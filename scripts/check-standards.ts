@@ -819,8 +819,6 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a slice of bytes already held; parses nothing",
   "crates/bazhen-holder/src/ring.rs::Ring::slot": "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/ring.rs::Ring::start": "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/ring.rs::Ring::write":
-    "the ring's Output: copies the child's output in; parses nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::after_poll":
     "reads the master into the Output, a sink that parses nothing; reaps the child",
   "crates/bazhen-holder/src/server.rs::Server::accept": "accepts connections; reads no bytes",

@@ -2,8 +2,6 @@
 //! behind, or reconnected, catches up from. It never blocks and never grows; what it no longer
 //! holds a subscriber learns of as a `gap`, and resnapshots.
 
-use crate::holder::Output;
-
 /// What a holder keeps: reconnect catch-up only, since a gap resnapshots.
 pub const RING_BYTES: usize = 1 << 20;
 
@@ -83,12 +81,6 @@ impl Ring {
                 .saturating_add(u64::try_from(now.len()).unwrap_or(u64::MAX));
             rest = later;
         }
-    }
-}
-
-impl Output for Ring {
-    fn write(&mut self, bytes: &[u8]) {
-        self.push(bytes);
     }
 }
 
