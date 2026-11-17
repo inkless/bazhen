@@ -128,6 +128,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_turn_writes_no_more_input_than_its_cap() {
+        // Queued across the end of the deque's buffer, so a turn writes it in two slices.
+        let mut bytes = VecDeque::with_capacity(2 * INPUT_PER_TURN);
+        let room = bytes.capacity();
+        bytes.extend(vec![b'a'; room]);
+        bytes.drain(..room - INPUT_PER_TURN / 2);
+        bytes.extend(vec![b'b'; 2 * INPUT_PER_TURN - INPUT_PER_TURN / 2]);
+        assert!(bytes.as_slices().0.len() < INPUT_PER_TURN);
+        let mut queue = InputQueue {
+            bytes,
+            ..InputQueue::default()
+        };
+        let null = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/null")
+            .unwrap();
+        queue.write_to(null.as_fd()).unwrap();
+        assert_eq!(queue.len(), INPUT_PER_TURN);
+    }
+
+    #[test]
+    fn a_program_that_stops_reading_is_warned_of_once_and_its_dropped_replies_counted_at_the_end() {
+        let mut queue = InputQueue::default();
+        queue.offer(&vec![b'a'; INPUT_CAP]).unwrap();
+        queue.offer_replies(&vec![b'r'; MOST_REPLY_BYTES]);
+        let log = crate::test_log::logged(|| {
+            for _ in 0..3 {
+                queue.offer_replies(b"x");
+            }
+            queue.clear();
+        });
+        assert_eq!(log.matches("isn't reading").count(), 1, "{log}");
+        assert!(log.contains("dropped=3"), "{log}");
+        let log = crate::test_log::logged(|| queue.clear());
+        assert!(!log.contains("replies dropped"), "{log}");
+    }
+
+    #[test]
     fn takes_a_frame_up_to_the_cap_and_refuses_one_past_it_whole() {
         let mut queue = InputQueue::default();
         assert_eq!(queue.offer(&vec![b'a'; INPUT_CAP - 1]), Ok(()));
