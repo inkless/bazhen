@@ -94,7 +94,11 @@ describe("the generated oxlint config, run by oxlint", () => {
       "apps/web/src/ui/e.tsx": [],
       "tests/e2e/h.spec.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/holder/f.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
-      "tests/holder/g.test.ts": Array(5).fill("eslint(no-restricted-imports)"),
+      // The re-export of `spawn` hands a start to files the tmux guard can't read it in.
+      "tests/holder/g.test.ts": [
+        "bazhen(host-guard)",
+        ...Array(5).fill("eslint(no-restricted-imports)"),
+      ],
       "tests/support/i.ts": ["eslint(no-restricted-imports)"],
       "tests/integration/j.ts": ["eslint(no-restricted-imports)"],
       "k.ts": ["eslint(no-restricted-imports)"],
