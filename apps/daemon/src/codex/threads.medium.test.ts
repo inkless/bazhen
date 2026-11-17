@@ -668,6 +668,83 @@ describe("Codex thread switches", () => {
 });
 
 describe("the agent on a Codex thread", () => {
+  it("is the live agent bound to it, and none for a thread nothing is bound to", async () => {
+    const { store, agentOn } = await withCodexAgents(A);
+    expect([store.codexAgent(A), store.codexAgent(C)]).toEqual([agentOn(A), undefined]);
+  });
+
+  it("is no agent once the agent bound to it has exited, is lost, closing or closed, beside one still live", async () => {
+    const [D, E] = ["01a1ce15-c3a4-7333-8444-944440000004", "01a1ce15-d5b6-7555-8666-955550000005"];
+    const { store, agentOn } = await withCodexAgents(A, B, C, D, E);
+    const user = { actor: "user", payload: {} } as const;
+    store.append({ ...user, type: "agent.lost", entityId: agentOn(A) });
+    store.append({ ...user, type: "agent.closing", entityId: agentOn(B) });
+    store.append({ ...user, type: "agent.closing", entityId: agentOn(C) });
+    store.append({ ...user, type: "agent.closed", entityId: agentOn(C) });
+    store.append({
+      type: "agent.exited",
+      entityId: agentOn(D),
+      actor: "system",
+      payload: { exit: { type: "unknown" } },
+    });
+    expect([A, B, C, D, E].map((t) => store.codexAgent(t))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      agentOn(E),
+    ]);
+  });
+
+  it("is the agent still starting on it, as a thread is bound before its TUI is up", async () => {
+    const { store, agentOn } = await withStartingCodexAgentsOn("tmux", A);
+    expect(store.codexAgent(A)).toBe(agentOn(A));
+  });
+
+  it("is no agent once the start of the agent bound to it has failed", async () => {
+    const { store } = await withCodexAgents();
+    const environmentId = localEnvironmentId(store);
+    const agentId = newId("agent");
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({
+      ...system,
+      type: "agent.launched",
+      payload: {
+        environmentId,
+        harness: "codex",
+        project: "p",
+        cwd: "/w",
+        terminalId: newId("term"),
+      },
+    });
+    store.append({
+      ...system,
+      type: "agent.external_ref_updated",
+      payload: { externalRef: { environmentId, kind: "codex-thread", id: A } },
+    });
+    const starting = store.codexAgent(A);
+    store.append({ ...system, type: "agent.failed", payload: { reason: "launch_rejected" } });
+    expect([starting, store.codexAgent(A)]).toEqual([agentId, undefined]);
+  });
+
+  it("is no agent whose reference names it as another kind than a Codex thread", async () => {
+    const { store, agentOn } = await withCodexAgents(A, B);
+    const other = agentOn(B);
+    store.append({
+      type: "agent.external_ref_updated",
+      entityId: other,
+      actor: "system",
+      payload: {
+        externalRef: {
+          environmentId: String(store.agentEnvironment(other)),
+          kind: "claude-session",
+          id: C,
+        },
+      },
+    });
+    expect([store.codexAgent(A), store.codexAgent(C)]).toEqual([agentOn(A), undefined]);
+  });
+
   it("is no agent when two are on it, so nothing meant for one reaches the other", async () => {
     const { store, agentOn } = await withCodexAgents(A, B);
     const [one, two] = [agentOn(A), agentOn(B)];

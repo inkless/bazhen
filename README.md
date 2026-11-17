@@ -274,6 +274,11 @@ the daemon that started it, wherever its home is. The daemon checks that against
 calls (see below). Without a peer reading, it takes that at its word, but refuses an agent that is
 closed, lost or unknown. Over TCP, from the web client, the caller is always you.
 
+A verb that defaults to the asking agent (`whoami`, `task list`, and `task done` or `task note`
+with no task named) asks the daemon which agent it takes the command for, and uses that one,
+whatever the environment names. A Codex command's `BAZHEN_AGENT_ID` can be whichever agent started
+its app-server, so the environment only says whether to ask.
+
 ## What Bazhen knows about who is calling
 
 With the peer reader running, a call on the daemon's socket from inside an agent is that agent's.

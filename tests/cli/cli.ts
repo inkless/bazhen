@@ -25,6 +25,7 @@ import {
   EnvRefreshRequest,
   ErrorResponse,
   EscalateRequest,
+  CallerResponse,
   FinishTaskRequest,
   RenameAgentRequest,
   SendMessageRequest,
@@ -171,6 +172,11 @@ export class FakeDaemon {
   answerWith<T>(route: string, schema: Schema<T>, make: (r: Received) => T): this {
     this.#routes.set(route, (r) => json(200, schema.parse(make(r))));
     return this;
+  }
+
+  /** Takes the CLI's calls to be agent `agentId`'s, or the human's as null, as `/v1/caller` says. */
+  takes(agentId: string | null): this {
+    return this.answer("GET /v1/caller", CallerResponse, { agentId });
   }
 
   /** Refuses `route` as the daemon refuses a command: a status, and an error the protocol names. */
