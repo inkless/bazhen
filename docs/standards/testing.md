@@ -159,6 +159,29 @@ Every new test must be shown to fail without the code it covers.
   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
   § Tests). Never bypass a hook with `--no-verify`.
 
+- **Renamed tests.** A test given a truer title and nothing else isn't new. Read by title, it
+  looks new, and passing on the base it would come out SURVIVED, which no control clears. Say
+  so in a commit message on the branch, one line per test, with the titles as the source
+  spells them: `Renamed: <old title> -> <new title>`. Falsify prints the test as RENAMED and
+  leaves it out, but only when all of these hold, in the one test file (its old path, if git
+  sees the file as renamed):
+  - the old title is exactly one test at the base and none at HEAD;
+  - the new title is exactly one test at HEAD and none at the base;
+  - the test's block, from its call line to its closing line at the call's indent, is the base's
+    with only the title changed. Its quotes and its indent may change, so it can move into or
+    out of a `describe`. That move puts it under the `describe`'s hooks, which falsify doesn't
+    compare, so the reviewer checks them.
+
+  Any other change to the test (its body, its options, `it` to `it.skip`, or a different test
+  under the old title's trailer) is judged as new, as it would be without the trailer. So is a
+  test whose block's end can't be read from its layout. So is every test in a file where a
+  backtick in a string or comment leaves a test call, or the file's end, read as inside a template
+  literal. A trailer that doesn't apply is printed with the rule it broke. A SURVIVED test that is
+  a lost base test under a new title is printed with the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
+  `describe`, which never made a test look new. Rust tests take no `Renamed:` trailer: a renamed
+  one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the
+  base's falsify reads no `Renamed:` trailer, so a renamed test there also needs a real control.
+
 Two lessons from the scaffold's controls:
 
 - **A test that fails only by timing out is weak.** Assert the thing you care about first, then

@@ -13,7 +13,8 @@ already checked (listed at the end).
    that isn't real yet?
 4. **Tests.** For each new test, ask _what change to the source would make this fail?_ Then check
    the falsify result, or a `Control:` trailer on the branch, says the same. Is each test the
-   smallest size that can fail for the right reason (`testing.md` § Sizes)?
+   smallest size that can fail for the right reason (`testing.md` § Sizes)? Does each test
+   falsify prints as RENAMED have a new title that says what its unchanged body does?
 5. **Errors.** Are expected failures typed? Is anything swallowed? Are third-party errors
    wrapped at the seam?
 6. **Names and comments.** Do names say what things are? Does every comment explain a _why_ the
@@ -34,7 +35,7 @@ already checked (listed at the end).
 9. **Docs.** If behaviour, a command or a rule changed, are `AGENTS.md`, the README or these
    standards updated in the same commit?
 
-The commit body says why the change was made, and records any `Control:` trailers.
+The commit body says why the change was made, and records any `Control:` and `Renamed:` trailers.
 
 ## Already checked by tooling
 
