@@ -1954,6 +1954,17 @@ describe("the signal chokepoints", () => {
     ]);
   });
 
+  it("asks for a start the scan can't follow to be called by name, not sent elsewhere", () => {
+    const source = 'import { execFile } from "node:child_process";\nconst ef = execFile;';
+    expect(failures({ "scripts/a.ts": source })).toEqual([
+      "scripts/a.ts:2: execFile used other than in a call, so the check can't read the options a " +
+        "start there is given, which may set a timeout, killSignal or signal that Node enforces " +
+        "with a kill; call each start by the name it's imported as, or as a member of " +
+        "child_process imported with `import … from`, with its options in the call " +
+        "(docs/standards/testing.md).",
+    ]);
+  });
+
   it("allows them in the chokepoints, and leaves installed packages alone", () => {
     const raw = "kill_process(pid, Signal::KILL); process.kill(pid);";
     expect(signalChokepointFailures([...CHOKEPOINTS, "node_modules/x/a.ts"], () => raw)).toEqual(

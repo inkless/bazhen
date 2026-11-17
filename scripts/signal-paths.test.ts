@@ -472,6 +472,307 @@ describe("a start's options the scan can't read", () => {
   });
 });
 
+const unfollowed = (line: number, start: string) => ({
+  line,
+  call: `${start} used other than in a call`,
+  unfollowed: true,
+});
+const loaded = (line: number) => ({
+  line,
+  call: "child_process named outside an import",
+  unfollowed: true,
+});
+
+describe("starts the scan can't follow to a call", () => {
+  const imports = [
+    'import { execFile, spawn as sp } from "node:child_process";',
+    'import cp, { fork } from "child_process";',
+    'import * as ns from "node:child_process";',
+    'import { promisify } from "node:util";',
+    "const run = promisify(execFile);",
+  ];
+  const at = (lines: string[]) => rawSignalCalls("a.ts", [...imports, ...lines].join("\n"));
+
+  it("finds a start imported by name, used as anything but a call", () => {
+    expect(
+      at([
+        'execFile.call(null, "ls", [], { timeout: 1 });',
+        'execFile.apply(null, ["ls", [], { timeout: 1 }]);',
+        'Reflect.apply(sp, null, ["ls"]);',
+        "const ef = execFile;",
+        "const seams = { spawn: sp };",
+        "const more = { fork };",
+        'promisify(execFile)("ls", [], { timeout: 1 });',
+        "const again = run;",
+        "execFile`ls`;",
+        "export default sp;",
+        "export { fork };",
+      ]),
+    ).toEqual([
+      unfollowed(6, "execFile"),
+      unfollowed(7, "execFile"),
+      unfollowed(8, "sp (spawn)"),
+      unfollowed(9, "execFile"),
+      unfollowed(10, "sp (spawn)"),
+      unfollowed(11, "fork"),
+      unfollowed(12, "execFile"),
+      unfollowed(13, "run (execFile)"),
+      unfollowed(14, "execFile"),
+      unfollowed(15, "sp (spawn)"),
+      unfollowed(16, "fork"),
+    ]);
+  });
+
+  it("finds child_process imported whole, used as anything but a call of a member", () => {
+    expect(
+      at([
+        "const c = cp;",
+        'ns["spawn"]("ls", [], { timeout: 1 });',
+        "const s = ns.spawn;",
+        'cp.execFile.call(null, "ls");',
+        "const { exec } = ns;",
+        "const seams = { ...cp };",
+        "const starts = [...[sp]];",
+        "ns.default.execFile(cmd, [], { timeout: 1 });",
+      ]),
+    ).toEqual([
+      unfollowed(6, "cp"),
+      unfollowed(7, "ns"),
+      unfollowed(8, "ns.spawn"),
+      unfollowed(9, "cp.execFile"),
+      unfollowed(10, "ns"),
+      unfollowed(11, "cp"),
+      unfollowed(12, "sp (spawn)"),
+      unfollowed(13, "ns.default"),
+    ]);
+  });
+
+  it("finds a promisified start that is exported, as other files call it unread", () => {
+    const source = [
+      'import { execFile } from "node:child_process";',
+      'import * as cp from "node:child_process";',
+      "export const run = promisify(execFile);",
+      "export let go = util.promisify(cp.execFile);",
+      "export var ex = promisify(execFile);",
+      'run("ps", [], { timeout: 1 });',
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [3, "run (execFile) used other than in a call"],
+      [4, "go (execFile) used other than in a call"],
+      [5, "ex (execFile) used other than in a call"],
+      [6, "timeout option of execFile"],
+    ]);
+  });
+
+  it("reads child_process imported by the name default as imported whole", () => {
+    const source = [
+      'import { default as cp } from "node:child_process";',
+      'import { "default" as qp, spawn } from "child_process";',
+      "cp.execFile(cmd, [], { timeout: 1 });",
+      "qp.spawn(cmd, [], { timeout: 1 });",
+      "const c = cp;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [3, "timeout option of execFile"],
+      [4, "timeout option of spawn"],
+      [5, "cp used other than in a call"],
+    ]);
+  });
+
+  it("reads a member's, a field's or a key's name as no mention, but a shorthand key as one", () => {
+    expect(
+      at([
+        "interface Seams {",
+        "  readonly env: E;",
+        "  readonly execFile?: typeof execFile;",
+        "  fork: Fork",
+        "  run(file: string): Promise<void>;",
+        "}",
+        "class Real {",
+        "  private execFile: typeof execFile;",
+        "  public sp!: Sp;",
+        "  declare readonly fork?: Fork;",
+        "  accessor execFile: Run;",
+        "  start() {}",
+        "  fork: Fork;",
+        "}",
+        "function seam(execFile: Run, sp?: Fork) {}",
+        "const names = {",
+        "  cp: 1,",
+        "  ns: 2,",
+        "  execFile,",
+        "};",
+      ]),
+    ).toEqual([unfollowed(24, "execFile")]);
+  });
+
+  it("finds a start chosen by a conditional, or compared by a case, though a : follows it", () => {
+    expect(
+      at([
+        "const f = ok ? execFile : sp;",
+        "const g = ok ?",
+        "  fork : run;",
+        "switch (x) { case execFile: break; }",
+        "const h = ok ? a ?? cp : ns;",
+        "const i = ok ? useFake && execFile : b;",
+        "const j = ok ? () => execFile : b;",
+        "const k = ok ? !fork : b;",
+        "const l = ok ? <Fn>sp : b;",
+        "const m = ok ? x || cp : b;",
+      ]),
+    ).toEqual([
+      unfollowed(6, "execFile"),
+      unfollowed(6, "sp (spawn)"),
+      unfollowed(8, "fork"),
+      unfollowed(8, "run (execFile)"),
+      unfollowed(9, "execFile"),
+      unfollowed(10, "cp"),
+      unfollowed(10, "ns"),
+      unfollowed(11, "execFile"),
+      unfollowed(12, "execFile"),
+      unfollowed(13, "fork"),
+      unfollowed(14, "sp (spawn)"),
+      unfollowed(15, "cp"),
+    ]);
+  });
+
+  it("finds a promisify of a start that the scan doesn't bind", () => {
+    expect(
+      at(["const twice = promisify(run);", 'twice("ls", [], { timeout: 1 });']).map((c) => c.line),
+    ).toEqual([6]);
+  });
+
+  it("finds child_process loaded, or named, outside an import it reads", () => {
+    const source = [
+      'const { spawn } = require("child_process");',
+      'const m = await import("node:child_process");',
+      "const n = await import(`child_process`);",
+      'export { exec } from "child_process";',
+      'export * from "node:child_process";',
+      'createRequire(import.meta.url)("child_process");',
+      'import cp = require("node:child_process");',
+      "const r = require;",
+      'r("child_process").execFile("ls", [], { timeout: 1 });',
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([
+      loaded(1),
+      loaded(2),
+      loaded(3),
+      loaded(4),
+      loaded(5),
+      loaded(6),
+      loaded(7),
+      loaded(9),
+    ]);
+  });
+
+  it("reads calls with type arguments or ?., an import beside a default, and import type", () => {
+    expect(
+      at([
+        "sp<ChildProcess>(cmd, [], { timeout: 1 });",
+        "sp?.(cmd, [], { timeout: 1 });",
+        "run(cmd, [], { timeout: 1 });",
+        "ns.spawn(cmd, [], { timeout: 1 });",
+        "cp?.spawn(cmd, [], { timeout: 1 });",
+        "cp.fork<Message>(mod, [], { timeout: 1 });",
+        "fork(mod, [], { timeout: 1 });",
+        "type Run = typeof execFile;",
+        "type Start = typeof cp.spawn;",
+        'import type { ChildProcess } from "node:child_process";',
+        'import { type SpawnOptions, execFileSync } from "child_process";',
+        'import type * as types from "node:child_process";',
+        "const names = { spawn: 1, execFile: 2, fork: 3 };",
+        "pty.spawn(argv, size, env);",
+        "const kind = cp.ChildProcess;",
+        "const text = \"import { spawn } from 'child_process'\";",
+        "// const ef = execFile;",
+      ]).map((c) => [c.line, c.call]),
+    ).toEqual([
+      [6, "timeout option of spawn"],
+      [7, "timeout option of spawn"],
+      [8, "timeout option of execFile"],
+      [9, "timeout option of spawn"],
+      [10, "timeout option of spawn"],
+      [11, "timeout option of fork"],
+      [12, "timeout option of fork"],
+    ]);
+  });
+
+  it("reads a start's options in a call whose result is spread", () => {
+    expect(calls("a.ts", "f(...execFileSync(cmd, [], { timeout: 1 }));")).toEqual([
+      "timeout option of execFileSync",
+    ]);
+  });
+
+  it("reads a start's options in a call with type arguments or ?.", () => {
+    expect(at(["sp<ChildProcess>(cmd, args, OPTS);", "cp?.spawn(cmd, args, OPTS);"])).toEqual([
+      unreadAt(6, "spawn"),
+      unreadAt(7, "spawn"),
+    ]);
+  });
+
+  it("reads a start imported under a quoted name", () => {
+    const source = [
+      'import { "execFile" as ef } from "node:child_process";',
+      "const alias = ef;",
+      "ef(cmd, [], { timeout: 1 });",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [2, "ef (execFile) used other than in a call"],
+      [3, "timeout option of execFile"],
+    ]);
+  });
+
+  it("finds a start imported under a name opening with $, called or not", () => {
+    const source = [
+      'import { spawn as $sp } from "node:child_process";',
+      "const alias = $sp;",
+      "$sp(cmd, [], { timeout: 1 });",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => [c.line, c.call])).toEqual([
+      [2, "$sp (spawn) used other than in a call"],
+      [3, "timeout option of spawn"],
+    ]);
+  });
+
+  it("finds a start imported only as a type, used as a value", () => {
+    const source = [
+      'import type * as types from "node:child_process";',
+      'import type { spawn as sp } from "node:child_process";',
+      "const t = types;",
+      "const s = sp;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([3, 4]);
+  });
+
+  it("finds only the starts a file imports, not a start's name it binds to something else", () => {
+    const source = [
+      'import { execFile } from "node:child_process";',
+      "const spawn = makeSpawner();",
+      "register(spawn, { fork }, execFile);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([unfollowed(3, "execFile")]);
+  });
+
+  it("lets the lint rule name child_process as data where it's allowed, and nowhere else", () => {
+    const plugin = "scripts/lint-plugin.ts";
+    const names = 'const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);';
+    expect(rawSignalCalls(plugin, names)).toEqual([]);
+    expect(allowedSignalFailures(plugin, names)).toEqual([]);
+    expect(isSignallingSource(plugin, names)).toBe(false);
+    expect(rawSignalCalls(plugin, `${names}\nconst m = require("child_process");`)).toEqual([
+      loaded(2),
+    ]);
+    expect(rawSignalCalls("a.ts", names)).toEqual([loaded(1), loaded(1)]);
+  });
+
+  it("counts an unfollowed start, or child_process loaded, as a signalling source", () => {
+    expect(isSignallingSource("a.ts", `${imports[0]}\nconst ef = execFile;`)).toBe(true);
+    expect(isSignallingSource("a.ts", 'const cp = require("child_process");')).toBe(true);
+    expect(isSignallingSource("a.ts", `${imports[0]}\nexecFile("ls", ["-A"]);`)).toBe(false);
+  });
+});
+
 describe("kills by a process started to send them", () => {
   it("finds a kill program run directly, by a shell, or through systemctl", () => {
     expect(calls("a.rs", 'Command::new("kill").args(["-TERM", &group]);')).toEqual([
