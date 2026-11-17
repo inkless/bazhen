@@ -1284,7 +1284,8 @@ function enumVariants(item: string): { head: string; variants: Variant[] } | und
 
 /**
  * Each enum of `code` with a variant that carries bytes, each such variant with the fields that
- * hold them, by name or by index (`undefined`: any of its fields). `names` are the carriers `code`
+ * hold them, by name, or by index from the front and from the back (`0` and `-2` for the first of
+ * two), `undefined` for any of its fields. `names` are the carriers `code`
  * sees, its own and those it brings in. A head bounded by a byte trait makes every field hold them.
  */
 function byteVariants(code: string, names: Set<string>): ByteVariants {
@@ -1300,7 +1301,10 @@ function byteVariants(code: string, names: Set<string>): ByteVariants {
         if (holds(v.text.slice(v.name.length))) variants.set(v.name, undefined);
         continue;
       }
-      const held = v.fields.filter((f) => whole || holds(f.type)).map((f) => f.name);
+      const held = v.fields
+        .map((f, i) => ({ ...f, last: String(i - (v.fields?.length ?? 0)) }))
+        .filter((f) => whole || holds(f.type))
+        .flatMap((f) => [f.name, f.last]);
       if (held.length > 0) variants.set(v.name, new Set(held));
     }
     if (variants.size === 0) continue;
@@ -1371,31 +1375,49 @@ function enclosingBracket(code: string, at: number): number {
 }
 
 /**
+ * The text before `at` back to the start of its arm or statement: just past the nearest `,`, `;`
+ * or `}` outside brackets (an arm whose body is a block needs no comma), or the bracket open
+ * around it.
+ */
+function headBefore(code: string, at: number): string {
+  let i = at - 1;
+  for (let depth = 0; i >= 0; i--) {
+    const c = code[i] ?? "";
+    if (depth === 0 && ",;}".includes(c)) break;
+    if (")]}".includes(c)) depth++;
+    else if ("([{".includes(c) && depth-- === 0) break;
+  }
+  return code.slice(i + 1, at);
+}
+
+/**
  * Whether the value from `start` to `end` in `code` is (part of) a pattern: what follows it, once
- * out of any tuple, slice, call-like or struct-like bracket around it, is a match arm's `=>`, an
- * or-pattern's `|`, a guard's `if` or a `let`'s `=`; or it is inside `matches!`. A value built
- * rather than matched is followed by none of those: by a `;`, or a `,` or `}` of the block.
+ * out of the brackets around it (a tuple, a slice, `Some(…)`, a struct), is a match arm's `=>`
+ * with no guard before it, an or-pattern's `|`, a guard's `if` (`matches!`'s too) or the `=` of a
+ * `let`. A value built rather than matched is followed by none of those: what follows the
+ * brackets around it is a `;`, the end of its block, or a guard's `=>`. A pattern binding a name
+ * in `matches!` without a guard can't use it, so that needs no case.
  */
 function inPattern(code: string, start: number, end: number): boolean {
   for (let from = start, to = end; ;) {
     const next = code.slice(to).trimStart();
-    if (/^(?:=>|\|(?!\|)|if\b|=(?![=>]))/.test(next)) return true;
-    if (!/^[,)\]}]/.test(next)) return false;
+    if (next.startsWith("=>")) return !/\bif\b/.test(headBefore(code, from));
+    if (/^=(?!=)/.test(next)) return /\blet\b/.test(headBefore(code, from));
+    if (/^(?:\|(?!\|)|if\b)/.test(next)) return true;
     const open = enclosingBracket(code, from);
     if (open === -1) return false;
-    const before = code.slice(0, open);
-    if (code[open] === "(" && /\bmatches\s*!\s*$/.test(before)) return true;
-    // A `{` after a type's name opens a struct or variant; any other opens a block.
-    if (code[open] === "{" && !/\b(?:[A-Z]\w*|Self)\s*$/.test(before)) return false;
     from = open;
     to = matchingBracket(code, open) + 1;
   }
 }
 
-/** Whether a pattern binds a name: an identifier that isn't a path, a field's name or a keyword. */
+/**
+ * Whether a pattern binds a name: a lowercase identifier that isn't a path, a field's name, `_` or
+ * a literal. (`ref` and `mut` count, but only ever before a name that binds.)
+ */
 const bindsName = (pattern: string) =>
   [...pattern.matchAll(/(?<![\w.:]|::\s*)(?:r#)?[a-z_]\w*\b(?!\s*(?:::|[({!"']|:(?!:)))/g)].some(
-    ([word]) => !/^(?:_|ref|mut|box|true|false)$/.test(word),
+    ([word]) => !/^(?:_|true|false)$/.test(word),
   );
 
 /** A bracket's contents split at its top-level commas, each trimmed. */
@@ -1416,8 +1438,8 @@ function topLevelParts(text: string): string[] {
 
 /**
  * Whether a variant's pattern, `inner` its bracket's contents, binds a field of `fields`
- * (`undefined`: any field). A tuple variant's fields count from the front before a `..` and, as
- * the field count isn't known here, any after it counts.
+ * (`undefined`: any field). A tuple variant's fields count from the front before a `..` and from
+ * the back after it, as `-1` for the last.
  */
 function bindsField(inner: string, named: boolean, fields: Set<string> | undefined): boolean {
   const parts = topLevelParts(inner);
@@ -1427,7 +1449,8 @@ function bindsField(inner: string, named: boolean, fields: Set<string> | undefin
       (p, i) =>
         p !== ".." &&
         bindsName(p) &&
-        (fields === undefined || (rest !== -1 && i > rest) || fields.has(String(i))),
+        (fields === undefined ||
+          fields.has(rest !== -1 && i > rest ? String(i - parts.length) : String(i))),
     );
   }
   return parts.some((p) => {
@@ -1739,6 +1762,17 @@ export function decoderFailures(
             `${file}: \`${use[0]}\` brings in a variant of ${name} that carries bytes by its own ` +
               "name, which hides a match on it from the decoder rule. Name it as " +
               `\`${name}::Variant\`.`,
+          );
+        }
+      }
+    }
+    for (const item of code.matchAll(/\benum\s+(\w+)/g)) {
+      const parsed = enumVariants(code.slice(item.index, itemEnd(code, item.index)));
+      for (const v of (parsed?.variants ?? []).filter((w) => w.fields === undefined)) {
+        if (BYTES_IN.test(v.text.slice(v.name.length))) {
+          out.push(
+            `${file}::${item[1]}::${v.name}: its fields can't be told apart, so the decoder rule ` +
+              "can't see which a pattern binds bytes from: write each as `name: Type`, or `Type`.",
           );
         }
       }

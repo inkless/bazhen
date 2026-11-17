@@ -461,13 +461,13 @@ What differs:
   in an impl bounded by one (`impl<R: Read> Reader<R>`). A method taking another value of its own
   type (`other: &Self`) is a decoder too. A byte field `pub` to other crates fails unless it is
   listed in `PUBLIC_BYTE_FIELDS` with why its bytes aren't from outside: another crate reads it
-  where the rule doesn't look. So does a struct whose fields the rule can't split, since it can't
-  tell which hold bytes. A variant's fields are public wherever its enum is, so a function whose
-  pattern binds a field of a variant holding bytes takes them, however it got the value: a match
-  arm, an or-pattern, a guard, `if let`, `let … else`, `matches!`, nested in a tuple, slice or
-  `Some(…)`, or the whole variant by `r @ Reply::Data { .. }`. One that matches with `{ .. }` or
-  binds only other fields doesn't, and one that hands the whole value on leaves it to the
-  function it hands it to, which takes the enum in its signature.
+  where the rule doesn't look. So does a struct, or an enum's variant, whose fields the rule can't
+  split, since it can't tell which hold bytes. A variant's fields are public wherever its enum is,
+  so a function whose pattern binds a field of a variant holding bytes takes them, however it got
+  the value: a match arm, an or-pattern, a guard, `if let`, `let … else`, `matches!`, nested in a
+  tuple, slice or `Some(…)`, or the whole variant by `r @ Reply::Data { .. }`. One that matches
+  with `{ .. }` or binds only other fields doesn't, nor does one that builds the variant, compares
+  it in a guard or hands it on: the function it is handed to takes the enum in its signature.
   `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the fuzz target
   that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that reads bytes
   only to hand them to a fuzzed decoder, one reached only through a fuzzed decoder. A module
