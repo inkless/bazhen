@@ -10,7 +10,12 @@ import { BusyShell, NeedsRestart, Shell } from "./shells.ts";
 import { TuiTheme } from "./theme.ts";
 import { Assignment, Task } from "./tasks.ts";
 
-/** foundation-design §4.5. */
+/**
+ * foundation-design §4.5. An agent is `starting` until its harness shows a sign of life (the
+ * `agent.ready` event), even once its terminal runs: a TUI held at a trust or login dialog isn't
+ * up. `running` means its harness has shown it is up since it last started, so it is the state to
+ * wait on for an agent that is ready. A respawn or relaunch makes it `starting` again.
+ */
 export const AgentState = z.enum([
   "starting",
   "running",
