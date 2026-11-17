@@ -929,8 +929,6 @@ const NOT_DECODERS: Record<string, string> = {
     "the Output trait's method: a sink handed the child's bytes in order, to keep",
   "crates/bazhen-holder/src/holder.rs::Discard::write":
     "drops the bytes it is handed; parses nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::turn":
-    "polls, then hands a readable master to read_master; parses nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::read_master":
     "copies the child's output to the Output in chunks, unparsed",
   "crates/bazhen-holder/src/holder.rs::Holder::step":
