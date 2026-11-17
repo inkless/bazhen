@@ -1220,6 +1220,8 @@ const TS_SENDERS = new RegExp(
     "runBounded",
     "killHolderAt",
     "rebindHolderAt",
+    "signalPaneAt",
+    "signalServerAt",
     "rebindHolderWith",
     "startHolderWith",
   ].join("|")})\\b|\\.\\s*hangUp\\b`,

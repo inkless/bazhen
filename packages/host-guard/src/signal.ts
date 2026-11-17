@@ -9,9 +9,25 @@ import { readFileSync } from "node:fs";
 import { constants } from "node:os";
 
 const groups = new Set<number>();
-/** Each proof's expiry; a proof is used once, and only within a second of the check behind it. */
+/** When each pane proof was made; a proof is used once, and only within a second of its check. */
 const vouched = new WeakMap<PaneGroup, number>();
-const PROOF_MS = 1_000;
+/** How long a proof stays good after the check behind it. */
+export const PROOF_MS = 1_000;
+
+/**
+ * The only clock a proof is made or spent by. Monotonic, so a wall clock set back (by NTP or by
+ * hand) can't keep a proof fresh; the product forms below read it themselves, and only the
+ * `*At` forms, which tests alone may import, take a time from their caller.
+ */
+export const proofClock = () => performance.now();
+
+/** Refuses a proof spent before it was made or more than `PROOF_MS` after. */
+function checkAge(target: string, made: number | undefined, now: number): void {
+  if (made === undefined) throw new RangeError(`refusing to signal ${target}: unvouched`);
+  if (now < made || now - made > PROOF_MS) {
+    throw new RangeError(`refusing to signal ${target}: stale proof`);
+  }
+}
 
 /** A live pane's process group, as one of Bazhen's own tmux servers reported it. */
 export interface PaneGroup {
@@ -27,10 +43,15 @@ const errorCode = (error: unknown) =>
   error instanceof Error && "code" in error ? error.code : undefined;
 
 /** A live pane's process group, as one `signalPane` may reach once. Only tmux.ts calls this. */
-export function vouch(group: PaneGroup, now = Date.now()): PaneGroup {
+export function vouch(group: PaneGroup): PaneGroup {
+  return vouchAt(group, proofClock());
+}
+
+/** `vouch` made at the time `now`, for the expiry's tests. Not for product code. */
+export function vouchAt(group: PaneGroup, now: number): PaneGroup {
   if (!isPid(group.pid)) throw new RangeError(`refusing to vouch for pid ${group.pid}`);
   const proof = Object.freeze({ ...group });
-  vouched.set(proof, now + PROOF_MS);
+  vouched.set(proof, now);
   return proof;
 }
 
@@ -43,10 +64,15 @@ export interface ServerProcess {
 const servers = new WeakMap<ServerProcess, number>();
 
 /** A checked server process, as one `signalServer` may reach once. Only tmux.ts calls this. */
-export function vouchServer(server: ServerProcess, now = Date.now()): ServerProcess {
+export function vouchServer(server: ServerProcess): ServerProcess {
+  return vouchServerAt(server, proofClock());
+}
+
+/** `vouchServer` made at the time `now`, for the expiry's tests. Not for product code. */
+export function vouchServerAt(server: ServerProcess, now: number): ServerProcess {
   if (!isPid(server.pid)) throw new RangeError(`refusing to vouch for pid ${server.pid}`);
   const proof = Object.freeze({ ...server });
-  servers.set(proof, now + PROOF_MS);
+  servers.set(proof, now);
   return proof;
 }
 
@@ -55,11 +81,15 @@ export function vouchServer(server: ServerProcess, now = Date.now()): ServerProc
  * and only to the pid itself: the default action of SIGUSR1 ends any process that is not tmux.
  * Whether the server was still there.
  */
-export function signalServer(server: ServerProcess, now = Date.now()): boolean {
-  const expiry = servers.get(server);
+export function signalServer(server: ServerProcess): boolean {
+  return signalServerAt(server, proofClock());
+}
+
+/** `signalServer` at the time `now`, for the expiry's tests. Not for product code. */
+export function signalServerAt(server: ServerProcess, now: number): boolean {
+  const made = servers.get(server);
   servers.delete(server);
-  if (expiry === undefined) throw new RangeError(`refusing to signal ${server.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to signal ${server.pid}: stale proof`);
+  checkAge(String(server.pid), made, now);
   return send(server.pid, "SIGUSR1");
 }
 
@@ -78,22 +108,26 @@ const holders: Record<HolderUse, WeakMap<HolderProcess, number>> = {
 };
 
 /** A checked holder process, as one signal of `use` may reach once. Only holder.ts calls this. */
-export function vouchHolderProcess(
+export function vouchHolderProcess(holder: HolderProcess, use: HolderUse): HolderProcess {
+  return vouchHolderProcessAt(holder, use, proofClock());
+}
+
+/** `vouchHolderProcess` made at the time `now`, for the expiry's tests. Not for product code. */
+export function vouchHolderProcessAt(
   holder: HolderProcess,
   use: HolderUse,
-  now = Date.now(),
+  now: number,
 ): HolderProcess {
   if (!isPid(holder.pid)) throw new RangeError(`refusing to vouch for pid ${holder.pid}`);
   const proof = Object.freeze({ ...holder });
-  holders[use].set(proof, now + PROOF_MS);
+  holders[use].set(proof, now);
   return proof;
 }
 
 function spend(holder: HolderProcess, use: HolderUse, now: number): void {
-  const expiry = holders[use].get(holder);
+  const made = holders[use].get(holder);
   holders[use].delete(holder);
-  if (expiry === undefined) throw new RangeError(`refusing to signal ${holder.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to signal ${holder.pid}: stale proof`);
+  checkAge(String(holder.pid), made, now);
 }
 
 /**
@@ -101,10 +135,10 @@ function spend(holder: HolderProcess, use: HolderUse, now: number): void {
  * is gone is the kernel's hang-up to its session. Whether the holder was still there.
  */
 export function killHolder(holder: HolderProcess): boolean {
-  return killHolderAt(holder, Date.now());
+  return killHolderAt(holder, proofClock());
 }
 
-/** `killHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+/** `killHolder` at the time `now`, for the expiry's tests. Not for product code. */
 export function killHolderAt(holder: HolderProcess, now: number): boolean {
   spend(holder, "kill", now);
   return send(holder.pid, "SIGKILL");
@@ -115,10 +149,10 @@ export function killHolderAt(holder: HolderProcess, now: number): boolean {
  * Only that signal, and only to the pid itself. Whether the holder was still there.
  */
 export function rebindHolder(holder: HolderProcess): boolean {
-  return rebindHolderAt(holder, Date.now());
+  return rebindHolderAt(holder, proofClock());
 }
 
-/** `rebindHolder` at the time `now`, for the expiry's tests. Not exported from the package. */
+/** `rebindHolder` at the time `now`, for the expiry's tests. Not for product code. */
 export function rebindHolderAt(holder: HolderProcess, now: number): boolean {
   spend(holder, "rebind", now);
   return send(holder.pid, "SIGUSR1");
@@ -289,11 +323,15 @@ export function signalGroup(child: { readonly pid?: number | undefined }, signal
 }
 
 /** Signals a pane's process and every tool it started, as Ctrl-C or a hangup would. */
-export function signalPane(pane: PaneGroup, signal: NodeJS.Signals, now = Date.now()): void {
-  const expiry = vouched.get(pane);
+export function signalPane(pane: PaneGroup, signal: NodeJS.Signals): void {
+  signalPaneAt(pane, signal, proofClock());
+}
+
+/** `signalPane` at the time `now`, for the expiry's tests. Not for product code. */
+export function signalPaneAt(pane: PaneGroup, signal: NodeJS.Signals, now: number): void {
+  const made = vouched.get(pane);
   vouched.delete(pane);
-  if (expiry === undefined) throw new RangeError(`refusing to signal group ${pane.pid}: unvouched`);
-  if (now > expiry) throw new RangeError(`refusing to signal group ${pane.pid}: stale proof`);
+  checkAge(`group ${pane.pid}`, made, now);
   send(-pane.pid, signal);
 }
 

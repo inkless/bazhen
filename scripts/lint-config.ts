@@ -27,6 +27,8 @@ export type Area = {
   onlyThrough?: { packages: string[]; via: string };
   /** host-guard modules it may import by path, where the rest go only through the package. */
   hostGuardModules?: string[];
+  /** Its `*At` and `*With` forms, which take a clock or replace a check, are for its tests alone. */
+  seamsForTestsOnly?: boolean;
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -70,6 +72,7 @@ export const MATRIX: Area[] = [
   // The one place that runs tmux or sends a signal; it depends on nothing of Bazhen's.
   {
     dir: "packages/host-guard",
+    seamsForTestsOnly: true,
     banned: [
       "@bazhen/protocol",
       "@bazhen/core",
@@ -235,7 +238,12 @@ const SMALL_TEST_BANS = [
   "sqlite",
 ].flatMap((m) => [m, `node:${m}`]);
 
-export type Pattern = { group: string[]; message: string; allowTypeImports?: boolean };
+export type Pattern = {
+  group: string[];
+  message: string;
+  allowTypeImports?: boolean;
+  importNamePattern?: string;
+};
 export type Override = {
   files: string[];
   rules: {
@@ -273,7 +281,23 @@ function hostGuardByPath(where: string, area?: Area): Pattern {
   };
 }
 
-function restrictions(area: Area, smallTest: boolean): Restriction {
+/**
+ * Bans a module's own seams from its siblings' product code: a `*At` form spends or makes a proof
+ * at a time its caller picks, so a stale one passes for fresh, and a `*With` form swaps out the
+ * check it exists for. Outside the package, `hostGuardByPath` already keeps them out.
+ */
+function seamsPattern(where: string): Pattern {
+  return {
+    group: ["./*"],
+    importNamePattern: "(?:At|With)$",
+    message:
+      `${where} imports no *At or *With form of a sibling module: those take a clock or replace ` +
+      "a check, for tests only. Call the product form; a helper that only happens to end in At " +
+      "or With is renamed, not exempted.",
+  };
+}
+
+function restrictions(area: Area, smallTest: boolean, test: boolean): Restriction {
   const where = `${area.dir} (tech-stack-and-scaffold.md §3, docs/standards/code.md)`;
   const patterns: Pattern[] = [
     ...area.banned.map((p) => packagePatterns(p, `${where} must not import ${p}.`, false)),
@@ -290,6 +314,7 @@ function restrictions(area: Area, smallTest: boolean): Restriction {
     }),
   ];
   if (area.dir !== "packages/host-guard") patterns.push(hostGuardByPath(where, area));
+  if (area.seamsForTestsOnly === true && !test) patterns.push(seamsPattern(where));
   if (area.thirdParty?.length) {
     patterns.push({
       group: area.thirdParty,
@@ -332,15 +357,18 @@ function overrides(): Override[] {
     return [
       {
         files: [`${area.dir}/**/*.ts`, `${area.dir}/**/*.tsx`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, false) },
+        rules: { ...base, "no-restricted-imports": restrictions(area, false, false) },
       },
       {
         files: [`${area.dir}/**/*.test.ts`, `${area.dir}/**/*.test.tsx`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, area.medium !== true) },
+        rules: {
+          ...base,
+          "no-restricted-imports": restrictions(area, area.medium !== true, true),
+        },
       },
       {
         files: [`${area.dir}/**/*.medium.test.ts`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, false) },
+        rules: { ...base, "no-restricted-imports": restrictions(area, false, true) },
       },
     ];
   });
