@@ -35,8 +35,33 @@ pub(crate) enum Failed {
     NotRunning,
     /// The daemon answered, but not with what the call expects.
     Refused(String),
+    /// The daemon refused the call, with this status and body.
+    Rejected(Rejection),
     /// The environment holds a value no request can carry.
     Unsendable(String),
+}
+
+/// A call the daemon refused: the path, and the status and body it answered with.
+#[derive(Debug)]
+pub(crate) struct Rejection {
+    pub(crate) path: String,
+    pub(crate) status: u16,
+    pub(crate) body: String,
+}
+
+impl Rejection {
+    /// Whether the daemon refused the call as `busy`: a close that would end what runs.
+    pub(crate) fn busy(&self) -> bool {
+        self.status == 409
+            && serde_json::from_str::<serde_json::Value>(&self.body)
+                .is_ok_and(|b| b.get("error").and_then(serde_json::Value::as_str) == Some("busy"))
+    }
+}
+
+impl std::fmt::Display for Rejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: HTTP {}: {}", self.path, self.status, self.body)
+    }
 }
 
 /// The daemon at a socket, called as this process's environment names the caller.
@@ -115,9 +140,11 @@ impl Daemon {
             Unread::Refused { status, body } if status < 300 || no_such_route(status, &body) => {
                 Failed::Refused(format!("{path}: HTTP {status}: {body}\n{ANOTHER_BUILD}"))
             }
-            Unread::Refused { status, body } => {
-                Failed::Refused(format!("{path}: HTTP {status}: {body}"))
-            }
+            Unread::Refused { status, body } => Failed::Rejected(Rejection {
+                path: path.to_owned(),
+                status,
+                body,
+            }),
         })
     }
 

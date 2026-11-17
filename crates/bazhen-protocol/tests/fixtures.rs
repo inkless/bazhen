@@ -26,6 +26,7 @@ use bazhen_protocol::notices::{
     RevokeDeviceResponse,
 };
 use bazhen_protocol::roles::RolesResponse;
+use bazhen_protocol::shells::{CloseShellRequest, OpenShellRequest, ShellCommandResponse};
 use bazhen_protocol::stream::{STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame};
 use bazhen_protocol::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, BroadcastMessageResponse,
@@ -110,6 +111,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ),
     ("CallerResponse", round_trips::<CallerResponse>),
     ("CloseAgentRequest", round_trips::<CloseAgentRequest>),
+    ("CloseShellRequest", round_trips::<CloseShellRequest>),
     ("CreateTaskRequest", round_trips::<CreateTaskRequest>),
     ("CreateTaskResponse", round_trips::<CreateTaskResponse>),
     ("DelegateTaskRequest", round_trips::<DelegateTaskRequest>),
@@ -129,6 +131,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("HealthResponse", round_trips::<HealthResponse>),
     ("LaunchAgentRequest", round_trips::<LaunchAgentRequest>),
     ("LaunchAgentResponse", round_trips::<LaunchAgentResponse>),
+    ("OpenShellRequest", round_trips::<OpenShellRequest>),
     ("PairingCodeResponse", round_trips::<PairingCodeResponse>),
     ("RelaunchAgentRequest", round_trips::<RelaunchAgentRequest>),
     ("RenameAgentRequest", round_trips::<RenameAgentRequest>),
@@ -137,6 +140,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("RolesResponse", round_trips::<RolesResponse>),
     ("SendMessageRequest", round_trips::<SendMessageRequest>),
     ("SendMessageResponse", round_trips::<SendMessageResponse>),
+    ("ShellCommandResponse", round_trips::<ShellCommandResponse>),
     ("SignalAgentRequest", round_trips::<SignalAgentRequest>),
     ("StateSnapshot", round_trips::<StateSnapshot>),
     ("StopResponse", round_trips::<StopResponse>),

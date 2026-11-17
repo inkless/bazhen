@@ -16,6 +16,7 @@ mod paths;
 mod printers;
 pub mod reply;
 mod sha256;
+mod shells;
 mod tasks;
 
 /// The holder's frames, for the fuzz targets to name what a direct attachment sends.
@@ -92,6 +93,15 @@ launch starts in --dir, else where it runs. close --confirm-busy ends what runs 
 shells; --force records closed an agent whose terminal's server can't be shown gone, though it
 may still run. relaunch --fresh starts a new harness session when the old one can't resume.";
 
+pub(crate) const SHELLS_USAGE: &str = "usage:
+  bazhen shells list [--all] [--json]
+  bazhen shells open [<agent> | --dir <dir>] [--json]
+  bazhen shells close <shell> [--confirm-busy] [--force] [--json]
+shells list shows the shells neither closed nor failed, --all every one. A shell opens beside
+<agent>, in its directory, else in --dir, else where it runs. <shell> is a shell's id, or a name
+one open shell has, in any case. close --confirm-busy ends what runs in it; --force records closed a shell whose server can't
+be shown gone.";
+
 const DAEMON_USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
     "[--home <dir>] [--port <port>]\n",
@@ -102,7 +112,7 @@ const DAEMON_USAGE: &str = concat!(
 
 /// The usage of every verb.
 pub(crate) fn usage() -> String {
-    [DAEMON_USAGE, TASK_USAGE, LIFECYCLE_USAGE].join("\n")
+    [DAEMON_USAGE, TASK_USAGE, LIFECYCLE_USAGE, SHELLS_USAGE].join("\n")
 }
 
 const NOT_RUNNING: &str = "bazhen is not running; start it with `bazhen start`";
@@ -143,6 +153,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
             tasks::run(&p, &Daemon::at(task_socket), now_ms, out)
         }
         "launch" | "close" | "respawn" | "relaunch" | "signal" => lifecycle::run(&p, &daemon, out),
+        "shells" => shells::run(&p, &daemon, out),
         "attach" => attach::run(&p, Path::new(&daemon.socket()), &daemon, out),
         "start" => Ok(daemon_verbs::start(&p, out)),
         "stop" => daemon_verbs::stop(&daemon, out),
@@ -164,6 +175,10 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         }
         Err(Failed::Refused(message) | Failed::Unsendable(message)) => {
             out.err(&message);
+            Exit::Failed
+        }
+        Err(Failed::Rejected(rejection)) => {
+            out.err(&rejection.to_string());
             Exit::Failed
         }
     }

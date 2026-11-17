@@ -65,6 +65,7 @@ describe("the command line", () => {
         "  bazhen send (<agent> | --task <task>) (<text> | --file <path>) [--wait [--timeout <seconds>]]",
         "  bazhen launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]",
         "  bazhen signal <agent> INT|TERM|HUP|KILL [--json]",
+        "  bazhen shells open [<agent> | --dir <dir>] [--json]",
       ]),
     );
     expect(runs[1]?.stderr).toBe(runs[0]?.stderr);
