@@ -266,10 +266,24 @@ It runs three ways:
 
 ### Runbook: a long run on a VM
 
+On a Linux x86_64 host with KVM, `pnpm soak:vm` (`scripts/soak-vm.sh`) runs the steps below in a
+libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); `create [--commit
+<sha>]` makes an Ubuntu 24.04 VM and provisions it at the commit, `main` by default; `start
+[--hours 24]` marks the VM disposable and starts the run; `status` shows it; `collect` copies the
+run's directory and log to `~/bazhen-soak-results`; `destroy` deletes the VM after asking.
+Everything that marks the VM or starts the soak runs over ssh only after the far end proves it is
+the VM `create` made: its hostname, a machine-id that isn't the host's, and an instance token
+`create` gave it. It refuses a VM it didn't create or one a soak has already run on. Every VM it
+makes is named `bazhen-soak`, so while another VM of that name exists it can neither use it nor
+create its own: remove that one with whatever made it. The VM runs
+Ubuntu's tmux 3.4, as CI's Linux soak does, not the 3.6b the test container builds. Without
+libvirt, follow the steps by hand:
+
 1. Create a Linux VM used for nothing else: 4 vCPUs, 8 GiB of memory and 30 GB of disk are
    enough. Keep its host from sleeping for the run's length.
-2. In the VM, install git, a C toolchain, tmux, Node at the version `.nvmrc` pins, pnpm through
-   corepack, and rustup. Clone the repository at the commit under test, and run
+2. In the VM, install git, a C toolchain, tmux, Node at the version `.nvmrc` pins, pnpm at the
+   version `packageManager` in `package.json` pins (`npm install -g pnpm@<version>`: Node 25 and
+   later ship no corepack), and rustup. Clone the repository at the commit under test, and run
    `pnpm install --frozen-lockfile`.
 3. Mark the VM disposable, in the VM and nowhere else: `sudo touch /etc/bazhen-disposable-host`.
    The soak refuses to start without the root-owned marker.
