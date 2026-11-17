@@ -225,12 +225,15 @@ describe('agents.shell = "login"', () => {
   it("starts each agent through the user's login shell, which hands over to the TUI", async () => {
     const { agentId } = await daemon.launch("login");
     await expect.poll(() => daemon.hasTerminal(agentId)).toBe(true);
+    // The pane's process is the TUI itself, with its own arguments, not a shell left waiting on it.
+    // It is the fixture's `/bin/sh -c` for a moment before then, so wait out the handover, for
+    // longer than the default 1 s: a loaded runner can be slow to get from the exec to the TUI.
+    await expect
+      .poll(() => daemon.agentCommand(agentId)[0], { timeout: 10_000 })
+      .not.toMatch(/(^|\/)(sh|bash|zsh|fish|login-shell\.sh)$/);
     const env = daemon.agentEnv(agentId);
     expect([env["BZ_LOGIN_SHELL_ARGS"], env["FROM_RC"]]).toEqual(["-l -i -c", "1"]);
-    // The pane's process is the TUI itself, with its own arguments, not a shell left waiting on it.
-    const [program, ...args] = daemon.agentCommand(agentId);
-    expect(program).not.toMatch(/(^|\/)(sh|bash|zsh|fish|login-shell\.sh)$/);
-    expect(args).toContain("--settings");
+    expect(daemon.agentCommand(agentId)).toContain("--settings");
   });
 });
 
