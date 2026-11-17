@@ -148,13 +148,16 @@ Every new test must be shown to fail without the code it covers.
     the change.
 
   A test is new when its title is: the branch's copy of the file has more tests with that title
-  than the base's. Falsify reads the test calls in both copies (`scripts/test-calls.ts`, on
+  than the base's, counted over the whole file whatever `describe` each is in. So a test removed
+  and a different one added under the same title isn't judged. Falsify reads the test calls in both copies (`scripts/test-calls.ts`, on
   TypeScript's scanner), so where git's diff aligns lines and how the formatter lays a call out
   don't matter: `it.runIf(c)(` with its title on the next line is read like `it(`. A string that
   reads like a test call isn't one. A test that moved, or became `async`, isn't new. A test whose
   body changes under its title is not read as new either, so a rewritten test gets its control by
   hand. A test whose title isn't a literal is counted by the expression that makes it, and a file
-  either copy of which can't be read counts as having a new test whose title couldn't be read.
+  either copy of which can't be read counts as having a new test whose title couldn't be read. So
+  does every changed `.tsx` test file: falsify can't read JSX, which would otherwise read as
+  regexes and strings that could hide a test call.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then

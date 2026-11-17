@@ -30,7 +30,8 @@ const OPENS: ReadonlyMap<SyntaxKind, SyntaxKind> = new Map([
   [SyntaxKind.TemplateHead, SyntaxKind.TemplateTail],
 ]);
 
-// A `/` after one of these divides; after anything else it starts a regex.
+// A `/` after one of these, a contextual keyword (`type`, `number`, `of`: names the scanner
+// reads as keywords), or a non-null `!` after one, divides; after anything else it starts a regex.
 const ENDS_OPERAND = new Set([
   SyntaxKind.Identifier,
   SyntaxKind.PrivateIdentifier,
@@ -52,8 +53,49 @@ const ENDS_OPERAND = new Set([
   SyntaxKind.NullKeyword,
 ]);
 
+// The members of vitest's test function, so `it.each` reaching no call is a test the chain
+// couldn't follow, while `test.path` is a property of something else named `test`.
+const TEST_MEMBERS = new Set([
+  "concurrent",
+  "each",
+  "extend",
+  "fails",
+  "for",
+  "only",
+  "runIf",
+  "scoped",
+  "sequential",
+  "shuffle",
+  "skip",
+  "skipIf",
+  "todo",
+]);
+
+/** Whether the `it` or `test` at `at` starts a test call: type arguments, a template, or a member of vitest's. */
+function isTestHead(tokens: Token[], at: number): boolean {
+  const next = tokens[at + 1];
+  return (
+    next?.kind === SyntaxKind.LessThanToken ||
+    next?.kind === SyntaxKind.NoSubstitutionTemplateLiteral ||
+    next?.kind === SyntaxKind.TemplateHead ||
+    (next?.kind === SyntaxKind.DotToken && TEST_MEMBERS.has(tokens[at + 2]?.text ?? ""))
+  );
+}
+
 const isKeyword = (kind: SyntaxKind) =>
   kind >= SyntaxKind.FirstKeyword && kind <= SyntaxKind.LastKeyword;
+
+/** Whether the token at `at` ends an operand, so a `/` after it divides. */
+function endsOperand(tokens: Token[], at: number): boolean {
+  const kind = tokens[at]?.kind;
+  if (kind === undefined) return false;
+  const member = tokens[at - 1]?.kind;
+  if (member === SyntaxKind.DotToken || member === SyntaxKind.QuestionDotToken) {
+    return isName(kind);
+  }
+  if (kind === SyntaxKind.ExclamationToken) return endsOperand(tokens, at - 1);
+  return ENDS_OPERAND.has(kind) || (isKeyword(kind) && kind > SyntaxKind.LastReservedWord);
+}
 
 const isName = (kind: SyntaxKind | undefined) =>
   kind !== undefined && (kind === SyntaxKind.Identifier || isKeyword(kind));
@@ -65,8 +107,6 @@ function tokenize(source: string): Token[] | string {
   for (;;) {
     let kind = scanner.scan();
     if (kind === SyntaxKind.EndOfFile) return tokens;
-    const before = tokens.at(-1)?.kind;
-    const afterDot = tokens.at(-2)?.kind === SyntaxKind.DotToken;
     if (kind === SyntaxKind.OpenBraceToken) templates.push(false);
     else if (kind === SyntaxKind.TemplateHead) templates.push(true);
     else if (kind === SyntaxKind.CloseBraceToken && templates.pop() === true) {
@@ -74,7 +114,7 @@ function tokenize(source: string): Token[] | string {
       if (kind === SyntaxKind.TemplateMiddle) templates.push(true);
     } else if (
       (kind === SyntaxKind.SlashToken || kind === SyntaxKind.SlashEqualsToken) &&
-      !(before !== undefined && (ENDS_OPERAND.has(before) || (afterDot && isName(before))))
+      !endsOperand(tokens, tokens.length - 1)
     ) {
       kind = scanner.reScanSlashToken();
     }
@@ -113,11 +153,39 @@ function closers(tokens: Token[]): Map<number, number> | string {
 }
 
 /**
+ * The index of the `>` closing the type arguments that open at `at`, when a call or a tagged
+ * template follows them, as in `it.each<[number, string]>(rows)`; else undefined.
+ */
+function endOfTypeArguments(
+  tokens: Token[],
+  closing: Map<number, number>,
+  at: number,
+): number | undefined {
+  let depth = 0;
+  for (let next = at; next < tokens.length; next++) {
+    const kind = tokens[next]?.kind;
+    if (kind === SyntaxKind.LessThanToken) depth++;
+    else if (kind === SyntaxKind.GreaterThanToken && --depth === 0) {
+      const after = tokens[next + 1]?.kind;
+      const called =
+        after === SyntaxKind.OpenParenToken ||
+        after === SyntaxKind.NoSubstitutionTemplateLiteral ||
+        after === SyntaxKind.TemplateHead;
+      return called ? next : undefined;
+    } else if (closing.has(next)) next = closing.get(next) ?? next;
+    else if (kind === SyntaxKind.SemicolonToken || kind === SyntaxKind.CloseParenToken)
+      return undefined;
+  }
+  return undefined;
+}
+
+/**
  * Each test call in `source`: an `it` or `test` that isn't a property or a declaration, then any
  * chain of `.name`, `(...)` and tagged templates, whose last `(...)` takes the title first. So
  * `it.runIf(c)("t", f)`, `it.each(rows)("t %s", f)` and ``it.each`…`("t", f)`` are read in any
- * layout. A last call with no arguments, or followed by `{` or `:` (a method named `test`), is
- * no test. A string that reads like a test call is a string. Returns why instead when the
+ * layout, with type arguments or not. A last call with no arguments, or followed by `{` or `:`
+ * (a method named `test`), is no test. A chain that starts as a test's does (`isTestHead`) but
+ * reaches no call is a test whose title can't be read, so it is never left out unseen. A string that reads like a test call is a string. Returns why instead when the
  * source can't be read: a literal left open, or brackets that don't balance.
  */
 export function testCalls(source: string): TestCall[] | string {
@@ -141,7 +209,10 @@ export function testCalls(source: string): TestCall[] | string {
     let next = i + 1;
     for (;;) {
       const kind = tokens[next]?.kind;
-      if (kind === SyntaxKind.DotToken && isName(tokens[next + 1]?.kind)) next += 2;
+      const typeArguments =
+        kind === SyntaxKind.LessThanToken ? endOfTypeArguments(tokens, closing, next) : undefined;
+      if (typeArguments !== undefined) next = typeArguments + 1;
+      else if (kind === SyntaxKind.DotToken && isName(tokens[next + 1]?.kind)) next += 2;
       else if (kind === SyntaxKind.NoSubstitutionTemplateLiteral) next += 1;
       else if (kind === SyntaxKind.TemplateHead) next = (closing.get(next) ?? next) + 1;
       else if (kind === SyntaxKind.OpenParenToken) {
@@ -149,6 +220,11 @@ export function testCalls(source: string): TestCall[] | string {
         last = { open: next, close };
         next = close + 1;
       } else break;
+    }
+    if (last === undefined && isTestHead(tokens, i)) {
+      const chain = JSON.stringify(tokens.slice(i, next).map((t) => t.text));
+      calls.push({ title: undefined, titleTokens: chain, body: chain });
+      continue;
     }
     const after = tokens[next]?.kind;
     if (

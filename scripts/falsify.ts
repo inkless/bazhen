@@ -303,13 +303,17 @@ const countedBy = (t: TestCall) => (t.title === undefined ? `\0${t.titleTokens}`
  * sides' test calls (`testCalls`), so a test that only moved, or whose body or layout changed under
  * its title, isn't new. A test whose title can't be read (interpolated, a variable) counts by its
  * title's tokens, and each new one adds an `<unparsed test in FILE>` marker, which classifies as
- * INVALID and so forces a Control trailer. So does a side that can't be read at all, with why.
+ * INVALID and so forces a Control trailer. So does a side that can't be read at all, with why,
+ * and a .tsx file: its JSX could read as regexes and strings that hide a test call.
  */
 export function changedTests(
   base: string | undefined,
   head: string,
   file: string,
 ): { titles: string[]; unreadable?: string } {
+  if (file.endsWith(".tsx")) {
+    return { titles: [unparsedIn(file)], unreadable: "falsify can't read JSX" };
+  }
   const before = base === undefined ? [] : testCalls(base);
   if (typeof before === "string") {
     return { titles: [unparsedIn(file)], unreadable: `the base's copy has ${before}` };

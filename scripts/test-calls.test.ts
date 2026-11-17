@@ -160,6 +160,48 @@ describe("testCalls", () => {
     expect(body('it("t", () => `a\n b`);')).not.toBe(body('it("t", () => `a\n  b`);'));
   });
 
+  it("reads a title after type arguments in the chain, nested or not", () => {
+    const source = lines(
+      "it.each<[Key, string]>([[a, b]])(",
+      '  "sends %s",',
+      "  (key, sent) => {},",
+      ");",
+      'test.for<Array<Map<string, { a: number }>>>([])("maps %s", () => {});',
+      "it.each<Row>`",
+      "  a",
+      "  ${1}",
+      '`("tabled $a", () => {});',
+    );
+    expect(titles(source)).toEqual(["sends %s", "maps %s", "tabled $a"]);
+  });
+
+  it("takes a test chain that reaches no call as one whose title can't be read, and another name's property as none", () => {
+    expect(
+      calls(
+        lines(
+          "const each = it.each;",
+          "const less = test < limit;",
+          "write(test.path, test.text);",
+        ),
+      ),
+    ).toEqual([
+      { title: undefined, titleTokens: '["it",".","each"]', body: '["it",".","each"]' },
+      { title: undefined, titleTokens: '["test"]', body: '["test"]' },
+    ]);
+  });
+
+  it("reads a division after a contextual keyword, a non-null assertion or an optional member", () => {
+    const source = lines(
+      "const a = number / 2;",
+      "const b = type /= 2;",
+      "const c = x! / 2;",
+      "const d = obj?.default / 2;",
+      "const e = !/x/.test(s) && (a, !/y/.test(s));",
+      'it("after them", () => expect(of / 2).toBe(1));',
+    );
+    expect(titles(source)).toEqual(["after them"]);
+  });
+
   it("says why a source can't be read: an unterminated literal, or brackets that don't balance", () => {
     expect([
       testCalls('it("open, () => {});'),

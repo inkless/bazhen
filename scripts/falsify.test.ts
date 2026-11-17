@@ -103,6 +103,15 @@ describe("changedTests", () => {
     expect(changed("", "const fixture = 'it(\"fixture\", f)';\n")).toEqual([]);
   });
 
+  it("marks a .tsx file as unparsed, since its JSX can't be read, and says why", () => {
+    const tsx = "packages/a/src/view.test.tsx";
+    const head = 'it("renders", () => {\n  render(<p>Don\'t</p>);\n});\n';
+    expect(changedTests(head, head, tsx)).toEqual({
+      titles: [`<unparsed test in ${tsx}>`],
+      unreadable: "falsify can't read JSX",
+    });
+  });
+
   it("marks a file either side of which can't be read as unparsed, and says why", () => {
     const good = 'it("a", () => {});\n';
     expect([
