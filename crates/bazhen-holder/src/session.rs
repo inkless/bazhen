@@ -427,10 +427,10 @@ mod tests {
 
     const DEADLINE: Duration = Duration::from_secs(5);
 
-    /// A child leading a session on a PTY of its own, killed with its group and reaped when the
-    /// test ends.
+    /// A child leading a session on a PTY of its own, its session killed and the child reaped
+    /// when the test ends.
     struct Leader {
-        _pty: Pty,
+        pty: Pty,
         _reaper: Reaper,
         child: ChildProcess,
     }
@@ -440,9 +440,13 @@ mod tests {
             if let Ok(session) = Session::led_by(self.child.pid()) {
                 let _ = session.signal(Signal::KILL);
             }
+            // A test that failed is reported by its own failure, not by a leader it left behind.
+            if !std::thread::panicking() {
+                self.wait_exited();
+            }
             let _ = rustix::process::waitpid(
                 Some(self.child.pid()),
-                rustix::process::WaitOptions::empty(),
+                rustix::process::WaitOptions::NOHANG,
             );
         }
     }
@@ -462,7 +466,7 @@ mod tests {
             let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
             let child = pty::spawn(slave, &process, &reaper).unwrap();
             Self {
-                _pty: pty,
+                pty,
                 _reaper: reaper,
                 child,
             }
@@ -472,13 +476,65 @@ mod tests {
             Session::led_by(self.child.pid()).unwrap()
         }
 
-        /// Waits until the leader has exited, leaving it unreaped.
+        /// Waits until the leader has exited, leaving it unreaped, and reads what its terminal
+        /// writes meanwhile, as the holder does. This is the only way a test waits for a leader.
+        /// On macOS a killed session's processes don't finish exiting while their terminal holds
+        /// output nobody has read, and `sh` with job control on can write there at any moment
+        /// (`sh: child setpgid (…): Operation not permitted`), so a wait that doesn't read the
+        /// master can wait forever.
         fn wait_exited(&self) {
+            let mut output = Vec::new();
+            let give_up = Instant::now() + DEADLINE;
+            while !self.exited() {
+                self.read_output(&mut output);
+                if Instant::now() >= give_up {
+                    let state = Command::new("ps")
+                        .args(["-o", "pid=,stat=,command=", "-p"])
+                        .arg(self.child.pid().as_raw_pid().to_string())
+                        .output()
+                        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+                    panic!(
+                        "timed out waiting until the leader has exited: {state:?}, its terminal \
+                         having written {:?}",
+                        String::from_utf8_lossy(&output)
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn exited(&self) -> bool {
             waitid(
                 WaitId::Pid(self.child.pid()),
-                WaitIdOptions::EXITED | WaitIdOptions::NOWAIT,
+                WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
             )
-            .unwrap();
+            .unwrap()
+            .is_some()
+        }
+
+        /// Reads what the terminal has written, waiting for nothing more: the master doesn't block.
+        fn read_output(&self, output: &mut Vec<u8>) {
+            let mut chunk = [0u8; 4096];
+            loop {
+                match rustix::io::read(self.pty.master(), &mut chunk) {
+                    Ok(n) if n > 0 => output.extend_from_slice(chunk.get(..n).unwrap_or_default()),
+                    Err(Errno::INTR) => {}
+                    _ => return,
+                }
+            }
+        }
+
+        /// Whether the terminal has written anything not yet read.
+        fn has_output(&self) -> bool {
+            let mut fds = [rustix::event::PollFd::from_borrowed_fd(
+                self.pty.master(),
+                rustix::event::PollFlags::IN,
+            )];
+            let now = rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            rustix::event::poll(&mut fds, Some(&now)).unwrap() > 0
         }
     }
 
@@ -588,6 +644,43 @@ mod tests {
         gone.wait().unwrap();
         let sweep = leader.session().pass_among([pid], Some(Signal::HUP));
         assert_eq!(sweep, Sweep::default());
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_leader_killed_with_its_output_unread_is_still_seen_to_exit() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let leader = Leader::start("echo unread; exec sleep 30");
+        until("the leader has written", || leader.has_output());
+        let sweep = leader.session().signal(Signal::KILL);
+        assert_eq!(sweep.reached, vec![leader.child.pid()]);
+        leader.wait_exited();
+    }
+
+    /// The drop is how most tests end their leader, so it is held to the same bound: run on a
+    /// thread of its own, a drop that blocks fails here instead of hanging the test.
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_leader_dropped_with_its_output_unread_is_ended_and_reaped() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let leader = Leader::start("echo unread; exec sleep 30");
+        until("the leader has written", || leader.has_output());
+        let pid = leader.child.pid();
+        let (dropped, done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(leader);
+            let _ = dropped.send(());
+        });
+        assert_eq!(
+            done.recv_timeout(DEADLINE * 2),
+            Ok(()),
+            "the drop never returned"
+        );
+        let reaped = waitid(
+            WaitId::Pid(pid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        );
+        assert_eq!(reaped.err(), Some(Errno::CHILD));
     }
 
     #[test]

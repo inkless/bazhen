@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::io::ErrorKind;
-use std::os::fd::{AsRawFd as _, BorrowedFd, RawFd};
+use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd, RawFd};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,14 +36,31 @@ struct Running {
 }
 
 /// Kills the child's group and reaps it if the test ends with the child still running. A child
-/// already reaped is left alone, since its pid may by then be another process's.
-struct EndsChild(Pid);
+/// already reaped is left alone, since its pid may by then be another process's. It reads the
+/// terminal while it waits, through a master of its own, since on macOS a killed process doesn't
+/// finish exiting while its terminal holds output nobody has read; and it waits at most
+/// `DEADLINE`, so a child that never exits fails the test instead of hanging it.
+struct EndsChild {
+    pid: Pid,
+    master: OwnedFd,
+}
 
 impl Drop for EndsChild {
     fn drop(&mut self) {
-        if let Ok(None) = waitpid(Some(self.0), WaitOptions::NOHANG) {
-            let _ = bazhen_test_signal::signal_group(self.0.as_raw_nonzero().get(), Signal::KILL);
-            let _ = waitpid(Some(self.0), WaitOptions::empty());
+        if let Ok(None) = waitpid(Some(self.pid), WaitOptions::NOHANG) {
+            let _ = bazhen_test_signal::signal_group(self.pid.as_raw_nonzero().get(), Signal::KILL);
+            let deadline = Instant::now() + DEADLINE;
+            let mut chunk = [0u8; 4096];
+            while let Ok(None) = waitpid(Some(self.pid), WaitOptions::NOHANG) {
+                if Instant::now() >= deadline {
+                    // A test that failed is reported by its own failure, not by a child it left.
+                    assert!(std::thread::panicking(), "the killed child never exited");
+                    return;
+                }
+                // The master doesn't block, so this reads only what is already there.
+                while matches!(rustix::io::read(&self.master, &mut chunk), Ok(n) if n > 0) {}
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }
@@ -64,7 +81,10 @@ fn start(argv: &[&str]) -> Result<Running> {
     let reaper = Reaper::new()?;
     let (pty, slave) = Pty::open(WindowSize::clamped(80, 24))?;
     let child = pty::spawn(slave, &process(argv)?, &reaper)?;
-    let ended = EndsChild(child.pid());
+    let ended = EndsChild {
+        pid: child.pid(),
+        master: pty.master().try_clone_to_owned()?,
+    };
     Ok(Running {
         pty,
         reaper,
