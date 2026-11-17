@@ -1,6 +1,6 @@
 // Runs scripts/falsify.ts against a branch in a linked worktree of a throwaway repository, with a
 // bogus GIT_DIR and GIT_INDEX_FILE in its environment that must never reach git or the tests. A
-// stub `pnpm` stands in for install and vitest, and logs what it saw; a stub `cargo-nextest` lists
+// stub `pnpm` stands in for install, the CLI's build and vitest, and logs what it saw; a stub `cargo-nextest` lists
 // the Rust tests named in the tree's rust-tests.txt and runs them, failing each on the line of
 // kills.txt whose marker the Rust source holds; a stub `cargo-mutants` lists mutants.json.
 
@@ -27,6 +27,7 @@ import { inSignalSandbox } from "./signal-paths.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
+const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TEST = "packages/a/src/x.test.ts";
 const CONTROL = "Control: return v = 1 -> caps failed: expected 2, got 1";
 
@@ -51,7 +52,39 @@ case "$1" in
     fi
     exit 0
     ;;
+  run)
+    echo "BUILD: $2 in $(pwd) to $CARGO_TARGET_DIR" >> "$STUB_LOG"
+    if [ "\${STUB_FAIL_BUILD:-}" = 1 ]; then
+      echo "   Compiling bazhen v0.1.0" >&2
+      echo "error[E0425]: cannot find value \\\`x\\\` in this scope" >&2
+      i=1
+      while [ $i -le 25 ]; do echo "  context line $i" >&2; i=$((i + 1)); done
+      exit 101
+    fi
+    # Cargo takes every folder under crates/ for a workspace member, and needs its manifest.
+    for member in crates/*/; do
+      [ -d "$member" ] || continue
+      if [ ! -e "\${member}Cargo.toml" ]; then
+        echo "error: failed to load manifest for workspace member $member" >&2
+        exit 101
+      fi
+    done
+    mkdir -p "$CARGO_TARGET_DIR/release"
+    bin="$CARGO_TARGET_DIR/release/bazhen"
+    printf '#!/bin/sh\\necho "BUILT FROM: %s"\\n' "$(cat ${CLI_MAIN})" > "$bin"
+    chmod +x "$bin"
+    if [ "\${STUB_RELATIVE_DEPINFO:-}" = 1 ]; then
+      printf '%s: ${CLI_MAIN}\\n' "$bin" > "$bin.d"
+    elif [ "\${STUB_NO_DEPINFO:-}" != 1 ]; then
+      printf '%s: %s/${CLI_MAIN}\\n' "$bin" "$(pwd)" > "$bin.d"
+    fi
+    exit 0
+    ;;
   exec)
+    if [ -n "\${BAZHEN_CLI:-}" ]; then
+      echo "CLI: $BAZHEN_CLI" >> "$STUB_LOG"
+      "$BAZHEN_CLI" >> "$STUB_LOG"
+    fi
     if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
       echo "HANGING $$" >> "$STUB_LOG"
       trap 'echo TERMED >> "$STUB_LOG"' TERM
@@ -267,6 +300,7 @@ describe("falsify on a branch in a linked worktree", () => {
       sawOldSource: stubLog().includes("SOURCE: export const v = 1;"),
       sawNewSource: stubLog().includes("SOURCE: export const v = 2;"),
       sawNewTest: stubLog().includes('it("caps"'),
+      builtCli: stubLog().includes("BUILD:"),
     }).toEqual({
       status: 0,
       killed: true,
@@ -274,6 +308,7 @@ describe("falsify on a branch in a linked worktree", () => {
       sawOldSource: true,
       sawNewSource: false,
       sawNewTest: true,
+      builtCli: false,
     });
   });
 
@@ -1132,5 +1167,142 @@ describe("falsify outside a sandbox", () => {
       asHost: false,
       here: inSignalSandbox(),
     });
+  });
+});
+
+const CLI_TEST = "tests/cli/x.test.ts";
+const OTHER_CRATE = "crates/holder/src/lib.rs";
+
+/**
+ * Commits the CLI's crate, another crate and a lockfile on the branch, then a change to `changed`
+ * and the files `added` with a new CLI test, and runs falsify against the first commit.
+ */
+function changeCli(
+  changed: string,
+  extra: Record<string, string> = {},
+  added: Record<string, string> = {},
+) {
+  const tree: Record<string, string> = {
+    [CLI_MAIN]: "fn main() { old }\n",
+    "crates/bazhen/Cargo.toml": '[package]\nname = "bazhen"\n',
+    [OTHER_CRATE]: "pub fn f() { old }\n",
+    "crates/holder/Cargo.toml": '[package]\nname = "holder"\n',
+    "Cargo.lock": "version = 4\n",
+  };
+  for (const [path, text] of Object.entries(tree)) write(fx.linked, path, text);
+  git(fx.linked, "add", ...Object.keys(tree));
+  git(fx.linked, "commit", "--quiet", "-m", "feat: cli1");
+  const base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, changed, "fn main() { new }\n");
+  for (const [path, text] of Object.entries(added)) write(fx.linked, path, text);
+  write(fx.linked, CLI_TEST, branchTest('import { scene } from "./cli.ts";\n'));
+  git(fx.linked, "add", changed, ...Object.keys(added), CLI_TEST);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: cli2");
+  return falsify(["--base", base], { STUB_SOURCE: CLI_MAIN, STUB_TEST: CLI_TEST, ...extra });
+}
+
+const builtCli = () => join(fx.linked, "target/falsify/release/bazhen");
+
+describe("falsify on a branch with a new CLI test", () => {
+  it("runs it against the CLI built from the base's Rust, whatever BAZHEN_CLI the caller set", () => {
+    const result = changeCli(CLI_MAIN, { BAZHEN_CLI: "/usr/local/bin/bazhen" });
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${CLI_TEST} › caps`),
+      built: stubLog().includes(`BUILD: build:cli in ${fx.tmp}/bz-falsify-`),
+      ran: stubLog().includes(`CLI: ${builtCli()}\n`),
+      builtFromBase: stubLog().includes("BUILT FROM: fn main() { old }"),
+      sawNewSource: stubLog().includes("{ new }"),
+    }).toEqual({
+      status: 0,
+      killed: true,
+      built: true,
+      ran: true,
+      builtFromBase: true,
+      sawNewSource: false,
+    });
+  });
+
+  it("fails when it passes against the base's CLI", () => {
+    expect(changeCli(CLI_MAIN, { STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(`SURVIVED ${CLI_TEST} › caps`),
+    });
+  });
+
+  it("takes it as unrelated when it passes and the CLI isn't built from the Rust that changed", () => {
+    expect(changeCli(OTHER_CRATE, { STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `INVALID  ${CLI_TEST} › caps (passed; unrelated to the source change)`,
+      ),
+    });
+  });
+
+  it("builds the base's CLI on a branch that adds a crate", () => {
+    const result = changeCli(
+      CLI_MAIN,
+      {},
+      { "crates/new/Cargo.toml": '[package]\nname = "new"\n', "crates/new/src/lib.rs": "\n" },
+    );
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${CLI_TEST} › caps`),
+      builtFromBase: stubLog().includes("BUILT FROM: fn main() { old }"),
+    }).toEqual({ status: 0, killed: true, builtFromBase: true });
+  });
+
+  it("takes it as unrelated when it passes and only the workspace's lockfile changed", () => {
+    expect(changeCli("Cargo.lock", { STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `INVALID  ${CLI_TEST} › caps (passed; unrelated to the source change)`,
+      ),
+    });
+  });
+
+  it("fails without a verdict when cargo's record doesn't name the CLI's source in the tree", () => {
+    const result = changeCli(CLI_MAIN, { STUB_RELATIVE_DEPINFO: "1", STUB_STATUS: "passed" });
+    expect({
+      status: result.status,
+      said: result.output.includes(`doesn't name ${CLI_MAIN}`),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+    }).toEqual({ status: 1, said: true, verdict: false });
+  });
+
+  it("fails without a verdict, naming cargo's error, when the base's CLI won't build", () => {
+    const result = changeCli(CLI_MAIN, { STUB_FAIL_BUILD: "1" });
+    expect({
+      status: result.status,
+      error: result.output.includes("cargo said:\n  error[E0425]: cannot find value `x`"),
+      tail: result.output.includes("  context line 25"),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+      ranTests: stubLog().includes("ARGS: exec"),
+      leftovers: leftovers(),
+    }).toEqual({
+      status: 1,
+      error: true,
+      tail: true,
+      verdict: false,
+      ranTests: false,
+      leftovers: [],
+    });
+  });
+
+  it("fails without a verdict when the build leaves no record of what it was built from", () => {
+    // The run before leaves its record behind, naming its own worktree.
+    expect(changeCli(CLI_MAIN).status).toBe(0);
+    const base = git(fx.linked, "rev-parse", "HEAD~1").trim();
+    const result = falsify(["--base", base], {
+      STUB_SOURCE: CLI_MAIN,
+      STUB_TEST: CLI_TEST,
+      STUB_NO_DEPINFO: "1",
+      STUB_STATUS: "passed",
+    });
+    expect({
+      status: result.status,
+      said: result.output.includes("cargo wrote no"),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+    }).toEqual({ status: 1, said: true, verdict: false });
   });
 });

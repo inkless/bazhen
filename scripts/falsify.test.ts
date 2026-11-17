@@ -4,6 +4,9 @@ import {
   harnessFiles,
   hasControl,
   addedRustTests,
+  binaryInputs,
+  cargoErrors,
+  depInfoSources,
   isRevertible,
   newTitles,
   parseArgs,
@@ -370,6 +373,69 @@ describe("revertsOf", () => {
   it("keeps a generator's output when the branch changes the output alone", () => {
     expect(revertsOf(modified(".oxlintrc.json", "scripts/lint-config.medium.test.ts"))).toEqual([]);
   });
+
+  it("reverts the protocol id the Rust crates speak with the protocol source", () => {
+    const changes = modified("packages/protocol/src/holder.ts", "crates/bazhen-protocol/src/id.rs");
+    expect(revertsOf(changes)).toEqual(changes);
+  });
+
+  it("reverts the Rust workspace's changes when a CLI test runs, and only then", () => {
+    const rust = [
+      ...modified("crates/bazhen/src/main.rs", "Cargo.toml", "Cargo.lock"),
+      { status: "R", oldPath: "crates/bazhen/src/old.rs", path: "crates/bazhen/src/new.rs" },
+    ];
+    const changes = [...rust, ...modified("README.md", "crates.md")];
+    expect({ cli: revertsOf(changes, { cli: true }), other: revertsOf(changes) }).toEqual({
+      cli: rust,
+      other: [],
+    });
+  });
+});
+
+describe("depInfoSources", () => {
+  it("lists the files under the tree a binary was built from, relative to it", () => {
+    const text =
+      "/t/release/bazhen: /wt/crates/bazhen/src/main.rs /wt/crates/a\\ b/src/lib.rs " +
+      "/home/u/.cargo/registry/src/x/lib.rs /wtx/crates/y.rs\n\n/wt/crates/bazhen/src/main.rs:\n";
+    expect(depInfoSources(text, "/wt")).toEqual([
+      "crates/bazhen/src/main.rs",
+      "crates/a b/src/lib.rs",
+    ]);
+  });
+});
+
+describe("binaryInputs", () => {
+  it("adds the manifest of each crate built from, and not the workspace's or its lockfile", () => {
+    expect(
+      binaryInputs([
+        "crates/bazhen/src/main.rs",
+        "crates/bazhen/src/args.rs",
+        "crates/p/src/id.rs",
+      ]),
+    ).toEqual([
+      "crates/bazhen/src/main.rs",
+      "crates/bazhen/src/args.rs",
+      "crates/p/src/id.rs",
+      "crates/bazhen/Cargo.toml",
+      "crates/p/Cargo.toml",
+    ]);
+  });
+});
+
+describe("cargoErrors", () => {
+  it("picks cargo's error lines out of what a build said", () => {
+    const said = [
+      "   Compiling bazhen v0.1.0",
+      "error[E0425]: cannot find value `x` in this scope",
+      " --> crates/bazhen/src/main.rs:3:5",
+      "warning: unused import",
+      'error: could not compile `bazhen` (bin "bazhen") due to 1 previous error',
+    ].join("\n");
+    expect(cargoErrors(said)).toEqual([
+      "error[E0425]: cannot find value `x` in this scope",
+      'error: could not compile `bazhen` (bin "bazhen") due to 1 previous error',
+    ]);
+  });
 });
 
 describe("relatedReverts", () => {
@@ -422,6 +488,16 @@ describe("relatedReverts", () => {
     expect(
       relatedReverts("scripts/falsify.medium.test.ts", source, ["scripts/falsify.ts"], PACKAGES),
     ).toEqual(["scripts/falsify.ts"]);
+  });
+
+  it("counts a reverted input of the CLI for a test of the CLI, and for no other test", () => {
+    const reverted = ["crates/bazhen/src/main.rs", "crates/bazhen-holder/src/lib.rs"];
+    const inputs = ["crates/bazhen/src/main.rs", "Cargo.lock"];
+    const source = 'import { scene } from "./cli.ts";';
+    expect({
+      cli: relatedReverts("tests/cli/agents.test.ts", source, reverted, PACKAGES, inputs),
+      other: relatedReverts("tests/api/agents.test.ts", source, reverted, PACKAGES, inputs),
+    }).toEqual({ cli: ["crates/bazhen/src/main.rs"], other: [] });
   });
 
   it("ignores a type-only import", () => {
