@@ -7,24 +7,11 @@ import {
   type StreamServerFrame,
 } from "@bazhen/protocol";
 import { failureDetail } from "../commands.ts";
+import { DRAIN_PATIENCE, HEARTBEAT_MS, keepAlive } from "../http/heartbeat.ts";
 import type { UpgradeRoute } from "../http/upgrades.ts";
-import { ViewHeartbeat } from "./heartbeat.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
 
 export const ANOTHER_PAGE = "this page is from another build of Bazhen than the daemon: reload it";
-
-/**
- * How often each view is pinged. One that is gone by `ViewHeartbeat`'s account is ended, so a
- * phone that slept or lost its network gives up the lease (foundation-design §4.3) instead of
- * holding it until its TCP connection times out.
- */
-export const HEARTBEAT_MS = 15_000;
-
-/**
- * Heartbeats a view with output still queued may leave unanswered: two minutes, in which a phone
- * on a slow link drains far more than the eviction allows to queue.
- */
-export const DRAIN_PATIENCE = 8;
 
 export interface StreamDeps {
   /** The daemon's protocol id: a view whose hello names another is refused. */
@@ -60,21 +47,16 @@ function serve(
   // Set as soon as a hello arrives, so a second one while the first joins starts nothing.
   let joining = false;
   let leaving: LeaveReason | undefined;
-  const heart = new ViewHeartbeat(deps.drainPatience ?? DRAIN_PATIENCE);
-  const beat = setInterval(() => {
-    if (heart.beat(ws.bufferedAmount) === "ping") return ws.ping();
-    leaving = "timed_out";
-    ws.terminate();
-  }, deps.heartbeatMs ?? HEARTBEAT_MS);
-  beat.unref();
-  ws.on("pong", () => heart.heard());
+  const every = {
+    ms: deps.heartbeatMs ?? HEARTBEAT_MS,
+    patience: deps.drainPatience ?? DRAIN_PATIENCE,
+  };
+  keepAlive(ws, every, () => (leaving = "timed_out"));
   ws.on("close", () => {
-    clearInterval(beat);
     leaving ??= "client_closed";
     attachment?.leave(leaving);
   });
   ws.on("message", (data: RawData, binary: boolean) => {
-    heart.heard();
     const bytes = toBuffer(data);
     if (binary) {
       attachment?.input(bytes);

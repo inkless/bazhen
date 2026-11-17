@@ -4,6 +4,7 @@ import { connect as tcpConnect } from "node:net";
 import { connect } from "node:tls";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
 import { FakeRuntime } from "@bazhen/core/testing";
@@ -12,6 +13,7 @@ import { Notices } from "../attention/notices.ts";
 import { DeviceAuth, LOOPBACK_COOKIE, SECURE_COOKIE } from "../auth/devices.ts";
 import { PairingCodes } from "../auth/pairing.ts";
 import { parseCidr, type Cidr } from "../config/cidr.ts";
+import { eventRoute } from "../events/server.ts";
 import { Store } from "../store/store.ts";
 import { loopbackPairing, tempDb, testView, upgradeOutcome } from "../testing/fixtures.ts";
 import { lanCertificate, type LanCertificate } from "../tls/material.ts";
@@ -173,14 +175,15 @@ async function lan(over: Partial<LanParts> = {}) {
     });
   const pair = (code: string, from = origin) =>
     call("/v1/pairing", { method: "POST", headers: { origin: from }, body: { code } });
-  const stream = (headers: Record<string, string>) => {
+  const stream = (headers: Record<string, string>, path = "/echo", more: ClientOptions = {}) => {
     // ws hands `servername` to tls.connect, though its types leave it out.
     const options: ClientOptions & { servername: string } = {
+      ...more,
       ca: cert().cert,
       servername: name,
       headers: { host: `${name}:${port}`, ...headers },
     };
-    return new WebSocket(`wss://127.0.0.1:${port}/echo`, options);
+    return new WebSocket(`wss://127.0.0.1:${port}${path}`, options);
   };
   /** What a TLS client trusting the certificate gets: a handshake, or the code that ended it. */
   const handshake = (extra: { maxVersion?: "TLSv1.2" } = {}) =>
@@ -441,6 +444,40 @@ describe("the LAN listener", () => {
         message: "two refused callers that never hung up kept the next connection out",
       })
       .toBe("handshake");
+  });
+
+  it("gives a paired device's slot back once its event stream stops answering pings", async () => {
+    const events = Store.open(tempDb());
+    cleanups.push(() => events.close());
+    const { pair, stream, handshake, codes, origin, server } = await lan({
+      streams: [eventRoute({ store: events, heartbeatMs: 100 })],
+      limits: { maxConnections: 1 },
+    });
+    const paired = await pair(codes.issue().code);
+    const connections = promisify(server.getConnections.bind(server));
+    await expect.poll(() => connections()).toBe(0);
+    const ws = stream(
+      { cookie: paired.cookie, origin },
+      `/v1/events?epoch=${events.epoch()}&after=0`,
+      {
+        autoPong: false,
+      },
+    );
+    cleanups.push(() => ws.terminate());
+    // Answering until the slot is shown to be held, then silent, as a phone leaving the network.
+    const answer = () => ws.pong();
+    ws.on("ping", answer);
+    await new Promise((resolve) => ws.once("open", resolve));
+    const held = await handshake();
+    ws.off("ping", answer);
+    await expect
+      .poll(() => handshake(), {
+        timeout: 2_000,
+        interval: 50,
+        message: "a silent event stream kept the next connection out",
+      })
+      .toBe("handshake");
+    expect(held).toBe("ECONNRESET");
   });
 
   it("stops listening and closes its open streams when it fails, as doctor then reports", async () => {
