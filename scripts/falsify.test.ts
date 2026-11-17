@@ -42,7 +42,7 @@ const diff = (...added: string[]) =>
 type Assertion = VitestReport["testResults"][number]["assertionResults"][number];
 
 const report = (...assertionResults: Assertion[]): VitestReport => ({
-  testResults: [{ name: `/tmp/wt/${FILE}`, status: "failed", assertionResults }],
+  testResults: [{ name: `/tmp/wt/${FILE}`, assertionResults }],
 });
 
 const result = (title: string, status: string, failureMessages: string[] = []): Assertion => ({
@@ -256,7 +256,6 @@ describe("failureLine", () => {
       testResults: [
         {
           name: `/tmp/wt/${FILE}`,
-          status: "failed",
           message: "Failed to load url ./y.ts\nmore",
           assertionResults: [],
         },
