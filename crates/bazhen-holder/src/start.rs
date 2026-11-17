@@ -462,4 +462,14 @@ mod tests {
         ];
         assert_eq!(codes, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
+
+    #[test]
+    fn a_panic_is_written_to_the_log_with_its_message() {
+        log_panics();
+        let log = crate::test_log::logged(|| {
+            let _ = std::panic::catch_unwind(|| panic!("xyzzy"));
+        });
+        assert!(log.contains("panicked"), "{log}");
+        assert!(log.contains("xyzzy"), "{log}");
+    }
 }
