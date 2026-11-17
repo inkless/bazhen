@@ -327,40 +327,61 @@ const BACKTICK = /(?<!\\)(?:\\\\)*`/g;
 const opensTemplate = (open: boolean, line: string) =>
   (line.match(BACKTICK)?.length ?? 0) % 2 === 1 ? !open : open;
 
+/** The test call on `line` with a readable title: its title as written, and where it ends. */
+function testCall(line: string): { raw: string; end: number } | undefined {
+  if (!TEST_CALL.test(line)) return undefined;
+  const match = [...line.matchAll(TITLE)].find(
+    ([, quote, title]) => title !== undefined && !(quote === "`" && title.includes("${")),
+  );
+  const raw = match?.[2];
+  return match === undefined || raw === undefined
+    ? undefined
+    : { raw, end: match.index + match[0].length };
+}
+
 /**
  * Each test call in a file with a readable title, and its block: the call line and the lines up
  * to its end, with the title's quoted string as a placeholder and the call line's indent taken off
  * every line but those inside a template literal, kept as they are. The end is read from the
  * formatter's layout: the lines indented deeper than the call or inside a template, then a closing
- * line at its indent. A call left open with no such line, or a template never closed, has no block.
- * A backtick in a string or a comment outside a template can only make the block run on, so
- * more of it is compared.
+ * line at its indent with no deeper line after it. A call left open with no such line has no block.
+ *
+ * Which lines are inside a template is read by counting backticks, which a backtick in a string,
+ * a comment or a `${}` misleads. Read that way, a template's `}` line can pass for the closing
+ * line and cut the block short. A miscount runs on until another odd backtick, so one that reaches
+ * a test call, or the end of the file, inside a template is caught, and then no test in the file
+ * has a block. One that ends inside the same test is caught only by the deeper line after a closing
+ * line, so a test with two misread backticks and a template between them can still be cut short.
  */
 function testsIn(source: string): TestBlock[] {
   const lines = source.split("\n");
+  const inside: boolean[] = [];
+  let open = false;
+  for (const line of lines) {
+    inside.push(open);
+    open = opensTemplate(open, line);
+  }
+  const calls = lines.map(testCall);
+  const counted = !open && calls.every((call, i) => call === undefined || !inside[i]);
   const tests: TestBlock[] = [];
   for (const [i, line] of lines.entries()) {
-    if (!TEST_CALL.test(line)) continue;
-    const match = [...line.matchAll(TITLE)].find(
-      ([, quote, title]) => title !== undefined && !(quote === "`" && title.includes("${")),
-    );
-    const raw = match?.[2];
-    if (match === undefined || raw === undefined) continue;
+    const call = calls[i];
+    if (call === undefined) continue;
+    const title = unescape(call.raw);
+    if (!counted) {
+      tests.push({ title, block: undefined });
+      continue;
+    }
     const indent = indentOf(line);
-    const end = match.index + match[0].length;
-    const block = [`${line.slice(indent, end - raw.length - 2)}\0${line.slice(end)}`];
-    let inTemplate = opensTemplate(false, line);
+    const block = [
+      `${line.slice(indent, call.end - call.raw.length - 2)}\0${line.slice(call.end)}`,
+    ];
     let next = i + 1;
     for (; next < lines.length; next++) {
       const text = lines[next] ?? "";
-      if (inTemplate) block.push(text);
+      if (inside[next]) block.push(text);
       else if (text.trim() !== "" && indentOf(text) <= indent) break;
       else block.push(text.trim() === "" ? "" : text.slice(indent));
-      inTemplate = opensTemplate(inTemplate, text);
-    }
-    if (inTemplate) {
-      tests.push({ title: unescape(raw), block: undefined });
-      continue;
     }
     while (block.at(-1) === "") block.pop();
     const closing = lines[next];
@@ -371,11 +392,12 @@ function testsIn(source: string): TestBlock[] {
       CLOSES.test(closing.slice(indent))
     ) {
       block.push(closing.slice(indent));
-      closed = true;
+      const after = lines.slice(next + 1).find((text) => text.trim() !== "");
+      closed = after === undefined || indentOf(after) <= indent;
     } else {
       closed = !OPENS_CALL.test(block[0] ?? "") && !OPENS.test(block.at(-1) ?? "");
     }
-    tests.push({ title: unescape(raw), block: closed ? block.join("\n") : undefined });
+    tests.push({ title, block: closed ? block.join("\n") : undefined });
   }
   return tests;
 }

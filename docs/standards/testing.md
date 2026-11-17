@@ -174,9 +174,10 @@ Every new test must be shown to fail without the code it covers.
 
   Any other change to the test (its body, its options, `it` to `it.skip`, or a different test
   under the old title's trailer) is judged as new, as it would be without the trailer. So is a
-  test whose block's end can't be read from its layout. A trailer that doesn't apply is printed
-  with the rule it broke. A SURVIVED test that is a lost base test under a new title is printed
-  with the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
+  test whose block's end can't be read from its layout. So is every test in a file where a
+  backtick in a string or comment leaves a test call, or the file's end, read as inside a template
+  literal. A trailer that doesn't apply is printed with the rule it broke. A SURVIVED test that is
+  a lost base test under a new title is printed with the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
   `describe`, which never made a test look new. Rust tests take no `Renamed:` trailer: a renamed
   one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the
   base's falsify reads no `Renamed:` trailer, so a renamed test there also needs a real control.

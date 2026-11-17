@@ -677,6 +677,14 @@ const refusal = (base: string | undefined, head: string) =>
 /** The source with the first test's closing line cut. */
 const cut = (source: string) => source.replace('});\n\nit("keeps v"', '\nit("keeps v"');
 
+// Each fixture has a backtick the count misreads ahead of a template with a `}` line at the call's
+// indent, and a body change after that line, which a block cut there would miss.
+const miscounted = (...body: string[]) => {
+  const base = lines('it("renders", () => {', ...body, "});", "", 'it("keeps", () => {});');
+  const head = base.replace('"renders"', '"renders it"').replace("toBe(1)", "toBe(2)");
+  return renameRefusal(base, head, "renders", "renders it");
+};
+
 /** A copy of the base's first test under `title`, after the rest. */
 const withCopy = (source: string, title: string) =>
   source + lines(`it("${title}", () => {`, "  expect(v + 1).toBe(2);", "});");
@@ -804,6 +812,34 @@ describe("renameRefusal", () => {
     const open = lines('it("renders", () => {', "  expect(render()).toBe(`{", "});");
     expect(
       renameRefusal(open, open.replace('"renders"', '"renders it"'), "renders", "renders it"),
+    ).toBe('the end of "renders" can\'t be found');
+  });
+
+  it("judges as new a test after which the file is read as inside a template", () => {
+    expect([
+      miscounted('  expect(render()).toBe(`a ${"`"} b', "}", "`);", "  expect(other()).toBe(1);"),
+      miscounted(
+        '  expect(msg).toContain("list` failed");',
+        "  expect(render()).toBe(`{",
+        '  "a": 1',
+        "}",
+        "`);",
+        "  expect(other()).toBe(1);",
+      ),
+    ]).toEqual(['the end of "renders" can\'t be found', 'the end of "renders" can\'t be found']);
+  });
+
+  it("judges as new a test whose closing line is followed by a deeper line", () => {
+    expect(
+      miscounted(
+        "  /* a lone ` here */",
+        "  expect(render()).toBe(`{",
+        "}",
+        '  "a": 1',
+        "`);",
+        "  /* and ` here */",
+        "  expect(other()).toBe(1);",
+      ),
     ).toBe('the end of "renders" can\'t be found');
   });
 });
