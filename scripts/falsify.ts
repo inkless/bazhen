@@ -129,15 +129,40 @@ const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 export const INSTALL_TIMEOUT_MS = 120_000;
+// Node's timers fire at once for a delay they can't hold.
+const TIMER_MAX_MS = 2 ** 31 - 1;
+
+/**
+ * The limit an environment variable sets, in ms, or `fallback` when it is unset or empty. Throws
+ * on anything but a whole number from 1 to the most a timer holds, which would stop every run at
+ * once.
+ */
+export function timeoutFrom(name: string, value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const ms = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!(ms >= 1 && ms <= TIMER_MAX_MS)) {
+    throw new Error(`${name} is a whole number of ms from 1 to ${TIMER_MAX_MS}, not "${value}"`);
+  }
+  return ms;
+}
+
 // Each vitest run's limit, one project's judged files; a test of the limit itself sets a shorter
 // one.
-const VITEST_TIMEOUT_MS = Number(process.env["FALSIFY_VITEST_TIMEOUT_MS"] ?? "") || 300_000;
+const VITEST_TIMEOUT_MS = timeoutFrom(
+  "FALSIFY_VITEST_TIMEOUT_MS",
+  process.env["FALSIFY_VITEST_TIMEOUT_MS"],
+  300_000,
+);
 const CARGO_TIMEOUT_MS = 900_000;
 // The most mutants run for one branch. A count, not a time budget, so a verdict is the same on
 // every machine; a hook-crate mutant builds and runs in under a second.
 const MAX_MUTANTS = 100;
 // Each Rust test run's limit, build included; a test of the limit itself sets a shorter one.
-const MUTANT_TIMEOUT_MS = Number(process.env["FALSIFY_RUST_TIMEOUT_MS"] ?? "") || 300_000;
+const MUTANT_TIMEOUT_MS = timeoutFrom(
+  "FALSIFY_RUST_TIMEOUT_MS",
+  process.env["FALSIFY_RUST_TIMEOUT_MS"],
+  300_000,
+);
 // nextest's libtest JSON is experimental; the version pins its shape.
 const LIBTEST_JSON_VERSION = "0.1";
 // The test gate's build options (workspace, features, lockfile, wrapper overrides), so the tests
@@ -618,12 +643,28 @@ export function isReport(value: unknown): value is VitestReport {
   );
 }
 
-/** A JSON file a command was to write: what it holds, or that it is missing or isn't JSON. */
-export type Written = { kind: "json"; value: unknown } | { kind: "missing" } | { kind: "not JSON" };
+/**
+ * A JSON file a command was to write: what it holds, or that it is missing, can't be read (with
+ * the error's code) or isn't JSON.
+ */
+export type Written =
+  | { kind: "json"; value: unknown }
+  | { kind: "missing" }
+  | { kind: "unreadable"; code: string }
+  | { kind: "not JSON" };
 
 function readWritten(path: string): Written {
   if (!existsSync(path)) return { kind: "missing" };
-  const text = readFileSync(path, "utf8");
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code =
+      error instanceof Error && "code" in error && typeof error.code === "string"
+        ? error.code
+        : String(error);
+    return { kind: "unreadable", code };
+  }
   try {
     return { kind: "json", value: JSON.parse(text) as unknown };
   } catch {
@@ -648,6 +689,7 @@ export function noOutputReason(
   if (ended.signal !== null) return `it was stopped by ${ended.signal}`;
   if (ended.code !== 0) return `it exited with code ${ended.code}`;
   if (written.kind === "missing") return `it wrote no ${noun}`;
+  if (written.kind === "unreadable") return `its ${noun} couldn't be read (${written.code})`;
   if (written.kind === "not JSON") return `its ${noun} isn't JSON`;
   return `its ${noun} isn't a vitest ${noun}`;
 }
@@ -1861,7 +1903,8 @@ async function main(args: string[]): Promise<number> {
     outcome: Outcome;
     unrelated?: boolean;
     unbuilt?: string[];
-    note?: string | undefined;
+    note?: string;
+    noReport?: string | undefined;
     failure?: string | undefined;
   }[] = [];
 
@@ -1982,7 +2025,7 @@ async function main(args: string[]): Promise<number> {
             `printed:\n${indentedTail(ran.said)}`,
         );
         for (const file of inProject) {
-          unreported.set(file, ` (no report from the ${project} run: ${reason})`);
+          unreported.set(file, `the ${project} run: ${reason}`);
         }
       }
       // A passing test that imports none of the reverted files is a test of code the branch didn't
@@ -2003,7 +2046,11 @@ async function main(args: string[]): Promise<number> {
           results.push({ ...t, outcome: "INVALID", unrelated: true });
         } else if (outcome === "KILLED" && unbuilt.length > 0) {
           results.push({ ...t, outcome: "INVALID", unbuilt, failure });
-        } else results.push({ ...t, outcome, failure, note: unreported.get(t.file) });
+        } else {
+          // Keyed by file: a file in two projects may have its verdict from the other's report.
+          const noReport = outcome === "INVALID" ? unreported.get(t.file) : undefined;
+          results.push({ ...t, outcome, failure, noReport });
+        }
       }
     } finally {
       cleanup?.();
@@ -2017,11 +2064,13 @@ async function main(args: string[]): Promise<number> {
   for (const r of results) {
     const note =
       r.note ??
-      (r.unrelated
-        ? " (passed; unrelated to the source change)"
-        : r.unbuilt
-          ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
-          : "");
+      (r.noReport !== undefined
+        ? ` (no report from ${r.noReport})`
+        : r.unrelated
+          ? " (passed; unrelated to the source change)"
+          : r.unbuilt
+            ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
+            : "");
     console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
     if (r.failure !== undefined) console.log(`           failed: ${r.failure}`);
   }
@@ -2075,8 +2124,10 @@ async function main(args: string[]): Promise<number> {
           .join("\n"),
     );
   }
+  // Rust verdicts are checked above, by their full path.
+  const rustVerdicts = new Set<object>(rustTests);
   const uncontrolled = uncontrolledTests(
-    results.filter((r) => r.note === undefined),
+    results.filter((r) => !rustVerdicts.has(r)),
     messages,
   );
   if (uncontrolled.length > 0) {
@@ -2084,8 +2135,8 @@ async function main(args: string[]): Promise<number> {
       reverts.length === 0
         ? "\nThis branch adds tests but no source change to revert."
         : "\nSome tests could not be judged by reverting (new symbols, tests unrelated to the " +
-            "source change, binaries the base doesn't build, unparsed titles, load errors or " +
-            "timeouts).",
+            "source change, binaries the base doesn't build, unparsed titles, load errors, " +
+            "timeouts, or runs that left no report).",
     );
     console.error(
       "Each needs a control of its own. Break the code by hand, confirm the test fails on its " +

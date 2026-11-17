@@ -33,6 +33,7 @@ const SOURCE = "packages/a/src/x.ts";
 const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TEST = "packages/a/src/x.test.ts";
 const CONTROL = `Control: ${TEST} › caps: return v = 1 -> expected 2, got 1`;
+const ASKS_CONTROL = `  Control: ${TEST} › caps: <what you broke> -> <how it failed>`;
 
 /** A test call whose title falsify can't read, split so this file's own line isn't one. */
 const UNREADABLE = ["it", "(name, () => {});"].join("");
@@ -126,6 +127,10 @@ case "$1" in
             case "$arg" in tests/api/*) project=api ;; esac
             printf '%s{"file":"%s/%s","projectName":"%s"}' "$sep" "$(pwd)" "$arg" "$project" >> "$listing"
             sep=","
+            # As when two projects' include patterns both match a file.
+            if [ -n "\${STUB_ALSO_PROJECT:-}" ]; then
+              printf ',{"file":"%s/%s","projectName":"%s"}' "$(pwd)" "$arg" "$STUB_ALSO_PROJECT" >> "$listing"
+            fi
             ;;
         esac
       done
@@ -162,10 +167,14 @@ case "$1" in
       printf 'Error: \\033[31mglobal setup failed\\033[39m\\r\\n' >&2
       exit "$STUB_VITEST_EXIT"
     fi
+    if [ -n "\${STUB_ALSO_PROJECT:-}" ]; then
+      case " $* " in *" --project $STUB_ALSO_PROJECT "*) echo "stub vitest: done"; exit 0 ;; esac
+    fi
     case "\${STUB_VITEST_REPORT:-}" in
       none) echo "stub vitest: done"; exit 0 ;;
       garbage) echo "not json" > "$out"; exit 0 ;;
       wrong) echo '{"results":[]}' > "$out"; exit 0 ;;
+      dir) mkdir "$out"; exit 0 ;;
     esac
     # Each file the run names, with STUB_EACH; else only the one test file the case judges.
     files="\${STUB_TEST:-${TEST}}"
@@ -599,8 +608,9 @@ describe("falsify on a branch in a linked worktree", () => {
           "  stub vitest: still running\n",
       ),
       line: result.output.includes(`INVALID  ${TEST} › caps (no report from the unit run: ${why})`),
+      asks: result.output.includes(ASKS_CONTROL),
       leftovers: leftovers(),
-    }).toEqual({ status: 0, block: true, line: true, leftovers: [] });
+    }).toEqual({ status: 1, block: true, line: true, asks: true, leftovers: [] });
   }, 30_000);
 
   it("says a vitest run exited with a code and no report, with the end of what it printed", () => {
@@ -619,13 +629,15 @@ describe("falsify on a branch in a linked worktree", () => {
       line: result.output.includes(
         `INVALID  ${TEST} › caps (no report from the unit run: it exited with code 2)`,
       ),
-    }).toEqual({ status: 0, block: true, end: true, start: false, line: true });
+      asks: result.output.includes(ASKS_CONTROL),
+    }).toEqual({ status: 1, block: true, end: true, start: false, line: true, asks: true });
   });
 
   it.each([
     ["none", "it wrote no report", "  stub vitest: done"],
     ["garbage", "its report isn't JSON", "  (nothing)"],
     ["wrong", "its report isn't a vitest report", "  (nothing)"],
+    ["dir", "its report couldn't be read (EISDIR)", "  (nothing)"],
   ])("says why a vitest run that exited 0 left no usable report (%s)", (mode, why, said) => {
     const result = againstBase({ STUB_VITEST_REPORT: mode });
     expect({
@@ -635,7 +647,28 @@ describe("falsify on a branch in a linked worktree", () => {
           `${said}\n`,
       ),
       line: result.output.includes(`INVALID  ${TEST} › caps (no report from the unit run: ${why})`),
+      asks: result.output.includes(ASKS_CONTROL),
+    }).toEqual({ status: 1, block: true, line: true, asks: true });
+  });
+
+  it("keeps a verdict another project's report gives a file off its no-report run's line", () => {
+    const result = againstBase({ STUB_ALSO_PROJECT: "medium" });
+    expect({
+      status: result.status,
+      block: result.output.includes("falsify: the medium run (1 file) left no report"),
+      line: result.output.includes(`KILLED   ${TEST} › caps\n`),
     }).toEqual({ status: 0, block: true, line: true });
+  });
+
+  it("passes a test of a run that left no report only once a control names it", () => {
+    const before = againstBase({ STUB_VITEST_REPORT: "none" });
+    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
+    expect({
+      before: before.status,
+      named: before.output.includes(`${ASKS_CONTROL}\n`),
+      why: before.output.includes("(no report from the unit run: it wrote no report)"),
+      after: againstBase({ STUB_VITEST_REPORT: "none" }).status,
+    }).toEqual({ before: 1, named: true, why: true, after: 0 });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {

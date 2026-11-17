@@ -17,6 +17,7 @@ import {
   workspaceExports,
   newTitles,
   noOutputReason,
+  timeoutFrom,
   parseArgs,
   parseNameStatus,
   projectsOf,
@@ -301,13 +302,35 @@ describe("noOutputReason", () => {
       noOutputReason(ended, { kind: "not JSON" }, "report", 1),
       noOutputReason(ended, { kind: "json", value: { results: [] } }, "report", 1),
       noOutputReason(ended, missing, "listing", 1),
+      noOutputReason(ended, { kind: "unreadable", code: "EISDIR" }, "report", 1),
     ]).toEqual([
       "it wrote no report",
       "its report isn't JSON",
       "its report isn't a vitest report",
       "it wrote no listing",
+      "its report couldn't be read (EISDIR)",
     ]);
   });
+});
+
+describe("timeoutFrom", () => {
+  it("is the variable's whole number of ms, from 1 to the most a timer holds", () => {
+    expect([
+      timeoutFrom("T", "1", 300_000),
+      timeoutFrom("T", "2147483647", 300_000),
+      timeoutFrom("T", undefined, 300_000),
+      timeoutFrom("T", "", 300_000),
+    ]).toEqual([1, 2_147_483_647, 300_000, 300_000]);
+  });
+
+  it.each(["0", "-5", "2147483648", "1e3", "1.5", " 5", "abc"])(
+    "refuses %j, which a timer would fire at once for or isn't a whole number of ms",
+    (value) => {
+      expect(() => timeoutFrom("T", value, 300_000)).toThrow(
+        `T is a whole number of ms from 1 to 2147483647, not "${value}"`,
+      );
+    },
+  );
 });
 
 describe("indentedTail", () => {
