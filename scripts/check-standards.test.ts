@@ -2137,6 +2137,24 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("takes a crate's name for a carrier where a glob it can't follow may bring the name in", () => {
+    const takes = "pub fn f(s: log::Step) {}\n";
+    const tree = {
+      ...repo,
+      ...steps,
+      "crates/c/Cargo.toml": '[dependencies]\nlog = "0.4"\n',
+      "crates/c/src/lib.rs": ["attach", "p", "u", "s"].map((m) => `pub mod ${m};`).join("\n"),
+      "crates/c/src/p.rs": `#[path = "x.rs"]\nmod imp;\nuse imp::*;\n${takes}`,
+      "crates/c/src/x.rs": "pub mod log {\n    pub use crate::attach::Step;\n}\n",
+      "crates/c/src/u.rs": `use mystery::*;\n${takes}`,
+      "crates/c/src/s.rs": `use std::io::*;\n${takes}`,
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/c/src/p.rs::f",
+      "crates/c/src/u.rs::f",
+    ]);
+  });
+
   it("takes a type of cfg'd twin modules for a carrier when either twin's is one", () => {
     const tree = {
       ...repo,

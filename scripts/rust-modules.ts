@@ -338,8 +338,12 @@ export class ModuleTable {
     return this.modules.filter((m) => m.file === file);
   }
 
-  /** What `path`, written in `module`, names. */
-  resolve(module: Module, path: string[]): Resolution {
+  /**
+   * What `path`, written in `module`, names. `glob` is set for a glob's own path, whose first
+   * name, when it names a crate, is that crate: a glob in the module bringing in a name a crate
+   * has too is ambiguous to rustc there, and reading the module's globs would loop back to it.
+   */
+  resolve(module: Module, path: string[], glob = false): Resolution {
     const last = path.at(-1) ?? "";
     const [first = "", ...rest] = path;
     let at: Resolution;
@@ -355,7 +359,7 @@ export class ModuleTable {
       at =
         module.parent === undefined ? unresolved(last) : { ...empty(), modules: [module.parent] };
     } else {
-      at = this.name(module, first, true);
+      at = this.name(module, first, true, glob);
     }
     if (tail.length === 0) return at;
     const out = empty();
@@ -461,6 +465,9 @@ export class ModuleTable {
           } else if (file !== undefined && declared === true) {
             this.child(module, name, file, dir, conditional);
           } else {
+            // Unreadable, moved, or a file another declaration reached first (one each crate
+            // root, lib.rs and main.rs, declares): opaque, which only ever adds what it may name.
+            // An inline twin declared beside it becomes opaque with it.
             this.child(module, name, module.file, dir, conditional).opaque = true;
           }
         }
@@ -540,10 +547,10 @@ export class ModuleTable {
    * What `name` names in `module`. Its own items, modules and `use`s shadow its globs, but only
    * those sure to hold wherever the name is used: a cfg'd one, one inside a block, or one of a
    * cfg'd twin may not, so it adds to what the name names and shadows nothing. `first` is a
-   * path's first name, which may also be a crate.
+   * path's first name, which may also be a crate; `glob`, that the path is a glob's own.
    */
-  private name(module: Module, name: string, first: boolean): Resolution {
-    const key = `${module.id}\0${name}\0${String(first)}`;
+  private name(module: Module, name: string, first: boolean, glob = false): Resolution {
+    const key = `${module.id}\0${name}\0${String(first)}\0${String(glob)}`;
     const known = this.memo.get(key);
     if (known !== undefined) return known;
     if (this.busy.has(key) || module.opaque) return unresolved(name);
@@ -567,16 +574,19 @@ export class ModuleTable {
     let out: Resolution;
     if (shadows) {
       out = merge(sure, maybe);
+    } else if (first && glob && this.isCrate(module, name)) {
+      out = merge(this.externCrate(module, name), maybe);
     } else {
       const globbed = empty();
       for (const { value } of module.globs) {
-        const target = this.resolve(module, value.path);
+        const target = this.resolve(module, value.path, true);
         if (target.items.length > 0 || target.unresolved.size > 0) globbed.unresolved.add(name);
         for (const m of target.modules) merge(globbed, this.name(m, name, false));
       }
       const found = globbed.items.length > 0 || globbed.modules.length > 0;
       if (first && !found && this.isCrate(module, name)) {
-        out = merge(this.externCrate(module, name), maybe);
+        // A glob shadows a crate's name, so one that may bring the name in keeps it unresolved.
+        out = merge(merge(this.externCrate(module, name), globbed), maybe);
       } else {
         out = merge(globbed, maybe);
         if (isEmpty(out)) out = first ? this.externCrate(module, name) : unresolved(name);

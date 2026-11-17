@@ -209,6 +209,27 @@ describe("ModuleTable.resolve", () => {
     expect(resolve(table, root, "serde::Value")).toEqual({ items: [], unresolved: ["Value"] });
   });
 
+  it("takes a crate's name a glob may bring in for unresolved, and a glob's own root for the crate", () => {
+    const table = tableOf(
+      {
+        [LIB]:
+          'use std::io::*;\nuse serde::de::*;\n#[path = "x.rs"]\nmod imp;\npub mod m;\npub mod u;\n',
+        "crates/a/src/x.rs": "pub mod log {}\n",
+        "crates/a/src/m.rs": "use crate::imp::*;\n",
+        "crates/a/src/u.rs": "use mystery::*;\n",
+      },
+      [{ ...A, deps: ["serde", "log"] }],
+    );
+    const outside = { items: [], unresolved: [] };
+    const root = moduleOf(table, LIB);
+    expect(resolve(table, root, "log::Step")).toEqual(outside);
+    expect(resolve(table, root, "serde::Value")).toEqual(outside);
+    for (const m of ["m", "u"]) {
+      const module = moduleOf(table, `crates/a/src/${m}.rs`, `${LIB}::${m}`);
+      expect(resolve(table, module, "log::Step")).toEqual({ items: [], unresolved: ["Step"] });
+    }
+  });
+
   it("finds the module code is in, an inline one's body included", () => {
     const code = "mod inner {\n    pub struct X;\n}\npub struct Y;\n";
     const table = tableOf({ [LIB]: code });
