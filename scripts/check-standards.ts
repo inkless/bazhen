@@ -673,8 +673,8 @@ export function macroFailures(
       );
 }
 
-// Every function in crates/ that takes bytes from outside (a slice, a buffer, a reader or a socket)
-// is a decoder until it is shown not to be: listed here with the fuzz target that drives it, or in
+// Every function in crates/ that takes bytes from outside (a slice, a buffer or a reader), or reads
+// them in its body (from a socket, a file or stdin), is a decoder until it is shown not to be: listed here with the fuzz target that drives it, or in
 // NOT_DECODERS with why it isn't one (docs/standards/rust.md § Tests). A decoder of text from
 // outside is listed here by hand, as pane_title's body is: the rule can't tell such text apart. A
 // target is crates/<crate>/fuzz/fuzz_targets/<target>.rs, and must call the function.
@@ -723,8 +723,6 @@ const NOT_DECODERS: Record<string, string> = {
     "starts ending a child the holder spawned; reads no bytes",
   "crates/bazhen-holder/src/holder.rs::Holder::retire":
     "starts ending a child the holder spawned; reads no bytes",
-  "crates/bazhen-holder/src/macos.rs::ExitWatch::exited":
-    "asks the kernel whether a watched process exited; reads no bytes",
   "crates/bazhen-holder/src/session.rs::Member::of_send":
     "names what the guard's send made of a process; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::advance":
@@ -814,7 +812,6 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::may_send":
     "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/conn.rs::Connection::new": "wraps an accepted socket; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::next_request":
     "hands over FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
   "crates/bazhen-holder/src/conn.rs::Connection::open":
@@ -872,8 +869,6 @@ const NOT_DECODERS: Record<string, string> = {
     "returns a field or a state; reads no bytes",
   "crates/bazhen-holder/src/server.rs::Server::listening":
     "returns a field or a state; reads no bytes",
-  "crates/bazhen-holder/src/server.rs::Server::new":
-    "takes the bound socket and terminal; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::poll": "waits on fds; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::run":
     "runs turns; bytes it reads go to Connection::receive and the ring",
@@ -966,65 +961,22 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen/src/attach/link.rs::drain":
     "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
   "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",
-  "crates/bazhen/src/attach/direct.rs::absence":
-    "reads whether a connect to the daemon's socket finished, and how; reads no bytes",
   "crates/bazhen/src/attach/direct.rs::pump":
     "moves bytes between a holder's socket and the person's terminal; bazhen-holder-proto's FrameDecoder, which its frame target fuzzes, and Direct::keys, which the attach target fuzzes, read them",
   "crates/bazhen/src/attach/direct.rs::write_whole":
     "writes a request this build encoded; reads nothing",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
-  "crates/bazhen/src/attach/tty.rs::Stops::fd":
-    "borrows the wake-up socket for poll; reads nothing",
-  "crates/bazhen/src/attach/tty.rs::Stops::drop":
-    "has a later stop signal end the process at once; reads nothing",
   "crates/bazhen/src/attach/tty.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
-  "crates/bazhen/src/attach/tty.rs::Wakeups::drop": "removes the signal handlers; reads nothing",
-  "crates/bazhen/src/attach/tty.rs::Wakeups::fd":
-    "borrows the wake-up socket for poll; reads nothing",
   "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
-  "crates/bazhen-holder/src/signals.rs::Wakeups::drop": "removes the signal handler; reads nothing",
-  "crates/bazhen-holder/src/signals.rs::Wakeups::fd":
-    "borrows the wake-up socket for poll; reads nothing",
-  "crates/bazhen-holder/src/start.rs::serve": "sets up the PTY, child and server; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::Socket::listener": "borrows the listener; reads nothing",
-  "crates/bazhen-holder/src/socket.rs::Socket::keep_lock":
-    "compares the held lock with the file at its name and locks again; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::Socket::bind_again":
-    "binds the socket again; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::renew": "sets the lock file's times; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::Socket::recheck_with":
-    "recheck, with the bind step passed in; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::Socket::recheck":
-    "looks the socket's path up and binds it again; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::Socket::remove": "removes the socket file; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::admit":
-    "asks the kernel for the peer's uid and sets socket options; reads no bytes",
-  "crates/bazhen-holder/src/socket.rs::peer_uid":
-    "asks the kernel for the peer's uid; reads no bytes",
   "crates/bazhen-holder/src/start_time.rs::decimal":
     "reached only through start_ticks and boot_time, which proc_stat fuzzes",
-  "crates/bazhen-holder/src/child.rs::Reaper::fd":
-    "borrows the wake-up socket for poll; reads nothing",
-  "crates/bazhen-holder/src/child.rs::Reaper::clear":
-    "discards SIGCHLD wake-ups, whose bytes the signal handler wrote and which carry no content",
-  "crates/bazhen-holder/src/pty.rs::Pty::master": "borrows the master fd; reads nothing",
-  "crates/bazhen-holder/src/pty.rs::Slave::as_fd": "borrows the slave fd; reads nothing",
-  "crates/bazhen-holder/src/pty.rs::Pty::set_size": "sets the window size; reads nothing",
-  "crates/bazhen-holder/src/ptmx.rs::open_master":
-    "returns the master fd its opener makes, again on ENXIO; reads nothing",
-  "crates/bazhen-holder/src/pty.rs::Pty::foreground_group":
-    "asks the terminal for its foreground group; reads no bytes",
-  "crates/bazhen-holder/src/pty.rs::spawn":
-    "hands the slave to a new child as its stdio; reads nothing",
   "crates/bazhen-holder/src/holder.rs::write":
     "the Output trait's method: a sink handed the child's bytes in order, to keep",
   "crates/bazhen-holder/src/holder.rs::Discard::write":
     "drops the bytes it is handed; parses nothing",
-  "crates/bazhen-holder/src/holder.rs::Holder::new":
-    "takes over a spawned child and reaps it if it has exited; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::exit": "returns the published exit; reads nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::turn":
     "polls, then hands a readable master to read_master; parses nothing",
@@ -1034,18 +986,12 @@ const NOT_DECODERS: Record<string, string> = {
     "copies the child's output to the Output in chunks, unparsed",
   "crates/bazhen-holder/src/holder.rs::Holder::step":
     "reaps the child and publishes its exit; reads no bytes",
-  "crates/bazhen-holder/src/log.rs::BoundedLog::dropped": "returns a count; reads nothing",
   "crates/bazhen-holder/src/log.rs::Line::write":
     "hands the holder's own log line to the log, or drops it; parses nothing",
   "crates/bazhen-holder/src/log.rs::BoundedLog::line":
     "an encoder: writes a log line the holder formatted",
-  "crates/bazhen-holder/src/log.rs::BoundedLog::make_room":
-    "opens or moves aside the log file; reads nothing",
   "crates/bazhen-holder/src/log.rs::BoundedLog::write":
     "an encoder: hands tracing's formatted line to line",
-  "crates/bazhen-holder/src/log.rs::BoundedLog::flush": "does nothing: every line is written whole",
-  "crates/bazhen-holder/src/start.rs::StartError::exit_code":
-    "maps a variant to its exit code; reads no bytes",
   "crates/bazhen-holder/src/start.rs::start": "reads stdin only through read_spec",
   "crates/bazhen-holder/src/start.rs::start_marked": "reads stdin only through read_spec",
   "crates/bazhen-holder/src/start.rs::read_spec":
@@ -1066,9 +1012,6 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/lib.rs::send": "writes a request; the reply goes to read_response",
   "crates/bazhen-client/src/framing.rs::read_response":
     "reads the socket until Framing::end_of, fuzzed, says where the frame ends",
-  "crates/bazhen-client/src/framing.rs::bound_reads": "sets a socket's read timeout; reads nothing",
-  "crates/bazhen-client/src/framing.rs::bound_or_unblock":
-    "sets a socket's blocking mode; reads nothing",
   "crates/bazhen-client/src/framing.rs::in_chunks":
     "reached only through Framing::end_of and body, both fuzzed",
   "crates/bazhen-client/src/framing.rs::ChunkScan::advance":
@@ -1135,14 +1078,47 @@ const NOT_DECODERS: Record<string, string> = {
     "reached only through Engine::advance, which is fuzzed",
   "crates/bazhen-holder-engine/src/capped.rs::Capped::clipboard_store":
     "vte's callback with what it parsed; reached only through Engine::advance, which is fuzzed",
-  "crates/bazhen-holder-engine/src/differential.rs::FullHistory::advance":
-    "test code: the differential test's reference terminal, compiled only under cfg(test)",
-  "crates/bazhen-holder-engine/src/differential.rs::FullHistory::advance_noting_alt":
-    "test code: the differential test's reference terminal, compiled only under cfg(test)",
-  "crates/bazhen-holder-engine/src/differential.rs::FullHistory::feed":
-    "test code: the differential test's reference terminal, compiled only under cfg(test)",
-  "crates/bazhen-holder-engine/src/differential/tracked.rs::Case::feed":
-    "test code: feeds the engine and the mode test's references, compiled only under cfg(test)",
+  "crates/bazhen-client/src/lib.rs::read_regular":
+    "reads at most max + 1 bytes of a regular file for its caller, parsing none of them",
+  "crates/bazhen-holder-engine/src/bin/replay.rs::replay":
+    "feeds a recording to Engine::advance, which its advance target fuzzes",
+  "crates/bazhen-holder-engine/src/bin/replay.rs::run":
+    "reads stdin only to wait for its end, and discards it",
+  "crates/bazhen-holder/src/process.rs::uid":
+    "reads /proc/<pid>/status for status_uid, which proc_args fuzzes",
+  "crates/bazhen-holder/src/process.rs::args":
+    "reads /proc/<pid>/cmdline for cmdline_args, which proc_args fuzzes",
+  "crates/bazhen-holder/src/process.rs::environ":
+    "reads /proc/<pid>/environ for cmdline_args, which proc_args fuzzes",
+  "crates/bazhen-holder/src/rss.rs::resident_bytes":
+    "reads /proc/self/statm for resident_pages, which proc_stat fuzzes",
+  "crates/bazhen-holder/src/session.rs::visit":
+    "reads /proc/<pid>/stat for member_state, which proc_stat fuzzes",
+  "crates/bazhen-holder/src/start.rs::run": "reads stdin only through read_spec",
+  "crates/bazhen-holder/src/start_time.rs::read":
+    "reads /proc/stat and /proc/<pid>/stat for epoch_seconds, which proc_stat fuzzes",
+  "crates/bazhen-hook/src/lib.rs::run":
+    "reads stdin for hook_request, which forwards it unparsed; the reply goes to parse_reply, fuzzed",
+  "crates/bazhen-hook/src/shell_report.rs::read_line":
+    "reads at most MAX_LINE + 1 bytes of stdin for the copy to send, parsing none of them",
+  "crates/bazhen-hook/src/shell_report.rs::send_line":
+    "reads stdin for report_body, which shell_report fuzzes",
+  "crates/bazhen-hook/src/statusline.rs::run":
+    "reads stdin to hand the user's command and report, parsing none of it",
+  "crates/bazhen-peer/src/main.rs::main":
+    "hands stdin's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
+  "crates/bazhen/src/attach/direct.rs::open":
+    "reads the holder's socket into FrameDecoder::push, which the proto crate's frame target fuzzes",
+  "crates/bazhen/src/fmt.rs::uuid":
+    "reads 16 random bytes from /dev/urandom and formats them; parses nothing",
+  "crates/bazhen/src/tasks.rs::read_file":
+    "reads stdin or read_regular's bytes as lossy UTF-8 text, parsing none of them",
+  "crates/bazhen-holder/src/guard.rs::parent":
+    "unfuzzed: parses stat_field's field 4 inline as a pid; move that parse into start_time.rs, under the proc_stat target",
+  "crates/bazhen-holder/src/process.rs::parent":
+    "unfuzzed: parses stat_field's fields 3 and 4 inline as a state and a pid; move that parse into start_time.rs, under the proc_stat target",
+  "crates/bazhen-holder/src/session.rs::supported":
+    "unfuzzed: parses /proc/self/stat's first field inline as a pid; move that parse into start_time.rs, under the proc_stat target",
 };
 
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
@@ -1150,15 +1126,43 @@ const NOT_DECODERS: Record<string, string> = {
 const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{;]*(?=\{)/gm;
 
 // Types a function takes that carry bytes from outside the process: anything holding u8s, a
-// reader of any kind, a socket, a file, stdin or a child process.
+// reader of any kind, or a handle that can only be read (stdin, a child's output). A socket, a file
+// or an fd isn't one, since holding it isn't reading it: a function that reads one does so in its
+// body, which BODY_READS reads.
 const BYTES_IN =
-  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read|Buf|Bytes|BytesMut|UnixStream|UnixListener|TcpStream|UdpSocket|File|OwnedFd|Stdin\w*|Child(?:Stdout|Stderr)?)\b/;
+  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read|Buf|Bytes|BytesMut|Stdin\w*|Child(?:Stdout|Stderr))\b/;
+
+// The reads of std::io, the socket and fd calls, and the reads of a file, whether called as a
+// method, by path or by a bare name a `use` brought in.
+const READS =
+  "read|read_exact|read_to_end|read_to_string|read_line|read_until|read_vectored|read_buf|" +
+  "recv|recv_from|recv_vectored|recvfrom|recvmsg|peek|peek_from|pread|readv|preadv";
+
+// A read in a function's body. A method must be given something to read into, so a channel's
+// `recv()`, an iterator's `peek()` and `OpenOptions::read(true)` aren't reads; stdin counts once it
+// is read from or kept, not when it is only handed to `isatty` or `tcgetattr`. A call by a bare
+// name is BARE_READ's.
+const BODY_READS = new RegExp(
+  [
+    `\\.\\s*(?:${READS})\\s*\\(\\s*(?!(?:true|false)\\s*\\))[^)\\s]`,
+    `::\\s*(?:${READS}|fill_buf)\\s*\\(`,
+    "\\.\\s*fill_buf\\s*\\(",
+    "\\bio\\s*::\\s*copy\\s*\\(",
+    "\\bfrom_reader\\s*\\(",
+    "\\bBufReader\\b",
+    "\\bstdin\\s*\\(\\s*\\)\\s*(?:\\.\\s*(?:lock|lines|bytes)\\b|;)",
+  ].join("|"),
+);
+
+// A read called by a bare name, as a `use libc::read;` lets it be. A function of the file's own
+// by that name is read where it is defined, so a call to it isn't one.
+const BARE_READ = new RegExp(`(?<![.:]\\s*|\\bfn\\s+)\\b(${READS}|fill_buf)\\s*\\(`, "g");
 
 // The names a `use … as` may not rename: each byte type above, and the containers that hold u8s.
 const BYTE_TYPE_NAMES = new Set(
   (
-    "u8 Read BufRead AsyncRead AsyncBufRead Buf Bytes BytesMut UnixStream UnixListener " +
-    "TcpStream UdpSocket File OwnedFd Stdin StdinLock Child ChildStdout ChildStderr Vec VecDeque"
+    "u8 Read BufRead AsyncRead AsyncBufRead Buf Bytes BytesMut Stdin StdinLock ChildStdout " +
+    "ChildStderr Vec VecDeque"
   ).split(" "),
 );
 
@@ -1273,16 +1277,31 @@ function signature(rest: string): { end: number; takes: string } {
   return { end, takes: whole.slice(0, arrow) + (where === -1 ? "" : whole.slice(arrow + where)) };
 }
 
+const inside = (i: number, spans: { start: number; end: number }[]) =>
+  spans.some((s) => s.start < i && i < s.end);
+
 /**
  * The functions in a Rust file's non-test code that take bytes: by a parameter or bound of a
- * byte type or of one of `carriers`, or as a method of a carrier, through `self`. A method is
- * named with its type (`Reader::next_frame`), so two types' methods of one name stay apart.
+ * byte type or of one of `carriers`, as a method of a carrier, through `self`, or by a read in
+ * the body. A method is named with its type (`Reader::next_frame`), so two types' methods of one
+ * name stay apart.
  */
 export function byteTakers(source: string, carriers: Set<string> = new Set()): string[] {
   const code = withoutTests(rustCode(source));
   const blocks = implBlocks(code);
-  return [...code.matchAll(/\bfn\s+(\w+)/g)].flatMap((m) => {
-    const takes = signature(code.slice(m.index)).takes;
+  const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
+    const { end, takes } = signature(code.slice(m.index));
+    const open = m.index + end;
+    const close = code[open] === "{" ? itemEnd(code, open) : open;
+    return { m, takes, open, close, body: code.slice(open, close) };
+  });
+  const bodies = fns.map((f) => ({ start: f.open, end: f.close }));
+  const own = new Set(
+    fns
+      .filter(({ m }) => !inside(m.index, blocks) && !inside(m.index, bodies))
+      .map(({ m }) => m[1]),
+  );
+  return fns.flatMap(({ m, takes, body }) => {
     const block = blocks.find((b) => b.start < m.index && m.index < b.end);
     const fn = m[1] ?? "";
     const name = block === undefined ? fn : `${block.type}::${fn}`;
@@ -1290,7 +1309,9 @@ export function byteTakers(source: string, carriers: Set<string> = new Set()): s
       block !== undefined &&
       (carriers.has(block.type) || block.byteBound) &&
       /\bself\b/.test(takes);
-    return BYTES_IN.test(takes) || mentionsAny(takes, carriers) || viaSelf ? [name] : [];
+    const reads =
+      BODY_READS.test(body) || [...body.matchAll(BARE_READ)].some(([, f]) => !own.has(f));
+    return BYTES_IN.test(takes) || mentionsAny(takes, carriers) || viaSelf || reads ? [name] : [];
   });
 }
 
@@ -1317,7 +1338,9 @@ export function decoderFailures(
   const out: string[] = [];
   const found = new Set<string>();
   const defined = new Set<string>();
-  const product = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
+  const sources = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
+  const testOnly = testModuleFiles(sources, read);
+  const product = sources.filter((p) => !testOnly.has(p));
   const crateCode = new Map<string, string>();
   for (const file of product) {
     const crate = crateOf(file);
@@ -1385,6 +1408,27 @@ export function decoderFailures(
       out.push(`${key}: its fuzz target ${file} doesn't exist.`);
     } else if (!calls) {
       out.push(`${file}: doesn't call ${path}, the decoder FUZZED_DECODERS says it drives.`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The files among `paths` that hold a module compiled only under test: one declared out of line
+ * as `#[cfg(test)] mod name;`, and every module inside it. A declaration with another attribute,
+ * such as `#[path]`, is left alone, so its file is still read as product code.
+ */
+function testModuleFiles(paths: string[], read: (path: string) => string): Set<string> {
+  const out = new Set<string>();
+  const declared = /#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;/g;
+  for (const file of paths) {
+    const dir = /(?:^|\/)(?:lib|main|mod)\.rs$/.test(file)
+      ? file.replace(/[^/]+$/, "")
+      : file.replace(/\.rs$/, "/");
+    for (const [, name = ""] of rustCode(read(file)).matchAll(declared)) {
+      for (const p of paths) {
+        if (p === `${dir}${name}.rs` || p.startsWith(`${dir}${name}/`)) out.add(p);
+      }
     }
   }
   return out;

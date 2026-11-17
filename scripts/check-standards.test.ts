@@ -1405,8 +1405,6 @@ describe("byteTakers", () => {
       "fn from(r: impl Read) {}",
       "fn feed<R: BufRead>(r: R) {}",
       "fn pump<R>(r: R) where R: std::io::Read {}",
-      "fn serve(s: &mut UnixStream) {}",
-      "fn load(f: File) {}",
       "fn drain<R>(r: R) -> usize where R: Read { 0 }",
       "fn twice(a: fn() -> u8, c: fn() -> u8, b: [u8; 4]) {}",
       "fn any(b: impl AsRef<[u8]>) {}",
@@ -1421,9 +1419,6 @@ describe("byteTakers", () => {
       "fn queued(q: VecDeque<u8>) {}",
       "fn each(i: impl Iterator<Item = u8>) {}",
       "unsafe fn raw(p: *const u8, q: *mut u8) {}",
-      "fn listen(l: UnixListener) {}",
-      "fn owned(fd: OwnedFd) {}",
-      "fn spawned(c: Child) {}",
     ].join("\n");
     expect(byteTakers(source)).toEqual([
       "parse",
@@ -1433,8 +1428,6 @@ describe("byteTakers", () => {
       "from",
       "feed",
       "pump",
-      "serve",
-      "load",
       "drain",
       "twice",
       "any",
@@ -1447,9 +1440,117 @@ describe("byteTakers", () => {
       "queued",
       "each",
       "raw",
-      "listen",
-      "owned",
-      "spawned",
+    ]);
+  });
+
+  it("leaves a function that only holds a socket, a file or an fd, and names one reading it", () => {
+    const source = [
+      "fn serve(s: &mut UnixStream) {}",
+      "fn size(f: File) -> u64 { f.metadata().len() }",
+      "fn listen(l: UnixListener) -> UnixStream { l.accept() }",
+      "fn owned(fd: OwnedFd) { ioctl(&fd, 0) }",
+      "fn spawned(c: Child) {}",
+      "fn net(s: TcpStream, u: UdpSocket) {}",
+      "fn drain(s: &mut UnixStream) { s.read(&mut chunk) }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["drain"]);
+  });
+
+  it("names a function that reads in its body, and leaves what only looks like a read", () => {
+    const source = [
+      "fn method(s: &Sock) { s.read(&mut b) }",
+      "fn exact() { f.read_exact(&mut head) }",
+      "fn whole() { s.read_to_end(&mut all) }",
+      "fn text() { f.read_to_string(&mut s) }",
+      "fn line() { r.read_line(&mut s) }",
+      "fn until() { r.read_until(b'\\n', &mut v) }",
+      "fn vectored() { s.read_vectored(&mut bufs) }",
+      "fn into() { s.read_buf(&mut cursor) }",
+      "fn received() { sock.recv(&mut b) }",
+      "fn from() { sock.recv_from(&mut b) }",
+      "fn gathered() { sock.recv_vectored(&mut bufs) }",
+      "fn peeked() { sock.peek(&mut b) }",
+      "fn peeked_from() { sock.peek_from(&mut b) }",
+      "fn filled() { r.fill_buf() }",
+      "fn raw(fd: BorrowedFd<'_>) { rustix::io::read(fd, &mut b) }",
+      "fn bare() { read(fd, &mut b) }",
+      "fn ufcs() { Read::read_exact(&mut s, &mut b) }",
+      "fn file() { std::fs::read(path) }",
+      "fn file_text() { fs::read_to_string(path) }",
+      "fn received_raw() { unsafe { libc::recv(fd, p, n, 0) } }",
+      "fn received_from() { libc::recvfrom(fd, p, n, 0, a, l) }",
+      "fn received_msg() { libc::recvmsg(fd, m, 0) }",
+      "fn positioned() { libc::pread(fd, p, n, 0) }",
+      "fn scattered() { libc::readv(fd, v, 2) }",
+      "fn scattered_at() { libc::preadv(fd, v, 2, 0) }",
+      "fn copied() { io::copy(&mut from, &mut to) }",
+      "fn json() { serde_json::from_reader(f) }",
+      "fn buffered() { let r = BufReader::new(f); }",
+      "fn locked() { io::stdin().lock() }",
+      "fn bound() { let input = io::stdin(); }",
+      "fn lines() { std::io::stdin().lines() }",
+      "fn each() { io::stdin().bytes() }",
+      "fn spaced() { s . read (\n &mut b) }",
+      "fn opened() { OpenOptions::new().read(true).open(p)?.read_to_end(&mut v) }",
+      "fn closure() { let f = |s: &mut T| s.read(&mut b); }",
+      "fn options() { OpenOptions::new().read(true).write(false).open(p) }",
+      "fn closed() { o.read( false ) }",
+      "fn channel() { rx.recv() }",
+      "fn waited() { rx.recv_timeout(d) }",
+      "fn ahead() { chars.peek() }",
+      "fn tty() { isatty(io::stdin()) }",
+      "fn termios() { tcgetattr(io::stdin()) }",
+      "fn piped() { Command::new(p).stdin(Stdio::piped()) }",
+      "fn listed() { fs::read_dir(p) }",
+      "fn reader() -> u8 { already_read(x) }",
+      'fn quoted() { let s = "s.read(&mut b)"; }',
+      "fn noted() { // s.read(&mut b)\n}",
+      "fn declared() { fn read(b: u8) {} }",
+      "fn read_line() -> u8 { 0 }",
+      "fn prompt() { read_line() }",
+      "impl Sock { fn recv(&self) {} }",
+      "fn leaves() { recv(fd, &mut b) }",
+      "trait Source { fn pull(&mut self); }",
+      "#[cfg(test)]",
+      "fn tested() { s.read(&mut b) }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual([
+      "method",
+      "exact",
+      "whole",
+      "text",
+      "line",
+      "until",
+      "vectored",
+      "into",
+      "received",
+      "from",
+      "gathered",
+      "peeked",
+      "peeked_from",
+      "filled",
+      "raw",
+      "bare",
+      "ufcs",
+      "file",
+      "file_text",
+      "received_raw",
+      "received_from",
+      "received_msg",
+      "positioned",
+      "scattered",
+      "scattered_at",
+      "copied",
+      "json",
+      "buffered",
+      "locked",
+      "bound",
+      "lines",
+      "each",
+      "spaced",
+      "opened",
+      "closure",
+      "leaves",
     ]);
   });
 
@@ -1590,6 +1691,50 @@ describe("decoderFailures", () => {
       "crates/p/src/gen.rs::Feed::feed",
       "crates/p/src/gen.rs::Bounded::pull",
       "crates/p/src/gen.rs::Outer::go",
+    ]);
+  });
+
+  it("takes a type holding only an fd for no carrier, and one holding bytes as well for one", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/fd.rs": [
+        "pub struct Watch { fd: OwnedFd }",
+        "impl Watch {",
+        "    pub fn fd(&self) -> BorrowedFd<'_> { self.fd.as_fd() }",
+        "    pub fn clear(&self) { (&self.fd).read(&mut drained); }",
+        "}",
+        "pub struct Sock { s: UnixStream, buf: Vec<u8> }",
+        "impl Sock {",
+        "    pub fn id(&self) -> u32 { 0 }",
+        "}",
+        "pub fn watch(w: &Watch) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/fd.rs::Watch::clear",
+      "crates/p/src/fd.rs::Sock::id",
+    ]);
+  });
+
+  it("skips a module compiled only under test, declared out of line, and the modules in it", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/lib.rs": `${lib}#[cfg(test)]\nmod t;\nmod q;\n#[cfg(test)]\npub(crate) mod u;\n`,
+      "crates/p/src/t.rs": "fn a(b: &[u8]) {}\nmod deep;\n",
+      "crates/p/src/t/deep.rs": "fn c(b: &[u8]) {}",
+      "crates/p/src/u/mod.rs": "fn d(b: &[u8]) {}",
+      "crates/p/src/q.rs": "fn e(b: &[u8]) {}\nmod t;\n#[cfg(test)]\nmod v;\n",
+      "crates/p/src/q/t.rs": "fn f(b: &[u8]) {}",
+      "crates/p/src/q/v.rs": "fn g(b: &[u8]) {}",
+      "crates/r/src/lib.rs": "mod t;\n// #[cfg(test)]\nmod u;\n",
+      "crates/r/src/t.rs": "fn h(b: &[u8]) {}",
+      "crates/r/src/u.rs": "fn i(b: &[u8]) {}",
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/q.rs::e",
+      "crates/p/src/q/t.rs::f",
+      "crates/r/src/t.rs::h",
+      "crates/r/src/u.rs::i",
     ]);
   });
 
