@@ -616,12 +616,16 @@ export function failureLine(report: VitestReport, file: string, title: string): 
     report.testResults.find((r) => r.name.endsWith(file))?.message,
   ];
   for (const message of messages) {
+    // A control character left in, a lone \r above all, could overwrite the line in a terminal.
     const line = stripVTControlCharacters(message ?? "")
       .split("\n")
-      .map((l) => l.trim())
+      .map((l) => l.replace(/\p{Cc}/gu, " ").trim())
       .find((l) => l !== "");
     if (line !== undefined) {
-      return line.length > FAILURE_LINE_MAX ? `${line.slice(0, FAILURE_LINE_MAX - 1)}…` : line;
+      const chars = Array.from(new Intl.Segmenter().segment(line), (s) => s.segment);
+      return chars.length > FAILURE_LINE_MAX
+        ? `${chars.slice(0, FAILURE_LINE_MAX - 1).join("")}…`
+        : line;
     }
   }
   return undefined;
@@ -1000,18 +1004,29 @@ async function pnpmFailure(dir: string, args: string[], log: string): Promise<st
   return ok ? undefined : indentedTail(readFileSync(path, "utf8"));
 }
 
-/** What each failed install attempt printed, or undefined once one succeeds and builds. */
-async function install(dir: string): Promise<string[] | undefined> {
+/**
+ * Why the worktree's dependencies couldn't be installed and built, with the end of what pnpm said,
+ * or undefined once they are.
+ */
+async function install(dir: string): Promise<string | undefined> {
   const said: string[] = [];
   for (const mode of INSTALL_MODES) {
     const failed = await pnpmFailure(dir, installArgs(mode), `falsify-install${mode.slice(1)}.log`);
     if (failed === undefined) {
       const unbuilt = await pnpmFailure(dir, ["rebuild"], "falsify-rebuild.log");
-      return unbuilt === undefined ? undefined : [`\`pnpm rebuild\` said:\n${unbuilt}`];
+      if (unbuilt === undefined) return undefined;
+      return (
+        "falsify: `pnpm rebuild` couldn't run the dependencies' builds in the temporary worktree. " +
+        "A dependency with a build script has to be named in pnpm-workspace.yaml's allowBuilds, " +
+        `true to run it or false to leave it unbuilt.\n\`pnpm rebuild\` said:\n${unbuilt}`
+      );
     }
     said.push(`\`pnpm install ${mode}\` said:\n${failed}`);
   }
-  return said;
+  return (
+    "falsify: couldn't install dependencies in the temporary worktree; run `pnpm install` and " +
+    `retry.\n${said.join("\n")}`
+  );
 }
 
 const INSTALL_TAIL_LINES = 20;
@@ -1772,12 +1787,9 @@ async function main(args: string[]): Promise<number> {
           git(["checkout", base, "--", c.oldPath], dir);
         } else git(["checkout", base, "--", c.path], dir);
       }
-      const installFailed = await install(dir);
-      if (installFailed !== undefined) {
-        console.error(
-          "falsify: couldn't install dependencies in the temporary worktree; run `pnpm install` " +
-            `and retry.\n${installFailed.join("\n")}`,
-        );
+      const notInstalled = await install(dir);
+      if (notInstalled !== undefined) {
+        console.error(notInstalled);
         return 1;
       }
       let built: Built = new Map();

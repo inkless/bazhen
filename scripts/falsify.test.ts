@@ -238,6 +238,15 @@ describe("failureLine", () => {
     expect(failureLine(report(failed), FILE, "t")).toBe(`Error: ${"x".repeat(292)}…`);
   });
 
+  it("puts a space for each control character, and never cuts a character in two", () => {
+    const controlled = result("t", "failed", ["Error: a\rb\tc\u0007d\u007fe"]);
+    const long = result("t", "failed", ["😀".repeat(400)]);
+    expect([
+      failureLine(report(controlled), FILE, "t"),
+      failureLine(report(long), FILE, "t"),
+    ]).toEqual(["Error: a b c d e", `${"😀".repeat(299)}…`]);
+  });
+
   it("is the file's message for a test it doesn't have, as a file that won't load", () => {
     const failedToLoad: VitestReport = {
       testResults: [

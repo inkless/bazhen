@@ -514,15 +514,25 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
-  it("judges nothing, saying what pnpm said, when the dependencies' builds fail", () => {
+  it("judges nothing, naming allowBuilds and what pnpm said, when the dependencies' builds fail", () => {
     const result = againstBase({ STUB_FAIL_REBUILD: "1" });
     expect({
       status: result.status,
       said: result.output.includes("Ignored build scripts: stub-dep@1.0.0"),
+      named: /`pnpm rebuild`[^\n]*allowBuilds/.test(result.output),
+      toldToInstall: result.output.includes("run `pnpm install`"),
       judged: /KILLED|SURVIVED|INVALID/.test(result.output),
       ranTests: stubLog().includes("VITEST:"),
       leftovers: leftovers(),
-    }).toEqual({ status: 1, said: true, judged: false, ranTests: false, leftovers: [] });
+    }).toEqual({
+      status: 1,
+      said: true,
+      named: true,
+      toldToInstall: false,
+      judged: false,
+      ranTests: false,
+      leftovers: [],
+    });
   });
 
   it("prints under a failed test the first line of what failed it", () => {
