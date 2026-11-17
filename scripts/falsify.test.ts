@@ -3,6 +3,7 @@ import {
   classify,
   failureLine,
   harnessFiles,
+  indentedTail,
   controlLine,
   addedRustTests,
   binaryInputs,
@@ -15,6 +16,8 @@ import {
   workspaceBins,
   workspaceExports,
   newTitles,
+  noOutputReason,
+  timeoutFrom,
   parseArgs,
   parseNameStatus,
   projectsOf,
@@ -268,6 +271,88 @@ describe("failureLine", () => {
       failureLine(report(result("t", "failed", ["", "  "])), FILE, "t"),
       failureLine({ testResults: [] }, FILE, "t"),
     ]).toEqual([undefined, undefined, undefined]);
+  });
+});
+
+describe("noOutputReason", () => {
+  const ended = { timedOut: false, code: 0, signal: null };
+  const missing = { kind: "missing" } as const;
+
+  it("names falsify's cap when the run timed out, however its group then ended", () => {
+    expect(
+      noOutputReason({ timedOut: true, code: null, signal: "SIGKILL" }, missing, "report", 300_000),
+    ).toBe("it timed out after 300 s, falsify's cap on one vitest run");
+  });
+
+  it("says how the run ended when it failed on its own", () => {
+    expect([
+      noOutputReason({ ...ended, code: null, error: "spawn pnpm ENOENT" }, missing, "report", 1),
+      noOutputReason({ ...ended, code: null, signal: "SIGSEGV" }, missing, "report", 1),
+      noOutputReason({ ...ended, code: 2 }, { kind: "json", value: [] }, "listing", 1),
+    ]).toEqual([
+      "it couldn't start: spawn pnpm ENOENT",
+      "it was stopped by SIGSEGV",
+      "it exited with code 2",
+    ]);
+  });
+
+  it("says what is wrong with what a run that exited 0 wrote", () => {
+    expect([
+      noOutputReason(ended, missing, "report", 1),
+      noOutputReason(ended, { kind: "not JSON" }, "report", 1),
+      noOutputReason(ended, { kind: "json", value: { results: [] } }, "report", 1),
+      noOutputReason(ended, missing, "listing", 1),
+      noOutputReason(ended, { kind: "unreadable", code: "EISDIR" }, "report", 1),
+    ]).toEqual([
+      "it wrote no report",
+      "its report isn't JSON",
+      "its report isn't a vitest report",
+      "it wrote no listing",
+      "its report couldn't be read (EISDIR)",
+    ]);
+  });
+});
+
+describe("timeoutFrom", () => {
+  it("is the variable's whole number of ms, from 1 to the most a timer holds", () => {
+    expect([
+      timeoutFrom("T", "1", 300_000),
+      timeoutFrom("T", "2147483647", 300_000),
+      timeoutFrom("T", undefined, 300_000),
+      timeoutFrom("T", "", 300_000),
+    ]).toEqual([1, 2_147_483_647, 300_000, 300_000]);
+  });
+
+  it.each(["0", "-5", "2147483648", "1e3", "1.5", " 5", "abc"])(
+    "refuses %j, which a timer would fire at once for or isn't a whole number of ms",
+    (value) => {
+      expect(() => timeoutFrom("T", value, 300_000)).toThrow(
+        `T is a whole number of ms from 1 to 2147483647, not "${value}"`,
+      );
+    },
+  );
+});
+
+describe("indentedTail", () => {
+  it("is the last 20 lines with text, each indented, keeping their own indent", () => {
+    const said = [...Array.from({ length: 25 }, (_, i) => `line ${i + 1}`), "", "    at x.ts:1"];
+    expect(indentedTail(said.join("\n")).split("\n")).toEqual([
+      ...Array.from({ length: 19 }, (_, i) => `  line ${i + 7}`),
+      "      at x.ts:1",
+    ]);
+  });
+
+  it("drops terminal escapes, puts a space for each control character, and cuts a long line", () => {
+    const said = ["\u001b[31mError\u001b[39m: a\rb\tc\u0007d", "dos line\r", "😀".repeat(400)];
+    expect(indentedTail(said.join("\n")).split("\n")).toEqual([
+      "  Error: a b c d",
+      "  dos line",
+      `  ${"😀".repeat(299)}…`,
+    ]);
+  });
+
+  it("says nothing was printed when there is no text", () => {
+    expect(indentedTail("\n \u001b[0m\n")).toBe("  (nothing)");
   });
 });
 
