@@ -46,6 +46,7 @@ async function daemon(
   const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
   const tokenFile = tokened ? tokens.mint(agentId).file : "";
   const observed: { id: string; toolUseId: string; sent: SentMessage }[] = [];
+  const logged: string[] = [];
   const mailbox = new Mailbox(store);
   const approvals = new Approvals(store);
   const inbox = new Inbox(store, approvals, (id, req) => mailbox.send(id, req));
@@ -78,6 +79,8 @@ async function daemon(
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
     observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
+    log: (line) => logged.push(line),
+    now: () => new Date("2026-11-17T00:00:00.000Z"),
   });
   const listener = getRequestListener(app.fetch);
   const socket = join(dir, "bazhen.sock");
@@ -102,6 +105,7 @@ async function daemon(
     failures,
     lifecycle,
     observed,
+    logged,
     tokens,
     tokenFile,
   };
@@ -408,5 +412,67 @@ describe("hook ingress, on an ack", () => {
     const token = readFileSync(tokenFile, "utf8");
     await post(socket, "/v1/hooks/ack", { agentId, offered }, { "bazhen-agent-token": token });
     expect(state(messageId)).toBe("emitted");
+  });
+});
+
+describe("hook ingress, on a hook it drops", () => {
+  const client = hookClient();
+  const at = "bazhen: 2026-11-17T00:00:00.000Z dropped";
+
+  it("says why it refused a waiter that carries another agent's token", async () => {
+    const elsewhere = newId("agent");
+    const { socket, agentId, logged, tokenFile } = await daemon(true, async () => ({
+      kind: "agent",
+      agentId: elsewhere,
+    }));
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: tokenFile });
+    expect(logged).toEqual([
+      `${at} the "wait" hook for agent ${agentId}: refused, the agent token is not agent ` +
+        `${elsewhere}'s, whose process calls`,
+    ]);
+  });
+
+  it("says it runs no such agent for each of a stranger's hooks but its status line", async () => {
+    const { socket, agentId, mailbox, logged } = await daemon();
+    const stranger = newId("agent");
+    const env = { BAZHEN_AGENT_ID: stranger, BAZHEN_SOCKET: socket };
+    await run(client, "wait", env);
+    await run(client, "PostToolUse", env, postToolUse());
+    await run(client, "statusline", env);
+    // The agent's own waiter, which takes its mail, is no drop.
+    mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    expect((await run(client, "wait", { ...env, BAZHEN_AGENT_ID: agentId })).code).toBe(2);
+    expect(logged).toEqual([
+      `${at} the "wait" hook for agent ${stranger}: the daemon runs no such agent`,
+      `${at} the "PostToolUse" hook for agent ${stranger}: the daemon runs no such agent`,
+    ]);
+  });
+
+  it("names the session of a waiter that isn't the agent's own, or says it is a subagent's", async () => {
+    const { socket, agentId, logged } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const other = "33333333-3333-4333-8333-333333333333";
+    await run(client, "wait", env, stop(other));
+    const subagent = JSON.stringify({ ...JSON.parse(stop()), agent_id: "sub-1" });
+    await run(client, "wait", env, subagent);
+    expect(logged).toEqual([
+      `${at} the "wait" hook for agent ${agentId}: session "${other}" isn't the agent's`,
+      `${at} the "wait" hook for agent ${agentId}: it ran in a subagent`,
+    ]);
+  });
+
+  it("says why it can't take a request, and keeps what the client sent short", async () => {
+    const { socket, agentId, logged } = await daemon();
+    const hook = { protocolVersion: "1.0", agentId, event: "wait", pid: 1, ppid: 1, payload: null };
+    await post(socket, "/v1/hooks", { nonsense: true });
+    await post(socket, "/v1/hooks", { ...hook, protocolVersion: "9.0" });
+    await post(socket, "/v1/hooks", { ...hook, agentId: newId("agent"), event: "x".repeat(500) });
+    expect(logged).toEqual([
+      `${at} a hook request it can't read: protocolVersion, agentId, event, pid, ppid, payload`,
+      `${at} the "wait" hook for agent ${agentId}: its protocol 9.0 isn't 1.0's`,
+      expect.stringContaining(`the "${"x".repeat(80)}…" hook for agent`),
+    ]);
+    expect(logged[2]?.length).toBeLessThan(250);
   });
 });

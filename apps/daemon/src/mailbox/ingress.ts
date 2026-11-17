@@ -43,6 +43,10 @@ export interface IngressDeps {
   readonly recordUsage: (agentId: string, usage: Usage) => void;
   /** Records a message the agent sent through its harness's own channel (§5.6). */
   readonly observeSend: (agentId: string, toolUseId: string, sent: SentMessage) => void;
+  /** Where a dropped hook is reported; console.error unless given. */
+  readonly log?: (line: string) => void;
+  /** The clock a dropped hook's report is stamped with. */
+  readonly now?: () => Date;
 }
 
 /**
@@ -54,18 +58,38 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
   const app = new Hono<{ Bindings: HttpBindings }>();
   const peerOf = async (c: Context<{ Bindings: HttpBindings }>) =>
     deps.peer === undefined ? undefined : deps.peer(c.env.incoming.socket);
+  const log = deps.log ?? console.error;
+  const now = deps.now ?? (() => new Date());
+  // An agent whose waiter is dropped waits with nothing to wake it, so each drop says why.
+  const report = (what: string) => log(`bazhen: ${now().toISOString()} dropped ${what}`);
 
   app.post("/v1/hooks", async (c) => {
     const hook = HookRequest.safeParse(await c.req.json().catch(() => undefined));
-    if (!hook.success || !isCompatible(hook.data.protocolVersion, HOOK_PROTOCOL_VERSION))
+    if (!hook.success) {
+      const fields = hook.error.issues.map((i) => i.path.join(".") || "the body");
+      report(`a hook request it can't read: ${clip([...new Set(fields)].join(", "))}`);
       return framed(QUIET);
+    }
     const { event, payload, ppid } = hook.data;
+    // The status line refreshes too often to report, and a lost reading of it costs nothing.
+    const dropped = (agentId: string, why: string) => {
+      if (event !== "statusline") report(`the ${quoted(event)} hook for agent ${agentId}: ${why}`);
+      return framed(QUIET);
+    };
+    if (!isCompatible(hook.data.protocolVersion, HOOK_PROTOCOL_VERSION))
+      return dropped(
+        hook.data.agentId,
+        `its protocol ${clip(hook.data.protocolVersion)} isn't ${HOOK_PROTOCOL_VERSION}'s`,
+      );
     const who = identify(
       deps.credentials,
       { token: c.req.header(AGENT_TOKEN_HEADER), said: hook.data.agentId },
       await peerOf(c),
     );
-    if (who.kind !== "agent" || !deps.knows(who.agentId)) return framed(QUIET);
+    if (who.kind === "refused") return dropped(hook.data.agentId, `refused, ${who.reason}`);
+    // A hook always names an agent, so it is never the human's.
+    if (who.kind === "human" || !deps.knows(who.agentId))
+      return dropped(hook.data.agentId, "the daemon runs no such agent");
     const { agentId } = who;
     const read = readHook(event, payload);
     const origin = hookOrigin(payload);
@@ -86,7 +110,13 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
     };
     switch (read.kind) {
       case "wait":
-        if (!(await own())) return framed(QUIET);
+        if (!(await own()))
+          return dropped(
+            agentId,
+            origin.subagent
+              ? "it ran in a subagent"
+              : `session ${origin.sessionId === null ? "none" : quoted(origin.sessionId)} isn't the agent's`,
+          );
         if (read.sessionStarted) deps.mailbox.sessionStarted(agentId, read.compacted);
         if (read.sessionStarted && !read.compacted) deps.activity.sessionStarted(agentId);
         observe();
@@ -159,6 +189,12 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
 
   return app;
 }
+
+/** The most of any text a client sent that a report of its hook carries. */
+const CLIP_CHARS = 80;
+const clip = (text: string) => (text.length > CLIP_CHARS ? `${text.slice(0, CLIP_CHARS)}…` : text);
+/** Text a client sent, quoted so it can't break the line it is reported in. */
+const quoted = (text: string) => JSON.stringify(clip(text));
 
 function framed(reply: HookReply): Response {
   const { headers, body } = frameHookReply(reply);

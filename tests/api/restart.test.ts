@@ -38,18 +38,25 @@ const send = async (agentId: string, key: string, body: string) =>
 
 beforeAll(async () => {
   [model, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
-  daemon = await Daemon.start({ modelUrl: model.url, responsesUrl: responses.url });
-  [survivor, victim, codex, quiet] = await Promise.all([
-    launch("survivor"),
-    launch("victim"),
-    launch("codex", "codex"),
-    launch("quiet"),
-  ]);
-  // Started, with no mail: idle, its SessionStart waiter held open across the kill.
-  await waitUntil(async () => (await activityOf(quiet)) === "idle", "the quiet agent idle");
-  // A message mid-turn when the daemon dies: seen, with the turn that would deliver it still running.
-  held = await send(survivor.agentId, "held", "[[fake:slow:8000]] Hold on to this.");
-  await waitUntil(async () => (await messageState(held)) === "seen", "the held message seen");
+  daemon = await Daemon.start({
+    modelUrl: model.url,
+    responsesUrl: responses.url,
+    claudeDebugLog: true,
+  });
+  await daemon.explained(async () => {
+    [survivor, victim, codex, quiet] = await Promise.all([
+      launch("survivor"),
+      launch("victim"),
+      launch("codex", "codex"),
+      launch("quiet"),
+    ]);
+    // Started, with no mail: idle, its SessionStart waiter held open across the kill.
+    await waitUntil(async () => (await activityOf(quiet)) === "idle", "the quiet agent idle");
+    // A message mid-turn when the daemon dies: seen, with the turn that would deliver it still
+    // running.
+    held = await send(survivor.agentId, "held", "[[fake:slow:8000]] Hold on to this.");
+    await waitUntil(async () => (await messageState(held)) === "seen", "the held message seen");
+  });
   await daemon.crash();
   // While the daemon is down, one agent's terminal ends; the other keeps the tmux server up.
   daemon.endTerminal(victim.agentId);
