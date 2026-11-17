@@ -64,12 +64,14 @@ describe("an agent's lifecycle after launch", () => {
     ]);
   });
 
-  it("refuses a close naming a generation the agent has moved past, and leaves it running", async () => {
-    const { agentId } = await daemon.launch("stale-close");
-    await daemon.running(agentId);
-    const { status, body } = await close(agentId, "stale", 5);
-    expect([status, ErrorResponse.parse(body).error]).toEqual([409, "stale_generation"]);
-    expect((await agentOf(agentId))?.state).toBe("running");
+  it("refuses a close naming a generation the agent has moved past, and leaves it unclosed", async () => {
+    // Respawned to generation 1. Its transcript is only a stand-in, so the new TUI may exit
+    // again; what matters is that generation 0 no longer names it.
+    const agentId = await exitedAgent();
+    expect((await respawn(agentId, "stale-close-respawn")).status).toBe(200);
+    const { status, body } = await close(agentId, "stale-close", 0);
+    expect({ status, body }).toMatchObject({ status: 409, body: { error: "stale_generation" } });
+    expect((await agentOf(agentId))?.state).not.toBeOneOf(["closing", "closed"]);
   });
 
   it("keeps an agent closing while tmux can't be reached, and closes it once it can", async () => {

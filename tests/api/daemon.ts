@@ -411,6 +411,9 @@ export class Daemon {
         ...(role === undefined ? {} : { role }),
       },
     });
+    if (res.status !== 200) {
+      throw new Error(`launching ${key} answered ${res.status}: ${JSON.stringify(res.body)}`);
+    }
     return LaunchAgentResponse.parse(res.body);
   }
 
@@ -1345,6 +1348,12 @@ export class View {
   /** The text a browser would show from everything received, whatever escapes drew it. */
   async text(): Promise<string> {
     return (await replay(this.received(), SIZE)).lines.join("\n");
+  }
+
+  /** The text a browser would show from the snapshot alone, once it has arrived whole. */
+  async snapshotText(): Promise<string> {
+    await waitUntil(() => this.hasSnapshot(), "the snapshot");
+    return (await replay(this.snapshot(), SIZE)).lines.join("\n");
   }
 
   /** Stops reading from the socket, as a stalled browser would; the daemon's sends back up. */
