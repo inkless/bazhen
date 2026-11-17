@@ -20,6 +20,7 @@ import type { ExitStatus, Signal } from "@bazhen/protocol";
 import { Mailbox } from "../mailbox/mailbox.ts";
 import { IdempotencyConflict, type Store } from "../store/store.ts";
 import {
+  bindLegacy,
   fakeEnvironment,
   quietStartAgain,
   storeBudget,
@@ -27,6 +28,7 @@ import {
   unlimited,
   untokened,
   withAgent,
+  withCodexAgents,
   BUILTIN_BOOK,
   testPrompts,
 } from "../testing/fixtures.ts";
@@ -42,6 +44,7 @@ import {
   ServerUnconfirmed,
   StaleGeneration,
   TerminalReplaced,
+  ThreadTaken,
 } from "./lifecycle.ts";
 
 /** The payloads of every event of `type` about `agentId`, oldest first. */
@@ -752,5 +755,61 @@ describe("an agent's terminal, against the terminal budget", () => {
       lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 }),
     ).rejects.toThrow(TerminalLimit);
     expect([agent()?.state, events(), launches.length]).toEqual(["lost", before, 1]);
+  });
+});
+
+/**
+ * A Codex agent on thread "t-1" whose terminal has `ended` as asked, beside a running one that a
+ * store from before one agent held a thread also binds to "t-1".
+ */
+async function sharedCodexThread(ended: "agent.lost" | "agent.exited") {
+  const { store, path, agentOn } = await withCodexAgents("t-1", "t-2");
+  const [agentId, other] = [agentOn("t-1"), agentOn("t-2")];
+  bindLegacy(path, other, "t-1");
+  store.append({
+    type: ended,
+    entityId: agentId,
+    actor: "system",
+    payload: ended === "agent.exited" ? { exit: { type: "unknown" } } : {},
+  });
+  const started: string[] = [];
+  const base = fakeEnvironment(store, async (l) => {
+    started.push(l.agentId);
+    return {
+      runtime: { terminalId: l.terminalId, runtime: "tmux", locator: {} },
+      externalRef: null,
+    };
+  });
+  const environment = {
+    ...base,
+    harnesses: ["codex" as const],
+    resumes: () => true,
+    respawn: async (r: AgentRespawn) => {
+      started.push(r.agentId);
+      return base.respawn(r);
+    },
+  };
+  const lifecycle = new Lifecycle(store, environment, new AgentQueue(), quietStartAgain);
+  const events = () => store.snapshot(testView).eventId;
+  return { lifecycle, agentId, started, events };
+}
+
+describe("starting a Codex agent again on its thread", () => {
+  it("refuses to relaunch an agent onto a thread another agent is on, recording nothing", async () => {
+    const { lifecycle, agentId, started, events } = await sharedCodexThread("agent.lost");
+    const before = events();
+    await expect(
+      lifecycle.relaunch(agentId, { idempotencyKey: "l", generation: 0 }),
+    ).rejects.toThrow(ThreadTaken);
+    expect([events(), started]).toEqual([before, []]);
+  });
+
+  it("refuses to respawn an agent onto a thread another agent is on, recording nothing", async () => {
+    const { lifecycle, agentId, started, events } = await sharedCodexThread("agent.exited");
+    const before = events();
+    await expect(
+      lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 }),
+    ).rejects.toThrow(ThreadTaken);
+    expect([events(), started]).toEqual([before, []]);
   });
 });
