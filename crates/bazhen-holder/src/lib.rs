@@ -15,6 +15,7 @@ mod linux;
 pub mod log;
 #[cfg(target_os = "macos")]
 mod macos;
+pub mod paste;
 pub mod process;
 mod ptmx;
 pub mod pty;

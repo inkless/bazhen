@@ -66,6 +66,11 @@ const OK_VERBS: [string, (client: HolderClient) => Promise<void>, object][] = [
   ],
   ["resize", (c) => c.resize({ cols: 90, rows: 20 }), { body: { cols: 90, rows: 20 } }],
   ["signal", (c) => c.signal("SIGINT"), { body: { signal: "SIGINT" } }],
+  [
+    "paste",
+    (c) => c.paste({ generation: 2, text: "ls", brackets: false }),
+    { body: { generation: 2, text: "ls", brackets: false } },
+  ],
   ["respawn", (c) => c.respawn(spec), { body: spec }],
   ["set-tags", (c) => c.setTags({ agent: "a1" }), { body: { tags: { agent: "a1" } } }],
   ["set-theme", (c) => c.setTheme(null), { body: { theme: null } }],
@@ -93,7 +98,7 @@ describe("HolderClient", () => {
   it("says hello first, with its version and the writer flag it was given", async () => {
     const { holder, opening } = pair({ hello: false }, { writer: true });
     const hello = await holder.request();
-    expect(hello).toMatchObject({ type: "hello", body: { protocol: ["1.2"], writer: true } });
+    expect(hello).toMatchObject({ type: "hello", body: { protocol: ["1.3"], writer: true } });
     expect(holder.chunks).toHaveLength(1);
     holder.send({ type: "hello", id: hello.id, body: fakeHello({ writer: true }) });
     await expect(opening).resolves.toMatchObject({ hello: { writer: true } });

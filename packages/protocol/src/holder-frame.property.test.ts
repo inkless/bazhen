@@ -14,6 +14,8 @@ import {
   holderRequestDecoder,
 } from "./holder-frame.ts";
 
+const isControl = (code: number) => code < 0x20 || (code >= 0x7f && code <= 0x9f);
+
 const id = fc.nat({ max: 0xffff_ffff });
 const offset = fc.maxSafeNat();
 const payload = fc.uint8Array({ maxLength: 64 });
@@ -73,6 +75,28 @@ const request: fc.Arbitrary<HolderRequest> = fc.oneof(
     id,
     body: fc.record({ theme: fc.constantFrom("light" as const, "dark" as const, null) }),
   }),
+  fc.oneof(
+    fc.record({
+      type: fc.constant("paste" as const),
+      id,
+      body: fc.record({
+        generation: offset,
+        text: fc.string({ unit: fc.integer({ min: 0x20, max: 0x7e }).map(String.fromCharCode) }),
+        brackets: fc.boolean(),
+      }),
+    }),
+    fc.record({
+      type: fc.constant("paste" as const),
+      id,
+      body: fc.record({
+        generation: offset,
+        text: fc
+          .string({ unit: "grapheme" })
+          .filter((t) => !Array.from(t, (c) => c.charCodeAt(0)).some(isControl)),
+        brackets: fc.constant(true),
+      }),
+    }),
+  ),
   fc.record({
     type: fc.constant("respawn" as const),
     id,

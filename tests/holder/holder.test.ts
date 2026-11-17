@@ -229,6 +229,32 @@ describe("a holder", () => {
     expect(output(events)).toBe("R\nhello");
   });
 
+  it("types a paste only into a program that would read it as text, marked when asked", async () => {
+    const raw = await started("paste", [
+      "sh",
+      "-c",
+      "stty -icanon -echo; printf R; exec head -c 18",
+    ]);
+    const reader = await listen(raw);
+    await reader.client.subscribe({ generation: 0, offset: 0 });
+    await until(() => output(reader.events).includes("R"), "the child's readiness");
+    await reader.client.paste({ generation: 0, text: "ls -la", brackets: true });
+    await reader.exit;
+    expect(output(reader.events)).toBe("R\x1b[200~ls -la\x1b[201~");
+
+    const lines = await started("paste-lines", ["sh", "-c", "stty -echo; printf R; read _"]);
+    const writer = await listen(lines, true);
+    await writer.client.subscribe({ generation: 0, offset: 0 });
+    await until(() => output(writer.events).includes("R"), "the child's readiness");
+    const refused = writer.client.paste({ generation: 0, text: "ls -la", brackets: true });
+    await expect(refused).rejects.toBeInstanceOf(HolderRequestError);
+    await expect(refused).rejects.toMatchObject({ code: "not-ready" });
+    await expect(refused).rejects.not.toHaveProperty("message", expect.stringContaining("ls -la"));
+    writer.client.input(encode("\n"));
+    await writer.exit;
+    expect(output(writer.events)).toBe("R");
+  });
+
   it("sizes the terminal for its writer only, clamping a zero size", async () => {
     const holder = await started("resize", ["sleep", "30"]);
     const { client } = await listen(holder, true);

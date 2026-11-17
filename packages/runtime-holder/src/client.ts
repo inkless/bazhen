@@ -8,6 +8,7 @@ import {
   holderReplyDecoder,
   type HolderError,
   type HolderHelloReply,
+  type HolderPasteRequest,
   type HolderProcessSpec,
   type HolderReply,
   type HolderRequest,
@@ -574,6 +575,14 @@ export class HolderClient {
 
   async signal(signal: HolderSignal, options?: RequestOptions): Promise<void> {
     await this.connection.ask((id) => ({ type: "signal", id, body: { signal } }), "ok", options);
+  }
+
+  /**
+   * Types `paste.text` into the child only if the program would read it as text now; the holder
+   * refuses with `not-ready` otherwise, typing nothing. Since holder/1.3.
+   */
+  async paste(paste: HolderPasteRequest, options?: RequestOptions): Promise<void> {
+    await this.connection.ask((id) => ({ type: "paste", id, body: paste }), "ok", options);
   }
 
   async respawn(spec: HolderProcessSpec, options?: RequestOptions): Promise<void> {

@@ -143,6 +143,7 @@ describe("holder type bytes", () => {
         respawn: 0x45,
         "set-tags": 0x46,
         "set-theme": 0x47,
+        paste: 0x48,
       },
       {
         hello: 0x81,

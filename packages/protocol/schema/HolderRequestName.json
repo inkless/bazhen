@@ -14,6 +14,7 @@
     "foreground",
     "respawn",
     "set-tags",
-    "set-theme"
+    "set-theme",
+    "paste"
   ]
 }
