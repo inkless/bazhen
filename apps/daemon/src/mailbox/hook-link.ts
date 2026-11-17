@@ -1,5 +1,5 @@
-import { renameSync, rmSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
+import { readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { type HolderInstall, installHolder, pruneHolderBuilds } from "@bazhen/runtime-holder";
 import { ensurePrivateDir } from "../config/private-dir.ts";
 
@@ -32,6 +32,19 @@ export function stableHookClient(
   }
 }
 
+/** The build in `dir` that `link` points at, or "" when it points at none. */
+function linkedBuild(link: string, dir: string): string {
+  let target: string;
+  try {
+    target = readlinkSync(link);
+  } catch {
+    return "";
+  }
+  return dirname(dirname(target)) === dir && basename(target) === HOOK_COMMAND
+    ? basename(dirname(target))
+    : "";
+}
+
 export interface HookClient {
   /** What hooks are given to run. */
   readonly path: string;
@@ -50,11 +63,14 @@ export async function installHookClient({
   dir,
   uid,
   warn = console.warn,
+  beforePrune,
 }: {
   source: string;
   dir: string;
   uid: number;
   warn?: (message: string) => void;
+  /** Called once the link is made, before the builds it doesn't name are removed; for tests. */
+  beforePrune?: () => void;
 }): Promise<HookClient> {
   let install: HolderInstall;
   try {
@@ -68,7 +84,10 @@ export async function installHookClient({
   const client = install.installed?.binary ?? source;
   const path = stableHookClient(dir, client, uid, warn);
   if (install.installed !== null && path !== client) {
-    await pruneHolderBuilds(dir, uid, new Set([install.installed.build])).catch((err: unknown) =>
+    beforePrune?.();
+    // Another start on this state may have pointed the link at its own build since.
+    const keep = new Set([install.installed.build, linkedBuild(path, dir)]);
+    await pruneHolderBuilds(dir, uid, keep).catch((err: unknown) =>
       warn(`hook client builds weren't pruned: ${String(err)}`),
     );
   }

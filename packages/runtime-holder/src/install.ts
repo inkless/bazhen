@@ -15,6 +15,7 @@ import {
   readdir,
   rename,
   rm,
+  utimes,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -154,7 +155,12 @@ export async function installHolder(
     const installed = { binary: join(dir, build, command), build, installDir: dir };
     // Read once, before the check: an install that renames its copy in meanwhile is whole.
     if ((await lstatOrNull(target)) !== null) {
-      if (await holds(target, build, uid, command)) return { installed };
+      if (await holds(target, build, uid, command)) {
+        // Fresh again, so a prune by another start that installed some other build leaves it.
+        const now = new Date();
+        await utimes(target, now, now);
+        return { installed };
+      }
       await rename(target, join(dir, `.bad-${build}-${tag()}`)).catch((error: unknown) => {
         if (codeOf(error) !== "ENOENT") throw error;
       });

@@ -771,6 +771,11 @@ export class Daemon {
     throw new Error(`no daemon for ${this.home}`);
   }
 
+  /** The file the hook link runs, every link resolved. */
+  hookClient(): string {
+    return realpathSync(join(this.home, "state", "hook", "bazhen-hook"));
+  }
+
   /** The command line of the agent's process (Linux only). */
   agentCommand(agentId: string): string[] {
     return readFileSync(`/proc/${this.panePid(agentId)}/cmdline`, "utf8")

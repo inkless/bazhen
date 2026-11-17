@@ -87,6 +87,17 @@ describe("installing the holder", () => {
     expect([second, statSync(second).ino, ls()]).toEqual([first, inode, [buildOf("build one")]]);
   });
 
+  it("makes a reused build fresh again, so another start's prune doesn't take it for unused", async () => {
+    await install();
+    const then = new Date(Date.now() - 2 * FRESH_MS);
+    utimesSync(join(dir, buildOf("build one")), then, then);
+    await install();
+    expect([await pruneHolderBuilds(dir, uid, new Set()), ls()]).toEqual([
+      [],
+      [buildOf("build one")],
+    ]);
+  });
+
   it("installs a new build beside the old one, which a running holder keeps unchanged", async () => {
     const old = binaryOf(await install());
     const inode = statSync(old).ino;

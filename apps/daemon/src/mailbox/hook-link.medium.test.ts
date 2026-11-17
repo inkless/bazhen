@@ -160,6 +160,23 @@ describe("installed hook client", () => {
     ]);
   });
 
+  it("keeps the build another start pointed the link at while this one installed its own", async () => {
+    const other = await install();
+    writeFileSync(source, "build two");
+    const { path } = await installHookClient({
+      source,
+      dir: state,
+      uid,
+      warn: quiet,
+      beforePrune: () => {
+        age();
+        stableHookClient(state, other.client, uid, quiet);
+      },
+    });
+    rmSync(source);
+    expect(runs(path)).toBe("build one");
+  });
+
   it("keeps a copy hooks were given by its own path while no link can be made", async () => {
     mkdirSync(join(state, "bazhen-hook", "kept"), { recursive: true });
     const before = await install();
