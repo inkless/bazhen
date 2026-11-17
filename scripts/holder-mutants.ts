@@ -7,14 +7,18 @@
 //   unviable   it didn't build
 //   timeout    the Rust tests ran out of time on it
 // It is a tool, not a check: a count of survivors is no gate (testing.md). Its table is for
-// someone to read, class each survivor and write the test that kills it.
+// someone to read, class each survivor and write the test that kills it. `--only` narrows a group
+// to the mutants a regex names, to see new tests kill them: each one caught is printed with the
+// tests that failed on it and why, what a `Control:` trailer names.
 //
 // A mutant of the holder can send a signal to any pid the mutated code computes, so this refuses
 // to start, before it lists or builds anything, anywhere but a sandbox: the `pnpm test:real`
 // container or a marked CI runner (scripts/signal-paths.ts). In the container the tree is the
 // image's own copy, so a mutant applied in place is undone with the container at the latest.
 //
-// Usage: node scripts/holder-mutants.ts --group <signal|lifecycle|rest> [--shard k/n] [--jobs n]
+// Usage: node scripts/holder-mutants.ts --group <signal|lifecycle|rest|macos> [--shard k/n]
+//        [--only <regex>] [--jobs n]
+// `--only` takes a JavaScript regex, matched against cargo-mutants' names for the group's mutants.
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -39,6 +43,8 @@ const LIFECYCLE_FUNCTIONS = [
 const LIFECYCLE_NAME = `^${SRC}/(?:server|conn)\\.rs:\\d+:\\d+: .*\\b(?:${LIFECYCLE_FUNCTIONS.join("|")})\\b`;
 const SIGNAL_FILES = ["guard.rs", "child.rs", "session.rs", "pty.rs", "signals.rs"];
 const LIFECYCLE_FILES = ["socket.rs"];
+/** Every module lib.rs declares under `#[cfg(target_os = "macos")]`. */
+export const MACOS_FILES: readonly string[] = ["macos.rs"];
 /** The files whose lifecycle functions `LIFECYCLE_NAME` picks out. */
 const LIFECYCLE_NAME_FILES = ["server.rs", "conn.rs"];
 
@@ -48,19 +54,28 @@ interface GroupSpec {
   readonly excludeRe: readonly string[];
   /** Mutants it also takes, by name, wherever they are. */
   readonly also?: string;
+  /** The only platform its code compiles on, where it isn't every one. */
+  readonly platform?: NodeJS.Platform;
 }
 
-/** The groups, most valuable first: each is one container run's worth. */
-export const GROUPS: Readonly<Record<"signal" | "lifecycle" | "rest", GroupSpec>> = {
+/** The groups, most valuable first. */
+export const GROUPS: Readonly<Record<"signal" | "lifecycle" | "rest" | "macos", GroupSpec>> = {
   /** Code that sends signals, or decides what they reach. */
   signal: { files: SIGNAL_FILES, excludeFiles: [], excludeRe: [] },
   /** Binding and rebinding the socket, and the close and drop paths of the server. */
   lifecycle: { files: LIFECYCLE_FILES, excludeFiles: [], excludeRe: [], also: LIFECYCLE_NAME },
   rest: {
     files: [],
-    excludeFiles: [...SIGNAL_FILES, ...LIFECYCLE_FILES],
+    excludeFiles: [...SIGNAL_FILES, ...LIFECYCLE_FILES, ...MACOS_FILES],
     excludeRe: [LIFECYCLE_NAME],
   },
+  /**
+   * The files compiled only on macOS. cargo-mutants lists them on Linux too, where each of their
+   * mutants builds, passes every test and would read as missed. Groups go by file, so a macOS-only
+   * item in a file Linux shares stays in that file's group and reads as missed on Linux: classed
+   * by reading, not by a run.
+   */
+  macos: { files: MACOS_FILES, excludeFiles: [], excludeRe: [], platform: "darwin" },
 };
 export type Group = keyof typeof GROUPS;
 const isGroup = (name: string): name is Group => Object.hasOwn(GROUPS, name);
@@ -94,6 +109,7 @@ export function groupOf(name: string): Group {
   const file = /^crates\/[^/]+\/src\/([^:]+):/.exec(name)?.[1] ?? "";
   if ((SIGNAL_FILES as readonly string[]).includes(file)) return "signal";
   if ((LIFECYCLE_FILES as readonly string[]).includes(file)) return "lifecycle";
+  if (MACOS_FILES.includes(file)) return "macos";
   return new RegExp(LIFECYCLE_NAME).test(name) ? "lifecycle" : "rest";
 }
 
@@ -196,15 +212,37 @@ export function nextestSummary(log: string): string | null {
   return lines.at(-1)?.trim() ?? null;
 }
 
+/** A terminal colour escape, which nextest writes when it thinks its output is a terminal. */
+const COLOUR = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "g");
+
+/**
+ * The tests nextest says failed in a mutant's log, each once, then each panic's place and message:
+ * what shows a mutant was caught by a test's assertion rather than by a crash or a timeout.
+ */
+export function failures(log: string): string[] {
+  const lines = log.replace(COLOUR, "").split("\n");
+  const failed = lines
+    .map((line) => line.trim())
+    .filter((line) => /^(?:FAIL|TIMEOUT|SIG[A-Z]+) \[/.test(line))
+    .map((line) => line.replace(/^\S+ \[[^\]]*\]\s*(?:\(\s*\d+\/\d+\)\s*)?/, ""));
+  const panics = lines.flatMap((line, i) => {
+    const at = /panicked at (.*):$/.exec(line.trim());
+    return at === null ? [] : [`${at[1]}: ${lines[i + 1]?.trim() ?? ""}`];
+  });
+  return [...new Set(failed), ...panics];
+}
+
 /**
  * The table a run prints: a line per mutant the Rust tests missed, with what nextest said it ran
- * on it, then the counts.
+ * on it; a line per mutant caught, with what failed on it, for those `caught` holds; then the
+ * counts.
  */
 export function report(
   group: Group,
   outcomes: readonly Outcome[],
   verdicts: Map<string, Verdict>,
   ran: Map<string, string | null> = new Map(),
+  caught: Map<string, readonly string[]> = new Map(),
 ) {
   const counts = new Map<Verdict, number>();
   for (const o of outcomes) {
@@ -217,32 +255,98 @@ export function report(
       (o) =>
         `${verdicts.get(o.name) ?? "missed"}\t${o.name}\t${ran.get(o.name) ?? "(no nextest summary)"}`,
     );
+  const catches = outcomes.flatMap((o) => {
+    const why = caught.get(o.name);
+    if (why === undefined) return [];
+    const shown = why.length === 0 ? ["(no failing test found)"] : why;
+    return [`caught\t${o.name}`, ...shown.map((line) => `\t${line}`)];
+  });
   const seconds = outcomes.reduce((sum, o) => sum + o.seconds, 0);
   const each = outcomes.length === 0 ? 0 : seconds / outcomes.length;
   return [
     `holder-mutants: ${group}: ${outcomes.length} mutants, ${each.toFixed(1)} s of build and Rust tests each`,
     ...lines,
+    ...catches,
     `holder-mutants: ${group}: ${[...counts].map(([v, n]) => `${v} ${n}`).join(", ")}`,
   ];
 }
 
-export function parseArgs(args: readonly string[]): { group: Group; shard?: string; jobs: number } {
+export interface Args {
+  readonly group: Group;
+  readonly shard?: string;
+  /** Of the group's mutants, only those whose name this matches. */
+  readonly only?: RegExp;
+  readonly jobs: number;
+}
+
+export function parseArgs(args: readonly string[]): Args {
   const value = (flag: string) => {
     const at = args.indexOf(flag);
     return at === -1 ? undefined : args[at + 1];
   };
   const group = value("--group");
   const shard = value("--shard");
+  const only = value("--only");
   const jobs = Number(value("--jobs") ?? "2");
   if (group === undefined || !isGroup(group)) {
     throw new Error(
-      `usage: holder-mutants --group <${Object.keys(GROUPS).join("|")}> [--shard k/n] [--jobs n]`,
+      `usage: holder-mutants --group <${Object.keys(GROUPS).join("|")}> [--shard k/n] ` +
+        "[--only <regex>] [--jobs n]",
     );
   }
   if (shard !== undefined && !/^\d+\/\d+$/.test(shard))
     throw new Error(`--shard takes k/n, not ${shard}`);
+  if (args.includes("--only") && (only === undefined || only === ""))
+    throw new Error("--only takes a regex of mutant names");
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error(`--jobs takes a count, not ${jobs}`);
-  return { group, ...(shard === undefined ? {} : { shard }), jobs };
+  return {
+    group,
+    ...(shard === undefined ? {} : { shard }),
+    ...(only === undefined ? {} : { only: new RegExp(only) }),
+    jobs,
+  };
+}
+
+/** `text` as a regex, in the syntax of the Rust regex crate, that matches it and nothing else. */
+export function rustLiteral(text: string): string {
+  return text.replace(/[\\.+*?()|[\]{}^$#&~-]/g, "\\$&");
+}
+
+/**
+ * `filters` narrowed to the mutants `names`: whatever `--file` and `--re` they had are replaced by
+ * the names' files and one regex matching the names whole. cargo-mutants takes a mutant matching
+ * any `--re`, so adding one would widen the selection; its `--exclude` and `--exclude-re` still
+ * apply after. A struct-field deletion in one of those files is listed whatever `--re` says, which
+ * `narrowingFaults` catches.
+ */
+export function narrowed(filters: readonly string[], names: readonly string[]): string[] {
+  const replaced = new Set(["--re", "--file"]);
+  const kept = filters.filter(
+    (arg, i) => !replaced.has(arg) && !replaced.has(filters[i - 1] ?? ""),
+  );
+  const files = [...new Set(names.map((name) => name.slice(0, name.indexOf(":"))))];
+  return [
+    ...kept,
+    ...files.flatMap((file) => ["--file", file]),
+    "--re",
+    `^(?:${names.map(rustLiteral).join("|")})$`,
+  ];
+}
+
+/** How what narrowed selections list differs from the mutants they were narrowed to, or nothing. */
+export function narrowingFaults(named: readonly string[], listed: readonly string[]): string[] {
+  const want = new Set(named);
+  const got = new Set(listed);
+  return [
+    ...[...got]
+      .filter((name) => !want.has(name))
+      .map(
+        (name) =>
+          `${name} is listed though --only doesn't name it: cargo-mutants lists a struct-field ` +
+          "deletion whatever --re says, so name it in --only too",
+      ),
+    ...[...want].filter((name) => !got.has(name)).map((name) => `${name} is named but not listed`),
+  ];
 }
 
 const cargoEnv = () => gateEnv(isolatedEnv());
@@ -269,13 +373,39 @@ function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): 
   });
 }
 
-/** Runs cargo-mutants over one selection into `out`, and the outcomes it wrote. */
-async function mutate(
+/**
+ * Why a run of mutants mustn't start here, or nothing: a test of this script replaces every
+ * effect, and a real run under one would mutate the holder and run its signalling tests on
+ * whatever machine runs the tests.
+ */
+export function refusalUnderTest(env: NodeJS.ProcessEnv): string | undefined {
+  return env["VITEST"] === undefined
+    ? undefined
+    : "holder-mutants: refusing to run cargo-mutants or the holder suite under a test";
+}
+
+function refuseUnderTest(): void {
+  const why = refusalUnderTest(process.env);
+  if (why !== undefined) throw new Error(why);
+}
+
+/** A cargo-mutants run over one selection: its outcomes, and what it wrote of each. */
+export interface MutantRun {
+  readonly outcomes: readonly Outcome[];
+  /** An outcome's build and test output. */
+  readonly log: (outcome: Outcome) => string;
+  /** Where an outcome's diff is. */
+  readonly diffFile: (outcome: Outcome) => string;
+}
+
+/** Runs cargo-mutants over one selection, and the outcomes it wrote. */
+async function runCargoMutants(
   filters: readonly string[],
-  out: string,
   shard: string | undefined,
   jobs: number,
-) {
+): Promise<MutantRun> {
+  refuseUnderTest();
+  const out = mkdtempSync(join(tmpdir(), "bz-holder-mutants-"));
   const args = [
     "mutants",
     "--no-config",
@@ -296,8 +426,13 @@ async function mutate(
   // cargo-mutants exits 2 when it missed mutants and 3 on timeouts: outcomes.json says which.
   const code = await run("cargo", args, cargoEnv());
   if (code !== 0 && code !== 2 && code !== 3) throw new Error(`cargo mutants exited ${code}`);
-  const json: unknown = JSON.parse(readFileSync(join(out, "mutants.out", "outcomes.json"), "utf8"));
-  return { outcomes: parseOutcomes(json), dir: join(out, "mutants.out") };
+  const dir = join(out, "mutants.out");
+  const json: unknown = JSON.parse(readFileSync(join(dir, "outcomes.json"), "utf8"));
+  return {
+    outcomes: parseOutcomes(json),
+    log: (o) => readFileSync(join(dir, o.logPath), "utf8"),
+    diffFile: (o) => join(dir, o.diffPath),
+  };
 }
 
 /**
@@ -305,6 +440,7 @@ async function mutate(
  * suite, and puts the file back as it was. Null when the patch left the file unchanged.
  */
 async function judgeBySuite(file: string, diffFile: string): Promise<boolean | null> {
+  refuseUnderTest();
   const original = readFileSync(file, "utf8");
   const patch = patchOf(file, readFileSync(diffFile, "utf8"));
   if (patch === null) throw new Error(`${diffFile} is not a cargo-mutants diff`);
@@ -320,15 +456,50 @@ async function judgeBySuite(file: string, diffFile: string): Promise<boolean | n
   }
 }
 
-/** What `main` reaches outside itself before it mutates anything, which a test replaces. */
+/**
+ * Everything `main` reaches outside itself. A test passes its own, so nothing a test calls can
+ * build a mutant or start a holder; there is no default.
+ */
 export interface Effects {
   readonly sandboxed: () => boolean;
   readonly list: (filters: readonly string[]) => string[];
+  readonly platform: NodeJS.Platform;
+  readonly mutate: (
+    filters: readonly string[],
+    shard: string | undefined,
+    jobs: number,
+  ) => Promise<MutantRun>;
+  /** Whether the holder suite fails on a mutant, null when its diff leaves the file unchanged. */
+  readonly judge: (file: string, diffFile: string) => Promise<boolean | null>;
+}
+
+const REAL: Effects = {
+  sandboxed: inSignalSandbox,
+  list: listMutants,
+  platform: process.platform,
+  mutate: runCargoMutants,
+  judge: judgeBySuite,
+};
+
+/**
+ * The cargo-mutants selections a run makes: the group's, or, with `only`, each narrowed to the
+ * mutants of it whose names `only` matches, leaving out any that matches none.
+ */
+export function selections(
+  group: Group,
+  only: RegExp | undefined,
+  list: (filters: readonly string[]) => string[],
+): string[][] {
+  if (only === undefined) return groupFilters(group);
+  return groupFilters(group).flatMap((filters) => {
+    const names = list(filters).filter((name) => only.test(name));
+    return names.length === 0 ? [] : [narrowed(filters, names)];
+  });
 }
 
 export async function main(
   args: readonly string[],
-  { sandboxed, list }: Effects = { sandboxed: inSignalSandbox, list: listMutants },
+  { sandboxed, list, platform, mutate, judge }: Effects,
 ): Promise<number> {
   if (!sandboxed()) {
     console.error(
@@ -338,33 +509,62 @@ export async function main(
     );
     return 1;
   }
-  const { group, shard, jobs } = parseArgs(args);
+  const { group, shard, only, jobs } = parseArgs(args);
+  const compiledOn = GROUPS[group].platform;
+  if (compiledOn !== undefined && compiledOn !== platform) {
+    console.error(
+      `holder-mutants: the ${group} group's code is compiled only on ${compiledOn}, so here ` +
+        "every mutant of it would read as missed.",
+    );
+    return 1;
+  }
   const listed = (g: Group) => groupFilters(g).flatMap(list);
   const faults = partitionFaults(list([]), {
     signal: listed("signal"),
     lifecycle: listed("lifecycle"),
     rest: listed("rest"),
+    macos: listed("macos"),
   });
   if (faults.length > 0) {
     console.error(`holder-mutants: the groups don't partition the mutants:\n${faults.join("\n")}`);
     return 1;
   }
-  const out = mkdtempSync(join(tmpdir(), "bz-holder-mutants-"));
+  const chosen = selections(group, only, list);
+  if (chosen.length === 0) {
+    console.error(`holder-mutants: --only ${String(only)} names no mutant of ${group}`);
+    return 1;
+  }
+  if (only !== undefined) {
+    const named = groupFilters(group)
+      .flatMap(list)
+      .filter((name) => only.test(name));
+    const wrong = narrowingFaults(named, chosen.flatMap(list));
+    if (wrong.length > 0) {
+      console.error(`holder-mutants: --only selects other than it names:\n${wrong.join("\n")}`);
+      return 1;
+    }
+  }
   const outcomes: Outcome[] = [];
   const verdicts = new Map<string, Verdict>();
   const ran = new Map<string, string | null>();
-  for (const [i, filters] of groupFilters(group).entries()) {
-    const { outcomes: these, dir } = await mutate(filters, join(out, String(i)), shard, jobs);
+  const caught = new Map<string, readonly string[]>();
+  for (const filters of chosen) {
+    const { outcomes: these, log, diffFile } = await mutate(filters, shard, jobs);
     outcomes.push(...these);
+    if (only !== undefined) {
+      for (const o of these.filter((m) => m.summary === "caught")) {
+        caught.set(o.name, failures(log(o)));
+      }
+    }
     for (const o of these.filter((m) => m.summary === "missed")) {
-      ran.set(o.name, nextestSummary(readFileSync(join(dir, o.logPath), "utf8")));
-      const failed = await judgeBySuite(o.file, join(dir, o.diffPath));
+      ran.set(o.name, nextestSummary(log(o)));
+      const failed = await judge(o.file, diffFile(o));
       if (failed === null) throw new Error(`holder-mutants: ${o.name} didn't apply`);
       verdicts.set(o.name, failed ? "suite" : "missed");
     }
   }
-  for (const line of report(group, outcomes, verdicts, ran)) console.log(line);
+  for (const line of report(group, outcomes, verdicts, ran, caught)) console.log(line);
   return 0;
 }
 
-if (isMain(import.meta)) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta)) process.exitCode = await main(process.argv.slice(2), REAL);
