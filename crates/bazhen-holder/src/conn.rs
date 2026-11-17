@@ -1304,6 +1304,90 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_to_a_connection_that_never_subscribed_sends_it_no_output() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(0);
+        conn.queue_snapshot(snapshot_frame(10), 0);
+        let ring = ring_of(1 << 10, &[b'x'; 30]);
+        conn.flush(now, &ring);
+        conn.flush(now, &ring);
+        let sent = peer.sent();
+        assert_eq!(sent.len(), 1, "{:?}", names(&sent));
+        assert!(!matches!(sent[0], Reply::Data { .. }));
+    }
+
+    #[test]
+    fn nothing_is_queued_to_a_connection_once_it_is_gone() {
+        let now = Instant::now();
+        let (mut conn, _peer) = pair(now);
+        conn.open(0);
+        conn.drop_now();
+        conn.queue_snapshot(vec![1; 64], 7);
+        conn.queue_state(State::Title, 0, title_frame(0, "gone"));
+        conn.queue_subscribed(ok_frame(1), 0);
+        conn.queue_exited(0, exited_frame());
+        assert_eq!(conn.queued(), 0);
+    }
+
+    #[test]
+    fn exited_queued_again_replaces_the_one_behind_a_subscriptions_ok() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(0);
+        conn.queue_subscribed(ok_frame(1), 0);
+        conn.queue_exited(0, exited_frame());
+        conn.requeue_exited(0, exited_frame());
+        conn.flush(now, &no_output());
+        assert_eq!(names(&peer.sent()), ["ok", "exited"]);
+    }
+
+    /// A peer that goes with our bytes unread leaves a reset to read, not an end. Linux only:
+    /// there the unread bytes turn the close into a reset, where macOS reads an end.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_read_that_fails_drops_its_connection() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        conn.open(0);
+        conn.queue(vec![1; 10]);
+        conn.flush(now, &no_output());
+        drop(peer);
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        assert!(conn.is_gone());
+    }
+
+    #[test]
+    fn a_state_queued_again_at_another_offset_replaces_the_one_behind_other_frames() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        let mut peer = Peer::of(peer);
+        conn.open(0);
+        conn.queue_exited(0, exited_frame());
+        conn.queue_state(State::Title, 0, title_frame(0, "first"));
+        conn.queue_state(State::Title, 5, title_frame(5, "second"));
+        conn.flush(now, &no_output());
+        assert_eq!(names(&peer.sent()), ["exited", "title second"]);
+    }
+
+    #[test]
+    fn a_subscriber_is_sent_only_the_newest_title_whatever_offsets_they_were_queued_at() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        conn.queue_state(State::Title, 10, title_frame(10, "first"));
+        conn.queue_state(State::Title, 20, title_frame(20, "second"));
+        let ring = ring_of(1 << 10, &[b'x'; 30]);
+        let titles: Vec<String> = names(&drain(&mut conn, &mut peer, &ring))
+            .into_iter()
+            .filter(|name| name.starts_with("title"))
+            .collect();
+        assert_eq!(titles, ["title second"]);
+    }
+
+    #[test]
     fn a_snapshots_bytes_are_owed_until_written_and_not_once_its_connection_is_gone() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);
@@ -1485,6 +1569,26 @@ mod tests {
                 "resized 20",
                 "data 20+10"
             ]
+        );
+    }
+
+    #[test]
+    fn a_gap_to_the_newest_resize_cut_short_by_an_event_goes_on_past_it() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = subscribed(now, 0);
+        conn.open(0);
+        conn.queue_state(State::Title, 5, title_frame(5, "kept"));
+        let newest = 10 * (MOST_QUEUED_RESIZES as u64 + 1);
+        for n in 1..=MOST_QUEUED_RESIZES as u64 + 1 {
+            conn.queue_state(State::Resized, 10 * n, resized_frame(10 * n));
+        }
+        let ring = ring_of(1 << 10, &[b'x'; 200]);
+        let sent = drain(&mut conn, &mut peer, &ring);
+        assert!(names(&sent).contains(&"title kept".to_owned()), "{sent:?}");
+        assert_eq!(
+            sent.iter().filter_map(data).map(|(at, _)| at).next(),
+            Some(newest),
+            "{sent:?}"
         );
     }
 

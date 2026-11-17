@@ -441,16 +441,20 @@ mod tests {
 
     const DEADLINE: Duration = Duration::from_secs(5);
 
-    fn holder(argv: &[&str]) -> Holder<Discard> {
+    fn spec(argv: &[&str]) -> ProcessSpec {
         let mut env = BTreeMap::new();
         env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
-        let process = ProcessSpec {
+        ProcessSpec {
             argv: Argv::new(argv.iter().map(|&a| a.to_owned()).collect()).unwrap(),
             cwd: NonEmpty::new("/").unwrap(),
             env: Env::new(env).unwrap(),
             generation: Generation::new(3).unwrap(),
             theme: None,
-        };
+        }
+    }
+
+    fn holder(argv: &[&str]) -> Holder<Discard> {
+        let process = spec(argv);
         let reaper = Reaper::new().unwrap();
         let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
         let child = pty::spawn(slave, &process, &reaper).unwrap();
@@ -498,6 +502,87 @@ mod tests {
             );
         }
         assert_eq!(describe(&holder.exit().unwrap().status), "exited 0");
+    }
+
+    /// Turns until `done`, failing past the deadline.
+    fn turn_until<O: Output>(
+        holder: &mut Holder<O>,
+        what: &str,
+        done: impl Fn(&Holder<O>) -> bool,
+    ) {
+        let give_up = Instant::now() + DEADLINE;
+        while !done(holder) {
+            assert!(Instant::now() < give_up, "{what} never happened");
+            holder.turn().unwrap();
+        }
+    }
+
+    /// Linux: the master reads `EIO` once no one holds the terminal open, whoever still runs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn input_is_refused_once_nothing_holds_the_terminal_though_the_child_runs_on() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut holder = holder(&["sh", "-c", "exec </dev/null >/dev/null 2>&1; sleep 1"]);
+        turn_until(&mut holder, "the end of the output", |h| !h.master_open);
+        assert!(holder.exit().is_none(), "the child's exit came first");
+        assert!(matches!(
+            holder.offer_input(b"x"),
+            Err(InputRefused::Exited)
+        ));
+        turn_until(&mut holder, "the exit", |h| h.exit().is_some());
+    }
+
+    /// Linux, as the drain test above: macOS revokes the terminal when its leader exits.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_query_written_after_the_exit_is_published_is_not_answered() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let process = spec(&["sh", "-c", "read _; exit 0"]);
+        let reaper = Reaper::new().unwrap();
+        let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let child = pty::spawn(slave, &process, &reaper).unwrap();
+        let size = bazhen_holder_engine::Size { cols: 80, rows: 24 };
+        let history = bazhen_holder_engine::HistoryRows(100);
+        let screen = crate::engine::Screen::new(
+            crate::ring::Ring::new(1 << 16),
+            crate::engine::Walled::new(crate::engine::engine, size, history, None),
+        );
+        let mut holder = Holder::new(pty, reaper, child, process.generation, screen);
+        let name = rustix::pty::ptsname(holder.pty.master(), Vec::new()).unwrap();
+        let held = pty::open_terminal(&name).unwrap();
+        let mut raw = rustix::termios::tcgetattr(&held).unwrap();
+        raw.make_raw();
+        rustix::termios::tcsetattr(&held, rustix::termios::OptionalActions::Now, &raw).unwrap();
+        rustix::io::write(holder.pty.master(), b"\n").unwrap();
+        turn_until(&mut holder, "the exit", |h| h.exit().is_some());
+        rustix::io::write(&held, b"\x1b[c").unwrap();
+        holder.turn().unwrap();
+        holder.flush_input();
+        rustix::fs::fcntl_setfl(&held, rustix::fs::OFlags::NONBLOCK).unwrap();
+        let mut answer = [0; 64];
+        assert_eq!(
+            rustix::io::read(&held, &mut answer),
+            Err(rustix::io::Errno::AGAIN),
+            "the terminal answered after the exit was published"
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_retired_child_has_its_session_ended_at_the_next_turn() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut holder = holder(&["sh", "-c", "read _"]);
+        let (_pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let retired = pty::spawn(slave, &spec(&["sleep", "30"]), &holder.reaper).unwrap();
+        holder.retire(retired);
+        assert!(holder.deadline().is_some(), "no turn is due to end it");
+        turn_until(&mut holder, "the retired child's end", |h| {
+            h.retiring.is_empty()
+        });
+        rustix::io::write(holder.pty.master(), b"\n").unwrap();
+        turn_until(&mut holder, "the exit", |h| h.exit().is_some());
     }
 
     #[test]

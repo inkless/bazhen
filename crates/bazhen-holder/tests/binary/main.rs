@@ -666,6 +666,34 @@ fn says_ready_and_leads_a_session_of_its_own() {
 
 #[test]
 #[ignore = "signals processes; runs in pnpm test:real rust"]
+fn lets_go_of_its_stdout_and_stderr_once_ready_and_runs_on() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("detached").unwrap();
+    let how = Start {
+        stderr: true,
+        ..Start::default()
+    };
+    let mut holder = spawn(&spec(&home, &["sleep", "30"], |_| {}), &how).unwrap();
+    let child = holder.child.as_mut().unwrap();
+    let (stdout, stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut out, mut err) = (String::new(), String::new());
+        let _ = BufReader::new(stdout).read_to_string(&mut out);
+        let _ = BufReader::new(stderr).read_to_string(&mut err);
+        let _ = tx.send((out, err));
+    });
+    let (out, err) = rx
+        .recv_timeout(DEADLINE)
+        .expect("the holder kept its stdout or stderr open");
+    assert_eq!(out, "ready\n");
+    assert_eq!(err, "");
+    assert_eq!(holder.state(), "still runs");
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
 fn logs_the_exit_of_a_child_that_exits_at_once() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
