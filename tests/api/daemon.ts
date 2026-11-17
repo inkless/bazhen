@@ -29,6 +29,7 @@ import { GENERATION_OPTION, signalOwnChild, signalPane, TmuxServer } from "@bazh
 import {
   encodeHolderRequest,
   EventFrame,
+  ExternalRef,
   HOLDER_PROTOCOL_VERSION,
   holderReplyDecoder,
   type HolderReply,
@@ -46,6 +47,10 @@ const run = promisify(execFile);
 
 /** What each harness's TUI shows once it has started. */
 export const BANNER = { "claude-code": "Claude Code", codex: "OpenAI Codex" } as const;
+
+/** How much of each agent's debug log `explanation` shows: its hook lines, and its last lines. */
+const EXPLAINED_HOOK_LINES = 200;
+const EXPLAINED_TAIL_LINES = 60;
 
 /** The size the daemon gives every agent's terminal. */
 const SIZE = { cols: 120, rows: 40 };
@@ -194,6 +199,11 @@ export interface DaemonOptions {
   readonly env?: Record<string, string>;
   /** The daemon's config.toml. */
   readonly config?: string;
+  /**
+   * Whether each Claude Code agent writes its debug log, for `explained` to show. Off unless asked
+   * for, since a TUI in debug mode says so on its screen.
+   */
+  readonly claudeDebugLog?: boolean;
 }
 
 /** A process's environment, from /proc (Linux only). */
@@ -229,6 +239,7 @@ export class Daemon {
       ...homeEnv(home),
       PATH: `${cliOnPath(home)}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
+      ...(opts.claudeDebugLog === true && { DEBUG: "1" }),
       ...opts.env,
     };
   }
@@ -292,6 +303,59 @@ export class Daemon {
   /** What the daemon has printed since it last started. */
   log(): string {
     return this.output;
+  }
+
+  /**
+   * Runs `work`, and when it throws, as a wait that times out does, prints what would explain it
+   * first: the daemon's log, and each Claude Code agent's debug log, if `claudeDebugLog` was on.
+   */
+  async explained<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (err) {
+      console.error(this.explanation());
+      throw err;
+    }
+  }
+
+  /**
+   * The daemon's log, then from each Claude Code agent's debug log the hooks it ran and its last
+   * lines. A hook missing from the debug log never ran; for one there that the daemon didn't act
+   * on, the daemon's log says why it dropped it.
+   */
+  explanation(): string {
+    const parts = [`---- the daemon's log\n${this.output}`];
+    const debug = join(this.home, "claude", "debug");
+    for (const [agentId, session] of this.claudeSessions()) {
+      const file = join(debug, `${session}.txt`);
+      if (!existsSync(file)) {
+        parts.push(`---- agent ${agentId} (session ${session}) wrote no debug log`);
+        continue;
+      }
+      const lines = readFileSync(file, "utf8").split("\n");
+      const hooks = lines.filter((l) => /hook/i.test(l)).slice(-EXPLAINED_HOOK_LINES);
+      parts.push(
+        `---- agent ${agentId} (session ${session}), the hooks in its debug log\n${hooks.join("\n")}`,
+        `---- agent ${agentId}, the end of its debug log\n${lines.slice(-EXPLAINED_TAIL_LINES).join("\n")}`,
+      );
+    }
+    return parts.join("\n");
+  }
+
+  /** Each Claude Code agent's id and the session it is bound to, as the daemon recorded them. */
+  private claudeSessions(): [string, string][] {
+    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
+    try {
+      return db
+        .prepare(`SELECT id, external_ref FROM agent_sessions WHERE external_ref IS NOT NULL`)
+        .all()
+        .flatMap((row): [string, string][] => {
+          const ref = ExternalRef.parse(JSON.parse(String(row.external_ref)));
+          return ref.kind === "claude-session" ? [[String(row.id), ref.id]] : [];
+        });
+    } finally {
+      db.close();
+    }
   }
 
   /** A new directory beside the work directory, which no harness has been told to trust. */
