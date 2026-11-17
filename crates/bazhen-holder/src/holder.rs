@@ -14,6 +14,7 @@ use crate::child::{ChildProcess, Reaper, SignalRefused};
 use crate::input::{InputFull, InputQueue};
 use crate::paste::{self, PasteRefused, Readings};
 use crate::pty::{Pty, WindowSize};
+use crate::session::{self, Listed, Listing};
 
 /// How long, after the child's exit is seen, output it wrote before exiting may still arrive before
 /// the exit is published. Reading the end of the output (EIO or 0) publishes it sooner.
@@ -72,6 +73,8 @@ pub struct Holder<O: Output> {
     draining_until: Option<Instant>,
     exit: Option<Exit>,
     input: InputQueue,
+    /// What lists the processes, once in a step for all its sessions' passes.
+    list: fn() -> io::Result<Vec<Listed>>,
 }
 
 /// Why `input` was refused.
@@ -103,6 +106,7 @@ impl<O: Output> Holder<O> {
             draining_until: None,
             exit: None,
             input: InputQueue::default(),
+            list: session::list,
         };
         holder.step(Instant::now());
         holder
@@ -372,10 +376,11 @@ impl<O: Output> Holder<O> {
             self.draining_until = None;
             self.input.clear();
         }
-        self.child.close_step(now);
+        let mut listing = Listing::by(self.list);
+        self.child.close_step(now, &mut listing);
         for old in &mut self.retiring {
             old.poll_exit();
-            old.close_step(now);
+            old.close_step(now, &mut listing);
         }
         self.retiring.retain(|old| !old.ended());
     }
@@ -408,6 +413,7 @@ mod tests {
     use rustix::event::{PollFd, Timespec, poll};
 
     use super::*;
+    use crate::child::CLOSE_GRACE;
     use crate::pty::{self, WindowSize};
 
     const DEADLINE: Duration = Duration::from_secs(5);
@@ -573,6 +579,42 @@ mod tests {
         });
         rustix::io::write(holder.pty.master(), b"\n").unwrap();
         turn_until(&mut holder, "the exit", |h| h.exit().is_some());
+    }
+
+    std::thread_local! {
+        static LISTINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// This system's processes, each listing counted.
+    fn counted() -> io::Result<Vec<Listed>> {
+        LISTINGS.with(|made| made.set(made.get() + 1));
+        session::list()
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_step_lists_the_processes_once_for_every_session_it_ends() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let ignores_the_hangup = ["sh", "-c", "trap '' HUP; exec sleep 30"];
+        let mut holder = holder(&ignores_the_hangup);
+        holder.list = counted;
+        let mut ptys = Vec::new();
+        for _ in 0..2 {
+            let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+            let old = pty::spawn(slave, &spec(&ignores_the_hangup), &holder.reaper).unwrap();
+            holder.retire(old);
+            ptys.push(pty);
+        }
+        let now = Instant::now();
+        holder.close(now);
+        let listings = || LISTINGS.with(std::cell::Cell::get);
+        holder.step(now);
+        assert_eq!(listings(), 1, "three sessions hung up");
+        holder.step(now + CLOSE_GRACE / 2);
+        assert_eq!(listings(), 1, "a step no session has a pass due in");
+        holder.step(now + CLOSE_GRACE);
+        assert_eq!(listings(), 2, "three sessions killed");
+        turn_until(&mut holder, "every session's end", Holder::ended);
     }
 
     #[test]

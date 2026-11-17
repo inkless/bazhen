@@ -724,6 +724,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::own_pid": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::parent_field": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::session_field": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::has_exited": "proc_stat",
   "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
   "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
@@ -1041,6 +1042,9 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/self/statm for resident_pages, which proc_stat fuzzes",
   "crates/bazhen-holder/src/session.rs::visit":
     "reads /proc/<pid>/stat for member_state, which proc_stat fuzzes",
+  "crates/bazhen-holder/src/session.rs::list": "reads /proc/<pid>/stat for listed_session",
+  "crates/bazhen-holder/src/session.rs::listed_session":
+    "reads the line only through session_field and member_state, which proc_stat fuzzes",
   "crates/bazhen-holder/src/start.rs::run": "reads stdin only through read_spec",
   "crates/bazhen-holder/src/start_time.rs::read":
     "reads /proc/stat and /proc/<pid>/stat for epoch_seconds, which proc_stat fuzzes",

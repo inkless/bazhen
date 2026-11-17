@@ -98,6 +98,13 @@ pub fn parent_field(stat: &[u8]) -> Option<i32> {
         .and_then(|pid| i32::try_from(pid).ok())
 }
 
+/// Field 6 of a `/proc/<pid>/stat` line: the id of the session the process is in.
+pub fn session_field(stat: &[u8]) -> Option<i32> {
+    stat_field(stat, 6)
+        .and_then(decimal)
+        .and_then(|sid| i32::try_from(sid).ok())
+}
+
 /// Whether a `/proc/<pid>/stat` line is of a process that has exited: a zombie, or one dead.
 pub fn has_exited(stat: &[u8]) -> bool {
     matches!(stat_field(stat, 3), Some(b"Z" | b"X"))
@@ -154,17 +161,19 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_pid_its_parent_and_whether_it_exited() {
+    fn reads_the_pid_its_parent_its_session_and_whether_it_exited() {
         let running = stat_line(b"sh", 7);
-        let zombie = b"4242 (sh) Z 1 4242 4242 0 -1".as_slice();
+        let zombie = b"4242 (sh) Z 1 4242 4241 0 -1".as_slice();
         let dead = b"4242 (sh) X 31 4242".as_slice();
         assert_eq!(
             [
                 own_pid(&running),
                 parent_field(&running),
-                parent_field(dead)
+                parent_field(dead),
+                session_field(&running),
+                session_field(zombie)
             ],
-            [Some(4242), Some(1), Some(31)]
+            [Some(4242), Some(1), Some(31), Some(4242), Some(4241)]
         );
         assert_eq!(
             [has_exited(&running), has_exited(zombie), has_exited(dead)],
@@ -181,6 +190,9 @@ mod tests {
         assert_eq!(parent_field(b"4242 (sh) S -1 4242"), None);
         assert_eq!(parent_field(b"4242 (sh) S 2147483648 4242"), None);
         assert_eq!(parent_field(b"4242 (sh) S"), None);
+        assert_eq!(session_field(b"4242 (sh) S 1 4242 -1"), None);
+        assert_eq!(session_field(b"4242 (sh) S 1 4242 2147483648"), None);
+        assert_eq!(session_field(b"4242 (sh) S 1 4242"), None);
         assert!(!has_exited(b"4242 (sh)"));
         assert!(!has_exited(b"4242 sh Z 1"));
     }
@@ -195,6 +207,7 @@ mod tests {
             let stat = stat_line(&name, ticks);
             prop_assert_eq!(start_ticks(&stat), Some(ticks));
             prop_assert_eq!((own_pid(&stat), parent_field(&stat)), (Some(4242), Some(1)));
+            prop_assert_eq!(session_field(&stat), Some(4242));
             prop_assert!(!has_exited(&stat));
         }
     }

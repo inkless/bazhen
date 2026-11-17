@@ -5,7 +5,7 @@ use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
 use crate::guard::{self, Refused, SendError};
-use crate::session::{Ending, Session};
+use crate::session::{Ending, Listing, Session};
 use crate::signals::{self, Wakeups};
 use bazhen_holder_proto::body::{self, ExitCode, ExitStatus};
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitOptions, waitid, waitpid};
@@ -171,14 +171,15 @@ impl ChildProcess {
             .and_then(|ending| ending.deadline(self.exit.is_some()))
     }
 
-    /// Makes the close's pass that is due, and reaps the child once its session has ended.
-    pub fn close_step(&mut self, now: Instant) {
+    /// Makes the close's pass that is due, over `listing`, the step's, and reaps the child once
+    /// its session has ended.
+    pub fn close_step(&mut self, now: Instant, listing: &mut Listing) {
         if self.reaped {
             return;
         }
         let exited = self.exit.is_some();
         if let Some(ending) = &mut self.ending {
-            ending.step(exited, now);
+            ending.step(exited, now, listing);
         }
         if self.ended() {
             self.reap();
@@ -286,7 +287,7 @@ mod tests {
             };
             let now = Instant::now();
             child.close(now);
-            child.close_step(now + CLOSE_GRACE);
+            child.close_step(now + CLOSE_GRACE, &mut Listing::new());
             assert!(child.ended());
         });
         assert!(status.success(), "{status:?}");
@@ -333,11 +334,11 @@ mod tests {
             let now = Instant::now();
             let mut child = ChildProcess::new(pid);
             child.close(now);
-            child.close_step(now);
+            child.close_step(now, &mut Listing::new());
             child.exit = Some(ExitStatus::Unknown);
             child.reaped = true;
             assert_eq!(child.close_deadline(), None);
-            child.close_step(now + CLOSE_GRACE);
+            child.close_step(now + CLOSE_GRACE, &mut Listing::new());
         });
         assert!(status.success(), "{status:?}");
         assert_eq!(seen, "hup\nusr1\n");
@@ -351,10 +352,10 @@ mod tests {
             let now = Instant::now();
             let mut child = ChildProcess::new(pid);
             child.close(now);
-            child.close_step(now);
+            child.close_step(now, &mut Listing::new());
             // Started over, the close would hang up again here, and kill only a grace later.
             child.close(now + CLOSE_GRACE);
-            child.close_step(now + CLOSE_GRACE);
+            child.close_step(now + CLOSE_GRACE, &mut Listing::new());
         });
         assert_eq!(status.signal(), Some(libc::SIGKILL), "{status:?}");
     }
