@@ -1,3 +1,18 @@
+import type { WebSocket } from "ws";
+
+/**
+ * How often each WebSocket peer is pinged. One that is gone by `ViewHeartbeat`'s account is ended,
+ * so a phone that slept or lost its network gives up its terminal's lease (foundation-design §4.3)
+ * and its connection slot instead of holding them until its TCP connection times out.
+ */
+export const HEARTBEAT_MS = 15_000;
+
+/**
+ * Heartbeats a peer with output still queued may leave unanswered: two minutes, in which a phone
+ * on a slow link drains far more than the eviction allows to queue.
+ */
+export const DRAIN_PATIENCE = 8;
+
 /**
  * Whether a view is still there, judged once per beat. A view that answered neither the last
  * ping nor sent anything since is gone, unless output was queued for it since: then a ping waits
@@ -29,4 +44,25 @@ export class ViewHeartbeat {
     this.unanswered++;
     return "ping";
   }
+}
+
+/**
+ * Pings `ws` every `ms` and ends it, after calling `gone`, once `ViewHeartbeat` judges it gone. A
+ * pong or any message counts as an answer.
+ */
+export function keepAlive(
+  ws: WebSocket,
+  every: { readonly ms: number; readonly patience: number },
+  gone?: () => void,
+): void {
+  const heart = new ViewHeartbeat(every.patience);
+  const beat = setInterval(() => {
+    if (heart.beat(ws.bufferedAmount) === "ping") return ws.ping();
+    gone?.();
+    ws.terminate();
+  }, every.ms);
+  beat.unref();
+  ws.on("pong", () => heart.heard());
+  ws.on("message", () => heart.heard());
+  ws.on("close", () => clearInterval(beat));
 }
