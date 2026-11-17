@@ -46,6 +46,7 @@ async function daemon(
   const tokens = new AgentTokens(store, join(dir, "agents"), process.getuid?.() ?? 0);
   const tokenFile = tokened ? tokens.mint(agentId).file : "";
   const observed: { id: string; toolUseId: string; sent: SentMessage }[] = [];
+  const logged: string[] = [];
   const mailbox = new Mailbox(store);
   const approvals = new Approvals(store);
   const inbox = new Inbox(store, approvals, (id, req) => mailbox.send(id, req));
@@ -78,6 +79,7 @@ async function daemon(
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
     observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
+    log: (line) => logged.push(line),
   });
   const listener = getRequestListener(app.fetch);
   const socket = join(dir, "bazhen.sock");
@@ -102,6 +104,7 @@ async function daemon(
     failures,
     lifecycle,
     observed,
+    logged,
     tokens,
     tokenFile,
   };
@@ -408,5 +411,50 @@ describe("hook ingress, on an ack", () => {
     const token = readFileSync(tokenFile, "utf8");
     await post(socket, "/v1/hooks/ack", { agentId, offered }, { "bazhen-agent-token": token });
     expect(state(messageId)).toBe("emitted");
+  });
+});
+
+describe("hook ingress, on a hook it drops", () => {
+  const client = hookClient();
+
+  it("says why it refused a waiter that carries another agent's token", async () => {
+    const elsewhere = newId("agent");
+    const { socket, agentId, logged, tokenFile } = await daemon(true, async () => ({
+      kind: "agent",
+      agentId: elsewhere,
+    }));
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    await run(client, "wait", { ...env, BAZHEN_AGENT_AUTH_FILE: tokenFile });
+    expect(logged).toEqual([
+      `bazhen: dropped the "wait" hook for agent ${agentId}: refused, the agent token is not ` +
+        `agent ${elsewhere}'s, whose process calls`,
+    ]);
+  });
+
+  it("says it runs no such agent, for a waiter naming an agent it doesn't know", async () => {
+    const { socket, logged } = await daemon();
+    const stranger = newId("agent");
+    await run(client, "wait", { BAZHEN_AGENT_ID: stranger, BAZHEN_SOCKET: socket });
+    expect(logged).toEqual([
+      `bazhen: dropped the "wait" hook for agent ${stranger}: the daemon runs no such agent`,
+    ]);
+  });
+
+  it("names the session of a waiter that isn't the agent's own", async () => {
+    const { socket, agentId, logged } = await daemon();
+    const other = "33333333-3333-4333-8333-333333333333";
+    await run(client, "wait", { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket }, stop(other));
+    expect(logged).toEqual([
+      `bazhen: dropped the "wait" hook for agent ${agentId}: session "${other}" isn't the agent's`,
+    ]);
+  });
+
+  it("reports nothing for a waiter it takes, nor for a status line it drops", async () => {
+    const { socket, agentId, mailbox, logged } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    expect((await run(client, "wait", env)).code).toBe(2);
+    await run(client, "statusline", { ...env, BAZHEN_AGENT_ID: newId("agent") });
+    expect(logged).toEqual([]);
   });
 });
