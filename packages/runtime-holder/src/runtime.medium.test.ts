@@ -759,13 +759,20 @@ const respawning: Handler = (holder, request) => {
   ok(holder, request);
 };
 
-/** Fake holders, and a runtime listing them every 20 ms, whose title reports go to `told`. */
+/**
+ * Fake holders, and a runtime listing them every 20 ms, whose title reports go to `told` by
+ * terminal, and to `reports` whole.
+ */
 function watched(root: string, handle?: Handler, hello: Partial<HolderHelloReply> = {}) {
   const fakes = startingFakes(root, hello, handle, {}, { titleSyncMs: 20 });
   const told: string[] = [];
-  const stop = fakes.runtime.onTitle((terminalId) => told.push(terminalId));
+  const reports: unknown[][] = [];
+  const stop = fakes.runtime.onTitle((...report) => {
+    told.push(report[0]);
+    reports.push(report);
+  });
   onTestFinished(stop);
-  return { ...fakes, told, stop };
+  return { ...fakes, told, reports, stop };
 }
 
 /** Waits for the runtime to list the holders `n` more times, by the `hello`s `fake` answered. */
@@ -816,15 +823,15 @@ async function handAnswered(root: string) {
 }
 
 describe("HolderRuntime: watching agents' titles", () => {
-  it("tells an agent's terminal as its watch opens and at each title its holder reports", async () => {
-    const { runtime, terminals, told } = watched(privateRoot());
+  it("tells an agent's terminal, and never its title, as its watch opens and at each title its holder reports", async () => {
+    const { runtime, terminals, reports } = watched(privateRoot(), undefined, { title: "first" });
     const ref = await runtime.create(agentSpec());
     const fake = terminals.get(ref.terminalId)!;
-    await expect.poll(() => told).toEqual([ref.terminalId]);
+    await expect.poll(() => reports).toEqual([[ref.terminalId]]);
     const [watch, ...more] = await lasting(fake);
     expect(more).toEqual([]);
     watch!.holder.send({ type: "title", body: { offset: 3, text: "the thread" } });
-    await expect.poll(() => told).toEqual([ref.terminalId, ref.terminalId]);
+    await expect.poll(() => reports).toEqual([[ref.terminalId], [ref.terminalId]]);
     expect(watch!.requests).toEqual([]);
     expect(watch!.holder.hello).toEqual(expect.objectContaining({ writer: false }));
   });

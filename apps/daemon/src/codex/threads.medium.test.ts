@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { newId, type RuntimeRef } from "@bazhen/core";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { newId, type RuntimeRef, type TerminalId } from "@bazhen/core";
+import { holderSocket, holdersDir } from "@bazhen/host-guard";
+import { HolderRuntime } from "@bazhen/runtime-holder";
+import { listenFakeHolder } from "@bazhen/runtime-holder/testing";
 import {
   FIXTURE_TMUX_SOCKET,
   testView,
@@ -157,6 +161,55 @@ function respawn(s: Awaited<ReturnType<typeof setup>>) {
     });
 }
 
+/** Above every system's pid limit, so nothing a holder runtime does can reach a process. */
+const FAKE_PID = 2 ** 22 + 1;
+
+/**
+ * A holder runtime over one fake holder of `terminal`, as `agentId`'s, whose `hello` carries
+ * `title`: what its title watch reports goes to `report`.
+ */
+async function holderReporting(
+  terminal: TerminalId,
+  agentId: string,
+  title: string,
+  report: (...told: [TerminalId]) => void,
+) {
+  const limit = Number(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+  if (!(FAKE_PID > limit)) throw new Error(`the fake holder's pid isn't above the limit ${limit}`);
+  vi.spyOn(process, "kill").mockImplementation((pid) => {
+    throw new Error(`a test reached process.kill(${pid})`);
+  });
+  const root = mkdtempSync("/tmp/bz-th-");
+  chmodSync(root, 0o700);
+  mkdirSync(holdersDir(root), { mode: 0o700 });
+  const start = 1_700_000_000;
+  const server = await listenFakeHolder(holderSocket(root, terminal), {
+    hello: {
+      terminalId: terminal,
+      tags: { kind: "agent", agentId },
+      holderPid: FAKE_PID,
+      holderStart: start,
+      childPid: FAKE_PID,
+      childStart: start,
+      title,
+    },
+  });
+  const runtime = new HolderRuntime({
+    root,
+    binary: "/nonexistent/bazhen-holder",
+    env: { PATH: "/bin" },
+    titleSyncMs: 60_000,
+    onError: () => {},
+  });
+  const stop = runtime.onTitle(report);
+  onTestFinished(async () => {
+    stop();
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+}
+
 describe("a Codex agent's TUI coming up", () => {
   it("takes a change heard before a respawn is recorded as its TUI up, once it is", async () => {
     const s = await setup({ titles: [shown(A)] });
@@ -176,18 +229,23 @@ describe("a Codex agent's TUI coming up", () => {
     expect([before, s.lifecycle()]).toEqual(["starting", "running"]);
   });
 
-  it("never takes the last TUI's title, heard before a respawn, for the new TUI's", async () => {
+  it("never takes the title the last TUI's holder reported before a respawn for the new TUI's", async () => {
     const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
     const s = await setup({ titles: [shown(C)], runtime: "holder", listing });
-    const titled = (title: string) => s.titles.splice(0, s.titles.length, title);
     void s.threads.heard(s.terminal);
     await expect.poll(() => s.lists.length).toBe(1);
-    titled(shown(A));
-    const stale = s.threads.heard(s.terminal);
+    s.titles.splice(0, 1, shown(A));
+    const reported: TerminalId[] = [];
+    // Everything the watch reports goes on, so a title it told would be acted on.
+    await holderReporting(s.terminal, s.agentId, shown(A), (...told) => {
+      reported.push(told[0]);
+      void s.threads.heard(...told);
+    });
+    await expect.poll(() => reported).toEqual([s.terminal]);
     respawn(s)();
-    titled("");
+    s.titles.splice(0, 1, "");
     answer(undefined);
-    await stale;
+    await s.threads.titleChanged(s.terminal);
     expect(s.lifecycle()).toBe("starting");
   });
 
