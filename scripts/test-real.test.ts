@@ -31,6 +31,8 @@ describe("pnpm test:real", () => {
   it("runs the suites it is given, once each and in order, or all but falsify", () => {
     expect(parseArgs([]).suites).toEqual(["integration", "api", "e2e", "holder", "rust"]);
     expect(parseArgs(["falsify", "api", "falsify"]).suites).toEqual(["falsify", "api"]);
+    expect(parseArgs(["soak"]).suites).toEqual(["soak"]);
+    expect(suiteCommand("soak")).toEqual(["pnpm", "test:soak"]);
   });
 
   it("judges falsify against main, or the base it is given", () => {

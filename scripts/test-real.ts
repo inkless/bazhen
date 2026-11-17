@@ -1,8 +1,9 @@
-// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n]]`: the real-tmux suites, and
-// the holder's mutants by group (scripts/holder-mutants.ts), in a container built from this
-// worktree (docs/standards/testing.md). The build context is a fresh repository holding HEAD and
-// falsify's base, overlaid with the worktree's uncommitted files, so falsify judges commits and
-// the other suites test what is on disk. Each suite gets a container of its own, with nothing of
+// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n]]`: the real-tmux suites, the
+// holder's mutants by group (scripts/holder-mutants.ts), and the soak's short runs
+// (scripts/soak.ts), in a container built from this worktree (docs/standards/testing.md). The
+// build context is a fresh repository holding HEAD and falsify's base, overlaid with the
+// worktree's uncommitted files, so falsify judges commits and the other suites test what is on
+// disk. Each suite gets a container of its own, with nothing of
 // the host's: no mount, no socket, no network.
 //
 // A run removes its containers, image and context on every exit it can observe, a signal
@@ -38,6 +39,7 @@ const SUITES = {
   rust: "test:rust:all",
   holder: "test:holder",
   mutants: "test:mutants:holder",
+  soak: "test:soak",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e", "holder", "rust"];

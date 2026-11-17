@@ -192,6 +192,70 @@ and each also stops once what it waits for can't happen, so a fault fails on the
 breaks rather than on a timeout. Its floods are `seq` output, so every byte at every offset is
 known and each attach is checked whole.
 
+## The holder soak
+
+The chaos suite proves each fault once, for seconds. The soak proves that hours of ordinary load
+and repeated faults leave no slow leak, no lost line and no dead terminal. It is what the flip to
+holders as the default runtime waits on.
+
+`scripts/soak.ts` runs a real daemon on holders under design §12.4's load: 25 terminals, as
+15 agent-stream replays, 5 floods, 3 idle shells, a shell that echoes, and a Claude Code agent on
+the fake model. Every shell runs `scripts/soak-worker.ts`, which prints numbered marker lines and
+probes its terminal with CPR and DA. The churn kills the daemon with -9 and restarts it every
+10 minutes. It attaches a view every 5 s, closes an idle shell and opens another every minute, and
+makes the agent exit and respawns it every 5 minutes. Two terminals stay viewed throughout, and a
+keystroke a second is timed through one of them until it echoes. The driver samples every 30 s:
+the daemon, every holder over its own protocol (so also while the daemon is down), the terminals'
+states and the machine's PTYs. Every 2½ minutes it holds the churn and takes a settled sample,
+whose counts must be back at their baselines.
+
+`scripts/soak-judge.ts` turns the records into a verdict per criterion. Its header gives the
+criteria and the contract the driver keeps. Nothing passes for want of data, and what only a
+longer run can judge is `unmeasured`, which fails the gate. A run writes everything to its
+directory as it happens, so one cut short keeps its evidence: the driver's records, each
+worker's, the driver's log, and the verdict as JSON and as text. `pnpm soak --judge <dir>` judges a directory
+again.
+
+It runs three ways:
+
+- **`pnpm test:real soak`** runs the smoke profile in the container: the same load with the churn
+  compressed, for minutes. A clean run must pass every criterion but the slopes, which only hours
+  show. Then a run with two faults injected must fail on the criteria they break and no others: a
+  holder closed behind the daemon's back, and a worker that reads its probe replies late. It takes
+  about half an hour of the heavy slot.
+- **CI's `Holder soak` workflow** runs `pnpm soak --hours <h>` on hosted Linux and macOS
+  runners, marked disposable. That is at most 4 measured hours after the warm-up hour, since a
+  hosted job is cut off at 6. It runs only when the owner starts it, never on a push, and an
+  agent never dispatches it. The run's directory is uploaded as an artifact.
+- **The long runs**, 24 h before the flip and 72 h before tmux is removed, use
+  `pnpm soak --hours 24` (or 72) on a Linux host of their own. **That host is a VM, or a
+  machine used for nothing else, never the owner's daily machine:** the run's holders signal every
+  process in their sessions, and a wrong pid there ends work that matters.
+
+### Runbook: a long run on a VM
+
+1. Create a Linux VM used for nothing else: 4 vCPUs, 8 GiB of memory and 30 GB of disk are
+   enough. Keep its host from sleeping for the run's length.
+2. In the VM, install git, a C toolchain, tmux, Node at the version `.nvmrc` pins, pnpm through
+   corepack, and rustup. Clone the repository at the commit under test, and run
+   `pnpm install --frozen-lockfile`.
+3. Mark the VM disposable, in the VM and nowhere else: `sudo touch /etc/bazhen-disposable-host`.
+   The soak refuses to start without the root-owned marker.
+4. Start the run so it outlives the login session:
+   `nohup pnpm soak --hours 24 --out ~/soak-24h > ~/soak-24h.log 2>&1 &`. It warms up for an
+   hour, measures for 24, then prints the verdict and exits 0 on a pass.
+5. Collect the run's directory (`~/soak-24h`) and log from the VM, for example with `scp -r`. The
+   verdict is in its verdict.txt, failures first; the driver's and the workers' records beside it
+   hold the evidence for each fault it names. An orphan names a pid that outlived its terminal's
+   close. Before chasing one, check that it isn't a zombie waiting to be reaped, `Z` in the third
+   field of `/proc/<pid>/stat`, which is alive to a signal-0 probe but holds nothing.
+6. Throw the VM away, or roll it back to a snapshot taken before step 3. Do so after a run that
+   was stopped or crashed too: a driver killed mid-run leaves its daemon, holders and tmux
+   server behind.
+
+A failed criterion is a bug to fix, not a run to repeat until it passes. The fix is proven by a
+test where one can show it, and by the next long run.
+
 ## Memory and time caps
 
 A test that runs away with memory takes more than its own run. Past the machine's memory the

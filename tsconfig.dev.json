@@ -10,7 +10,10 @@
     "packages/*/src/**/*.test.ts",
     "apps/daemon/src/**/*.test.ts",
     "tests/support/*.ts",
-    "scripts/*.ts"
+    "scripts/*.ts",
+    "tests/api/daemon.ts",
+    "tests/api/fake-model.ts",
+    "tests/api/fixtures/browser.ts"
   ],
   "references": [
     {

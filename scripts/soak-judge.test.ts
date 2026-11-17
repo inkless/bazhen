@@ -122,7 +122,12 @@ function cleanRun(): SoakEvent[] {
         ptys: 5,
       },
       { kind: "daemon", t: start, up: true },
+      { kind: "step", t: start, step: "restart", ok: true },
     );
+  }
+  for (let t = MIN; t <= END; t += MIN) {
+    events.push({ kind: "step", t, step: "idle", ok: true });
+    if (t % (5 * MIN) === 0) events.push({ kind: "step", t, step: "agent", ok: true });
   }
   for (let t = 0; t <= END; t += 10 * SEC) {
     for (const [i, name] of WORKERS.entries()) {
@@ -269,6 +274,11 @@ const shortLived = (lifeMs: number): SoakEvent[] => [
   { kind: "close", t: HOUR + lifeMs, name: "i3" },
 ];
 const closedBeforeWindow = (name: string): SoakEvent => ({ kind: "close", t: MEASURE - MIN, name });
+/** One more fd for each daemon life. */
+const fdsByLife = (s: Sample) => 9 + Math.floor(s.t / LIFE);
+/** Drops `step`'s records from `t` on. */
+const notStepAfter = (step: string, t: number) => (e: SoakEvent) =>
+  e.kind !== "step" || e.step !== step || e.t < t;
 const notStartOf = (name: string) => (e: SoakEvent) => e.kind !== "start" || e.name !== name;
 const notAttachOf = (name: string) => (e: SoakEvent) => e.kind !== "attach" || e.name !== name;
 
@@ -545,6 +555,12 @@ describe("judge", () => {
         ),
     ],
     [
+      "a holder whose fds grow by one with each daemon life, steady within each",
+      "counts",
+      (events) =>
+        mapSamples(events, (s) => mapHolder(s, "e1", (h) => ({ ...h, fds: fdsByLife(s) }))),
+    ],
+    [
       "a PTY not back to baseline once settled",
       "counts",
       (events) =>
@@ -585,6 +601,19 @@ describe("judge", () => {
       "a keystroke never echoed, even in warm-up",
       "echo",
       (events) => [...events, { kind: "echo", t: MIN, ms: null, flooding: false }],
+    ],
+    [
+      "a churn step that failed, an attach's snapshot timing out say",
+      "churn",
+      (events) => [
+        ...events,
+        { kind: "step", t: HOUR, step: "rotate", ok: false, why: "timed out waiting" },
+      ],
+    ],
+    [
+      "restarts that stopped halfway through the window",
+      "churn",
+      (events) => events.filter(notStepAfter("restart", HOUR)),
     ],
     [
       "a panic in a holder's log",
@@ -637,6 +666,15 @@ describe("judge", () => {
       (events) => [...events, { kind: "marker", t: HOUR - 500, name: "r1", n: 10_000 }],
     ],
     [
+      "a worker opened as the run ends, closed by its teardown seconds later",
+      (events) => [
+        ...events,
+        { kind: "open", t: END, name: "i5", load: "idle" },
+        { kind: "start", t: END, name: "i5", pid: 209 },
+        { kind: "close", t: END + 5 * SEC, name: "i5" },
+      ],
+    ],
+    [
       "a worker opened as the run ends, too late to be checked",
       (events) => [
         ...events,
@@ -680,6 +718,21 @@ describe("judge", () => {
       (events) => [...events, { ...sampleAt(events, HOUR), t: HOUR + 1, settled: false, ptys: 9 }],
     ],
     [
+      "a daemon that opens an fd on first use in each life, after that life's first settled count",
+      (events) =>
+        mapSamples(
+          events,
+          withDaemon((d) => ({ fds: d.ageMs < MIN ? 40 : 41 })),
+        ),
+    ],
+    [
+      "a holder whose fds step up once, at the window's first restart, and hold",
+      (events) =>
+        mapSamples(events, (s) =>
+          mapHolder(s, "e1", (h) => ({ ...h, fds: s.t >= MEASURE + LIFE ? 10 : 9 })),
+        ),
+    ],
+    [
       "a daemon that holds more fds in one life than another, steady within each",
       (events) =>
         mapSamples(
@@ -698,6 +751,10 @@ describe("judge", () => {
         ),
     ],
     [
+      "a window holding one restart fewer than its cadence fits, the fewest it may",
+      (events) => events.filter(notStepAfter("restart", END - 2 * LIFE + 1)),
+    ],
+    [
       "slow echo with no flood running",
       (events) => [...events, ...floodEchoes(100).map((e) => ({ ...e, flooding: false }))],
     ],
@@ -705,6 +762,21 @@ describe("judge", () => {
 
   it.each(harmless)("passes %s", (_, change) => {
     expect(notPassing(change(cleanRun()))).toEqual([]);
+  });
+
+  it("reports the seams' measured rate and how many tries found output paused", () => {
+    const unpaused = Array.from({ length: 10 }, (_, i): SoakEvent => ({
+      kind: "unpaused",
+      t: HOUR + i,
+      name: "r1",
+    }));
+    const seams = judge([...cleanRun(), ...unpaused], OPTIONS).criteria.find(
+      (c) => c.name === "seams",
+    );
+    expect(seams).toMatchObject({
+      status: "pass",
+      detail: "121 seams in 2.00 measured hours, 61 an hour, of 131 tries; each equal cell by cell",
+    });
   });
 
   it("splits out the probes taken while the daemon was down", () => {
@@ -758,6 +830,7 @@ describe("judge", () => {
       "counts: unmeasured",
       "daemon-memory: unmeasured",
       "echo: unmeasured",
+      "churn: unmeasured",
       "engine: fail",
     ]);
   });
