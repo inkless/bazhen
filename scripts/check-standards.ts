@@ -2425,8 +2425,17 @@ export function signalChokepointFailures(
     const text = read(file);
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
     out.push(...allowedSignalFailures(file, text));
-    for (const { line, call, unread } of rawSignalCalls(file, text)) {
+    for (const { line, call, unread, unfollowed } of rawSignalCalls(file, text)) {
       if (product && !tests.has(line)) continue;
+      if (unfollowed === true) {
+        out.push(
+          `${file}:${line}: ${call}, so the check can't read the options a start there is given, ` +
+            "which may set a timeout, killSignal or signal that Node enforces with a kill; call " +
+            "each start by the name it's imported as, or as a member of child_process imported " +
+            "with `import … from`, with its options in the call (docs/standards/testing.md).",
+        );
+        continue;
+      }
       if (unread === true) {
         out.push(
           `${file}:${line}: ${call}, so the check can't tell whether they set a timeout, ` +

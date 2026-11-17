@@ -118,6 +118,22 @@ const STARTERS = [
 ] as const;
 const STARTER_NAME = `(?:${STARTERS.join("|")})`;
 const CHILD_PROCESS_MODULE = `["'](?:node:)?child_process["']`;
+// A static import of child_process the scan reads, `import type` included: a default, a namespace
+// or named imports, or a default beside either of the others.
+const CHILD_PROCESS_IMPORT = new RegExp(
+  `\\bimport\\s+(?:type\\s+)?(?:([\\w$]+)\\s*,\\s*)?(?:([\\w$]+)|\\*\\s+as\\s+([\\w$]+)|\\{([^}]*)\\})` +
+    `\\s+from\\s*${CHILD_PROCESS_MODULE}`,
+  "g",
+);
+// child_process named as a string, which a `require`, an `import()` or a re-export loads it by.
+const CHILD_PROCESS_NAMED = /["'`](?:node:)?child_process["'`]/g;
+// What makes a name a call: type arguments without parens or braces, and `?.`, before its `(`.
+const CALLED = "\\s*(?:<[^()<>;{}]*>\\s*)?(?:\\?\\.\\s*)?\\(";
+// A name's start, not a member's, though a spread's `...` may come before it: `\b` alone misses a
+// name opening with `$`.
+const NOT_MEMBER = "(?<!(?<!\\.)\\.\\s*)(?:\\b|(?<![\\w$]))";
+const alternation = (names: Iterable<string>) =>
+  [...names].map((n) => n.replaceAll("$", "\\$")).join("|");
 // A key, a getter's or a method's included, as each sets the option.
 const START_OPTION =
   /(?<=[{,]\s*(?:(?:get|set|async)\s+|\*\s*)?)\b(timeout|killSignal|signal)\b(?=\s*[:,}(])/g;
@@ -225,43 +241,75 @@ const spreadArguments = (start: string, args: { text: string; at: number }[]) =>
     .filter((arg) => arg.text.startsWith("..."));
 
 /**
+ * What a file binds to child_process's starts. `named` maps each name a call of which is a start
+ * to the start: every start's own name, called bare, whether imported or not, then each import
+ * alias and each name bound by `promisify`. `bound` holds the names this file binds itself, by
+ * importing or promisifying a start; `modules` its default and namespace imports. `imports` spans
+ * each import the scan reads, and `promisified` is where each `promisify` it resolves names the
+ * name it binds and the start it binds it to.
+ */
+interface StartBindings {
+  named: Map<string, string>;
+  bound: Set<string>;
+  modules: string[];
+  imports: [number, number][];
+  promisified: Set<number>;
+}
+
+function startBindings(code: string, kept: string): StartBindings {
+  const named = new Map<string, string>(STARTERS.map((s) => [s, s]));
+  const bound = new Set<string>();
+  const modules: string[] = [];
+  const imports: [number, number][] = [];
+  for (const m of kept.matchAll(CHILD_PROCESS_IMPORT)) {
+    if (code.slice(m.index, m.index + 6) !== "import") continue;
+    imports.push([m.index, m.index + m[0].length]);
+    for (const whole of [m[1], m[2], m[3]]) if (whole !== undefined) modules.push(whole);
+    for (const spec of (m[4] ?? "").split(",")) {
+      const [imported, local] = spec.trim().split(/\s+as\s+/);
+      const start = imported?.replace(/^(["'])(.*)\1$/, "$2");
+      if (start === undefined || !STARTERS.some((s) => s === start)) continue;
+      named.set(local ?? start, start);
+      bound.add(local ?? start);
+    }
+  }
+  const module = modules.length > 0 ? `(?:${alternation(modules)})\\s*\\??\\.\\s*` : "";
+  const promisify = new RegExp(
+    `\\b(?:const|let|var)\\s+([\\w$]+)\\s*=\\s*(?:\\w+\\s*\\.\\s*)?promisify\\s*\\(\\s*` +
+      `((?:${module === "" ? NOT_MEMBER : `${module}|${NOT_MEMBER}`})` +
+      `(${alternation(named.keys())}))\\s*\\)`,
+    "dg",
+  );
+  const promisified = new Set<number>();
+  for (const m of code.matchAll(promisify)) {
+    const [local, start, name, at] = [m[1], m[3], m.indices?.[1]?.[0], m.indices?.[2]?.[0]];
+    if (local === undefined || start === undefined || name === undefined || at === undefined)
+      continue;
+    named.set(local, named.get(start) ?? start);
+    bound.add(local);
+    promisified.add(name).add(at);
+  }
+  return { named, bound, modules, imports, promisified };
+}
+
+/** Each call of a start: by a name in `named`, or as a member of child_process imported whole. */
+function startCalls({ named, modules }: StartBindings) {
+  const bare = `${NOT_MEMBER}(${alternation(named.keys())})`;
+  const member =
+    modules.length === 0 ? "" : `|(?:${alternation(modules)})\\s*\\??\\.\\s*(${STARTER_NAME})`;
+  return new RegExp(`(?:${bare}${member})${CALLED}`, "g");
+}
+
+/**
  * Each `timeout`, `killSignal` or `signal` key in a child_process start's arguments, and each
  * place its options aren't written out where the scan can read them: the start called bare or
  * through an import alias, as a member of child_process imported whole, or bound by `promisify`
  * to a name of its own. A wrapper taking a timeout of its own isn't a start; the kill it causes is
  * found where it calls Node. A declaration named for a start has parameters, not options.
  */
-function startOptions(code: string, kept: string) {
-  const named = new Map<string, string>(STARTERS.map((s) => [s, s]));
-  const modules: string[] = [];
-  const imports = new RegExp(
-    `\\bimport\\s+(?:(\\w+)|\\*\\s+as\\s+(\\w+)|\\{([^}]*)\\})\\s+from\\s*${CHILD_PROCESS_MODULE}`,
-    "g",
-  );
-  for (const m of kept.matchAll(imports)) {
-    if (code.slice(m.index, m.index + 6) !== "import") continue;
-    const whole = m[1] ?? m[2];
-    if (whole !== undefined) modules.push(whole);
-    for (const spec of (m[3] ?? "").split(",")) {
-      const [imported, local] = spec.trim().split(/\s+as\s+/);
-      if (imported !== undefined && local !== undefined && named.has(imported))
-        named.set(local, imported);
-    }
-  }
-  const module = modules.length > 0 ? `(?:${modules.join("|")})\\s*\\.\\s*` : "";
-  const notMember = "(?<!\\.\\s*)\\b";
-  const promisified = new RegExp(
-    `\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*(?:\\w+\\s*\\.\\s*)?promisify\\s*\\(\\s*` +
-      `(?:${module === "" ? notMember : `${module}|${notMember}`})` +
-      `(${[...named.keys()].join("|")})\\s*\\)`,
-    "g",
-  );
-  for (const m of code.matchAll(promisified))
-    if (m[1] !== undefined && m[2] !== undefined) named.set(m[1], named.get(m[2]) ?? m[2]);
-  const bare = `${notMember}(${[...named.keys()].join("|")})`;
-  const member = module === "" ? "" : `|${module}(${STARTER_NAME})`;
-  const calls = new RegExp(`(?:${bare}${member})\\s*\\(`, "g");
-  return [...code.matchAll(calls)].flatMap((call) => {
+function startOptions(code: string, bindings: StartBindings) {
+  const { named } = bindings;
+  return [...code.matchAll(startCalls(bindings))].flatMap((call) => {
     const open = call.index + call[0].length - 1;
     const close = closingParen(code, open);
     const args = code.slice(open, close);
@@ -293,6 +341,64 @@ function startOptions(code: string, kept: string) {
       })),
     ];
   });
+}
+
+/**
+ * Each place a start this file binds goes where the scan can't follow it to a call: a mention of
+ * a bound name, or of child_process imported whole, that isn't a start's call, the `promisify`
+ * that binds it, its import, a `typeof` or a key; and child_process named as a string anywhere but
+ * the source of an import the scan reads. Through any of these a start can be called with options
+ * no rule reads, `.call`, `Reflect.apply`, an alias, a seam object, `require` and `import()`
+ * among them, so each is flagged rather than followed.
+ */
+function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
+  const { named, bound, modules, imports, promisified } = bindings;
+  const calls = new Set([...code.matchAll(startCalls(bindings))].map((m) => m.index));
+  const imported = (index: number) => imports.some(([from, to]) => index >= from && index < to);
+  const unfollowed = (index: number, call: string) => ({
+    index,
+    line: lineAt(code, index),
+    call,
+    unfollowed: true as const,
+  });
+  const names = [...bound, ...modules];
+  const mentions =
+    names.length === 0
+      ? []
+      : [...code.matchAll(new RegExp(`${NOT_MEMBER}(${alternation(names)})(?![\\w$])`, "g"))];
+  const references = mentions.flatMap((m) => {
+    const name = m[1] ?? "";
+    const before = code.slice(0, m.index);
+    const after = code.slice(m.index + name.length);
+    const followed =
+      calls.has(m.index) ||
+      promisified.has(m.index) ||
+      imported(m.index) ||
+      /\btypeof\s+$/.test(before) ||
+      (/[{,]\s*$/.test(before) && /^\s*\??:/.test(after));
+    if (followed) return [];
+    if (bound.has(name)) {
+      const start = named.get(name) ?? name;
+      return [
+        unfollowed(
+          m.index,
+          `${name === start ? name : `${name} (${start})`} used other than in a call`,
+        ),
+      ];
+    }
+    const member = /^\s*\??\.\s*([\w$]+)/.exec(after)?.[1];
+    if (member === undefined) return [unfollowed(m.index, `${name} used other than in a call`)];
+    return STARTERS.some((s) => s === member)
+      ? [unfollowed(m.index, `${name}.${member} used other than in a call`)]
+      : [];
+  });
+  const loads = [...kept.matchAll(CHILD_PROCESS_NAMED)]
+    .filter((m) => code[m.index] === kept[m.index] && !imported(m.index))
+    .map((m) => ({
+      ...unfollowed(m.index, "child_process named outside an import"),
+      literal: true,
+    }));
+  return [...references, ...loads];
 }
 
 const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
@@ -724,8 +830,9 @@ interface AllowedSignal {
   /** How many places `code` matches, 1 unless given: any other count fails, 0 included. */
   readonly count?: number;
   /**
-   * Text that names kills and runs none: it allows a kill by a command line alone, and doesn't
-   * make its file one that signals.
+   * Text that names kills or child_process and runs or loads none: it allows only a kill by a
+   * command line and child_process named outside an import, and doesn't make its file one that
+   * signals.
    */
   readonly fixture?: boolean;
   /** The part of each match that is allowed, its first match within it, when not all of it. */
@@ -764,6 +871,36 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
     {
       code: /const FIXTURE = \[[\s\S]*?\]\.join\("\\n"\)/,
       why: "the lint rule's fixture, which oxlint reads and nothing runs",
+      fixture: true,
+    },
+  ],
+  "scripts/lint-plugin.ts": [
+    {
+      code: /\bCHILD_PROCESS = new Set\(\["child_process", "node:child_process"\]\)/,
+      at: /"child_process", "node:child_process"/,
+      why: "the names the lint rule knows child_process's imports by, which load nothing",
+      fixture: true,
+    },
+  ],
+  "scripts/lint-config.ts": [
+    {
+      code: /"tls",\s*"child_process",\s*"worker_threads",/,
+      at: /"child_process"/,
+      why: "a module a small test may not import, named in its ban, which loads nothing",
+      fixture: true,
+    },
+    {
+      code: /\.\.\.\["child_process", "module", "cluster", "worker_threads"\]/,
+      at: /"child_process"/,
+      why: "a module that starts processes, named where a wrapper must start them, which loads nothing",
+      fixture: true,
+    },
+  ],
+  "scripts/lint-config.test.ts": [
+    {
+      code: /banned\("scripts\/\*\*\/\*\.test\.ts"\)\.includes\("node:child_process"\)/,
+      at: /"node:child_process"/,
+      why: "a test that a small test's bans name child_process, which loads nothing",
       fixture: true,
     },
   ],
@@ -939,11 +1076,20 @@ function allowedIn(file: string, text: string) {
 
 /**
  * A signal found in a file. `unread` marks a start's options the scan can't read, which may set a
- * kill or not.
+ * kill or not; `unfollowed` a start reached where the scan can't follow it to a call, or
+ * child_process loaded where it can't see what is started. `literal` marks text that names a
+ * kill or child_process, which a fixture may hold.
  */
-type Signal = { index: number; line: number; call: string; literal?: boolean; unread?: boolean };
+type Signal = {
+  index: number;
+  line: number;
+  call: string;
+  literal?: boolean;
+  unread?: boolean;
+  unfollowed?: boolean;
+};
 
-/** Whether one of `allowed` lets `signal` through: a fixture lets only a command line's. */
+/** Whether one of `allowed` lets `signal` through: a fixture lets only its text's, `literal`. */
 const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
   allowed.some(
     ({ entry, spans }) =>
@@ -954,13 +1100,16 @@ const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
 const asCalls = (signals: Signal[]) =>
   signals
     .toSorted((a, b) => a.index - b.index)
-    .map(({ line, call, unread }) => (unread === true ? { line, call, unread } : { line, call }));
+    .map(({ line, call, unread, unfollowed }) => {
+      if (unread === true) return { line, call, unread };
+      return unfollowed === true ? { line, call, unfollowed } : { line, call };
+    });
 
 /** Each raw signal call in a file, by line, whatever else the file is. */
 export function rawSignalCalls(
   file: string,
   text: string,
-): { line: number; call: string; unread?: true }[] {
+): { line: number; call: string; unread?: true; unfollowed?: true }[] {
   const { signals, allowed } = signalsIn(file, text);
   return asCalls(signals.filter((s) => !allows(allowed, s)));
 }
@@ -1032,6 +1181,7 @@ function signalsIn(
   const memberComputed = [...kept.matchAll(TS_MEMBER_KILL_COMPUTED)]
     .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
     .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
+  const starts = startBindings(code, kept);
   const seen = new Set<number>();
   const signals = [
     ...found(code, TS_KILL),
@@ -1043,7 +1193,8 @@ function signalsIn(
     ...memberComputed,
     ...found(code, TS_MEMBER_KILL_BOUND),
     ...found(code, /\bkillSignal\b/g),
-    ...startOptions(code, kept),
+    ...startOptions(code, starts),
+    ...unfollowedStarts(code, kept, starts),
     ...kills(literals, code),
   ].filter((m) => !seen.has(m.index) && seen.add(m.index));
   return { signals, allowed: allowedIn(file, kept) };

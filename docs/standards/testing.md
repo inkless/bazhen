@@ -333,7 +333,9 @@ A test owns everything it touches and leaves nothing behind.
   another object; a `timeout`, `killSignal` or `signal` option to a `child_process` start, which
   Node enforces with a kill, and any options to one that aren't written out in the call, as a
   variable, a spread of the options or the arguments, or a computed or quoted key could hold
-  one; Rust's `kill_process`,
+  one; a start, or `child_process` itself, reached any way but a call by the name it's imported
+  as or as a member of a static `import … from` of it, as `.call`, `Reflect.apply`, an alias, a
+  seam object, `require` or `import()` reach one with options no rule reads; Rust's `kill_process`,
   `kill_process_group`, `kill_current_process_group`, `pidfd_send_signal`, `libc::kill`,
   `libc::killpg`, `tgkill` and `tkill`, nix's `kill` and `killpg` by path, a `use` naming `libc`
   or a `signal` module that imports `kill`, a glob or a rename at any depth of its groups, any
