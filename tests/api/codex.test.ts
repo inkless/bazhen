@@ -526,7 +526,7 @@ describe("a Codex agent", () => {
       const agent = await daemon.launch("codex-on-leaked", "codex");
       await waitUntil(() => daemon.screen(agent.agentId).includes(BANNER.codex), "Codex's TUI");
       const output = await ranAllowed(
-        'echo "id=${BAZHEN_AGENT_ID-u} file=${BAZHEN_AGENT_AUTH_FILE-u}"; ../cli/bazhen whoami',
+        "env | grep ^BAZHEN_AGENT; ../cli/bazhen whoami",
         "leak",
         agent,
       );
