@@ -138,7 +138,10 @@ Every new test must be shown to fail without the code it covers.
   - **INVALID** — no verdict: it couldn't load, timed out, was skipped, its title couldn't be
     read or isn't unique, or it passed but imports no reverted file, so it is unrelated to the
     source change (a characterization or property test of existing code); a branch that adds
-    tests without a source change also lands here.
+    tests without a source change also lands here. So does every test of a vitest run that
+    left no report: falsify says why (it hit falsify's 300 s cap on one run, exited with a code
+    or signal, or wrote no usable report) on each one's line, and prints the end of what vitest
+    printed.
     Every test of a brand-new function is INVALID, because the function doesn't exist before
     the change.
 

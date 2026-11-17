@@ -110,7 +110,10 @@ case "$1" in
     ;;
   exec)
     if [ "$3" = list ]; then
-      [ "\${STUB_FAIL_LIST:-}" = 1 ] && exit 1
+      if [ "\${STUB_FAIL_LIST:-}" = 1 ]; then
+        echo "Error: stub config failed to load" >&2
+        exit 1
+      fi
       for arg in "$@"; do
         case "$arg" in --json=*) listing="\${arg#--json=}" ;; esac
       done
@@ -139,6 +142,7 @@ case "$1" in
     fi
     if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
       echo "HANGING $$" >> "$STUB_LOG"
+      echo "stub vitest: still running" >&2
       trap 'echo TERMED >> "$STUB_LOG"' TERM
       i=0
       while [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
@@ -151,6 +155,18 @@ case "$1" in
     for arg in "$@"; do
       case "$arg" in --outputFile=*) out="\${arg#--outputFile=}" ;; esac
     done
+    if [ -n "\${STUB_VITEST_EXIT:-}" ]; then
+      i=1
+      while [ $i -le 25 ]; do echo "stub vitest line $i" >&2; i=$((i + 1)); done
+      echo "stub vitest: 1 project failed to start"
+      printf 'Error: \\033[31mglobal setup failed\\033[39m\\r\\n' >&2
+      exit "$STUB_VITEST_EXIT"
+    fi
+    case "\${STUB_VITEST_REPORT:-}" in
+      none) echo "stub vitest: done"; exit 0 ;;
+      garbage) echo "not json" > "$out"; exit 0 ;;
+      wrong) echo '{"results":[]}' > "$out"; exit 0 ;;
+    esac
     # Each file the run names, with STUB_EACH; else only the one test file the case judges.
     files="\${STUB_TEST:-${TEST}}"
     if [ "\${STUB_EACH:-}" = 1 ]; then
@@ -571,6 +587,55 @@ describe("falsify on a branch in a linked worktree", () => {
         `KILLED   ${TEST} › caps\n           failed: AssertionError: expected 1 to be 2\n`,
       ),
     });
+  });
+
+  it("says a vitest run stopped at falsify's cap left no report, and what it printed", () => {
+    const result = againstBase({ STUB_HANG_VITEST: "1", FALSIFY_VITEST_TIMEOUT_MS: "1000" });
+    const why = "it timed out after 1 s, falsify's cap on one vitest run";
+    expect({
+      status: result.status,
+      block: result.output.includes(
+        `falsify: the unit run (1 file) left no report: ${why}. The end of what it printed:\n` +
+          "  stub vitest: still running\n",
+      ),
+      line: result.output.includes(`INVALID  ${TEST} › caps (no report from the unit run: ${why})`),
+      leftovers: leftovers(),
+    }).toEqual({ status: 0, block: true, line: true, leftovers: [] });
+  }, 30_000);
+
+  it("says a vitest run exited with a code and no report, with the end of what it printed", () => {
+    const result = againstBase({ STUB_VITEST_EXIT: "2" });
+    expect({
+      status: result.status,
+      block: result.output.includes(
+        "falsify: the unit run (1 file) left no report: it exited with code 2. The end of what " +
+          "it printed:\n  stub vitest line 8\n",
+      ),
+      end: result.output.includes(
+        "  stub vitest line 25\n  stub vitest: 1 project failed to start\n" +
+          "  Error: global setup failed\n",
+      ),
+      start: result.output.includes("stub vitest line 7\n"),
+      line: result.output.includes(
+        `INVALID  ${TEST} › caps (no report from the unit run: it exited with code 2)`,
+      ),
+    }).toEqual({ status: 0, block: true, end: true, start: false, line: true });
+  });
+
+  it.each([
+    ["none", "it wrote no report", "  stub vitest: done"],
+    ["garbage", "its report isn't JSON", "  (nothing)"],
+    ["wrong", "its report isn't a vitest report", "  (nothing)"],
+  ])("says why a vitest run that exited 0 left no usable report (%s)", (mode, why, said) => {
+    const result = againstBase({ STUB_VITEST_REPORT: mode });
+    expect({
+      status: result.status,
+      block: result.output.includes(
+        `falsify: the unit run (1 file) left no report: ${why}. The end of what it printed:\n` +
+          `${said}\n`,
+      ),
+      line: result.output.includes(`INVALID  ${TEST} › caps (no report from the unit run: ${why})`),
+    }).toEqual({ status: 0, block: true, line: true });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {
@@ -1521,7 +1586,10 @@ describe("falsify on a branch with new tests in two vitest projects", () => {
     const result = againstBase({ STUB_FAIL_LIST: "1" });
     expect({
       status: result.status,
-      said: result.output.includes("couldn't name the projects of the tests to judge"),
+      said: result.output.includes(
+        "couldn't name the projects of the tests to judge (it exited with code 1), so none can " +
+          "be judged. The end of what it printed:\n  Error: stub config failed to load\n",
+      ),
       verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
       ran: stubLog().includes("VITEST:"),
     }).toEqual({ status: 1, said: true, verdict: false, ran: false });

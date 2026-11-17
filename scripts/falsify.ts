@@ -10,10 +10,11 @@
 //             survive; one that passes otherwise is unrelated to the source change and comes out
 //             INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
-//             isn't unique, or it passed but is unrelated to the source change; a branch that
-//             adds tests without a source change also lands here, as does every test of a
-//             brand-new symbol. Each INVALID test needs a hand-run control, recorded as a
-//             trailer in a commit on the branch that names it by its file and exact title:
+//             isn't unique, its project's run left no report (falsify says why), or it passed
+//             but is unrelated to the source change; a branch that adds tests without a source
+//             change also lands here, as does every test of a brand-new symbol. Each INVALID
+//             test needs a hand-run control, recorded as a trailer in a commit on the branch
+//             that names it by its file and exact title:
 //             `Control: <file> › <title>: <what you broke> -> <how the test failed>`
 //             (one whose title couldn't be read, by its file and no other new test's title).
 //
@@ -128,7 +129,9 @@ const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
 export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 export const INSTALL_TIMEOUT_MS = 120_000;
-const VITEST_TIMEOUT_MS = 300_000;
+// Each vitest run's limit, one project's judged files; a test of the limit itself sets a shorter
+// one.
+const VITEST_TIMEOUT_MS = Number(process.env["FALSIFY_VITEST_TIMEOUT_MS"] ?? "") || 300_000;
 const CARGO_TIMEOUT_MS = 900_000;
 // The most mutants run for one branch. A count, not a time budget, so a verdict is the same on
 // every machine; a hook-crate mutant builds and runs in under a second.
@@ -615,6 +618,40 @@ export function isReport(value: unknown): value is VitestReport {
   );
 }
 
+/** A JSON file a command was to write: what it holds, or that it is missing or isn't JSON. */
+export type Written = { kind: "json"; value: unknown } | { kind: "missing" } | { kind: "not JSON" };
+
+function readWritten(path: string): Written {
+  if (!existsSync(path)) return { kind: "missing" };
+  const text = readFileSync(path, "utf8");
+  try {
+    return { kind: "json", value: JSON.parse(text) as unknown };
+  } catch {
+    return { kind: "not JSON" };
+  }
+}
+
+/**
+ * Why a vitest run, or its listing, left nothing falsify can use: how it ended when that wasn't
+ * an exit of its own with code 0, else what is wrong with what it wrote. A run that times out ends
+ * by falsify's signal, so its cap is named rather than that signal.
+ */
+export function noOutputReason(
+  ended: Omit<Ran, "ok">,
+  written: Written,
+  noun: "report" | "listing",
+  capMs: number,
+): string {
+  if (ended.timedOut)
+    return `it timed out after ${capMs / 1000} s, falsify's cap on one vitest run`;
+  if (ended.error !== undefined) return `it couldn't start: ${ended.error}`;
+  if (ended.signal !== null) return `it was stopped by ${ended.signal}`;
+  if (ended.code !== 0) return `it exited with code ${ended.code}`;
+  if (written.kind === "missing") return `it wrote no ${noun}`;
+  if (written.kind === "not JSON") return `its ${noun} isn't JSON`;
+  return `its ${noun} isn't a vitest ${noun}`;
+}
+
 /**
  * The test files a `vitest list --filesOnly --json=<file>` listing names, by the project each runs
  * in, relative to whichever of `roots` (the worktree, and its real path) holds them. Throws on
@@ -654,7 +691,25 @@ export function classify(report: VitestReport, file: string, title: string): Out
   return test.status === "failed" ? "KILLED" : "INVALID";
 }
 
-const FAILURE_LINE_MAX = 300;
+const PRINTED_LINE_MAX = 300;
+
+/**
+ * The lines of what a test or a command said, safe to print: terminal escapes dropped, and each
+ * other control character a space, since one left in, a lone \r above all, could overwrite the
+ * line in a terminal.
+ */
+const printableLines = (text: string): string[] =>
+  stripVTControlCharacters(text)
+    .split("\n")
+    .map((line) => line.replace(/\p{Cc}/gu, " "));
+
+/** The line cut short between graphemes, so a character is never cut in two. */
+function clipped(line: string): string {
+  const chars = Array.from(new Intl.Segmenter().segment(line), (s) => s.segment);
+  return chars.length > PRINTED_LINE_MAX
+    ? `${chars.slice(0, PRINTED_LINE_MAX - 1).join("")}…`
+    : line;
+}
 
 /**
  * The first line of what failed the test: its first failure message's, or, where it has none, its
@@ -666,17 +721,10 @@ export function failureLine(report: VitestReport, file: string, title: string): 
     report.testResults.find((r) => r.name.endsWith(file))?.message,
   ];
   for (const message of messages) {
-    // A control character left in, a lone \r above all, could overwrite the line in a terminal.
-    const line = stripVTControlCharacters(message ?? "")
-      .split("\n")
-      .map((l) => l.replace(/\p{Cc}/gu, " ").trim())
+    const line = printableLines(message ?? "")
+      .map((l) => l.trim())
       .find((l) => l !== "");
-    if (line !== undefined) {
-      const chars = Array.from(new Intl.Segmenter().segment(line), (s) => s.segment);
-      return chars.length > FAILURE_LINE_MAX
-        ? `${chars.slice(0, FAILURE_LINE_MAX - 1).join("")}…`
-        : line;
-    }
+    if (line !== undefined) return clipped(line);
   }
   return undefined;
 }
@@ -987,18 +1035,22 @@ async function onSignal(signal: NodeJS.Signals): Promise<void> {
 
 const handleSignal = (signal: NodeJS.Signals) => void onSignal(signal);
 
+/** How a child ended: `ok` only when it exited 0 within its time. */
+export type Ran = {
+  ok: boolean;
+  timedOut: boolean;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  error?: string;
+};
+
 function run(
   cmd: string,
   args: string[],
   cwd: string,
   timeoutMs: number,
-  options: {
-    env?: NodeJS.ProcessEnv;
-    stdout?: number;
-    stderr?: number;
-    onTimeout?: () => void;
-  } = {},
-): Promise<boolean> {
+  options: { env?: NodeJS.ProcessEnv; stdout?: number; stderr?: number } = {},
+): Promise<Ran> {
   return new Promise((done) => {
     const child = spawnGroup(cmd, args, {
       cwd,
@@ -1009,21 +1061,43 @@ function run(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      options.onTimeout?.();
       // A signal may be stopping the same group, and signalGroup throws once it has gone; a
       // refused target is a fault, and surfaces.
       stopGroup(child).catch(rethrowUnsafe);
     }, timeoutMs);
-    const finish = (ok: boolean) => {
+    const finish = (ended: Omit<Ran, "ok" | "timedOut">) => {
       clearTimeout(timer);
       // After a signal, onSignal owns the exit: main must not go on to the next step.
       if (signalled) return;
       running = undefined;
-      done(ok && !timedOut);
+      done({ ...ended, ok: ended.code === 0 && !timedOut, timedOut });
     };
-    child.once("error", () => finish(false));
-    child.once("exit", (code) => finish(code === 0));
+    child.once("error", (error) => finish({ code: null, signal: null, error: error.message }));
+    child.once("exit", (code, signal) => finish({ code, signal }));
   });
+}
+
+/**
+ * Runs a command in `dir` with its stdout and stderr in `dir/<log>`, and returns how it ended and
+ * what it printed.
+ */
+async function logged(
+  cmd: string,
+  args: string[],
+  dir: string,
+  log: string,
+  timeoutMs: number,
+  env?: NodeJS.ProcessEnv,
+): Promise<Ran & { said: string }> {
+  const path = join(dir, log);
+  const fd = openSync(path, "w");
+  let ran: Ran;
+  try {
+    ran = await run(cmd, args, dir, timeoutMs, { stdout: fd, stderr: fd, ...(env && { env }) });
+  } finally {
+    closeSync(fd);
+  }
+  return { ...ran, said: readFileSync(path, "utf8") };
 }
 
 /** Offline first: in the test container, the store the image fetched is all there is. */
@@ -1043,15 +1117,8 @@ export const installArgs = (mode: (typeof INSTALL_MODES)[number]) => [
 
 /** Runs `pnpm <args>` in `dir`, and returns the end of what it said if it failed. */
 async function pnpmFailure(dir: string, args: string[], log: string): Promise<string | undefined> {
-  const path = join(dir, log);
-  const fd = openSync(path, "w");
-  let ok: boolean;
-  try {
-    ok = await run("pnpm", args, dir, INSTALL_TIMEOUT_MS, { stdout: fd, stderr: fd });
-  } finally {
-    closeSync(fd);
-  }
-  return ok ? undefined : indentedTail(readFileSync(path, "utf8"));
+  const { ok, said } = await logged("pnpm", args, dir, log, INSTALL_TIMEOUT_MS);
+  return ok ? undefined : indentedTail(said);
 }
 
 /**
@@ -1079,18 +1146,19 @@ async function install(dir: string): Promise<string | undefined> {
   );
 }
 
-const INSTALL_TAIL_LINES = 20;
+const TAIL_LINES = 20;
 
-/** The last lines of a command's output, indented, or a note that it printed nothing. */
-function indentedTail(text: string): string {
-  const lines = text
-    .trimEnd()
-    .split("\n")
-    .filter((line) => line.trim() !== "");
+/**
+ * The last lines of a command's output, printable and indented, or a note that it printed nothing.
+ */
+export function indentedTail(text: string): string {
+  const lines = printableLines(text)
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== "");
   if (lines.length === 0) return "  (nothing)";
   return lines
-    .slice(-INSTALL_TAIL_LINES)
-    .map((line) => `  ${line}`)
+    .slice(-TAIL_LINES)
+    .map((line) => `  ${clipped(line)}`)
     .join("\n");
 }
 
@@ -1223,21 +1291,16 @@ async function buildBinaries(
     ];
     const log = join(dir, `falsify-build-${profile}.log`);
     const fd = openSync(log, "w");
-    let ok: boolean;
-    let timedOut = false;
+    let ran: Ran;
     try {
-      ok = await run("pnpm", args, dir, CARGO_TIMEOUT_MS, {
-        env: rustEnv(top),
-        stderr: fd,
-        onTimeout: () => (timedOut = true),
-      });
+      ran = await run("pnpm", args, dir, CARGO_TIMEOUT_MS, { env: rustEnv(top), stderr: fd });
     } finally {
       closeSync(fd);
     }
-    if (!ok) {
+    if (!ran.ok) {
       const said = readFileSync(log, "utf8");
       const errors = cargoErrors(said);
-      const why = timedOut
+      const why = ran.timedOut
         ? `it timed out after ${CARGO_TIMEOUT_MS / 1000} s`
         : errors.length > 0
           ? `cargo said:\n${errors.map((line) => `  ${line}`).join("\n")}`
@@ -1298,18 +1361,13 @@ async function capture(
 ): Promise<{ ok: boolean; out: string; timedOut: boolean }> {
   const path = join(dir, file);
   const fd = openSync(path, "w");
-  let ok: boolean;
-  let timedOut = false;
+  let ran: Ran;
   try {
-    ok = await run(cmd, args, dir, options.timeoutMs, {
-      env: options.env,
-      stdout: fd,
-      onTimeout: () => (timedOut = true),
-    });
+    ran = await run(cmd, args, dir, options.timeoutMs, { env: options.env, stdout: fd });
   } finally {
     closeSync(fd);
   }
-  return { ok, out: readFileSync(path, "utf8"), timedOut };
+  return { ok: ran.ok, out: readFileSync(path, "utf8"), timedOut: ran.timedOut };
 }
 
 /**
@@ -1803,7 +1861,7 @@ async function main(args: string[]): Promise<number> {
     outcome: Outcome;
     unrelated?: boolean;
     unbuilt?: string[];
-    note?: string;
+    note?: string | undefined;
     failure?: string | undefined;
   }[] = [];
 
@@ -1846,11 +1904,13 @@ async function main(args: string[]): Promise<number> {
         built = made;
       }
       // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
-      const vitestOptions = runsBinaries
-        ? { env: { ...isolatedEnv(), BAZHEN_CLI: join(dir, "target", "release", "bazhen") } }
-        : {};
+      const vitestEnv = runsBinaries
+        ? { ...isolatedEnv(), BAZHEN_CLI: join(dir, "target", "release", "bazhen") }
+        : undefined;
+      // Each vitest step's output goes to a log beside its report, at the worktree's root: both
+      // are untracked there, nothing judged reads them, and they go with the worktree.
       const listFile = join(dir, "falsify-projects.json");
-      await run(
+      const listed = await logged(
         "pnpm",
         [
           "exec",
@@ -1861,27 +1921,38 @@ async function main(args: string[]): Promise<number> {
           ...new Set(targets.map((t) => t.file)),
         ],
         dir,
+        "falsify-vitest-list.log",
         VITEST_TIMEOUT_MS,
-        vitestOptions,
+        vitestEnv,
       );
-      let projects: Map<string, string[]>;
-      try {
-        projects = projectsOf(JSON.parse(readFileSync(listFile, "utf8")), [dir, realpathSync(dir)]);
-      } catch (error) {
+      const listing = readWritten(listFile);
+      let projects: Map<string, string[]> | undefined;
+      let why: string | undefined;
+      if (listing.kind === "json") {
+        try {
+          projects = projectsOf(listing.value, [dir, realpathSync(dir)]);
+        } catch (error) {
+          why = error instanceof Error ? error.message : String(error);
+        }
+      }
+      if (projects === undefined) {
         // Listing only globs the config's include patterns, so a failure is a fault, not a verdict.
-        const why = error instanceof Error ? error.message : String(error);
+        const reason =
+          (listed.ok ? why : undefined) ??
+          noOutputReason(listed, listing, "listing", VITEST_TIMEOUT_MS);
         console.error(
-          `falsify: \`vitest list\` couldn't name the projects of the tests to judge (${why}), so ` +
-            "none can be judged.",
+          `falsify: \`vitest list\` couldn't name the projects of the tests to judge (${reason}), so ` +
+            `none can be judged. The end of what it printed:\n${indentedTail(listed.said)}`,
         );
         return 1;
       }
       // One run per project, as its own pnpm script runs it: two projects' global setups in one
       // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).
       const report: VitestReport = { testResults: [] };
+      const unreported = new Map<string, string>();
       for (const [index, [project, inProject]] of [...projects].entries()) {
         const reportFile = join(dir, `falsify-report-${index}.json`);
-        await run(
+        const ran = await logged(
           "pnpm",
           [
             "exec",
@@ -1894,14 +1965,24 @@ async function main(args: string[]): Promise<number> {
             `--outputFile=${reportFile}`,
           ],
           dir,
+          `falsify-vitest-${index}.log`,
           VITEST_TIMEOUT_MS,
-          vitestOptions,
+          vitestEnv,
         );
-        try {
-          const parsed: unknown = JSON.parse(readFileSync(reportFile, "utf8"));
-          if (isReport(parsed)) report.testResults.push(...parsed.testResults);
-        } catch {
-          // No report at all: that run never got going, so each of its targets is INVALID.
+        const written = readWritten(reportFile);
+        if (written.kind === "json" && isReport(written.value)) {
+          report.testResults.push(...written.value.testResults);
+          continue;
+        }
+        // Each of the run's targets is INVALID: say why once, and name it on each.
+        const reason = noOutputReason(ran, written, "report", VITEST_TIMEOUT_MS);
+        const files = `${inProject.length} file${inProject.length === 1 ? "" : "s"}`;
+        console.error(
+          `falsify: the ${project} run (${files}) left no report: ${reason}. The end of what it ` +
+            `printed:\n${indentedTail(ran.said)}`,
+        );
+        for (const file of inProject) {
+          unreported.set(file, ` (no report from the ${project} run: ${reason})`);
         }
       }
       // A passing test that imports none of the reverted files is a test of code the branch didn't
@@ -1922,7 +2003,7 @@ async function main(args: string[]): Promise<number> {
           results.push({ ...t, outcome: "INVALID", unrelated: true });
         } else if (outcome === "KILLED" && unbuilt.length > 0) {
           results.push({ ...t, outcome: "INVALID", unbuilt, failure });
-        } else results.push({ ...t, outcome, failure });
+        } else results.push({ ...t, outcome, failure, note: unreported.get(t.file) });
       }
     } finally {
       cleanup?.();
