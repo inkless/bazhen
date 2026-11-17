@@ -171,8 +171,7 @@ fn is_ancestor(raw: i32) -> bool {
 #[cfg(target_os = "linux")]
 fn parent(pid: Pid) -> Option<Pid> {
     let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid())).ok()?;
-    let field = crate::start_time::stat_field(&stat, 4)?;
-    Pid::from_raw(std::str::from_utf8(field).ok()?.parse().ok()?)
+    Pid::from_raw(crate::start_time::parent_field(&stat)?)
 }
 
 #[cfg(target_os = "macos")]

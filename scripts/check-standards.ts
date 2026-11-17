@@ -711,6 +711,9 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::own_pid": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::parent_field": "proc_stat",
+  "crates/bazhen-holder/src/start_time.rs::has_exited": "proc_stat",
   "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
   "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
   "crates/bazhen-holder/src/process.rs::cmdline_args": "proc_args",
@@ -1115,11 +1118,11 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen/src/tasks.rs::read_file":
     "reads stdin or read_regular's bytes as lossy UTF-8 text, parsing none of them",
   "crates/bazhen-holder/src/guard.rs::parent":
-    "unfuzzed: parses stat_field's field 4 inline as a pid; move that parse into start_time.rs, under the proc_stat target",
+    "reads /proc/<pid>/stat for parent_field, which proc_stat fuzzes",
   "crates/bazhen-holder/src/process.rs::parent":
-    "unfuzzed: parses stat_field's fields 3 and 4 inline as a state and a pid; move that parse into start_time.rs, under the proc_stat target",
+    "reads /proc/<pid>/stat for has_exited and parent_field, which proc_stat fuzzes",
   "crates/bazhen-holder/src/session.rs::supported":
-    "unfuzzed: parses /proc/self/stat's first field inline as a pid; move that parse into start_time.rs, under the proc_stat target",
+    "reads /proc/self/stat for own_pid, which proc_stat fuzzes",
 };
 
 // An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
