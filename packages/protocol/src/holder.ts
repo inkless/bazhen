@@ -136,6 +136,18 @@ export function isOlderHolderMajor(
   return theirs !== undefined && mine !== undefined && theirs < mine;
 }
 
+/** The version that added `paste`, the gated paste. */
+export const HOLDER_PASTE_VERSION = "1.3";
+
+/**
+ * Whether `agreed`, the version a holder and this build settled on, has `paste`: one of its
+ * major at least as new as `HOLDER_PASTE_VERSION`. A major that comes after it says for itself,
+ * so until it does, false.
+ */
+export function holderHasPaste(agreed: string): boolean {
+  return negotiateHolder([agreed], [HOLDER_PASTE_VERSION]) === HOLDER_PASTE_VERSION;
+}
+
 /**
  * A byte offset in the terminal's output since its generation began. Safe integers only, the
  * same as a binary frame's u64 offset is held to when decoded.

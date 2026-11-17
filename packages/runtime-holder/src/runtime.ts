@@ -47,6 +47,7 @@ import {
 } from "@bazhen/host-guard";
 import {
   HOLDER_PROTOCOL_VERSION,
+  holderHasPaste,
   isOlderHolderMajor,
   type ExitStatus,
   type HolderHelloReply,
@@ -755,17 +756,25 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   /**
-   * Refuses every paste, once the text and the ref have been checked as for any runtime: a
-   * holder has no gate that checks, in the same turn as it types, that the program would read
-   * the paste as text, so nothing is typed without one.
+   * Pastes through the holder's gate, which types the text only if the program would read it as
+   * text now, checked in the turn that queues it; a `PasteRefused` with the holder's reason
+   * otherwise. A holder older than the gate refuses every paste.
    */
   async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {
     const refused = pasteTextRefusal(text, brackets);
     if (refused !== undefined) throw new RangeError(refused);
     await this.withProcess(ref, async (client) => {
-      if (client.hello.exit !== null) throw new ProcessState(ref.terminalId, "running");
+      const { exit, generation, version } = client.hello;
+      if (exit !== null) throw new ProcessState(ref.terminalId, "running");
+      if (!holderHasPaste(version)) {
+        throw new PasteRefused(
+          "this terminal's holder predates gated paste; restart the terminal to paste",
+        );
+      }
+      await client.paste({ generation, text, brackets }).catch((error: unknown) => {
+        throw pasteRefusal(ref, error);
+      });
     });
-    throw new PasteRefused("a holder terminal has no paste gate");
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
@@ -809,6 +818,17 @@ function refusal(ref: RuntimeRef, error: unknown): unknown {
   if (error.code === "stale-generation")
     return new StaleIncarnation(ref.terminalId, "process-replaced");
   return error;
+}
+
+/** A paste's refusal: one the gate made, or the holder had no engine to decide by, is a PasteRefused. */
+function pasteRefusal(ref: RuntimeRef, error: unknown): unknown {
+  if (
+    error instanceof HolderRequestError &&
+    (error.code === "not-ready" || error.code === "unavailable")
+  ) {
+    return new PasteRefused(error.reason);
+  }
+  return refusal(ref, error);
 }
 
 /**

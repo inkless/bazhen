@@ -115,7 +115,11 @@ const harness: SnapshotHarness = {
   forge: (ref: Ref) => ({ ...ref, locator: { ...ref.locator, holderStart: "1" } }),
   placeOf: (ref) => ref.locator.socket,
   exitMayBeUnknown: false,
-  pastes: false,
+  // Out of canonical mode, as a line editor at its prompt is, or the gate refuses the paste.
+  pasteReader: {
+    argv: ["sh", "-c", "stty -icanon -echo && printf 'paste-ready\\n' && exec cat"],
+    ready: "paste-ready",
+  },
   // Resolved, as the OS reports a process's directory: macOS's /tmp is a link to /private/tmp.
   cwd: realpathSync(userDir(testHome())),
   waitMs: 10_000,
@@ -124,6 +128,29 @@ const harness: SnapshotHarness = {
 
 runtimeContract("HolderRuntime", harness);
 snapshotContract("HolderRuntime", harness);
+
+describe("HolderRuntime: pasting into a program the gate refuses", () => {
+  it("refuses a paste into a program reading whole lines as PasteRefused, saying why", async () => {
+    const holders = holderRuntime();
+    onTestFinished(() => holders.dispose());
+    const { runtime } = holders;
+    // Canonical from the start, as every terminal is: a paste here would be read as a line.
+    const ref = await runtime.create({
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["cat"],
+      cwd: harness.cwd,
+      env: {},
+      size: { cols: 80, rows: 24 },
+      generation: 0,
+      historyLines: 10_000,
+    });
+    await expect(runtime.paste(ref, "echo pasted", true)).rejects.toMatchObject({
+      name: "PasteRefused",
+      message: "the program reads whole lines, not at a line editor",
+    });
+  });
+});
 
 describe("HolderRuntime: watching an agent's title", () => {
   it("hears each title its program sets, though it never subscribed, and a respawn's reset", async () => {

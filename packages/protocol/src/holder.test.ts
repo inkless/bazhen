@@ -15,6 +15,7 @@ import {
   HolderStats,
   HolderSubscribeRequest,
   hasLoneSurrogate,
+  holderHasPaste,
   isOlderHolderMajor,
   negotiateHolder,
 } from "./holder.ts";
@@ -72,6 +73,19 @@ describe("hasLoneSurrogate", () => {
     const depth = 200_000;
     const deep: unknown = JSON.parse(`${"[".repeat(depth)}"\ud800"${"]".repeat(depth)}`);
     expect(hasLoneSurrogate(deep)).toBe(true);
+  });
+});
+
+describe("holderHasPaste", () => {
+  it("is true from the paste's version on in its major, and false in any other", () => {
+    expect(["1.2", "1.3", "1.10", "2.0", "0.9", "x"].map(holderHasPaste)).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
 });
 
