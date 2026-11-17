@@ -11,6 +11,8 @@ import {
   isRevertible,
   manifestNames,
   namedBinaries,
+  workspaceBins,
+  workspaceExports,
   newTitles,
   parseArgs,
   parseNameStatus,
@@ -449,6 +451,50 @@ describe("namedBinaries", () => {
   });
 });
 
+describe("workspaceExports", () => {
+  it("maps each package specifier its exports name to the file, and skips a package without", () => {
+    const manifests = [
+      {
+        dir: "packages/protocol",
+        text: JSON.stringify({
+          name: "@bazhen/protocol",
+          exports: { ".": "./src/index.ts", "./id": "./src/id.ts" },
+        }),
+      },
+      { dir: "apps/web", text: JSON.stringify({ name: "@bazhen/web" }) },
+    ];
+    expect(workspaceExports(manifests)).toEqual({
+      "@bazhen/protocol": "packages/protocol/src/index.ts",
+      "@bazhen/protocol/id": "packages/protocol/src/id.ts",
+    });
+  });
+});
+
+describe("workspaceBins", () => {
+  it("maps each binary target to its package, and no library", () => {
+    const metadata = {
+      packages: [
+        {
+          name: "bazhen-holder-engine",
+          targets: [
+            { name: "bazhen_holder_engine", kind: ["lib"] },
+            { name: "bazhen-holder-replay", kind: ["bin"] },
+          ],
+        },
+        { name: "bazhen", targets: [{ name: "bazhen", kind: ["bin"] }] },
+      ],
+    };
+    expect([...workspaceBins(metadata)]).toEqual([
+      ["bazhen-holder-replay", "bazhen-holder-engine"],
+      ["bazhen", "bazhen"],
+    ]);
+  });
+
+  it("refuses what isn't a listing, rather than read it as no binaries", () => {
+    expect(() => workspaceBins({ error: "no manifest" })).toThrow(/not a cargo metadata listing/);
+  });
+});
+
 describe("manifestNames", () => {
   it("gives the package's name and each binary's, and no dependency's", () => {
     const manifest = [
@@ -473,6 +519,7 @@ describe("binariesOf", () => {
     "tests/x/spawns.test.ts": 'const main = join(repo, "apps/d/src/main.ts");',
     "apps/d/src/main.ts": 'import "./h.ts";',
     "apps/d/src/h.ts": 'const H = new URL("../../../target/release-holder/h", import.meta.url);',
+    "tests/x/package.test.ts": 'import { h } from "@bazhen/d/h";',
   };
   const read = (path: string) => files[path];
 
@@ -481,6 +528,12 @@ describe("binariesOf", () => {
       direct: ["debug/b", "release/c"],
       reached: ["debug/b", "release/c", "release/d"],
     });
+  });
+
+  it("follows a workspace package's export as it follows a relative import", () => {
+    expect(
+      binariesOf("tests/x/package.test.ts", read, { "@bazhen/d/h": "apps/d/src/h.ts" }),
+    ).toEqual({ direct: ["release-holder/h"], reached: ["release-holder/h"] });
   });
 
   it("reaches what a source file it names by its path from the root leads to", () => {

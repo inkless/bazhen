@@ -56,7 +56,8 @@ case "$1" in
     exit 0
     ;;
   run)
-    echo "BUILD: $2 $3 $4 in $(pwd) to $CARGO_TARGET_DIR" >> "$STUB_LOG"
+    shift
+    echo "BUILD: $* in $(pwd) to $CARGO_TARGET_DIR" >> "$STUB_LOG"
     if [ "\${STUB_FAIL_BUILD:-}" = 1 ]; then
       echo "   Compiling bazhen v0.1.0" >&2
       echo "error[E0425]: cannot find value \\\`x\\\` in this scope" >&2
@@ -72,13 +73,18 @@ case "$1" in
         exit 101
       fi
     done
-    folder="$4"
+    folder="$3"
     [ "$folder" = dev ] && folder=debug
     mkdir -p "$CARGO_TARGET_DIR/$folder"
-    for main in crates/*/src/main.rs; do
-      [ -e "$main" ] || continue
-      crate="\${main#crates/}"
-      bin="$CARGO_TARGET_DIR/$folder/\${crate%%/*}"
+    names=""
+    previous=""
+    for arg in "$@"; do
+      [ "$previous" = --bin ] && names="$names $arg"
+      previous="$arg"
+    done
+    for name in $names; do
+      main="crates/$name/src/main.rs"
+      bin="$CARGO_TARGET_DIR/$folder/$name"
       printf '#!/bin/sh\\necho "BUILT FROM: %s"\\n' "$(cat "$main")" > "$bin"
       chmod +x "$bin"
       if [ "\${STUB_RELATIVE_DEPINFO:-}" = 1 ]; then
@@ -182,6 +188,26 @@ if [ -e bin-tests.txt ]; then printf ','; suite hook::bin/hook bin-tests.txt; fi
 printf '}}'
 `;
 
+// \`cargo metadata\`: each crate whose manifest is \`[package]\\nname = "<crate's folder>"\`, with a
+// binary of that name when it has a src/main.rs.
+const STUB_CARGO = `#!/bin/sh
+echo "CARGO: $*" >> "$STUB_LOG"
+[ "$1" = metadata ] || exit 1
+[ "\${STUB_FAIL_METADATA:-}" = 1 ] && exit 101
+printf '{"packages":['
+sep=""
+for manifest in crates/*/Cargo.toml; do
+  [ -e "$manifest" ] || continue
+  crate="\${manifest#crates/}"
+  crate="\${crate%%/*}"
+  kind=lib
+  [ -e "crates/$crate/src/main.rs" ] && kind=bin
+  printf '%s{"name":"%s","targets":[{"name":"%s","kind":["%s"]}]}' "$sep" "$crate" "$crate" "$kind"
+  sep=","
+done
+printf ']}'
+`;
+
 const STUB_MUTANTS = `#!/bin/sh
 echo "MUTANTS: $*" >> "$STUB_LOG"
 [ "\${STUB_MUTANTS_FAIL:-}" = 1 ] && exit 1
@@ -245,6 +271,8 @@ beforeEach(() => {
   chmodSync(join(root, "bin/cargo-nextest"), 0o755);
   write(root, "bin/cargo-mutants", STUB_MUTANTS);
   chmodSync(join(root, "bin/cargo-mutants"), 0o755);
+  write(root, "bin/cargo", STUB_CARGO);
+  chmodSync(join(root, "bin/cargo"), 0o755);
   writeFileSync(fx.log, "");
 
   mkdirSync(fx.repo);
@@ -1222,7 +1250,8 @@ describe("falsify on a branch with a new CLI test", () => {
       status: result.status,
       killed: result.output.includes(`KILLED   ${CLI_TEST} › caps`),
       built: new RegExp(
-        `^BUILD: build:bins --profile release in ${worktree} to ${fx.linked}/target/falsify$`,
+        `^BUILD: build:bins --profile release -p bazhen --bin bazhen in ${worktree} to ` +
+          `${fx.linked}/target/falsify$`,
         "m",
       ).test(stubLog()),
       ran: new RegExp(`^CLI: ${worktree}/target/release/bazhen\n`, "m").test(stubLog()),
@@ -1348,6 +1377,12 @@ function changeHook(
     "crates/holder/Cargo.toml": '[package]\nname = "holder"\n',
     [HOOK_HELPER]: `export const hook = ${helper};\n`,
     "apps/daemon/src/mailbox/via.ts": 'export { hook } from "./hook-command.ts";\n',
+    "apps/daemon/package.json": JSON.stringify({
+      name: "@bazhen/daemon",
+      exports: { "./hook": "./src/mailbox/hook-command.ts" },
+    }),
+    "crates/bazhen-peer/Cargo.toml": '[package]\nname = "bazhen-peer"\n',
+    "crates/bazhen-peer/src/main.rs": "fn main() { peer }\n",
   };
   for (const [path, text] of Object.entries(tree)) write(fx.linked, path, text);
   git(fx.linked, "add", ...Object.keys(tree));
@@ -1439,7 +1474,51 @@ describe("falsify on a branch with a new test that runs a binary", () => {
       ranBase: stubLog().includes(
         "RAN target/debug/bazhen-hook: BUILT FROM: fn main() { old hook }",
       ),
-    }).toEqual({ status: 0, builds: ["BUILD: build:bins --profile dev in "], ranBase: true });
+    }).toEqual({
+      status: 0,
+      builds: ["BUILD: build:bins --profile dev -p bazhen-hook --bin bazhen-hook in "],
+      ranBase: true,
+    });
+  });
+
+  it("builds only the binaries the test reaches, not the rest of the workspace's", () => {
+    const result = changeHook(HOOK_MAIN);
+    expect({
+      status: result.status,
+      builds: stubLog().match(/^BUILD: .*? in /gm),
+      ranPeer: stubLog().includes("RAN target/release/bazhen-peer"),
+    }).toEqual({
+      status: 0,
+      builds: ["BUILD: build:bins --profile release -p bazhen-hook --bin bazhen-hook in "],
+      ranPeer: false,
+    });
+  });
+
+  it("follows a workspace package's export to the binary its file names", () => {
+    const result = changeHook(
+      HOOK_MAIN,
+      { STUB_STATUS: "passed" },
+      { imports: 'import { hook } from "@bazhen/daemon/hook";\n' },
+    );
+    expect({
+      result,
+      ranBase: stubLog().includes(
+        "RAN target/release/bazhen-hook: BUILT FROM: fn main() { old hook }",
+      ),
+    }).toEqual({
+      result: { status: 1, output: expect.stringContaining(`SURVIVED ${HOOK_TEST} › caps`) },
+      ranBase: true,
+    });
+  });
+
+  it("fails without a verdict when cargo can't list the base's binaries", () => {
+    const result = changeHook(HOOK_MAIN, { STUB_FAIL_METADATA: "1" });
+    expect({
+      status: result.status,
+      said: result.output.includes("couldn't list the base's binaries"),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+      built: stubLog().includes("BUILD:"),
+    }).toEqual({ status: 1, said: true, verdict: false, built: false });
   });
 
   it("builds nothing for a path into target/ that names no crate's binary", () => {
@@ -1498,6 +1577,8 @@ const MENTIONS_TARGET = [
   "tests/cli/fixtures.ts",
 ];
 const FALSIFY_TESTS = ["scripts/falsify.medium.test.ts", "scripts/falsify.test.ts"];
+// Any spelling of a path into target/: a quoted or slashed `target/`, or "target" joined to more.
+const TARGET_MENTION = /["'`/]target\/|["']target["']\s*[,+]/;
 /** The binaries a file names, except the fixtures of falsify's own tests. */
 const named = (path: string, text: string) =>
   FALSIFY_TESTS.includes(path) ? [] : namedBinaries(path, text).toSorted();
@@ -1545,9 +1626,19 @@ describe("the repository's tests that run a binary", () => {
     expect(names.filter((name) => !declared.includes(name))).toEqual([]);
   });
 
+  it("reach a binary however a test's helper spells its path, or fail here", () => {
+    const spellings = [
+      'join(repo, "target", "release", name)',
+      '"target/" + profile',
+      "`${root}/target/${profile}/bazhen`",
+      "`target/${profile}/bazhen`",
+    ];
+    expect(spellings.filter((s) => TARGET_MENTION.test(s))).toEqual(spellings);
+  });
+
   it("mention a target/ path nowhere else", () => {
     const mentions = files
-      .filter(({ text }) => /\btarget\/[\w-]+\//.test(text))
+      .filter(({ text }) => TARGET_MENTION.test(text))
       .map(({ path }) => path)
       .filter((path) => !(path in RUNS_BINARIES));
     expect(mentions).toEqual(MENTIONS_TARGET);

@@ -482,20 +482,44 @@ export const manifestNames = (manifest: string): string[] =>
   [...manifest.matchAll(/^name\s*=\s*"([^"]+)"/gm)].map(([, name = ""]) => name);
 
 /**
- * The binaries the test at `testPath` names `direct`ly, itself or in a file it imports by a
- * relative path, and every one it `reaches`: named by anything its relative imports, or the
- * source files named by their path from the repository's root (`apps/daemon/src/main.ts`, which a
- * test spawns), lead to, followed to their end. `read` returns a file's text, or undefined where
- * there is none.
+ * The file each workspace package specifier names, from each package's `exports` map, as
+ * `@bazhen/protocol/id` → `packages/protocol/src/id.ts`. `manifests` are the packages' folders
+ * and their package.json text.
+ */
+export function workspaceExports(
+  manifests: readonly { dir: string; text: string }[],
+): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const { dir, text } of manifests) {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const name = "name" in parsed ? parsed.name : undefined;
+    const exports = "exports" in parsed ? parsed.exports : undefined;
+    if (typeof name !== "string" || typeof exports !== "object" || exports === null) continue;
+    for (const [subpath, file] of Object.entries(exports)) {
+      if (typeof file !== "string") continue;
+      files[`${name}${subpath.slice(1)}`] = posix.join(dir, file);
+    }
+  }
+  return files;
+}
+
+/**
+ * The binaries the test at `testPath` names `direct`ly, itself or in a file it imports, and every
+ * one it `reaches`: named by anything its imports, or the source files named by their path from
+ * the repository's root (`apps/daemon/src/main.ts`, which a test spawns), lead to, followed to
+ * their end. An import is relative, or a workspace package's, as `exports` maps it to a file.
+ * `read` returns a file's text, or undefined where there is none.
  */
 export function binariesOf(
   testPath: string,
   read: (path: string) => string | undefined,
+  exports: Readonly<Record<string, string>> = {},
 ): { direct: string[]; reached: string[] } {
   const direct = new Set<string>();
   const reached = new Set<string>();
   const seen = new Set([testPath]);
-  // Each file with whether its binaries are the test's own: the test's, or a relative import's.
+  // Each file with whether its binaries are the test's own: the test's, or one it imports's.
   const queue: [string, boolean][] = [[testPath, true]];
   const visit = (path: string | undefined, own: boolean) => {
     if (path === undefined || seen.has(path)) return;
@@ -511,11 +535,10 @@ export function binariesOf(
       if (own) direct.add(binary);
     }
     for (const specifier of runtimeSpecifiers(source)) {
-      if (!specifier.startsWith(".")) continue;
-      visit(
-        namedPaths(path, specifier).find((c) => read(c) !== undefined),
-        own && path === testPath,
-      );
+      const imported = specifier.startsWith(".")
+        ? namedPaths(path, specifier).find((c) => read(c) !== undefined)
+        : exports[specifier];
+      visit(imported, own && path === testPath);
     }
     for (const [, named = ""] of source.matchAll(ROOT_SOURCE)) visit(named, false);
   }
@@ -785,23 +808,86 @@ function eachDepInfo(target: string, each: (folder: string, name: string) => voi
 }
 
 /**
- * Builds every binary in the worktree `dir` in each of `profiles`, with its own `build:bins`
- * script, copies each one this run built to the worktree's own target/, and returns them with what
- * each was built from; or undefined, with the reason printed, so no test is judged against a
- * binary that isn't the base's.
+ * Each binary `cargo metadata` lists in the workspace, mapped to its package. Throws on anything
+ * that isn't such a listing, so one that went wrong is never read as a workspace without binaries.
+ */
+export function workspaceBins(metadata: unknown): Map<string, string> {
+  const packages =
+    typeof metadata === "object" && metadata !== null && "packages" in metadata
+      ? metadata.packages
+      : undefined;
+  if (!Array.isArray(packages)) throw new Error("not a cargo metadata listing: no packages");
+  const bins = new Map<string, string>();
+  for (const pkg of packages as unknown[]) {
+    const name = typeof pkg === "object" && pkg !== null && "name" in pkg ? pkg.name : undefined;
+    const targets =
+      typeof pkg === "object" && pkg !== null && "targets" in pkg ? pkg.targets : undefined;
+    if (typeof name !== "string" || !Array.isArray(targets)) {
+      throw new Error("not a cargo metadata listing: a package without a name or targets");
+    }
+    for (const t of targets as unknown[]) {
+      if (typeof t !== "object" || t === null || !("name" in t) || !("kind" in t)) continue;
+      if (typeof t.name === "string" && Array.isArray(t.kind) && t.kind.includes("bin")) {
+        bins.set(t.name, name);
+      }
+    }
+  }
+  return bins;
+}
+
+/**
+ * Builds `wanted` (`<profile>/<name>`) in the worktree `dir`, those the base's workspace has, with
+ * its own `build:bins` script, copies each one to the worktree's own target/, and returns them
+ * with what each was built from; or undefined, with the reason printed, so no test is judged
+ * against a binary that isn't the base's.
  */
 async function buildBinaries(
   dir: string,
   top: string,
-  profiles: readonly string[],
+  wanted: readonly string[],
 ): Promise<Built | undefined> {
   if (refusesCargoConfig(dir, "builds the base's binaries")) return undefined;
+  const listed = await capture(
+    "cargo",
+    ["metadata", "--no-deps", "--format-version", "1", "--offline"],
+    dir,
+    "falsify-metadata.json",
+    { env: rustEnv(top), timeoutMs: CARGO_TIMEOUT_MS },
+  );
+  let bins: Map<string, string>;
+  try {
+    if (!listed.ok) throw new Error("it failed");
+    bins = workspaceBins(JSON.parse(listed.out));
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    console.error(
+      `falsify: \`cargo metadata\` couldn't list the base's binaries (${why}), so the tests that ` +
+        "run one can't be judged.",
+    );
+    return undefined;
+  }
   const target = cargoTarget(top);
   // Cargo writes a binary's dep-info on every build, a no-op one included, so the ones that come
   // back mark what this run built; one left by an earlier run would name another worktree's files.
   eachDepInfo(target, (folder, name) => rmSync(join(folder, name), { force: true }));
-  for (const profile of profiles) {
-    const args = ["run", "build:bins", "--profile", profile];
+  const requested: string[] = [];
+  for (const [folder, profile] of Object.entries(PROFILES)) {
+    // A binary the base doesn't have isn't built; a test that runs it gets no verdict.
+    const names = wanted.flatMap((w) => {
+      const name = w.slice(folder.length + 1);
+      return w.startsWith(`${folder}/`) && bins.has(name) ? [name] : [];
+    });
+    if (names.length === 0) continue;
+    requested.push(...names.map((name) => `${folder}/${name}`));
+    const packages = [...new Set(names.map((name) => bins.get(name) ?? ""))];
+    const args = [
+      "run",
+      "build:bins",
+      "--profile",
+      profile,
+      ...packages.flatMap((p) => ["-p", p]),
+      ...names.flatMap((name) => ["--bin", name]),
+    ];
     const log = join(dir, `falsify-build-${profile}.log`);
     const fd = openSync(log, "w");
     let ok: boolean;
@@ -854,10 +940,12 @@ async function buildBinaries(
     );
     return undefined;
   }
-  if (built.size === 0) {
+  const unrecorded = requested.filter((binary) => !built.has(binary));
+  if (unrecorded.length > 0) {
     console.error(
-      `falsify: the base's binaries built, but cargo wrote no dep-info under ${target}, so what ` +
-        "they were built from is unknown and no test that runs one can be judged.",
+      `falsify: the base's binaries built, but cargo wrote no dep-info under ${target} for ` +
+        `${unrecorded.join(", ")}, so what they were built from is unknown and no test that runs ` +
+        "one can be judged.",
     );
     return undefined;
   }
@@ -1311,21 +1399,22 @@ async function main(args: string[]): Promise<number> {
       .flatMap((path) => manifestNames(atHead(path) ?? "")),
   );
   const isBinary = (binary: string) => crateNames.has(binary.slice(binary.indexOf("/") + 1));
+  const exports = workspaceExports(
+    [...headFiles]
+      .filter((path) => /^(?:apps|packages)\/[^/]+\/package\.json$/.test(path))
+      .map((path) => ({ dir: posix.dirname(path), text: atHead(path) ?? "{}" })),
+  );
   const binaries = new Map(
     targets.map((t) => {
-      const { direct, reached } = binariesOf(t.file, atHead);
+      const { direct, reached } = binariesOf(t.file, atHead, exports);
       return [t.file, { direct: direct.filter(isBinary), reached: reached.filter(isBinary) }];
     }),
   );
-  // Built only in the profiles a judged test may run a binary from: each is a whole build.
-  const profiles = [
-    ...new Set(
-      [...binaries.values()].flatMap((b) =>
-        b.reached.flatMap((binary) => PROFILES[binary.split("/")[0] ?? ""] ?? []),
-      ),
-    ),
-  ];
-  const runsBinaries = profiles.length > 0;
+  // Only the binaries a judged test may run are built: a release build links each with LTO.
+  const wanted = [...new Set([...binaries.values()].flatMap((b) => b.reached))].filter(
+    (binary) => PROFILES[binary.slice(0, binary.indexOf("/"))] !== undefined,
+  );
+  const runsBinaries = wanted.length > 0;
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
   const reverts = revertsOf(changes, { rust: runsBinaries });
   if (targets.length > 0 && reverts.length > 0) {
@@ -1412,7 +1501,7 @@ async function main(args: string[]): Promise<number> {
       }
       let built: Built = new Map();
       if (runsBinaries) {
-        const made = await buildBinaries(dir, top, profiles);
+        const made = await buildBinaries(dir, top, wanted);
         if (made === undefined) return 1;
         built = made;
       }
