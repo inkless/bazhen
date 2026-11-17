@@ -55,8 +55,11 @@ interface Moving {
    * It is never given up on: that would let the mail go to a thread the TUI may have left.
    */
   unread?: boolean;
-  /** Its agent was said, once, to keep its mail held past the give-up time. */
-  told?: boolean;
+  /**
+   * Its agent was said to keep its mail held while its title can't be read, and the activity
+   * detail it had before, put back once the title is read.
+   */
+  told?: { readonly detail: string | undefined } | undefined;
 }
 
 /** How many new thread ids are kept to resolve titles against; the oldest go first. */
@@ -70,6 +73,7 @@ const LIST_PAGE = 50;
 const LIST_PAGES = 40;
 
 export const UNTRACKED = "thread switches are not being tracked";
+export const MAIL_HELD = "its title can't be read, so its mail is held";
 
 /**
  * Follows a Codex TUI from thread to thread (foundation-design §5.8, C6). The TUI keeps its
@@ -218,7 +222,7 @@ export class CodexThreads {
     const title = await runtime.title(agent.runtime);
     if (this.replaced(terminal, agent.generation)) return this.settle(terminal);
     const unread = this.moving.get(terminal);
-    if (unread !== undefined) unread.unread = false;
+    if (unread !== undefined) this.read(unread);
     const gaveUpOn = this.gaveUp.get(terminal);
     this.gaveUp.delete(terminal);
     // The TUI empties its title as it exits, which names no thread to follow.
@@ -361,24 +365,34 @@ export class CodexThreads {
         (agentId === undefined ? undefined : this.move(terminal, agentId, null));
       if (m === undefined) return;
       m.unread = true;
+      // Before anything that can throw, so it is followed again whatever happens here.
       this.later(terminal, m);
+      if (m.told !== undefined) return;
+      m.told = { detail: this.opts.store.latestActivity(m.agentId)?.detail };
+      this.log(`codex: agent ${m.agentId} keeps its mail held: ${MAIL_HELD}`);
+      this.describe(m.agentId, MAIL_HELD);
     } catch (err) {
       this.log(`codex: terminal ${terminal} could not be followed again: ${String(err)}`);
     }
   }
 
+  /** The terminal's title was read: the agent's detail from before its mail was held is back. */
+  private read(m: Moving): void {
+    m.unread = false;
+    const { told } = m;
+    m.told = undefined;
+    if (told === undefined) return;
+    if (this.opts.store.latestActivity(m.agentId)?.detail === MAIL_HELD)
+      this.describe(m.agentId, told.detail);
+  }
+
   /**
    * Follows the terminal again after a wait, or, past the give-up time, leaves the agent on its
    * thread and lets its held mail go there. A terminal whose title can't be read keeps its mail
-   * held, and says so once.
+   * held for as long as it can't.
    */
   private later(terminal: TerminalId, m: Moving): void {
-    const overdue = Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS);
-    if (overdue && m.unread === true && m.told !== true) {
-      m.told = true;
-      this.untracked(m.agentId, "its title can't be read, so its mail is held");
-    }
-    if (overdue && m.unread !== true) {
+    if (m.unread !== true && Date.now() - m.since >= (this.opts.giveUpMs ?? RESUME_GIVE_UP_MS)) {
       this.settle(terminal);
       if (m.prefix !== null) this.gaveUp.set(terminal, m.prefix);
       const why =
@@ -446,6 +460,18 @@ export class CodexThreads {
       confidence: latest?.confidence ?? 1,
       observedAt: new Date().toISOString(),
       detail: UNTRACKED,
+    });
+  }
+
+  /** The agent's activity as it is, with `detail` in place of whatever detail it had. */
+  private describe(agentId: string, detail: string | undefined): void {
+    const latest = this.opts.store.latestActivity(agentId);
+    this.opts.store.recordActivity(agentId, {
+      value: latest?.value ?? "unknown",
+      source: latest?.source ?? "native",
+      confidence: latest?.confidence ?? 1,
+      observedAt: new Date().toISOString(),
+      ...(detail !== undefined && { detail }),
     });
   }
 }

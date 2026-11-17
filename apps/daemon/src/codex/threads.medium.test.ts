@@ -15,7 +15,7 @@ import {
 import { localEnvironmentId } from "../agents/launch.ts";
 import { Readiness } from "../agents/readiness.ts";
 import { ThreadHeld } from "../store/store.ts";
-import { CodexThreads, UNTRACKED } from "./threads.ts";
+import { CodexThreads, MAIL_HELD, UNTRACKED } from "./threads.ts";
 
 const A = "01a1ce15-39c0-7183-b5b6-f6f2f0000001";
 const B = "01a1ce15-6f85-7482-9722-6f4f70000002";
@@ -122,7 +122,8 @@ async function setup(opts: {
   const announce = (id: string, extra: object = {}) =>
     threads.listener.notification?.("thread/started", started(id, extra));
   const boundTo = () => store.codexThread(agentId);
-  const untracked = () => store.latestActivity(agentId)?.detail === UNTRACKED;
+  const detail = () => store.latestActivity(agentId)?.detail;
+  const untracked = () => detail() === UNTRACKED;
   const held = () => threads.held(agentId);
   const lifecycle = () => store.snapshot(testView).agents.find((a) => a.id === agentId)?.state;
   return {
@@ -133,6 +134,7 @@ async function setup(opts: {
     announce,
     boundTo,
     untracked,
+    detail,
     resumed,
     lists,
     titled,
@@ -387,7 +389,12 @@ describe("Codex thread switches", () => {
     await s.threads.titleChanged(s.terminal);
     expect(s.held()).toBe(true);
     await expect.poll(s.held).toBe(false);
-    expect([s.boundTo(), s.released, waits()]).toEqual([A, [s.agentId, s.agentId], 1]);
+    expect([s.boundTo(), s.released, waits(), s.untracked()]).toEqual([
+      A,
+      [s.agentId, s.agentId],
+      1,
+      true,
+    ]);
   });
 
   it("lets mail go at give-up, and moves the agent once the thread its title names is announced", async () => {
@@ -484,13 +491,28 @@ describe("Codex thread switches", () => {
     const s = await setup({ titles: [shown(B), GONE], unsaved: 1, giveUpMs: 20 });
     s.announce(B);
     await s.threads.titleChanged(s.terminal);
-    await expect.poll(s.untracked).toBe(true);
     await expect.poll(() => s.titled.length).toBeGreaterThan(5);
     const said = s.logged.filter((line) => line.includes("mail is held"));
-    expect([s.boundTo(), s.held(), s.released, said.length]).toEqual([A, true, [], 1]);
+    expect([s.boundTo(), s.held(), s.released, said.length, s.detail()]).toEqual([
+      A,
+      true,
+      [],
+      1,
+      MAIL_HELD,
+    ]);
     s.titles.splice(0, s.titles.length, shown(B));
     await expect.poll(s.boundTo).toBe(B);
-    expect([s.held(), s.released, s.untracked()]).toEqual([false, [s.agentId], false]);
+    expect([s.held(), s.released, s.detail()]).toEqual([false, [s.agentId], undefined]);
+  });
+
+  it("says at the first title read that fails, not at the give-up time, that the agent's mail is held", async () => {
+    const s = await setup({ titles: [GONE, shown(B)], retryMs: 60_000 });
+    s.announce(B);
+    await s.threads.titleChanged(s.terminal);
+    const said = s.logged.filter((line) => line.includes("mail is held"));
+    expect([s.held(), said.length, s.detail()]).toEqual([true, 1, MAIL_HELD]);
+    await s.threads.titleChanged(s.terminal);
+    expect([s.boundTo(), s.held(), s.detail()]).toEqual([B, false, undefined]);
   });
 
   it("holds an agent's mail at start while its title can't be read, and moves it once it reads", async () => {
