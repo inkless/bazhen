@@ -472,10 +472,12 @@ What differs:
     for it: `pane_title::body` takes the pane id tmux passes as an argument, so
     `crates/bazhen-hook/fuzz/fuzz_targets/pane_title.rs` drives it.
   - **The rule is a reviewer's net, not a proof.** It reads signatures and the names of reads in a
-    body, so it can't see a function a macro generates, or a read through a wrapper whose method
-    isn't named as a read (a `next_message()`). A read is a method given something to read into, so
-    a channel's `recv()`, an iterator's `peek()` and `OpenOptions::read(true)` aren't reads, and
-    neither is a bare call to a function of the same file, which is read where it is defined. Review
+    body, so it can't see a function a macro generates, a read through a wrapper whose method
+    isn't named as a read (a `next_message()`), or another crate's match on an enum that carries
+    bytes: a variant's fields are public wherever the enum is, and carriers are read per crate. A
+    read is a method given something to read into, so a channel's `recv()`, an iterator's `peek()`
+    and `OpenOptions::read(true)` aren't reads, and neither is a bare call to a function of the
+    same file, which is read where it is defined. Review
     checks those by hand. Two looser edges are known, and review covers them too: a target that
     names a type and calls `.decode(` on a value counts as driving that type's `decode`, so the
     reviewer checks the value is of the listed type; and a method that only measures or clears a
