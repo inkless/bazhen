@@ -321,17 +321,17 @@ pub struct RenameAgentRequest {
     pub name: AgentName,
 }
 
-/// What a command on an agent produced: the events it recorded, none if there was nothing to do.
 /// Who the daemon takes the request that asked to be: an agent, or the human as none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallerResponse {
-    /// Required, null for the human: a refusal's body, which the CLI reads whatever its status,
-    /// holds no `agentId`, and must not read as the human.
+    /// Required, null for the human: optional, any JSON object would read as the human, such as
+    /// a success from another build that holds no `agentId`.
     #[serde(deserialize_with = "Option::deserialize")]
     pub agent_id: Option<AgentId>,
 }
 
+/// What a command on an agent produced: the events it recorded, none if there was nothing to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCommandResponse {
