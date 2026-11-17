@@ -68,3 +68,24 @@ export function rustCode(source: string, strings: string[] = [], raw: boolean[] 
   }
   return out;
 }
+
+/**
+ * The index just past the item starting at `start`: past its `{ … }` body, or its `;`. Only `(`
+ * and `[` are counted on the way, since a `<` in an item may be a comparison, not a generic.
+ */
+export function itemEnd(code: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < code.length; i++) {
+    const c = code[i];
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (c === ";" && depth <= 0) return i + 1;
+    else if (c === "{" && depth <= 0) {
+      for (let braces = 0; i < code.length; i++) {
+        if (code[i] === "{") braces++;
+        else if (code[i] === "}" && --braces === 0) return i + 1;
+      }
+    }
+  }
+  return code.length;
+}

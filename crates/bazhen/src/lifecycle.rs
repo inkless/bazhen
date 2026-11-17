@@ -33,11 +33,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Fa
 }
 
 /// Prints what a verb answered, or why it stopped, with `usage_text` under a usage mistake.
-pub(crate) fn answer(
-    step: Result<String, Stop>,
-    usage_text: &str,
-    out: &mut Out,
-) -> Result<Exit, Failed> {
+pub(crate) fn answer(step: Step<String>, usage_text: &str, out: &mut Out) -> Result<Exit, Failed> {
     match step {
         Ok(text) => {
             out.line(&text);
