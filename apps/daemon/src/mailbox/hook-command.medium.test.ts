@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -465,6 +465,41 @@ describe.each(clients)("hook client (%s)", { timeout: 30_000 }, (_kind, client) 
         BAZHEN_SOCKET: socket,
       }),
     ).toEqual(QUIET);
+  });
+});
+
+/**
+ * A curl that appends each header file it is handed (`-H @file`) to `headers` in `at`, and fails to
+ * connect, so the script's own bytes are seen, whatever any real curl does with them.
+ */
+function headerFileCurl(at: string) {
+  const bin = join(at, "bin");
+  mkdirSync(bin);
+  const record = `case "$a" in @*) [ "$prev" = -H ] && cat "\${a#@}" >>'${join(at, "headers")}' ;; esac`;
+  writeFileSync(join(bin, "curl"), `#!/bin/sh\nfor a; do ${record}; prev=$a; done\nexit 7\n`, {
+    mode: 0o755,
+  });
+  return { PATH: `${bin}:${process.env["PATH"] ?? ""}` };
+}
+
+// curl 8.18 keeps a CR before a header file's newline in the header's value; earlier ones drop it.
+describe("hook client (script), as curl reads its header file", () => {
+  it("ends the token's header line with a bare newline, on a hook and on the status line", async () => {
+    dir = mkdtempSync("/tmp/bz-hook-");
+    const token = "t".repeat(43);
+    const tokenFile = join(dir, "agent.token");
+    writeFileSync(tokenFile, token);
+    const env = {
+      ...headerFileCurl(dir),
+      BAZHEN_AGENT_ID: newId("agent"),
+      BAZHEN_SOCKET: join(dir, "bazhen.sock"),
+      BAZHEN_AGENT_AUTH_FILE: tokenFile,
+    };
+    await run(HOOK_SCRIPT, "PermissionRequest", env);
+    await run(HOOK_SCRIPT, "statusline-wrap", env, "{}", ["true"]);
+    expect(readFileSync(join(dir, "headers"), "utf8")).toBe(
+      `Bazhen-Agent-Token: ${token}\n`.repeat(2),
+    );
   });
 });
 
