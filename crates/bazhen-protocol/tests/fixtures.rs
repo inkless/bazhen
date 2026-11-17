@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use bazhen_protocol::agents::{
-    AgentCommandResponse, FleetAgent, HarnessId, RenameAgentRequest, StateSnapshot,
+    AgentCommandResponse, CallerResponse, FleetAgent, HarnessId, RenameAgentRequest, StateSnapshot,
 };
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
@@ -106,6 +106,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
         "BroadcastMessageResponse",
         round_trips::<BroadcastMessageResponse>,
     ),
+    ("CallerResponse", round_trips::<CallerResponse>),
     ("CreateTaskRequest", round_trips::<CreateTaskRequest>),
     ("CreateTaskResponse", round_trips::<CreateTaskResponse>),
     ("DelegateTaskRequest", round_trips::<DelegateTaskRequest>),

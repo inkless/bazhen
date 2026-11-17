@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentName, AgentRef, AGENT_NAME_MAX } from "./agent-name.ts";
 import {
   AgentCommandResponse,
+  CallerResponse,
   FleetAgent,
   RenameAgentRequest,
   StateSnapshot,
@@ -469,6 +470,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     wire: [{ idempotencyKey: KEY, agentId: "BZ-127", role: "reviewer" }],
   },
   AssignTaskResponse: { schema: AssignTaskResponse, wire: [{ assignmentId: ASGN, eventIds: [3] }] },
+  CallerResponse: { schema: CallerResponse, wire: [{ agentId: AGENT }, { agentId: null }] },
   BroadcastMessageResponse: {
     schema: BroadcastMessageResponse,
     wire: [

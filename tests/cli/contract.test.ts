@@ -544,8 +544,8 @@ describe("who is asking", () => {
     expect(asking()).toEqual([["", undefined, undefined]]);
   });
 
-  it("names the agent, proves it with its token, and names the paired device, on whoami's call", async () => {
-    s.daemon.answer(
+  it("names the agent, proves it with its token, and names the paired device, on whoami's calls", async () => {
+    s.daemon.takes(AGENT).answer(
       "GET /v1/state",
       StateSnapshot,
       snapshot({
@@ -561,7 +561,14 @@ describe("who is asking", () => {
       BAZHEN_DEVICE_ID: DEV,
       BAZHEN_AGENT_AUTH_FILE: file,
     });
-    expect([ran.code, asking()]).toEqual([0, [[AGENT, TOKEN, DEV]]]);
+    expect([ran.code, s.daemon.routes(), asking()]).toEqual([
+      0,
+      ["GET /v1/caller", "GET /v1/state"],
+      [
+        [AGENT, TOKEN, DEV],
+        [AGENT, TOKEN, DEV],
+      ],
+    ]);
   });
 
   it("sends no token from a file it may not read, and still runs", async ({ skip }) => {

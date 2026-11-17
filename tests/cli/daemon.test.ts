@@ -766,6 +766,16 @@ describe("bazhen devices", () => {
     expect([ran.code, ran.stdout]).toEqual([0, `revoked ${DEV}; its open views are closed\n`]);
   });
 
+  it("says the daemon's refusal of a revoke, rather than that the device is revoked", async () => {
+    const unknown = { error: "not_found" as const, message: `no device ${DEV}` };
+    s.daemon.fail(`POST /v1/devices/${DEV}/revoke`, 404, unknown);
+    expect(await s.bazhen(["devices", "revoke", DEV])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `/v1/devices/${DEV}/revoke: HTTP 404: ${JSON.stringify(unknown)}\n`,
+    });
+  });
+
   it("dismisses a device's open pairing notice, and fails when it has none", async () => {
     s.daemon
       .answer(

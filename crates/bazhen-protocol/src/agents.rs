@@ -321,10 +321,46 @@ pub struct RenameAgentRequest {
     pub name: AgentName,
 }
 
+/// Who the daemon takes the request that asked to be: an agent, or the human as none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallerResponse {
+    /// Required, null for the human: optional, any JSON object would read as the human, such as
+    /// a success from another build that holds no `agentId`.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub agent_id: Option<AgentId>,
+}
+
 /// What a command on an agent produced: the events it recorded, none if there was nothing to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCommandResponse {
     pub agent_id: AgentId,
     pub event_ids: Vec<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::from_slice;
+
+    #[test]
+    fn a_caller_is_an_agent_or_the_human_and_a_refusal_is_neither() {
+        let agent = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+        let read = |json: &str| from_slice::<CallerResponse>(json.as_bytes()).ok();
+        assert_eq!(
+            [
+                read(&format!(r#"{{"agentId":"{agent}"}}"#)),
+                read(r#"{"agentId":null}"#),
+                read(r#"{"error":"forbidden","message":"Codex thread t is no live agent's"}"#),
+            ],
+            [
+                Some(CallerResponse {
+                    agent_id: AgentId::parse(agent)
+                }),
+                Some(CallerResponse { agent_id: None }),
+                None,
+            ]
+        );
+    }
 }

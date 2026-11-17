@@ -1,8 +1,7 @@
 //! The task verbs' answers as plain lines, which a model reads as easily as a person.
 
 use bazhen_protocol::agents::{
-    Agent, AgentState, ExternalRefKind, FleetAgent, FleetAttention, FleetHeadline, FleetSignal,
-    FleetTask, StateSnapshot,
+    Agent, FleetAgent, FleetAttention, FleetHeadline, FleetSignal, FleetTask, StateSnapshot,
 };
 use bazhen_protocol::ids::AgentId;
 use bazhen_protocol::mail::AttentionState;
@@ -12,21 +11,6 @@ use bazhen_protocol::tasks::{Assignment, AssignmentState, Task, TaskDetail, Task
 use bazhen_protocol::text::quote_note;
 
 use crate::fmt::{age_seconds, ago};
-
-/// The live Codex agent bound to `thread`, if exactly one is, as the daemon tells a Codex command's
-/// agent by the thread it runs in: of two, neither is guessed at.
-pub(crate) fn agent_on_thread<'a>(s: &'a StateSnapshot, thread: &str) -> Option<&'a AgentId> {
-    let mut on = s.agents.iter().filter(|a| {
-        matches!(a.state, AgentState::Starting | AgentState::Running)
-            && a.external_ref
-                .as_ref()
-                .is_some_and(|r| r.kind == ExternalRefKind::CodexThread && r.id == thread)
-    });
-    match (on.next(), on.next()) {
-        (Some(only), None) => Some(&only.id),
-        _ => None,
-    }
-}
 
 /// An agent's active assignments, in the snapshot's order.
 pub(crate) fn active_for<'a>(s: &'a StateSnapshot, agent: &str) -> Vec<&'a Assignment> {

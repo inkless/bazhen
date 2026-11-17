@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use bazhen_client::{env_text, read_regular};
 
-use bazhen_protocol::agents::{AgentCommandResponse, HarnessId, RenameAgentRequest, StateSnapshot};
+use bazhen_protocol::agents::{
+    AgentCommandResponse, CallerResponse, HarnessId, RenameAgentRequest, StateSnapshot,
+};
 use bazhen_protocol::ids::{MessageId, is_id};
 use bazhen_protocol::mail::{
     MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
@@ -29,9 +31,7 @@ use crate::call::{CALL, Daemon, Failed, WAIT_MARGIN};
 use crate::fmt::{encode_uri_component, uuid};
 use crate::out::Out;
 use crate::paths::normalize;
-use crate::printers::{
-    active_for, agent_on_thread, fleet, list_agents, list_roles, list_tasks, show_task, whoami,
-};
+use crate::printers::{active_for, fleet, list_agents, list_roles, list_tasks, show_task, whoami};
 use crate::{Exit, TASK_USAGE};
 
 /// Why a task verb stopped before it was done.
@@ -85,8 +85,10 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
         p,
         daemon,
         now_ms,
-        agent: agent_named(env_text("BAZHEN_AGENT_ID")),
-        codex_thread: env_text("CODEX_THREAD_ID"),
+        in_agent: in_agent(
+            env_text("BAZHEN_AGENT_ID").as_deref(),
+            env_text("CODEX_THREAD_ID").as_deref(),
+        ),
     };
     match verb.run(out) {
         Ok(answer) => {
@@ -113,16 +115,18 @@ struct Verb<'a> {
     p: &'a Parsed,
     daemon: &'a Daemon,
     now_ms: i64,
-    /// `BAZHEN_AGENT_ID`, set inside every agent Bazhen launches but in a Codex agent's commands.
-    agent: Option<String>,
-    /// `CODEX_THREAD_ID`, which Codex sets in each command it runs, outside the agent's terminal.
-    codex_thread: Option<String>,
+    /// Whether the command may run inside an agent, by `in_agent`.
+    in_agent: bool,
 }
 
-/// The agent `BAZHEN_AGENT_ID` names: none when it is empty, as a Codex thread sets it over the
-/// app-server's own environment, which may hold the agent whose terminal started the server.
-fn agent_named(id: Option<String>) -> Option<String> {
-    id.filter(|id| !id.is_empty())
+/// Whether a command whose environment holds `agent_id` (`BAZHEN_AGENT_ID`) and `thread`
+/// (`CODEX_THREAD_ID`) may run inside an agent, so that only the daemon can say which. Neither
+/// says which: a Codex command's `BAZHEN_AGENT_ID` is its app-server's, which may be whichever
+/// agent started the server, and is empty on a thread Bazhen loaded.
+fn in_agent(agent_id: Option<&str>, thread: Option<&str>) -> bool {
+    [agent_id, thread]
+        .into_iter()
+        .any(|v| v.is_some_and(|v| !v.is_empty()))
 }
 
 /// `value`, refused as missing when absent or empty.
@@ -213,17 +217,13 @@ impl Verb<'_> {
         Ok(self.daemon.get("/v1/state", CALL)?)
     }
 
-    /// The agent this command runs inside: `BAZHEN_AGENT_ID`, or else the live Codex agent bound
-    /// to the thread `CODEX_THREAD_ID` names, which the daemon tells it by too.
+    /// The agent this command runs inside, as the daemon takes its calls to be that agent's.
     fn me(&self) -> Step<Option<String>> {
-        if let Some(agent) = &self.agent {
-            return Ok(Some(agent.clone()));
-        }
-        let Some(thread) = &self.codex_thread else {
+        if !self.in_agent {
             return Ok(None);
-        };
-        let s = self.state()?;
-        Ok(agent_on_thread(&s, thread).map(ToString::to_string))
+        }
+        let r: CallerResponse = self.daemon.get("/v1/caller", CALL)?;
+        Ok(r.agent_id.map(|id| id.to_string()))
     }
 
     /// The role `--role` names, else `fallback`.
@@ -783,13 +783,22 @@ fn resolve(dir: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::agent_named;
+    use super::in_agent;
 
     #[test]
-    fn an_empty_agent_id_names_no_agent() {
+    fn a_command_may_be_an_agents_by_either_variable_but_not_by_an_empty_one() {
+        let thread = Some("01a1e0f0-593e-7ae1-9d31-769db26227fc");
         assert_eq!(
-            [Some(String::new()), Some("agent_x".to_owned()), None].map(agent_named),
-            [None, Some("agent_x".to_owned()), None]
+            [
+                (Some("agent_x"), None),
+                (None, thread),
+                (Some(""), thread),
+                (Some(""), None),
+                (None, Some("")),
+                (None, None),
+            ]
+            .map(|(id, thread)| in_agent(id, thread)),
+            [true, true, true, false, false, false]
         );
     }
 }
