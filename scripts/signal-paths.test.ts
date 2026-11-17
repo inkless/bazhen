@@ -592,14 +592,18 @@ describe("starts the scan can't follow to a call", () => {
         "  private execFile: typeof execFile;",
         "  public sp!: Sp;",
         "  declare readonly fork?: Fork;",
+        "  accessor execFile: Run;",
+        "  start() {}",
+        "  fork: Fork;",
         "}",
+        "function seam(execFile: Run, sp?: Fork) {}",
         "const names = {",
         "  cp: 1,",
         "  ns: 2,",
         "  execFile,",
         "};",
       ]),
-    ).toEqual([unfollowed(20, "execFile")]);
+    ).toEqual([unfollowed(24, "execFile")]);
   });
 
   it("finds a start chosen by a conditional, or compared by a case, though a : follows it", () => {
@@ -610,6 +614,11 @@ describe("starts the scan can't follow to a call", () => {
         "  fork : run;",
         "switch (x) { case execFile: break; }",
         "const h = ok ? a ?? cp : ns;",
+        "const i = ok ? useFake && execFile : b;",
+        "const j = ok ? () => execFile : b;",
+        "const k = ok ? !fork : b;",
+        "const l = ok ? <Fn>sp : b;",
+        "const m = ok ? x || cp : b;",
       ]),
     ).toEqual([
       unfollowed(6, "execFile"),
@@ -619,6 +628,11 @@ describe("starts the scan can't follow to a call", () => {
       unfollowed(9, "execFile"),
       unfollowed(10, "cp"),
       unfollowed(10, "ns"),
+      unfollowed(11, "execFile"),
+      unfollowed(12, "execFile"),
+      unfollowed(13, "fork"),
+      unfollowed(14, "sp (spawn)"),
+      unfollowed(15, "cp"),
     ]);
   });
 

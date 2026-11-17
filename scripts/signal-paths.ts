@@ -132,6 +132,11 @@ const CALLED = "\\s*(?:<[^()<>;{}]*>\\s*)?(?:\\?\\.\\s*)?\\(";
 // A name's start, not a member's, though a spread's `...` may come before it: `\b` alone misses a
 // name opening with `$`.
 const NOT_MEMBER = "(?<!(?<!\\.)\\.\\s*)(?:\\b|(?<![\\w$]))";
+// What a key's name follows: a member's, a field's, a parameter's or a property's start, then
+// any modifiers. Inside a conditional's branch a name follows an operator instead, as in
+// `ok ? a && execFile : b`, where it is a value.
+const KEY_AFTER =
+  /(?:^|[{}(,;])\s*(?:(?:readonly|private|public|protected|static|declare|abstract|override|accessor)\s+)*$/;
 const alternation = (names: Iterable<string>) =>
   [...names].map((n) => n.replaceAll("$", "\\$")).join("|");
 // A key, a getter's or a method's included, as each sets the option.
@@ -349,8 +354,7 @@ function startOptions(code: string, bindings: StartBindings) {
 /**
  * Each place a start this file binds goes where the scan can't follow it to a call: a mention of
  * a bound name, or of child_process imported whole, that isn't a start's call, the `promisify`
- * that binds it, its import, a `typeof` or a key (a name a `:` follows, with no conditional's `?`
- * before it); a start or `default` read as a member of child_process imported whole but not
+ * that binds it, its import, a `typeof` or a key (`KEY_AFTER`); a start or `default` read as a member of child_process imported whole but not
  * called; and child_process named as a string anywhere but the source of an import the scan
  * reads. Through any of these a start can be called with options
  * no rule reads, `.call`, `Reflect.apply`, an alias, a seam object, `require` and `import()`
@@ -380,7 +384,7 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
       promisified.has(m.index) ||
       imported(m.index) ||
       /\btypeof\s+$/.test(before) ||
-      (/^\s*[?!]?\s*:/.test(after) && !/(?:\?|\bcase)\s*$/.test(before));
+      (/^\s*[?!]?\s*:/.test(after) && KEY_AFTER.test(before));
     if (followed) return [];
     if (bound.has(name)) {
       const start = named.get(name) ?? name;
