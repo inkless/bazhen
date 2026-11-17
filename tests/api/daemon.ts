@@ -313,7 +313,12 @@ export class Daemon {
     try {
       return await work();
     } catch (err) {
-      console.error(this.explanation());
+      // Whatever goes wrong in explaining it, the failure itself is what the test reports.
+      try {
+        console.error(this.explanation());
+      } catch (unexplained) {
+        console.error(`couldn't explain the failure: ${String(unexplained)}`);
+      }
       throw err;
     }
   }
