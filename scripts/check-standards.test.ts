@@ -1786,9 +1786,9 @@ describe("decoderFailures", () => {
         "    pub fn handed(&self) { parse_conn(self) }",
         "    pub fn matched(&self) -> usize { let Self { buf, .. } = self; buf.len() }",
         "    pub fn by_path(&mut self) { Self::reset(self) }",
-        "    fn bytes(&self) -> &[u8] { &self.buf }",
-        "    pub fn first(&self) -> Option<u8> { self.bytes().first().copied() }",
         "    pub fn second(&self) -> Option<u8> { self.first() }",
+        "    pub fn first(&self) -> Option<u8> { self.bytes().first().copied() }",
+        "    fn bytes(&self) -> &[u8] { &self.buf }",
         "    pub fn named(&self) -> u64 { self.id }",
         "    pub fn quiet(&self) -> u64 { self.named() }",
         "    pub fn elsewhere(&self) { self.flush_all() }",
@@ -1801,11 +1801,102 @@ describe("decoderFailures", () => {
       "crates/p/src/conn.rs::Conn::handed",
       "crates/p/src/conn.rs::Conn::matched",
       "crates/p/src/conn.rs::Conn::by_path",
-      "crates/p/src/conn.rs::Conn::bytes",
-      "crates/p/src/conn.rs::Conn::first",
       "crates/p/src/conn.rs::Conn::second",
+      "crates/p/src/conn.rs::Conn::first",
+      "crates/p/src/conn.rs::Conn::bytes",
       "crates/p/src/conn.rs::Conn::elsewhere",
       "crates/p/src/conn.rs::Conn::merge",
+    ]);
+  });
+
+  it("splits a struct's fields where a length shifts, and pins nothing it can't split", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/shift.rs": [
+        "pub struct Shifted { id: u64, scratch: [u32; 1 << 4], buf: Vec<u8> }",
+        "pub struct Halved { lens: Vec<[u32; N >> 2]>, pub buf: Vec<u8> }",
+        "pub struct Odd { a: Foo<u8, b: Vec<u8>, n: u64 }",
+        "pub struct Raw { r#type: Vec<u8>, n: u64 }",
+        "pub struct Junk { Vec<u8>, n: u64 }",
+        "pub struct Hooked<F: Fn(Option<u32>) -> u32> { buf: Vec<u8>, n: u64, f: F }",
+        "impl Shifted {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn peek(&self) -> u8 { self.buf[0] }",
+        "}",
+        "impl Halved {",
+        "    pub fn lens(&self) -> u32 { self.lens[0][0] }",
+        "}",
+        "impl Odd {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl Raw {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "    pub fn kind(&self) -> u8 { self.r#type[0] }",
+        "}",
+        "impl Junk {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl<F> Hooked<F> {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/shift.rs::Halved::buf",
+      "crates/p/src/shift.rs::Odd",
+      "crates/p/src/shift.rs::Junk",
+      "crates/p/src/shift.rs::Shifted::peek",
+      "crates/p/src/shift.rs::Odd::n",
+      "crates/p/src/shift.rs::Raw::kind",
+      "crates/p/src/shift.rs::Junk::n",
+    ]);
+  });
+
+  it("takes a carrier of another crate its `use` or a path names for a byte type", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": [
+        "pub struct Frames { buf: Vec<u8> }",
+        "pub struct Screen { rows: Vec<u8> }",
+        "pub mod wire {",
+        "    pub struct Packet { b: Vec<u8> }",
+        "}",
+      ].join("\n"),
+      "crates/p/src/conn.rs": [
+        "use q::Frames;",
+        "pub struct Screen { rows: u32 }",
+        "pub struct Conn { id: u64, frames: Option<Frames>, packet: q::wire::Packet, screen: Screen }",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn frames(&self) -> bool { self.frames.is_some() }",
+        "    pub fn packet(&self) { send(&self.packet) }",
+        "    pub fn rows(&self) -> u32 { self.screen.rows }",
+        "}",
+        "pub fn show(f: &Frames) {}",
+        "pub fn draw(s: &Screen) {}",
+      ].join("\n"),
+      "crates/r/src/lib.rs": [
+        "use p::Conn;",
+        "use q::*;",
+        "use q::Frames as F;",
+        "pub struct Holder { c: Conn, n: u64 }",
+        "pub struct Globbed { s: Screen }",
+        "impl Holder {",
+        "    pub fn c(&self) { look(&self.c) }",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl Globbed {",
+        "    pub fn s(&self) { look(&self.s) }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::frames",
+      "crates/p/src/conn.rs::Conn::packet",
+      "crates/p/src/conn.rs::show",
+      "crates/r/src/lib.rs",
+      "crates/r/src/lib.rs::Holder::c",
+      "crates/r/src/lib.rs::Globbed::s",
     ]);
   });
 

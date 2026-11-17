@@ -448,17 +448,19 @@ What differs:
   `io::stdin().lock()`, a closure's read included). A socket, a file or an fd in a signature isn't bytes: holding one is not
   reading it, so a function that only binds, borrows or sets one up needs no entry. A struct or enum
   of the same crate that carries bytes (a byte field, a parameter bounded by a byte trait, or a
-  field of such a type) is a byte type too: a function taking one is a decoder, as is a method of it
-  taking `self` that can reach the bytes, as a stateful frame reader reads through `self`. A method
-  reaches them when its body uses a field holding them (`self.buf`, `let b = &self.buf;`, a closure
-  or a helper given it), uses `self` other than by a field (handed on, matched, destructured), calls
-  a method of its own that reaches them, or calls one with no body in the file. One that only reads
-  the type's other fields, as a getter of an id does, isn't a decoder. Every method taking `self`
-  counts when no field pins the bytes: on an enum, a struct whose bytes come by a type parameter
-  bounded by a byte trait (`struct R<T: Read>`), and in an impl bounded by one
-  (`impl<R: Read> Reader<R>`). A method taking another value of its own type (`other: &Self`) is a
-  decoder too. A byte field `pub` to other crates fails unless it is listed in `PUBLIC_BYTE_FIELDS`
-  with why its bytes aren't from outside: another crate reads it where the rule doesn't look.
+  field of such a type), or one of another crate that a `use` or a path brings in, is a byte type
+  too: a function taking one is a decoder, as is a method of it taking `self` that can reach the
+  bytes, as a stateful frame reader reads through `self`. A method reaches them when its body uses a
+  field holding them (`self.buf`, `let b = &self.buf;`, a closure or a helper given it), uses `self`
+  other than by a field (handed on, matched, destructured), calls a method of its own that reaches
+  them, or calls one with no body in the file. One that only reads the type's other fields, as a
+  getter of an id does, isn't a decoder. Every method taking `self` counts when no field pins the
+  bytes: on an enum, a struct whose bytes come by a type parameter bounded by a byte trait
+  (`struct R<T: Read>`), and in an impl bounded by one (`impl<R: Read> Reader<R>`). A method taking
+  another value of its own type (`other: &Self`) is a decoder too. A byte field `pub` to other
+  crates fails unless it is listed in `PUBLIC_BYTE_FIELDS` with why its bytes aren't from outside:
+  another crate reads it where the rule doesn't look. So does a struct whose fields the rule can't
+  split, since it can't tell which hold bytes.
   `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the fuzz target
   that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that reads bytes
   only to hand them to a fuzzed decoder, one reached only through a fuzzed decoder. A module
@@ -472,17 +474,18 @@ What differs:
     for it: `pane_title::body` takes the pane id tmux passes as an argument, so
     `crates/bazhen-hook/fuzz/fuzz_targets/pane_title.rs` drives it.
   - **The rule is a reviewer's net, not a proof.** It reads signatures and the names of reads in a
-    body, so it can't see a function a macro generates, a read through a wrapper whose method
-    isn't named as a read (a `next_message()`), or another crate's match on an enum that carries
-    bytes: a variant's fields are public wherever the enum is, and carriers are read per crate. A
-    read is a method given something to read into, so a channel's `recv()`, an iterator's `peek()`
-    and `OpenOptions::read(true)` aren't reads, and neither is a bare call to a function of the
-    same file, which is read where it is defined. Review
-    checks those by hand. Two looser edges are known, and review covers them too: a target that
-    names a type and calls `.decode(` on a value counts as driving that type's `decode`, so the
-    reviewer checks the value is of the listed type; and a method that only measures or clears a
-    byte field (`self.buf.len()`, `self.buf.clear()`) uses it, so it counts as a decoder and needs
-    a `NOT_DECODERS` entry with its reason. That is expected, not noise.
+    body, so it can't see a function a macro generates, a read through a wrapper whose method isn't
+    named as a read (a `next_message()`), a trait's default method reading through a method the
+    trait requires (`fn kind(&self) -> u8 { self.raw()[0] }`), or a match on another crate's enum
+    that carries bytes in a function that got it by a call rather than a parameter or a field: a
+    variant's fields are public wherever the enum is. A read is a method given something to read
+    into, so a channel's `recv()`, an iterator's `peek()` and `OpenOptions::read(true)` aren't
+    reads, and neither is a bare call to a function of the same file, which is read where it is
+    defined. Review checks those by hand. Two looser edges are known, and review covers them too: a
+    target that names a type and calls `.decode(` on a value counts as driving that type's `decode`,
+    so the reviewer checks the value is of the listed type; and a method that only measures or
+    clears a byte field (`self.buf.len()`, `self.buf.clear()`) uses it, so it counts as a decoder
+    and needs a `NOT_DECODERS` entry with its reason. That is expected, not noise.
   - The targets live in `crates/<name>/fuzz/fuzz_targets/<target>.rs` (cargo-fuzz's layout),
     with seed inputs in `fuzz/seeds/<target>/`. The fuzz crate is a workspace of its own, its
     dependencies pinned exactly. A target asserts what must hold of every input, not only

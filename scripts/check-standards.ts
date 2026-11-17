@@ -743,6 +743,19 @@ const NOT_DECODERS: Record<string, string> = {
     "queues a decoded input request's bytes for the child; parses nothing",
   "crates/bazhen-holder/src/server.rs::stats":
     "reads the holder's own counts; no bytes from a peer",
+  "crates/bazhen-holder/src/conn.rs::Connection::hold": "keeps a decoded request; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::held_since":
+    "returns when the request it holds was held; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::holds_a_snapshot":
+    "says whether it holds a request; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::reading":
+    "says whether it waits for a request, from its state; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::has_request":
+    "says whether a decoded request waits; reads no bytes",
+  "crates/bazhen-holder/src/conn.rs::Connection::take_next":
+    "takes FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/conn.rs::Connection::next_request":
+    "hands over FrameDecoder::next_frame's result, which the proto crate's frame target fuzzes",
   "crates/bazhen-holder/src/conn.rs::Connection::queue_subscribed":
     "queues a frame this holder encoded, with where output then starts; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::queue_exited":
@@ -876,6 +889,8 @@ const NOT_DECODERS: Record<string, string> = {
     "a step of has_keystrokes, which the input target fuzzes",
   "crates/bazhen-protocol/src/input.rs::reply":
     "a step of has_keystrokes, which the input target fuzzes",
+  "crates/bazhen/src/attach/direct.rs::Direct::reply":
+    "acts on a decoded Reply, handing its bytes to the screen whole; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::declare":
     "hands the keys Attachment::keys held over, whole; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::engage":
@@ -1104,11 +1119,12 @@ const BYTE_TYPE_NAMES = new Set(
 type Carriers = Map<string, Set<string> | undefined>;
 
 /**
- * The structs and enums in `code` with a field that carries bytes. Such a type is a byte type
- * too: a method of it reads the bytes through `self`, as a stateful frame reader does, when it
- * uses a field that holds them.
+ * The structs and enums in `code` with a field that carries bytes: a byte type, or a carrier of
+ * this crate or of `elsewhere`, those of other crates this crate brings in. Such a type is a byte
+ * type too: a method of it reads the bytes through `self`, as a stateful frame reader does, when
+ * it uses a field that holds them.
  */
-function byteCarriers(code: string): Carriers {
+function byteCarriers(code: string, elsewhere: Set<string> = new Set()): Carriers {
   const items = [...code.matchAll(/\b(struct|enum)\s+(\w+)/g)].map((m) => ({
     kind: m[1],
     name: m[2] ?? "",
@@ -1119,7 +1135,7 @@ function byteCarriers(code: string): Carriers {
   for (let grew = true; grew;) {
     grew = false;
     for (const { name, body } of items) {
-      if (!names.has(name) && mentionsAny(body.slice(name.length), names)) {
+      if (!names.has(name) && mentionsAny(body.slice(name.length), [...names, ...elsewhere])) {
         names.add(name);
         grew = true;
       }
@@ -1128,7 +1144,8 @@ function byteCarriers(code: string): Carriers {
   const carriers: Carriers = new Map();
   for (const { kind, name, body } of items.filter((i) => names.has(i.name))) {
     const struct = kind === "struct" ? structFields(body) : undefined;
-    const holds = (type: string) => BYTES_IN.test(type) || mentionsAny(type, names);
+    const holds = (type: string) =>
+      BYTES_IN.test(type) || mentionsAny(type, names) || mentionsAny(type, elsewhere);
     const fields =
       struct === undefined || holds(struct.head)
         ? undefined
@@ -1145,40 +1162,50 @@ function byteCarriers(code: string): Carriers {
 
 /**
  * A struct's fields, by name or, in a tuple struct, by index, each with whether it is `pub` to
- * other crates, and its head: its generics and `where` clause.
+ * other crates, and its head: its generics and `where` clause. `undefined` when the fields can't
+ * be told apart. A `<` or `>` is a bracket only where a type can have one, outside any `( [ {`
+ * nested in a field or the generics, since one inside may be a shift in a length (`[u8; 1 << 4]`).
  */
-function structFields(item: string): {
-  head: string;
-  fields: { name: string; type: string; public: boolean }[];
-} {
+function structFields(
+  item: string,
+): { head: string; fields: { name: string; type: string; public: boolean }[] } | undefined {
   const name = /\bstruct\s+\w+\s*/.exec(item);
   const from = (name?.index ?? 0) + (name?.[0].length ?? 0);
   let i = from;
-  for (let depth = 0; i < item.length; i++) {
-    const c = item[i];
-    if (c === "<") depth++;
-    else if (c === ">" && item[i - 1] !== "-") depth--;
-    else if (depth <= 0 && (c === "{" || c === "(" || c === ";")) break;
+  for (let angles = 0, nested = 0; i < item.length; i++) {
+    const c = item[i] ?? "";
+    if (nested === 0 && angles === 0 && "{(;".includes(c)) break;
+    if ("([{".includes(c)) nested++;
+    else if (")]}".includes(c)) nested--;
+    else if (nested === 0 && c === "<") angles++;
+    else if (nested === 0 && c === ">" && item[i - 1] !== "-") angles--;
   }
   const open = item[i];
   if (open !== "{" && open !== "(") return { head: item.slice(from), fields: [] };
   const parts: string[] = [];
-  let depth = 0;
   let start = i + 1;
-  let close = item.length;
-  for (let j = i; j < item.length; j++) {
-    const c = item[j];
-    if ("([{<".includes(c ?? "")) depth++;
-    else if (")]}".includes(c ?? "") || (c === ">" && item[j - 1] !== "-")) depth--;
-    if (depth === 0) {
-      close = j;
-      break;
-    }
-    if (depth === 1 && c === ",") {
+  let close = -1;
+  let angles = 0;
+  for (let j = i, nested = 0; j < item.length; j++) {
+    const c = item[j] ?? "";
+    if ("([{".includes(c)) {
+      nested++;
+    } else if (")]}".includes(c)) {
+      nested--;
+      if (nested === 0) {
+        close = j;
+        break;
+      }
+    } else if (nested === 1 && c === "<") {
+      angles++;
+    } else if (nested === 1 && c === ">" && item[j - 1] !== "-") {
+      angles--;
+    } else if (nested === 1 && angles === 0 && c === ",") {
       parts.push(item.slice(start, j));
       start = j + 1;
     }
   }
+  if (close === -1 || angles !== 0) return undefined;
   parts.push(item.slice(start, close));
   const fields = parts
     .map((p) => p.replace(/#\s*\[(?:[^[\]]|\[[^\]]*\])*\]/g, "").trim())
@@ -1186,14 +1213,18 @@ function structFields(item: string): {
     .map((p, index) => {
       const visibility = /^pub\b\s*(\([^)]*\))?\s*/.exec(p);
       const field = p.slice(visibility?.[0].length ?? 0);
-      const named = /^(\w+)\s*:(?!:)([\s\S]*)$/.exec(field);
+      const named = /^((?:r#)?\w+)\s*:(?!:)([\s\S]*)$/.exec(field);
       return {
-        name: open === "{" ? (named?.[1] ?? "") : String(index),
+        name: open === "{" ? named?.[1] : String(index),
         type: open === "{" ? (named?.[2] ?? field) : field,
         public: visibility !== null && visibility[1] === undefined,
       };
     });
-  return { head: item.slice(from, i) + item.slice(close + 1), fields };
+  if (fields.some((f) => f.name === undefined)) return undefined;
+  return {
+    head: item.slice(from, i) + item.slice(close + 1),
+    fields: fields.map((f) => ({ ...f, name: f.name ?? "" })),
+  };
 }
 
 const mentionsAny = (text: string, names: Iterable<string>) =>
@@ -1316,7 +1347,11 @@ const inside = (i: number, spans: { start: number; end: number }[]) =>
  * the body. A method is named with its type (`Reader::next_frame`), so two types' methods of one
  * name stay apart.
  */
-export function byteTakers(source: string, carriers: Carriers = new Map()): string[] {
+export function byteTakers(
+  source: string,
+  carriers: Carriers = new Map(),
+  elsewhere: Set<string> = new Set(),
+): string[] {
   const code = withoutTests(rustCode(source));
   const blocks = implBlocks(code);
   const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
@@ -1366,7 +1401,7 @@ export function byteTakers(source: string, carriers: Carriers = new Map()): stri
     const reads =
       BODY_READS.test(body) || [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g));
     return BYTES_IN.test(takes) ||
-      mentionsAny(takes, carriers.keys()) ||
+      mentionsAny(takes, [...carriers.keys(), ...elsewhere]) ||
       takesSelfType ||
       viaSelf.has(f) ||
       reads
@@ -1409,14 +1444,29 @@ export function decoderFailures(
     const crate = crateOf(file);
     crateCode.set(crate, `${crateCode.get(crate) ?? ""}\n${withoutTests(rustCode(read(file)))}`);
   }
-  const crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
+  // A field may hold another crate's carrier, which may hold this crate's: repeat until no crate
+  // finds another.
+  let crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
+  const imported = new Map<string, Set<string>>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [crate, code] of crateCode) {
+      const names = importedCarriers(code, crate, crateCarriers);
+      if (names.size !== (imported.get(crate)?.size ?? 0)) {
+        imported.set(crate, names);
+        crateCarriers.set(crate, byteCarriers(code, names));
+        grew = true;
+      }
+    }
+  }
   for (const file of product) {
     const carriers: Carriers = crateCarriers.get(crateOf(file)) ?? new Map();
     const code = blankItems(withoutTests(rustCode(read(file))), IMPL_BLOCK);
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
     for (const use of code.matchAll(/\buse\b[^;]*;/g)) {
       for (const [, from = "", to = ""] of use[0].matchAll(/\b(\w+)\s+as\s+(\w+)/g)) {
-        if (to !== "_" && (BYTE_TYPE_NAMES.has(from) || carriers.has(from))) {
+        const foreign = imported.get(crateOf(file))?.has(from) ?? false;
+        if (to !== "_" && (BYTE_TYPE_NAMES.has(from) || carriers.has(from) || foreign)) {
           out.push(
             `${file}: \`${from} as ${to}\` renames a byte type, which hides it from the decoder ` +
               "rule. Use the type's own name.",
@@ -1425,8 +1475,15 @@ export function decoderFailures(
       }
     }
     for (const struct of code.matchAll(/\bstruct\s+(\w+)/g)) {
-      const { fields } = structFields(code.slice(struct.index, itemEnd(code, struct.index)));
-      for (const field of fields.filter((f) => f.public && BYTES_IN.test(f.type))) {
+      const item = code.slice(struct.index, itemEnd(code, struct.index));
+      const parsed = structFields(item);
+      if (parsed === undefined && BYTES_IN.test(item)) {
+        out.push(
+          `${file}::${struct[1]}: its fields can't be told apart, so the decoder rule can't see ` +
+            "which hold bytes or whether one is pub: write each field as `name: Type`.",
+        );
+      }
+      for (const field of (parsed?.fields ?? []).filter((f) => f.public && BYTES_IN.test(f.type))) {
         const key = `${file}::${struct[1]}::${field.name}`;
         publicFound.add(key);
         if (!(key in publicByteFields)) {
@@ -1446,7 +1503,7 @@ export function decoderFailures(
         );
       }
     }
-    for (const fn of byteTakers(read(file), carriers)) {
+    for (const fn of byteTakers(read(file), carriers, imported.get(crateOf(file)))) {
       const key = `${file}::${fn}`;
       found.add(key);
       if (!(key in fuzzed) && !(key in notDecoders)) {
@@ -1529,6 +1586,30 @@ function testModuleFiles(paths: string[], read: (path: string) => string): Set<s
 }
 
 const crateOf = (file: string) => /^crates\/[^/]+/.exec(file)?.[0] ?? "";
+
+/**
+ * The carriers of other crates that `code`, the code of `crate`, names: in a `use` of that crate
+ * (all of them for a glob), or in a path through it (`bazhen_holder_proto::frame::Request`). A type
+ * of another crate is named no other way, so one of the same name there isn't taken for it.
+ */
+function importedCarriers(
+  code: string,
+  crate: string,
+  crateCarriers: Map<string, Carriers>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [other, carriers] of crateCarriers) {
+    if (other === crate || carriers.size === 0) continue;
+    const ident = other.slice("crates/".length).replace(/-/g, "_");
+    const uses = [...code.matchAll(new RegExp(`\\buse\\s+(?:::\\s*)?${ident}\\b[^;]*;`, "g"))];
+    const paths = [...code.matchAll(new RegExp(`\\b${ident}(?:\\s*::\\s*\\w+)+`, "g"))];
+    const text = [...uses, ...paths].map((m) => m[0]).join("\n");
+    for (const name of carriers.keys()) {
+      if (uses.some((m) => m[0].includes("*")) || mentionsAny(text, [name])) out.add(name);
+    }
+  }
+  return out;
+}
 
 /** Why a crate's fuzz manifest isn't a cargo-fuzz crate of its own with exact pins. */
 export function fuzzManifestFailures(manifest: string, text: string): string[] {
