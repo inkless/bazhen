@@ -169,7 +169,8 @@ Every new test must be shown to fail without the code it covers.
   - the new title is exactly one test at HEAD and none at the base;
   - the test's block, from its call line to its closing line at the call's indent, is the base's
     with only the title changed. Its quotes and its indent may change, so it can move into or
-    out of a `describe`.
+    out of a `describe`. That move puts it under the `describe`'s hooks, which falsify doesn't
+    compare, so the reviewer checks them.
 
   Any other change to the test (its body, its options, `it` to `it.skip`, or a different test
   under the old title's trailer) is judged as new, as it would be without the trailer. So is a

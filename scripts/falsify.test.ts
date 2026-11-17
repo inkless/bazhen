@@ -769,6 +769,43 @@ describe("renameRefusal", () => {
   it("judges as new a test whose block has no closing line", () => {
     expect(refusal(cut(BASE_TESTS), cut(RENAMED))).toBe('the end of "adds one" can\'t be found');
   });
+
+  it("reads a block on past a template's lines at the call's indent, raw", () => {
+    const base = lines(
+      'it("renders", () => {',
+      "  expect(render()).toBe(`{",
+      '  "a": 1',
+      "  ",
+      "}`);",
+      "  expect(other()).toBe(1);",
+      "});",
+    );
+    const head = base.replace('it("renders"', 'it("renders it"');
+    const renders = (source: string) => renameRefusal(base, source, "renders", "renders it");
+    const changed = '"renders it" isn\'t "renders" with only its title changed';
+    expect([
+      renders(head),
+      renders(head.replace("toBe(1)", "toBe(2)")),
+      renders(head.replace('"a": 1\n  \n', '"a": 1\n\n')),
+    ]).toEqual([undefined, changed, changed]);
+  });
+
+  it("reads an arrow's block on past a template's lines at the call's indent", () => {
+    const base = lines('it("prints", () =>', "  expect(print()).toBe(`a", "b`));", "");
+    const head = base.replace('it("prints"', 'it("prints it"');
+    const prints = (source: string) => renameRefusal(base, source, "prints", "prints it");
+    expect([prints(head), prints(head.replace("b`", "c`"))]).toEqual([
+      undefined,
+      '"prints it" isn\'t "prints" with only its title changed',
+    ]);
+  });
+
+  it("judges as new a test whose template never closes", () => {
+    const open = lines('it("renders", () => {', "  expect(render()).toBe(`{", "});");
+    expect(
+      renameRefusal(open, open.replace('"renders"', '"renders it"'), "renders", "renders it"),
+    ).toBe('the end of "renders" can\'t be found');
+  });
 });
 
 describe("renamedFrom", () => {

@@ -321,11 +321,20 @@ const titled = (tests: TestBlock[], title: string) => tests.filter((t) => t.titl
 
 const indentOf = (line: string) => /^\s*/.exec(line)?.[0].length ?? 0;
 
+const BACKTICK = /(?<!\\)(?:\\\\)*`/g;
+
+/** Whether a template literal is open after `line`, given whether one was open before it. */
+const opensTemplate = (open: boolean, line: string) =>
+  (line.match(BACKTICK)?.length ?? 0) % 2 === 1 ? !open : open;
+
 /**
  * Each test call in a file with a readable title, and its block: the call line and the lines up
  * to its end, with the title's quoted string as a placeholder and the call line's indent taken off
- * every line. The end is read from the formatter's layout: the lines indented deeper than the call,
- * then a closing line at its indent. A call left open with no such line has no block.
+ * every line but those inside a template literal, kept as they are. The end is read from the
+ * formatter's layout: the lines indented deeper than the call or inside a template, then a closing
+ * line at its indent. A call left open with no such line, or a template never closed, has no block.
+ * A backtick in a string or a comment outside a template can only make the block run on, so
+ * more of it is compared.
  */
 function testsIn(source: string): TestBlock[] {
   const lines = source.split("\n");
@@ -340,11 +349,18 @@ function testsIn(source: string): TestBlock[] {
     const indent = indentOf(line);
     const end = match.index + match[0].length;
     const block = [`${line.slice(indent, end - raw.length - 2)}\0${line.slice(end)}`];
+    let inTemplate = opensTemplate(false, line);
     let next = i + 1;
     for (; next < lines.length; next++) {
       const text = lines[next] ?? "";
-      if (text.trim() !== "" && indentOf(text) <= indent) break;
-      block.push(text.trim() === "" ? "" : text.slice(indent));
+      if (inTemplate) block.push(text);
+      else if (text.trim() !== "" && indentOf(text) <= indent) break;
+      else block.push(text.trim() === "" ? "" : text.slice(indent));
+      inTemplate = opensTemplate(inTemplate, text);
+    }
+    if (inTemplate) {
+      tests.push({ title: unescape(raw), block: undefined });
+      continue;
     }
     while (block.at(-1) === "") block.pop();
     const closing = lines[next];
@@ -412,21 +428,16 @@ export function renamedFrom(
 }
 
 type Target = { file: string; title: string };
+type Sides = (file: string) => { base: string | undefined; head: string | undefined };
 
 /**
  * The new tests left to judge once those a `Renamed:` trailer shows are the base's under a new
  * title are left out, each of those printed. A trailer that applies to no test is printed with why,
- * and its test is judged. `hints` names the base test each judged one looks like a rename of, by
- * `${file} ${title}`.
+ * and its test is judged.
  */
-function leaveOutRenames(
-  found: Target[],
-  trailers: RenameTrailer[],
-  sides: (file: string) => { base: string | undefined; head: string | undefined },
-): { targets: Target[]; hints: Map<string, string> } {
+function leaveOutRenames(found: Target[], trailers: RenameTrailer[], sides: Sides): Target[] {
   const applied = new Set<string>();
   const refusals = new Map<string, string>();
-  const hints = new Map<string, string>();
   const targets = found.filter((t) => {
     const { base, head } = sides(t.file);
     for (const r of trailers.filter((trailer) => trailer.to === t.title)) {
@@ -438,8 +449,6 @@ function leaveOutRenames(
       }
       if (!refusals.has(r.trailer)) refusals.set(r.trailer, `${t.file}: ${why}`);
     }
-    const from = renamedFrom(base, head, t.title);
-    if (from !== undefined) hints.set(`${t.file} ${t.title}`, from);
     return true;
   });
   for (const trailer of new Set(trailers.map((r) => r.trailer))) {
@@ -447,7 +456,7 @@ function leaveOutRenames(
     const why = refusals.get(trailer) ?? "the branch adds no test of that name";
     console.log(`falsify: Renamed: ${trailer} doesn't apply (${why}), so its test is judged`);
   }
-  return { targets, hints };
+  return targets;
 }
 
 /**
@@ -1581,10 +1590,15 @@ async function main(args: string[]): Promise<number> {
   const basePaths = new Map(
     tests.map((t) => [t.path, t.status === "R" && t.oldPath ? t.oldPath : t.path]),
   );
-  const { targets, hints } = leaveOutRenames(found, renameTrailers(messages), (file) => ({
-    base: fileAt(base, basePaths.get(file) ?? file),
-    head: fileAt(head, file),
-  }));
+  const read = new Map<string, ReturnType<Sides>>();
+  const sides: Sides = (file) => {
+    const known = read.get(file);
+    if (known !== undefined) return known;
+    const both = { base: fileAt(base, basePaths.get(file) ?? file), head: fileAt(head, file) };
+    read.set(file, both);
+    return both;
+  };
+  const targets = leaveOutRenames(found, renameTrailers(messages), sides);
   const headFiles = new Set(
     git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]).split("\0"),
   );
@@ -1828,7 +1842,8 @@ async function main(args: string[]): Promise<number> {
         "behaviour the change introduces (bz-write-unit-test).",
     );
     const renames = survived.flatMap((r) => {
-      const from = hints.get(`${r.file} ${r.title}`);
+      const { base: before, head: after } = sides(r.file);
+      const from = renamedFrom(before, after, r.title);
       return from === undefined ? [] : [`  Renamed: ${from} -> ${r.title}`];
     });
     if (renames.length > 0) {
