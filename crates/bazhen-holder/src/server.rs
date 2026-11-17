@@ -1754,6 +1754,145 @@ mod tests {
 
     #[test]
     #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscriber_is_pushed_the_title_and_the_switch_to_the_alternate_screen() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let script = "read _; printf '\\033]0;hi\\007\\033[?1049h'; exec sleep 30";
+        let mut f = Failing::start("title-pushed", script);
+        let mut peer = f.peer(&[hello_as(true), subscribe_request(2)]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        f.until("the subscription", |f| {
+            f.server.conns.iter().any(Connection::is_open)
+        });
+        let input = Request::Input {
+            id: RequestId(3),
+            bytes: b"\n".to_vec(),
+        };
+        (&peer).write_all(&input.encode().unwrap()).unwrap();
+        let give_up = Instant::now() + Duration::from_secs(10);
+        let pushed = |replies: &[Reply]| {
+            let title = replies
+                .iter()
+                .any(|r| matches!(r, Reply::Title(t) if t.text == "hi"));
+            let alternate = replies
+                .iter()
+                .any(|r| matches!(r, Reply::Alternate(a) if a.on));
+            (title, alternate)
+        };
+        while pushed(&replies) != (true, true) {
+            assert!(
+                Instant::now() < give_up,
+                "the title or the switch was never pushed: {replies:?}"
+            );
+            assert!(!f.server.turn(&mut f.holder).unwrap());
+            read_into(&mut peer, &mut decoder, &mut replies);
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_snapshot_draws_the_screen_once() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("snapshot-once", "printf 'xyzzy'; exec sleep 30");
+        f.until("the output", |f| f.output().contains("xyzzy"));
+        match f.ask(&snapshot_request(2)).as_slice() {
+            [_, Reply::Snapshot { bytes, .. }] => {
+                let text = String::from_utf8_lossy(bytes);
+                assert_eq!(text.matches("xyzzy").count(), 1, "{text:?}");
+            }
+            other => panic!("answered {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscription_from_an_offset_streams_from_that_offset() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("subscribe-from", "printf '0123456789'; exec sleep 30");
+        f.until("the output", |f| f.output().contains("0123456789"));
+        let subscribe = Request::Subscribe {
+            id: RequestId(2),
+            body: body::SubscribeRequest {
+                from: Some(body::SubscribeFrom {
+                    generation: f.holder.generation(),
+                    offset: Offset::new(4).unwrap(),
+                }),
+            },
+        };
+        let mut peer = f.peer(&[hello_request(), subscribe]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        let first = loop {
+            assert!(Instant::now() < give_up, "no output: {replies:?}");
+            assert!(!f.server.turn(&mut f.holder).unwrap());
+            read_into(&mut peer, &mut decoder, &mut replies);
+            if let Some(first) = replies.iter().find_map(|r| match r {
+                Reply::Data { offset, bytes } => Some((offset.get(), bytes.clone())),
+                _ => None,
+            }) {
+                break first;
+            }
+        };
+        assert_eq!(first.0, 4);
+        assert!(first.1.starts_with(b"456789"), "{first:?}");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_subscription_after_a_snapshot_of_a_terminal_yet_to_write_is_answered() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("subscribe-at-zero", "exec sleep 30");
+        let mut peer = f.peer(&[hello_request(), snapshot_request(2), subscribe_request(3)]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        let answer = loop {
+            assert!(Instant::now() < give_up, "the subscribe was never answered");
+            assert!(!f.server.turn(&mut f.holder).unwrap());
+            read_into(&mut peer, &mut decoder, &mut replies);
+            if let Some(answer) = replies.iter().find_map(|r| match r {
+                Reply::Error { body, .. } => Some(body.code.clone()),
+                Reply::Ok { body, .. } if body.request == "subscribe" => Some("ok".to_owned()),
+                _ => None,
+            }) {
+                break answer;
+            }
+        };
+        assert_eq!(answer, "ok", "{replies:?}");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_respawn_sent_before_hello_is_refused_and_respawns_nothing() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("respawn-first", "exec sleep 30");
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
+        let respawn = Request::Respawn {
+            id: RequestId(2),
+            body: ProcessSpec {
+                argv: body::Argv::new(vec!["sleep".into(), "30".into()]).unwrap(),
+                cwd: body::NonEmpty::new("/").unwrap(),
+                env: body::Env::new(env).unwrap(),
+                generation: body::Generation::new(1).unwrap(),
+                theme: None,
+            },
+        };
+        let mut peer = f.peer(&[respawn]);
+        let (mut decoder, mut replies) = (bazhen_holder_proto::reply_decoder(), Vec::new());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        while replies.is_empty() {
+            assert!(Instant::now() < give_up, "the respawn was never answered");
+            assert!(!f.server.turn(&mut f.holder).unwrap());
+            read_into(&mut peer, &mut decoder, &mut replies);
+        }
+        assert!(
+            matches!(&replies[0], Reply::Error { body, .. } if body.code == "invalid"),
+            "{replies:?}"
+        );
+        assert_eq!(f.holder.generation().get(), 0);
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn an_accept_with_no_connection_waiting_goes_on_accepting() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut f = Failing::start("accept-idle", "sleep 30");
