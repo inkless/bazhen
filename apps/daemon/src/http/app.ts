@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
+  CallerResponse,
   AnswerAttentionRequest,
   DismissAttentionRequest,
   DismissNoticeRequest,
@@ -377,6 +378,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   // so no page can act as an agent, whatever header it sends (§9.1).
   const callerOf = (c: Context<AppEnv>): Caller =>
     allow === null ? (c.get("caller") ?? null) : null;
+  app.get("/v1/caller", (c) => c.json(CallerResponse.parse({ agentId: callerOf(c) })));
   const taskRoute = <T, R>(
     path: string,
     schema: z.ZodType<T>,

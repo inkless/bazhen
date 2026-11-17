@@ -585,6 +585,49 @@ describe("socket callers", () => {
   });
 });
 
+/** Whom `on` names on `/v1/caller` to a request with `headers`, and the status it answers with. */
+const callerOn = async (on: Served, headers: Record<string, string> = {}) => {
+  const res = await on.request("/v1/caller", { headers: { host, ...headers } });
+  return [res.status, await res.json()];
+};
+
+describe("the caller route", () => {
+  it("names the agent the socket's guard took the caller for, and the human as null", async () => {
+    expect([
+      await callerOn(socket, { "bazhen-agent-token": AGENT_TOKEN }),
+      await callerOn(socket, { "bazhen-agent-id": agentId }),
+      await callerOn(socket),
+    ]).toEqual([
+      [200, { agentId: tokenedAgent }],
+      [200, { agentId }],
+      [200, { agentId: null }],
+    ]);
+  });
+
+  it("names a Codex command's thread's agent, not the agent its server's environment names", async () => {
+    const thread = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
+    const codexAgent = newId("agent");
+    const underServer = new Hono<SocketEnv>();
+    guardCallers(
+      underServer,
+      { ...credentials, codexAgent: (t) => new Map([[thread, codexAgent]]).get(t) },
+      async () => ({ kind: "codex", via: "server" }),
+    );
+    underServer.route("/", createApp({ ...deps, allow: null }));
+    const leaked = { "bazhen-agent-token": AGENT_TOKEN, "bazhen-agent-id": tokenedAgent };
+    const res = await underServer.request(
+      "/v1/caller",
+      { headers: { ...leaked, "bazhen-codex-thread": thread } },
+      { incoming: { socket: {} } },
+    );
+    expect([res.status, await res.json()]).toEqual([200, { agentId: codexAgent }]);
+  });
+
+  it("names nobody to a browser, whatever agent it names", async () => {
+    expect(await callerOn(app, { "bazhen-agent-id": agentId })).toEqual([200, { agentId: null }]);
+  });
+});
+
 describe("HTTP task routes", () => {
   it("takes a socket caller that names its agent as that agent", async () => {
     const res = await createTask(socket, "mine", { "bazhen-agent-id": agentId });

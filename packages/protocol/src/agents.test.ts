@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LaunchAgentRequest, RespawnAgentRequest, StateSnapshot } from "./agents.ts";
+import {
+  CallerResponse,
+  LaunchAgentRequest,
+  RespawnAgentRequest,
+  StateSnapshot,
+} from "./agents.ts";
 
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
 
@@ -32,6 +37,21 @@ describe("LaunchAgentRequest", () => {
       LaunchAgentRequest.safeParse({ ...launch, theme: "system" }).success,
       RespawnAgentRequest.safeParse({ ...respawn, theme: "Light" }).success,
     ]).toEqual([true, true, true, false, false]);
+  });
+});
+
+describe("CallerResponse", () => {
+  it("names an agent by its id, or the human as null, and nothing else", () => {
+    const agent = "agent_01900000000070008000000000000001";
+    expect(
+      [
+        { agentId: agent },
+        { agentId: null },
+        {},
+        { agentId: "BZ-127" },
+        { agentId: "term_01900000000070008000000000000001" },
+      ].map((r) => CallerResponse.safeParse(r).success),
+    ).toEqual([true, true, false, false, false]);
   });
 });
 

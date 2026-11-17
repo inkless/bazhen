@@ -323,6 +323,7 @@ export type SocketEnv = { Bindings: HttpBindings } & CallerEnv;
 export const AGENT_OPEN: readonly (readonly [method: string, path: string])[] = [
   ["GET", "/v1/health"],
   ["GET", "/v1/state"],
+  ["GET", "/v1/caller"],
   ["GET", "/v1/roles"],
   ["GET", "/v1/daemon/doctor"],
   ["POST", "/v1/tasks"],

@@ -296,6 +296,14 @@ export const AgentCommandResponse = z.object({
 });
 export type AgentCommandResponse = z.infer<typeof AgentCommandResponse>;
 
+/**
+ * Who the daemon takes the request that asks to be: an agent, or the human as null. A command's
+ * environment can't tell, since who a Codex command is depends on which process the daemon
+ * finds calling, so a command defaulting to its own agent asks.
+ */
+export const CallerResponse = z.object({ agentId: Id("agent").nullable() });
+export type CallerResponse = z.infer<typeof CallerResponse>;
+
 /** Projections, consistent as of `eventId` in store `epoch`: resume the event stream there. */
 export const StateSnapshot = z.object({
   epoch: z.string(),
