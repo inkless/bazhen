@@ -95,7 +95,7 @@ describe("a daemon that isn't running", () => {
   it("exits 3 when it holds a read past five seconds, as one wedged does", async () => {
     s.daemon.hang("GET /v1/state");
     const begun = Date.now();
-    const ran = await s.bazhen(["task", "list"]);
+    const ran = await s.bazhen(["task", "list", "--all"]);
     expect(ran).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
@@ -184,7 +184,7 @@ describe("the daemon a task verb reaches", () => {
 
   it("is the one the home names when BAZHEN_SOCKET is empty", async () => {
     state();
-    const ran = await s.bazhen(["task", "list"], { BAZHEN_SOCKET: "" });
+    const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_SOCKET: "" });
     expect([ran.code, s.daemon.routes()]).toEqual([0, ["GET /v1/state"]]);
   });
 });
@@ -201,10 +201,10 @@ describe("the daemon any verb reaches", () => {
 
   it("is under --home over BAZHEN_HOME, and under a home given with a trailing slash", async () => {
     state();
-    const flag = await s.bazhen(["task", "list", "--home", s.home], {
+    const flag = await s.bazhen(["task", "list", "--all", "--home", s.home], {
       BAZHEN_HOME: join(s.dir, "other"),
     });
-    const slash = await s.bazhen(["task", "list"], { BAZHEN_HOME: `${s.home}/` });
+    const slash = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: `${s.home}/` });
     expect([flag.code, slash.code, s.daemon.routes()]).toEqual([
       0,
       0,
@@ -228,7 +228,7 @@ describe("the daemon any verb reaches", () => {
     const theirs = await FakeDaemon.listen(join(runtime, "bazhen", "bazhen.sock"));
     try {
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bare(["task", "list"], { XDG_RUNTIME_DIR: runtime });
+      const ran = await s.bare(["task", "list", "--all"], { XDG_RUNTIME_DIR: runtime });
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {
       await theirs.close();
@@ -243,7 +243,7 @@ describe("the daemon any verb reaches", () => {
     try {
       const theirs = await FakeDaemon.listen(join(run, "bazhen.sock"));
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bazhen(["task", "list"], { BAZHEN_HOME: home });
+      const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: home });
       await theirs.close();
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {

@@ -304,6 +304,28 @@ describe("bazhen whoami", () => {
     expect(shown).toEqual([`BZ-127  ${AGENT}`, `starter-1  ${OTHER}`]);
   });
 
+  it("names the agent the daemon takes a command for though its environment names no agent", async () => {
+    s.daemon
+      .takes(AGENT)
+      .answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
+    const ran = await s.bazhen(["whoami"]);
+    expect([ran.code, ran.stdout.split("\n")[0], s.daemon.routes()]).toEqual([
+      0,
+      `BZ-127  ${AGENT}`,
+      ["GET /v1/caller", "GET /v1/state"],
+    ]);
+  });
+
+  it("names no agent when no daemon answers, whatever its environment names", async () => {
+    await s.daemon.close();
+    const bare = await s.bazhen(["whoami"]);
+    const named = await s.bazhen(["whoami"], asAgent);
+    expect([bare, named].map((r) => [r.code, r.stdout, r.stderr])).toEqual([
+      [3, "", "bazhen is not running; start it with `bazhen start`\n"],
+      [3, "", "bazhen is not running; start it with `bazhen start`\n"],
+    ]);
+  });
+
   it("names no agent for a Codex command the daemon takes for the human's", async () => {
     s.daemon
       .takes(null)
@@ -335,7 +357,7 @@ describe("bazhen whoami", () => {
   });
 
   it("wants to run inside an agent the daemon knows", async () => {
-    s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
+    s.daemon.takes(null).answer("GET /v1/state", StateSnapshot, snapshot());
     const outside = await s.bazhen(["whoami"]);
     const asked = s.daemon.routes();
     s.daemon.takes(AGENT);
@@ -345,7 +367,10 @@ describe("bazhen whoami", () => {
       "",
       expect.stringContaining("inside an agent"),
     ]);
-    expect([outside.stderr, asked]).toEqual([expect.not.stringContaining("usage:"), []]);
+    expect([outside.stderr, asked]).toEqual([
+      expect.not.stringContaining("usage:"),
+      ["GET /v1/caller"],
+    ]);
     expect([unknown.code, unknown.stdout, unknown.stderr]).toEqual([
       2,
       "",

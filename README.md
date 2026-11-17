@@ -276,8 +276,10 @@ closed, lost or unknown. Over TCP, from the web client, the caller is always you
 
 A verb that defaults to the asking agent (`whoami`, `task list`, and `task done` or `task note`
 with no task named) asks the daemon which agent it takes the command for, and uses that one,
-whatever the environment names. A Codex command's `BAZHEN_AGENT_ID` can be whichever agent started
-its app-server, so the environment only says whether to ask.
+whatever the environment names, and even when it names no agent. A Codex command's
+`BAZHEN_AGENT_ID` can be whichever agent started its app-server, and a process in an agent's
+terminal is that agent's with no variable set. With no daemon running, these verbs say so and
+exit 3.
 
 ## What Bazhen knows about who is calling
 

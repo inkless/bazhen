@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use bazhen_client::{env_text, read_regular};
+use bazhen_client::read_regular;
 
 use bazhen_protocol::agents::{
     AgentCommandResponse, CallerResponse, HarnessId, RenameAgentRequest, StateSnapshot,
@@ -81,15 +81,7 @@ const DEFAULT_WAIT_S: u64 = 60;
 
 /// Runs the task verb the command line names, and says how it went.
 pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Result<Exit, Failed> {
-    let verb = Verb {
-        p,
-        daemon,
-        now_ms,
-        in_agent: in_agent(
-            env_text("BAZHEN_AGENT_ID").as_deref(),
-            env_text("CODEX_THREAD_ID").as_deref(),
-        ),
-    };
+    let verb = Verb { p, daemon, now_ms };
     match verb.run(out) {
         Ok(answer) => {
             out.line(&answer.text);
@@ -115,18 +107,6 @@ struct Verb<'a> {
     p: &'a Parsed,
     daemon: &'a Daemon,
     now_ms: i64,
-    /// Whether the command may run inside an agent, by `in_agent`.
-    in_agent: bool,
-}
-
-/// Whether a command whose environment holds `agent_id` (`BAZHEN_AGENT_ID`) and `thread`
-/// (`CODEX_THREAD_ID`) may run inside an agent, so that only the daemon can say which. Neither
-/// says which: a Codex command's `BAZHEN_AGENT_ID` is its app-server's, which may be whichever
-/// agent started the server, and is empty on a thread Bazhen loaded.
-fn in_agent(agent_id: Option<&str>, thread: Option<&str>) -> bool {
-    [agent_id, thread]
-        .into_iter()
-        .any(|v| v.is_some_and(|v| !v.is_empty()))
 }
 
 /// `value`, refused as missing when absent or empty.
@@ -217,11 +197,10 @@ impl Verb<'_> {
         Ok(self.daemon.get("/v1/state", CALL)?)
     }
 
-    /// The agent this command runs inside, as the daemon takes its calls to be that agent's.
+    /// The agent this command runs inside, as the daemon takes its calls to be that agent's. The
+    /// environment can't say: a process the daemon attributes to an agent may carry no agent
+    /// variable, and a Codex command's `BAZHEN_AGENT_ID` may be another agent's.
     fn me(&self) -> Step<Option<String>> {
-        if !self.in_agent {
-            return Ok(None);
-        }
         let r: CallerResponse = self.daemon.get("/v1/caller", CALL)?;
         Ok(r.agent_id.map(|id| id.to_string()))
     }
@@ -779,26 +758,4 @@ fn resolve(dir: &str) -> String {
     let cwd = std::env::current_dir()
         .map_or_else(|_| "/".to_owned(), |c| c.to_string_lossy().into_owned());
     normalize(&format!("{cwd}/{dir}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::in_agent;
-
-    #[test]
-    fn a_command_may_be_an_agents_by_either_variable_but_not_by_an_empty_one() {
-        let thread = Some("01a1e0f0-593e-7ae1-9d31-769db26227fc");
-        assert_eq!(
-            [
-                (Some("agent_x"), None),
-                (None, thread),
-                (Some(""), thread),
-                (Some(""), None),
-                (None, Some("")),
-                (None, None),
-            ]
-            .map(|(id, thread)| in_agent(id, thread)),
-            [true, true, true, false, false, false]
-        );
-    }
 }
