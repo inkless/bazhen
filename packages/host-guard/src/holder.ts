@@ -272,7 +272,7 @@ export interface StartSeams {
 }
 
 const realSpawn: NonNullable<StartSeams["spawn"]> = (file, args, options) =>
-  spawnChild(file, args, { ...options, stdio: ["pipe", "pipe", "pipe"] });
+  spawnChild(file, args, { env: options.env, cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] });
 
 /** What this process knows of each holder it started, by pid. */
 interface Own {

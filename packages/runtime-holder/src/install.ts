@@ -217,8 +217,8 @@ export type ProcessArgs = () => Promise<string>;
 const psArgs: ProcessArgs = async () => {
   const run = promisify(execFile);
   const ps = ["-A", "-ww", "-o", "pid=,uid=,args="];
-  const options = { env: PS_ENV, timeout: PS_TIMEOUT_MS, maxBuffer: PS_MAX_BYTES };
-  return (await run("ps", ps, options)).stdout;
+  return (await run("ps", ps, { env: PS_ENV, timeout: PS_TIMEOUT_MS, maxBuffer: PS_MAX_BYTES }))
+    .stdout;
 };
 
 /**

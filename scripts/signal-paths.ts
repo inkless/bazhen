@@ -118,7 +118,12 @@ const STARTERS = [
 ] as const;
 const STARTER_NAME = `(?:${STARTERS.join("|")})`;
 const CHILD_PROCESS_MODULE = `["'](?:node:)?child_process["']`;
-const START_OPTION = /(?<=[{,]\s*)\b(timeout|killSignal|signal)\b(?=\s*[:,}])/g;
+// A key, a getter's or a method's included, as each sets the option.
+const START_OPTION =
+  /(?<=[{,]\s*(?:(?:get|set|async)\s+|\*\s*)?)\b(timeout|killSignal|signal)\b(?=\s*[:,}(])/g;
+// What a declaration's name follows: a statement's or a member's start, or a modifier.
+const DECLARED_AFTER =
+  /(?:^|[;{},*]|\b(?:function|async|static|public|private|protected|readonly|override|abstract|declare|get|set))\s*$/;
 
 /** The index of the `)` closing the `(` at `open` in blanked code, or the end of the code. */
 function closingParen(code: string, open: number): number {
@@ -130,11 +135,101 @@ function closingParen(code: string, open: number): number {
   return code.length;
 }
 
+const OPENS = "([{";
+const CLOSES = ")]}";
+
 /**
- * Each `timeout`, `killSignal` or `signal` key in a child_process start's arguments: the start
- * called bare or through an import alias, as a member of child_process imported whole, or bound
- * by `promisify` to a name of its own. A wrapper taking a timeout of its own isn't a start; the
- * kill it causes is found where it calls Node.
+ * The top-level items of the bracketed list that `list`, blanked code, opens with: each trimmed,
+ * with its offset in `list`. The list runs to its closing bracket, or to the end of `list`.
+ */
+function listItems(list: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  let depth = 0;
+  let from = 1;
+  const item = (to: number) => {
+    const raw = list.slice(from, to);
+    const text = raw.trim();
+    if (text !== "") out.push({ text, at: from + raw.length - raw.trimStart().length });
+  };
+  for (let i = 0; i < list.length; i++) {
+    const c = list.charAt(i);
+    if (OPENS.includes(c)) depth++;
+    else if (CLOSES.includes(c) && --depth === 0) {
+      item(i);
+      return out;
+    } else if (c === "," && depth === 1) {
+      item(i);
+      from = i + 1;
+    }
+  }
+  item(list.length);
+  return out;
+}
+
+/** Blanked code with each bracketed group's contents dropped: `f(a)[0]` is `f()[]`. */
+function outline(text: string): string {
+  let depth = 0;
+  let out = "";
+  for (const c of text) {
+    if (OPENS.includes(c) && depth++ === 0) out += c;
+    else if (CLOSES.includes(c) && --depth === 0) out += c;
+    else if (depth === 0) out += c;
+  }
+  return out;
+}
+
+const isFunction = (shape: string) =>
+  /^(?:async\s+)?function\b/.test(shape) ||
+  /^(?:async\s*)?(?:\(\)\s*(?::[^=?]*)?|[\w$]+\s*)=>/.test(shape);
+
+const NOTHING = /^(?:undefined|null)$/;
+// A key in a literal object the scan can't read as a name: a spread, a computed key, or a quoted
+// one, whose quotes are blanked; a getter's, a setter's or a method's included.
+const UNREAD_KEY = /^(?:\.\.\.|(?:(?:get|set|async)\s*)?(?:\*\s*)?["'`[])/;
+
+/**
+ * Where in a start's argument `arg` options may be that the scan can't read: all of it, unless it
+ * is a literal object, an array (the args), a function (the callback), undefined or null; in a
+ * literal object, each key it can't read. Offsets are in `arg.text`.
+ */
+function unreadOptions(arg: { text: string }): number[] {
+  const shape = outline(arg.text);
+  if (shape === "{}") {
+    return listItems(arg.text)
+      .filter((entry) => UNREAD_KEY.test(entry.text))
+      .map((entry) => entry.at);
+  }
+  return shape === "[]" || NOTHING.test(shape) || isFunction(shape) ? [] : [0];
+}
+
+/**
+ * The arguments of a start Node may read its options from. `exec`'s second; for the others the
+ * third, and the second too unless a third follows that may be the options, since Node takes a
+ * second argument that isn't an array as the options, and `execFile(file, options, callback)`
+ * takes undefined or null for the callback. Where a third may be the options, the second is
+ * taken for the args: Node's types allow only an array there, so options in it, as in
+ * `spawn(cmd, OPTS, undefined)`, need a cast past TypeScript.
+ */
+function optionSlots(start: string, args: { text: string; at: number }[]) {
+  if (start === "exec" || start === "execSync") return args.slice(1, 2);
+  const third = args[2] === undefined ? "" : outline(args[2].text);
+  return third === "" || NOTHING.test(third) || isFunction(third)
+    ? args.slice(1, 3)
+    : args.slice(2, 3);
+}
+
+/** A start's arguments spread from a value, up to its last options slot: any may be the options. */
+const spreadArguments = (start: string, args: { text: string; at: number }[]) =>
+  args
+    .slice(0, start === "exec" || start === "execSync" ? 2 : 3)
+    .filter((arg) => arg.text.startsWith("..."));
+
+/**
+ * Each `timeout`, `killSignal` or `signal` key in a child_process start's arguments, and each
+ * place its options aren't written out where the scan can read them: the start called bare or
+ * through an import alias, as a member of child_process imported whole, or bound by `promisify`
+ * to a name of its own. A wrapper taking a timeout of its own isn't a start; the kill it causes is
+ * found where it calls Node. A declaration named for a start has parameters, not options.
  */
 function startOptions(code: string, kept: string) {
   const named = new Map<string, string>(STARTERS.map((s) => [s, s]));
@@ -168,13 +263,35 @@ function startOptions(code: string, kept: string) {
   const calls = new RegExp(`(?:${bare}${member})\\s*\\(`, "g");
   return [...code.matchAll(calls)].flatMap((call) => {
     const open = call.index + call[0].length - 1;
-    const args = code.slice(open, closingParen(code, open));
+    const close = closingParen(code, open);
+    const args = code.slice(open, close);
     const start = call[2] ?? named.get(call[1] ?? "") ?? "";
-    return [...args.matchAll(START_OPTION)].map((option) => ({
+    const options = [...args.matchAll(START_OPTION)].map((option) => ({
       index: open + option.index,
       line: lineAt(code, open + option.index),
       call: `${option[1]} option of ${start}`,
     }));
+    const declared =
+      DECLARED_AFTER.test(code.slice(0, call.index)) && /^\s*[{:]/.test(code.slice(close + 1));
+    if (declared) return options;
+    const items = listItems(args);
+    const spread = spreadArguments(start, items);
+    // Past a spread no argument's slot is known, so the spread alone stands for the call.
+    const unread =
+      spread.length > 0
+        ? spread.map((arg) => open + arg.at)
+        : optionSlots(start, items).flatMap((arg) =>
+            unreadOptions(arg).map((at) => open + arg.at + at),
+          );
+    return [
+      ...options,
+      ...unread.map((index) => ({
+        index,
+        line: lineAt(code, index),
+        call: `options of ${start} not written inline`,
+        unread: true as const,
+      })),
+    ];
   });
 }
 
@@ -701,6 +818,12 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       "tmux, reading a script on stdin in TmuxServer.source",
     ),
   ],
+  "packages/runtime-holder/src/install.ts": [
+    timedOut(
+      /run\("ps", ps, \{ env: PS_ENV, timeout: PS_TIMEOUT_MS, maxBuffer: PS_MAX_BYTES \}\)/,
+      "ps, listing the processes that run a holder build",
+    ),
+  ],
   "apps/daemon/src/codex/channel.ts": [
     timedOut(/run\("codex", args, \{ env, timeout: 60_000 \}\)/, "the codex CLI"),
     timedOut(/run\("codex", \["--version"\], \{ env, timeout: 1_000 \}\)/, "codex --version"),
@@ -814,7 +937,11 @@ function allowedIn(file: string, text: string) {
   });
 }
 
-type Signal = { index: number; line: number; call: string; literal?: boolean };
+/**
+ * A signal found in a file. `unread` marks a start's options the scan can't read, which may set a
+ * kill or not.
+ */
+type Signal = { index: number; line: number; call: string; literal?: boolean; unread?: boolean };
 
 /** Whether one of `allowed` lets `signal` through: a fixture lets only a command line's. */
 const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
@@ -825,10 +952,15 @@ const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
   );
 
 const asCalls = (signals: Signal[]) =>
-  signals.toSorted((a, b) => a.index - b.index).map(({ line, call }) => ({ line, call }));
+  signals
+    .toSorted((a, b) => a.index - b.index)
+    .map(({ line, call, unread }) => (unread === true ? { line, call, unread } : { line, call }));
 
 /** Each raw signal call in a file, by line, whatever else the file is. */
-export function rawSignalCalls(file: string, text: string): { line: number; call: string }[] {
+export function rawSignalCalls(
+  file: string,
+  text: string,
+): { line: number; call: string; unread?: true }[] {
   const { signals, allowed } = signalsIn(file, text);
   return asCalls(signals.filter((s) => !allows(allowed, s)));
 }

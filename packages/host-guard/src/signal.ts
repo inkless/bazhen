@@ -206,8 +206,18 @@ function send(target: number, signal: NodeJS.Signals): boolean {
   }
 }
 
+/**
+ * Options for `spawnGroup`, without the ones Node enforces with a kill of its own: the group is
+ * signalled only through `signalGroup`.
+ */
+export type GroupSpawnOptions = Omit<SpawnOptions, "timeout" | "killSignal" | "signal"> & {
+  readonly timeout?: never;
+  readonly killSignal?: never;
+  readonly signal?: never;
+};
+
 /** Starts a child leading a process group of its own, which `signalGroup` may then reach. */
-export function spawnGroup(command: string, args: readonly string[], opts: SpawnOptions) {
+export function spawnGroup(command: string, args: readonly string[], opts: GroupSpawnOptions) {
   const child = spawn(command, args, { ...opts, detached: true });
   if (child.pid !== undefined) groups.add(child.pid);
   return child;

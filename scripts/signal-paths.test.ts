@@ -206,18 +206,14 @@ describe("raw signal calls in TypeScript", () => {
 
 describe("kills Node sends for a process start's options", () => {
   it("finds a timeout, killSignal or signal passed to each child_process start", () => {
-    const starts = [
-      "spawn",
-      "spawnSync",
-      "exec",
-      "execSync",
-      "execFile",
-      "execFileSync",
-      "fork",
-    ].flatMap((start) => [
-      `${start}(cmd, args, { timeout: 1_000 });`,
-      `${start}(cmd, args, { env, killSignal: "SIGKILL" });`,
-      `${start}(cmd, args, { stdio: "ignore", signal: abort.signal });`,
+    const heads = [
+      ...["spawn", "spawnSync", "execFile", "execFileSync", "fork"].map((s) => `${s}(cmd, args,`),
+      ...["exec", "execSync"].map((s) => `${s}(cmd,`),
+    ];
+    const starts = heads.flatMap((head) => [
+      `${head} { timeout: 1_000 });`,
+      `${head} { env, killSignal: "SIGKILL" });`,
+      `${head} { stdio: "ignore", signal: abort.signal });`,
     ]);
     expect(starts.filter((source) => calls("a.ts", source).length !== 1)).toEqual([]);
   });
@@ -259,7 +255,7 @@ describe("kills Node sends for a process start's options", () => {
       'server.run(["list-sessions"], { timeout: 500 });',
       "const run = (event, timeout) => ({ type: 'command', timeout });",
       'run("wait", 86_400);',
-      'execFile("ps", args, (error, signal) => done(signal));',
+      'execFile("ps", ["-A"], (error, signal) => done(signal));',
       "execFile(cmd, [], { env: limits.timeout, cwd: opts.signal }, done);",
       'const s = "spawn(cmd, [], { timeout: 1 })";',
       "// execFile(cmd, [], { timeout: 1 })",
@@ -277,6 +273,202 @@ describe("kills Node sends for a process start's options", () => {
       "  { timeout: 1 });",
     ].join("\n");
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4]);
+  });
+
+  it("finds a timeout set by a getter or a method", () => {
+    expect(calls("a.ts", "spawn(cmd, args, { get timeout() { return 1; } });")).toEqual([
+      "timeout option of spawn",
+    ]);
+  });
+});
+
+const unread = (start: string) => `options of ${start} not written inline`;
+const unreadAt = (line: number, start: string) => ({ line, call: unread(start), unread: true });
+
+describe("a start's options the scan can't read", () => {
+  it("finds options passed through a constant, which could hold a timeout", () => {
+    const source = ["const OPTS = { timeout: 5_000 };", "execFileSync(cmd, args, OPTS);"];
+    expect(rawSignalCalls("a.ts", source.join("\n"))).toEqual([unreadAt(2, "execFileSync")]);
+  });
+
+  it("finds them at the options slot of each start, however the start is named", () => {
+    const flagged: [string, string][] = [
+      ["spawn(cmd, args, opts);", "spawn"],
+      ["spawnSync(cmd, args, opts);", "spawnSync"],
+      ["execFile(cmd, args, opts, done);", "execFile"],
+      ["execFileSync(cmd, args, opts);", "execFileSync"],
+      ["fork(mod, args, opts);", "fork"],
+      ["exec(cmd, opts, done);", "exec"],
+      ["execSync(cmd, opts);", "execSync"],
+      ['import { execFile as ef } from "node:child_process";\nef(cmd, [], opts);', "execFile"],
+      ['import * as cp from "child_process";\ncp.spawn(cmd, args, opts);', "spawn"],
+      ['const run = promisify(execFile);\nawait run("ps", ps, options);', "execFile"],
+    ];
+    expect(flagged.map(([source]) => calls("a.ts", source))).toEqual(
+      flagged.map(([, start]) => [unread(start)]),
+    );
+  });
+
+  it("finds a second argument that may be the options, as Node reads any that isn't an array", () => {
+    const flagged = [
+      "spawn(cmd, args);",
+      "spawnSync(cmd, opts);",
+      "execFile(cmd, opts, (error, stdout) => {});",
+      "execFile(cmd, opts, function (error) {});",
+      "fork(mod, opts);",
+    ];
+    expect(flagged.map((source) => calls("a.ts", source))).toEqual(
+      flagged.map((source) => [unread(source.slice(0, source.indexOf("(")))]),
+    );
+  });
+
+  it("finds a second argument that may be the options, before a callback of undefined or null", () => {
+    expect(calls("a.ts", "execFile(file, opts, undefined);\nexecFile(file, opts, null);")).toEqual([
+      unread("execFile"),
+      unread("execFile"),
+    ]);
+  });
+
+  it("finds arguments spread from a value at or before the options, which may hold them", () => {
+    const source = [
+      "spawn(...a);",
+      "execFile(...callArgs, done);",
+      "execSync(...x);",
+      "spawn(cmd, ...rest);",
+      "execFile(cmd, args, ...rest);",
+      "exec(cmd, ...rest);",
+      "execFile(cmd, [], {}, ...callbacks);",
+      "exec(cmd, {}, ...callbacks);",
+      "spawn(cmd, [...args], {});",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([
+      unreadAt(1, "spawn"),
+      unreadAt(2, "execFile"),
+      unreadAt(3, "execSync"),
+      unreadAt(4, "spawn"),
+      unreadAt(5, "execFile"),
+      unreadAt(6, "exec"),
+    ]);
+  });
+
+  it("finds a key it can't read as a name: computed or quoted, a getter's or a method's too", () => {
+    const source = [
+      "spawn(cmd, args, {",
+      "  get [K]() { return 1; },",
+      "  async [k]() {},",
+      "  *[k]() {},",
+      "  async *[k]() {},",
+      '  "timeout": 5,',
+      '  get "timeout"() { return 1; },',
+      "  'killSignal': \"SIGKILL\",",
+      "  [`signal`]: s,",
+      '  stdio: "inherit",',
+      "  getStdio: 1,",
+      "});",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  it("finds a callback in a variable, which text can't tell from the options", () => {
+    expect(calls("a.ts", "execFile(cmd, args, done);")).toEqual([unread("execFile")]);
+  });
+
+  it("finds any expression that isn't a literal object", () => {
+    const flagged = [
+      "spawn(cmd, args, this.options);",
+      "spawn(cmd, args, options());",
+      "spawn(cmd, args, quiet ? QUIET : LOUD);",
+      'spawn(cmd, args, { stdio: "inherit" } as SpawnOptions);',
+      "spawn(cmd, args, Object.assign({}, base));",
+      "spawn(cmd, args, `${opts}`);",
+      "spawn(cmd, args, [opts][0]);",
+      "spawn(cmd, args, x ? opts : () => undefined);",
+      "const child = ok ? spawn(cmd, args, opts) : null;",
+    ];
+    expect(flagged.map((source) => calls("a.ts", source))).toEqual(
+      flagged.map(() => [unread("spawn")]),
+    );
+  });
+
+  it("finds a spread or a computed key in a literal object, each where it is", () => {
+    const source = [
+      "spawn(cmd, args, {",
+      "  ...base,",
+      '  stdio: "inherit",',
+      "  [key]: value,",
+      "});",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([unreadAt(2, "spawn"), unreadAt(4, "spawn")]);
+  });
+
+  it("reads literals, and a spread inside an option's own value, and finds only the rest", () => {
+    const source = [
+      'spawn(cmd, args, { env: { ...process.env, A: "1" }, stdio: ["pipe", log, log] });',
+      "spawn(cmd, [...args, file]);",
+      'spawn("sh", ["-c", line], {});',
+      "spawnSync(cmd, [], undefined);",
+      "spawnSync(cmd, [], null);",
+      "execFile(cmd, [], { env }, done);",
+      'execFile("ps", ["-A"], (error, stdout) => done(stdout));',
+      'execFile("ps", ["-A"], function (error, stdout) {});',
+      'execFile("ps", ["-A"], async (error): Promise<void> => {});',
+      "exec(cmd, (error) => done(error));",
+      "exec(cmd, { cwd }, async function (error) {});",
+      'execSync("true");',
+      'spawnSync("pnpm", installArgs(mode), { stdio: "inherit" });',
+      "pattern.exec(text, opts);",
+      "server.run(args, opts);",
+      "spawn(cmd, args, opts);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([unreadAt(16, "spawn")]);
+  });
+
+  it("skips a declaration named for a start, whose parameters are no options, not a call", () => {
+    const source = [
+      "const run = promisify(execFile);",
+      "const spawner = {",
+      "  spawn(argv, size, env): PtyProcess {",
+      "    return proc;",
+      "  },",
+      "  fork(a, b, c) {",
+      "    return a;",
+      "  },",
+      "};",
+      "interface PtySpawner {",
+      "  spawn(",
+      "    argv: readonly [string, ...string[]],",
+      "    size: Size,",
+      "    env: Readonly<Record<string, string>>,",
+      "  ): PtyProcess;",
+      "  exec(command: string, options: Options): void;",
+      "}",
+      "class Server {",
+      "  private async spawn(file, args, opts): Promise<void> {}",
+      "  run(args: readonly string[], opts: TmuxOptions = {}): Promise<string> {",
+      "    return run(bin, args, { timeout: 1 });",
+      "  }",
+      "  static execSync(cmd, opts) {}",
+      "  *spawnSync(cmd, args, opts) {}",
+      "}",
+      "function execFile(file, args, opts) {}",
+      "export async function execFileSync(file, args, opts): Promise<void> {}",
+      "execFileSync(file, args, opts);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([
+      { line: 21, call: "timeout option of execFile" },
+      unreadAt(28, "execFileSync"),
+    ]);
+  });
+
+  it("names options it can't read at a start whose timeout is allowed", () => {
+    const base = "scripts/falsify-base.ts";
+    const call = [
+      'spawnSync("pnpm", installArgs(mode), {',
+      "  ...extra,",
+      "  timeout: INSTALL_TIMEOUT_MS,",
+      "});",
+    ].join("\n");
+    expect(rawSignalCalls(base, call)).toEqual([unreadAt(2, "spawnSync")]);
   });
 });
 
