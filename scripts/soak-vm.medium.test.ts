@@ -31,10 +31,13 @@ const STUBS: Record<string, string> = {
   uname: "echo x86_64",
   id: "echo soak libvirt",
   hostname: "echo test-host",
-  virsh: `case "$*" in
+  virsh: `for last; do :; done
+case "$*" in
   *" dominfo "*) [ -n "$STUB_DOMAIN" ] ;;
   *" desc "*) printf '%s\\n' "$STUB_DESC" ;;
   *" domstate "*) echo running ;;
+  *" vol-info "*) case " $STUB_VOLUMES " in *" $last "*) ;; *) exit 1 ;; esac ;;
+  *" vol-delete "*) echo "\${*#*vol-delete }" >> "$DELETED" ;;
   *" domifaddr "*) printf ' Name MAC address Protocol Address\\n---\\n vnet0 52:54:00:00:00:01 ipv4 %s/24\\n' "$STUB_IP" ;;
   *) exit 1 ;;
 esac`,
@@ -71,6 +74,10 @@ interface Setup {
   ip?: string;
   /** What the VM's ~/soak-run holds. */
   run?: string;
+  /** The volumes the pool holds. */
+  volumes?: string[];
+  /** What is typed at the script's prompts. */
+  input?: string;
 }
 
 let runs = 0;
@@ -78,6 +85,7 @@ let runs = 0;
 function run(args: string[], setup: Setup = {}) {
   const home = join(dir, `home-${(runs += 1)}`);
   const calls = join(home, "calls");
+  const deleted = join(home, "deleted");
   mkdirSync(join(home, ".ssh"), { recursive: true });
   writeFileSync(join(home, ".ssh", "bazhen-soak"), "");
   if (setup.token !== undefined) {
@@ -86,6 +94,7 @@ function run(args: string[], setup: Setup = {}) {
   }
   const result = spawnSync(bash, [script, ...args], {
     encoding: "utf8",
+    input: setup.input ?? "",
     env: {
       PATH: bin,
       HOME: home,
@@ -93,6 +102,8 @@ function run(args: string[], setup: Setup = {}) {
       XDG_CACHE_HOME: join(home, "cache"),
       USER: "soak",
       CALLS: calls,
+      DELETED: deleted,
+      STUB_VOLUMES: (setup.volumes ?? []).join(" "),
       STUB_DOMAIN: setup.domain === true ? "1" : "",
       STUB_DESC: setup.desc ?? "",
       STUB_IP: setup.ip ?? "192.168.122.5",
@@ -104,12 +115,17 @@ function run(args: string[], setup: Setup = {}) {
     stdout: result.stdout,
     stderr: result.stderr,
     calls: existsSync(calls) ? readFileSync(calls, "utf8").split("\n").filter(Boolean) : [],
+    deleted: existsSync(deleted) ? readFileSync(deleted, "utf8").split("\n").filter(Boolean) : [],
     collected: existsSync(join(home, "bazhen-soak-results")),
   };
 }
 
 const refused = (message: string) => ({ status: 1, stderr: expect.stringContaining(message) });
 const ours = { token: TOKEN, domain: true, desc: `bazhen-soak instance ${TOKEN}` };
+
+const LEFTOVERS = ["bazhen-soak.qcow2", "bazhen-soak-seed.iso"];
+// A volume of the pool that is no VM's: destroy must leave it be.
+const BASE_VOLUME = "noble-0123456789ab.qcow2";
 
 const BAD_HOURS = ["0", "0.0", "-1", "abc", "24h", "1e3", "1."];
 const BAD_COMMITS = ["main", "abc", "ABC1234", "abc1234; true", "a".repeat(41)];
@@ -202,6 +218,32 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
     expect(run(["collect"], { ...ours, run: GOOD_RUN })).toMatchObject({
       collected: true,
       calls: expect.arrayContaining(["scp"]),
+    });
+  });
+
+  describe("destroy with no domain", () => {
+    const left = { volumes: [...LEFTOVERS, BASE_VOLUME] };
+
+    it("refuses volumes it has no token for, deleting none and naming the manual command", () => {
+      expect(run(["destroy"], { ...left, input: "bazhen-soak\n" })).toMatchObject({
+        ...refused("no instance token on this host"),
+        stderr: expect.stringContaining("vol-delete --pool default <volume>"),
+        deleted: [],
+      });
+    });
+
+    it("deletes nothing when the typed name is wrong", () => {
+      expect(run(["destroy"], { ...left, token: TOKEN, input: "bazhen\n" })).toMatchObject({
+        ...refused("not confirmed; nothing changed"),
+        deleted: [],
+      });
+    });
+
+    it("deletes exactly the VM's two volumes when the host has its token and the name is typed", () => {
+      expect(run(["destroy"], { ...left, token: TOKEN, input: "bazhen-soak\n" })).toMatchObject({
+        status: 0,
+        deleted: LEFTOVERS.map((volume) => `--pool default ${volume}`),
+      });
     });
   });
 });
