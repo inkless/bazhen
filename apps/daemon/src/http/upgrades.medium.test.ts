@@ -13,8 +13,10 @@ import { socketUpgrades, type UpgradeRoute } from "./upgrades.ts";
 
 let server: Server | undefined;
 let dir: string | undefined;
+const lingerers: Socket[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
+  for (const conn of lingerers.splice(0)) conn.destroy();
   server?.close();
   if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
   dir = undefined;
@@ -62,6 +64,31 @@ function rawUpgrade(conn: Socket, target: string, host?: string) {
   conn.on("close", () => (answer = received === "" ? "closed" : received.split("\r\n")[0]));
   conn.write(upgradeRequest(target, host));
   return () => answer;
+}
+
+/** Whether the server's side of the next connection the server accepts has closed. */
+function serverSide() {
+  if (server === undefined) throw new Error("nothing is serving");
+  let closed = false;
+  server.once("connection", (socket: Socket) => socket.once("close", () => (closed = true)));
+  return () => closed;
+}
+
+/**
+ * Sends an upgrade for `target` on a connection that never closes its side, and never reads from
+ * it unless `reading`; the status line read back, empty if none was.
+ */
+function lingering(to: { path: string } | { port: number; host: string }, reading: boolean) {
+  const conn = connect({ ...to, allowHalfOpen: true });
+  lingerers.push(conn);
+  conn.on("error", () => {});
+  let received = "";
+  if (reading) conn.on("data", (d: Buffer) => (received += d.toString("latin1")));
+  else conn.pause();
+  return (target: string, host?: string) => {
+    conn.write(upgradeRequest(target, host));
+    return () => received.split("\r\n")[0];
+  };
 }
 
 /** A raw connection to the server at `base`, a URL `serving` gave, and the Host it is known by. */
@@ -141,6 +168,21 @@ describe("WebSocket upgrades", () => {
       process.off("uncaughtException", escape);
     }
     expect(escaped).toEqual([]);
+  });
+
+  it("answers a target URL can't read from another host with the guard's 421, and closes its side though the caller never hangs up", async () => {
+    const { hostname, port } = new URL(await serving());
+    const closed = serverSide();
+    const status = lingering({ port: Number(port), host: hostname }, true)("//[", "evil.example");
+    await expect.poll(status).toBe("HTTP/1.1 421 Misdirected Request");
+    await expect.poll(closed).toBe(true);
+  });
+
+  it("closes its side of a refusal whose caller neither reads it nor hangs up", async () => {
+    const { hostname, port } = new URL(await serving());
+    const closed = serverSide();
+    lingering({ port: Number(port), host: hostname }, false)("/echo/hi", "evil.example");
+    await expect.poll(closed).toBe(true);
   });
 });
 
@@ -245,12 +287,22 @@ describe("WebSocket upgrades on the daemon's socket", () => {
     expect(await refusalOf(ws)).toEqual([403, "the agent token is no live agent's"]);
   });
 
-  it("refuses a caller whose read fails outright", async () => {
+  it("refuses a caller whose read fails outright, and logs why", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const url = await servingOnSocket(() => Promise.reject(new Error("ps failed")));
     expect(await refusalOf(new WebSocket(url("/echo/hi")))).toEqual([
       403,
       "the caller's process can't be read for sure",
     ]);
+    expect(logged).toHaveBeenCalledWith("a peer reading failed", new Error("ps failed"));
+  });
+
+  it("closes its side of a refusal on the socket whose caller never hangs up", async () => {
+    const url = await servingOnSocket(async () => ({ kind: "agent", agentId: agent }));
+    const closed = serverSide();
+    const status = lingering({ path: socketPath(url) }, true)("/echo/hi");
+    await expect.poll(status).toBe("HTTP/1.1 403 Forbidden");
+    await expect.poll(closed).toBe(true);
   });
 
   it("answers a path no route serves with 404", async () => {

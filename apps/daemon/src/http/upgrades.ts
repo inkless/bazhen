@@ -18,6 +18,7 @@ const REFUSAL_STATUS = {
 /**
  * A WebSocket endpoint: the path it serves, and what takes an upgrade the guard let through.
  * `device` is the paired device the upgrade came from, or null for a browser that never paired.
+ * A route refuses through `refuseUpgrade`, never a bare `socket.end`, which leaves the socket held.
  */
 export interface UpgradeRoute {
   readonly path: RegExp;
@@ -32,17 +33,27 @@ export interface UpgradeRoute {
 }
 
 export function refuseUpgrade(socket: Duplex, status: string): void {
-  socket.end(`HTTP/1.1 ${status}\r\n\r\n`);
+  refuse(socket, `HTTP/1.1 ${status}\r\n\r\n`);
 }
 
 /** Refuses an upgrade with 403 and the reason, as a forbidden request is answered. */
 function forbidUpgrade(socket: Duplex, message: string): void {
   const body: ErrorResponse = { error: "forbidden", message };
   const text = JSON.stringify(body);
-  socket.end(
+  refuse(
+    socket,
     `HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n` +
       `Content-Length: ${Buffer.byteLength(text)}\r\nConnection: close\r\n\r\n${text}`,
   );
+}
+
+/**
+ * Writes `response` and closes the socket once it is written. The HTTP server lets a socket stay
+ * half-open and an upgraded one has none of its timeouts, so a caller that never hangs up would
+ * otherwise hold the socket for as long as the daemon runs.
+ */
+function refuse(socket: Duplex, response: string): void {
+  socket.end(response, () => socket.destroy());
 }
 
 /**
@@ -97,7 +108,13 @@ export function socketUpgrades(
       return Array.isArray(value) ? value[0] : value;
     };
     const presented = { token: header(AGENT_TOKEN_HEADER), said: header(AGENT_ID_HEADER) };
-    const reading = peer === undefined ? undefined : await peer(req.socket).catch(() => null);
+    const reading =
+      peer === undefined
+        ? undefined
+        : await peer(req.socket).catch((err: unknown) => {
+            console.error("a peer reading failed", err);
+            return null;
+          });
     if (reading === null) {
       return forbidUpgrade(socket, "the caller's process can't be read for sure");
     }
