@@ -758,3 +758,86 @@ fn an_exited_child_is_left_unreaped_until_its_session_has_ended() {
     assert!(!unreaped());
     wait_gone(straggler).unwrap();
 }
+
+/// Starts a second thread that sleeps 30 s, writes the process's pid to the file named by
+/// `$ARGV[0]`, then ends its first thread by the raw `exit` syscall, which ends only the calling
+/// thread where `exit_group` would end them all. Until the second thread is done, `/proc` shows
+/// the process as `Z` though it lives.
+#[cfg(target_os = "linux")]
+const FIRST_THREAD_EXITS: &str = r#"use threads; require "syscall.ph";
+threads->create(sub { sleep 30 });
+open my $f, ">", $ARGV[0] or die "open: $!"; print $f "$$\n"; close $f;
+syscall(SYS_exit(), 0); die "exit: $!";"#;
+
+/// Whether `/proc` shows `pid` as `Z` with a thread besides its exited first one: read here,
+/// apart from the sweep's own reading, which is under test.
+#[cfg(target_os = "linux")]
+fn first_thread_gone(pid: Pid) -> bool {
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid.as_raw_nonzero()));
+    let Some((_, fields)) = stat.as_deref().unwrap_or_default().rsplit_once(')') else {
+        return false;
+    };
+    // From the state, the stat's 3rd field, so the thread count, its 20th, is the 18th here.
+    let mut fields = fields.split_whitespace();
+    let zombie = fields.next() == Some("Z");
+    let threads = fields.nth(16).and_then(|n| n.parse::<u32>().ok());
+    zombie && threads.is_some_and(|n| n >= 2)
+}
+
+/// Whether the process `held` pins has exited, every thread of it, within `DEADLINE`: only then is
+/// a pidfd readable.
+#[cfg(target_os = "linux")]
+fn exits_in_time(held: &OwnedFd) -> Result<bool> {
+    let deadline = Instant::now() + DEADLINE;
+    let mut fds = [PollFd::new(held, PollFlags::IN)];
+    loop {
+        let left = Timespec::try_from(deadline.saturating_duration_since(Instant::now()))?;
+        match poll(&mut fds, Some(&left)) {
+            Ok(ready) => return Ok(ready > 0),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn hold(pid: Pid) -> Result<OwnedFd> {
+    Ok(rustix::process::pidfd_open(
+        pid,
+        rustix::process::PidfdFlags::empty(),
+    )?)
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_hangs_up_a_child_whose_first_thread_has_exited_while_another_runs() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let mut running = start(&["perl", "-e", FIRST_THREAD_EXITS, "/dev/null"]).unwrap();
+    let pid = running.child.pid();
+    wait_for(&mut running, |_| first_thread_gone(pid)).unwrap();
+    let held = hold(pid).unwrap();
+    assert_eq!(running.child.poll_exit(), None);
+    close_now(&mut running).unwrap();
+    assert!(
+        exits_in_time(&held).unwrap(),
+        "the child outlived the hangup"
+    );
+    assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGHUP"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_close_ends_a_job_whose_first_thread_has_exited_while_another_runs() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let file = scratch("first-thread-job").unwrap();
+    let script = r#"set -m; perl -e "$1" "$0" & wait"#;
+    let mut running = start(&["sh", "-c", script, file.arg(), FIRST_THREAD_EXITS]).unwrap();
+    wait_for(&mut running, |_| read_text(file.path()).ends_with('\n')).unwrap();
+    let job = pid_in(file.path()).unwrap();
+    wait_for(&mut running, |_| first_thread_gone(job)).unwrap();
+    let held = hold(job).unwrap();
+    close_until_ended(&mut running).unwrap();
+    assert!(exits_in_time(&held).unwrap(), "the job outlived the close");
+}
