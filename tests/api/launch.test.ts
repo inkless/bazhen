@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { join } from "node:path";
-import { ErrorResponse, LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
-import { Daemon } from "./daemon.ts";
+import { join, relative } from "node:path";
+import {
+  DoctorResponse,
+  ErrorResponse,
+  LaunchAgentResponse,
+  StateSnapshot,
+} from "@bazhen/protocol";
+import { Daemon, overSocket } from "./daemon.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
@@ -59,6 +64,16 @@ describe("launching an agent", () => {
     expect([daemon.agentCommand(agentId).join(" "), daemon.tmux("show-hooks", "-gw")]).toEqual([
       expect.stringContaining(`'${link}'`),
       expect.stringContaining(`'${link}' 'pane-title'`),
+    ]);
+  });
+
+  it("points the hook link at a copy installed under its build, which doctor names", async () => {
+    const client = daemon.hookClient();
+    const asked = await overSocket(daemon.socket, "GET", "/v1/daemon/doctor");
+    const doctor = DoctorResponse.parse(asked.body);
+    expect([relative(join(daemon.home, "state", "hook"), client), doctor.hookClient.path]).toEqual([
+      expect.stringMatching(/^[0-9a-f]{16}\/bazhen-hook$/),
+      client,
     ]);
   });
 
