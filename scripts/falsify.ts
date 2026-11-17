@@ -15,7 +15,7 @@
 //             brand-new symbol. Each INVALID test needs a hand-run control, recorded as a
 //             trailer in a commit on the branch that names it by its file and exact title:
 //             `Control: <file> › <title>: <what you broke> -> <how the test failed>`
-//             (one whose title couldn't be read is named by its file alone).
+//             (one whose title couldn't be read, by its file and no other new test's title).
 //
 // A test that runs a Rust binary finds it in the repository's target/, which the worktree has
 // none of. When a judged test, or anything it reaches through its imports (relative, or a
@@ -552,27 +552,44 @@ export function uncontrolledRustTests(names: string[], messages: string): string
   });
 }
 
-const PATH_CHAR = "[\\w./-]";
+const DESCRIBE = "(?:(?:(?!: | › ).)+ › )*";
+const keyOf = (t: { file: string; title: string }) => `${t.file}\0${t.title}`;
 
 /**
- * The TypeScript tests no `Control:` trailer names. A trailer names a test when the part before
- * its last `->` holds the test's path, not inside a longer one, then ` › `, any `describe` names
- * each ending ` › `, and its exact title, ending at a `: ` or at that last `->`. A test whose title
- * couldn't be read is named by its path alone.
+ * The one test a `Control:` trailer's subject names, of the branch's new TypeScript tests. The
+ * subject starts with a test's path and ` › `, then any `describe` names each ending ` › ` and
+ * holding no `: `, then its exact title, ending at a `: ` or at the subject's end. Of the titles
+ * that fit, it names the longest. A subject that starts with the path but fits no title names the
+ * file's test whose title couldn't be read.
  */
-export function uncontrolledTests<T extends { file: string; title: string }>(
+function namedBy<T extends { file: string; title: string }>(subject: string, tests: T[]) {
+  const inFile = tests.filter((t) => subject.startsWith(`${t.file} › `));
+  const fitting = inFile.filter(
+    (t) =>
+      t.title !== unparsedIn(t.file) &&
+      new RegExp(
+        `^${escapeRegExp(t.file)} › ${DESCRIBE}${escapeRegExp(t.title)}(?=:(?: |$)|$)`,
+      ).test(subject),
+  );
+  const longest = fitting.toSorted((a, b) => b.title.length - a.title.length)[0];
+  return longest ?? inFile.find((t) => t.title === unparsedIn(t.file));
+}
+
+/**
+ * The INVALID TypeScript tests, of the branch's new ones, no `Control:` trailer names. Each
+ * trailer names at most one test (`namedBy`); the part before its last `->` is what it names.
+ */
+export function uncontrolledTests<T extends { file: string; title: string; outcome: Outcome }>(
   tests: T[],
   messages: string,
 ): T[] {
-  const subjects = controlSubjects(messages);
-  return tests.filter((t) => {
-    const path = `(?<!${PATH_CHAR})${escapeRegExp(t.file)}`;
-    const named =
-      t.title === unparsedIn(t.file)
-        ? new RegExp(`${path}(?!${PATH_CHAR})`)
-        : new RegExp(`${path} › (?:.* › )?${escapeRegExp(t.title)}(?=:(?: |$)|$)`);
-    return !subjects.some((subject) => named.test(subject));
-  });
+  const named = new Set(
+    controlSubjects(messages).flatMap((subject) => {
+      const test = namedBy(subject, tests);
+      return test === undefined ? [] : [keyOf(test)];
+    }),
+  );
+  return tests.filter((t) => t.outcome === "INVALID" && !named.has(keyOf(t)));
 }
 
 /** The trailer line a test no control names needs, to fill in. */
@@ -1978,7 +1995,7 @@ async function main(args: string[]): Promise<number> {
     );
   }
   const uncontrolled = uncontrolledTests(
-    results.filter((r) => r.outcome === "INVALID" && r.note === undefined),
+    results.filter((r) => r.note === undefined),
     messages,
   );
   if (uncontrolled.length > 0) {

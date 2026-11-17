@@ -490,6 +490,16 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
+  it("takes a control for another new test in the file as none for one whose title it couldn't read", () => {
+    renameTest('it("caps", () => {});\nit(name, () => {});', CONTROL);
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `\n  Control: ${TEST} › <the test's title>: <what you broke> -> <how it failed>\n`,
+      ),
+    });
+  });
+
   it("defaults to the merge base with main, ignoring commits main gained since", () => {
     write(fx.repo, SOURCE, "export const v = 3;\n");
     git(fx.repo, "commit", "--quiet", "-am", "feat: v3");

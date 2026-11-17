@@ -27,8 +27,8 @@ already checked (listed at the end).
    its own source (`io::stdin()` inside)? Are a library's errors typed with thiserror, and wrapped with their source? Is a
    new dependency pinned in `[workspace.dependencies]`, with a reason in the commit, and its
    default features trimmed? Does the mutant falsify prints beside a KILLED Rust test change
-   the behaviour the test names? Does each Rust test it reports INVALID have a `Control:`
-   trailer that breaks the code the test names? Does a behaviour the daemon can observe have
+   the behaviour the test names? Does the `Control:` trailer naming each Rust test it reports
+   INVALID break the code the test names? Does a behaviour the daemon can observe have
    its test in the black-box suite too?
 8. **Web** (`ui.md`). Does a key's path to the daemon stay free of other work, and does any
    task that can run over 50 ms yield? Does the page still avoid `eval`, HTML strings and

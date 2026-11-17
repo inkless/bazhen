@@ -358,16 +358,20 @@ describe("parseArgs", () => {
 
 const trailers = (...lines: string[]) => lines.map((l) => `feat: x\n\n${l}\n`).join("\n");
 
+const invalid = (title: string, file = FILE) => ({ file, title, outcome: "INVALID" as const });
+const killed = (title: string, file = FILE) => ({ file, title, outcome: "KILLED" as const });
+
 describe("uncontrolledTests", () => {
   const OTHER = "packages/core/src/y.test.ts";
 
-  it("is every test no Control trailer names by its file and title, in any commit", () => {
+  it("is every INVALID test no Control trailer names by its file and title, in any commit", () => {
     const tests = [
-      { file: FILE, title: "caps" },
-      { file: FILE, title: "trims" },
-      { file: OTHER, title: "caps" },
-      { file: FILE, title: "pads" },
-      { file: FILE, title: "wraps" },
+      invalid("caps"),
+      invalid("trims"),
+      invalid("caps", OTHER),
+      invalid("pads"),
+      invalid("wraps"),
+      killed("rounds"),
     ];
     const messages = trailers(
       `Control: ${FILE} › caps: return v -> expected 2, got 1`,
@@ -376,9 +380,9 @@ describe("uncontrolledTests", () => {
       `The Control: ${FILE} › wraps: x -> y is mid-line`,
     );
     expect(uncontrolledTests(tests, messages)).toEqual([
-      { file: OTHER, title: "caps" },
-      { file: FILE, title: "pads" },
-      { file: FILE, title: "wraps" },
+      invalid("caps", OTHER),
+      invalid("pads"),
+      invalid("wraps"),
     ]);
   });
 
@@ -389,36 +393,31 @@ describe("uncontrolledTests", () => {
       `Control: ${FILE} › caps twice, as ${FILE} › caps twice: x -> y`,
       `Control: ${FILE} › capsule: x -> y`,
     );
-    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
-      { file: FILE, title: "caps" },
-    ]);
+    expect(uncontrolledTests([invalid("caps")], messages)).toEqual([invalid("caps")]);
   });
 
-  it("takes no path that is only part of the one the trailer names", () => {
+  it("names a test only by a trailer that starts with its whole path", () => {
     const messages = trailers(
       "Control: src/x.test.ts › caps: x -> y",
       `Control: a/${FILE} › caps: x -> y`,
       `Control: ${FILE}x › caps: x -> y`,
+      `Control: see ${FILE} › caps: x -> y`,
       "Control: caps: x -> y",
     );
-    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
-      { file: FILE, title: "caps" },
-    ]);
+    expect(uncontrolledTests([invalid("caps")], messages)).toEqual([invalid("caps")]);
   });
 
   it("takes a test named only after the trailer's last arrow as not named", () => {
     const messages = trailers(`Control: return v -> ${FILE} › caps: failed`);
-    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
-      { file: FILE, title: "caps" },
-    ]);
+    expect(uncontrolledTests([invalid("caps")], messages)).toEqual([invalid("caps")]);
   });
 
   it("names a title holding an arrow, a colon or a regex symbol, and one under a describe", () => {
     const tests = [
-      { file: FILE, title: "maps a -> b" },
-      { file: FILE, title: "says: no" },
-      { file: FILE, title: "nests" },
-      { file: FILE, title: "reads [x] (y)+" },
+      invalid("maps a -> b"),
+      invalid("says: no"),
+      invalid("nests"),
+      invalid("reads [x] (y)+"),
     ];
     const messages = trailers(
       `Control: ${FILE} › maps a -> b: x -> y`,
@@ -429,15 +428,31 @@ describe("uncontrolledTests", () => {
     expect(uncontrolledTests(tests, messages)).toEqual([]);
   });
 
-  it("names a test whose title couldn't be read by its file alone", () => {
-    const tests = [
-      { file: FILE, title: `<unparsed test in ${FILE}>` },
-      { file: OTHER, title: `<unparsed test in ${OTHER}>` },
-    ];
-    const messages = trailers(`Control: ${FILE} › reads each case: x -> y`);
-    expect(uncontrolledTests(tests, messages)).toEqual([
-      { file: OTHER, title: `<unparsed test in ${OTHER}>` },
+  it("names one test per trailer, the longest title that fits", () => {
+    const messages = trailers(`Control: ${FILE} › parse: keys: broke the split -> x`);
+    expect(uncontrolledTests([invalid("parse"), invalid("parse: keys")], messages)).toEqual([
+      invalid("parse"),
     ]);
+  });
+
+  it("takes no describe name holding a colon, so a trailer's break names no second test", () => {
+    const messages = trailers(`Control: ${FILE} › other: broke y › caps: z -> x`);
+    expect(uncontrolledTests([invalid("caps")], messages)).toEqual([invalid("caps")]);
+  });
+
+  it("names a test whose title couldn't be read by a trailer starting with its file", () => {
+    const tests = [invalid(`<unparsed test in ${FILE}>`), invalid(`<unparsed test in ${OTHER}>`)];
+    const messages = trailers(`Control: ${FILE} › reads each case: x -> y`);
+    expect(uncontrolledTests(tests, messages)).toEqual([invalid(`<unparsed test in ${OTHER}>`)]);
+  });
+
+  it("takes no trailer for another new test in the file, or one only mentioning the file, for one whose title couldn't be read", () => {
+    const unparsed = invalid(`<unparsed test in ${FILE}>`);
+    const messages = trailers(
+      `Control: ${FILE} › parsed one: broke -> fail`,
+      `Control: ${OTHER} › t: moved a helper out of ${FILE} -> fail`,
+    );
+    expect(uncontrolledTests([unparsed, killed("parsed one")], messages)).toEqual([unparsed]);
   });
 });
 
