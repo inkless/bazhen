@@ -120,10 +120,10 @@ async function runWorker(
 /** Three marker records in a row with one count: the worker's writes have stopped. */
 const stalled = (written: readonly number[]) =>
   written.length === 3 && written.every((n) => n === written[0]);
-/**
- * Inside vitest's 5 s test timeout, so a worker that never stalls fails here, showing its counts.
- */
-const STALL_TIMEOUT_MS = 4_000;
+/** Each test's time, with room on a loaded runner for a stall wait to run to its own timeout. */
+const TEST_TIMEOUT_MS = 15_000;
+/** Inside TEST_TIMEOUT_MS, so a worker that never stalls fails here, showing its counts. */
+const STALL_TIMEOUT_MS = 10_000;
 
 /**
  * Runs a worker whose output nobody reads, so the pipe fills and its writes stall, until its
@@ -134,13 +134,13 @@ async function runStalled(args: readonly string[]): Promise<Ran> {
   const { child, out, ran } = startWorker(args);
   const exited = once(child, "exit");
   const closed = once(child, "close");
-  // An exit ends the wait at once, with its code to show, rather than at the timeout.
+  // An exit, by code or by signal, ends the wait at once with what ended it, not at the timeout.
   const lastThree = () =>
-    child.exitCode === null ? writtenOf({ events: recordsIn(out) }).slice(-3) : child.exitCode;
+    child.exitCode ?? child.signalCode ?? writtenOf({ events: recordsIn(out) }).slice(-3);
   await expect
     .poll(lastThree, { timeout: STALL_TIMEOUT_MS, interval: 20 })
-    .toSatisfy((last) => typeof last === "number" || stalled(last));
-  expect(child.exitCode).toBeNull();
+    .toSatisfy((last) => !Array.isArray(last) || stalled(last));
+  expect({ code: child.exitCode, signal: child.signalCode }).toEqual({ code: null, signal: null });
   child.stdin.end();
   const [code] = await exited;
   let output = "";
@@ -153,7 +153,7 @@ async function runStalled(args: readonly string[]): Promise<Ran> {
 const CLOCK_SLACK_MS = 5;
 const FAST = ["--probe-every", "100", "--probe-timeout", "200", "--marker-every", "20"];
 
-describe("soak worker", () => {
+describe("soak worker", { timeout: TEST_TIMEOUT_MS }, () => {
   it("prints its markers in order and times each probe it gets an answer to", async () => {
     const ran = await runWorker(["idle", ...FAST, "--probe-timeout", "5000"], {
       probes: 3,
