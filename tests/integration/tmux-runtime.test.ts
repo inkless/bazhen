@@ -303,18 +303,20 @@ describe("tmux runtime on a private server", () => {
   });
 
   it("titles a respawned pane as its new program does: with the first title it sets, or none", async () => {
-    const s = spec(titled("the old thread", "exit 0"));
+    const s = spec(["sh", "-c", "exit 0"]);
     const ref = await runtime.create(s);
     await expect.poll(() => exitOf(ref.terminalId), { timeout: 3000 }).not.toBeNull();
     const titledAtOnce = await runtime.respawn(ref, {
       ...s,
       generation: 1,
-      argv: titled("the new thread", "exit 0"),
+      argv: titled("the new thread", "printf done; exec sleep 300"),
     });
-    await expect.poll(() => exitOf(ref.terminalId), { timeout: 3000 }).not.toBeNull();
-    // Long enough for a title reset that raced the new program, rather than preceding it, to land.
+    await expect.poll(() => screen(ref.locator.sessionId), { timeout: 3000 }).toContain("done");
+    // Catches a reset made outside the respawn's command list, which could land after the title.
     await sleep(200);
     const first = await runtime.title(titledAtOnce);
+    await runtime.signal(titledAtOnce, "SIGKILL");
+    await expect.poll(() => exitOf(ref.terminalId), { timeout: 3000 }).not.toBeNull();
     const untitled = await runtime.respawn(titledAtOnce, {
       ...s,
       generation: 2,
