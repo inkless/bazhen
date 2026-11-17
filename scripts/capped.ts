@@ -125,6 +125,7 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
   } else if (ended.signal === "SIGXCPU") {
     lines.push("capped: stopped at its CPU-time limit, set for a test whose runner had died");
   }
+  if (ended.uncounted !== undefined) lines.push(`capped: ${ended.uncounted}`);
   return lines;
 }
 

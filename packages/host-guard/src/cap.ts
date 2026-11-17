@@ -38,6 +38,8 @@ export interface Ended {
   readonly peak: number;
   readonly memoryKills: number;
   readonly timedOut: boolean;
+  /** Why a memory kill may have gone uncounted, when one may have. */
+  readonly uncounted?: string;
 }
 
 export type Verdict = { readonly ok: true } | { readonly ok: false; readonly why: string };
@@ -299,28 +301,72 @@ export function runInScope(
       offSignals();
       const timedOut = Date.now() - started >= cap.timeMs;
       // A scope whose last process was the one killed can go before its counter is read.
-      if (kills === 0 && signal === "SIGKILL") kills = await journaledKills(unit, started);
-      done({ code, signal, peak, memoryKills: kills, timedOut });
+      const journaled =
+        kills === 0 && signal === "SIGKILL"
+          ? await journaledKills(unit, started)
+          : { memoryKills: kills };
+      done({ code, signal, peak, timedOut, ...journaled });
     };
     child.once("error", () => void finish(127, null));
     child.once("exit", (code, signal) => void finish(code, signal));
   });
 }
 
-/** The OOM kills systemd logged for a unit. */
-export const journalKills = (text: string) =>
-  text.split("\n").filter((l) => l.includes("killed by the OOM killer")).length;
+/**
+ * systemd's id for a unit's OOM kill. Its text is reworded between releases (systemd 259 has
+ * "The kernel OOM killer killed some processes in this unit."); the id is not.
+ */
+const UNIT_OOM_MESSAGE_ID = "fe6faa94e7774663a0da52717891d8ef";
 
-async function journaledKills(unit: string, since: number): Promise<number> {
-  const args = ["--user", "-u", unit, `--since=@${Math.floor(since / 1000)}`, "-o", "cat"];
+const messageId = (line: string): unknown => {
+  try {
+    const entry: unknown = JSON.parse(line);
+    return typeof entry === "object" && entry !== null && "MESSAGE_ID" in entry
+      ? entry.MESSAGE_ID
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The OOM kills systemd logged for a unit, in `journalctl -o json`'s one entry a line. */
+export const journalKills = (text: string) =>
+  text.split("\n").filter((line) => messageId(line) === UNIT_OOM_MESSAGE_ID).length;
+
+/**
+ * journalctl's arguments for the OOM kills systemd logged for `unit` since `since`, matched by id
+ * in the journal and printed as the id alone, so the output stays a line an entry however much
+ * the unit logged.
+ */
+export const journalArgs = (unit: string, since: number) => [
+  "--user",
+  "-u",
+  unit,
+  `MESSAGE_ID=${UNIT_OOM_MESSAGE_ID}`,
+  `--since=@${Math.floor(since / 1000)}`,
+  "-o",
+  "json",
+  "--output-fields=MESSAGE_ID",
+  "--no-pager",
+];
+
+async function journaledKills(
+  unit: string,
+  since: number,
+): Promise<Pick<Ended, "memoryKills" | "uncounted">> {
   // systemd may log the kill a moment after the scope's last process has gone.
   for (let tries = 0; tries < 5; tries += 1) {
-    const kills = journalKills((await output("journalctl", [...args, "--no-pager"])) ?? "");
-    if (kills > 0) return kills;
+    const text = await output("journalctl", journalArgs(unit, since));
+    if (text === undefined) return { memoryKills: 0, uncounted: JOURNAL_UNREAD };
+    const kills = journalKills(text);
+    if (kills > 0) return { memoryKills: kills };
     await new Promise((wait) => setTimeout(wait, 100));
   }
-  return 0;
+  return { memoryKills: 0 };
 }
+
+const JOURNAL_UNREAD =
+  "journalctl couldn't be read, so a memory kill logged after the scope had gone may have gone uncounted";
 
 /** A process's parent and its anonymous memory, as a listing reports them. */
 export interface ProcessRow {
