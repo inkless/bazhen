@@ -15,6 +15,7 @@ import {
   inSignalSandbox,
   thisHost,
 } from "../packages/host-guard/src/index.ts";
+import { CHILD_PROCESS_MODULES, CHILD_PROCESS_STARTS } from "./child-process.ts";
 import { rustCode } from "./rust-source.ts";
 
 export { DISPOSABLE_HOST_MARKER, SANDBOX_RULE, type SandboxHost, inSignalSandbox, thisHost };
@@ -107,17 +108,10 @@ const NOT_RECEIVERS = new Set([
 
 // child_process's own starts, each of which Node kills the child for when given a `timeout`,
 // `killSignal` or `signal` (an AbortSignal).
-const STARTERS = [
-  "spawn",
-  "spawnSync",
-  "exec",
-  "execSync",
-  "execFile",
-  "execFileSync",
-  "fork",
-] as const;
+const STARTERS = CHILD_PROCESS_STARTS;
 const STARTER_NAME = `(?:${STARTERS.join("|")})`;
-const CHILD_PROCESS_MODULE = `["'](?:node:)?child_process["']`;
+const MODULE_NAME = `(?:${CHILD_PROCESS_MODULES.join("|")})`;
+const CHILD_PROCESS_MODULE = `["']${MODULE_NAME}["']`;
 // A static import of child_process the scan reads, `import type` included: a default, a namespace
 // or named imports, or a default beside either of the others.
 const CHILD_PROCESS_IMPORT = new RegExp(
@@ -126,7 +120,7 @@ const CHILD_PROCESS_IMPORT = new RegExp(
   "g",
 );
 // child_process named as a string, which a `require`, an `import()` or a re-export loads it by.
-const CHILD_PROCESS_NAMED = /["'`](?:node:)?child_process["'`]/g;
+const CHILD_PROCESS_NAMED = new RegExp(`["'\`]${MODULE_NAME}["'\`]`, "g");
 // What makes a name a call: type arguments without parens or braces, and `?.`, before its `(`.
 const CALLED = "\\s*(?:<[^()<>;{}]*>\\s*)?(?:\\?\\.\\s*)?\\(";
 // A name's start, not a member's, though a spread's `...` may come before it: `\b` alone misses a
@@ -883,11 +877,11 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       fixture: true,
     },
   ],
-  "scripts/lint-plugin.ts": [
+  "scripts/child-process.ts": [
     {
-      code: /\bCHILD_PROCESS = new Set\(\["child_process", "node:child_process"\]\)/,
+      code: /\bCHILD_PROCESS_MODULES = \["child_process", "node:child_process"\]/,
       at: /"child_process", "node:child_process"/,
-      why: "the names the lint rule knows child_process's imports by, which load nothing",
+      why: "the names the checks know child_process's imports by, which load nothing",
       fixture: true,
     },
   ],

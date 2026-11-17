@@ -6,14 +6,28 @@
 // `kill` or `abort` on `process` is an error. One wrong socket or pid ends someone else's work, so each is
 // checked in one place and banned everywhere else. The rule follows what a file binds: import aliases,
 // namespace imports, `promisify` and constants. It can flag an argument that merely says `tmux`
-// to a tool that isn't tmux; rename the argument or move the call into host-guard.
+// to a tool that isn't tmux; rename the argument or move the call into host-guard. A start it
+// can't read the argv of is an error too: one imported from child_process or host-guard used
+// other than as a call (`Reflect.apply`, a seam object, an export), and either module loaded other
+// than by a static import (`require`, `import()`, a re-export).
+
+import { CHILD_PROCESS_MODULES, CHILD_PROCESS_STARTS } from "./child-process.ts";
 
 interface Node {
   readonly type: string;
   readonly [key: string]: unknown;
 }
+interface Reference {
+  readonly identifier: Node;
+  isWrite(): boolean;
+  isRead(): boolean;
+}
+interface Variable {
+  readonly references: readonly Reference[];
+}
 interface Context {
   report(problem: { node: Node; message: string }): void;
+  readonly sourceCode: { getDeclaredVariables(node: Node): readonly Variable[] };
 }
 
 const TMUX =
@@ -23,18 +37,13 @@ const KILL =
   "Send signals only through @bazhen/host-guard (spawnGroup, signalGroup, signalOwnChild, " +
   "signalPane, TmuxServer.recreateSocket, isAlive) " +
   "(docs/standards/code.md).";
+const UNFOLLOWED =
+  "Call a process start by its name, or as a member of its module imported statically, so this " +
+  "rule can read whether it runs tmux; run tmux only through @bazhen/host-guard " +
+  "(docs/standards/code.md).";
 
-/** child_process's process-starting calls, and the names wrappers of them go by here. */
-const STARTS = new Set([
-  "exec",
-  "execSync",
-  "execFile",
-  "execFileSync",
-  "spawn",
-  "spawnSync",
-  "fork",
-  "run",
-  // host-guard's own process starts: none of them can be pointed at tmux either.
+/** host-guard's own process starts: none of them can be pointed at tmux either. */
+const HOST_GUARD_STARTS = new Set([
   "spawnGroup",
   "runBounded",
   "runIn",
@@ -45,7 +54,22 @@ const STARTS = new Set([
   "linuxNotifier",
   "macNotifier",
 ]);
-const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);
+const CHILD_PROCESS_STARTERS = new Set<string>(CHILD_PROCESS_STARTS);
+/** Process-starting calls, and the names wrappers of them go by here. */
+const STARTS = new Set([...CHILD_PROCESS_STARTERS, "run", ...HOST_GUARD_STARTS]);
+const CHILD_PROCESS = new Set<string>(CHILD_PROCESS_MODULES);
+/** host-guard by its package, a subpath of it, or a relative path into its sources. */
+const isHostGuard = (source: string) =>
+  source === "@bazhen/host-guard" ||
+  source.startsWith("@bazhen/host-guard/") ||
+  (source.startsWith(".") && /(?:^|\/)host-guard\/src(?:\/|$)/.test(source));
+/** The starts a module exports, if it is child_process or host-guard. */
+const startsOf = (source: string): ReadonlySet<string> | undefined =>
+  CHILD_PROCESS.has(source)
+    ? CHILD_PROCESS_STARTERS
+    : isHostGuard(source)
+      ? HOST_GUARD_STARTS
+      : undefined;
 const PROCESS = new Set(["process", "node:process"]);
 const GLOBALS = new Set(["globalThis", "global", "window", "self"]);
 /** What on `process` sends a signal: `kill` and `_kill` to any pid, `abort` SIGABRT to this one. */
@@ -60,6 +84,51 @@ const nameOf = (node: unknown): string | undefined => {
   if (node.type === "Literal" && typeof node["value"] === "string") return node["value"];
   return undefined;
 };
+const parentOf = (node: Node): Node | undefined => {
+  const parent = node["parent"];
+  return isNode(parent) ? parent : undefined;
+};
+/** A member's name: its property's, or a computed key's that is a string literal. */
+const memberName = (member: Node): string | undefined => {
+  const property = member["property"];
+  if (member["computed"] !== true) return nameOf(property);
+  return isNode(property) && property.type === "Literal" ? nameOf(property) : undefined;
+};
+/** A callee's name: a function's, or a method's. */
+const calleeName = (callee: unknown): string | undefined =>
+  isNode(callee) && callee.type === "MemberExpression" ? memberName(callee) : nameOf(callee);
+const isPromisify = (callee: unknown) => calleeName(callee) === "promisify";
+const isCreateRequire = (init: Node) =>
+  init.type === "CallExpression" && calleeName(init["callee"]) === "createRequire";
+/** Whether `node` is the callee of a call, or the object of a `.call` or `.apply` that is called. */
+const isCalled = (node: Node): boolean => {
+  const parent = parentOf(node);
+  if (parent?.type === "CallExpression") return parent["callee"] === node;
+  if (parent?.type !== "MemberExpression" || parent["object"] !== node) return false;
+  const name = memberName(parent);
+  return (
+    (name === "call" || name === "apply") &&
+    parentOf(parent)?.type === "CallExpression" &&
+    parentOf(parent)?.["callee"] === parent
+  );
+};
+
+/** The `const x = <id>` or `const x = promisify(<id>)` binding `x` to what `id` starts, if any. */
+const aliasing = (id: Node): Node | undefined => {
+  const parent = parentOf(id);
+  const init = parent?.type === "CallExpression" && isPromisify(parent["callee"]) ? parent : id;
+  const declarator = parentOf(init);
+  return declarator?.type === "VariableDeclarator" &&
+    declarator["init"] === init &&
+    isNode(declarator["id"]) &&
+    declarator["id"].type === "Identifier"
+    ? declarator
+    : undefined;
+};
+const isExported = (declarator: Node) => {
+  const declaration = parentOf(declarator);
+  return declaration !== undefined && parentOf(declaration)?.type === "ExportNamedDeclaration";
+};
 
 /** A command that runs tmux: its basename, or `tmux` as a word in a shell string. */
 export const runsTmux = (text: string) =>
@@ -72,6 +141,24 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
     const childProcess = new Set<string>();
     const processes = new Set(["process"]);
     const constants = new Map<string, Node>();
+    /** Names a call of which loads the module its first argument names. */
+    const loaders = new Set(["require"]);
+    const declarators: { name: string; init: Node }[] = [];
+    const calls: Node[] = [];
+    /** The variables a start or a module whole is bound to, with the starts that module has. */
+    const bound: { variable: Variable; starters?: ReadonlySet<string> }[] = [];
+    const seen = new Set<Variable>();
+    const bind = (node: Node, starters?: ReadonlySet<string>) => {
+      for (const variable of context.sourceCode.getDeclaredVariables(node)) {
+        if (!seen.has(variable)) {
+          seen.add(variable);
+          bound.push(starters === undefined ? { variable } : { variable, starters });
+        }
+      }
+    };
+    const unfollowed = (node: Node) => {
+      if (reports.tmux) context.report({ node, message: UNFOLLOWED });
+    };
 
     /** The strings an argument holds: itself, a constant's value, or an array's elements. */
     const strings = (node: unknown, depth = 0): string[] => {
@@ -90,6 +177,9 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
         return strings(constants.get(String(node["name"])), depth + 1);
       return [];
     };
+    const namesModule = (node: unknown) =>
+      !(isNode(node) && node.type === "ArrayExpression") &&
+      strings(node).some((s) => startsOf(s) !== undefined);
 
     const isProcess = (node: unknown): boolean =>
       isNode(node) &&
@@ -116,16 +206,83 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
         : undefined;
     }
 
+    /** Whether a call loads a module: by `require`, a loader's name or result, or a member. */
+    const loads = (callee: unknown) =>
+      isNode(callee) &&
+      ((callee.type === "Identifier" && loaders.has(String(callee["name"]))) ||
+        callee.type === "CallExpression" ||
+        (callee.type === "MemberExpression" &&
+          ["require", "getBuiltinModule"].includes(calleeName(callee) ?? "")));
+
+    /** Each alias, `promisify` or loader a declarator binds, to a fixpoint: order doesn't matter. */
+    function resolveNames() {
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const { name, init } of declarators) {
+          const start =
+            (init.type === "Identifier" && starts.has(String(init["name"]))) ||
+            (init.type === "CallExpression" &&
+              isPromisify(init["callee"]) &&
+              nodes(init["arguments"]).some((a) => starts.has(nameOf(a) ?? "")));
+          if (start && !starts.has(name)) grew = Boolean(starts.add(name));
+          const loader =
+            (init.type === "Identifier" && loaders.has(String(init["name"]))) ||
+            isCreateRequire(init);
+          if (loader && !loaders.has(name)) grew = Boolean(loaders.add(name));
+        }
+      }
+    }
+
+    /**
+     * Each reference to a bound start that isn't a call, a `typeof`, or the alias or `promisify`
+     * binding it, whose own references are then followed; each to a bound module but as a member,
+     * a start or `default` of which must be called.
+     */
+    function followReferences() {
+      for (const { variable, starters } of bound) {
+        for (const reference of variable.references) {
+          const id = reference.identifier;
+          const parent = parentOf(id);
+          if ((reference.isWrite() && !reference.isRead()) || parent === undefined) continue;
+          if (parent.type === "TSTypeQuery" || parent.type === "TSQualifiedName") continue;
+          if (starters !== undefined) {
+            const name =
+              parent.type === "MemberExpression" && parent["object"] === id
+                ? memberName(parent)
+                : undefined;
+            const start = name !== undefined && (starters.has(name) || name === "default");
+            if (name === undefined || (start && !isCalled(parent))) unfollowed(id);
+            continue;
+          }
+          if (isCalled(id)) continue;
+          const declarator = aliasing(id);
+          // Exported, it is called in files that don't bind it, where no call of it is read.
+          if (declarator === undefined || isExported(declarator)) unfollowed(declarator ?? id);
+          else bind(declarator);
+        }
+      }
+    }
+
     return {
       ImportDeclaration(node: Node) {
         const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
+        const starters = startsOf(source);
         for (const spec of nodes(node["specifiers"])) {
           const local = nameOf(spec["local"]) ?? "";
           const imported = nameOf(spec["imported"]);
+          const named = spec.type === "ImportSpecifier" && imported !== "default";
           if (CHILD_PROCESS.has(source)) {
-            if (spec.type === "ImportSpecifier" && imported !== undefined) {
+            if (named && imported !== undefined) {
               if (STARTS.has(imported)) starts.add(local);
             } else childProcess.add(local);
+          }
+          if (
+            starters !== undefined &&
+            node["importKind"] !== "type" &&
+            spec["importKind"] !== "type" &&
+            (!named || starters.has(imported ?? ""))
+          ) {
+            bind(spec, named ? undefined : starters);
           }
           if (PROCESS.has(source)) {
             if (spec.type === "ImportSpecifier" && SENDS.has(imported ?? "")) {
@@ -136,11 +293,39 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           }
         }
       },
+      ImportExpression(node: Node) {
+        if (namesModule(node["source"])) unfollowed(node);
+      },
+      TSImportEqualsDeclaration(node: Node) {
+        const reference = node["moduleReference"];
+        if (
+          node["importKind"] !== "type" &&
+          isNode(reference) &&
+          reference.type === "TSExternalModuleReference" &&
+          namesModule(reference["expression"])
+        ) {
+          unfollowed(node);
+        }
+      },
+      ExportAllDeclaration(node: Node) {
+        const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
+        if (node["exportKind"] !== "type" && startsOf(source) !== undefined) unfollowed(node);
+      },
       ExportNamedDeclaration(node: Node) {
         const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
-        if (!reports.signals || !PROCESS.has(source)) return;
+        const starters = startsOf(source);
         for (const spec of nodes(node["specifiers"])) {
-          if (SENDS.has(nameOf(spec["local"]) ?? "")) context.report({ node: spec, message: KILL });
+          const local = nameOf(spec["local"]) ?? "";
+          if (reports.signals && PROCESS.has(source) && SENDS.has(local))
+            context.report({ node: spec, message: KILL });
+          if (
+            starters !== undefined &&
+            node["exportKind"] !== "type" &&
+            spec["exportKind"] !== "type" &&
+            (starters.has(local) || local === "default")
+          ) {
+            unfollowed(spec);
+          }
         }
       },
       VariableDeclarator(node: Node) {
@@ -151,10 +336,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           const name = String(id["name"]);
           if (["Literal", "TemplateLiteral", "ArrayExpression"].includes(init.type))
             constants.set(name, init);
-          if (init.type === "Identifier" && starts.has(String(init["name"]))) starts.add(name);
-          if (init.type === "CallExpression" && nameOf(init["callee"]) === "promisify") {
-            if (nodes(init["arguments"]).some((a) => starts.has(nameOf(a) ?? ""))) starts.add(name);
-          }
+          declarators.push({ name, init });
           if (isProcess(init)) processes.add(name);
         }
         if (id.type === "ObjectPattern" && isProcess(init)) {
@@ -173,9 +355,18 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
         }
       },
       CallExpression(node: Node) {
-        const args = startArguments(node["callee"], nodes(node["arguments"]));
-        if (reports.tmux && args?.flatMap((a) => strings(a)).some(runsTmux))
-          context.report({ node, message: TMUX });
+        calls.push(node);
+      },
+      "Program:exit"() {
+        resolveNames();
+        for (const node of calls) {
+          const args = nodes(node["arguments"]);
+          const started = startArguments(node["callee"], args);
+          if (reports.tmux && started?.flatMap((a) => strings(a)).some(runsTmux))
+            context.report({ node, message: TMUX });
+          if (loads(node["callee"]) && namesModule(args[0])) unfollowed(node);
+        }
+        if (reports.tmux) followReferences();
       },
     };
   },

@@ -9,8 +9,8 @@ const repo = fileURLToPath(new URL("..", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "bz-lint-plugin-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-/** The lines oxlint reports under `bazhen(host-guard)` in `source`, linted with the repo's config. */
-function flagged(source: string): number[] {
+/** What oxlint reports under `bazhen(host-guard)` or `bazhen(signal-guard)` in `source`, by line. */
+function reports(source: string): { line: number; message: string }[] {
   const file = join(dir, "fixture.ts");
   writeFileSync(file, source);
   let out = "";
@@ -26,10 +26,28 @@ function flagged(source: string): number[] {
   } catch (error) {
     out = String(Reflect.get(Object(error), "stdout"));
   }
-  return [...out.matchAll(/fixture\.ts:(\d+):\d+: .*(?:host|signal)-guard/g)].map((m) =>
-    Number(m[1]),
-  );
+  return [
+    ...out.matchAll(/fixture\.ts:(\d+):\d+: (.*) \[\w+\/bazhen\((?:host|signal)-guard\)\]/g),
+  ].map((m) => ({ line: Number(m[1]), message: m[2] ?? "" }));
 }
+
+/** The lines oxlint reports under `bazhen(host-guard)` or `bazhen(signal-guard)` in `source`. */
+const flagged = (source: string) =>
+  reports(source)
+    .map((r) => r.line)
+    .toSorted((a, b) => a - b);
+
+/** Each line reported in `source`, with whether every report on it is the unfollowed start's. */
+const unfollowed = (source: string) => {
+  const lines = new Map<number, boolean>();
+  for (const { line, message } of reports(source)) {
+    lines.set(line, (lines.get(line) ?? true) && /can read whether it runs tmux/.test(message));
+  }
+  return [...lines].toSorted(([a], [b]) => a - b);
+};
+
+/** The 1-based lines of `source` from `first` to `first + count - 1`. */
+const lines = (first: number, count: number) => Array.from({ length: count }, (_, i) => first + i);
 
 const FIXTURE = [
   'import { execFileSync, execSync, spawn } from "node:child_process";',
@@ -91,5 +109,103 @@ describe("the host-guard lint rule", () => {
       4, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 36, 39, 42, 43, 44, 45,
       46, 47, 49, 50,
     ]);
+  });
+});
+
+const IMPORTS = [
+  'import { execFile, execFileSync, spawn } from "node:child_process";',
+  'import * as cp from "node:child_process";',
+  'import cpd, { fork } from "child_process";',
+  'import { spawnGroup, runBounded, TmuxServer } from "@bazhen/host-guard";',
+  'import * as hg from "@bazhen/host-guard";',
+  'import { runIn } from "../packages/host-guard/src/index.ts";',
+  'import { promisify } from "node:util";',
+  'import util from "node:util";',
+  'import { createRequire } from "node:module";',
+  'import type { ChildProcess } from "node:child_process";',
+  "declare const require: (id: string) => unknown;",
+  "declare const module: { require(id: string): unknown };",
+];
+
+/** Each a start, or child_process or host-guard, reached where the rule can't read its argv. */
+const UNFOLLOWED = [
+  'Reflect.apply(execFile, null, ["tmux", ["kill-server"]]);',
+  'void promisify(execFile)("tmux", ["kill-server"]);',
+  "export const seams = { spawn };",
+  "export const renamed = { run: spawnGroup };",
+  "export const relative = [runIn];",
+  "export const exportedRun = promisify(execFile);",
+  "export const exportedAlias = spawn;",
+  "const alias = execFileSync; export const passed = [alias];",
+  "export const whole = cp;",
+  'export const computed = cp["execFile"];',
+  "export const uncalled = cp.spawn;",
+  "export const { execSync } = cp;",
+  "export const bound = hg.spawnGroup.bind(null);",
+  "export const defaulted = [cpd];",
+  "export { fork };",
+  "export default runBounded;",
+  'require("child_process");',
+  'module.require("node:child_process");',
+  'createRequire(import.meta.url)("node:child_process");',
+  'const req = createRequire(import.meta.url); req("node:child_process");',
+  'const r = require; r("child_process");',
+  'const r2 = req; r2("child_process");',
+  'process.getBuiltinModule("node:child_process");',
+  'void import("node:child_process");',
+  'const cpName = "node:child_process"; void import(cpName);',
+  'export { spawn as launch } from "child_process";',
+  'export { spawnGroup as group } from "@bazhen/host-guard";',
+  'export * from "node:child_process";',
+  'export * as everything from "@bazhen/host-guard";',
+  'import cpr = require("node:child_process");',
+];
+
+/** Each a start called where the rule reads its argv, or a mention that starts nothing. */
+const FOLLOWED = [
+  'execFile("git", []);',
+  'spawn<string>("git", []);',
+  'cp?.spawn("git", []);',
+  'execFileSync.call(null, "git", []);',
+  'cp.execFile.apply(null, ["git", []]);',
+  "type Start = typeof spawn; type Options = cp.SpawnOptions; type Module = typeof cp;",
+  'const runner = promisify(execFile); void runner("git", []);',
+  'const ef = execFile; ef("git", []);',
+  "const keyed = { spawn: 1 }; void keyed.spawn;",
+  "export function shadow(spawn: () => void) { return spawn; }",
+  'void new TmuxServer("/x"); void new hg.TmuxServer("/x");',
+  'spawnGroup("git", []); hg.runBounded("git"); runIn("git");',
+  'void cpd.spawn("git"); void fork("x"); void cpr;',
+  'export const named = ["child_process", "node:child_process"].includes("node:child_process");',
+  'require("node:fs"); void import("node:fs");',
+  'export { TmuxServer } from "@bazhen/host-guard";',
+  'export type { ChildProcess as Child } from "node:child_process";',
+  "export const child: ChildProcess | null = null;",
+  'const viaUtil = util.promisify(execFile); void viaUtil("git", []);',
+];
+
+describe("the host-guard rule's reach", () => {
+  it("flags every start or module reached other than by a call it reads, and nothing it can follow", () => {
+    const first = IMPORTS.length + 1;
+    expect(unfollowed([...IMPORTS, ...UNFOLLOWED, ...FOLLOWED].join("\n"))).toEqual(
+      lines(first, UNFOLLOWED.length).map((line) => [line, true]),
+    );
+  });
+
+  it("reads a start's argv wherever its alias, constant or namespace is declared", () => {
+    expect(
+      flagged(
+        [
+          'import { execFile } from "node:child_process";',
+          'import { default as cpx } from "node:child_process";',
+          'import util from "node:util";',
+          'export function early() { lateAlias("tmux", []); execFile(lateBin, []); }',
+          'cpx.execFileSync("tmux", ["kill-server"]);',
+          "const lateAlias = execFile;",
+          'const lateBin = "tmux";',
+          'const viaUtil = util.promisify(execFile); void viaUtil("tmux", []);',
+        ].join("\n"),
+      ),
+    ).toEqual([4, 4, 5, 8]);
   });
 });

@@ -36,7 +36,10 @@ Each layer has one job:
 - `packages/runtime-holder` is the second runtime: a client of the holders' protocol
   (`packages/protocol/src/holder.ts`).
 - `packages/host-guard` is the only code that runs tmux, and its `packages/host-guard/src/signal.ts`
-  the only TypeScript that sends a signal, product and tests alike. `TmuxServer` names every server
+  the only TypeScript that sends a signal, product and tests alike. Lint reads every process
+  start's argv for tmux, so a start from `child_process` or host-guard used other than as a call
+  (`Reflect.apply`, a seam object, an export), or either module loaded other than by a static
+  `import` (`require`, `import()`, a re-export), is an error too. `TmuxServer` names every server
   by a socket path inside a directory its caller owns, never by `-L`, and refuses `default` and the
   directory the user's own servers share. A signal reaches only a group this process started
   (`spawnGroup`), a pane its tmux server vouched for (`paneGroup`, `signalPane`), or one of its own
