@@ -6,7 +6,7 @@
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +45,10 @@ function recorded(line: string): Recorded {
   };
 }
 
+/** A worker's records so far, from whole lines only: the last may still be being written. */
+const recordsIn = (out: string) =>
+  existsSync(out) ? readFileSync(out, "utf8").split("\n").slice(0, -1).map(recorded) : [];
+
 /** Each probe's time, a probe never answered as Infinity, which fails any bound on time. */
 const probeTimes = (ran: Ran) =>
   ran.events.filter((e) => e.kind === "probe").map((e) => e.ms ?? Number.POSITIVE_INFINITY);
@@ -52,7 +56,7 @@ const probeTimes = (ran: Ran) =>
 /** The last marker the worker printed; NaN, which no bound holds, for none. */
 const lastMarker = (ran: Ran) => markersIn(ran.output, "w").at(-1) ?? Number.NaN;
 /** The marker counts the worker recorded as written, in order. */
-const writtenOf = (ran: Ran) =>
+const writtenOf = (ran: Pick<Ran, "events">) =>
   ran.events.filter((e) => e.kind === "marker").map((e) => e.n ?? Number.NaN);
 
 /**
@@ -62,25 +66,35 @@ const writtenOf = (ran: Ran) =>
 type Answer = { readonly afterMs: number; readonly reply?: string } | "never";
 const AT_ONCE: Answer = { afterMs: 0 };
 
+function startWorker([mode = "idle", ...options]: readonly string[]) {
+  const name = `w${Math.random().toString(36).slice(2, 8)}`;
+  const out = join(dir, `${name}.jsonl`);
+  const child = spawn(process.execPath, [WORKER, mode, name, out, ...options], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  child.stdout.setEncoding("utf8");
+  const ran = (output: string, code: number | null): Ran => ({
+    output: output.replaceAll(name, "w"),
+    events: recordsIn(out),
+    code,
+  });
+  return { child, out, ran };
+}
+
 /**
  * Runs a worker until it has asked `probes` probes, answering each as `answer` says, typing
  * `typed` once it starts, then closes its input and waits for it to exit and its output to be
  * read to the end.
  */
 async function runWorker(
-  [mode = "idle", ...options]: readonly string[],
+  args: readonly string[],
   { probes, answer, typed = "" }: { probes: number; answer: Answer; typed?: string },
 ): Promise<Ran> {
-  const name = `w${Math.random().toString(36).slice(2, 8)}`;
-  const out = join(dir, `${name}.jsonl`);
-  const child = spawn(process.execPath, [WORKER, mode, name, out, ...options], {
-    stdio: ["pipe", "pipe", "inherit"],
-  });
+  const { child, ran } = startWorker(args);
   let output = "";
   let asked = 0;
   const askedAll = Promise.withResolvers<void>();
   const reply = (text: string) => child.stdin.writable && child.stdin.write(text);
-  child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
     output += chunk;
     const now = output.split(PROBE).length - 1;
@@ -100,19 +114,46 @@ async function runWorker(
     child.stdin.end();
   }
   const [code] = await exited;
-  const events = readFileSync(out, "utf8").trim().split("\n").map(recorded);
-  return {
-    output: output.replaceAll(name, "w"),
-    events,
-    code: typeof code === "number" ? code : null,
-  };
+  return ran(output, typeof code === "number" ? code : null);
+}
+
+/** Three marker records in a row with one count: the worker's writes have stopped. */
+const stalled = (written: readonly number[]) =>
+  written.length === 3 && written.every((n) => n === written[0]);
+/** Each test's time, with room on a loaded runner for a stall wait to run to its own timeout. */
+const TEST_TIMEOUT_MS = 15_000;
+/** Inside TEST_TIMEOUT_MS, so a worker that never stalls fails here, showing its counts. */
+const STALL_TIMEOUT_MS = 10_000;
+
+/**
+ * Runs a worker whose output nobody reads, so the pipe fills and its writes stall, until its
+ * recorded count has stopped moving; then closes its input and reads its output only once it has
+ * exited, so it ends with output still waiting to be written.
+ */
+async function runStalled(args: readonly string[]): Promise<Ran> {
+  const { child, out, ran } = startWorker(args);
+  const exited = once(child, "exit");
+  const closed = once(child, "close");
+  // An exit, by code or by signal, ends the wait at once with what ended it, not at the timeout.
+  const lastThree = () =>
+    child.exitCode ?? child.signalCode ?? writtenOf({ events: recordsIn(out) }).slice(-3);
+  await expect
+    .poll(lastThree, { timeout: STALL_TIMEOUT_MS, interval: 20 })
+    .toSatisfy((last) => !Array.isArray(last) || stalled(last));
+  expect({ code: child.exitCode, signal: child.signalCode }).toEqual({ code: null, signal: null });
+  child.stdin.end();
+  const [code] = await exited;
+  let output = "";
+  child.stdout.on("data", (chunk: string) => (output += chunk));
+  await closed;
+  return ran(output, typeof code === "number" ? code : null);
 }
 
 /** Whole-millisecond clocks read a timer of n ms as a little under n. */
 const CLOCK_SLACK_MS = 5;
 const FAST = ["--probe-every", "100", "--probe-timeout", "200", "--marker-every", "20"];
 
-describe("soak worker", () => {
+describe("soak worker", { timeout: TEST_TIMEOUT_MS }, () => {
   it("prints its markers in order and times each probe it gets an answer to", async () => {
     const ran = await runWorker(["idle", ...FAST, "--probe-timeout", "5000"], {
       probes: 3,
@@ -138,6 +179,12 @@ describe("soak worker", () => {
     expect(written).toEqual(written.toSorted((a, b) => a - b));
     expect(written[0]).toBeGreaterThan(0);
     expect(written.at(-1)).toBeLessThanOrEqual(lastMarker(ran));
+  });
+
+  it("records no marker as written that its output doesn't hold, even ending with output stalled", async () => {
+    const ran = await runStalled(["flood", ...FAST, "--flood-on", "100000"]);
+    expect(writtenOf(ran).at(-1)).toBeGreaterThan(0);
+    expect(writtenOf(ran).at(-1)).toBeLessThanOrEqual(lastMarker(ran));
   });
 
   it("records a probe never answered as null", async () => {

@@ -174,10 +174,10 @@ const POOLS_PER_SLOPE_WINDOW = 12;
 const MIN_CHECKED_MS = 30_000;
 /**
  * How long a written marker may take to reach a viewer: an attach must see those older. A worker
- * counts a marker written once its write returns, when the bytes are in the PTY and not yet the
- * holder's. A write blocks while the PTY is full, so the holder is behind by one PTY buffer and
- * one flood batch at most, which a holder still reading drains in milliseconds. One that hasn't
- * in a second has stalled, which is a fault.
+ * counts a marker written in its write's callback, once the OS has taken the bytes: they are in
+ * the PTY and not yet the holder's. A write blocks while the PTY is full, so the holder is behind
+ * by one PTY buffer and one flood batch at most, which a holder still reading drains in
+ * milliseconds. One that hasn't in a second has stalled, which is a fault.
  */
 const WRITE_LAG_MS = 1_000;
 /** The fewest daemon lives whose baselines are fitted for growth across lives. */

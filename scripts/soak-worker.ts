@@ -6,8 +6,8 @@
 //   {"kind":"start","name":…,"mode":…,"pid":…,"t":…}
 //   {"kind":"probe","name":…,"t":…,"ms":<number>|null}: null when no reply came in time
 //   {"kind":"marker","name":…,"t":…,"n":…}: every marker up to n has been written, once a probe round
-// Written means the terminal took the bytes: the write returned, so they sit in the PTY, read by
-// the holder or about to be. A worker can't know a viewer has them; the judge allows for that.
+// Written means the OS took the bytes: they sit in the PTY, read by the holder or about to be. A
+// worker can't know a viewer has them; the judge allows for that.
 //   {"kind":"hup","name":…,"t":…}
 //   {"kind":"exit","name":…,"t":…,"why":"input-ended"|"input-failed"|"output-failed"}
 // It signals nothing, and ends when its terminal's input ends or fails, or it is hung up, recording
@@ -249,18 +249,30 @@ async function run(options: WorkerOptions): Promise<void> {
 
   const stdout = process.stdout;
   stdout.on("error", () => fail("output-failed", 1));
-  const write = async (text: string) => {
-    if (!stdout.write(text)) await new Promise((drained) => stdout.once("drain", drained));
+  const write = async (text: string, taken?: (error: Error | null | undefined) => void) => {
+    if (!stdout.write(text, taken)) await new Promise((drained) => stdout.once("drain", drained));
   };
   let markers = 0;
-  /** The last marker whose write has returned: the terminal has taken it. */
+  /** The last marker the OS has taken, with every one before it. */
   let written = 0;
+  /** Whether a write of markers failed, so some before any later one may never have been taken. */
+  let lost = false;
   const nextMarker = () => marker(name, ++markers);
-  /** Writes `text`, which ends in markers up to the last one made, and counts them written. */
+  /**
+   * Writes `text`, which ends in markers up to the last one made, and counts them written once
+   * the OS has taken them. A write's return doesn't say so: to a pipe it can return with the
+   * bytes still queued in this process, which exiting drops.
+   */
   const writeMarkers = async (text: string) => {
     const last = markers;
-    await write(text);
-    written = last;
+    await write(text, (error) => {
+      if (error) {
+        lost = true;
+        fail("output-failed", 1);
+      } else if (!lost) {
+        written = last;
+      }
+    });
   };
 
   const prober = new Prober(() => performance.now(), options.probeTimeoutMs);
