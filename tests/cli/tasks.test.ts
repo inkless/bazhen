@@ -211,7 +211,25 @@ describe("bazhen task done and cancel", () => {
     ]);
   });
 
+  it("finishes the only task of the agent the daemon takes a command for though its environment names no agent", async () => {
+    s.daemon
+      .takes(AGENT)
+      .answer(
+        "GET /v1/state",
+        StateSnapshot,
+        snapshot({ assignments: [assigned(TASK, AGENT), assigned(TASK2, OTHER)] }),
+      )
+      .answer(`POST /v1/tasks/${TASK}/finish`, TaskCommandResponse, done);
+    const ran = await s.bazhen(["task", "done"]);
+    expect([ran.code, ran.stdout, s.daemon.routes()]).toEqual([
+      0,
+      `${TASK} done\n`,
+      ["GET /v1/caller", "GET /v1/state", `POST /v1/tasks/${TASK}/finish`],
+    ]);
+  });
+
   it("wants the task named outside an agent, and always for a cancel", async () => {
+    s.daemon.takes(null);
     const finish = await s.bazhen(["task", "done"]);
     const cancel = await s.bazhen(["task", "cancel"], asAgent);
     expect([finish.code, finish.stdout, finish.stderr]).toEqual([
@@ -224,7 +242,7 @@ describe("bazhen task done and cancel", () => {
       "",
       expect.stringContaining("missing the task"),
     ]);
-    expect(s.daemon.received).toEqual([]);
+    expect(s.daemon.routes()).toEqual(["GET /v1/caller"]);
   });
 });
 
@@ -239,6 +257,15 @@ describe("bazhen task list", () => {
     s.daemon.takes(AGENT).answer("GET /v1/state", StateSnapshot, state);
     const ran = await s.bazhen(["task", "list"], asAgent);
     expect(ran.stdout).toBe(`${TASK}  mine  [worker BZ-127]\n`);
+  });
+
+  it("lists the asking agent's own tasks when the daemon names it though its environment names no agent", async () => {
+    s.daemon.takes(AGENT).answer("GET /v1/state", StateSnapshot, state);
+    const ran = await s.bazhen(["task", "list"]);
+    expect([ran.stdout, s.daemon.routes()]).toEqual([
+      `${TASK}  mine  [worker BZ-127]\n`,
+      ["GET /v1/caller", "GET /v1/state"],
+    ]);
   });
 
   it("lists the tasks of the agent the daemon takes a Codex command for, whichever its environment names", async () => {
@@ -271,6 +298,7 @@ describe("bazhen task list", () => {
   it("says when there is nothing open, to an agent and to the human", async () => {
     s.daemon.takes(AGENT).answer("GET /v1/state", StateSnapshot, snapshot());
     const mine = await s.bazhen(["task", "list"], asAgent);
+    s.daemon.takes(null);
     const all = await s.bazhen(["task", "list"]);
     expect([mine.stdout, all.stdout]).toEqual(["you have no open tasks\n", "no open tasks\n"]);
   });

@@ -100,7 +100,7 @@ impl Caller {
 
 /// A variable's value as text; one that isn't UTF-8 keeps a U+FFFD where it isn't, so a header
 /// refuses it rather than the caller going unnamed.
-pub fn env_text(name: &str) -> Option<String> {
+fn env_text(name: &str) -> Option<String> {
     env::var_os(name).map(|v| text_of(&v))
 }
 

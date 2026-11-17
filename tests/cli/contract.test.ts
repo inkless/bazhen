@@ -95,8 +95,19 @@ describe("a daemon that isn't running", () => {
   it("exits 3 when it holds a read past five seconds, as one wedged does", async () => {
     s.daemon.hang("GET /v1/state");
     const begun = Date.now();
-    const ran = await s.bazhen(["task", "list"]);
+    const ran = await s.bazhen(["task", "list", "--all"]);
     expect(ran).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
+  });
+
+  it("exits 3 when it holds its answer on who is calling, rather than taking the caller for the human", async () => {
+    s.daemon.hang("GET /v1/caller");
+    const begun = Date.now();
+    const ran = await s.bazhen(["whoami"]);
+    expect([ran, s.daemon.routes()]).toEqual([
+      { code: 3, stdout: "", stderr: NOT_RUNNING },
+      ["GET /v1/caller"],
+    ]);
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
 });
@@ -135,9 +146,13 @@ describe("a daemon that refuses", () => {
     ]);
   });
 
-  it("exits 1 on a route the daemon doesn't have, which it answers in plain text", async () => {
-    const ran = await s.bazhen(["roles"]);
-    expect(ran).toEqual({ code: 1, stdout: "", stderr: "/v1/roles: HTTP 404: 404 Not Found\n" });
+  it("exits 1 on a route the daemon doesn't have, which it answers in plain text, saying to restart it", async () => {
+    const roles = await s.bazhen(["roles"]);
+    const caller = await s.bazhen(["whoami"]);
+    expect([roles, caller]).toEqual([
+      { code: 1, stdout: "", stderr: `/v1/roles: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
+      { code: 1, stdout: "", stderr: `/v1/caller: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
+    ]);
   });
 
   it("exits 1 on an answer this CLI can't read, as from a daemon of another build", async () => {
@@ -184,7 +199,7 @@ describe("the daemon a task verb reaches", () => {
 
   it("is the one the home names when BAZHEN_SOCKET is empty", async () => {
     state();
-    const ran = await s.bazhen(["task", "list"], { BAZHEN_SOCKET: "" });
+    const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_SOCKET: "" });
     expect([ran.code, s.daemon.routes()]).toEqual([0, ["GET /v1/state"]]);
   });
 });
@@ -201,10 +216,10 @@ describe("the daemon any verb reaches", () => {
 
   it("is under --home over BAZHEN_HOME, and under a home given with a trailing slash", async () => {
     state();
-    const flag = await s.bazhen(["task", "list", "--home", s.home], {
+    const flag = await s.bazhen(["task", "list", "--all", "--home", s.home], {
       BAZHEN_HOME: join(s.dir, "other"),
     });
-    const slash = await s.bazhen(["task", "list"], { BAZHEN_HOME: `${s.home}/` });
+    const slash = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: `${s.home}/` });
     expect([flag.code, slash.code, s.daemon.routes()]).toEqual([
       0,
       0,
@@ -228,7 +243,7 @@ describe("the daemon any verb reaches", () => {
     const theirs = await FakeDaemon.listen(join(runtime, "bazhen", "bazhen.sock"));
     try {
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bare(["task", "list"], { XDG_RUNTIME_DIR: runtime });
+      const ran = await s.bare(["task", "list", "--all"], { XDG_RUNTIME_DIR: runtime });
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {
       await theirs.close();
@@ -243,7 +258,7 @@ describe("the daemon any verb reaches", () => {
     try {
       const theirs = await FakeDaemon.listen(join(run, "bazhen.sock"));
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bazhen(["task", "list"], { BAZHEN_HOME: home });
+      const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: home });
       await theirs.close();
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {
