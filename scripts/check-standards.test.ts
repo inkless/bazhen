@@ -2000,6 +2000,58 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("names a crate whichever way its manifest writes the name", () => {
+    const tree = {
+      ...repo,
+      "Cargo.toml": '[workspace.dependencies]\nqd.package = "queue"\nqd.path = "crates/q"\n',
+      "crates/q/Cargo.toml": "[package]\nname = 'queue'\n",
+      "crates/q/src/lib.rs": "pub struct Frames { buf: Vec<u8> }",
+      "crates/a/Cargo.toml": "[dependencies]\nqs = { package = 'queue', path = \"../q\" }\n",
+      "crates/a/src/lib.rs": carrierCrate("A", "qs::Frames"),
+      "crates/b/Cargo.toml": "[dependencies . qt]\npackage = 'queue'\n",
+      "crates/b/src/lib.rs": carrierCrate("B", "qt::Frames"),
+      "crates/c/src/lib.rs": carrierCrate("C", "qd::Frames"),
+      "crates/d/Cargo.toml":
+        '[target.\'cfg(unix)\'.dependencies]\n"qk" = {\n  path = "../q",\n  package = "queue",\n}\n',
+      "crates/d/src/lib.rs": carrierCrate("D", "qk::Frames"),
+      "crates/e/src/lib.rs": carrierCrate("E", "Frames", "use queue::Frames;"),
+      "crates/f/Cargo.toml": "dev-dependencies.qv.package = 'queue'\n",
+      "crates/f/src/lib.rs": carrierCrate("F", "qv::Frames"),
+      "crates/g/Cargo.toml": '[package.metadata.x]\nqx.package = "queue"\n',
+      "crates/g/src/lib.rs": carrierCrate("G", "qx::Frames"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/a/src/lib.rs::A::f",
+      "crates/b/src/lib.rs::B::f",
+      "crates/c/src/lib.rs::C::f",
+      "crates/d/src/lib.rs::D::f",
+      "crates/e/src/lib.rs::E::f",
+      "crates/f/src/lib.rs::F::f",
+    ]);
+  });
+
+  it("names a manifest whose package name it can't read", () => {
+    const tree = {
+      ...repo,
+      "Cargo.toml": [
+        "[workspace.dependencies]",
+        'qe = { package = "qu\\u0065ue" }',
+        "qn.package = 1",
+        "qi = { package = { name = 'queue' } }",
+        'qo = { version = "1" }',
+        "[package.metadata.x]",
+        "qm.package = 1",
+      ].join("\n"),
+      "crates/q/Cargo.toml": '[package]\nname = """queue"""\n',
+    };
+    expect(failures(fuzzed, exempt, tree)).toEqual([
+      expect.stringContaining('Cargo.toml: can\'t read `qe = { package = "qu\\u0065ue" }`'),
+      expect.stringContaining("Cargo.toml: can't read `qn.package = 1`"),
+      expect.stringContaining("Cargo.toml: can't read `qi = { package = { name = 'queue' } }`"),
+      expect.stringContaining('crates/q/Cargo.toml: can\'t read `name = """queue"""`'),
+    ]);
+  });
+
   it("takes every self method of a carrier no field pins its bytes to", () => {
     const tree = {
       ...repo,
@@ -2063,6 +2115,158 @@ describe("decoderFailures", () => {
       expect.stringContaining("crates/p/src/pubs.rs::Tuple::0: a pub byte field"),
       expect.stringContaining("Listed::bare is in PUBLIC_BYTE_FIELDS with no reason"),
       expect.stringContaining("Gone::x is listed, but no such pub byte field exists"),
+    ]);
+  });
+
+  it("takes an enum for a carrier by its variants' fields, not by their names", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/e.rs": [
+        "pub struct Ring { buf: Vec<u8> }",
+        "pub enum Origin { Ring, Snapshot = 2 }",
+        "impl Origin {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub enum Holds { A(Ring), B }",
+        "impl Holds {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub enum Named { Input { bytes: Vec<u8> }, Ring { n: u64 } }",
+        "impl Named {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub enum Bounded<R> where R: Read { A(R), B }",
+        "impl<R> Bounded<R> {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub fn origin(o: Origin) {}",
+        "pub fn holds(h: Holds) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/e.rs::Holds::code",
+      "crates/p/src/e.rs::Named::code",
+      "crates/p/src/e.rs::Bounded::code",
+      "crates/p/src/e.rs::holds",
+    ]);
+  });
+
+  it("takes a function whose pattern binds a byte field of a variant, however it got the value", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": [
+        "pub enum Msg { Data { id: u64, bytes: Vec<u8> }, Raw(u64, Vec<u8>), Ping(u64), Gone }",
+        "pub fn send(m: Msg) {}",
+      ].join("\n"),
+      "crates/a/src/lib.rs": [
+        "use q::Msg;",
+        "fn arm() { match next() { Msg::Data { bytes, .. } => look(bytes), _ => {} } }",
+        "fn renamed() { match next() { Msg::Data { bytes: b, .. } => look(b), _ => {} } }",
+        "fn tuple() { if let Msg::Raw(_, b) = next() { look(b) } }",
+        "fn tail() { if let Msg::Raw(.., b) = next() { look(b) } }",
+        "fn by_ref() { match &next() { &Msg::Data { ref bytes, .. } => look(bytes), _ => {} } }",
+        "fn by_ref_mut() { match next() { Msg::Raw(_, ref mut b) => look(b), _ => {} } }",
+        "fn by_amp() { if let Some(&Msg::Raw(_, ref b)) = all().first() { look(b) } }",
+        "fn boxed() { match next() { Msg::Raw(_, box b) => look(b), _ => {} } }",
+        "fn either() { match next() { Msg::Raw(_, b) | Msg::Data { bytes: b, .. } => look(b), _ => {} } }",
+        "fn guard() { match next() { Msg::Raw(_, b) if b.is_empty() => {} _ => {} } }",
+        "fn or_else() { let Msg::Raw(_, b) = next() else { return }; look(b) }",
+        "fn each() { while let Some(Msg::Data { bytes, .. }) = queue() { look(bytes) } }",
+        "fn test() -> bool { matches!(next(), Msg::Raw(_, b) if b.is_empty()) }",
+        "fn slice() { if let [Msg::Raw(_, b), ..] = all() { look(b) } }",
+        "fn pair() { match (next(), 1) { (Msg::Data { bytes, .. }, _) => look(bytes), _ => {} } }",
+        "fn whole() { if let m @ Msg::Data { .. } = next() { keep(m) } }",
+        "fn pathed() { if let q::Msg::Raw(_, b) = next() { look(b) } }",
+        "fn rest() { match next() { Msg::Data { .. } => {} _ => {} } }",
+        "fn other_field() { match next() { Msg::Data { id, .. } => look(id), Msg::Raw(n, _) => look(n), _ => {} } }",
+        "fn plain() { if let Msg::Ping(n) = next() { look(n) } }",
+        "fn unit() { if let Msg::Gone = next() {} }",
+        "fn ignored() { if let Msg::Raw(_, _) = next() {} }",
+        "fn built(n: u64) -> Msg { Msg::Data { id: n, bytes: make() } }",
+        "fn sent(n: u64) { let m = Msg::Raw(n, make()); q::send(m); q::send(Msg::Raw(n, make())); }",
+        "fn listed(n: u64) -> Vec<Msg> { vec![Msg::Raw(n, make()), Msg::Ping(n)] }",
+        "fn chosen(n: u64) -> Option<Msg> { match n { 0 => Some(Msg::Raw(n, make())), _ => None } }",
+        "fn forward() { let m = next(); match m { Msg::Data { .. } => q::send(m), _ => {} } }",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/q/src/lib.rs::send",
+      ...[
+        "arm",
+        "renamed",
+        "tuple",
+        "tail",
+        "by_ref",
+        "by_ref_mut",
+        "by_amp",
+        "boxed",
+        "either",
+        "guard",
+        "or_else",
+        "each",
+        "test",
+        "slice",
+        "pair",
+        "whole",
+        "pathed",
+      ].map((fn) => `crates/a/src/lib.rs::${fn}`),
+    ]);
+  });
+
+  it("takes a pattern on Self in the enum's own impl, and fails an alias of the enum", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/f.rs": [
+        "pub enum Frame { Data(Vec<u8>), Ping }",
+        "pub struct Other { n: u64 }",
+        "pub enum Kind { Data(u64) }",
+        "impl Frame {",
+        "    pub fn parse() -> Self { match make() { Self::Data(b) => Self::Data(b), f => f } }",
+        "    pub fn ping() -> Self { Self::Ping }",
+        "    pub fn wrap(b: Vec<u8>) -> Self { Self::Data(b) }",
+        "}",
+        "impl Kind {",
+        "    pub fn n() -> u64 { match make() { Self::Data(n) => n } }",
+        "}",
+        "impl Other {",
+        "    pub fn n() -> u64 { match make() { Self::Data(n) => n, _ => 0 } }",
+        "}",
+        "fn free() { match make() { Frame::Data(b) => look(b), _ => {} } }",
+        "type Alias = Frame;",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/f.rs::Alias",
+      "crates/p/src/f.rs::Frame::parse",
+      "crates/p/src/f.rs::Frame::wrap",
+      "crates/p/src/f.rs::free",
+    ]);
+  });
+
+  it("names a `use` that brings in a byte-carrying variant by its own name", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": "pub enum Msg { Raw(Vec<u8>), Ping }\npub enum Kind { A, B }\n",
+      "crates/a/src/lib.rs": [
+        "use q::Msg::*;",
+        "use q::Msg::{Ping, Raw};",
+        "use q::Msg::Raw;",
+        "use q::Msg::{self};",
+        "use q::Msg::Ping;",
+        "use q::Msg;",
+        "use q::Kind::*;",
+        "pub struct A { n: u64 }",
+        "impl A {",
+        "    fn f() { use q::Msg::{self as M, *}; }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree)).toEqual([
+      expect.stringContaining("`use q::Msg::*;` brings in a variant of Msg that carries bytes"),
+      expect.stringContaining("`use q::Msg::{Ping, Raw};` brings in a variant of Msg"),
+      expect.stringContaining("`use q::Msg::Raw;` brings in a variant of Msg"),
+      expect.stringContaining("crates/a/src/lib.rs: `self as M` renames a byte type"),
+      expect.stringContaining("`use q::Msg::{self as M, *};` brings in a variant of Msg"),
     ]);
   });
 

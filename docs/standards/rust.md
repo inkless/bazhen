@@ -448,7 +448,7 @@ What differs:
   `io::stdin().lock()`, a closure's read included). A socket, a file or an fd in a signature isn't bytes: holding one is not
   reading it, so a function that only binds, borrows or sets one up needs no entry. A struct or enum
   of the same crate that carries bytes (a byte field, a parameter bounded by a byte trait, or a
-  field of such a type), or one of another crate that this crate brings in (by a `use` or a path,
+  field of such a type; an enum by its variants' fields, not their names), or one of another crate that this crate brings in (by a `use` or a path,
   through the crate, a module of it, an alias for either or another crate's re-export, the crate
   under its package name or a name a manifest gives it), is a byte type too: a function taking one
   is a decoder, as is a method of it taking `self` that can reach the bytes, as a stateful frame
@@ -462,14 +462,21 @@ What differs:
   type (`other: &Self`) is a decoder too. A byte field `pub` to other crates fails unless it is
   listed in `PUBLIC_BYTE_FIELDS` with why its bytes aren't from outside: another crate reads it
   where the rule doesn't look. So does a struct whose fields the rule can't split, since it can't
-  tell which hold bytes.
+  tell which hold bytes. A variant's fields are public wherever its enum is, so a function whose
+  pattern binds a field of a variant holding bytes takes them, however it got the value: a match
+  arm, an or-pattern, a guard, `if let`, `let … else`, `matches!`, nested in a tuple, slice or
+  `Some(…)`, or the whole variant by `r @ Reply::Data { .. }`. One that matches with `{ .. }` or
+  binds only other fields doesn't, and one that hands the whole value on leaves it to the
+  function it hands it to, which takes the enum in its signature.
   `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the fuzz target
   that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that reads bytes
   only to hand them to a fuzzed decoder, one reached only through a fuzzed decoder. A module
   compiled only under test (`#[cfg(test)] mod name;`, and the modules inside it) isn't read. A
   method is listed with its type (`lib.rs::Reader::next_frame`). A stale entry, an entry with no
   reason, a type alias of a byte type and a `use … as` renaming one fail too (`as _`, which brings a
-  trait's methods into scope, is fine).
+  trait's methods into scope, is fine), as does a `use` bringing in a variant that carries bytes by
+  its own name (`use Reply::*`), which a pattern could then name bare, and a manifest whose
+  `package` name isn't a plain string, since the rule couldn't tell which crate it names.
   - **Text is not taken for bytes**, because most functions taking `&str` parse text the program
     made itself. A decoder of a text protocol whose input doesn't pass through a fuzzed byte
     decoder first is listed in `FUZZED_DECODERS` by hand, with its own target, and review checks
@@ -477,13 +484,11 @@ What differs:
     `crates/bazhen-hook/fuzz/fuzz_targets/pane_title.rs` drives it.
   - **The rule is a reviewer's net, not a proof.** It reads signatures and the names of reads in a
     body, so it can't see a function a macro generates, a read through a wrapper whose method isn't
-    named as a read (a `next_message()`), a trait's default method reading through a method the
-    trait requires (`fn kind(&self) -> u8 { self.raw()[0] }`), or a match on another crate's enum
-    that carries bytes in a function that got it by a call rather than a parameter or a field: a
-    variant's fields are public wherever the enum is. A read is a method given something to read
-    into, so a channel's `recv()`, an iterator's `peek()` and `OpenOptions::read(true)` aren't
-    reads, and neither is a bare call to a function of the same file, which is read where it is
-    defined. Review checks those by hand. Two looser edges are known, and review covers them too: a
+    named as a read (a `next_message()`), or a trait's default method reading through a method the
+    trait requires (`fn kind(&self) -> u8 { self.raw()[0] }`). A read is a method given something
+    to read into, so a channel's `recv()`, an iterator's `peek()` and `OpenOptions::read(true)`
+    aren't reads, and neither is a bare call to a function of the same file, which is read where it
+    is defined. Review checks those by hand. Two looser edges are known, and review covers them too: a
     target that names a type and calls `.decode(` on a value counts as driving that type's `decode`,
     so the reviewer checks the value is of the listed type; and a method that only measures or
     clears a byte field (`self.buf.len()`, `self.buf.clear()`) uses it, so it counts as a decoder
