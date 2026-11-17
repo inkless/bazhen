@@ -183,10 +183,11 @@ function endOfTypeArguments(
  * Each test call in `source`: an `it` or `test` that isn't a property or a declaration, then any
  * chain of `.name`, `(...)` and tagged templates, whose last `(...)` takes the title first. So
  * `it.runIf(c)("t", f)`, `it.each(rows)("t %s", f)` and ``it.each`…`("t", f)`` are read in any
- * layout, with type arguments or not. A last call with no arguments, or followed by `{` or `:`
- * (a method named `test`), is no test. A chain that starts as a test's does (`isTestHead`) but
- * reaches no call is a test whose title can't be read, so it is never left out unseen. A string that reads like a test call is a string. Returns why instead when the
- * source can't be read: a literal left open, or brackets that don't balance.
+ * layout, with type arguments or not. A last call with no arguments, or followed by `{` or `:` (a
+ * method named `test`), is no test. A chain that starts as a test's does (`isTestHead`) but reaches
+ * no call is a test whose title can't be read, so it is never left out unseen. A string that reads
+ * like a test call is a string. Returns why instead when the source can't be read: a literal left
+ * open, or brackets that don't balance.
  */
 export function testCalls(source: string): TestCall[] | string {
   const tokens = tokenize(source);
