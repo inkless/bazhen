@@ -14,6 +14,7 @@ use bazhen_protocol::agents::{
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
 };
+use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::has_keystrokes;
 use bazhen_protocol::mail::{
@@ -126,6 +127,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("EnvRefreshResponse", round_trips::<EnvRefreshResponse>),
     ("EscalateRequest", round_trips::<EscalateRequest>),
     ("EscalateResponse", round_trips::<EscalateResponse>),
+    ("EventEnvelopeFrame", round_trips::<EventFrame>),
     ("FinishTaskRequest", round_trips::<FinishTaskRequest>),
     ("FleetAgent", round_trips::<FleetAgent>),
     ("HealthResponse", round_trips::<HealthResponse>),
