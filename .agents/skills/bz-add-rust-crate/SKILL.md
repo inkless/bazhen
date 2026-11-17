@@ -42,7 +42,8 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    outside is a library with a thin `main` (§ Tests), so its fuzz crate can call it.
 6. **Give each decoder its fuzz target,** in `crates/<name>/fuzz/` with seeds, and list it in
    `FUZZED_DECODERS` in `scripts/check-standards.ts`; list what only looks like one in
-   `NOT_DECODERS` with why. Copy `crates/bazhen-hook/fuzz/`.
+   `NOT_DECODERS` with why, and a byte field `pub` to other crates in `PUBLIC_BYTE_FIELDS` with
+   why its bytes aren't from outside. Copy `crates/bazhen-hook/fuzz/`.
 7. **List what the checks pin by path:** an FFI module in `UNSAFE_MODULES` (§ Unsafe); a crate that
    may build an async runtime, an HTTP stack or SQLite in `HEAVY_ALLOWED`, with why; a signal
    chokepoint in `SIGNAL_CHOKEPOINTS` in `scripts/signal-paths.ts`, in `PRODUCT_CHOKEPOINTS` in

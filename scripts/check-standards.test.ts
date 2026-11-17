@@ -1591,6 +1591,17 @@ describe("byteTakers", () => {
   });
 });
 
+/** A crate's source holding one type whose field is `field`, with a method using it and one not. */
+const carrierCrate = (name: string, field: string, head = "") =>
+  [
+    head,
+    `pub struct ${name} { f: ${field}, n: u64 }`,
+    `impl ${name} {`,
+    "    pub fn f(&self) { look(&self.f) }",
+    "    pub fn n(&self) -> u64 { self.n }",
+    "}",
+  ].join("\n");
+
 describe("decoderFailures", () => {
   const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
   const repo: Record<string, string> = {
@@ -1602,7 +1613,8 @@ describe("decoderFailures", () => {
     fuzzed: Record<string, string>,
     notDecoders: Record<string, string>,
     tree = repo,
-  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders);
+    publicFields: Record<string, string> = {},
+  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders, publicFields);
   const fuzzed = { "crates/p/src/lib.rs::decode": "decode" };
   const exempt = { "crates/p/src/lib.rs::send": "an encoder" };
 
@@ -1649,27 +1661,27 @@ describe("decoderFailures", () => {
     const reader = {
       ...repo,
       "crates/p/src/reader.rs": [
-        "pub struct Reader {",
+        "pub struct Framer {",
         "    buf: Vec<u8>,",
         "}",
         "pub struct Frame<'a>(&'a [u8]);",
         "pub struct Plain {",
         "    n: u32,",
         "}",
-        "impl Reader {",
+        "impl Framer {",
         "    pub fn new() -> Self { todo() }",
-        "    pub fn next_frame(&mut self) -> Option<u8> { None }",
+        "    pub fn next_frame(&mut self) -> Option<u8> { self.buf.pop() }",
         "}",
         "impl Plain {",
         "    pub fn get(&self) -> u32 { 0 }",
         "}",
         "pub fn decode(f: Frame<'_>) {}",
-        "type Alias = Reader;",
+        "type Alias = Framer;",
       ].join("\n"),
     };
     expect(failures(fuzzed, exempt, reader).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/reader.rs::Alias",
-      "crates/p/src/reader.rs::Reader::next_frame",
+      "crates/p/src/reader.rs::Framer::next_frame",
       "crates/p/src/reader.rs::decode",
     ]);
   });
@@ -1694,7 +1706,7 @@ describe("decoderFailures", () => {
         "struct Middle { inner: Inner }",
         "pub struct Outer { m: Middle }",
         "impl Outer {",
-        "    pub fn go(&self) {}",
+        "    pub fn go(&self) { walk(&self.m) }",
         "}",
         "pub struct Plain<T> { t: T }",
         "impl<T: Clone> Plain<T> {",
@@ -1721,14 +1733,336 @@ describe("decoderFailures", () => {
         "}",
         "pub struct Sock { s: UnixStream, buf: Vec<u8> }",
         "impl Sock {",
-        "    pub fn id(&self) -> u32 { 0 }",
+        "    pub fn pending(&self) -> usize { self.buf.len() }",
         "}",
         "pub fn watch(w: &Watch) {}",
       ].join("\n"),
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/fd.rs::Watch::clear",
-      "crates/p/src/fd.rs::Sock::id",
+      "crates/p/src/fd.rs::Sock::pending",
+    ]);
+  });
+
+  it("takes a carrier's method for a decoder only when it uses a field holding the bytes", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/conn.rs": [
+        "pub struct Conn {",
+        "    id: u64,",
+        "    buffered: bool,",
+        "    cache: HashMap<u64, String>,",
+        "    frames: HashMap<u64, Vec<u8>>,",
+        "    hook: fn(u64) -> u64,",
+        "    #[allow(dead_code)]",
+        "    buf: Vec<u8>,",
+        "    inner: Inner,",
+        "}",
+        "struct Inner { b: Box<[u8]> }",
+        "pub struct Pair(u64, Vec<u8>);",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn is_buffered(&self) -> bool { self.buffered }",
+        "    pub fn cached(&self) -> usize { self.cache.len() }",
+        "    pub fn framed(&self) -> usize { self.frames.len() }",
+        "    pub fn hooked(&self) -> u64 { (self.hook)(self.id) }",
+        "    pub fn alias(&self) -> usize { let b = &self.buf; b.len() }",
+        "    pub fn helper(&self) { parse(&self.buf) }",
+        "    pub fn closure(&self) -> bool { (0..4).any(|i| self.buf.get(i).is_some()) }",
+        "    pub fn nested(&self) { touch(&self.inner) }",
+        "    pub fn path(&self) { self::log(self.id) }",
+        "}",
+        "impl Pair {",
+        "    pub fn first(&self) -> u64 { self.0 }",
+        "    pub fn second(&self) -> usize { self.1.len() }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::framed",
+      "crates/p/src/conn.rs::Conn::alias",
+      "crates/p/src/conn.rs::Conn::helper",
+      "crates/p/src/conn.rs::Conn::closure",
+      "crates/p/src/conn.rs::Conn::nested",
+      "crates/p/src/conn.rs::Pair::second",
+    ]);
+  });
+
+  it("takes a carrier's method that hands on or matches self, or calls one that counts", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/conn.rs": [
+        "pub struct Conn { id: u64, buf: Vec<u8> }",
+        "impl Conn {",
+        "    pub fn handed(&self) { parse_conn(self) }",
+        "    pub fn matched(&self) -> usize { let Self { buf, .. } = self; buf.len() }",
+        "    pub fn by_path(&mut self) { Self::reset(self) }",
+        "    pub fn second(&self) -> Option<u8> { self.first() }",
+        "    pub fn first(&self) -> Option<u8> { self.bytes().first().copied() }",
+        "    fn bytes(&self) -> &[u8] { &self.buf }",
+        "    pub fn named(&self) -> u64 { self.id }",
+        "    pub fn quiet(&self) -> u64 { self.named() }",
+        "    pub fn elsewhere(&self) { self.flush_all() }",
+        "    pub fn merge(&mut self, other: &Self) {}",
+        "    pub fn boxed(self: Box<Self>) -> u64 { self.id }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::handed",
+      "crates/p/src/conn.rs::Conn::matched",
+      "crates/p/src/conn.rs::Conn::by_path",
+      "crates/p/src/conn.rs::Conn::second",
+      "crates/p/src/conn.rs::Conn::first",
+      "crates/p/src/conn.rs::Conn::bytes",
+      "crates/p/src/conn.rs::Conn::elsewhere",
+      "crates/p/src/conn.rs::Conn::merge",
+    ]);
+  });
+
+  it("splits a struct's fields where a length shifts, and pins nothing it can't split", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/shift.rs": [
+        "pub struct Shifted { id: u64, scratch: [u32; 1 << 4], buf: Vec<u8> }",
+        "pub struct Halved { lens: Vec<[u32; N >> 2]>, pub buf: Vec<u8> }",
+        "pub struct Odd { a: Foo<u8, b: Vec<u8>, n: u64 }",
+        "pub struct Raw { r#type: Vec<u8>, n: u64 }",
+        "pub struct Junk { Vec<u8>, n: u64 }",
+        "pub struct Hooked<F: Fn(Option<u32>) -> u32> { buf: Vec<u8>, n: u64, f: F }",
+        "impl Shifted {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn peek(&self) -> u8 { self.buf[0] }",
+        "}",
+        "impl Halved {",
+        "    pub fn lens(&self) -> u32 { self.lens[0][0] }",
+        "}",
+        "impl Odd {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl Raw {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "    pub fn kind(&self) -> u8 { self.r#type[0] }",
+        "}",
+        "impl Junk {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl<F> Hooked<F> {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/shift.rs::Halved::buf",
+      "crates/p/src/shift.rs::Odd",
+      "crates/p/src/shift.rs::Junk",
+      "crates/p/src/shift.rs::Shifted::peek",
+      "crates/p/src/shift.rs::Odd::n",
+      "crates/p/src/shift.rs::Raw::kind",
+      "crates/p/src/shift.rs::Junk::n",
+    ]);
+  });
+
+  it("takes a carrier of another crate its `use` or a path names for a byte type", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": [
+        "pub struct Frames { buf: Vec<u8> }",
+        "pub struct Screen { rows: Vec<u8> }",
+        "pub mod wire {",
+        "    pub struct Packet { b: Vec<u8> }",
+        "}",
+      ].join("\n"),
+      "crates/p/src/conn.rs": [
+        "use q::Frames;",
+        "pub struct Screen { rows: u32 }",
+        "pub struct Conn { id: u64, frames: Option<Frames>, packet: q::wire::Packet, screen: Screen }",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn frames(&self) -> bool { self.frames.is_some() }",
+        "    pub fn packet(&self) { send(&self.packet) }",
+        "    pub fn rows(&self) -> u32 { self.screen.rows }",
+        "}",
+        "pub fn show(f: &Frames) {}",
+        "pub fn draw(s: &Screen) {}",
+      ].join("\n"),
+      "crates/r/src/lib.rs": [
+        "use p::Conn;",
+        "use q::*;",
+        "use q::Frames as F;",
+        "pub struct Holder { c: Conn, n: u64 }",
+        "pub struct Globbed { s: Screen }",
+        "impl Holder {",
+        "    pub fn c(&self) { look(&self.c) }",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "impl Globbed {",
+        "    pub fn s(&self) { look(&self.s) }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Conn::frames",
+      "crates/p/src/conn.rs::Conn::packet",
+      "crates/p/src/conn.rs::show",
+      "crates/r/src/lib.rs",
+      "crates/r/src/lib.rs::Holder::c",
+      "crates/r/src/lib.rs::Globbed::s",
+    ]);
+  });
+
+  it("follows another crate's carrier through a module, a renamed crate, an alias or a re-export", () => {
+    const tree = {
+      ...repo,
+      "crates/q/src/lib.rs": [
+        "pub mod frame {",
+        "    pub struct Request { b: Vec<u8> }",
+        "}",
+        "pub struct Decoder { buf: Vec<u8> }",
+        "pub struct Other { buf: Vec<u8> }",
+        "pub struct Third { buf: Vec<u8> }",
+        "pub struct Fourth { buf: Vec<u8> }",
+        "pub struct Fifth { buf: Vec<u8> }",
+      ].join("\n"),
+      "crates/p/src/conn.rs": [
+        "use q::frame;",
+        "use q as proto;",
+        "use q::{self as hq};",
+        "extern crate q as eq;",
+        "pub use q::Fourth;",
+        "type Dec = proto::Fifth;",
+        "pub struct Conn {",
+        "    id: u64,",
+        "    held: Option<frame::Request>,",
+        "    d: proto::Decoder,",
+        "    o: hq::Other,",
+        "    t: eq::Third,",
+        "}",
+        "impl Conn {",
+        "    pub fn id(&self) -> u64 { self.id }",
+        "    pub fn held(&self) -> bool { self.held.is_some() }",
+        "    pub fn d(&self) { look(&self.d) }",
+        "    pub fn o(&self) { look(&self.o) }",
+        "    pub fn t(&self) { look(&self.t) }",
+        "}",
+      ].join("\n"),
+      "crates/w/src/lib.rs": [
+        "use q::{self as hw};",
+        "pub struct W { f: self::inner::Decoder, n: u64 }",
+        "impl W {",
+        "    pub fn f(&self) { look(&self.f) }",
+        "}",
+      ].join("\n"),
+      "crates/r/src/lib.rs": [
+        "use p::Fourth;",
+        "pub struct Boxed { f: Fourth, n: u64 }",
+        "impl Boxed {",
+        "    pub fn f(&self) { look(&self.f) }",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/conn.rs::Dec",
+      "crates/p/src/conn.rs::Conn::held",
+      "crates/p/src/conn.rs::Conn::d",
+      "crates/p/src/conn.rs::Conn::o",
+      "crates/p/src/conn.rs::Conn::t",
+      "crates/r/src/lib.rs::Boxed::f",
+    ]);
+  });
+
+  it("names a crate by its package, and by each name a manifest gives it", () => {
+    const tree = {
+      ...repo,
+      "Cargo.toml": '[workspace.dependencies]\nqw = { package = "queue", path = "crates/q" }\n',
+      "crates/q/Cargo.toml": [
+        "[package]",
+        'name = "queue"',
+        "[package.metadata.docs]",
+        'qm = { package = "queue" }',
+      ].join("\n"),
+      "crates/q/src/lib.rs": "pub struct Frames { buf: Vec<u8> }",
+      "crates/a/Cargo.toml": '[dependencies]\nqq = { package = "queue", path = "../q" }\n',
+      "crates/a/src/lib.rs": carrierCrate("A", "qq::Frames"),
+      "crates/b/Cargo.toml": '[dependencies.qz]\npackage = "queue"\npath = "../q"\n',
+      "crates/b/src/lib.rs": carrierCrate("B", "qz::Frames"),
+      "crates/c/src/lib.rs": carrierCrate("C", "qw::Frames"),
+      "crates/d/src/lib.rs": carrierCrate("D", "Frames", "use q::Frames;"),
+      "crates/e/src/lib.rs": carrierCrate("E", "Frames", "use queue::Frames;"),
+      "crates/m/src/lib.rs": carrierCrate("M", "qm::Frames"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/a/src/lib.rs::A::f",
+      "crates/b/src/lib.rs::B::f",
+      "crates/c/src/lib.rs::C::f",
+      "crates/e/src/lib.rs::E::f",
+    ]);
+  });
+
+  it("takes every self method of a carrier no field pins its bytes to", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/a.rs": [
+        "pub enum Msg { Data(Vec<u8>), Ping }",
+        "impl Msg {",
+        "    pub fn code(&self) -> u8 { 0 }",
+        "}",
+        "pub struct Keyed { n: u64, b: Vec<u8> }",
+        "impl Keyed {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "pub struct Twin { n: u64, b: Vec<u8> }",
+        "impl Twin {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+        "pub enum Mirror { A(Vec<u8>) }",
+        "pub struct Bounded<R> where R: Read { r: R, n: u64 }",
+        "impl<R> Bounded<R> {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+      "crates/p/src/b.rs": [
+        "pub enum Twin { A(Vec<u8>) }",
+        "pub struct Mirror { n: u64, b: Vec<u8> }",
+        "impl Mirror {",
+        "    pub fn n(&self) -> u64 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/a.rs::Msg::code",
+      "crates/p/src/a.rs::Twin::n",
+      "crates/p/src/a.rs::Bounded::n",
+      "crates/p/src/b.rs::Mirror::n",
+    ]);
+  });
+
+  it("names a pub byte field another crate could read, unless listed with a reason", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/pubs.rs": [
+        "pub struct Open {",
+        "    #[allow(dead_code)]",
+        "    pub buf: Vec<u8>,",
+        "    pub n: u64,",
+        "    pub(crate) mine: Vec<u8>,",
+        "    own: Vec<u8>,",
+        "}",
+        "pub struct Tuple(pub [u8; 4], pub(super) Vec<u8>);",
+        "pub struct Listed { pub rgb: [u8; 3], pub bare: [u8; 3] }",
+      ].join("\n"),
+    };
+    const listed = {
+      "crates/p/src/pubs.rs::Listed::rgb": "a colour",
+      "crates/p/src/pubs.rs::Listed::bare": " ",
+      "crates/p/src/pubs.rs::Gone::x": "a colour",
+    };
+    expect(failures(fuzzed, exempt, tree, listed)).toEqual([
+      expect.stringContaining("crates/p/src/pubs.rs::Open::buf: a pub byte field"),
+      expect.stringContaining("crates/p/src/pubs.rs::Tuple::0: a pub byte field"),
+      expect.stringContaining("Listed::bare is in PUBLIC_BYTE_FIELDS with no reason"),
+      expect.stringContaining("Gone::x is listed, but no such pub byte field exists"),
     ]);
   });
 
