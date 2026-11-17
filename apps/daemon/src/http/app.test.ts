@@ -284,7 +284,7 @@ describe("HTTP app", () => {
     const routed = new RoutedRuntime({
       runtimes: [tmux, holder],
       defaultKind: "tmux",
-      onError: () => {},
+      log: () => {},
     });
     holder.disconnect();
     const res = await createApp({ ...deps, runtime: routed }).request("/v1/health", {

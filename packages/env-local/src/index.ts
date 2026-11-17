@@ -113,7 +113,7 @@ export class LocalEnvironment implements EnvironmentAdapter {
             runtimes: [opts.runtime],
             defaultKind: opts.runtime.kind,
             // With one runtime, a failure to read it is thrown, never only reported.
-            onError: () => {},
+            log: () => {},
           });
     this.runtimes = this.runtime.kinds;
     this.defaultRuntime = this.runtime.defaultKind;

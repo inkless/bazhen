@@ -54,7 +54,7 @@ describe("LocalEnvironment over two runtimes", () => {
       runtime: new RoutedRuntime({
         runtimes: [tmux, holder],
         defaultKind: "tmux",
-        onError: () => {},
+        log: () => {},
       }),
       harnesses: [harness],
       socket: "/run/b.sock",

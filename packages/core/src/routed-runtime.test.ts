@@ -6,16 +6,50 @@ import { FakeRuntime, fakeContractHarness } from "./testing/fake-runtime.ts";
 import { runtimeContract } from "./testing/runtime-contract.ts";
 
 function pair() {
-  const errors: unknown[] = [];
+  const logged: unknown[][] = [];
   const tmux = new FakeRuntime({ kind: "tmux" });
   const holder = new FakeRuntime({ kind: "holder", attach: "snapshot" });
   const routed = new RoutedRuntime({
     runtimes: [tmux, holder],
     defaultKind: "tmux",
-    onError: (err) => errors.push(err),
+    log: (...line) => logged.push(line),
   });
-  return { tmux, holder, routed, errors };
+  return { tmux, holder, routed, logged };
 }
+
+/**
+ * Three runtimes whose foreground reads each fail with the error `fail` last gave its kind, and
+ * read as usual once it is given none.
+ */
+function faulty() {
+  const logged: unknown[][] = [];
+  const faults = new Map<string, Error>();
+  const runtimes = ["tmux", "holder", "other"].map((kind) => {
+    const runtime = new FakeRuntime({ kind });
+    const read = runtime.foregrounds.bind(runtime);
+    runtime.foregrounds = (ids) => {
+      const fault = faults.get(kind);
+      return fault === undefined ? read(ids) : Promise.reject(fault);
+    };
+    return runtime;
+  });
+  const routed = new RoutedRuntime({
+    runtimes,
+    defaultKind: "tmux",
+    log: (...line) => logged.push(line),
+  });
+  const fail = (kind: string, fault?: Error) =>
+    fault === undefined ? faults.delete(kind) : faults.set(kind, fault);
+  const sweep = (times = 1) =>
+    Array.from({ length: times }).reduce<Promise<unknown>>(
+      (done) => done.then(() => routed.foregrounds(new Set())),
+      Promise.resolve(),
+    );
+  return { routed, logged, fail, sweep };
+}
+
+const cantRead = (kind: string, err: Error) => [`runtime ${kind}: can't read foregrounds:`, err];
+const readsAgain = (kind: string) => [`runtime ${kind}: foregrounds read again`];
 
 const spec = (argv: TerminalSpec["argv"] = ["sleep", "300"]): TerminalSpec => ({
   terminalId: newId("term"),
@@ -46,7 +80,7 @@ runtimeContract("RoutedRuntime over two FakeRuntimes", {
     const routed = new RoutedRuntime({
       runtimes: [tmux, holder],
       defaultKind: "tmux",
-      onError: () => {},
+      log: () => {},
     });
     const create = routed.create.bind(routed);
     routed.create = (s) => create({ ...s, runtime: "holder" });
@@ -59,7 +93,7 @@ runtimeContract("RoutedRuntime over two FakeRuntimes", {
 });
 
 const make = (runtimes: RuntimeAdapter[], defaultKind: string) =>
-  new RoutedRuntime({ runtimes, defaultKind, onError: () => {} });
+  new RoutedRuntime({ runtimes, defaultKind, log: () => {} });
 
 describe("RoutedRuntime", () => {
   it("creates a terminal on the runtime its spec names, and on the default when none", async () => {
@@ -132,12 +166,71 @@ describe("RoutedRuntime", () => {
   });
 
   it("still sees one runtime's foregrounds while the other can't be read, and says why", async () => {
-    const { tmux, routed, errors } = pair();
+    const { tmux, routed, logged } = pair();
     await routed.create(spec());
     const shell = await routed.create({ ...spec(), runtime: "holder" });
     tmux.disconnect();
     const seen = await routed.foregrounds(new Set([shell.terminalId]));
-    expect([seen.map((f) => f.ref.terminalId), errors.length]).toEqual([[shell.terminalId], 1]);
+    expect([seen.map((f) => f.ref.terminalId), logged]).toEqual([
+      [shell.terminalId],
+      [cantRead("tmux", new Error("the fake runtime's server can't be read"))],
+    ]);
+  });
+
+  it("says a runtime's foreground fault once while it lasts, with the error itself", async () => {
+    const { logged, fail, sweep } = faulty();
+    const fault = new Error("ps unreadable");
+    fail("holder", fault);
+    await sweep(3);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.[1]).toBe(fault);
+  });
+
+  it("says a runtime's foreground fault again when its message changes", async () => {
+    const { logged, fail, sweep } = faulty();
+    const [first, then] = [new Error("ps unreadable"), new Error("EACCES")];
+    fail("holder", first);
+    await sweep(2);
+    fail("holder", then);
+    await sweep(2);
+    expect(logged).toEqual([cantRead("holder", first), cantRead("holder", then)]);
+  });
+
+  it("says once that a runtime reads again, and a fault after that afresh", async () => {
+    const { logged, fail, sweep } = faulty();
+    const fault = new Error("ps unreadable");
+    fail("holder", fault);
+    await sweep(2);
+    fail("holder");
+    await sweep(2);
+    fail("holder", new Error("ps unreadable"));
+    await sweep();
+    expect(logged).toEqual([
+      cantRead("holder", fault),
+      readsAgain("holder"),
+      cantRead("holder", fault),
+    ]);
+  });
+
+  it("says the same fault on two runtimes for each of them", async () => {
+    const { logged, fail, sweep } = faulty();
+    const fault = new Error("EACCES");
+    fail("tmux", fault);
+    fail("holder", fault);
+    await sweep(2);
+    expect(logged).toEqual([cantRead("tmux", fault), cantRead("holder", fault)]);
+  });
+
+  it("neither says nor clears a fault when no runtime can be read", async () => {
+    const { routed, logged, fail, sweep } = faulty();
+    const fault = new Error("ps unreadable");
+    fail("holder", fault);
+    await sweep();
+    for (const kind of ["tmux", "other"]) fail(kind, new Error("down"));
+    await expect(routed.foregrounds(new Set())).rejects.toThrow("down");
+    for (const kind of ["tmux", "other"]) fail(kind);
+    await sweep();
+    expect(logged).toEqual([cantRead("holder", fault)]);
   });
 
   it("throws for foregrounds only when no runtime can be read", async () => {

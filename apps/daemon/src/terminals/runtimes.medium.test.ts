@@ -43,7 +43,7 @@ function twoRuntimes() {
     new LocalEnvironment({
       historyLines: 10_000,
       id: localEnvironmentId(store),
-      runtime: new RoutedRuntime({ runtimes: [tmux, holder], defaultKind, onError: () => {} }),
+      runtime: new RoutedRuntime({ runtimes: [tmux, holder], defaultKind, log: () => {} }),
       harnesses: [claude, codex],
       socket: "/run/b.sock",
     });
