@@ -15,6 +15,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 
 use bazhen_holder_proto::body::ErrorCode;
+use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::{Dev, OFlags, fstat};
 use rustix::io::ioctl_fionread;
 use rustix::process::Pid;
@@ -51,6 +52,21 @@ pub fn line_state(name: &CStr, device: Dev) -> io::Result<LineState> {
         .open(std::ffi::OsStr::from_bytes(name.to_bytes()))?;
     if fstat(&slave)?.st_rdev != device {
         return Err(io::Error::other("the slave's name names another device"));
+    }
+    // On Linux a write to the master reaches the line discipline later, from a kernel worker, so
+    // FIONREAD alone can miss a byte just written. Polling the slave for input finishes that
+    // hand-off first when nothing is yet readable, which makes the count exact.
+    loop {
+        match poll(
+            &mut [PollFd::new(&slave, PollFlags::IN)],
+            Some(&Timespec::default()),
+        ) {
+            Err(rustix::io::Errno::INTR) => {}
+            done => {
+                done?;
+                break;
+            }
+        }
     }
     Ok(LineState {
         canonical: tcgetattr(&slave)?.local_modes.contains(LocalModes::ICANON),
@@ -115,7 +131,7 @@ pub fn ready(readings: &Readings) -> Result<(), NotReady> {
     Ok(())
 }
 
-/// The engine has failed for good, so whether the program asked for bracketed paste is unknown.
+/// The engine has failed, so whether the program asked for bracketed paste is unknown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModeUnknown;
 
@@ -159,8 +175,8 @@ impl PasteRefused {
             Self::NotReady(why) => (ErrorCode::NotReady, why.why()),
             Self::ModeUnknown => (
                 ErrorCode::Unavailable,
-                "the terminal engine has failed for good, so whether the program asked for \
-                 bracketed paste is unknown",
+                "the terminal engine has failed, so whether the program asked for bracketed \
+                 paste is unknown",
             ),
             Self::Full => (ErrorCode::InputFull, "the input queue can't take the paste"),
         }
@@ -171,7 +187,15 @@ impl PasteRefused {
 mod tests {
     use proptest::prelude::*;
 
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    use bazhen_holder_proto::body::{Argv, Env, Generation, NonEmpty, ProcessSpec};
+
     use super::*;
+    use crate::child::Reaper;
+    use crate::holder::{Discard, Holder};
+    use crate::pty::{self, Pty, WindowSize};
 
     fn pid(n: i32) -> Pid {
         Pid::from_raw(n).unwrap()
@@ -291,6 +315,50 @@ mod tests {
                 "not-ready",
             ]
         );
+    }
+
+    fn holder(script: &str) -> Holder<Discard> {
+        let mut env = BTreeMap::new();
+        env.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
+        let process = ProcessSpec {
+            argv: Argv::new(["sh", "-c", script].map(str::to_owned).to_vec()).unwrap(),
+            cwd: NonEmpty::new("/").unwrap(),
+            env: Env::new(env).unwrap(),
+            generation: Generation::new(0).unwrap(),
+            theme: None,
+        };
+        let reaper = Reaper::new().unwrap();
+        let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let child = pty::spawn(slave, &process, &reaper).unwrap();
+        Holder::new(pty, reaper, child, process.generation, Discard)
+    }
+
+    /// The engine's mode is asked only of a program that would read the paste: an unmarked paste
+    /// with the mode unknown is not ready while the program reads whole lines, and unavailable
+    /// once it reads keys.
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn an_unknown_mode_is_answered_only_once_the_program_is_ready() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut holder = holder("read _; stty -icanon -echo; exec head -c 1 >/dev/null");
+        let generation = Generation::new(0).unwrap();
+        let paste = |holder: &mut Holder<Discard>| holder.paste(generation, "ls", false, None);
+        let canonical = PasteRefused::NotReady(NotReady::Canonical);
+        assert_eq!(paste(&mut holder), Err(canonical));
+        holder.offer_input(b"\n").unwrap();
+        holder.flush_input();
+        let give_up = Instant::now() + Duration::from_secs(5);
+        let answer = loop {
+            let answer = paste(&mut holder);
+            if answer != Err(canonical)
+                && answer != Err(PasteRefused::NotReady(NotReady::TypedAhead))
+                || Instant::now() > give_up
+            {
+                break answer;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(answer, Err(PasteRefused::ModeUnknown));
     }
 
     proptest! {

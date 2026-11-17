@@ -3,13 +3,12 @@
 
 use std::io::Write as _;
 use std::path::Path;
-use std::time::Instant;
 
 use bazhen_holder_proto::body::{Generation, PasteRequest};
 use bazhen_holder_proto::{Reply, Request, RequestId};
 
 use super::{Client, is_ok, serving};
-use crate::{DEADLINE, Result, home, sweep};
+use crate::{Result, home, sweep};
 
 /// The text every test pastes, which no answer and no log line may hold.
 const TEXT: &str = "echo pasted";
@@ -152,21 +151,36 @@ fn input_not_yet_read_makes_a_paste_not_ready() {
     let mut writer = Client::connect(&socket).unwrap();
     let mut seen = writer.writer_after("R").unwrap();
     writer.input(b"x").unwrap();
+    // Pasted at once, the byte may still be in the holder's queue; once written it is unread.
     let queued = refused(
         "not-ready",
         "input the holder queued for the program is still unwritten",
     );
-    let deadline = Instant::now() + DEADLINE;
-    let answer = loop {
-        let answer = writer.paste(0, true, &mut seen).unwrap();
-        if answer != queued || Instant::now() > deadline {
-            break answer;
-        }
-    };
+    let answer = std::iter::repeat_with(|| writer.paste(0, true, &mut seen).unwrap())
+        .take(100)
+        .find(|answer| *answer != queued);
     assert_eq!(
         answer,
-        refused("not-ready", "input typed ahead waits unread")
+        Some(refused("not-ready", "input typed ahead waits unread"))
     );
+    assert!(!logged_the_text(&socket).unwrap());
+}
+
+/// Raw, asks the terminal for its attributes, and prints back what it reads: the reply.
+const ASKS_DA1: &str = r"stty -icanon -echo; printf '\033[c'; exec cat";
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_paste_right_after_the_program_read_the_holders_reply_is_typed() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("paste-reply").unwrap();
+    let (_holder, socket) = serving(&home, &["sh", "-c", ASKS_DA1]).unwrap();
+    let mut reader = Client::connect(&socket).unwrap();
+    // The reply starts `ESC [ ?`; the query doesn't. Once cat prints it back, nothing waits unread.
+    let mut seen = reader.reader_after("\x1b[?").unwrap();
+    assert_eq!(reader.paste(0, false, &mut seen).unwrap(), Ok(()));
+    reader.output_until(&mut seen, TEXT).unwrap();
     assert!(!logged_the_text(&socket).unwrap());
 }
 
