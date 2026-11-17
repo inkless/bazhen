@@ -506,4 +506,39 @@ describe("a Codex agent", () => {
       daemon.editCodexConfig(() => original);
     }
   }, 180_000);
+
+  // Codex's managed server keeps the environment of whatever started it, and an agent's tool call
+  // can start it. Its commands on every thread then inherit that agent's variables.
+  it("keeps a command the agent runs its own, on a server started inside another agent", async () => {
+    const starter = await daemon.launch("codex-starter", "codex");
+    await waitUntil(() => daemon.screen(starter.agentId).includes(BANNER.codex), "Codex's TUI");
+    const own = daemon.agentEnv(starter.agentId);
+    const leaked = Object.fromEntries(
+      ["BAZHEN_AGENT_ID", "BAZHEN_AGENT_AUTH_FILE", "BAZHEN_SOCKET"].map((name) => [
+        name,
+        String(own[name]),
+      ]),
+    );
+    expect(leaked["BAZHEN_AGENT_ID"]).toBe(starter.agentId);
+    try {
+      await daemon.codex("app-server", "daemon", "stop");
+      await daemon.codexWith(leaked, "app-server", "daemon", "start");
+      const agent = await daemon.launch("codex-on-leaked", "codex");
+      await waitUntil(() => daemon.screen(agent.agentId).includes(BANNER.codex), "Codex's TUI");
+      const output = await ranAllowed(
+        'echo "id=${BAZHEN_AGENT_ID-u} file=${BAZHEN_AGENT_AUTH_FILE-u}"; ../cli/bazhen whoami',
+        "leak",
+        agent,
+      );
+      expect({
+        id: output.includes(starter.agentId),
+        file: output.includes(String(leaked["BAZHEN_AGENT_AUTH_FILE"])),
+        agent: output.includes(agent.agentId),
+        exit: output.includes("leak=0"),
+      }).toEqual({ id: false, file: false, agent: true, exit: true });
+    } finally {
+      await daemon.codex("app-server", "daemon", "stop");
+      await daemon.codex("app-server", "daemon", "start");
+    }
+  }, 180_000);
 });

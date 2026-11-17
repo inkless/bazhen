@@ -902,9 +902,20 @@ export class Daemon {
    * as the daemon runs it, since an app-server it starts would hand them to every command it runs.
    */
   async codex(...args: string[]): Promise<void> {
-    const env = Object.fromEntries(
-      Object.entries(this.env).filter(([name]) => !name.startsWith("BAZHEN_")),
-    );
+    await this.codexWith({}, ...args);
+  }
+
+  /**
+   * The Codex CLI as `codex()` runs it, with `extra` in its environment, as a command run inside
+   * an agent's terminal would have its variables.
+   */
+  async codexWith(extra: Readonly<Record<string, string>>, ...args: string[]): Promise<void> {
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(this.env).filter(([name]) => !name.startsWith("BAZHEN_")),
+      ),
+      ...extra,
+    };
     await run("codex", args, { env, timeout: 90_000 });
   }
 
