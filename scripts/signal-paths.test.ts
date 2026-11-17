@@ -754,13 +754,14 @@ describe("starts the scan can't follow to a call", () => {
     expect(rawSignalCalls("a.ts", source)).toEqual([unfollowed(3, "execFile")]);
   });
 
-  it("lets the lint rule name child_process as data where it's allowed, and nowhere else", () => {
-    const plugin = "scripts/lint-plugin.ts";
-    const names = 'const CHILD_PROCESS = new Set(["child_process", "node:child_process"]);';
-    expect(rawSignalCalls(plugin, names)).toEqual([]);
-    expect(allowedSignalFailures(plugin, names)).toEqual([]);
-    expect(isSignallingSource(plugin, names)).toBe(false);
-    expect(rawSignalCalls(plugin, `${names}\nconst m = require("child_process");`)).toEqual([
+  it("lets the checks' start list name child_process as data where it's allowed, and nowhere else", () => {
+    const list = "scripts/child-process.ts";
+    const names =
+      'export const CHILD_PROCESS_MODULES = ["child_process", "node:child_process"] as const;';
+    expect(rawSignalCalls(list, names)).toEqual([]);
+    expect(allowedSignalFailures(list, names)).toEqual([]);
+    expect(isSignallingSource(list, names)).toBe(false);
+    expect(rawSignalCalls(list, `${names}\nconst m = require("child_process");`)).toEqual([
       loaded(2),
     ]);
     expect(rawSignalCalls("a.ts", names)).toEqual([loaded(1), loaded(1)]);
