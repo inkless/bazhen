@@ -49,19 +49,31 @@ export function transcriptReader(
     try {
       if (!fstatSync(fd).isFile()) return unreadable(path, "it isn't a regular file");
       const chunk = Buffer.allocUnsafe(chunkBytes);
-      let pending = Buffer.alloc(0);
+      // The line still open, in copies of each read's share of it: each byte is searched for a
+      // newline once and copied at most twice, however many reads a long line spans.
+      let open: Buffer[] = [];
+      let openBytes = 0;
       for (let read = 0; read < limitBytes;) {
         const n = readSync(fd, chunk, 0, Math.min(chunkBytes, limitBytes - read), read);
         if (n === 0) return false;
         read += n;
-        pending = Buffer.concat([pending, chunk.subarray(0, n)]);
+        const bytes = chunk.subarray(0, n);
+        let start = 0;
         let end: number;
-        while ((end = pending.indexOf(NEWLINE)) !== -1) {
-          if (isConversationEntry(pending.subarray(0, end).toString("utf8"))) return true;
-          pending = pending.subarray(end + 1);
+        while ((end = bytes.indexOf(NEWLINE, start)) !== -1) {
+          const rest = bytes.subarray(start, end);
+          const line = openBytes === 0 ? rest : Buffer.concat([...open, rest]);
+          if (isConversationEntry(line.toString("utf8"))) return true;
+          open = [];
+          openBytes = 0;
+          start = end + 1;
+        }
+        if (start < n) {
+          open.push(Buffer.from(bytes.subarray(start)));
+          openBytes += n - start;
         }
       }
-      return pending.length >= limitBytes / 2;
+      return openBytes >= limitBytes / 2;
     } catch (err) {
       return unreadable(path, String(err));
     } finally {
