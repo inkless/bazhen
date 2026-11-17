@@ -9,6 +9,7 @@ pub mod attach;
 mod call;
 mod daemon_verbs;
 mod doctor;
+mod events;
 mod fmt;
 mod lifecycle;
 mod out;
@@ -45,6 +46,8 @@ pub enum Exit {
     Bounced,
     /// `send --wait`: the message was still on its way when the wait ran out.
     Queued,
+    /// `wait`: the agent or shell wasn't in the state when the wait ran out.
+    TimedOut,
     /// The status of the daemon's own start-up, as it exited.
     Code(u8),
 }
@@ -57,7 +60,7 @@ impl Exit {
             Self::Usage => 2,
             Self::NotRunning => 3,
             Self::Bounced => 4,
-            Self::Queued => 5,
+            Self::Queued | Self::TimedOut => 5,
             Self::Code(code) => code,
         }
     }
@@ -99,8 +102,16 @@ pub(crate) const SHELLS_USAGE: &str = "usage:
   bazhen shells close <shell> [--confirm-busy] [--force] [--json]
 shells list shows the shells neither closed nor failed, --all every one. A shell opens beside
 <agent>, in its directory, else in --dir, else where it runs. <shell> is a shell's id, or a name
-one open shell has, in any case. close --confirm-busy ends what runs in it; --force records closed a shell whose server can't
-be shown gone.";
+one open shell has, in any case. close --confirm-busy ends what runs in it; --force records
+closed a shell whose server can't be shown gone.";
+
+pub(crate) const EVENTS_USAGE: &str = "usage:
+  bazhen events --follow [--after <event>] [--json]
+  bazhen wait <agent|shell> <state>|ended [--timeout <seconds>] [--json]
+events --follow prints each event as it happens, after the event --after names if given, until
+Ctrl-C; when the daemon goes away it tries again until it is back. wait exits 0 once the agent
+or shell is in <state>, or closed or failed for ended (an agent is running once its harness is
+up and ready), 1 if it ended otherwise, and 5 if the timeout (60 s unless given) runs out.";
 
 const DAEMON_USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
@@ -112,7 +123,14 @@ const DAEMON_USAGE: &str = concat!(
 
 /// The usage of every verb.
 pub(crate) fn usage() -> String {
-    [DAEMON_USAGE, TASK_USAGE, LIFECYCLE_USAGE, SHELLS_USAGE].join("\n")
+    [
+        DAEMON_USAGE,
+        TASK_USAGE,
+        LIFECYCLE_USAGE,
+        SHELLS_USAGE,
+        EVENTS_USAGE,
+    ]
+    .join("\n")
 }
 
 const NOT_RUNNING: &str = "bazhen is not running; start it with `bazhen start`";
@@ -154,6 +172,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         }
         "launch" | "close" | "respawn" | "relaunch" | "signal" => lifecycle::run(&p, &daemon, out),
         "shells" => shells::run(&p, &daemon, out),
+        "events" | "wait" => events::run(&p, &daemon, out),
         "attach" => attach::run(&p, Path::new(&daemon.socket()), &daemon, out),
         "start" => Ok(daemon_verbs::start(&p, out)),
         "stop" => daemon_verbs::stop(&daemon, out),

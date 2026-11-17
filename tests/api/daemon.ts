@@ -112,6 +112,18 @@ export function bazhen(
   });
 }
 
+/** `bazhen events --follow` against `daemon`, left running: what it printed, and how it ended. */
+export function followEvents(daemon: Daemon) {
+  const child = spawn(CLI, ["events", "--follow"], { env: daemon.env });
+  let printed = "";
+  child.stdout.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
+  child.stderr.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+    child.once("exit", (code, signal) => resolve({ code, signal })),
+  );
+  return { child, printed: () => printed, exited };
+}
+
 /**
  * A directory under `home` holding a `bazhen` that runs this checkout's CLI, so an agent finds
  * the command by name, as it would where Bazhen is installed.

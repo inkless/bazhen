@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { tmuxVersion } from "@bazhen/host-guard";
+import { signalOwnChild, tmuxVersion } from "@bazhen/host-guard";
 import { StateSnapshot } from "@bazhen/protocol";
-import { Daemon, LOGIN_SHELL, bazhen, cliHome, overSocket } from "./daemon.ts";
+import {
+  Daemon,
+  LOGIN_SHELL,
+  bazhen,
+  cliHome,
+  followEvents,
+  overSocket,
+  waitUntil,
+} from "./daemon.ts";
 
 /** What each notice offers its viewer. */
 const offered = (state: StateSnapshot) => state.notices.map((n) => n.actions);
@@ -29,6 +37,25 @@ describe("the daemon's Unix socket", () => {
     // from the harness's paired browser, which never may, its own pairing's included.
     expect(shared(asOwner)).toEqual(shared(overHttp));
     expect([offered(asOwner), offered(overHttp)]).toEqual([[["dismiss"]], [[]]]);
+  });
+
+  it("follows its events with bazhen events --follow until Ctrl-C, which ends it with 0", async () => {
+    const follow = followEvents(daemon);
+    let opened = 0;
+    try {
+      // The stream carries only what happens once it is open: open shells until one shows.
+      await waitUntil(async () => {
+        await daemon.request("/v1/shells", {
+          method: "POST",
+          body: { idempotencyKey: `follow-${opened++}`, cwd: daemon.work },
+        });
+        return follow.printed().includes(" terminal ");
+      }, "an event printed by bazhen events --follow");
+      signalOwnChild(follow.child, "SIGINT");
+      expect(await follow.exited).toEqual({ code: 0, signal: null });
+    } finally {
+      signalOwnChild(follow.child, "SIGTERM");
+    }
   });
 
   it("serves stop on the socket only, never over HTTP", async () => {
