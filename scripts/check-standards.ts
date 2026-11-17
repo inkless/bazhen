@@ -723,8 +723,6 @@ const FUZZED_DECODERS: Record<string, string> = {
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::procargs2_split":
     "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
-  "crates/bazhen-holder/src/session.rs::Member::of_send":
-    "names what the guard's send made of a process; reads no bytes",
   "crates/bazhen-holder/src/engine.rs::advance":
     "passes the child's output to the engine's Engine::advance, which its advance target fuzzes",
   "crates/bazhen-holder/src/engine.rs::Engine::advance":
@@ -1125,17 +1123,27 @@ type Carriers = Map<string, Set<string> | undefined>;
  * it uses a field that holds them.
  */
 function byteCarriers(code: string, elsewhere: Set<string> = new Set()): Carriers {
-  const items = [...code.matchAll(/\b(struct|enum)\s+(\w+)/g)].map((m) => ({
-    kind: m[1],
-    name: m[2] ?? "",
-    body: code.slice(m.index, itemEnd(code, m.index)),
-  }));
-  const names = new Set(items.filter((i) => BYTES_IN.test(i.body)).map((i) => i.name));
+  const items = [...code.matchAll(/\b(struct|enum)\s+(\w+)/g)].map((m) => {
+    const body = code.slice(m.index, itemEnd(code, m.index));
+    const variants = m[1] === "enum" ? enumVariants(body) : undefined;
+    // An enum's variant names aren't types, so only its head and its fields' types are read.
+    const types =
+      variants === undefined
+        ? body.slice(m[2]?.length ?? 0)
+        : [
+            variants.head,
+            ...variants.variants.flatMap((v) => v.fields?.map((f) => f.type) ?? v.text),
+          ].join("\n");
+    return { kind: m[1], name: m[2] ?? "", body, types };
+  });
+  const names = new Set(
+    items.filter((i) => BYTES_IN.test(i.kind === "enum" ? i.types : i.body)).map((i) => i.name),
+  );
   // A type holding a carrier carries bytes too, however deep: repeat until nothing is added.
   for (let grew = true; grew;) {
     grew = false;
-    for (const { name, body } of items) {
-      if (!names.has(name) && mentionsAny(body.slice(name.length), [...names, ...elsewhere])) {
+    for (const { name, types } of items) {
+      if (!names.has(name) && mentionsAny(types, [...names, ...elsewhere])) {
         names.add(name);
         grew = true;
       }
@@ -1227,6 +1235,105 @@ function structFields(
   };
 }
 
+type Variant = { name: string; text: string; fields: { name: string; type: string }[] | undefined };
+
+/**
+ * An enum's head (its generics and `where` clause) and its variants, each with its fields as a
+ * struct's are read (`undefined` when they can't be told apart). `undefined` when the enum has no
+ * body.
+ */
+function enumVariants(item: string): { head: string; variants: Variant[] } | undefined {
+  const name = /\benum\s+\w+\s*/.exec(item);
+  const from = (name?.index ?? 0) + (name?.[0].length ?? 0);
+  let open = from;
+  for (let angles = 0, nested = 0; open < item.length; open++) {
+    const c = item[open] ?? "";
+    if (nested === 0 && angles === 0 && c === "{") break;
+    if ("([".includes(c)) nested++;
+    else if (")]".includes(c)) nested--;
+    else if (nested === 0 && c === "<") angles++;
+    else if (nested === 0 && c === ">" && item[open - 1] !== "-") angles--;
+  }
+  if (item[open] !== "{") return undefined;
+  const close = itemEnd(item, open) - 1;
+  const parts: string[] = [];
+  let start = open + 1;
+  for (let i = start, nested = 0; i < close; i++) {
+    const c = item[i] ?? "";
+    if ("([{".includes(c)) nested++;
+    else if (")]}".includes(c)) nested--;
+    else if (nested === 0 && c === ",") {
+      parts.push(item.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(item.slice(start, close));
+  const variants = parts
+    .map((p) => p.replace(/#\s*\[(?:[^[\]]|\[[^\]]*\])*\]/g, "").trim())
+    .filter((p) => p !== "")
+    .map((text) => {
+      // Anything else before or after the name (an attribute left half stripped) and its fields
+      // can't be told apart, so it fails rather than reading as a variant with none.
+      const variant = /^(?:r#)?(\w+)\s*(?=$|[({=])/.exec(text);
+      const rest = text.slice(variant?.[0].length ?? 0);
+      const fields =
+        variant === null
+          ? undefined
+          : /^[({]/.test(rest)
+            ? structFields(`struct ${variant[1] ?? ""} ${rest}`)?.fields
+            : [];
+      return { name: variant?.[1] ?? /\w+/.exec(text)?.[0] ?? "", text, fields };
+    });
+  return { head: item.slice(from, open), variants };
+}
+
+/**
+ * Each enum of `code` with a variant that carries bytes, each such variant with the fields that
+ * hold them, by name, or by index from the front and from the back (`0` and `-2` for the first of
+ * two), `undefined` for any of its fields. `names` are the carriers `code`
+ * sees, its own and those it brings in. A head bounded by a byte trait makes every field hold them.
+ */
+function byteVariants(code: string, names: Set<string>): ByteVariants {
+  const out: ByteVariants = new Map();
+  for (const m of code.matchAll(/\benum\s+(\w+)/g)) {
+    const parsed = enumVariants(code.slice(m.index, itemEnd(code, m.index)));
+    if (parsed === undefined) continue;
+    const holds = (type: string) => BYTES_IN.test(type) || mentionsAny(type, names);
+    const whole = holds(parsed.head);
+    const variants = new Map<string, Set<string> | undefined>();
+    for (const v of parsed.variants) {
+      if (v.fields === undefined) {
+        if (holds(v.text.slice(v.name.length))) variants.set(v.name, undefined);
+        continue;
+      }
+      const held = v.fields
+        .map((f, i) => ({ ...f, last: String(i - (v.fields?.length ?? 0)) }))
+        .filter((f) => whole || holds(f.type))
+        .flatMap((f) => [f.name, f.last]);
+      if (held.length > 0) variants.set(v.name, new Set(held));
+    }
+    if (variants.size === 0) continue;
+    const known = out.get(m[1] ?? "") ?? new Map();
+    for (const [v, fields] of variants) {
+      // Two enums of one name in a crate: either's fields may be the one a pattern binds.
+      const before = known.get(v);
+      known.set(
+        v,
+        !known.has(v)
+          ? fields
+          : before === undefined || fields === undefined
+            ? undefined
+            : new Set([...before, ...fields]),
+      );
+    }
+    out.set(m[1] ?? "", known);
+  }
+  return out;
+}
+
+/** Each enum's variants that carry bytes, with the fields holding them (`undefined`: any). */
+type ByteVariants = Map<string, Map<string, Set<string> | undefined>>;
+
 const mentionsAny = (text: string, names: Iterable<string>) =>
   [...names].some((n) => new RegExp(`\\b${n}\\b`).test(text));
 
@@ -1251,6 +1358,164 @@ function reachesBytes(
   return [...body.matchAll(/\bself\s*\.\s*(\w+)\s*(?:::\s*<[^()]*>\s*)?\(/g)].some(([, m]) =>
     calls(m ?? ""),
   );
+}
+
+/** The index of the bracket closing the `(`, `[` or `{` at `open`, or the end of `code`. */
+function matchingBracket(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if ("([{".includes(code[i] ?? " ")) depth++;
+    else if (")]}".includes(code[i] ?? " ") && --depth === 0) return i;
+  }
+  return code.length;
+}
+
+/** The index of the innermost bracket open around `at`, or -1. */
+function enclosingBracket(code: string, at: number): number {
+  for (let i = at - 1, depth = 0; i >= 0; i--) {
+    if (")]}".includes(code[i] ?? " ")) depth++;
+    else if ("([{".includes(code[i] ?? " ") && depth-- === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The text before `at` back to the start of its arm or statement: just past the nearest `,`, `;`
+ * or `}` outside brackets (an arm whose body is a block needs no comma), or the bracket open
+ * around it.
+ */
+function headBefore(code: string, at: number): string {
+  let i = at - 1;
+  for (let depth = 0; i >= 0; i--) {
+    const c = code[i] ?? "";
+    if (depth === 0 && ",;}".includes(c)) break;
+    if (")]}".includes(c)) depth++;
+    else if ("([{".includes(c) && depth-- === 0) break;
+  }
+  return code.slice(i + 1, at);
+}
+
+/** Text ending in a value a `[` after it indexes: a name that isn't a keyword, or a bracket. */
+const INDEXED =
+  /(?:[)\]]|\b(?!(?:let|in|match|if|while|for|return|break|else|move|yield)\b)(?:r#)?\w+)\s*$/;
+
+/**
+ * Whether the value from `start` to `end` in `code` is (part of) a pattern: what follows it, once
+ * out of the brackets around it (a tuple, a slice, `Some(…)`, a struct), is a match arm's `=>`
+ * with no guard before it, an or-pattern's `|` (a closure's parameters' too), a guard's `if`
+ * (`matches!`'s too), a `for`'s `in`, the `:` before a `let`'s or a parameter's type, or an `=`:
+ * a `let`'s, a destructuring assignment's, or a `select!` arm's. A value built rather than matched
+ * is followed by none of those: what follows the brackets around it is a `;`, the end of its
+ * block, or a guard's `=>`; and one in an index is an expression, even one assigned to. A pattern
+ * binding a name in `matches!` without a guard can't use it, so that needs no case.
+ */
+function inPattern(code: string, start: number, end: number): boolean {
+  for (let from = start, to = end; ;) {
+    const next = code.slice(to).trimStart();
+    if (next.startsWith("=>")) return !/\bif\b/.test(headBefore(code, from));
+    if (/^(?:=(?!=)|:(?!:)|\|(?!\|)|if\b|in\b)/.test(next)) return true;
+    const open = enclosingBracket(code, from);
+    if (open === -1 || (code[open] === "[" && INDEXED.test(code.slice(0, open)))) return false;
+    from = open;
+    to = matchingBracket(code, open) + 1;
+  }
+}
+
+/**
+ * Whether a pattern binds a name: a lowercase identifier that isn't a path, a field's name, `_` or
+ * a literal. (`ref` and `mut` count, but only ever before a name that binds.)
+ */
+const bindsName = (pattern: string) =>
+  [...pattern.matchAll(/(?<![\w.:]|::\s*)(?:r#)?[a-z_]\w*\b(?!\s*(?:::|[({!"']|:(?!:)))/g)].some(
+    ([word]) => !/^(?:_|true|false)$/.test(word),
+  );
+
+/** A bracket's contents split at its top-level commas, each trimmed. */
+function topLevelParts(text: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0, depth = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) depth--;
+    else if (depth === 0 && c === ",") {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return [...parts, text.slice(start)].map((p) => p.trim()).filter((p) => p !== "");
+}
+
+/**
+ * Whether a variant's pattern, `inner` its bracket's contents, binds a field of `fields`
+ * (`undefined`: any field). A tuple variant's fields count from the front before a `..` and from
+ * the back after it, as `-1` for the last.
+ */
+function bindsField(inner: string, named: boolean, fields: Set<string> | undefined): boolean {
+  const parts = topLevelParts(inner);
+  if (!named) {
+    const rest = parts.indexOf("..");
+    return parts.some(
+      (p, i) =>
+        p !== ".." &&
+        bindsName(p) &&
+        (fields === undefined ||
+          fields.has(rest !== -1 && i > rest ? String(i - parts.length) : String(i))),
+    );
+  }
+  return parts.some((p) => {
+    const field = /^((?:r#)?\w+)\s*:(?!:)([\s\S]*)$/.exec(p);
+    const name = field?.[1] ?? /(\w+)$/.exec(p)?.[1] ?? "";
+    const bound = field === null ? p !== ".." : bindsName(field[2] ?? "");
+    return bound && (fields === undefined || fields.has(name));
+  });
+}
+
+/**
+ * Where each `name @ subpattern` in `body` puts its subpattern: from just past the `@` through the
+ * subpattern's path and the bracket after it (`m @ Some(…)`, `m @ (… | …)`, `m @ &Msg::Raw(…)`).
+ */
+function atBindings(body: string): [number, number][] {
+  return [...body.matchAll(/\b(?:r#)?[a-z_]\w*\s*@/g)].map((m) => {
+    const from = m.index + m[0].length;
+    const lead = /^(?:\s|&|\bmut\b|\bbox\b|(?:r#)?\w+|::|<(?:[^<>]|<[^<>]*>)*>)*/.exec(
+      body.slice(from),
+    );
+    const at = from + (lead?.[0].length ?? 0);
+    return [from, "([{".includes(body[at] ?? " ") ? matchingBracket(body, at) + 1 : at];
+  });
+}
+
+/** Generic arguments in a path (`::<T>`), as a pattern may give an enum or a variant. */
+const TURBOFISH = String.raw`(?:\s*::\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?`;
+
+/**
+ * Whether `body` has a pattern naming a variant of `variants` that binds a field holding bytes, or
+ * binds a value holding the variant whole (`r @ Reply::Data { .. }`, `r @ Some(Reply::Data { .. })`).
+ * `own`, the type an impl is for, is what `Self::` names there.
+ */
+function bindsByteVariant(body: string, variants: ByteVariants, own?: string): boolean {
+  const bound = atBindings(body);
+  for (const [name, byVariant] of variants) {
+    const enums = own === name ? `(?:${name}|Self)` : name;
+    const path = new RegExp(
+      `\\b${enums}${TURBOFISH}\\s*::\\s*(${[...byVariant.keys()].join("|")})\\b${TURBOFISH}(?!\\s*::)`,
+      "g",
+    );
+    for (const m of body.matchAll(path)) {
+      if (bound.some(([from, to]) => from <= m.index && m.index < to)) return true;
+      const after = m.index + m[0].length;
+      const open = after + (body.slice(after).length - body.slice(after).trimStart().length);
+      const bracket = body[open] === "(" || body[open] === "{";
+      const close = bracket ? matchingBracket(body, open) : after - 1;
+      if (!inPattern(body, m.index, close + 1)) continue;
+      const fields = byVariant.get(m[1] ?? "");
+      if (bracket && bindsField(body.slice(open + 1, close), body[open] === "{", fields)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -1343,14 +1608,16 @@ const inside = (i: number, spans: { start: number; end: number }[]) =>
 
 /**
  * The functions in a Rust file's non-test code that take bytes: by a parameter or bound of a
- * byte type or of one of `carriers`, as a method of a carrier, through `self`, or by a read in
- * the body. A method is named with its type (`Reader::next_frame`), so two types' methods of one
+ * byte type or of one of `carriers`, as a method of a carrier, through `self`, by a read in the
+ * body, or by a pattern binding a byte field of one of `variants`, which is public wherever its
+ * enum is. A method is named with its type (`Reader::next_frame`), so two types' methods of one
  * name stay apart.
  */
 export function byteTakers(
   source: string,
   carriers: Carriers = new Map(),
   elsewhere: Set<string> = new Set(),
+  variants: ByteVariants = new Map(),
 ): string[] {
   const code = withoutTests(rustCode(source));
   const blocks = implBlocks(code);
@@ -1399,7 +1666,9 @@ export function byteTakers(
       (carriers.has(block.type) || block.byteBound) &&
       /\bSelf\b/.test(takes.replace(/\bself\s*:[^,)]*/, ""));
     const reads =
-      BODY_READS.test(body) || [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g));
+      BODY_READS.test(body) ||
+      [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g)) ||
+      bindsByteVariant(body, variants, block?.type);
     return BYTES_IN.test(takes) ||
       mentionsAny(takes, [...carriers.keys(), ...elsewhere]) ||
       takesSelfType ||
@@ -1448,7 +1717,8 @@ export function decoderFailures(
   // finds another.
   let crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
   const imported = new Map<string, Set<string>>();
-  const idents = crateIdents(paths, read, [...crateCode.keys()]);
+  const { idents, failures: manifestFailures } = crateIdents(paths, read, [...crateCode.keys()]);
+  out.push(...manifestFailures);
   for (let grew = true; grew;) {
     grew = false;
     // A crate's own carriers, and the ones it brings in, which a `pub use` passes on.
@@ -1467,17 +1737,71 @@ export function decoderFailures(
       }
     }
   }
+  const ownVariants = new Map(
+    [...crateCode].map(([crate, code]) => [
+      crate,
+      byteVariants(
+        code,
+        new Set([...(crateCarriers.get(crate)?.keys() ?? []), ...(imported.get(crate) ?? [])]),
+      ),
+    ]),
+  );
+  // A crate sees its own enums' variants and those of the enums it brings in.
+  const seenVariants = new Map(
+    [...crateCode.keys()].map((crate) => {
+      const seen: ByteVariants = new Map(ownVariants.get(crate));
+      for (const [other, variants] of ownVariants) {
+        if (other === crate) continue;
+        for (const [name, byVariant] of variants) {
+          if (!(imported.get(crate)?.has(name) ?? false)) continue;
+          seen.set(name, new Map([...(seen.get(name) ?? []), ...byVariant]));
+        }
+      }
+      return [crate, seen];
+    }),
+  );
   for (const file of product) {
     const carriers: Carriers = crateCarriers.get(crateOf(file)) ?? new Map();
+    const variants = seenVariants.get(crateOf(file)) ?? new Map();
     const code = blankItems(withoutTests(rustCode(read(file))), IMPL_BLOCK);
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
-    for (const use of code.matchAll(/\buse\b[^;]*;/g)) {
-      for (const [, from = "", to = ""] of use[0].matchAll(/\b(\w+)\s+as\s+(\w+)/g)) {
+    for (const use of withoutTests(rustCode(read(file))).matchAll(/\buse\b[^;]*;/g)) {
+      for (const rename of use[0].matchAll(/\b(\w+)\s+as\s+(\w+)/g)) {
+        const [written = "", named = "", to = ""] = rename;
+        // `self` in a group names the path before it: `Frame::{self as F}` renames `Frame`.
+        const from =
+          named === "self"
+            ? (/(\w+)\s*::\s*\{[^{}]*$/.exec(use[0].slice(0, rename.index))?.[1] ?? "")
+            : named;
         const foreign = imported.get(crateOf(file))?.has(from) ?? false;
         if (to !== "_" && (BYTE_TYPE_NAMES.has(from) || carriers.has(from) || foreign)) {
           out.push(
-            `${file}: \`${from} as ${to}\` renames a byte type, which hides it from the decoder ` +
+            `${file}: \`${written}\` renames a byte type, which hides it from the decoder ` +
               "rule. Use the type's own name.",
+          );
+        }
+      }
+      for (const [name, byVariant] of variants) {
+        const names = [...byVariant.keys()].join("|");
+        const bare = new RegExp(
+          `\\b${name}\\s*::\\s*(?:\\*|(?:${names})\\b|\\{[^}]*(?:\\*|\\b(?:${names})\\b))`,
+        );
+        if (bare.test(use[0])) {
+          out.push(
+            `${file}: \`${use[0]}\` brings in a variant of ${name} that carries bytes by its own ` +
+              "name, which hides a match on it from the decoder rule. Name it as " +
+              `\`${name}::Variant\`.`,
+          );
+        }
+      }
+    }
+    for (const item of code.matchAll(/\benum\s+(\w+)/g)) {
+      const parsed = enumVariants(code.slice(item.index, itemEnd(code, item.index)));
+      for (const v of (parsed?.variants ?? []).filter((w) => w.fields === undefined)) {
+        if (BYTES_IN.test(v.text.slice(v.name.length))) {
+          out.push(
+            `${file}::${item[1]}::${v.name}: its fields can't be told apart, so the decoder rule ` +
+              "can't see which a pattern binds bytes from: write each as `name: Type`, or `Type`.",
           );
         }
       }
@@ -1512,7 +1836,7 @@ export function decoderFailures(
         );
       }
     }
-    for (const fn of byteTakers(read(file), carriers, imported.get(crateOf(file)))) {
+    for (const fn of byteTakers(read(file), carriers, imported.get(crateOf(file)), variants)) {
       const key = `${file}::${fn}`;
       found.add(key);
       if (!(key in fuzzed) && !(key in notDecoders)) {
@@ -1638,45 +1962,143 @@ function importedCarriers(
   return out;
 }
 
+/** `text` split at each top-level `sep` outside strings and brackets, each part trimmed. */
+function tomlSplit(text: string, sep: string, limit = Infinity): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let quote = "";
+  for (let i = 0, depth = 0; i < text.length && parts.length < limit - 1; i++) {
+    const c = text[i] ?? "";
+    if (quote !== "") {
+      if (c === "\\" && quote === '"') i++;
+      else if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") depth--;
+    else if (depth === 0 && c === sep) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return [...parts, text.slice(start)].map((p) => p.trim());
+}
+
+/** A TOML key's parts, each bare or quoted, or `undefined` when it isn't a key. */
+function tomlKey(text: string): string[] | undefined {
+  const parts = tomlSplit(text, ".").map((p) =>
+    /^(?:([\w-]+)|"([^"\\]*)"|'([^']*)')$/
+      .exec(p)
+      ?.slice(1)
+      .find((g) => g !== undefined),
+  );
+  return parts.every((p) => p !== undefined) ? parts : undefined;
+}
+
+/** A TOML string with no escapes in it, basic or literal, or `undefined` for anything else. */
+const tomlString = (text: string) =>
+  /^(?:"([^"\\]*)"|'([^']*)')$/
+    .exec(text.trim())
+    ?.slice(1)
+    .find((g) => g !== undefined);
+
+const DEPENDENCIES = /^(?:dev-|build-)?dependencies$/;
+
+/** Whether a table's key is a dependencies table: of a package, a target or the workspace. */
+const isDependencies = (key: string[]) =>
+  (key.length === 1 && DEPENDENCIES.test(key[0] ?? "")) ||
+  (key.length === 2 && key[0] === "workspace" && key[1] === "dependencies") ||
+  (key.length === 3 && key[0] === "target" && DEPENDENCIES.test(key[2] ?? ""));
+
+/**
+ * Each dependency a manifest renames, as `[name, package]`, whichever way the TOML writes it: inline
+ * (`q = { package = "x" }`), dotted (`q.package = 'x'`) or in the dependency's own table; and why a
+ * `package` key in a dependencies table, or the package's `name`, can't be read as a plain string.
+ */
+function manifestNames(
+  manifest: string,
+  text: string,
+): { name?: string | undefined; renames: [string, string][]; failures: string[] } {
+  const out: { name?: string | undefined; renames: [string, string][]; failures: string[] } = {
+    renames: [],
+    failures: [],
+  };
+  const unreadable = (line: string) =>
+    out.failures.push(
+      `${manifest}: can't read \`${line}\` for a package's name, so the decoder rule can't tell ` +
+        'which crate it names: write it as a plain string (`package = "name"`).',
+    );
+  const entry = (line: string, key: string[], value: string) => {
+    if (key.length === 2 && key[0] === "package" && key[1] === "name") {
+      out.name = tomlString(value);
+      if (out.name === undefined) unreadable(line);
+      return;
+    }
+    const at = [1, 2, 3].find((i) => isDependencies(key.slice(0, i)));
+    if (at === undefined) return;
+    const [dependency = "", ...rest] = key.slice(at);
+    if (rest.length === 0 && value.startsWith("{") && value.endsWith("}")) {
+      for (const part of tomlSplit(value.slice(1, -1), ",").filter((p) => p !== "")) {
+        const [inner = "", innerValue = ""] = tomlSplit(part, "=", 2);
+        const innerKey = tomlKey(inner);
+        if (innerKey === undefined) {
+          if (/\bpackage\b/.test(inner)) unreadable(line);
+        } else entry(line, [...key, ...innerKey], innerValue);
+      }
+    } else if (rest.length === 1 && rest[0] === "package") {
+      const name = tomlString(value);
+      if (name === undefined) unreadable(line);
+      else out.renames.push([dependency, name]);
+    } else if (rest.includes("package")) unreadable(line);
+  };
+  let table: string[] = [];
+  let header: string | undefined;
+  for (const line of tomlLines(text)) {
+    if (TOML_HEADER.test(line)) {
+      const key = line.startsWith("[[") ? ["[["] : tomlKey(line.slice(1, -1));
+      header = key === undefined ? line : undefined;
+      table = key ?? [];
+      continue;
+    }
+    // A table whose name can't be read may be a dependencies table, so a rename in it fails.
+    if (header !== undefined) {
+      if (/\bpackage\b["']?\s*=/.test(line)) unreadable(`${header} ${line}`);
+      continue;
+    }
+    const [key = "", value = ""] = tomlSplit(line, "=", 2);
+    const parts = tomlKey(key);
+    if (parts !== undefined) entry(line, [...table, ...parts], value);
+    else if (/\bpackage\b/.test(key)) unreadable(line);
+  }
+  return out;
+}
+
 /**
  * The names Rust code may give each crate of `crates`: its package name, with `-` as `_`, and each
- * name a manifest gives it by `package = "…"`.
+ * name a manifest gives it by `package = "…"`; and why a manifest's names can't be read.
  */
 function crateIdents(
   paths: string[],
   read: (path: string) => string,
   crates: string[],
-): Map<string, string[]> {
-  const manifests = paths.filter((p) => /(?:^|\/)Cargo\.toml$/.test(p));
+): { idents: Map<string, string[]>; failures: string[] } {
+  const manifests = new Map(
+    paths
+      .filter((p) => /(?:^|\/)Cargo\.toml$/.test(p))
+      .map((p) => [p, manifestNames(p, read(p))] as const),
+  );
   const byPackage = new Map<string, string>();
   for (const crate of crates) {
-    const manifest = `${crate}/Cargo.toml`;
-    const lines = manifests.includes(manifest)
-      ? (tomlTables(read(manifest)).get("[package]") ?? [])
-      : [];
-    const name = lines
-      .map((l) => /^name\s*=\s*"([^"]+)"/.exec(l)?.[1])
-      .find((n) => n !== undefined);
+    const name = manifests.get(`${crate}/Cargo.toml`)?.name;
     byPackage.set(name ?? crate.slice("crates/".length), crate);
   }
   const idents = new Map([...byPackage].map(([name, crate]) => [crate, [name.replace(/-/g, "_")]]));
-  for (const manifest of manifests) {
-    for (const [header, lines] of tomlTables(read(manifest))) {
-      const renamed = (key: string, text: string) => {
-        const crate = byPackage.get(/\bpackage\s*=\s*"([^"]+)"/.exec(text)?.[1] ?? "");
-        if (crate !== undefined) idents.get(crate)?.push(key.replace(/-/g, "_"));
-      };
-      const table = /^\[(?:.+\.)?dependencies\.([\w-]+)\]$/.exec(header);
-      if (table) renamed(table[1] ?? "", lines.join("\n"));
-      for (const line of lines) {
-        const inline = /^([\w-]+)\s*=\s*\{(.*)\}$/.exec(line);
-        if (inline && /^\[(?:.+\.)?dependencies\]$/.test(header)) {
-          renamed(inline[1] ?? "", inline[2] ?? "");
-        }
-      }
+  for (const { renames } of manifests.values()) {
+    for (const [key, name] of renames) {
+      const crate = byPackage.get(name);
+      if (crate !== undefined) idents.get(crate)?.push(key.replace(/-/g, "_"));
     }
   }
-  return idents;
+  return { idents, failures: [...manifests.values()].flatMap((m) => m.failures) };
 }
 
 /** Why a crate's fuzz manifest isn't a cargo-fuzz crate of its own with exact pins. */
