@@ -340,7 +340,10 @@ export interface RuntimeAdapter {
    * unreadable server throws; a terminal whose processes can't be read is left out.
    */
   foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]>;
-  /** The title the terminal's program last set, as a Codex TUI sets it to its thread. */
+  /**
+   * The title the terminal's program last set, as a Codex TUI sets it to its thread: empty after a
+   * respawn until the new process sets one, so no title outlives the process that set it.
+   */
   title(ref: RuntimeRef): Promise<string>;
   /** Drops a shell terminal's agent link from its tags, so a reconcile never links it again. */
   unlink(ref: RuntimeRef): Promise<void>;

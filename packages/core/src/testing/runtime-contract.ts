@@ -328,6 +328,29 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => runtime.title(ref), { timeout: harness.waitMs }).toBe("the thread");
     });
 
+    it("respawns a terminal with no title, whatever its last process set", async () => {
+      const runtime = fresh();
+      const s = spec(["cat"]);
+      const ref = await runtime.create(s);
+      const old = await runtime.attach(ref, null);
+      onTestFinished(() => old.stream.close());
+      old.stream.write(encode("\x1b]2;the old thread\x07\r"));
+      await expect
+        .poll(() => runtime.title(ref), { timeout: harness.waitMs })
+        .toBe("the old thread");
+      // Killed, as a TUI that never gets to empty its title.
+      await runtime.signal(ref, "SIGKILL");
+      await deadOf(runtime, ref);
+      const next = await runtime.respawn(ref, { ...s, generation: 1 });
+      expect(await runtime.title(next)).toBe("");
+      const { stream } = await runtime.attach(next, null);
+      onTestFinished(() => stream.close());
+      stream.write(encode("\x1b]2;the new thread\x07\r"));
+      await expect
+        .poll(() => runtime.title(next), { timeout: harness.waitMs })
+        .toBe("the new thread");
+    });
+
     it("reports on attach the history depth each terminal was made with", async () => {
       const runtime = fresh();
       const shallow = await runtime.create(spec(["cat"], undefined, 7));

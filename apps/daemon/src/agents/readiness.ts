@@ -20,12 +20,8 @@ const SETTLES: ReadonlySet<string> = new Set([
   "agent.closing",
 ]);
 
-/** The events that start or end a reuse of an agent's terminal, and which option each tells. */
-const REUSES: Partial<Record<string, "terminalReused" | "terminalLeft">> = {
-  "agent.respawn_requested": "terminalReused",
-  "agent.respawn_rejected": "terminalLeft",
-  "agent.closing": "terminalLeft",
-};
+/** The events after which nothing will start in an agent's terminal. */
+const LEAVES: ReadonlySet<string> = new Set(["agent.respawn_rejected", "agent.closing"]);
 
 export interface ReadinessOptions {
   readonly store: Store;
@@ -36,9 +32,7 @@ export interface ReadinessOptions {
   readonly notStarted: (agentId: string, summary: string) => void;
   /** A start's terminal runs, and may already show a sign of life that came before it did. */
   readonly terminalUp?: (terminalId: TerminalId) => void;
-  /** A start is asked for in the agent's own terminal, which keeps what the last process left. */
-  readonly terminalReused?: (terminalId: TerminalId) => void;
-  /** That start is refused, or the agent is closing: nothing will start in the terminal. */
+  /** A respawn is refused, or the agent is closing: nothing will start in the terminal. */
   readonly terminalLeft?: (terminalId: TerminalId) => void;
   /** The agent runs now: mail held while it started may go. */
   readonly released?: (agentId: string) => void;
@@ -100,11 +94,10 @@ export class Readiness {
   }
 
   private react(e: Recorded): void {
-    const told = REUSES[e.type];
-    if (told !== undefined) {
+    if (LEAVES.has(e.type)) {
       const terminalId = this.opts.store.agentTerminal({ agentId: e.entityId })?.runtime
         ?.terminalId;
-      if (terminalId !== undefined) this.opts[told]?.(terminalId);
+      if (terminalId !== undefined) this.opts.terminalLeft?.(terminalId);
     }
     if (SETTLES.has(e.type)) {
       clearTimeout(this.timers.get(e.entityId));
