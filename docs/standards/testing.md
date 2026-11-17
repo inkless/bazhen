@@ -273,7 +273,9 @@ libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); 
 run's directory and log to `~/bazhen-soak-results`; `destroy` deletes the VM after asking.
 Everything that marks the VM or starts the soak runs over ssh only after the far end proves it is
 the VM `create` made: its hostname, a machine-id that isn't the host's, and an instance token
-`create` gave it. It refuses a VM it didn't create or one a soak has already run on. The VM runs
+`create` gave it. It refuses a VM it didn't create or one a soak has already run on. Every VM it
+makes is named `bazhen-soak`, so while another VM of that name exists it can neither use it nor
+create its own: remove that one with whatever made it. The VM runs
 Ubuntu's tmux 3.4, as CI's Linux soak does, not the 3.6b the test container builds. Without
 libvirt, follow the steps by hand:
 

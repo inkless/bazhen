@@ -26,7 +26,9 @@ IMG_NAME=noble-server-cloudimg-amd64.img
 CLOUD_KEYRING=/usr/share/keyrings/ubuntu-cloudimage-keyring.gpg
 INSTANCE_FILE=/etc/bazhen-soak-instance
 SETUP_PACKAGES=(qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst
-  cloud-image-utils gpgv ubuntu-cloudimage-keyring)
+  cloud-image-utils gpgv)
+# Ships the keyring file the cloud image's checksums are signed against.
+KEYRING_PACKAGE=ubuntu-keyring
 
 STATE="${XDG_DATA_HOME:-$HOME/.local/share}/bazhen-soak"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/bazhen-soak"
@@ -92,15 +94,17 @@ host_prereqs() {
 
 cmd_setup() {
   [[ $EUID -ne 0 ]] || die "run as your own user; the script calls sudo itself"
+  local packages=("${SETUP_PACKAGES[@]}")
+  [[ -f $CLOUD_KEYRING ]] || packages+=("$KEYRING_PACKAGE")
   cat >&2 <<EOF
 This changes the host, with sudo:
-  - apt-get install ${SETUP_PACKAGES[*]}
+  - apt-get install ${packages[*]}
   - usermod -aG libvirt,kvm $USER
   - systemctl enable --now libvirtd
 EOF
   confirm "Proceed?" || die "not confirmed; nothing changed"
   sudo apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${SETUP_PACKAGES[@]}"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
   sudo usermod -aG libvirt,kvm "$USER"
   sudo systemctl enable --now libvirtd
   log "Setup done."
@@ -194,7 +198,7 @@ vol_sha256() {
 # Prints the volume's name.
 ensure_base_volume() {
   [[ -f $CLOUD_KEYRING ]] || die "no $CLOUD_KEYRING to check the cloud image's signature with; \
-run: sudo apt-get install ubuntu-cloudimage-keyring"
+it comes with $KEYRING_PACKAGE: run pnpm soak:vm setup, or sudo apt-get install $KEYRING_PACKAGE"
   need gpgv
   mkdir -p "$CACHE"
   log "Fetching $IMG_BASE_URL/SHA256SUMS and its signature"
@@ -224,7 +228,9 @@ virsh -c qemu:///system vol-delete --pool $POOL $vol"
     [[ ${have%% *} == "$want" ]] || die "$IMG_NAME fails its SHA256 check"
   fi
   log "Image checksum OK; uploading to pool '$POOL' as $vol"
-  "${VIRSH[@]}" vol-create-as "$POOL" "$vol" "$(stat -c %s "$img")" --format qcow2 >/dev/null
+  local size
+  size=$(stat -c %s "$img")
+  "${VIRSH[@]}" vol-create-as "$POOL" "$vol" "$size" --format qcow2 >/dev/null
   "${VIRSH[@]}" vol-upload --pool "$POOL" "$vol" "$img" >&2
   "${VIRSH[@]}" pool-refresh "$POOL" >/dev/null
   [[ $(vol_sha256 "$vol") == "$want" ]] || die "volume $vol doesn't match $IMG_NAME after upload"
@@ -275,15 +281,17 @@ os_variant() {
 }
 
 vm_ip() {
-  local leases
+  local leases ip
   leases=$("${VIRSH[@]}" domifaddr "$VM" --source lease 2>/dev/null) || return 0
-  awk '$3 == "ipv4" && !found { sub(/\/.*/, "", $4); print $4; found = 1 }' <<<"$leases"
+  ip=$(awk '$3 == "ipv4" && !found { sub(/\/.*/, "", $4); print $4; found = 1 }' <<<"$leases")
+  [[ -z $ip || $ip =~ ^([0-9]{1,3}[.]){3}[0-9]{1,3}$ ]] || die "libvirt leased $VM '$ip', not an IPv4 address"
+  printf '%s\n' "$ip"
 }
 
 wait_ip() {
   local ip i
   for ((i = 0; i < 90; i++)); do
-    ip=$(vm_ip)
+    ip=$(vm_ip) || exit 1
     if [[ -n $ip ]]; then
       printf '%s\n' "$ip"
       return
@@ -296,14 +304,15 @@ wait_ip() {
 SSH_OPTS=()
 TARGET=""
 TOKEN=""
-HOST_ID=""
+HOST_ID_SHA=""
 init_ssh() {
   TOKEN=$(require_ours)
   vm_running || die "VM $VM is not running; start it with: virsh -c qemu:///system start $VM"
   [[ -f $KEY ]] || die "no ssh key at $KEY; run: pnpm soak:vm create"
   need ssh
   [[ $(hostname) != "$VM" ]] || die "this host itself is named '$VM'; refusing"
-  HOST_ID=$(</etc/machine-id)
+  HOST_ID_SHA=$(sha256sum </etc/machine-id)
+  HOST_ID_SHA=${HOST_ID_SHA%% *}
   local ip
   ip=$(wait_ip)
   # No ~/.ssh/config: a Host * rule there could forward the host's agent or X into the VM.
@@ -314,11 +323,11 @@ init_ssh() {
   TARGET="$VM_USER@$ip"
 }
 
-# Each argument reaches the VM's shell as one word.
+# Each argument reaches the VM's shell as one word. Nothing from this host's stdin goes with it.
 vm_ssh() {
   local cmd
   cmd=$(printf '%q ' "$@")
-  ssh "${SSH_OPTS[@]}" -- "$TARGET" "$cmd"
+  ssh "${SSH_OPTS[@]}" -- "$TARGET" "$cmd" </dev/null
 }
 
 wait_ssh() {
@@ -331,14 +340,16 @@ wait_ssh() {
 }
 
 # Prefixed to every script run in the VM, so the identity check and the action share one session.
-# Its arguments are the VM's expected hostname, this host's machine-id, the instance token and
-# the file the VM keeps its token in.
+# Its arguments are the VM's expected hostname, the SHA-256 of this host's machine-id (which is
+# meant to stay on the machine, and arguments are readable to every process in the VM), the
+# instance token and the file the VM keeps its token in.
 VM_GUARD=$(cat <<'REMOTE'
 set -euo pipefail
-want_host="$1"; host_id="$2"; token="$3"; instance_file="$4"; shift 4
+want_host="$1"; host_id_sha="$2"; token="$3"; instance_file="$4"; shift 4
 refuse() { echo "refusing: $*" >&2; exit 97; }
 [[ "$(hostname)" == "$want_host" ]] || refuse "the VM says hostname $(hostname), not $want_host"
-[[ "$(cat /etc/machine-id)" != "$host_id" ]] || refuse "the VM has the host's machine-id"
+id_sha=$(sha256sum < /etc/machine-id)
+[[ "${id_sha%% *}" != "$host_id_sha" ]] || refuse "the VM has the host's machine-id"
 [[ -r "$instance_file" && "$(tr -d "[:space:]" < "$instance_file")" == "$token" ]] \
   || refuse "the VM's instance token is not the one create gave it"
 REMOTE
@@ -349,8 +360,7 @@ REMOTE
 vm_run() {
   local body="$1"
   shift
-  vm_ssh bash -c "$VM_GUARD"$'\n'"$body" bash "$VM" "$HOST_ID" "$TOKEN" "$INSTANCE_FILE" "$@" \
-    </dev/null
+  vm_ssh bash -c "$VM_GUARD"$'\n'"$body" bash "$VM" "$HOST_ID_SHA" "$TOKEN" "$INSTANCE_FILE" "$@"
 }
 
 # The identity check alone, for commands that only read from the VM.
@@ -359,7 +369,8 @@ assert_vm() { vm_run 'true' || die "the ssh target at $TARGET is not $VM; refusi
 resolve_commit() {
   local c="$1"
   if [[ -z $c ]]; then
-    c=$(git ls-remote "$REPO_URL" refs/heads/main | cut -f1)
+    c=$(git ls-remote "$REPO_URL" refs/heads/main)
+    c=${c%%[[:space:]]*}
     [[ $c =~ ^[0-9a-f]{40}$ ]] || die "could not resolve main on $REPO_URL with git ls-remote"
     log "Commit under test: main = $c"
   fi
@@ -387,41 +398,48 @@ earlier VM; remove them with: pnpm soak:vm destroy"
     mkdir -p "$STATE"
     ensure_network
     ensure_pool
-    local base token seed
+    local base base_path token seed seed_size variant
     base=$(ensure_base_volume)
+    base_path=$("${VIRSH[@]}" vol-path --pool "$POOL" "$base")
     token=$(</proc/sys/kernel/random/uuid)
+    # Before any volume exists, so volumes left by a create that fails are ones destroy can tell
+    # this script made.
+    printf '%s\n' "$token" >"$TOKEN_FILE"
     log "Creating a $DISK qcow2 overlay on $base"
     "${VIRSH[@]}" vol-create-as "$POOL" "$VM.qcow2" "$DISK" --format qcow2 \
-      --backing-vol "$("${VIRSH[@]}" vol-path --pool "$POOL" "$base")" \
-      --backing-vol-format qcow2 >/dev/null
+      --backing-vol "$base_path" --backing-vol-format qcow2 >/dev/null
     seed=$(make_seed "$token")
-    "${VIRSH[@]}" vol-create-as "$POOL" "$VM-seed.iso" "$(stat -c %s "$seed")" --format raw >/dev/null
+    seed_size=$(stat -c %s "$seed")
+    "${VIRSH[@]}" vol-create-as "$POOL" "$VM-seed.iso" "$seed_size" --format raw >/dev/null
     "${VIRSH[@]}" vol-upload --pool "$POOL" "$VM-seed.iso" "$seed"
     rm -f "$KNOWN_HOSTS"
-    printf '%s\n' "$token" >"$TOKEN_FILE"
+    variant=$(os_variant)
     log "Defining and booting $VM ($VCPUS vCPU, $MEM_MIB MiB, network '$NET')"
     virt-install --connect qemu:///system --name "$VM" \
       --metadata "description=bazhen-soak instance $token" \
       --memory "$MEM_MIB" --vcpus "$VCPUS" --cpu host-passthrough \
-      --os-variant "$(os_variant)" --import \
+      --os-variant "$variant" --import \
       --disk "vol=$POOL/$VM.qcow2,bus=virtio" \
       --disk "vol=$POOL/$VM-seed.iso,device=cdrom" \
       --network "network=$NET,model=virtio" \
       --graphics none --noautoconsole
     "${VIRSH[@]}" autostart --disable "$VM" >/dev/null 2>&1 || true
   fi
-  provision "$(resolve_commit "$commit")"
+  commit=$(resolve_commit "$commit")
+  provision "$commit"
 }
 
 cmd_provision() {
   local commit="$1"
   host_prereqs
   vm_exists || die "no VM $VM; run: pnpm soak:vm create"
-  provision "$(resolve_commit "$commit")"
+  commit=$(resolve_commit "$commit")
+  provision "$commit"
 }
 
 provision() {
   local commit="$1"
+  [[ $commit =~ ^[0-9a-f]{7,40}$ ]] || die "no commit to provision at, got '$commit'"
   init_ssh
   log "Waiting for ssh on $TARGET"
   wait_ssh
@@ -435,7 +453,6 @@ provision() {
   esac
   log "Provisioning the VM at $commit (apt, rustup, clone, Node, pnpm, install, build)"
   vm_run "$PROVISION" "$commit" "$REPO_URL"
-  log "Commit under test (the VM's ~/soak-commit): $(vm_ssh cat soak-commit)"
 }
 
 PROVISION=$(cat <<'REMOTE'
@@ -518,7 +535,7 @@ pnpm run build:cli
 pnpm run build:holder:release
 
 printf "%s\n" "$full" > "$HOME/soak-commit"
-say "provisioned; commit under test: $full"
+say "provisioned; commit under test (in ~/soak-commit): $full"
 REMOTE
 )
 
@@ -581,7 +598,9 @@ EOF
 cmd_status() {
   host_prereqs
   vm_exists || die "no VM $VM"
-  echo "VM state: $("${VIRSH[@]}" domstate "$VM")"
+  local state
+  state=$("${VIRSH[@]}" domstate "$VM")
+  echo "VM state: $state"
   init_ssh
   vm_run "$STATUS"
 }
@@ -651,7 +670,15 @@ cmd_destroy() {
     echo "This powers off $VM and deletes it with its disks (the cached base image stays)."
     echo "Collect first if you haven't: pnpm soak:vm collect"
   else
-    echo "No VM $VM, but pool '$POOL' holds its volumes: $(echo "$left" | paste -sd' ')."
+    local list
+    list=$(paste -sd' ' <<<"$left")
+    # With no domain there is no description to prove them this script's; a token on the host
+    # says only that this script's last create here never finished.
+    [[ -n $(host_token) ]] || die "pool '$POOL' holds $list but there is no VM $VM and no \
+instance token on this host, so nothing shows this script made them; refusing. If they are \
+yours to remove: virsh -c qemu:///system vol-delete --pool $POOL <volume>"
+    echo "There is no VM $VM, but pool '$POOL' holds $list, left by a create of this script's"
+    echo "that didn't finish (its instance token is on this host). This deletes exactly those."
   fi
   local typed=""
   read -r -p "Type the VM name ($VM) to confirm: " typed
