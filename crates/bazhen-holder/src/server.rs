@@ -1245,6 +1245,7 @@ mod tests {
         let mut server = Server::new(socket, terminal, rebind, now);
         let (ours, mut peer) = UnixStream::pair().unwrap();
         ours.set_nonblocking(true).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let mut conn = Connection::new(1, ours, now);
         conn.open(0);
         peer.write_all(&Request::Stats { id: RequestId(1) }.encode().unwrap())

@@ -292,20 +292,16 @@ impl<O: Output> Holder<O> {
         self.step(now);
     }
 
-    /// Waits for the next thing to do, and does it, with nothing but the child to serve: the
-    /// holder's own loop is `Server::run`. Waits with no timeout when no deadline is pending.
+    /// Waits for the next thing to do, but no later than `until`, and does it, with nothing but
+    /// the child to serve: the holder's own loop is `Server::run`.
     ///
     /// # Errors
     ///
     /// When `poll` fails for any reason but an interrupting signal.
-    pub fn turn(&mut self) -> io::Result<()> {
-        let timeout = match self.deadline() {
-            Some(at) => Some(
-                Timespec::try_from(at.saturating_duration_since(Instant::now()))
-                    .map_err(io::Error::other)?,
-            ),
-            None => None,
-        };
+    pub fn turn(&mut self, until: Instant) -> io::Result<()> {
+        let wake = self.deadline().map_or(until, |at| at.min(until));
+        let timeout = Timespec::try_from(wake.saturating_duration_since(Instant::now()))
+            .map_err(io::Error::other)?;
         let master_ready = {
             let wakeups = self.wakeups();
             // A master nothing holds open any more reports `POLLHUP` whatever is asked, so it
@@ -315,7 +311,7 @@ impl<O: Output> Holder<O> {
                 .flatten()
                 .map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::IN))
                 .collect();
-            readiness(poll(&mut fds, timeout.as_ref()))?
+            readiness(poll(&mut fds, Some(&timeout)))?
                 && fds.get(1).is_some_and(|fd| !fd.revents().is_empty())
         };
         self.after_poll(master_ready, Instant::now());
@@ -468,7 +464,7 @@ mod tests {
         let mut draining_until = holder.draining_until;
         while holder.exit().is_none() {
             assert!(Instant::now() < give_up, "the exit was never published");
-            holder.turn().unwrap();
+            holder.turn(give_up).unwrap();
             if holder.exit().is_none() {
                 draining_until = holder.draining_until;
             }
@@ -513,7 +509,7 @@ mod tests {
         let give_up = Instant::now() + DEADLINE;
         while !done(holder) {
             assert!(Instant::now() < give_up, "{what} never happened");
-            holder.turn().unwrap();
+            holder.turn(give_up).unwrap();
         }
     }
 
@@ -558,7 +554,7 @@ mod tests {
         rustix::io::write(holder.pty.master(), b"\n").unwrap();
         turn_until(&mut holder, "the exit", |h| h.exit().is_some());
         rustix::io::write(&held, b"\x1b[c").unwrap();
-        holder.turn().unwrap();
+        holder.turn(Instant::now() + DEADLINE).unwrap();
         holder.flush_input();
         rustix::fs::fcntl_setfl(&held, rustix::fs::OFlags::NONBLOCK).unwrap();
         let mut answer = [0; 64];
