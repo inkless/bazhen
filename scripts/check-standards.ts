@@ -1272,12 +1272,17 @@ function enumVariants(item: string): { head: string; variants: Variant[] } | und
     .map((p) => p.replace(/#\s*\[(?:[^[\]]|\[[^\]]*\])*\]/g, "").trim())
     .filter((p) => p !== "")
     .map((text) => {
-      const variant = /^(?:r#)?(\w+)\s*/.exec(text);
+      // Anything else before or after the name (an attribute left half stripped) and its fields
+      // can't be told apart, so it fails rather than reading as a variant with none.
+      const variant = /^(?:r#)?(\w+)\s*(?=$|[({=])/.exec(text);
       const rest = text.slice(variant?.[0].length ?? 0);
-      const fields = /^[({]/.test(rest)
-        ? structFields(`struct ${variant?.[1] ?? ""} ${rest}`)?.fields
-        : [];
-      return { name: variant?.[1] ?? "", text, fields };
+      const fields =
+        variant === null
+          ? undefined
+          : /^[({]/.test(rest)
+            ? structFields(`struct ${variant[1] ?? ""} ${rest}`)?.fields
+            : [];
+      return { name: variant?.[1] ?? /\w+/.exec(text)?.[0] ?? "", text, fields };
     });
   return { head: item.slice(from, open), variants };
 }
@@ -1390,22 +1395,27 @@ function headBefore(code: string, at: number): string {
   return code.slice(i + 1, at);
 }
 
+/** Text ending in a value a `[` after it indexes: a name that isn't a keyword, or a bracket. */
+const INDEXED =
+  /(?:[)\]]|\b(?!(?:let|in|match|if|while|for|return|break|else|move|yield)\b)(?:r#)?\w+)\s*$/;
+
 /**
  * Whether the value from `start` to `end` in `code` is (part of) a pattern: what follows it, once
  * out of the brackets around it (a tuple, a slice, `Some(…)`, a struct), is a match arm's `=>`
- * with no guard before it, an or-pattern's `|`, a guard's `if` (`matches!`'s too) or the `=` of a
- * `let`. A value built rather than matched is followed by none of those: what follows the
- * brackets around it is a `;`, the end of its block, or a guard's `=>`. A pattern binding a name
- * in `matches!` without a guard can't use it, so that needs no case.
+ * with no guard before it, an or-pattern's `|` (a closure's parameters' too), a guard's `if`
+ * (`matches!`'s too), a `for`'s `in`, the `:` before a `let`'s or a parameter's type, or an `=`:
+ * a `let`'s, a destructuring assignment's, or a `select!` arm's. A value built rather than matched
+ * is followed by none of those: what follows the brackets around it is a `;`, the end of its
+ * block, or a guard's `=>`; and one in an index is an expression, even one assigned to. A pattern
+ * binding a name in `matches!` without a guard can't use it, so that needs no case.
  */
 function inPattern(code: string, start: number, end: number): boolean {
   for (let from = start, to = end; ;) {
     const next = code.slice(to).trimStart();
     if (next.startsWith("=>")) return !/\bif\b/.test(headBefore(code, from));
-    if (/^=(?!=)/.test(next)) return /\blet\b/.test(headBefore(code, from));
-    if (/^(?:\|(?!\|)|if\b)/.test(next)) return true;
+    if (/^(?:=(?!=)|:(?!:)|\|(?!\|)|if\b|in\b)/.test(next)) return true;
     const open = enclosingBracket(code, from);
-    if (open === -1) return false;
+    if (open === -1 || (code[open] === "[" && INDEXED.test(code.slice(0, open)))) return false;
     from = open;
     to = matchingBracket(code, open) + 1;
   }
@@ -1462,24 +1472,43 @@ function bindsField(inner: string, named: boolean, fields: Set<string> | undefin
 }
 
 /**
+ * Where each `name @ subpattern` in `body` puts its subpattern: from just past the `@` through the
+ * subpattern's path and the bracket after it (`m @ Some(…)`, `m @ (… | …)`, `m @ &Msg::Raw(…)`).
+ */
+function atBindings(body: string): [number, number][] {
+  return [...body.matchAll(/\b(?:r#)?[a-z_]\w*\s*@/g)].map((m) => {
+    const from = m.index + m[0].length;
+    const lead = /^(?:\s|&|\bmut\b|\bbox\b|(?:r#)?\w+|::|<(?:[^<>]|<[^<>]*>)*>)*/.exec(
+      body.slice(from),
+    );
+    const at = from + (lead?.[0].length ?? 0);
+    return [from, "([{".includes(body[at] ?? " ") ? matchingBracket(body, at) + 1 : at];
+  });
+}
+
+/** Generic arguments in a path (`::<T>`), as a pattern may give an enum or a variant. */
+const TURBOFISH = String.raw`(?:\s*::\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?`;
+
+/**
  * Whether `body` has a pattern naming a variant of `variants` that binds a field holding bytes, or
- * binds the whole variant (`r @ Reply::Data { .. }`). `own`, the type an impl is for, is what
- * `Self::` names there.
+ * binds a value holding the variant whole (`r @ Reply::Data { .. }`, `r @ Some(Reply::Data { .. })`).
+ * `own`, the type an impl is for, is what `Self::` names there.
  */
 function bindsByteVariant(body: string, variants: ByteVariants, own?: string): boolean {
+  const bound = atBindings(body);
   for (const [name, byVariant] of variants) {
     const enums = own === name ? `(?:${name}|Self)` : name;
     const path = new RegExp(
-      `\\b${enums}\\s*::\\s*(${[...byVariant.keys()].join("|")})\\b(?!\\s*::)`,
+      `\\b${enums}${TURBOFISH}\\s*::\\s*(${[...byVariant.keys()].join("|")})\\b${TURBOFISH}(?!\\s*::)`,
       "g",
     );
     for (const m of body.matchAll(path)) {
+      if (bound.some(([from, to]) => from <= m.index && m.index < to)) return true;
       const after = m.index + m[0].length;
       const open = after + (body.slice(after).length - body.slice(after).trimStart().length);
       const bracket = body[open] === "(" || body[open] === "{";
       const close = bracket ? matchingBracket(body, open) : after - 1;
       if (!inPattern(body, m.index, close + 1)) continue;
-      if (/\b(?:r#)?[a-z_]\w*\s*@\s*(?:\w+\s*::\s*)*$/.test(body.slice(0, m.index))) return true;
       const fields = byVariant.get(m[1] ?? "");
       if (bracket && bindsField(body.slice(open + 1, close), body[open] === "{", fields)) {
         return true;
@@ -2022,9 +2051,17 @@ function manifestNames(
     } else if (rest.includes("package")) unreadable(line);
   };
   let table: string[] = [];
+  let header: string | undefined;
   for (const line of tomlLines(text)) {
     if (TOML_HEADER.test(line)) {
-      table = line.startsWith("[[") ? ["[["] : (tomlKey(line.slice(1, -1)) ?? ["?"]);
+      const key = line.startsWith("[[") ? ["[["] : tomlKey(line.slice(1, -1));
+      header = key === undefined ? line : undefined;
+      table = key ?? [];
+      continue;
+    }
+    // A table whose name can't be read may be a dependencies table, so a rename in it fails.
+    if (header !== undefined) {
+      if (/\bpackage\b["']?\s*=/.test(line)) unreadable(`${header} ${line}`);
       continue;
     }
     const [key = "", value = ""] = tomlSplit(line, "=", 2);

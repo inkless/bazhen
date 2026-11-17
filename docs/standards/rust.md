@@ -448,9 +448,10 @@ What differs:
   `io::stdin().lock()`, a closure's read included). A socket, a file or an fd in a signature isn't bytes: holding one is not
   reading it, so a function that only binds, borrows or sets one up needs no entry. A struct or enum
   of the same crate that carries bytes (a byte field, a parameter bounded by a byte trait, or a
-  field of such a type; an enum by its variants' fields, not their names), or one of another crate that this crate brings in (by a `use` or a path,
-  through the crate, a module of it, an alias for either or another crate's re-export, the crate
-  under its package name or a name a manifest gives it), is a byte type too: a function taking one
+  field of such a type; an enum by its variants' fields, not their names), or one of another
+  crate that this crate brings in (by a `use` or a path, through the crate, a module of it, an
+  alias for either or another crate's re-export, the crate under its package name or a name a
+  manifest gives it), is a byte type too: a function taking one
   is a decoder, as is a method of it taking `self` that can reach the bytes, as a stateful frame
   reader reads through `self`. A method reaches them when its body uses a field holding them
   (`self.buf`, `let b = &self.buf;`, a closure or a helper given it), uses `self` other than by a
@@ -464,10 +465,13 @@ What differs:
   where the rule doesn't look. So does a struct, or an enum's variant, whose fields the rule can't
   split, since it can't tell which hold bytes. A variant's fields are public wherever its enum is,
   so a function whose pattern binds a field of a variant holding bytes takes them, however it got
-  the value: a match arm, an or-pattern, a guard, `if let`, `let … else`, `matches!`, nested in a
-  tuple, slice or `Some(…)`, or the whole variant by `r @ Reply::Data { .. }`. One that matches
-  with `{ .. }` or binds only other fields doesn't, nor does one that builds the variant, compares
-  it in a guard or hands it on: the function it is handed to takes the enum in its signature.
+  the value: a match arm, an or-pattern, a guard, `if let`, `let … else` (typed too), `matches!`,
+  a `for`, a closure's parameter, a `select!` arm, a destructuring assignment, nested in a tuple,
+  slice or `Some(…)`, with generic arguments (`Msg::<T>::Raw`), or a value holding the variant
+  whole by `r @ Reply::Data { .. }` or `r @ Some(Reply::Data { .. })`. One that matches with
+  `{ .. }` or binds only other fields doesn't, nor does one that builds the variant, compares it
+  in a guard, indexes by it or hands it on: the function it is handed to takes the enum in its
+  signature.
   `scripts/check-standards.ts` fails until each is listed in `FUZZED_DECODERS` with the fuzz target
   that calls it, or in `NOT_DECODERS` with why it isn't one: an encoder, a function that reads bytes
   only to hand them to a fuzzed decoder, one reached only through a fuzzed decoder. A module
@@ -488,7 +492,12 @@ What differs:
     trait requires (`fn kind(&self) -> u8 { self.raw()[0] }`). A read is a method given something
     to read into, so a channel's `recv()`, an iterator's `peek()` and `OpenOptions::read(true)`
     aren't reads, and neither is a bare call to a function of the same file, which is read where it
-    is defined. Review checks those by hand. Two looser edges are known, and review covers them too: a
+    is defined. It finds a pattern on a byte variant by the enum's name, so it can't see one written
+    through an alias of the enum the rule fails anyway, a qualified path (`<Msg>::Raw(b)`), or a
+    macro of the crate's own that takes the pattern apart. And a type parameter with no bound
+    (`enum E<T> { Data(T) }`, `struct S<T> { b: T }`) carries bytes only where it is used as
+    `E<Vec<u8>>`, so the type isn't a carrier: a function taking `E<Vec<u8>>` is found by its
+    signature, but one that matches a value it got by a call isn't. Review checks those by hand. Two looser edges are known, and review covers them too: a
     target that names a type and calls `.decode(` on a value counts as driving that type's `decode`,
     so the reviewer checks the value is of the listed type; and a method that only measures or
     clears a byte field (`self.buf.len()`, `self.buf.clear()`) uses it, so it counts as a decoder
