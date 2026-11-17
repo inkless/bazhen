@@ -71,7 +71,7 @@ describe("an agent's lifecycle after launch", () => {
     expect((await respawn(agentId, "stale-close-respawn")).status).toBe(200);
     const { status, body } = await close(agentId, "stale-close", 0);
     expect({ status, body }).toMatchObject({ status: 409, body: { error: "stale_generation" } });
-    expect((await agentOf(agentId))?.state).not.toBeOneOf(["closing", "closed"]);
+    expect((await agentOf(agentId))?.state).toBeOneOf(["starting", "running", "exited"]);
   });
 
   it("keeps an agent closing while tmux can't be reached, and closes it once it can", async () => {

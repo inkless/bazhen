@@ -81,11 +81,9 @@ describe("the bazhen verbs a Claude Code agent is taught", () => {
   it("run without asking, while the daemon's other commands still ask", async () => {
     const { messageId } = await mail("whoami", "[[fake:bash:bazhen whoami]]");
     // The turn ends, or stops at an ask, which is the one thing the verb must not do.
-    await waitUntil(
-      () => endedOrAsked(messageId, "bazhen whoami"),
-      "the turn to end or ask",
-      30_000,
-    );
+    await expect
+      .poll(() => endedOrAsked(messageId, "bazhen whoami"), { timeout: 30_000 })
+      .toBe(true);
     const name = await nameOf(sender.agentId);
     const ran = model.requests.filter((r) => r.includes("tool_result")).at(-1);
     expect([(await openFor("bazhen whoami")).length, ran]).toEqual([
