@@ -78,6 +78,11 @@ describe("a Claude Code agent respawned on its session", () => {
   it("isn't offered, and is refused, while its transcript holds only what Claude Code writes ahead of a turn", () =>
     daemon.explained(async () => {
       const { agentId } = await killedAfterATurn("metadata-only", "Say ok.");
+      // Offered first on the same path, so the refusal below is the metadata's doing, not an
+      // answer the daemon formed before the turn reached the disk.
+      await expect
+        .poll(async () => (await agentOf(agentId))?.resumable, { timeout: 10_000 })
+        .toBe(true);
       const session = String((await agentOf(agentId))?.externalRef?.id);
       // The transcript as Claude Code 2.1.322 leaves it when killed a moment after a turn's Stop.
       daemon.rewriteTranscript(
