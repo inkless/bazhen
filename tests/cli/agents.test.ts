@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FleetAgents, StateSnapshot } from "@bazhen/protocol";
+import {
+  type Agent,
+  AgentState,
+  type ExternalRef,
+  FleetAgents,
+  StateSnapshot,
+} from "@bazhen/protocol";
 import { type Scene, scene } from "./cli.ts";
 import {
   AGENT,
@@ -45,6 +51,24 @@ const item = (id: string, state: "open" | "closed") => ({
   openedAt: ago(5),
   actions: [],
 });
+
+const threadId = (n: number) => `01a1e0f0-593e-7ae1-9d31-${n.toString(16).padStart(12, "0")}`;
+const THREAD = threadId(1);
+const onThread = (
+  id: string,
+  name: string,
+  on: string,
+  { kind = "codex-thread", ...over }: Partial<Agent> & { kind?: ExternalRef["kind"] } = {},
+): Agent => {
+  const a = agent(id, name, over);
+  return { ...a, externalRef: { environmentId: a.environmentId, kind, id: on } };
+};
+const whoamiOn = async (thread: string) => {
+  const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: thread });
+  return [ran.code, ran.stdout.split("\n")[0], ran.stderr];
+};
+const named = (name: string, id: string) => [0, `${name}  ${id}`, ""];
+const refused = [2, "", expect.stringContaining("inside an agent")];
 
 describe("bazhen agents", () => {
   it("lists the agents not ended, each led by its name, and one with none by its id", async () => {
@@ -275,34 +299,64 @@ describe("bazhen whoami", () => {
   });
 
   it("names the Codex agent whose thread the command runs in, as Codex runs it outside the agent", async () => {
-    const thread = "01a1e0f0-593e-7ae1-9d31-769db26227fc";
-    const codexAgent = (id: string, name: string, over = {}) => {
-      const a = agent(id, name, over);
-      return {
-        ...a,
-        externalRef: { environmentId: a.environmentId, kind: "codex-thread" as const, id: thread },
-      };
-    };
     s.daemon.answer(
       "GET /v1/state",
       StateSnapshot,
       snapshot({
-        agents: [codexAgent(OTHER, "before", { state: "closed" }), codexAgent(AGENT, "BZ-127")],
+        agents: [
+          onThread(OTHER, "before", THREAD, { state: "closed" }),
+          onThread(AGENT, "BZ-127", THREAD),
+        ],
       }),
     );
-    const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: thread });
+    const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: THREAD });
     expect(ran.stdout.split("\n")[0]).toBe(`BZ-127  ${AGENT}`);
   });
 
   it("names no agent for a Codex thread no live agent is bound to", async () => {
-    s.daemon.answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
-    const ran = await s.bazhen(["whoami"], {
-      CODEX_THREAD_ID: "01a1e0f0-0000-7000-8000-000000000000",
-    });
-    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
-      2,
-      "",
-      expect.stringContaining("inside an agent"),
+    const notLive = AgentState.options.filter((state) => !["starting", "running"].includes(state));
+    const ended = notLive.map((state, i) => ({
+      state,
+      id: `agent_0190c3b2a1d47a3b8c1d2e3f4a5b6d${i}d`,
+      on: threadId(10 + i),
+    }));
+    const claude = threadId(2);
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [
+          onThread(AGENT, "BZ-127", THREAD),
+          ...ended.map(({ state, id, on }) => onThread(id, state, on, { state })),
+          onThread(THIRD, "claude-1", claude, { harness: "claude-code", kind: "claude-session" }),
+        ],
+      }),
+    );
+    const threads = [THREAD, ...ended.map(({ on }) => on), claude, threadId(3)];
+    expect(await Promise.all(threads.map(whoamiOn))).toEqual([
+      named("BZ-127", AGENT),
+      ...ended.map(() => refused),
+      refused,
+      refused,
+    ]);
+  });
+
+  it("names no agent for a Codex thread two live agents are bound to", async () => {
+    const shared = threadId(2);
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [
+          onThread(AGENT, "BZ-127", THREAD),
+          onThread(OTHER, "first", shared),
+          onThread(THIRD, "second", shared, { state: "starting" }),
+        ],
+      }),
+    );
+    expect([await whoamiOn(THREAD), await whoamiOn(shared)]).toEqual([
+      named("BZ-127", AGENT),
+      refused,
     ]);
   });
 
