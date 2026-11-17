@@ -7,7 +7,7 @@ use std::os::fd::BorrowedFd;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{self, ExitStatus, Generation};
-use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::event::PollFlags;
 use rustix::process::Pid;
 
 use crate::child::{ChildProcess, Reaper, SignalRefused};
@@ -292,36 +292,6 @@ impl<O: Output> Holder<O> {
         self.step(now);
     }
 
-    /// Waits for the next thing to do, and does it, with nothing but the child to serve: the
-    /// holder's own loop is `Server::run`. Waits with no timeout when no deadline is pending.
-    ///
-    /// # Errors
-    ///
-    /// When `poll` fails for any reason but an interrupting signal.
-    pub fn turn(&mut self) -> io::Result<()> {
-        let timeout = match self.deadline() {
-            Some(at) => Some(
-                Timespec::try_from(at.saturating_duration_since(Instant::now()))
-                    .map_err(io::Error::other)?,
-            ),
-            None => None,
-        };
-        let master_ready = {
-            let wakeups = self.wakeups();
-            // A master nothing holds open any more reports `POLLHUP` whatever is asked, so it
-            // leaves the set rather than wake every turn.
-            let mut fds: Vec<PollFd<'_>> = [Some(wakeups), self.master()]
-                .into_iter()
-                .flatten()
-                .map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::IN))
-                .collect();
-            readiness(poll(&mut fds, timeout.as_ref()))?
-                && fds.get(1).is_some_and(|fd| !fd.revents().is_empty())
-        };
-        self.after_poll(master_ready, Instant::now());
-        Ok(())
-    }
-
     /// When the process side next needs a turn with nothing ready: the end of an exit's drain, or
     /// the next pass of a session being ended.
     pub fn deadline(&self) -> Option<Instant> {
@@ -435,6 +405,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use bazhen_holder_proto::body::{Argv, Env, NonEmpty, ProcessSpec};
+    use rustix::event::{PollFd, Timespec, poll};
 
     use super::*;
     use crate::pty::{self, WindowSize};
@@ -461,6 +432,25 @@ mod tests {
         Holder::new(pty, reaper, child, process.generation, Discard)
     }
 
+    /// Waits for the next thing to do, but no later than `until`, and does it, with nothing but
+    /// the child to serve: the holder's own loop is `Server::run`.
+    fn turn<O: Output>(holder: &mut Holder<O>, until: Instant) {
+        let wake = holder.deadline().map_or(until, |at| at.min(until));
+        let timeout = Timespec::try_from(wake.saturating_duration_since(Instant::now())).unwrap();
+        let master_ready = {
+            // A master nothing holds open any more reports `POLLHUP` whatever is asked, so it
+            // leaves the set rather than wake every turn.
+            let mut fds: Vec<PollFd<'_>> = [Some(holder.wakeups()), holder.master()]
+                .into_iter()
+                .flatten()
+                .map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::IN))
+                .collect();
+            readiness(poll(&mut fds, Some(&timeout))).unwrap()
+                && fds.get(1).is_some_and(|fd| !fd.revents().is_empty())
+        };
+        holder.after_poll(master_ready, Instant::now());
+    }
+
     /// Turns until the exit is published, and says whether that was before the drain's deadline:
     /// in the same step as the reap, or on a turn the deadline hadn't reached.
     fn published_before_the_drain_was_over(holder: &mut Holder<Discard>) -> bool {
@@ -468,7 +458,7 @@ mod tests {
         let mut draining_until = holder.draining_until;
         while holder.exit().is_none() {
             assert!(Instant::now() < give_up, "the exit was never published");
-            holder.turn().unwrap();
+            turn(holder, give_up);
             if holder.exit().is_none() {
                 draining_until = holder.draining_until;
             }
@@ -513,7 +503,7 @@ mod tests {
         let give_up = Instant::now() + DEADLINE;
         while !done(holder) {
             assert!(Instant::now() < give_up, "{what} never happened");
-            holder.turn().unwrap();
+            turn(holder, give_up);
         }
     }
 
@@ -558,7 +548,7 @@ mod tests {
         rustix::io::write(holder.pty.master(), b"\n").unwrap();
         turn_until(&mut holder, "the exit", |h| h.exit().is_some());
         rustix::io::write(&held, b"\x1b[c").unwrap();
-        holder.turn().unwrap();
+        turn(&mut holder, Instant::now() + DEADLINE);
         holder.flush_input();
         rustix::fs::fcntl_setfl(&held, rustix::fs::OFlags::NONBLOCK).unwrap();
         let mut answer = [0; 64];
