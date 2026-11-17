@@ -16,6 +16,7 @@ use rustix::process::{Pid, Signal};
 
 use super::{DEADLINE, Home, Result, Start, Started, home, spawn, spec, sweep};
 
+mod paste;
 mod respawn;
 mod verbs;
 
@@ -284,7 +285,7 @@ fn says_ready_only_once_its_socket_answers_with_who_it_is() {
     assert_eq!(hello.offset.get(), 0);
     assert_eq!((hello.size.cols.get(), hello.size.rows.get()), (80, 24));
     assert!(hello.writer);
-    assert_eq!(hello.version.as_str(), "1.2");
+    assert_eq!(hello.version.as_str(), "1.3");
 }
 
 #[test]

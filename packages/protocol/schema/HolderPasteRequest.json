@@ -1,0 +1,24 @@
+{
+  "$id": "HolderPasteRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "text": {
+      "type": "string",
+      "description": "No C0 or C1 control or DEL; with `brackets` false, printable ASCII (0x20-0x7e) only."
+    },
+    "brackets": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "generation",
+    "text",
+    "brackets"
+  ]
+}

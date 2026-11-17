@@ -12,6 +12,7 @@ use rustix::process::Pid;
 
 use crate::child::{ChildProcess, Reaper, SignalRefused};
 use crate::input::{InputFull, InputQueue};
+use crate::paste::{self, PasteRefused, Readings};
 use crate::pty::{Pty, WindowSize};
 
 /// How long, after the child's exit is seen, output it wrote before exiting may still arrive before
@@ -204,6 +205,41 @@ impl<O: Output> Holder<O> {
             return Err(InputRefused::Exited);
         }
         self.input.offer(bytes).map_err(InputRefused::Full)
+    }
+
+    /// Queues `text` as a paste of generation `generation`, only if the program would read it as
+    /// text now (`paste::ready`), marked as `paste::typed` says from `brackets` and the program's
+    /// bracketed-paste mode, `bracketed`. Nothing comes between the checks and the queueing, and a
+    /// refusal queues none of it.
+    ///
+    /// # Errors
+    ///
+    /// The first of, in order: another generation, the child exited, not ready, the mode unknown
+    /// for an unmarked paste.
+    pub fn paste(
+        &mut self,
+        generation: Generation,
+        text: &str,
+        brackets: bool,
+        bracketed: Option<bool>,
+    ) -> Result<(), PasteRefused> {
+        if generation != self.generation {
+            return Err(PasteRefused::Stale);
+        }
+        if self.child_exited() || self.exit.is_some() || !self.master_open {
+            return Err(PasteRefused::Exited);
+        }
+        let (name, device) = self.pty.slave();
+        paste::ready(&Readings {
+            queued: self.input.len(),
+            line: paste::line_state(name, device).ok(),
+            foreground: self.pty.foreground_group(),
+            child: self.child.pid(),
+        })
+        .map_err(PasteRefused::NotReady)?;
+        let bytes =
+            paste::typed(text, brackets, bracketed).map_err(|_| PasteRefused::ModeUnknown)?;
+        self.input.offer(&bytes).map_err(|_| PasteRefused::Full)
     }
 
     /// Writes queued input to the master as far as it takes it. A master that refuses it for good

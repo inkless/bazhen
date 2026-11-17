@@ -752,6 +752,10 @@ const NOT_DECODERS: Record<string, string> = {
     "queues a decoded input request's bytes for the child; parses nothing",
   "crates/bazhen-holder/src/server.rs::stats":
     "reads the holder's own counts; no bytes from a peer",
+  "crates/bazhen-holder/src/server.rs::paste":
+    "answers a paste FrameDecoder::next_frame decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/holder.rs::Holder::paste":
+    "queues a decoded paste's checked text for the child; parses nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::hold": "keeps a decoded request; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::held_since":
     "returns when the request it holds was held; reads no bytes",

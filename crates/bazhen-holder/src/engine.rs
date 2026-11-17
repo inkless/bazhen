@@ -32,6 +32,8 @@ pub trait Vt: fmt::Debug {
     fn stats(&self) -> Stats;
     fn title(&self) -> Option<&str>;
     fn alternate(&self) -> bool;
+    /// Whether the program has bracketed paste (`?2004`) on.
+    fn bracketed_paste(&self) -> bool;
 }
 
 impl Vt for Engine {
@@ -69,6 +71,10 @@ impl Vt for Engine {
 
     fn alternate(&self) -> bool {
         Self::alternate(self)
+    }
+
+    fn bracketed_paste(&self) -> bool {
+        Self::modes(self).bracketed_paste
     }
 }
 
@@ -188,6 +194,12 @@ impl Walled {
     /// Whether the alternate screen is up; false with no engine.
     pub fn alternate(&mut self) -> bool {
         self.call("alternate", |vt| vt.alternate()).unwrap_or(false)
+    }
+
+    /// Whether the program has bracketed paste on; `None` with no engine, or when it failed
+    /// answering.
+    pub fn bracketed_paste(&mut self) -> Option<bool> {
+        self.call("bracketed_paste", |vt| vt.bracketed_paste())
     }
 
     /// Runs `call` on the engine, if there is one; a panic in it replaces the engine.
@@ -377,6 +389,11 @@ pub(crate) mod tests {
         fn alternate(&self) -> bool {
             self.check();
             self.engine.alternate()
+        }
+
+        fn bracketed_paste(&self) -> bool {
+            self.check();
+            self.engine.modes().bracketed_paste
         }
     }
 

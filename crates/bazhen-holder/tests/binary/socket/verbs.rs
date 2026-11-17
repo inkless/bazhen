@@ -23,7 +23,7 @@ impl Client {
     }
 
     /// Sends `request` and returns its answer, keeping any output that comes before it in `seen`.
-    fn ask(&mut self, request: &Request, seen: &mut Vec<u8>) -> Result<Reply> {
+    pub(super) fn ask(&mut self, request: &Request, seen: &mut Vec<u8>) -> Result<Reply> {
         self.send(request)?;
         loop {
             match self.reply()? {
@@ -40,7 +40,7 @@ impl Client {
     }
 
     /// Output until it holds `needle`, appended to `seen`.
-    fn output_until(&mut self, seen: &mut Vec<u8>, needle: &str) -> Result<()> {
+    pub(super) fn output_until(&mut self, seen: &mut Vec<u8>, needle: &str) -> Result<()> {
         let deadline = Instant::now() + DEADLINE;
         while !String::from_utf8_lossy(seen).contains(needle) {
             if Instant::now() > deadline {
@@ -85,7 +85,7 @@ impl Client {
     }
 
     /// Output until `exited`, appended to `seen`.
-    fn output_to_exit(&mut self, seen: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn output_to_exit(&mut self, seen: &mut Vec<u8>) -> Result<()> {
         loop {
             match self.reply()? {
                 Reply::Data { bytes, .. } => seen.extend_from_slice(&bytes),

@@ -364,6 +364,7 @@ fn every_constant_is_the_typescript_one() {
         ("respawn", request_code::RESPAWN),
         ("set-tags", request_code::SET_TAGS),
         ("set-theme", request_code::SET_THEME),
+        ("paste", request_code::PASTE),
     ];
     let reply_codes = [
         ("hello", reply_code::HELLO),

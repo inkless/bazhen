@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::body::{
     Alternate, ErrorBody, Exited, Foreground, FrozenHelloReply, FrozenProtocol, Gap, HelloReply,
-    HelloRequest, MAX_SAFE_INTEGER, Offset, OkBody, ProcessSpec, Resized, Respawned,
+    HelloRequest, MAX_SAFE_INTEGER, Offset, OkBody, PasteRequest, ProcessSpec, Resized, Respawned,
     SetTagsRequest, SetThemeRequest, SignalRequest, Size, Stats, SubscribeRequest, Title,
 };
 use crate::json;
@@ -37,6 +37,7 @@ pub mod request_code {
     pub const RESPAWN: u8 = 0x45;
     pub const SET_TAGS: u8 = 0x46;
     pub const SET_THEME: u8 = 0x47;
+    pub const PASTE: u8 = 0x48;
 }
 
 /// Each reply's and event's type byte. A request's own reply is its type with the top bit set
@@ -81,6 +82,7 @@ pub fn request_name(code: u8) -> Cow<'static, str> {
         request_code::RESPAWN => "respawn",
         request_code::SET_TAGS => "set-tags",
         request_code::SET_THEME => "set-theme",
+        request_code::PASTE => "paste",
         _ => return Cow::Owned(format!("{code:#04x}")),
     };
     Cow::Borrowed(name)
@@ -136,6 +138,10 @@ pub enum Request {
     SetTheme {
         id: RequestId,
         body: SetThemeRequest,
+    },
+    Paste {
+        id: RequestId,
+        body: PasteRequest,
     },
     /// A type in the requests' range this build doesn't know: answered `unknown-request`.
     Unknown {
@@ -356,6 +362,7 @@ impl Request {
             Self::Respawn { .. } => request_code::RESPAWN,
             Self::SetTags { .. } => request_code::SET_TAGS,
             Self::SetTheme { .. } => request_code::SET_THEME,
+            Self::Paste { .. } => request_code::PASTE,
             Self::Unknown { code, .. } => *code,
         }
     }
@@ -374,6 +381,7 @@ impl Request {
             | Self::Respawn { id, .. }
             | Self::SetTags { id, .. }
             | Self::SetTheme { id, .. }
+            | Self::Paste { id, .. }
             | Self::Unknown { id, .. } => *id,
         }
     }
@@ -397,6 +405,7 @@ impl Request {
             Self::Respawn { body, .. } => with_json(&id, body)?,
             Self::SetTags { body, .. } => with_json(&id, body)?,
             Self::SetTheme { body, .. } => with_json(&id, body)?,
+            Self::Paste { body, .. } => with_json(&id, body)?,
         };
         frame(self.code(), &payload, MAX_REQUEST_BYTES)
     }
@@ -568,6 +577,10 @@ fn request_body(code: u8, id: RequestId, rest: &[u8]) -> Result<Request, Malform
         request_code::SET_THEME => Request::SetTheme {
             id,
             body: body("set-theme", rest)?,
+        },
+        request_code::PASTE => Request::Paste {
+            id,
+            body: body("paste", rest)?,
         },
         _ => Request::Unknown { code, id },
     })
@@ -973,6 +986,18 @@ mod tests {
                     id,
                     body: SetThemeRequest { theme }
                 }),
+            (id(), count(), "[ -~]{0,32}", any::<bool>()).prop_map(
+                |(id, generation, text, brackets)| Request::Paste {
+                    id,
+                    body: PasteRequest::new(generation, text, brackets).unwrap(),
+                }
+            ),
+            (id(), count(), "[^\\p{Cc}]{0,32}").prop_map(|(id, generation, text)| {
+                Request::Paste {
+                    id,
+                    body: PasteRequest::new(generation, text, true).unwrap(),
+                }
+            }),
         ]
     }
 

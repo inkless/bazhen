@@ -8,6 +8,7 @@
 
 //! A terminal's PTY, and the child that runs on it as the leader of a session of its own.
 
+use std::ffi::{CStr, CString};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
@@ -18,6 +19,7 @@ use std::process::{Command, Stdio};
 use std::ptr;
 
 use bazhen_holder_proto::body::{Cols, ProcessSpec, Rows, Size};
+use rustix::fs::{Dev, fstat};
 use rustix::io::{FdFlags, fcntl_setfd, ioctl_fionbio};
 use rustix::process::Pid;
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -104,6 +106,10 @@ pub struct Pty {
     /// EIO.
     #[cfg(target_os = "macos")]
     _slave: OwnedFd,
+    /// The slave's name, and the device it named when opened: a check opens it again by name
+    /// only to find the same device there.
+    slave_name: CString,
+    slave_device: Dev,
 }
 
 /// The slave side, until a child takes it as its terminal. On Linux the holder keeps no slave of
@@ -136,6 +142,9 @@ impl Pty {
         let slave = open_terminal(&name)
             .map_err(|e| failed(&format!("opening the slave {}", name.to_string_lossy()), e))?;
         let slave = OwnedFd::from(slave);
+        let slave_device = fstat(&slave)
+            .map_err(|e| failed("reading the slave's device", e))?
+            .st_rdev;
         let mut termios = tcgetattr(&slave).map_err(|e| failed("reading the slave's modes", e))?;
         termios.input_modes.insert(InputModes::IUTF8);
         tcsetattr(&slave, OptionalActions::Now, &termios)
@@ -147,6 +156,8 @@ impl Pty {
             _slave: slave
                 .try_clone()
                 .map_err(|e| failed("keeping a slave of the holder's own", e))?,
+            slave_name: name,
+            slave_device,
         };
         pty.set_size(size)
             .map_err(|e| failed("sizing the PTY", e))?;
@@ -155,6 +166,11 @@ impl Pty {
 
     pub fn master(&self) -> BorrowedFd<'_> {
         self.master.as_fd()
+    }
+
+    /// The slave's name, and the device it named when the PTY was opened.
+    pub fn slave(&self) -> (&CStr, Dev) {
+        (&self.slave_name, self.slave_device)
     }
 
     /// # Errors

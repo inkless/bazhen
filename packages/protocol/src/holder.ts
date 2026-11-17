@@ -27,7 +27,7 @@ import { ProtocolVersion } from "./version.ts";
  *   agree on, so the rest of its `hello` must satisfy the schema of every major it lists;
  * - `error`, and its codes `no-shared-version` and `invalid`.
  */
-export const HOLDER_PROTOCOL_VERSION = "1.2";
+export const HOLDER_PROTOCOL_VERSION = "1.3";
 
 /** Byte limits, in UTF-8 bytes, that both peers enforce on strings. */
 export const HOLDER_VERSION_MAX_BYTES = 32;
@@ -289,6 +289,50 @@ export type HolderSetTagsRequest = z.infer<typeof HolderSetTagsRequest>;
 export const HolderSetThemeRequest = z.object({ theme: HolderTheme.nullable() });
 export type HolderSetThemeRequest = z.infer<typeof HolderSetThemeRequest>;
 
+/**
+ * Whether a character is a C0 or C1 control or DEL: a key, such as Enter, or the start of a
+ * sequence, not text. Every one is a single UTF-16 unit.
+ */
+const hasControl = (text: string) => {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+};
+
+/**
+ * Types `text` into the child as a paste, without Enter, only if the program would read it as
+ * text now; the holder decides, in one turn, with nothing read from any connection between its
+ * checks and the queueing. Marked with the bracketed-paste sequences when `brackets` is true or
+ * the program has turned bracketed paste (mode 2004) on; unmarked, it may arrive as keys, so it
+ * must then be printable ASCII. Text holding a control character is refused: a newline would be
+ * Enter, and an ESC could end the marked paste early. Needs no writer slot: it is taken only when
+ * no input waits for the child, so it never lands inside a writer's frame.
+ *
+ * Answered, in this order: `stale-generation` when `generation` isn't the current child's;
+ * `exited` when the child has exited; `not-ready` when the program wouldn't read it as text (its
+ * input waits unread, or it reads in canonical mode, or another group holds the terminal's
+ * foreground); `unavailable` when unmarked and the holder's engine has failed for good, so the
+ * mode is unknown; else `ok`, with the text queued ahead of any input read after it. No refusal
+ * types any of it, and none quotes it. Since 1.3.
+ */
+export const HolderPasteRequest = z
+  .object({
+    generation: Count,
+    text: wellFormed()
+      .refine((text) => !hasControl(text), "a control character")
+      .describe(
+        "No C0 or C1 control or DEL; with `brackets` false, printable ASCII (0x20-0x7e) only.",
+      ),
+    brackets: z.boolean(),
+  })
+  .refine(
+    ({ text, brackets }) => brackets || /^[\x20-\x7e]*$/u.test(text),
+    "unmarked text beyond printable ASCII",
+  );
+export type HolderPasteRequest = z.infer<typeof HolderPasteRequest>;
+
 export const HolderHelloReply = z.object({
   /** The version agreed on, in which both sides speak from here on. */
   version: ProtocolVersion,
@@ -404,6 +448,7 @@ export const HolderRequestName = z.enum([
   "respawn",
   "set-tags",
   "set-theme",
+  "paste",
 ]);
 export type HolderRequestName = z.infer<typeof HolderRequestName>;
 
@@ -414,7 +459,8 @@ export type HolderRequestName = z.infer<typeof HolderRequestName>;
  *
  * Every request gets one answer under its id, except `input`, which gets one only when refused:
  * - `hello`, `snapshot`, `stats`, `foreground`: their own reply, or `error`;
- * - `subscribe`, `resize`, `signal`, `respawn`, `set-tags`, `set-theme`: `ok`, or `error`;
+ * - `subscribe`, `resize`, `signal`, `respawn`, `set-tags`, `set-theme`, `paste`: `ok`, or
+ *   `error`;
  * - `input`: nothing, or `error` (`not-writer`, `input-full`, `exited`);
  * - `close`: `ok`; then the holder hangs up the child's process group, kills it if it outlives a
  *   grace period, removes its socket and exits, ending every connection.
@@ -432,6 +478,7 @@ export const HOLDER_REQUEST_CODES = {
   respawn: 0x45,
   "set-tags": 0x46,
   "set-theme": 0x47,
+  paste: 0x48,
 } as const satisfies Record<HolderRequestName, number>;
 
 /** The `request` of `ok` and `error` names the request answered, for logs: its id says which. */
@@ -471,8 +518,13 @@ export const HOLDER_ERROR_CODES = [
   "failed",
   /** The request needs the child to have exited, and it still runs: a `respawn`. */
   "running",
-  /** The holder's terminal engine has failed for good, so it has no screen: a `snapshot`. */
+  /**
+   * The holder's terminal engine has failed for good, so it has no screen: a `snapshot`, or an
+   * unmarked `paste`, which needs to know whether the program asked for bracketed paste.
+   */
   "unavailable",
+  /** A `paste` the program wouldn't read as text now; the message says which check failed. */
+  "not-ready",
 ] as const;
 
 export const HolderError = z.object({

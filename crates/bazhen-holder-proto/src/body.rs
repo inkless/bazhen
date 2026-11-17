@@ -666,6 +666,77 @@ pub struct SetThemeRequest {
     pub theme: Option<Theme>,
 }
 
+/// Types text into the child as a paste, only if the program would read it as text now: see
+/// `HolderPasteRequest` in `holder.ts` for the answers and their order. The text holds no C0 or
+/// C1 control or DEL, and, unless marked with `brackets`, nothing beyond printable ASCII. Why a
+/// text is refused never quotes it. Since 1.3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "PasteFields", into = "PasteFields")]
+pub struct PasteRequest(PasteFields);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PasteFields {
+    generation: Generation,
+    text: String,
+    brackets: bool,
+}
+
+impl PasteRequest {
+    /// # Errors
+    ///
+    /// When `text` holds a control, or is unmarked and holds anything beyond printable ASCII.
+    pub fn new(
+        generation: Generation,
+        text: impl Into<String>,
+        brackets: bool,
+    ) -> Result<Self, Invalid> {
+        let text = text.into();
+        if text
+            .chars()
+            .any(|c| c < ' ' || ('\u{7f}'..='\u{9f}').contains(&c))
+        {
+            return Err(Invalid("the text holds a control character".to_owned()));
+        }
+        if !brackets && !text.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
+            return Err(Invalid(
+                "unmarked text holds more than printable ASCII".to_owned(),
+            ));
+        }
+        Ok(Self(PasteFields {
+            generation,
+            text,
+            brackets,
+        }))
+    }
+
+    pub const fn generation(&self) -> Generation {
+        self.0.generation
+    }
+
+    pub fn text(&self) -> &str {
+        &self.0.text
+    }
+
+    /// Marked with the bracketed-paste sequences whether or not the program asked.
+    pub const fn brackets(&self) -> bool {
+        self.0.brackets
+    }
+}
+
+impl TryFrom<PasteFields> for PasteRequest {
+    type Error = Invalid;
+
+    fn try_from(fields: PasteFields) -> Result<Self, Invalid> {
+        Self::new(fields.generation, fields.text, fields.brackets)
+    }
+}
+
+impl From<PasteRequest> for PasteFields {
+    fn from(paste: PasteRequest) -> Self {
+        paste.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelloReply {
@@ -819,12 +890,15 @@ pub enum ErrorCode {
     Failed,
     /// The request needs the child to have exited, and it still runs: a `respawn`.
     Running,
-    /// The holder's terminal engine has failed for good, so it has no screen: a `snapshot`.
+    /// The holder's terminal engine has failed for good, so it has no screen: a `snapshot`, or an
+    /// unmarked `paste`, which needs to know whether the program asked for bracketed paste.
     Unavailable,
+    /// A `paste` the program wouldn't read as text now; the message says which check failed.
+    NotReady,
 }
 
 impl ErrorCode {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::UnknownRequest,
         Self::StaleGeneration,
         Self::OutOfRange,
@@ -837,6 +911,7 @@ impl ErrorCode {
         Self::Failed,
         Self::Running,
         Self::Unavailable,
+        Self::NotReady,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -853,6 +928,7 @@ impl ErrorCode {
             Self::Failed => "failed",
             Self::Running => "running",
             Self::Unavailable => "unavailable",
+            Self::NotReady => "not-ready",
         }
     }
 }
@@ -918,6 +994,41 @@ mod tests {
             None
         );
         assert!(read::<SetThemeRequest>(json!({})).is_err());
+    }
+
+    #[test]
+    fn a_paste_takes_text_but_never_a_key_and_unmarked_only_printable_ascii() {
+        let paste = |text: &str, brackets| {
+            read::<PasteRequest>(json!({ "generation": 0, "text": text, "brackets": brackets }))
+                .map(|paste| paste.text().to_owned())
+                .map_err(|e| e.to_string())
+        };
+        assert_eq!(
+            [
+                paste("echo 你好 Å", true),
+                paste(" !~ $HOME", false),
+                paste("make\r", true),
+                paste("a\u{1b}[201~", true),
+                paste("a\u{7f}", true),
+                paste("\u{9b}2J", true),
+                paste("echo Å", false),
+            ]
+            .map(|read| read.map_err(|e| e
+                .split(" at line")
+                .next()
+                .unwrap_or_default()
+                .to_owned())),
+            [
+                Ok("echo 你好 Å".to_owned()),
+                Ok(" !~ $HOME".to_owned()),
+                Err("the text holds a control character".to_owned()),
+                Err("the text holds a control character".to_owned()),
+                Err("the text holds a control character".to_owned()),
+                Err("the text holds a control character".to_owned()),
+                Err("unmarked text holds more than printable ASCII".to_owned()),
+            ]
+        );
+        assert!(read::<PasteRequest>(json!({ "generation": 0, "text": "make" })).is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@ import {
   HolderRespawned,
   HolderHelloReply,
   HolderHelloRequest,
+  HolderPasteRequest,
   HolderSetThemeRequest,
   HolderSignalRequest,
   HolderSpawnSpec,
@@ -232,6 +233,33 @@ const broken: [string, z.ZodType, unknown, unknown][] = [
     { signal: "SIGSTOP" },
   ],
   ["a theme left out instead of null", HolderSetThemeRequest, { theme: null }, {}],
+  ...(
+    [
+      ["a paste of Enter", "make\r", true],
+      ["a paste of a newline", "make\n", true],
+      ["a paste of an ESC, which could end the marked paste", "a\u001b[201~b", true],
+      ["a paste of DEL", "a\u007f", true],
+      ["a paste of a C1 control", "\u009b2J", true],
+      ["an unmarked paste beyond printable ASCII", "echo Å", false],
+    ] as const
+  ).map(([name, text, brackets]): [string, z.ZodType, unknown, unknown] => [
+    name,
+    HolderPasteRequest,
+    { generation: 0, text: "make", brackets },
+    { generation: 0, text, brackets },
+  ]),
+  [
+    "a paste that doesn't say whether to mark it",
+    HolderPasteRequest,
+    { generation: 0, text: "make", brackets: false },
+    { generation: 0, text: "make" },
+  ],
+  [
+    "a paste of no generation",
+    HolderPasteRequest,
+    { generation: 0, text: "make", brackets: false },
+    { text: "make", brackets: false },
+  ],
   [
     "an error without a code",
     HolderError,
@@ -305,6 +333,15 @@ describe("holder/1 schemas", () => {
     });
   });
 
+  it("take a marked paste of any text but controls, and an unmarked one of printable ASCII", () => {
+    const marked = { generation: 2, text: "echo 你好 Å 👋", brackets: true };
+    const unmarked = { generation: 2, text: ` !"#~ $HOME 'a  b' \\`, brackets: false };
+    expect([HolderPasteRequest.parse(marked), HolderPasteRequest.parse(unmarked)]).toEqual([
+      marked,
+      unmarked,
+    ]);
+  });
+
   it("give a spawn spec without a history depth the default one", () => {
     const { historyLines: _, ...spec } = HolderSpawnSpec.parse(spawnSpec);
     expect(HolderSpawnSpec.parse(spec).historyLines).toBe(HISTORY_LINES);
@@ -326,6 +363,7 @@ describe("holder error codes", () => {
       "failed",
       "running",
       "unavailable",
+      "not-ready",
     ]);
   });
 });

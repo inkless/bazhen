@@ -15,6 +15,7 @@ import {
   HolderHelloReplyFrozen,
   HolderHelloRequest,
   HolderOk,
+  HolderPasteRequest,
   HolderProcessSpec,
   type HolderReplyName,
   type HolderRequestName,
@@ -66,6 +67,7 @@ interface RequestFields {
   respawn: Body<HolderProcessSpec>;
   "set-tags": Body<HolderSetTagsRequest>;
   "set-theme": Body<HolderSetThemeRequest>;
+  paste: Body<HolderPasteRequest>;
 }
 
 interface ReplyFields {
@@ -315,6 +317,7 @@ const REQUESTS: { readonly [K in HolderRequestName]: Codec<RequestFields[K]> } =
   respawn: json(HolderProcessSpec),
   "set-tags": json(HolderSetTagsRequest),
   "set-theme": json(HolderSetThemeRequest),
+  paste: json(HolderPasteRequest),
 };
 
 const REPLIES: { readonly [K in HolderReplyName]: Codec<ReplyFields[K]> } = {

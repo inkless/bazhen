@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use bazhen_holder_engine::TooLarge;
 use bazhen_holder_proto::body::{
     self, Alternate, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest,
-    Offset, OkBody, ProcessSpec, ProtocolVersion, Resized, Respawned, Size, StartTime, Stats,
-    SubscribeFrom, Tags, TerminalId, Title, Versions,
+    Offset, OkBody, PasteRequest, ProcessSpec, ProtocolVersion, Resized, Respawned, Size,
+    StartTime, Stats, SubscribeFrom, Tags, TerminalId, Title, Versions,
 };
 use bazhen_holder_proto::{
     MOST_SNAPSHOT_TEXT, PROTOCOL_VERSION, Reply, Request, RequestId, SNAPSHOT_HEAD, SnapshotFrame,
@@ -818,6 +818,7 @@ fn answer(
             Ok(body) => send(conn, &Reply::Foreground { id, body }),
             Err((code, why)) => refuse(conn, id, "foreground", code, why),
         },
+        Request::Paste { id, body } => paste(conn, holder, id, &body),
         Request::Close { id } => {
             ok(conn, id, "close");
             shared.close_requested = true;
@@ -967,6 +968,19 @@ fn input(
             let why = "the program isn't reading its input: input is refused until the queue \
                        drains";
             refuse(conn, id, "input", ErrorCode::InputFull, why);
+        }
+    }
+}
+
+/// Types a paste if the program would read it as text now (`Holder::paste`), deciding the marks
+/// from the engine's bracketed-paste mode in the same turn.
+fn paste(conn: &mut Connection, holder: &mut Holder<Screen>, id: RequestId, body: &PasteRequest) {
+    let bracketed = holder.output_mut().engine_mut().bracketed_paste();
+    match holder.paste(body.generation(), body.text(), body.brackets(), bracketed) {
+        Ok(()) => ok(conn, id, "paste"),
+        Err(refused) => {
+            let (code, why) = refused.answer();
+            refuse(conn, id, "paste", code, why);
         }
     }
 }

@@ -242,6 +242,21 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
   request("set-tags to none", { type: "set-tags", id: 19, body: { tags: {} } }),
   request("set-theme dark", { type: "set-theme", id: 20, body: { theme: "dark" } }),
   request("set-theme none", { type: "set-theme", id: 21, body: { theme: null } }),
+  request("paste, marked, beyond ASCII", {
+    type: "paste",
+    id: 74,
+    body: { generation: 3, text: "echo 你好 'a  b' Å", brackets: true },
+  }),
+  request("paste, unmarked unless asked, printable ASCII", {
+    type: "paste",
+    id: 75,
+    body: { generation: 0, text: ` !"#$%&'()*+,-./09:;<=>?@AZ[\\]^_\`az{|}~`, brackets: false },
+  }),
+  request("paste of nothing", {
+    type: "paste",
+    id: 76,
+    body: { generation: 0, text: "", brackets: false },
+  }),
 
   inbound("unknown request with a reply of its own", "unknown", rawRequest(0x05, 22, "{}")),
   inbound("unknown request without one", "unknown", rawRequest(0x7f, 23, "")),
@@ -451,6 +466,36 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     "malformed",
     rawRequest(req["set-theme"], 65, "{}"),
   ),
+  ...(
+    [
+      ["paste of Enter", "make\r", true],
+      ["paste of an ESC", "a\u001b[201~b", true],
+      ["paste of DEL", "a\u007f", true],
+      ["paste of a C1 control", "\u009b2J", true],
+      ["paste unmarked beyond ASCII", "echo Å", false],
+    ] as const
+  ).map(([name, text, brackets], i) =>
+    inbound(
+      name,
+      "malformed",
+      rawRequest(req.paste, 77 + i, JSON.stringify({ generation: 0, text, brackets })),
+    ),
+  ),
+  inbound(
+    "paste without brackets",
+    "malformed",
+    rawRequest(req.paste, 82, '{"generation":0,"text":"make"}'),
+  ),
+  inbound(
+    "paste with brackets null, as a boolean is never null",
+    "malformed",
+    rawRequest(req.paste, 83, '{"generation":0,"text":"make","brackets":null}'),
+  ),
+  inbound(
+    "paste with fields from a later minor",
+    "valid",
+    rawRequest(req.paste, 84, '{"generation":0,"text":"make","brackets":true,"later":1}'),
+  ),
 ];
 
 const REPLY_SOURCES: readonly FrameSource[] = [
@@ -640,6 +685,7 @@ const BODY: Record<Direction, Record<string, { at: number; json: boolean }>> = {
     respawn: { at: 4, json: true },
     "set-tags": { at: 4, json: true },
     "set-theme": { at: 4, json: true },
+    paste: { at: 4, json: true },
   },
   reply: {
     hello: { at: 4, json: true },
