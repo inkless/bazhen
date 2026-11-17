@@ -97,9 +97,9 @@ pub(crate) const SHELLS_USAGE: &str = "usage:
   bazhen shells list [--all] [--json]
   bazhen shells open [<agent> | --dir <dir>] [--json]
   bazhen shells close <shell> [--confirm-busy] [--force] [--json]
-shells list shows the shells not closed, --all every one. A shell opens beside <agent>, in its
-directory, else in --dir, else where it runs. <shell> is a shell's id, or a name one open shell
-has. close --confirm-busy ends what runs in it; --force records closed a shell whose server can't
+shells list shows the shells neither closed nor failed, --all every one. A shell opens beside
+<agent>, in its directory, else in --dir, else where it runs. <shell> is a shell's id, or a name
+one open shell has, in any case. close --confirm-busy ends what runs in it; --force records closed a shell whose server can't
 be shown gone.";
 
 const DAEMON_USAGE: &str = concat!(

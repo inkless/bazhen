@@ -292,9 +292,9 @@ The verbs the web client's agent controls use, for a terminal or a script:
 | `bazhen respawn <agent>`                                           | Start an exited agent again, on its harness session                               |
 | `bazhen relaunch <agent> [--fresh]`                                | Start a lost agent again on a new terminal; `--fresh` if its session can't resume |
 | `bazhen signal <agent> INT\|TERM\|HUP\|KILL`                       | Send its process a signal, named with or without `SIG`                            |
-| `bazhen shells list [--all]`                                       | The shells not closed, or with `--all` every one                                  |
+| `bazhen shells list [--all]`                                       | The shells neither closed nor failed, or with `--all` every one                   |
 | `bazhen shells open [<agent> \| --dir …]`                          | A shell beside an agent, in its directory, else in `--dir` or where it runs       |
-| `bazhen shells close <shell> [--confirm-busy] [--force]`           | Close a shell, named by its id or a name one open shell has                       |
+| `bazhen shells close <shell> [--confirm-busy] [--force]`           | Close a shell, named by its id or a name one open shell has, in any case          |
 
 All but `shells list`, which only reads, are yours alone: the daemon refuses them to an agent, and
 the CLI prints its refusal. A command acts on the agent or shell as `/v1/state` shows it at that

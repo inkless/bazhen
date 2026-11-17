@@ -53,6 +53,19 @@ describe("bazhen shells list", () => {
     });
   });
 
+  it("names the agent a shell is beside by its id when it has no name", async () => {
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [agent(OTHER, "")],
+        shells: [shell(SH1, { linkedAgentId: OTHER })],
+      }),
+    );
+    const ran = await s.bazhen(["shells", "list"]);
+    expect(ran.stdout).toBe(`${SH1}  running  beside ${OTHER}  /work\n`);
+  });
+
   it("lists closed and failed shells too with --all, and says when there are none", async () => {
     holding([gone, failed]);
     const all = await s.bazhen(["shells", "list", "--all"]);
@@ -162,6 +175,27 @@ describe("bazhen shells close", () => {
     await s.bazhen(["shells", "close", "build"]);
     expect(s.daemon.received.filter((r) => r.method === "POST").map((r) => r.path)).toEqual([
       `/v1/shells/${SH2}/close`,
+    ]);
+  });
+
+  it("takes a shell's name in any case, and refuses one two open shells have in different cases", async () => {
+    holding([
+      shell(SH1, { name: "build" }),
+      shell(SH2, { name: "logs" }),
+      shell(SH3, { name: "Logs" }),
+    ]);
+    const folded = await s.bazhen(["shells", "close", "BUILD"]);
+    const two = await s.bazhen(["shells", "close", "logs"]);
+    expect([folded.stdout, two]).toEqual([
+      `closed build (${SH1})\n`,
+      {
+        code: 1,
+        stdout: "",
+        stderr: `2 open shells are named logs: name one by its id, ${SH2} or ${SH3}\n`,
+      },
+    ]);
+    expect(s.daemon.received.filter((r) => r.method === "POST").map((r) => r.path)).toEqual([
+      `/v1/shells/${SH1}/close`,
     ]);
   });
 

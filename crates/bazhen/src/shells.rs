@@ -61,8 +61,11 @@ fn list(p: &Parsed, daemon: &Daemon) -> Step<String> {
 /// A shell on one line: its name, id and state, the agent it's beside, what runs in it, where.
 fn line(state: &StateSnapshot, shell: &Shell) -> String {
     let beside = shell.linked_agent_id.as_ref().map(|id| {
-        let agent = state.agents.iter().find(|a| &a.id == id);
-        let name = agent.map_or(id.as_str(), |a| a.name.as_str());
+        let named = state
+            .agents
+            .iter()
+            .find(|a| &a.id == id && !a.name.is_empty());
+        let name = named.map_or(id.as_str(), |a| a.name.as_str());
         format!("beside {}", printable(name))
     });
     let fields = [
@@ -146,8 +149,8 @@ fn close(p: &Parsed, daemon: &Daemon) -> Step<String> {
     })
 }
 
-/// The shell `given` names: by its id, else by a name only one open shell has, as shells' names
-/// needn't differ.
+/// The shell `given` names: by its id, else by a name only one open shell has, ignoring ASCII case
+/// as an agent's name is matched, since shells' names needn't differ.
 fn shell_named<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Shell> {
     if let Some(shell) = state.shells.iter().find(|s| s.id.as_str() == given) {
         return Ok(shell);
@@ -155,7 +158,12 @@ fn shell_named<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Shell> {
     let named: Vec<&Shell> = state
         .shells
         .iter()
-        .filter(|s| !s.state.ended() && s.name.as_deref() == Some(given))
+        .filter(|s| {
+            !s.state.ended()
+                && s.name
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(given))
+        })
         .collect();
     match named.as_slice() {
         [one] => Ok(one),
