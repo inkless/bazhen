@@ -99,6 +99,17 @@ describe("a daemon that isn't running", () => {
     expect(ran).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
+
+  it("exits 3 when it holds its answer on who is calling, rather than taking the caller for the human", async () => {
+    s.daemon.hang("GET /v1/caller");
+    const begun = Date.now();
+    const ran = await s.bazhen(["whoami"]);
+    expect([ran, s.daemon.routes()]).toEqual([
+      { code: 3, stdout: "", stderr: NOT_RUNNING },
+      ["GET /v1/caller"],
+    ]);
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
+  });
 });
 
 describe("a daemon that refuses", () => {
@@ -135,9 +146,13 @@ describe("a daemon that refuses", () => {
     ]);
   });
 
-  it("exits 1 on a route the daemon doesn't have, which it answers in plain text", async () => {
-    const ran = await s.bazhen(["roles"]);
-    expect(ran).toEqual({ code: 1, stdout: "", stderr: "/v1/roles: HTTP 404: 404 Not Found\n" });
+  it("exits 1 on a route the daemon doesn't have, which it answers in plain text, saying to restart it", async () => {
+    const roles = await s.bazhen(["roles"]);
+    const caller = await s.bazhen(["whoami"]);
+    expect([roles, caller]).toEqual([
+      { code: 1, stdout: "", stderr: `/v1/roles: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
+      { code: 1, stdout: "", stderr: `/v1/caller: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
+    ]);
   });
 
   it("exits 1 on an answer this CLI can't read, as from a daemon of another build", async () => {

@@ -110,8 +110,9 @@ impl Daemon {
         })?;
         decode(&response, LIMITS).map_err(|e| match e {
             Unread::Garbled => Failed::NotRunning,
-            // A refusal is read by its caller; a success this build can't read came from another.
-            Unread::Refused { status, body } if status < 300 => {
+            // A refusal is read by its caller; a success this build can't read, or a route the
+            // daemon doesn't have, came from another.
+            Unread::Refused { status, body } if status < 300 || no_such_route(status, &body) => {
                 Failed::Refused(format!("{path}: HTTP {status}: {body}\n{ANOTHER_BUILD}"))
             }
             Unread::Refused { status, body } => {
@@ -131,6 +132,13 @@ impl Daemon {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Whether a refusal is the daemon's answer to a route it doesn't have. It refuses a request on a
+/// route it has with a JSON error, as a 404 for an unknown task; a route it lacks gets a 404 in
+/// plain text.
+fn no_such_route(status: u16, body: &str) -> bool {
+    status == 404 && serde_json::from_str::<serde::de::IgnoredAny>(body).is_err()
 }
 
 /// The variable a request header comes from.
