@@ -32,7 +32,10 @@ const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
 const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TEST = "packages/a/src/x.test.ts";
-const CONTROL = "Control: return v = 1 -> caps failed: expected 2, got 1";
+const CONTROL = `Control: ${TEST} › caps: return v = 1 -> expected 2, got 1`;
+
+/** A test call whose title falsify can't read, split so this file's own line isn't one. */
+const UNREADABLE = ["it", "(name, () => {});"].join("");
 
 const STUB_PNPM = `#!/bin/sh
 {
@@ -467,13 +470,36 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
-  it("fails on an INVALID test until a commit on the branch records a control", () => {
+  it("fails on an INVALID test until a commit on the branch records a control naming it", () => {
     const before = againstBase({ STUB_STATUS: "skipped" });
+    const another = `Control: ${TEST} › caps twice: return v = 1 -> expected 2, got 1`;
+    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: another", "-m", another);
+    const namingAnother = againstBase({ STUB_STATUS: "skipped" }).status;
     git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
     git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "chore: later");
-    expect({ before, after: againstBase({ STUB_STATUS: "skipped" }).status }).toEqual({
-      before: { status: 1, output: expect.stringContaining("INVALID") },
+    expect({
+      before,
+      namingAnother,
+      after: againstBase({ STUB_STATUS: "skipped" }).status,
+    }).toEqual({
+      before: {
+        status: 1,
+        output: expect.stringContaining(
+          `\n  Control: ${TEST} › caps: <what you broke> -> <how it failed>\n`,
+        ),
+      },
+      namingAnother: 1,
       after: 0,
+    });
+  });
+
+  it("takes a control for another new test in the file as none for one whose title it couldn't read", () => {
+    renameTest(branchTest(`${UNREADABLE}\n`), CONTROL);
+    expect(againstBase()).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `\n  Control: ${TEST} › <the test's title>: <what you broke> -> <how it failed>\n`,
+      ),
     });
   });
 
@@ -634,17 +660,23 @@ describe("falsify on a branch that changes a script", () => {
   it("asks a control for a passing test that imports no script the branch changed", () => {
     const unrelated = { path: "scripts/y.test.ts", text: branchTest("") };
     const before = changeScript(SCRIPT, unrelated, { STUB_STATUS: "passed" });
+    const base = git(fx.linked, "rev-parse", "HEAD~1").trim();
+    const again = () =>
+      falsify(["--base", base], {
+        STUB_SOURCE: SCRIPT,
+        STUB_TEST: unrelated.path,
+        STUB_STATUS: "passed",
+      }).status;
     git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
-    const after = falsify(["--base", git(fx.linked, "rev-parse", "HEAD~2").trim()], {
-      STUB_SOURCE: SCRIPT,
-      STUB_TEST: unrelated.path,
-      STUB_STATUS: "passed",
-    });
-    expect({ before, after: after.status }).toEqual({
+    const namingAnotherFile = again();
+    const naming = `Control: ${unrelated.path} › caps: return s = 1 -> expected 2, got 1`;
+    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", naming);
+    expect({ before, namingAnotherFile, after: again() }).toEqual({
       before: {
         status: 1,
         output: expect.stringContaining("(passed; unrelated to the source change)"),
       },
+      namingAnotherFile: 1,
       after: 0,
     });
   });

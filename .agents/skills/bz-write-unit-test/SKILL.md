@@ -27,8 +27,9 @@ check rejects a pull request whose new test passes without your change.
    against the source at the branch's base, as CI does on the pull request:
    - **SURVIVED** — the test doesn't depend on your change. Fix the assertion.
    - **INVALID** (a brand-new function) — break your code by hand, confirm the test fails on its
-     assertion, restore the code, and record a trailer in a commit on the branch:
-     `Control: <what you broke> -> <how the test failed>`.
+     assertion, restore the code, and record a trailer in a commit on the branch naming the
+     test, one per INVALID test, as falsify prints the line it needs:
+     `Control: <file> › <title>: <what you broke> -> <how the test failed>`.
 
 ## Checklist
 
