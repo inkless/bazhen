@@ -35,8 +35,11 @@ export interface ContractHarness {
   forge(ref: RuntimeRef): RuntimeRef;
   /** Where the runtime runs a terminal's process, for one that reuses it across a respawn. */
   placeOf(ref: RuntimeRef): string | undefined;
-  /** False for a runtime that refuses every paste, having no gate to check the program first. */
-  readonly pastes?: boolean;
+  /**
+   * A program that reads a paste as text once its output holds `ready`, for a runtime whose gate
+   * checks the program first; `cat`, with nothing to wait for, where none is given.
+   */
+  readonly pasteReader?: { readonly argv: readonly [string, ...string[]]; readonly ready: string };
   /** Whether it may never learn how a process ended, and call the cause unknown, as tmux 3.4 may. */
   readonly exitMayBeUnknown: boolean;
   /** Where the terminals' programs run. */
@@ -126,6 +129,19 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
     generation: 0,
     historyLines,
   });
+
+  /** A terminal running the harness's paste reader, once it reads, and what it has shown. */
+  async function pasteReader(runtime: RuntimeAdapter) {
+    const reader = harness.pasteReader ?? { argv: ["cat"] as const, ready: "" };
+    const ref = await runtime.create(spec(reader.argv));
+    const attached = await runtime.attach(ref, { cols: 100, rows: 30 });
+    onTestFinished(() => attached.stream.close());
+    // What the reader printed before the attach is on the screen a snapshot rebuilds.
+    let seen = attached.kind === "snapshot" ? decode(attached.vt) : "";
+    attached.stream.onData((bytes) => (seen += decode(bytes)));
+    await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(reader.ready);
+    return { ref, seen: () => seen.slice(seen.indexOf(reader.ready) + reader.ready.length) };
+  }
 
   /** The cause the runtime gives, or, where it may not learn it, unknown. */
   const causes = (status: ExitStatus) =>
@@ -223,56 +239,34 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       expect([entry?.tags, entry?.exit]).toEqual([{ kind: "shell" }, null]);
     });
 
-    it.skipIf(harness.pastes === false)(
-      "pastes text into a terminal's process exactly, and never presses Enter",
-      async () => {
-        const runtime = fresh();
-        const ref = await runtime.create(spec(["cat"]));
-        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 });
-        onTestFinished(() => stream.close());
-        let seen = "";
-        stream.onData((bytes) => (seen += decode(bytes)));
-        const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\`;
-        await runtime.paste(ref, text, false);
-        await expect.poll(() => seen, { timeout: harness.waitMs }).toContain(text);
-        // `cat` prints a line back once it ends: with no Enter, it is only ever seen echoed, once.
-        await delay(300);
-        // And `cat` never asked for bracketed paste, so the paste isn't marked.
-        expect([seen.split(text).length - 1, seen.includes("[200~")]).toEqual([1, false]);
-      },
-    );
+    it("pastes text into a terminal's process exactly, and never presses Enter", async () => {
+      const runtime = fresh();
+      const { ref, seen } = await pasteReader(runtime);
+      const text = `echo "$HOME" 'a  b'; #{pane_id} ~ \\`;
+      await runtime.paste(ref, text, false);
+      await expect.poll(seen, { timeout: harness.waitMs }).toContain(text);
+      // A reader of lines prints one back once it ends: with no Enter, the text is only ever seen
+      // once, and nothing ends the line after it.
+      await delay(300);
+      // And the reader never asked for bracketed paste, so the paste isn't marked.
+      const shown = seen();
+      expect([
+        shown.split(text).length - 1,
+        shown.includes(`${text}\r`),
+        shown.includes(`${text}\n`),
+        shown.includes("[200~"),
+      ]).toEqual([1, false, false, false]);
+    });
 
-    it.skipIf(harness.pastes === false)(
-      "marks a paste with the bracketed-paste sequences when asked, whatever the program asked",
-      async () => {
-        const runtime = fresh();
-        const ref = await runtime.create(spec(["cat"]));
-        const { stream } = await runtime.attach(ref, { cols: 100, rows: 30 });
-        onTestFinished(() => stream.close());
-        let seen = "";
-        stream.onData((bytes) => (seen += decode(bytes)));
-        await runtime.paste(ref, "echo marked 你好", true);
-        // As the terminal echoes them: ESC is shown as ^[ where the terminal echoes controls so.
-        const marked = () =>
-          ["\u001b", "^["].some((esc) => seen.includes(`[200~echo marked 你好${esc}[201~`));
-        await expect.poll(marked, { timeout: harness.waitMs }).toBe(true);
-      },
-    );
-
-    it.runIf(harness.pastes === false)(
-      "refuses a paste of text it would otherwise take, as it has no gate to check first",
-      async () => {
-        const runtime = fresh();
-        const ref = await runtime.create(spec(["cat"]));
-        // A PasteRefused, by name, as host-guard throws it: core can't import host-guard.
-        await expect(runtime.paste(ref, "make", true)).rejects.toMatchObject({
-          name: "PasteRefused",
-        });
-        await expect(runtime.paste(ref, "make", false)).rejects.toMatchObject({
-          name: "PasteRefused",
-        });
-      },
-    );
+    it("marks a paste with the bracketed-paste sequences when asked, whatever the program asked", async () => {
+      const runtime = fresh();
+      const { ref, seen } = await pasteReader(runtime);
+      await runtime.paste(ref, "echo marked 你好", true);
+      // As the terminal echoes them: ESC is shown as ^[ where the terminal echoes controls so.
+      const marked = () =>
+        ["\u001b", "^["].some((esc) => seen().includes(`[200~echo marked 你好${esc}[201~`));
+      await expect.poll(marked, { timeout: harness.waitMs }).toBe(true);
+    });
 
     it("refuses to paste a key, or into a process that has exited or been replaced", async () => {
       const runtime = fresh();

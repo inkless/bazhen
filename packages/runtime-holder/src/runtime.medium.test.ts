@@ -122,6 +122,14 @@ const answerAll =
     } else ok(holder, request);
   };
 
+/** Refuses each paste with the code its text names, and answers `ok` to everything else. */
+const refusingPastes: Handler = (holder, request) => {
+  if (request.type !== "paste") return ok(holder, request);
+  const code = request.body.text;
+  const message = `the gate said ${code}`;
+  holder.send({ type: "error", id: request.id, body: { request: "paste", code, message } });
+};
+
 /** The fake holders' ends of connections whose sockets have closed. */
 const hungUp = new WeakSet<FakeHolder>();
 
@@ -626,22 +634,6 @@ describe("HolderRuntime: refusing a ref that isn't the holder's process", () => 
     expect(fake.connections.flatMap((c) => c.requests)).toEqual([]);
   });
 
-  it("refuses every paste, after checking its text and ref, and sends the holder nothing", async () => {
-    const { runtime, ref, fake } = await made();
-    await expect(runtime.paste(ref, "make\r", true)).rejects.toBeInstanceOf(RangeError);
-    await expect(
-      runtime.paste(refWith(ref, { generation: "1" }), "make", false),
-    ).rejects.toMatchObject({
-      reason: "process-replaced",
-    });
-    await expect(runtime.paste(ref, "make", true)).rejects.toBeInstanceOf(PasteRefused);
-    expect(fake.connections.flatMap((c) => c.requests)).toEqual([]);
-    const exited = await made({ exit: { type: "exited", code: 0 } });
-    await expect(exited.runtime.paste(exited.ref, "make", false)).rejects.toBeInstanceOf(
-      ProcessState,
-    );
-  });
-
   it("signals a running process, and refuses one that has exited", async () => {
     const { runtime, ref, fake } = await made();
     await runtime.signal(ref, "SIGINT");
@@ -821,6 +813,57 @@ async function handAnswered(root: string) {
   };
   return { opened, answer };
 }
+
+describe("HolderRuntime: pasting through the holder's gate", () => {
+  it("pastes through the holder's gate, in the generation it greeted with", async () => {
+    const { runtime, ref, fake } = await made();
+    await runtime.paste(ref, "make 你好", true);
+    expect(fake.connections.flatMap((c) => c.requests)).toEqual([
+      expect.objectContaining({
+        type: "paste",
+        body: { generation: 0, text: "make 你好", brackets: true },
+      }),
+    ]);
+  });
+
+  it("refuses as the gate did: not ready or unknown as PasteRefused, stale or exited as for any verb", async () => {
+    const { runtime, terminals } = startingFakes(privateRoot(), {}, refusingPastes);
+    const ref = await runtime.create(spec());
+    const outcomes = await Promise.all(
+      ["not-ready", "unavailable", "stale-generation", "exited"].map((code) =>
+        runtime.paste(ref, code, false).catch((error: unknown) => error),
+      ),
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({ name: "PasteRefused", message: "the gate said not-ready" }),
+      expect.objectContaining({ name: "PasteRefused", message: "the gate said unavailable" }),
+      expect.objectContaining({ reason: "process-replaced" }),
+      expect.any(ProcessState),
+    ]);
+    expect(outcomes[0]).toBeInstanceOf(PasteRefused);
+    expect(terminals.get(ref.terminalId)!.connections.flatMap((c) => c.requests)).toHaveLength(4);
+  });
+
+  it("refuses every paste to a holder older than the gate, after checking its text and ref, and sends it nothing", async () => {
+    const { runtime, ref, fake } = await made({ version: "1.2", protocol: ["1.2"] });
+    await expect(runtime.paste(ref, "make\r", true)).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      runtime.paste(refWith(ref, { generation: "1" }), "make", false),
+    ).rejects.toMatchObject({
+      reason: "process-replaced",
+    });
+    await expect(runtime.paste(ref, "make", true)).rejects.toThrow(
+      new PasteRefused(
+        "this terminal's holder predates gated paste; restart the terminal to paste",
+      ),
+    );
+    expect(fake.connections.flatMap((c) => c.requests)).toEqual([]);
+    const exited = await made({ exit: { type: "exited", code: 0 } });
+    await expect(exited.runtime.paste(exited.ref, "make", false)).rejects.toBeInstanceOf(
+      ProcessState,
+    );
+  });
+});
 
 describe("HolderRuntime: watching agents' titles", () => {
   it("tells an agent's terminal, and never its title, as its watch opens and at each title its holder reports", async () => {

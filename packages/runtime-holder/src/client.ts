@@ -51,6 +51,8 @@ export class HolderRequestError extends Error {
   readonly code: HolderErrorCode;
   readonly rawCode: string;
   readonly request: string;
+  /** Why, as the holder said it. */
+  readonly reason: string;
   /** The holder's versions, sent with `no-shared-version`. */
   readonly protocol: readonly string[] | undefined;
 
@@ -60,6 +62,7 @@ export class HolderRequestError extends Error {
     this.code = isKnownCode(body.code) ? body.code : "failed";
     this.rawCode = body.code;
     this.request = body.request;
+    this.reason = body.message;
     this.protocol = body.protocol;
   }
 }
