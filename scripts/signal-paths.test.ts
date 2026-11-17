@@ -579,7 +579,7 @@ describe("starts the scan can't follow to a call", () => {
     ]);
   });
 
-  it("reads a member's, a field's or a key's name as no mention, after any modifier", () => {
+  it("reads a member's, a field's or a key's name as no mention, but a shorthand key as one", () => {
     expect(
       at([
         "interface Seams {",
@@ -596,9 +596,10 @@ describe("starts the scan can't follow to a call", () => {
         "const names = {",
         "  cp: 1,",
         "  ns: 2,",
+        "  execFile,",
         "};",
       ]),
-    ).toEqual([]);
+    ).toEqual([unfollowed(20, "execFile")]);
   });
 
   it("finds a start chosen by a conditional, or compared by a case, though a : follows it", () => {
@@ -730,9 +731,13 @@ describe("starts the scan can't follow to a call", () => {
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([3, 4]);
   });
 
-  it("finds nothing in a file that names a start it doesn't import", () => {
-    const source = ["const spawn = makeSpawner();", "register(spawn, { fork });"].join("\n");
-    expect(rawSignalCalls("a.ts", source)).toEqual([]);
+  it("finds only the starts a file imports, not a start's name it binds to something else", () => {
+    const source = [
+      'import { execFile } from "node:child_process";',
+      "const spawn = makeSpawner();",
+      "register(spawn, { fork }, execFile);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source)).toEqual([unfollowed(3, "execFile")]);
   });
 
   it("lets the lint rule name child_process as data where it's allowed, and nowhere else", () => {
