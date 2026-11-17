@@ -1,53 +1,71 @@
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { isConversationEntry } from "@bazhen/harness-claude-code";
 
 export interface TranscriptLimits {
   /** How much is read at a time. */
   readonly chunkBytes?: number;
-  /** How much of the file is read at most before the answer is no. */
+  /** How much of the file is read at most. */
   readonly limitBytes?: number;
 }
 
-const CHUNK_BYTES = 64 * 1024;
+const CHUNK_BYTES = 16 * 1024;
 /**
- * A session's first message is among its transcript's first few lines, in a resumed one too,
- * which appends; a respawn's check doesn't read on through a long transcript that shows none.
+ * A session's first entry is among its transcript's first few lines, in a resumed one too, which
+ * appends; each metadata line ahead of it is a few hundred bytes. A line still open here that is
+ * half this long is no metadata but an entry holding a large paste, such as an image.
  */
 const LIMIT_BYTES = 1024 * 1024;
 const NEWLINE = 0x0a;
 
+const codeOf = (err: unknown) =>
+  typeof err === "object" && err !== null ? Reflect.get(err, "code") : undefined;
+
 /**
- * Whether the Claude Code transcript at `path` holds a conversation `--resume` can load. A line
- * still without its newline may be mid-write and is not read; any read error is no.
+ * Reads whether the Claude Code transcript at a path holds a conversation `--resume` can load. A
+ * line still without its newline may be mid-write and is not judged, unless it runs on past the
+ * limit. A path that can't be read holds none; why is said once for each path, but for a file not
+ * there yet, which is how every session starts.
  */
-export function transcriptHoldsConversation(
-  path: string,
+export function transcriptReader(
+  warn: (message: string) => void,
   { chunkBytes = CHUNK_BYTES, limitBytes = LIMIT_BYTES }: TranscriptLimits = {},
-): boolean {
-  let fd: number;
-  try {
-    fd = openSync(path, "r");
-  } catch {
+): (path: string) => boolean {
+  const warned = new Set<string>();
+  const unreadable = (path: string, why: string) => {
+    if (warned.has(path)) return false;
+    warned.add(path);
+    warn(`the transcript ${path} can't be read, so its session isn't offered to resume: ${why}`);
     return false;
-  }
-  try {
-    const chunk = Buffer.alloc(chunkBytes);
-    let pending = Buffer.alloc(0);
-    for (let read = 0; read < limitBytes;) {
-      const n = readSync(fd, chunk, 0, Math.min(chunkBytes, limitBytes - read), read);
-      if (n === 0) return false;
-      read += n;
-      pending = Buffer.concat([pending, chunk.subarray(0, n)]);
-      let end: number;
-      while ((end = pending.indexOf(NEWLINE)) !== -1) {
-        if (isConversationEntry(pending.subarray(0, end).toString("utf8"))) return true;
-        pending = pending.subarray(end + 1);
-      }
+  };
+  return (path) => {
+    let fd: number;
+    try {
+      // The path is a hook's to name: a FIFO there mustn't block the daemon, nor a terminal
+      // become the controlling terminal of the session the daemon leads.
+      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
+    } catch (err) {
+      return codeOf(err) === "ENOENT" ? false : unreadable(path, String(err));
     }
-    return false;
-  } catch {
-    return false;
-  } finally {
-    closeSync(fd);
-  }
+    try {
+      if (!fstatSync(fd).isFile()) return unreadable(path, "it isn't a regular file");
+      const chunk = Buffer.allocUnsafe(chunkBytes);
+      let pending = Buffer.alloc(0);
+      for (let read = 0; read < limitBytes;) {
+        const n = readSync(fd, chunk, 0, Math.min(chunkBytes, limitBytes - read), read);
+        if (n === 0) return false;
+        read += n;
+        pending = Buffer.concat([pending, chunk.subarray(0, n)]);
+        let end: number;
+        while ((end = pending.indexOf(NEWLINE)) !== -1) {
+          if (isConversationEntry(pending.subarray(0, end).toString("utf8"))) return true;
+          pending = pending.subarray(end + 1);
+        }
+      }
+      return pending.length >= limitBytes / 2;
+    } catch (err) {
+      return unreadable(path, String(err));
+    } finally {
+      closeSync(fd);
+    }
+  };
 }

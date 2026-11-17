@@ -49,12 +49,11 @@ describe("a Claude Code agent respawned on its session", () => {
   it("comes back on the same session, and its next turn sends the model the conversation before", () =>
     daemon.explained(async () => {
       const launched = await killedAfterATurn("resumed", "Remember the word kestrel.");
-      // The daemon reads a transcript at most once per check window, so it can take a moment
-      // after the file holds the turn to offer the respawn, as a client is shown it.
-      await expect
-        .poll(async () => (await agentOf(launched.agentId))?.commands, { timeout: 10_000 })
-        .toContain("respawn");
-      const session = (await agentOf(launched.agentId))?.externalRef;
+      // Reads while the turn ran found no conversation yet. A client reads the agent again only
+      // on an event, the exit here, so that read must offer the respawn.
+      const exited = await agentOf(launched.agentId);
+      expect(exited?.commands).toContain("respawn");
+      const session = exited?.externalRef;
       const res = await respawn(launched.agentId, "respawn", 0);
       expect(res.status).toBe(200);
       expect(AgentCommandResponse.parse(res.body).eventIds).toHaveLength(2);

@@ -516,19 +516,37 @@ describe("Claude Code hooks", () => {
     ]).toEqual([true, false, false]);
   });
 
-  it("takes a transcript line for a message only by its own type, user or assistant", () => {
+  it("takes a transcript line for a conversation entry only by its own type", () => {
     expect(
       [
-        '{"type":"user","message":{"role":"user","content":"hi"}}',
+        '{"type":"user","isMeta":true,"message":{"role":"user","content":"<command-name>"}}',
         '{"type":"assistant","message":{"role":"assistant","content":[]}}',
+        '{"type":"attachment","attachment":{}}',
+        '{"type":"system","subtype":"local_command","content":"Kept model"}',
         '{"type":"mode","mode":"normal"}',
+        '{"type":"permission-mode","permissionMode":"default"}',
+        '{"type":"atis-latch","atis":""}',
         '{"type":"file-history-snapshot","snapshot":{}}',
-        '{"type":"system","message":{"type":"user"}}',
+        '{"type":"cost-state","snapshot":{"type":"user"}}',
         '"user"',
         "null",
         "{not json",
       ].map(isConversationEntry),
-    ).toEqual([true, true, false, false, false, false, false, false]);
+    ).toEqual([true, true, true, true, false, false, false, false, false, false, false, false]);
+  });
+
+  it("looks again at once at a transcript that held no conversation, as one written since would", () => {
+    let written = false;
+    const harness = new ClaudeCodeHarness({
+      newSessionId: () => "s",
+      hookCommand: "h",
+      holdsConversation: () => written,
+      now: () => 0,
+    });
+    const asks = () => harness.canResume({ transcript: "/c/s.jsonl" });
+    const before = asks();
+    written = true;
+    expect([before, asks()]).toEqual([false, true]);
   });
 
   it("looks at a transcript once per check window, and again once the window has passed", () => {

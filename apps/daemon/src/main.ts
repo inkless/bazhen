@@ -37,7 +37,7 @@ import { AgentQueue } from "./agents/queue.ts";
 import { reconcile } from "./agents/reconcile.ts";
 import { ServerWatch } from "./agents/server-watch.ts";
 import { statusLineChoice } from "./agents/status-line.ts";
-import { transcriptHoldsConversation } from "./agents/transcript.ts";
+import { transcriptReader } from "./agents/transcript.ts";
 import { codexApprovals } from "./codex/approvals.ts";
 import {
   allOf,
@@ -361,7 +361,7 @@ const environment = new LocalEnvironment({
     new ClaudeCodeHarness({
       newSessionId: randomUUID,
       hookCommand: hookCommand(hookPath),
-      holdsConversation: transcriptHoldsConversation,
+      holdsConversation: transcriptReader((message) => console.warn(`bazhen: ${message}`)),
       statusLine: (cwd) =>
         statusLineChoice(cwd, hostEnv["CLAUDE_CONFIG_DIR"] ?? join(inputs.home, ".claude")),
       // A mode every agent starts in, overriding the user's settings; unset by default.
