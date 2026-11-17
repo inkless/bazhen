@@ -201,6 +201,35 @@ async function lan(over: Partial<LanParts> = {}) {
   return { call, pair, stream, handshake, codes, devices, origin, port, server };
 }
 
+/**
+ * The status line an unpaired caller's upgrade to the listener on `port` gets, read over a TLS
+ * connection that never hangs up.
+ */
+function lingeringUpgrade(port: number) {
+  return new Promise<string>((resolve) => {
+    const socket = connect({
+      socket: tcpConnect({ host: "127.0.0.1", port, allowHalfOpen: true }),
+      servername: name,
+      ca: cert().cert,
+    });
+    cleanups.push(() => socket.destroy());
+    socket.on("error", () => {});
+    let received = "";
+    socket.on("data", (d: Buffer) => {
+      received += d.toString("latin1");
+      if (received.includes("\r\n")) resolve(received.split("\r\n")[0] ?? "");
+    });
+    const host = `${name}:${port}`;
+    socket.once("secureConnect", () =>
+      socket.write(
+        `GET /echo HTTP/1.1\r\nHost: ${host}\r\nOrigin: https://${host}\r\n` +
+          "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+      ),
+    );
+  });
+}
+
 describe("the LAN listener", () => {
   it("shows each pairing from its socket's address, and lets no paired device dismiss one", async () => {
     const { call, codes, origin } = await lan();
@@ -397,6 +426,19 @@ describe("the LAN listener", () => {
         timeout: 2_000,
         interval: 50,
         message: "127.0.0.1 never got its share back after its connection closed",
+      })
+      .toBe("handshake");
+  });
+
+  it("lets refused upgrades whose callers never hang up hold no share of the listener", async () => {
+    const { handshake, port } = await lan({ limits: { maxConnections: 2, maxPerPeer: 2 } });
+    const refusals = await Promise.all([lingeringUpgrade(port), lingeringUpgrade(port)]);
+    expect(refusals).toEqual(["HTTP/1.1 401 Unauthorized", "HTTP/1.1 401 Unauthorized"]);
+    await expect
+      .poll(() => handshake(), {
+        timeout: 2_000,
+        interval: 50,
+        message: "two refused callers that never hung up kept the next connection out",
       })
       .toBe("handshake");
   });

@@ -18,6 +18,7 @@ const REFUSAL_STATUS = {
 /**
  * A WebSocket endpoint: the path it serves, and what takes an upgrade the guard let through.
  * `device` is the paired device the upgrade came from, or null for a browser that never paired.
+ * A route refuses through `refuseUpgrade`, never a bare `socket.end`, which leaves the socket held.
  */
 export interface UpgradeRoute {
   readonly path: RegExp;

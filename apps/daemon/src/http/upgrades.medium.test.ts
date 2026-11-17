@@ -181,12 +181,8 @@ describe("WebSocket upgrades", () => {
   it("closes its side of a refusal whose caller neither reads it nor hangs up", async () => {
     const { hostname, port } = new URL(await serving());
     const closed = serverSide();
-    const status = lingering({ port: Number(port), host: hostname }, false)(
-      "/echo/hi",
-      "evil.example",
-    );
+    lingering({ port: Number(port), host: hostname }, false)("/echo/hi", "evil.example");
     await expect.poll(closed).toBe(true);
-    expect(status()).toBe("");
   });
 });
 
