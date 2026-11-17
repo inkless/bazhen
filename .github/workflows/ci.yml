@@ -59,6 +59,8 @@ jobs:
           tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # shellcheck is on the runner image, not on every developer's machine, so it runs here.
+      - run: pnpm lint:shell
       # The suites that signal processes they didn't start, which run only on a sandbox: this
       # runner, marked disposable above, or the test container. `pnpm check` leaves them out.
       - run: pnpm test:holder
