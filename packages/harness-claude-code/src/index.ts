@@ -20,8 +20,8 @@ export interface ClaudeCodeOptions {
    * none, leaving Claude Code's own (foundation-design §11.2).
    */
   readonly statusLine?: (cwd: string) => StatusLineChoice;
-  /** Whether a file is there, to tell a session with a conversation to resume from one without. */
-  readonly exists: (path: string) => boolean;
+  /** Whether a transcript holds a conversation `--resume` can load: an `isConversationEntry`. */
+  readonly holdsConversation: (path: string) => boolean;
   /** The time in ms, for how long a file's answer stands; the clock by default. */
   readonly now?: () => number;
 }
@@ -35,7 +35,24 @@ export interface UserStatusLine {
   readonly padding?: number;
 }
 
-/** How long a transcript's existence is taken as read before the file is looked at again. */
+/**
+ * Whether a line of a Claude Code transcript is a message, which `--resume` needs one of to load
+ * the session. Claude Code writes metadata lines ahead of a turn (`mode`, `permission-mode`,
+ * `file-history-snapshot`), and a transcript of only those is "No conversation found".
+ */
+export function isConversationEntry(line: string): boolean {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  const type: unknown =
+    typeof entry === "object" && entry !== null ? Reflect.get(entry, "type") : undefined;
+  return type === "user" || type === "assistant";
+}
+
+/** How long a transcript's answer is taken as read before the file is looked at again. */
 const TRANSCRIPT_CHECK_MS = 2_000;
 
 /**
@@ -44,8 +61,8 @@ const TRANSCRIPT_CHECK_MS = 2_000;
  * hooks with the launch, beside the user's own, so nothing is written to the user's settings.
  */
 export class ClaudeCodeHarness implements HarnessAdapter {
-  /** Each transcript asked about lately, and whether it was there: a snapshot asks per agent. */
-  private readonly checked = new Map<string, { exists: boolean; at: number }>();
+  /** Each transcript asked about lately, and its answer: a snapshot asks per agent. */
+  private readonly checked = new Map<string, { holds: boolean; at: number }>();
   readonly id = "claude-code";
   readonly themes = ["light", "dark"] as const;
   private readonly opts: ClaudeCodeOptions;
@@ -60,19 +77,20 @@ export class ClaudeCodeHarness implements HarnessAdapter {
   }
 
   /**
-   * `--resume` finds a session only once Claude Code has written its transcript, which a session
-   * killed before its first turn never has; its hooks name the file.
+   * `--resume` loads a session only once its transcript, which its hooks name, holds a message.
+   * A session killed before its first turn has no file, and one killed just after a turn ended
+   * can have only the metadata Claude Code writes ahead of the turn.
    */
   canResume({ transcript }: { readonly transcript: string | null }): boolean {
     if (transcript === null) return false;
     const now = (this.opts.now ?? Date.now)();
     const known = this.checked.get(transcript);
-    if (known !== undefined && now - known.at < TRANSCRIPT_CHECK_MS) return known.exists;
+    if (known !== undefined && now - known.at < TRANSCRIPT_CHECK_MS) return known.holds;
     for (const [path, { at }] of this.checked)
       if (now - at >= TRANSCRIPT_CHECK_MS) this.checked.delete(path);
-    const exists = this.opts.exists(transcript);
-    this.checked.set(transcript, { exists, at: now });
-    return exists;
+    const holds = this.opts.holdsConversation(transcript);
+    this.checked.set(transcript, { holds, at: now });
+    return holds;
   }
 
   /** The same TUI, with its hooks, on the session the agent already had. */

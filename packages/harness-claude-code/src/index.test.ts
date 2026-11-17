@@ -7,6 +7,7 @@ import {
   carriesWake,
   foldReply,
   hookOrigin,
+  isConversationEntry,
   isMainAgentTool,
   readHook,
   wakeText,
@@ -23,7 +24,11 @@ const waiterAt = (hook_event_name: string, source?: string) =>
   readHook("wait", { hook_event_name, session_id: "s", source });
 const request = { harness: "claude-code" as const, project: "p", cwd: "/work" };
 const claude = (newSessionId: () => string): HarnessAdapter =>
-  new ClaudeCodeHarness({ newSessionId, hookCommand: "bazhen-hook", exists: () => false });
+  new ClaudeCodeHarness({
+    newSessionId,
+    hookCommand: "bazhen-hook",
+    holdsConversation: () => false,
+  });
 
 /** The status line a launch sets, given which status line to wrap; absent when it sets none. */
 const statusLineOf = async (choice: StatusLineChoice) => {
@@ -31,7 +36,7 @@ const statusLineOf = async (choice: StatusLineChoice) => {
     newSessionId: () => "s",
     hookCommand: "bazhen-hook",
     statusLine: () => choice,
-    exists: () => false,
+    holdsConversation: () => false,
   });
   const { argv } = await harness.launchSpec(request, {});
   const settings: unknown = JSON.parse(String(argv[argv.indexOf("--settings") + 1]));
@@ -65,7 +70,7 @@ describe("Claude Code harness", () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "fresh",
       hookCommand: "bazhen-hook",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s-7" }, {});
     const launched = await harness.launchSpec(request, {});
@@ -80,7 +85,7 @@ describe("Claude Code harness", () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "bazhen-hook",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const options = { instructions: "Use bazhen task done." };
     const launched = await harness.launchSpec(request, options);
@@ -95,7 +100,7 @@ describe("Claude Code harness", () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "bazhen-hook",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const options = { instructions: "Review it.", instructionsFile: "/run/bazhen/prompts/a.md" };
     const launched = await harness.launchSpec(request, options);
@@ -111,7 +116,7 @@ describe("Claude Code harness", () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "bazhen-hook",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const options = { name: "BZ-127" };
     const launched = await harness.launchSpec(request, options);
@@ -188,7 +193,7 @@ describe("Claude Code harness", () => {
       newSessionId: () => "s",
       hookCommand: "h",
       permissionMode: "default",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const configured = (await harness.launchSpec(request, {})).argv;
     expect([configured.slice(-2), (await claude(() => "s").launchSpec(request, {})).argv]).toEqual([
@@ -225,7 +230,7 @@ describe("Claude Code's theme", () => {
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "h",
-      exists: () => false,
+      holdsConversation: () => false,
     });
     const launched = await harness.launchSpec(request, { theme: "light" });
     const resumed = await harness.resumeSpec(
@@ -497,12 +502,12 @@ describe("Claude Code hooks", () => {
     expect(again).toContain("possible re-delivery of msg_1, first offered 2026-11-12T08:00:00Z");
   });
 
-  it("resumes a session only once the transcript its hooks named is on disk", () => {
+  it("resumes a session only once the transcript its hooks named holds a conversation", () => {
     const written = new Set(["/claude/projects/w/s-1.jsonl"]);
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "h",
-      exists: (path) => written.has(path),
+      holdsConversation: (path) => written.has(path),
     });
     expect([
       harness.canResume({ transcript: "/claude/projects/w/s-1.jsonl" }),
@@ -511,13 +516,28 @@ describe("Claude Code hooks", () => {
     ]).toEqual([true, false, false]);
   });
 
+  it("takes a transcript line for a message only by its own type, user or assistant", () => {
+    expect(
+      [
+        '{"type":"user","message":{"role":"user","content":"hi"}}',
+        '{"type":"assistant","message":{"role":"assistant","content":[]}}',
+        '{"type":"mode","mode":"normal"}',
+        '{"type":"file-history-snapshot","snapshot":{}}',
+        '{"type":"system","message":{"type":"user"}}',
+        '"user"',
+        "null",
+        "{not json",
+      ].map(isConversationEntry),
+    ).toEqual([true, true, false, false, false, false, false, false]);
+  });
+
   it("looks at a transcript once per check window, and again once the window has passed", () => {
     let looked = 0;
     let now = 0;
     const harness = new ClaudeCodeHarness({
       newSessionId: () => "s",
       hookCommand: "h",
-      exists: () => (looked++, true),
+      holdsConversation: () => (looked++, true),
       now: () => now,
     });
     const asks = () => harness.canResume({ transcript: "/c/s.jsonl" });

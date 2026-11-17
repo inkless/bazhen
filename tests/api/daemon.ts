@@ -363,6 +363,32 @@ export class Daemon {
     }
   }
 
+  /**
+   * What the transcript the agent's Claude Code hooks last named holds, as the daemon recorded
+   * the path: nothing while there is no path or no file.
+   */
+  transcript(agentId: string): string {
+    const path = this.transcriptPath(agentId);
+    return path === null || !existsSync(path) ? "" : readFileSync(path, "utf8");
+  }
+
+  /** Replaces what the agent's recorded transcript holds, as Claude Code would write it. */
+  rewriteTranscript(agentId: string, text: string): void {
+    const path = this.transcriptPath(agentId);
+    if (path === null) throw new Error(`no transcript recorded for ${agentId}`);
+    writeFileSync(path, text);
+  }
+
+  private transcriptPath(agentId: string): string | null {
+    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
+    try {
+      const row = db.prepare(`SELECT transcript FROM agent_sessions WHERE id = ?`).get(agentId);
+      return typeof row?.transcript === "string" ? row.transcript : null;
+    } finally {
+      db.close();
+    }
+  }
+
   /** A new directory beside the work directory, which no harness has been told to trust. */
   untrustedDirectory(name: string): string {
     const dir = join(this.home, name);
