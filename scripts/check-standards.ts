@@ -3170,13 +3170,13 @@ export function signalChokepointFailures(
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
     out.push(...allowedSignalFailures(file, text));
     const calls = rawSignalCalls(file, text);
-    for (const { line, call, unread, unfollowed, imported } of calls) {
+    for (const { line, call, unread, unfollowed, held } of calls) {
       if (product && !tests.has(line)) {
-        if (imported === true) {
+        if (held !== undefined) {
           out.push(
-            `${file}:${line}: imports a raw signal (${call}); a chokepoint names it by its path ` +
-              "where it calls it, as an imported name reaches the file's tests " +
-              "(docs/standards/rust.md § Signals).",
+            `${file}:${line}: ${held === "imported" ? "imports a raw signal" : "takes a raw signal as a value"} ` +
+              `(${call}); a chokepoint calls each by its path where it names it, as a name it ` +
+              "imports or holds reaches the file's tests (docs/standards/rust.md § Signals).",
           );
         }
         continue;

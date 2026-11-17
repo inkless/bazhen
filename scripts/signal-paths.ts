@@ -95,7 +95,16 @@ function signalImports(code: string) {
     const names = words.includes("libc") || words.includes("signal");
     const brings = m[1] !== undefined || words.some((w) => w === "kill" || w === "*" || w === "as");
     if (!names || !brings) return [];
-    const call = m[0].replaceAll(/\s+/g, " ").trim();
+    const what = words.includes("libc") ? "libc" : "a `signal` module";
+    const how =
+      m[1] !== undefined
+        ? "is a `pub use`"
+        : words.includes("kill")
+          ? "imports `kill`"
+          : words.includes("*")
+            ? "imports a glob"
+            : "renames";
+    const call = `${m[0].replaceAll(/\s+/g, " ").trim()}, which names ${what} and ${how}`;
     return [{ index: m.index, end: m.index + m[0].length, line: lineAt(code, m.index), call }];
   });
 }
@@ -1102,8 +1111,9 @@ function allowedIn(file: string, text: string) {
  * A signal found in a file. `unread` marks a start's options the scan can't read, which may set a
  * kill or not; `unfollowed` a start reached where the scan can't follow it to a call, or
  * child_process loaded where it can't see what is started. `literal` marks text that names a
- * kill or child_process, which a fixture may hold. `imported` marks a Rust `use` or `extern crate`
- * that brings a raw call in, whose name reaches the file's child modules.
+ * kill or child_process, which a fixture may hold. `held` marks a raw Rust call named but not
+ * called: brought in by a `use` or `extern crate`, or taken as a value, which a child module, the
+ * file's tests, can reach by a name the scan doesn't read.
  */
 type Signal = {
   index: number;
@@ -1112,8 +1122,10 @@ type Signal = {
   literal?: boolean;
   unread?: boolean;
   unfollowed?: boolean;
-  imported?: boolean;
+  held?: Held;
 };
+
+type Held = "imported" | "a value";
 
 /** Whether one of `allowed` lets `signal` through: a fixture lets only its text's, `literal`. */
 const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
@@ -1126,9 +1138,9 @@ const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
 const asCalls = (signals: Signal[]) =>
   signals
     .toSorted((a, b) => a.index - b.index)
-    .map(({ line, call, unread, unfollowed, imported }) => {
+    .map(({ line, call, unread, unfollowed, held }) => {
       if (unread === true) return { line, call, unread };
-      if (imported === true) return { line, call, imported };
+      if (held !== undefined) return { line, call, held };
       return unfollowed === true ? { line, call, unfollowed } : { line, call };
     });
 
@@ -1136,7 +1148,7 @@ const asCalls = (signals: Signal[]) =>
 export function rawSignalCalls(
   file: string,
   text: string,
-): { line: number; call: string; unread?: true; unfollowed?: true; imported?: true }[] {
+): { line: number; call: string; unread?: true; unfollowed?: true; held?: Held }[] {
   const { signals, allowed } = signalsIn(file, text);
   return asCalls(signals.filter((s) => !allows(allowed, s)));
 }
@@ -1171,15 +1183,22 @@ function signalsIn(
       cooked: raw[n],
     }));
     const uses = [...code.matchAll(RUST_USE)].map((m) => [m.index, m.index + m[0].length]);
-    const direct = found(code, RUST_RAW).map((d) => ({
-      ...d,
-      imported:
+    const direct = found(code, RUST_RAW).map((d): Signal => {
+      const imported =
         d.call.startsWith("extern") ||
-        uses.some(([from = 0, to = 0]) => d.index >= from && d.index < to),
-    }));
+        uses.some(([from = 0, to = 0]) => d.index >= from && d.index < to);
+      const after = code.slice(d.index + d.call.length);
+      // A syscall's number is a value by nature: it counts as called only as `syscall`'s first
+      // argument.
+      const called = d.call.startsWith("SYS_")
+        ? /\bsyscall\s*\(\s*(?:\w+\s*::\s*)*$/.test(code.slice(0, d.index)) && /^\s*,/.test(after)
+        : /^\s*(?:::\s*<[^<>]*>\s*)?\(/.test(after);
+      if (imported) return { ...d, held: "imported" };
+      return called ? d : { ...d, held: "a value" };
+    });
     const imports = signalImports(code)
       .filter((u) => !direct.some((d) => d.index >= u.index && d.index < u.end))
-      .map(({ index, line, call }) => ({ index, line, call, imported: true }));
+      .map(({ index, line, call }): Signal => ({ index, line, call, held: "imported" }));
     return {
       signals: [...direct, ...imports, ...kills(literals, code)],
       allowed: allowedIn(file, code),

@@ -304,9 +304,10 @@ groups, counts as a raw call, since it hides the `kill` the scan reads for. So d
 known so far whose methods signal any pid, or hold one to signal (`sysinfo`, `psutil`, `heim`,
 `kill_tree`, `pidfd`), are banned in `deny.toml`: a method call is text the scan can't tell from a child's own `kill`.
 
-A chokepoint's product code is exempt only in its calls, so it calls a raw function by its path
-and never imports one: an imported name reaches the file's tests, which `super::` can name with
-nothing in sight the scan reads. Its tests take no glob `use` and name no bare `kill`, a method's
+A chokepoint's product code is exempt only where it calls a raw function by its path. One it
+imports, or takes as a value (a `const` holding it, say), fails, since the file's tests reach that
+name through `super::` with nothing in sight the scan reads; a syscall number counts as called
+only as `syscall`'s first argument. Its tests take no glob `use` and name no bare `kill`, a method's
 `.kill()` aside, so they reach nothing the product code imports. And no manifest takes `libc` or
 `nix` under another name (`package = "libc"`), which the scan, reading their kills by the crate's
 name, wouldn't read; a `package` it can't read as a plain string fails too.

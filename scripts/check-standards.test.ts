@@ -2835,6 +2835,9 @@ describe("the signal chokepoints", () => {
       "        test_kill_process(p);",
       "        let _ = Signal::KILL;",
       "        unsafe { libc::kill(p, 9) };",
+      "        // kill(p, 9) in a comment",
+      `        let s = "${bare}";`,
+      "        let killed = kill_switch.is_on();",
       "    }",
       "}",
     ].join("\n");
@@ -2852,7 +2855,7 @@ describe("the signal chokepoints", () => {
     expect(found[3]).toMatch(/a bare `kill`.*bazhen_test_signal/);
   });
 
-  it("fails an import of a raw call on a chokepoint's product lines, though not a call by path", () => {
+  it("fails a raw call imported or held as a value on a chokepoint's product lines, not one called by its path", () => {
     const source = [
       "use libc::kill as k;",
       "use nix::sys::signal as s;",
@@ -2861,6 +2864,12 @@ describe("the signal chokepoints", () => {
       "use rustix::process::kill_process;",
       "use rustix::process::{Pid, Signal};",
       "fn f() { rustix::process::kill_process_group(p, s); unsafe { libc::kill(p, 9) }; }",
+      "const K: fn(Pid, Signal) -> io::Result<()> = rustix::process::kill_process;",
+      "const N: c_long = libc::SYS_kill;",
+      "fn g() { unsafe { f(libc::SYS_tkill) } }",
+      "fn h() { unsafe { libc::syscall(libc::SYS_pidfd_send_signal, fd, 0, none, 0) }; }",
+      "fn i() { rustix::process::kill_process_group::<P>(p, s); }",
+      "pub use nix::sys::signal::Signal;",
     ].join("\n");
     const found = signalChokepointFailures(CHOKEPOINTS, guardOnly(source));
     expect(found.map((f) => f.split(": ")[0])).toEqual([
@@ -2869,8 +2878,16 @@ describe("the signal chokepoints", () => {
       "crates/bazhen-holder/src/guard.rs:3",
       "crates/bazhen-holder/src/guard.rs:4",
       "crates/bazhen-holder/src/guard.rs:5",
+      "crates/bazhen-holder/src/guard.rs:8",
+      "crates/bazhen-holder/src/guard.rs:9",
+      "crates/bazhen-holder/src/guard.rs:10",
+      "crates/bazhen-holder/src/guard.rs:13",
     ]);
     expect(found[0]).toMatch(/imports a raw signal \(libc::kill\).*by its path/);
+    expect(found[5]).toMatch(/takes a raw signal as a value \(kill_process\)/);
+    expect(found[8]).toMatch(
+      /imports a raw signal \(pub use nix::sys::signal::Signal, which names a `signal` module and is a `pub use`\)/,
+    );
   });
 
   it("names a chokepoint that no longer exists", () => {

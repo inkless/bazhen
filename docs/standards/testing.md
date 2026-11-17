@@ -399,8 +399,9 @@ A test owns everything it touches and leaves nothing behind.
   `libc::killpg`, `tgkill` and `tkill`, nix's `kill` and `killpg` by path, a `use` naming `libc`
   or a `signal` module that imports `kill`, a glob or a rename at any depth of its groups, any
   `pub use` of either, `sigqueue` and the kill syscalls, a renamed `extern crate` of libc or nix,
-  and libc or nix renamed in a manifest; in a Rust chokepoint, an import of any of them, and in
-  its tests a glob `use` or a bare `kill`), and a process started to
+  and libc or nix renamed in a manifest; in a Rust chokepoint, any of them imported or taken as
+  a value rather than called (a syscall number only as `syscall`'s first argument), and in its
+  tests a glob `use` or a bare `kill`), and a process started to
   send one (`kill`, `pkill`, `killall`, `killall5` or `skill` run directly, through a launcher
   such as `env`, `sudo` or `timeout`, or by a shell, `xargs kill`, `systemctl kill`, `loginctl
   terminate-user` and the like, and `fuser -k`), appear only in the chokepoints
