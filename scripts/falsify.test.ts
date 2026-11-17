@@ -3,7 +3,7 @@ import {
   classify,
   failureLine,
   harnessFiles,
-  hasControl,
+  controlLine,
   addedRustTests,
   binaryInputs,
   cargoErrors,
@@ -27,6 +27,7 @@ import {
   signalExitCode,
   staleWorktrees,
   uncontrolledRustTests,
+  uncontrolledTests,
   type VitestReport,
 } from "./falsify.ts";
 
@@ -355,13 +356,100 @@ describe("parseArgs", () => {
   });
 });
 
-describe("hasControl", () => {
-  it("finds a Control trailer in any commit message of the branch", () => {
+const trailers = (...lines: string[]) => lines.map((l) => `feat: x\n\n${l}\n`).join("\n");
+
+describe("uncontrolledTests", () => {
+  const OTHER = "packages/core/src/y.test.ts";
+
+  it("is every test no Control trailer names by its file and title, in any commit", () => {
+    const tests = [
+      { file: FILE, title: "caps" },
+      { file: FILE, title: "trims" },
+      { file: OTHER, title: "caps" },
+      { file: FILE, title: "pads" },
+      { file: FILE, title: "wraps" },
+    ];
+    const messages = trailers(
+      `Control: ${FILE} › caps: return v -> expected 2, got 1`,
+      `Control: ${FILE} › trims -> it failed`,
+      `Control: ${FILE} › pads, with no arrow`,
+      `The Control: ${FILE} › wraps: x -> y is mid-line`,
+    );
+    expect(uncontrolledTests(tests, messages)).toEqual([
+      { file: OTHER, title: "caps" },
+      { file: FILE, title: "pads" },
+      { file: FILE, title: "wraps" },
+    ]);
+  });
+
+  it("takes no title that is only part of the one the trailer names", () => {
+    const messages = trailers(
+      `Control: ${FILE} › caps twice: x -> y`,
+      `Control: ${FILE} › big caps: x -> y`,
+      `Control: ${FILE} › caps twice, as ${FILE} › caps twice: x -> y`,
+      `Control: ${FILE} › capsule: x -> y`,
+    );
+    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
+      { file: FILE, title: "caps" },
+    ]);
+  });
+
+  it("takes no path that is only part of the one the trailer names", () => {
+    const messages = trailers(
+      "Control: src/x.test.ts › caps: x -> y",
+      `Control: a/${FILE} › caps: x -> y`,
+      `Control: ${FILE}x › caps: x -> y`,
+      "Control: caps: x -> y",
+    );
+    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
+      { file: FILE, title: "caps" },
+    ]);
+  });
+
+  it("takes a test named only after the trailer's last arrow as not named", () => {
+    const messages = trailers(`Control: return v -> ${FILE} › caps: failed`);
+    expect(uncontrolledTests([{ file: FILE, title: "caps" }], messages)).toEqual([
+      { file: FILE, title: "caps" },
+    ]);
+  });
+
+  it("names a title holding an arrow, a colon or a regex symbol, and one under a describe", () => {
+    const tests = [
+      { file: FILE, title: "maps a -> b" },
+      { file: FILE, title: "says: no" },
+      { file: FILE, title: "nests" },
+      { file: FILE, title: "reads [x] (y)+" },
+    ];
+    const messages = trailers(
+      `Control: ${FILE} › maps a -> b: x -> y`,
+      `Control: ${FILE} › says: no: x -> y`,
+      `Control: ${FILE} › the group › nests: x -> y`,
+      `Control: ${FILE} › reads [x] (y)+: x -> y`,
+    );
+    expect(uncontrolledTests(tests, messages)).toEqual([]);
+  });
+
+  it("names a test whose title couldn't be read by its file alone", () => {
+    const tests = [
+      { file: FILE, title: `<unparsed test in ${FILE}>` },
+      { file: OTHER, title: `<unparsed test in ${OTHER}>` },
+    ];
+    const messages = trailers(`Control: ${FILE} › reads each case: x -> y`);
+    expect(uncontrolledTests(tests, messages)).toEqual([
+      { file: OTHER, title: `<unparsed test in ${OTHER}>` },
+    ]);
+  });
+});
+
+describe("controlLine", () => {
+  it("is the trailer a test needs, with its file and title filled in", () => {
     expect([
-      hasControl("feat: a\n\nbody\n\nfix: b\n\nControl: drop the guard -> expected 1, got 2\n"),
-      hasControl("feat: a\n\nControl: no arrow here\n"),
-      hasControl("feat: a\n\nThe Control: x -> y is mid-line\n"),
-    ]).toEqual([true, false, false]);
+      controlLine({ file: FILE, title: "caps" }),
+      controlLine({ file: FILE, title: `<unparsed test in ${FILE}>` }),
+    ]).toEqual([
+      `Control: ${FILE} › caps: <what you broke> -> <how it failed>`,
+      `Control: ${FILE} › <the test's title>: <what you broke> -> <how it failed>`,
+    ]);
   });
 });
 

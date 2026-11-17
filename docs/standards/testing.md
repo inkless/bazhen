@@ -151,11 +151,17 @@ Every new test must be shown to fail without the code it covers.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
-  restore the code. Record it as a trailer in a commit message on the branch:
-  `Control: <what you broke> -> <how the test failed>`, one per INVALID test. For a TypeScript
-  test the check accepts any one trailer on the branch, so the reviewer is who holds you to the
-  rest. A Rust test falsify didn't kill with a mutant of the change needs a trailer of its own,
-  whose subject starts with the test's full path as nextest lists it:
+  restore the code. Record it as a trailer in a commit message on the branch, one per INVALID
+  test, naming the test by its file and title as falsify prints them:
+  `Control: <file> › <title>: <what you broke> -> <how the test failed>`. Falsify fails until
+  every INVALID test is named, and prints the line each one still needs. A trailer names a test
+  when the part before its last `->` holds the test's path, not as part of a longer path, then
+  `›`, any `describe` names each followed by `›`, and the exact title, followed by `: ` or by
+  that last `->`. So `caps` is not named by `caps twice` or `big caps`, and a title may hold
+  `->` or `:`. A test whose title falsify couldn't read (`<unparsed test in FILE>`) is named by
+  its file alone. Falsify checks that each test is named; the reviewer checks that the break
+  recorded really is one. A Rust test falsify didn't kill with a mutant of the change needs a
+  trailer of its own, whose subject starts with the test's full path as nextest lists it:
   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
   § Tests). Never bypass a hook with `--no-verify`.
 

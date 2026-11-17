@@ -12,7 +12,8 @@ already checked (listed at the end).
 3. **Complexity.** Could a reader new to the code follow it? Is anything built for a future need
    that isn't real yet?
 4. **Tests.** For each new test, ask _what change to the source would make this fail?_ Then check
-   the falsify result, or a `Control:` trailer on the branch, says the same. Is each test the
+   the falsify result, or the `Control:` trailer naming the test, says the same, and that the
+   break the trailer records would fail that test on its assertion. Is each test the
    smallest size that can fail for the right reason (`testing.md` § Sizes)? Does each test
    falsify prints as RENAMED have a new title that says what its unchanged body does?
 5. **Errors.** Are expected failures typed? Is anything swallowed? Are third-party errors

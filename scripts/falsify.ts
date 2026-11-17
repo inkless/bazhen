@@ -11,10 +11,11 @@
 //             INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, or it passed but is unrelated to the source change; a branch that
-//             adds tests without a source change also lands here. Every test of a brand-new
-//             symbol is INVALID, so it needs a hand-run control
-//             recorded as a trailer in a commit on the branch:
-//             `Control: <what you broke> -> <how the test failed>`.
+//             adds tests without a source change also lands here, as does every test of a
+//             brand-new symbol. Each INVALID test needs a hand-run control, recorded as a
+//             trailer in a commit on the branch that names it by its file and exact title:
+//             `Control: <file> › <title>: <what you broke> -> <how the test failed>`
+//             (one whose title couldn't be read is named by its file alone).
 //
 // A test that runs a Rust binary finds it in the repository's target/, which the worktree has
 // none of. When a judged test, or anything it reaches through its imports (relative, or a
@@ -124,7 +125,6 @@ const IN_TARGET = /^target\/([\w-]+\/[\w-]+)$/;
 const ROOT_SOURCE = /["'`]((?:apps|packages|scripts|tests)\/[\w./-]+\.[cm]?tsx?)["'`]/g;
 const TITLE = /(?<![.\w])(?:it|test)(?:\.\w+(?:\([^()]*\))?)*\(\s*(["'`])((?:\\.|(?!\1).)+)\1/g;
 const TEST_CALL = /(?<![.\w])(?:it|test)(?:\.\w+)*\s*\(/;
-const CONTROL_TRAILER = /^Control: .+ -> .+$/m;
 export const WORKTREE_PREFIX = "bz-falsify-";
 const LOCK_REASON = /^bz-falsify pid=(\d+)$/;
 export const INSTALL_TIMEOUT_MS = 120_000;
@@ -259,6 +259,8 @@ export function parseNameStatus(out: string): Change[] {
   return changes;
 }
 
+const unparsedIn = (file: string) => `<unparsed test in ${file}>`;
+
 const unescape = (title: string) => title.replace(/\\(["'`])/g, "$1");
 
 /**
@@ -281,7 +283,7 @@ export function newTitles(diff: string, file: string): string[] {
       side.set(unescape(title), line.slice(1).trim());
       parsed = true;
     }
-    if (!parsed && side === added) added.set(`<unparsed test in ${file}>`, "");
+    if (!parsed && side === added) added.set(unparsedIn(file), "");
   }
   const onlyMadeAsync = (title: string, call: string) => {
     const before = removed.get(title);
@@ -534,6 +536,8 @@ export function addedRustTests(base: string[], head: string[]): { file: string; 
 
 const CONTROL_SUBJECT = /^Control: (.+) -> .+$/gm;
 const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const controlSubjects = (messages: string) =>
+  [...messages.matchAll(CONTROL_SUBJECT)].map(([, subject = ""]) => subject);
 
 /**
  * The Rust tests no `Control:` trailer names. A trailer names a test when the part before its
@@ -541,11 +545,40 @@ const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\
  * so one trailer covers the same path added in two crates on one branch.
  */
 export function uncontrolledRustTests(names: string[], messages: string): string[] {
-  const subjects = [...messages.matchAll(CONTROL_SUBJECT)].map(([, subject = ""]) => subject);
+  const subjects = controlSubjects(messages);
   return names.filter((name) => {
     const named = new RegExp(`(?<!\\w|::)${escapeRegExp(name)}(?!\\w|::)`);
     return !subjects.some((subject) => named.test(subject));
   });
+}
+
+const PATH_CHAR = "[\\w./-]";
+
+/**
+ * The TypeScript tests no `Control:` trailer names. A trailer names a test when the part before
+ * its last `->` holds the test's path, not inside a longer one, then ` › `, any `describe` names
+ * each ending ` › `, and its exact title, ending at a `: ` or at that last `->`. A test whose title
+ * couldn't be read is named by its path alone.
+ */
+export function uncontrolledTests<T extends { file: string; title: string }>(
+  tests: T[],
+  messages: string,
+): T[] {
+  const subjects = controlSubjects(messages);
+  return tests.filter((t) => {
+    const path = `(?<!${PATH_CHAR})${escapeRegExp(t.file)}`;
+    const named =
+      t.title === unparsedIn(t.file)
+        ? new RegExp(`${path}(?!${PATH_CHAR})`)
+        : new RegExp(`${path} › (?:.* › )?${escapeRegExp(t.title)}(?=:(?: |$)|$)`);
+    return !subjects.some((subject) => named.test(subject));
+  });
+}
+
+/** The trailer line a test no control names needs, to fill in. */
+export function controlLine(t: { file: string; title: string }): string {
+  const title = t.title === unparsedIn(t.file) ? "<the test's title>" : t.title;
+  return `Control: ${t.file} › ${title}: <what you broke> -> <how it failed>`;
 }
 
 export type VitestReport = {
@@ -1586,9 +1619,6 @@ export function parseArgs(args: string[]): { base?: string; harness?: true } {
   return { base: value };
 }
 
-/** True when any of the branch's commit messages records a control. */
-export const hasControl = (messages: string): boolean => CONTROL_TRAILER.test(messages);
-
 const resolves = (ref: string) => {
   try {
     git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
@@ -1933,23 +1963,25 @@ async function main(args: string[]): Promise<number> {
     }
     return 1;
   }
-  const uncontrolled = uncontrolledRustTests(
+  const uncontrolledRust = uncontrolledRustTests(
     rustTests.filter((t) => t.outcome !== "KILLED").map((t) => t.title),
     messages,
   );
-  if (uncontrolled.length > 0) {
+  if (uncontrolledRust.length > 0) {
     console.error(
       "\nNo mutant of the change showed these Rust tests can fail, so each needs a control of its " +
         "own. Break the code by hand, confirm the test fails on its assertion, and record it in a " +
         "commit message on the branch, naming the test by its full path:\n" +
-        uncontrolled
+        uncontrolledRust
           .map((name) => `  Control: ${name}: <what you broke> -> <how it failed>`)
           .join("\n"),
     );
-    return 1;
   }
-  const invalid = results.filter((r) => r.outcome === "INVALID" && r.note === undefined);
-  if (invalid.length > 0 && !hasControl(messages)) {
+  const uncontrolled = uncontrolledTests(
+    results.filter((r) => r.outcome === "INVALID" && r.note === undefined),
+    messages,
+  );
+  if (uncontrolled.length > 0) {
     console.error(
       reverts.length === 0
         ? "\nThis branch adds tests but no source change to revert."
@@ -1958,12 +1990,13 @@ async function main(args: string[]): Promise<number> {
             "timeouts).",
     );
     console.error(
-      "Break the code by hand, confirm each test fails on its assertion, and record it in a " +
-        "commit message on the branch:\n  Control: <what you broke> -> <how the test failed>",
+      "Each needs a control of its own. Break the code by hand, confirm the test fails on its " +
+        "assertion, and record it in a commit message on the branch, naming the test by its " +
+        "file and title:\n" +
+        uncontrolled.map((t) => `  ${controlLine(t)}`).join("\n"),
     );
-    return 1;
   }
-  return 0;
+  return uncontrolledRust.length > 0 || uncontrolled.length > 0 ? 1 : 0;
 }
 
 /** The exit code for a signal that killed a synchronous child (git), or undefined. */
