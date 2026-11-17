@@ -16,6 +16,7 @@ import {
   newTitles,
   parseArgs,
   parseNameStatus,
+  projectsOf,
   relatedReverts,
   revertsOf,
   rustTestIds,
@@ -448,6 +449,25 @@ describe("namedBinaries", () => {
       'const built = "target/falsify/release/bazhen";',
     ].join("\n");
     expect(namedBinaries("tests/cli/x.test.ts", source)).toEqual([]);
+  });
+});
+
+describe("projectsOf", () => {
+  it("groups the listed files by project, relative to whichever root holds them", () => {
+    const listing = [
+      { file: "/wt/tests/api/a.test.ts", projectName: "api" },
+      { file: "/real/wt/tests/holder/h.test.ts", projectName: "holder" },
+      { file: "/wt/tests/api/b.test.ts", projectName: "api" },
+    ];
+    expect([...projectsOf(listing, ["/wt", "/real/wt"])]).toEqual([
+      ["api", ["tests/api/a.test.ts", "tests/api/b.test.ts"]],
+      ["holder", ["tests/holder/h.test.ts"]],
+    ]);
+  });
+
+  it("refuses a file outside the worktree, rather than run it", () => {
+    const listing = [{ file: "/elsewhere/x.test.ts", projectName: "unit" }];
+    expect(() => projectsOf(listing, ["/wt"])).toThrow(/not a vitest file listing/);
   });
 });
 

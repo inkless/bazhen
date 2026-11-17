@@ -17,16 +17,19 @@
 //             `Control: <what you broke> -> <how the test failed>`.
 //
 // A test that runs a Rust binary finds it in the repository's target/, which the worktree has
-// none of. When a judged test, or anything it reaches through relative imports or source paths it
-// names, names one (`target/<profile>/<name>`), the branch's Rust changes are reverted in the
-// worktree too, every binary is built there with `pnpm run build:bins` in each profile reached,
-// and each one this run built is copied to the worktree's target/: the test runs the base's
-// binaries, built with HEAD's script, toolchain and .cargo config. Only a name a crate's manifest
-// declares counts. A test is related to a reverted file that a binary it names, or a file it
-// imports directly names, was built from, as cargo's dep-info for it lists, or to that binary's
-// crates' manifests. A test that fails while it reaches a binary the base doesn't build is
-// INVALID: the binary's absence failed it. Binaries that won't build are no verdict: falsify
-// fails, naming cargo's error.
+// none of. When a judged test, or anything it reaches through its imports (relative, or a
+// workspace package's exports) or the source paths it names, names one as
+// `target/<profile>/<name>`, the branch's Rust changes are reverted in the worktree too, each
+// binary reached that the base has is built there with `pnpm run build:bins`, and each one this
+// run built is copied to the worktree's target/: the test runs the base's binaries, built with
+// HEAD's script, toolchain and .cargo config. Only a name a crate's manifest declares counts. A
+// test is related to a reverted file that a binary it names, or a file it imports directly names,
+// was built from, as cargo's dep-info for it lists, or to that binary's crates' manifests. A test
+// that fails while it reaches a binary the base doesn't build is INVALID: the binary's absence
+// failed it. Binaries that won't build are no verdict: falsify fails, naming cargo's error.
+//
+// The judged tests run once per vitest project, as each project's pnpm script runs them: two
+// projects' global setups in one process clash.
 //
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
@@ -357,6 +360,30 @@ export function isReport(value: unknown): value is VitestReport {
     value !== null &&
     Array.isArray((value as { testResults?: unknown }).testResults)
   );
+}
+
+/**
+ * The test files a `vitest list --filesOnly --json=<file>` listing names, by the project each runs
+ * in, relative to whichever of `roots` (the worktree, and its real path) holds them. Throws on
+ * anything that isn't such a listing, or names a file outside them.
+ */
+export function projectsOf(listing: unknown, roots: readonly string[]): Map<string, string[]> {
+  if (!Array.isArray(listing)) throw new Error("not a vitest file listing");
+  const projects = new Map<string, string[]>();
+  for (const listed of listing as unknown[]) {
+    const file =
+      typeof listed === "object" && listed !== null && "file" in listed ? listed.file : "";
+    const project =
+      typeof listed === "object" && listed !== null && "projectName" in listed
+        ? listed.projectName
+        : undefined;
+    const root = roots.find((r) => typeof file === "string" && file.startsWith(`${r}/`));
+    if (typeof file !== "string" || typeof project !== "string" || root === undefined) {
+      throw new Error("not a vitest file listing of the worktree");
+    }
+    projects.set(project, [...(projects.get(project) ?? []), file.slice(root.length + 1)]);
+  }
+  return projects;
 }
 
 export function classify(report: VitestReport, file: string, title: string): Outcome {
@@ -1505,30 +1532,58 @@ async function main(args: string[]): Promise<number> {
         if (made === undefined) return 1;
         built = made;
       }
-      const reportFile = join(dir, "falsify-report.json");
+      // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
+      const vitestOptions = runsBinaries
+        ? { env: { ...isolatedEnv(), BAZHEN_CLI: join(dir, "target", "release", "bazhen") } }
+        : {};
+      const listFile = join(dir, "falsify-projects.json");
       await run(
         "pnpm",
         [
           "exec",
           "vitest",
-          "run",
+          "list",
+          "--filesOnly",
+          `--json=${listFile}`,
           ...new Set(targets.map((t) => t.file)),
-          "--reporter=json",
-          `--outputFile=${reportFile}`,
         ],
         dir,
         VITEST_TIMEOUT_MS,
-        // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
-        runsBinaries
-          ? { env: { ...isolatedEnv(), BAZHEN_CLI: join(dir, "target", "release", "bazhen") } }
-          : {},
+        vitestOptions,
       );
-      let report: VitestReport = { testResults: [] };
+      let projects = new Map<string, string[]>();
       try {
-        const parsed: unknown = JSON.parse(readFileSync(reportFile, "utf8"));
-        if (isReport(parsed)) report = parsed;
+        projects = projectsOf(JSON.parse(readFileSync(listFile, "utf8")), [dir, realpathSync(dir)]);
       } catch {
-        // No report at all: the run never got going, so every target is INVALID.
+        // No listing: no run, so every target is INVALID.
+      }
+      // One run per project, as its own pnpm script runs it: two projects' global setups in one
+      // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).
+      const report: VitestReport = { testResults: [] };
+      for (const [index, [project, inProject]] of [...projects].entries()) {
+        const reportFile = join(dir, `falsify-report-${index}.json`);
+        await run(
+          "pnpm",
+          [
+            "exec",
+            "vitest",
+            "run",
+            "--project",
+            project,
+            ...inProject,
+            "--reporter=json",
+            `--outputFile=${reportFile}`,
+          ],
+          dir,
+          VITEST_TIMEOUT_MS,
+          vitestOptions,
+        );
+        try {
+          const parsed: unknown = JSON.parse(readFileSync(reportFile, "utf8"));
+          if (isReport(parsed)) report.testResults.push(...parsed.testResults);
+        } catch {
+          // No report at all: that run never got going, so each of its targets is INVALID.
+        }
       }
       // A passing test that imports none of the reverted files is a test of code the branch didn't
       // change (a characterization or property test): no verdict, so it needs a control.

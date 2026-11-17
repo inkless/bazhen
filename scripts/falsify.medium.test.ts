@@ -96,6 +96,26 @@ case "$1" in
     exit 0
     ;;
   exec)
+    if [ "$3" = list ]; then
+      for arg in "$@"; do
+        case "$arg" in --json=*) listing="\${arg#--json=}" ;; esac
+      done
+      printf '[' > "$listing"
+      sep=""
+      for arg in "$@"; do
+        case "$arg" in
+          *.test.ts)
+            project=unit
+            case "$arg" in tests/api/*) project=api ;; esac
+            printf '%s{"file":"%s/%s","projectName":"%s"}' "$sep" "$(pwd)" "$arg" "$project" >> "$listing"
+            sep=","
+            ;;
+        esac
+      done
+      printf ']' >> "$listing"
+      exit 0
+    fi
+    echo "VITEST: $*" >> "$STUB_LOG"
     for bin in target/*/*; do
       [ -f "$bin" ] && echo "RAN $bin: $("$bin")" >> "$STUB_LOG"
     done
@@ -117,7 +137,21 @@ case "$1" in
     for arg in "$@"; do
       case "$arg" in --outputFile=*) out="\${arg#--outputFile=}" ;; esac
     done
-    printf '{"testResults":[{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[]}]}]}' "$(pwd)" "\${STUB_TEST:-${TEST}}" "$STUB_STATUS" > "$out"
+    # Each file the run names, with STUB_EACH; else only the one test file the case judges.
+    files="\${STUB_TEST:-${TEST}}"
+    if [ "\${STUB_EACH:-}" = 1 ]; then
+      files=""
+      for arg in "$@"; do
+        case "$arg" in *.test.ts) files="$files $arg" ;; esac
+      done
+    fi
+    printf '{"testResults":[' > "$out"
+    sep=""
+    for file in $files; do
+      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[]}]}' "$sep" "$(pwd)" "$file" "$STUB_STATUS" >> "$out"
+      sep=","
+    done
+    printf ']}' >> "$out"
     exit 0
     ;;
 esac
@@ -1348,6 +1382,30 @@ describe("falsify on a branch with a new CLI test", () => {
       said: result.output.includes("cargo wrote no dep-info"),
       verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
     }).toEqual({ status: 1, said: true, verdict: false });
+  });
+});
+
+describe("falsify on a branch with new tests in two vitest projects", () => {
+  it("runs each project's targets in a run of its own, and judges them all", () => {
+    const api = "tests/api/y.test.ts";
+    write(fx.linked, api, branchTest('import { v } from "../../packages/a/src/x.ts";\n'));
+    git(fx.linked, "add", api);
+    git(fx.linked, "commit", "--quiet", "-m", "test: api");
+    const result = againstBase({ STUB_EACH: "1" });
+    expect({
+      status: result.status,
+      runs: stubLog()
+        .match(/^VITEST: .*$/gm)
+        ?.map((line) => line.replace(/ --reporter=json .*$/, "")),
+      killed: [TEST, api].filter((f) => result.output.includes(`KILLED   ${f} › caps`)),
+    }).toEqual({
+      status: 0,
+      runs: [
+        `VITEST: exec vitest run --project unit ${TEST}`,
+        `VITEST: exec vitest run --project api ${api}`,
+      ],
+      killed: [TEST, api],
+    });
   });
 });
 
