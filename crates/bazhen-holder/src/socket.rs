@@ -284,8 +284,6 @@ fn in_private_dir<T>(
         })?;
     let stat = fstat(&opened).map_err(|e| io_error(dir)(e.into()))?;
     let others = Mode::RWXG | Mode::RWXO;
-    // No test tells the owner check's `||` from `&&`: only a directory another user owns with no
-    // group or other bits does, and only root can make one.
     if FileType::from_raw_mode(stat.st_mode) != FileType::Directory
         || stat.st_uid != geteuid().as_raw()
         || Mode::from_raw_mode(stat.st_mode).intersects(others)
@@ -473,6 +471,49 @@ mod tests {
         }
         assert!(!open.join("t1.lock").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Makes the process non-dumpable while it lives, and dumpable again after.
+    #[cfg(target_os = "linux")]
+    struct NotDumpable;
+
+    #[cfg(target_os = "linux")]
+    impl NotDumpable {
+        fn new() -> Self {
+            use rustix::process::{DumpableBehavior, set_dumpable_behavior};
+            set_dumpable_behavior(DumpableBehavior::NotDumpable).unwrap();
+            Self
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for NotDumpable {
+        fn drop(&mut self) {
+            use rustix::process::{DumpableBehavior, set_dumpable_behavior};
+            set_dumpable_behavior(DumpableBehavior::Dumpable).unwrap();
+        }
+    }
+
+    /// A non-dumpable process's own `/proc/<pid>/fd` is root's, mode 0500, and yet the process
+    /// may enter it: the one directory another user owns with no group or other bits that a test
+    /// can reach without root.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn refuses_a_directory_another_user_owns_though_no_one_else_may_enter_it() {
+        let _guard = NotDumpable::new();
+        let dir = PathBuf::from("/proc/self/fd");
+        let meta = std::fs::metadata(&dir).unwrap();
+        assert_ne!(
+            meta.uid(),
+            geteuid().as_raw(),
+            "{dir:?} is this user's own: run as a user other than root"
+        );
+        assert_eq!(meta.mode() & 0o077, 0, "{dir:?} has group or other bits");
+        let refused = Socket::bind(&dir.join("t1.sock"));
+        assert!(
+            matches!(refused, Err(BindError::NotPrivate(_))),
+            "{refused:?}"
+        );
     }
 
     #[test]
