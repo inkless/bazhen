@@ -51,8 +51,8 @@ pub struct Caller {
 impl Caller {
     /// The caller this process's environment says it is: `BAZHEN_AGENT_ID`, the token in the file
     /// `BAZHEN_AGENT_AUTH_FILE` names, `BAZHEN_DEVICE_ID`, and `CODEX_THREAD_ID`, which Codex sets
-    /// in each command it runs. A variable set but empty is said as it is; a token that can't be
-    /// read, or isn't one, is not sent at all.
+    /// in each command it runs. A variable set but empty is said as it is, and the daemon reads an
+    /// empty agent id as none; a token that can't be read, or isn't one, is not sent at all.
     pub fn from_env() -> Self {
         Self {
             agent_id: env_text("BAZHEN_AGENT_ID"),

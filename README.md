@@ -291,7 +291,10 @@ process under a Codex app-server (`codex app-server`, the managed one included),
 environment Codex gave a `CODEX_THREAD_ID`, as a command left running after its shell exits, is
 never yours. It is the agent whose thread `CODEX_THREAD_ID` names, which `bazhen` sends, and is
 refused when that thread is no live agent's, such as your own Codex session's. Bazhen gives each
-agent's thread `BAZHEN_SOCKET`, so its commands reach the daemon that launched it. The daemon knows
+agent's thread `BAZHEN_SOCKET`, so its commands reach the daemon that launched it. The server
+keeps the environment of whatever started it, which can be a `codex app-server daemon start` or
+`codex update` run inside an agent. So each agent's thread also sets `BAZHEN_AGENT_ID` and
+`BAZHEN_AGENT_AUTH_FILE` empty, and under the server the thread alone says which agent a call is. The daemon knows
 the server by its command line (`codex` or `codex-<platform>`, run as `app-server`), so a Codex
 that renames its binary or that subcommand would be missed; `pnpm test:real api` checks the Codex
 the tests install, and `bazhen doctor` warns when a live Codex agent's server doesn't match.
