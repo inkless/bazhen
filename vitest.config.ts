@@ -105,6 +105,18 @@ export default defineConfig({
         },
       },
       {
+        // The soak's short runs, a real daemon on holders for minutes: on a disposable host only.
+        test: {
+          name: "soak",
+          include: ["tests/soak/**/*.test.ts"],
+          globalSetup: [CAPPED, "tests/support/global-setup.ts"],
+          setupFiles: [SEEDED],
+          fileParallelism: false,
+          maxWorkers: 1,
+          testTimeout: 40 * 60_000,
+        },
+      },
+      {
         test: {
           name: "api",
           include: ["tests/api/**/*.test.ts"],

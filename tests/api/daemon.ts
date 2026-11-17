@@ -349,6 +349,14 @@ export class Daemon {
     return `http://127.0.0.1:${this.port}`;
   }
 
+  /** The daemon process's pid, while this helper runs one. */
+  get pid(): number | undefined {
+    const child = this.process;
+    return child === undefined || child.exitCode !== null || child.signalCode !== null
+      ? undefined
+      : child.pid;
+  }
+
   /** The daemon's Unix socket, beside its tmux server. */
   get socket(): string {
     return join(this.home, "run", "bazhen.sock");
@@ -455,16 +463,11 @@ export class Daemon {
     size = { cols: 100, rows: 30 },
     cookie?: string,
   ): Promise<View> {
-    const ws = new WebSocket(
-      `${this.url.replace("http", "ws")}/v1/terminals/${terminalId}/stream`,
-      {
-        headers: { origin, cookie: cookie ?? (await this.cookie()) },
-      },
-    );
-    const view = new View(ws);
-    await opened(ws);
-    view.frame({ type: "hello", protocolId: await protocolId(), mode, ...size });
-    return view;
+    return openView(this.url, terminalId, mode, {
+      origin,
+      size,
+      cookie: cookie ?? (await this.cookie()),
+    });
   }
 
   /** Opens a view of a terminal over the daemon's socket, as `bazhen attach` does. */
@@ -1053,6 +1056,29 @@ export const showsThread = (title: string, threadId: string) => {
   return shown.length >= 20 && threadId.startsWith(shown);
 };
 
+/**
+ * Opens a view of a terminal on the daemon at `url`, as a paired browser at `origin` would: what
+ * `Daemon.view` does, for a process that has only the daemon's address and the browser's cookie.
+ */
+export async function openView(
+  url: string,
+  terminalId: string,
+  mode: "observe" | "interactive",
+  {
+    origin,
+    size,
+    cookie,
+  }: { origin: string; size: { cols: number; rows: number }; cookie: string },
+): Promise<View> {
+  const ws = new WebSocket(`${url.replace("http", "ws")}/v1/terminals/${terminalId}/stream`, {
+    headers: { origin, cookie },
+  });
+  const view = new View(ws);
+  await opened(ws);
+  view.frame({ type: "hello", protocolId: await protocolId(), mode, ...size });
+  return view;
+}
+
 /** Resolves once the upgrade is accepted; a refusal rejects with its status. */
 function opened(ws: WebSocket): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -1113,6 +1139,7 @@ export class EventClient {
 export class View {
   readonly frames: StreamServerFrame[] = [];
   private readonly raw: Buffer[] = [];
+  private readonly outputListeners: ((chunk: Buffer) => void)[] = [];
   private snapshotEnd: number | undefined;
   private readonly ws: WebSocket;
 
@@ -1121,6 +1148,7 @@ export class View {
     ws.on("message", (data: Buffer, binary: boolean) => {
       if (binary) {
         this.raw.push(data);
+        for (const listener of this.outputListeners) listener(data);
         return;
       }
       const frame = StreamServerFrame.parse(JSON.parse(data.toString("utf8")));
@@ -1143,6 +1171,16 @@ export class View {
   snapshot(): Buffer {
     if (this.snapshotEnd === undefined) throw new Error("no snapshot received yet");
     return Buffer.concat(this.raw.slice(0, this.snapshotEnd));
+  }
+
+  /** Calls `listener` with each chunk of terminal output this view receives from now on. */
+  onOutput(listener: (chunk: Buffer) => void): void {
+    this.outputListeners.push(listener);
+  }
+
+  /** Whether the snapshot the view opened on has arrived whole. */
+  hasSnapshot(): boolean {
+    return this.snapshotEnd !== undefined;
   }
 
   /** Every byte of terminal output this view has received, in order. */

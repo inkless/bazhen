@@ -711,6 +711,13 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       "ps, reading a caller's parent",
     ),
   ],
+  "scripts/soak.ts": [
+    timedOut(
+      /execFileSync\("(?:ps|lsof)", \[[^\]]*\], \{\s*encoding: "utf8",\s*timeout: 5_000,\s*\}\)/,
+      "ps and lsof, reading a soak's processes",
+      2,
+    ),
+  ],
   "scripts/falsify-base.ts": [
     timedOut(
       /spawnSync\("pnpm", installArgs\(mode\), \{[^;]*?timeout: INSTALL_TIMEOUT_MS,/,
@@ -960,10 +967,10 @@ export const SIGNALS_IGNORE = "signals processes; runs in pnpm test:real rust";
 
 /**
  * Whether a file holds tests that may signal processes they didn't start: Rust tests ignored as
- * signalling, and the holder suite, whose holders signal whole sessions when they close.
+ * signalling, and the holder and soak suites, whose holders signal whole sessions when they close.
  */
 export function isSignallingTest(file: string, text: string): boolean {
-  if (file.startsWith("tests/holder/")) return true;
+  if (file.startsWith("tests/holder/") || file.startsWith("tests/soak/")) return true;
   if (!file.endsWith(".rs")) return false;
   const strings: string[] = [];
   const code = rustCode(text, strings);

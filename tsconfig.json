@@ -44,6 +44,9 @@
       "path": "tests/api"
     },
     {
+      "path": "tests/soak"
+    },
+    {
       "path": "tests/e2e"
     },
     {

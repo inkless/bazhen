@@ -1,0 +1,76 @@
+name: Holder soak
+
+# The holder soak (scripts/soak.ts): a real daemon on holders under design §12.4's load and churn
+# for hours, then a verdict per criterion. Hours of runner time, so it runs only when someone
+# starts it, never on a push or a pull request. Its holders signal every process in their sessions
+# as they close, so it runs only on a runner marked disposable. A hosted job is cut off at 6 h:
+# with the gate's warm-up hour, the build and teardown, 4 measured hours is the most that fits.
+# The runs the flip to holders waits on are longer, on a host of their own (docs/standards/testing.md).
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Where to soak
+        type: choice
+        options: [both, linux, macos]
+        default: both
+      hours:
+        description: Hours measured, after an hour's warm-up (at most 4)
+        type: number
+        default: 4
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  HUSKY: 0
+
+jobs:
+  soak:
+    name: soak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+    steps:
+      - name: Refuse more hours than a hosted job can hold
+        env:
+          HOURS: ${{ inputs.hours }}
+        run: |
+          awk -v h="$HOURS" 'BEGIN { exit !(h > 0 && h <= 4) }' || {
+            echo "hours must be more than 0 and at most 4, not $HOURS" >&2
+            exit 1
+          }
+      - name: Mark the runner disposable
+        run: sudo touch /etc/bazhen-disposable-host
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux
+        if: runner.os == 'macOS'
+        run: command -v tmux || brew install tmux
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      - name: Soak
+        env:
+          HOURS: ${{ inputs.hours }}
+        run: pnpm soak --hours "$HOURS" --out soak-run
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-${{ matrix.os }}
+          path: soak-run
+          if-no-files-found: error

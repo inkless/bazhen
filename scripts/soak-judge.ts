@@ -69,7 +69,12 @@ export type SoakEvent =
       readonly holders: readonly HolderSample[];
       /** Every terminal the daemon shows; empty while it is down. */
       readonly terminals: readonly TerminalSample[];
-      /** PTYs in use on the machine. */
+      /**
+       * PTY masters the soak's holders and daemon hold. Not the machine's count, which is the
+       * kernel's across every container on it: a test container's would move with the host's
+       * terminals. A master some other process held would go uncounted; the children of a
+       * closed terminal, which hold its other end, are checked as orphans instead.
+       */
       readonly ptys: number;
     }
   /** The driver is about to close a terminal: its holder and program may end from here on. */
@@ -83,6 +88,8 @@ export type SoakEvent =
       readonly snapshot: readonly number[];
       readonly stream: readonly number[];
     }
+  /** A seam tried on a terminal whose output never paused long enough to compare. */
+  | { readonly kind: "unpaused"; readonly t: number; readonly name: string }
   /** A viewer's screen compared cell by cell with the holder's own at the same offset. */
   | { readonly kind: "seam"; readonly t: number; readonly name: string; readonly equal: boolean }
   /** A keystroke typed through a view, until its echo came back; null if it never did. */
@@ -104,6 +111,17 @@ export type SoakEvent =
     }
   /** Every marker up to `n` has been written to the terminal, as its worker records. */
   | { readonly kind: "marker"; readonly t: number; readonly name: string; readonly n: number }
+  /**
+   * A churn step the driver took, or tried to: a restart, an agent cycle, an idle shell replaced,
+   * an attach, a seam, a settled sample. One that failed says why.
+   */
+  | {
+      readonly kind: "step";
+      readonly t: number;
+      readonly step: string;
+      readonly ok: boolean;
+      readonly why?: string;
+    }
   | { readonly kind: "hup"; readonly t: number; readonly name: string }
   | { readonly kind: "exit"; readonly t: number; readonly name: string; readonly why: string };
 
@@ -133,6 +151,11 @@ export interface JudgeOptions {
   readonly startingMs: number;
   readonly engineBudget: Readonly<Record<Load, number>>;
   readonly seamsPerHour: number;
+  /**
+   * How often the driver takes each churn step that must happen: a window holds at least as many
+   * of each as fit in it, less one for where the window falls between two.
+   */
+  readonly churnEveryMs: Readonly<Record<string, number>>;
   /** Whether `unmeasured` fails the run, as it does for the gate. */
   readonly requireAll: boolean;
 }
@@ -157,6 +180,8 @@ const MIN_CHECKED_MS = 30_000;
  * in a second has stalled, which is a fault.
  */
 const WRITE_LAG_MS = 1_000;
+/** The fewest daemon lives whose baselines are fitted for growth across lives. */
+const MIN_LIVES = 3;
 /** What a float may be off by and still sit on a bar: 1 MiB/h fitted is not 0.9999999. */
 const EPSILON = 1e-9;
 
@@ -172,6 +197,7 @@ export const GATE: JudgeOptions = {
   daemonAgeMs: 9 * 60_000,
   slopeWindowMs: HOUR,
   startingMs: 2 * 60_000,
+  churnEveryMs: { restart: 10 * 60_000, agent: 5 * 60_000, idle: 60_000 },
   engineBudget: {
     replay: 8 * MiB,
     agent: 8 * MiB,
@@ -447,7 +473,8 @@ function outputLoss(run: Run) {
   let watched = 0;
   for (const { name, t: opened } of workers) {
     const closed = run.closes.get(name) ?? Number.POSITIVE_INFINITY;
-    if (closed - opened < MIN_CHECKED_MS) {
+    // A close after the window is the run's teardown, which closes whatever is open.
+    if (closed - opened < MIN_CHECKED_MS && closed <= run.to) {
       faults.push(`${name} was closed ${closed - opened} ms after it opened, too soon to check`);
       continue;
     }
@@ -474,10 +501,14 @@ function seams(run: Run) {
   const faults = found.filter((s) => !s.equal).map((s) => `${s.name} at ${s.t} differs`);
   const hours = hasWindow(run) ? (run.to - run.from) / HOUR : 0;
   const measured = inWindow(found, run).length;
+  const tries = measured + inWindow(ofKind(run.events, "unpaused"), run).length;
+  const rate = `${measured} seams in ${hours.toFixed(2)} measured hours, ${
+    hours === 0 ? 0 : Math.round(measured / hours)
+  } an hour, of ${tries} tries`;
   if (faults.length === 0 && (hours === 0 || measured / hours < run.options.seamsPerHour)) {
-    return unmeasured("seams", `${measured} seams in ${hours.toFixed(2)} measured hours`);
+    return unmeasured("seams", rate);
   }
-  return result("seams", faults, `${found.length} seams, each equal cell by cell`);
+  return result("seams", faults, `${rate}; each equal cell by cell`);
 }
 
 /** The spans the daemon was down, from its `daemon` events. */
@@ -581,9 +612,15 @@ function engineBudget({ samples, options }: Run) {
 }
 
 /**
- * Settled counts against their baselines: the machine's PTYs against the first settled sample,
- * each holder's fds against its own first, and the daemon's against the first of its own life,
- * since each restart is a new process that may open what it needs lazily.
+ * Settled counts against their baselines. The machine's PTYs stay at the first settled sample's.
+ * The daemon's fds, and each holder's, stay at each daemon life's baseline: its second settled
+ * count, since a restart is a new daemon, which opens some of what it needs on first use, and a
+ * holder's fds include its daemon's connections. One such is a terminal's control connection
+ * (runtime-holder's `Control`), opened on the terminal's first input or resize and kept while any
+ * stream views it: one per viewed terminal, which never grows. The first settled count of a life,
+ * before that first use, is its warm-up.
+ * Across lives the baselines must not climb: a robust slope over them, one point a life, above
+ * zero is a leak each restart adds to, while one lazy step stays at zero.
  */
 function counts(run: Run) {
   const settled = inWindow(run.samples, run).filter((s) => s.settled);
@@ -591,30 +628,47 @@ function counts(run: Run) {
   if (base === undefined || settled.length < 2) {
     return unmeasured("counts", "fewer than two settled samples in the measured window");
   }
-  const firstOf = new Map<string, number>();
-  const baseline = (key: string, value: number) => {
-    const was = firstOf.get(key) ?? value;
-    firstOf.set(key, was);
-    return was;
-  };
+  /** Each process's counts in each daemon life, in order. */
+  const lives = new Map<string, Map<number, { t: number; fds: number }[]>>();
   const faults: string[] = [];
+  const count = (process: string, life: number, fds: number, t: number) => {
+    const byLife = lives.get(process) ?? new Map<number, { t: number; fds: number }[]>();
+    lives.set(process, byLife);
+    byLife.set(life, [...(byLife.get(life) ?? []), { t, fds }]);
+  };
   for (const sample of settled) {
-    if (sample.ptys !== base.ptys)
+    if (sample.ptys !== base.ptys) {
       faults.push(`${sample.ptys} PTYs at ${sample.t}, not ${base.ptys}`);
-    const daemon = sample.daemon;
-    if (daemon !== null) {
-      const was = baseline(`daemon:${daemon.pid}`, daemon.fds);
-      if (daemon.fds !== was)
-        faults.push(`the daemon held ${daemon.fds} fds at ${sample.t}, not ${was}`);
     }
+    const daemon = sample.daemon;
+    if (daemon === null) continue;
+    count("the daemon", daemon.pid, daemon.fds, sample.t);
     for (const h of sample.holders) {
-      if (h.fds === null) continue;
-      const was = baseline(`${h.name}:${h.pid}`, h.fds);
-      if (h.fds !== was)
-        faults.push(`${h.name}'s holder held ${h.fds} fds at ${sample.t}, not ${was}`);
+      if (h.fds !== null) count(`${h.name}'s holder`, daemon.pid, h.fds, sample.t);
     }
   }
-  return result("counts", faults, `${settled.length} settled samples, every count at baseline`);
+  let compared = 0;
+  for (const [process, byLife] of lives) {
+    const baselines: Point[] = [];
+    for (const [warmUp, baseline, ...after] of byLife.values()) {
+      if (warmUp === undefined || baseline === undefined) continue;
+      baselines.push([baselines.length, baseline.fds]);
+      for (const later of after) {
+        compared++;
+        if (later.fds !== baseline.fds) {
+          faults.push(`${process} held ${later.fds} fds at ${later.t}, not ${baseline.fds}`);
+        }
+      }
+    }
+    const perLife = theilSen(baselines);
+    if (baselines.length >= MIN_LIVES && perLife > 0) {
+      faults.push(`${process}'s fds grew ${perLife.toFixed(2)} a daemon life`);
+    }
+  }
+  if (faults.length === 0 && compared === 0) {
+    return unmeasured("counts", "no daemon life had a settled count past its baseline");
+  }
+  return result("counts", faults, `${compared} settled counts, each at its life's baseline`);
 }
 
 /**
@@ -675,6 +729,29 @@ function echo(run: Run) {
   return result("echo", faults, `${flooded.length} keystrokes during floods, p99 ${p99} ms`);
 }
 
+/**
+ * The churn itself: every step the driver took went through, and the window holds as many of
+ * each required step as its cadence fits. A soak whose churn stopped judges a quiet machine.
+ */
+function churn(run: Run) {
+  const steps = ofKind(run.events, "step");
+  const faults = steps
+    .filter((s) => !s.ok)
+    .map((s) => `${s.step} failed at ${s.t}${s.why === undefined ? "" : `: ${s.why}`}`);
+  if (!hasWindow(run)) {
+    return faults.length > 0
+      ? result("churn", faults, "")
+      : unmeasured("churn", "the run recorded no measured window");
+  }
+  const done = inWindow(steps, run).filter((s) => s.ok);
+  for (const [step, everyMs] of Object.entries(run.options.churnEveryMs)) {
+    const expected = Math.floor((run.to - run.from) / everyMs) - 1;
+    const took = done.filter((s) => s.step === step).length;
+    if (took < expected) faults.push(`${took} ${step} steps in the window, not ${expected}`);
+  }
+  return result("churn", faults, `${done.length} churn steps in the window, none failed`);
+}
+
 function engine({ events, samples }: Run) {
   const read = samples.some((s) => s.holders.length > 0);
   const reset = new Set(
@@ -714,6 +791,7 @@ export function judge(events: readonly SoakEvent[], options: JudgeOptions = GATE
     counts(run),
     daemonSlope(run),
     echo(run),
+    churn(run),
     engine(run),
   ];
   const pass = criteria.every(

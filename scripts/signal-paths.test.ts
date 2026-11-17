@@ -653,11 +653,12 @@ describe("signalling sources", () => {
 });
 
 describe("signalling tests", () => {
-  it("counts a Rust test ignored as signalling, and the holder suite", () => {
+  it("counts a Rust test ignored as signalling, and the holder and soak suites", () => {
     const ignored =
       '#[test]\n#[ignore = "signals processes; runs in pnpm test:real rust"]\nfn t() {}';
     expect(isSignallingTest("crates/x/tests/a.rs", ignored)).toBe(true);
     expect(isSignallingTest("tests/holder/holder.test.ts", "")).toBe(true);
+    expect(isSignallingTest("tests/soak/soak.test.ts", "")).toBe(true);
   });
 
   it("doesn't count a test ignored for another reason, or one quoting the attribute", () => {
