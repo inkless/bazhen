@@ -761,18 +761,18 @@ const respawning: Handler = (holder, request) => {
 
 /**
  * Fake holders, and a runtime listing them every 20 ms, whose title reports go to `told` by
- * terminal and to `heard` as `terminal: title`.
+ * terminal, and to `reports` whole.
  */
 function watched(root: string, handle?: Handler, hello: Partial<HolderHelloReply> = {}) {
   const fakes = startingFakes(root, hello, handle, {}, { titleSyncMs: 20 });
   const told: string[] = [];
-  const heard: string[] = [];
-  const stop = fakes.runtime.onTitle((terminalId, title) => {
-    told.push(terminalId);
-    heard.push(`${terminalId}: ${title}`);
+  const reports: unknown[][] = [];
+  const stop = fakes.runtime.onTitle((...report) => {
+    told.push(report[0]);
+    reports.push(report);
   });
   onTestFinished(stop);
-  return { ...fakes, told, heard, stop };
+  return { ...fakes, told, reports, stop };
 }
 
 /** Waits for the runtime to list the holders `n` more times, by the `hello`s `fake` answered. */
@@ -823,17 +823,15 @@ async function handAnswered(root: string) {
 }
 
 describe("HolderRuntime: watching agents' titles", () => {
-  it("tells an agent's title as its watch opens and at each title its holder reports", async () => {
-    const { runtime, terminals, heard } = watched(privateRoot(), undefined, { title: "first" });
+  it("tells an agent's terminal, and never its title, as its watch opens and at each title its holder reports", async () => {
+    const { runtime, terminals, reports } = watched(privateRoot(), undefined, { title: "first" });
     const ref = await runtime.create(agentSpec());
     const fake = terminals.get(ref.terminalId)!;
-    await expect.poll(() => heard).toEqual([`${ref.terminalId}: first`]);
+    await expect.poll(() => reports).toEqual([[ref.terminalId]]);
     const [watch, ...more] = await lasting(fake);
     expect(more).toEqual([]);
     watch!.holder.send({ type: "title", body: { offset: 3, text: "the thread" } });
-    await expect
-      .poll(() => heard)
-      .toEqual([`${ref.terminalId}: first`, `${ref.terminalId}: the thread`]);
+    await expect.poll(() => reports).toEqual([[ref.terminalId], [ref.terminalId]]);
     expect(watch!.requests).toEqual([]);
     expect(watch!.holder.hello).toEqual(expect.objectContaining({ writer: false }));
   });
@@ -888,21 +886,18 @@ describe("HolderRuntime: watching agents' titles", () => {
 
   it("watches the holder that runs a terminal now, not an older one that kept its connection", async () => {
     const root = privateRoot();
-    const { runtime, terminals, heard } = watched(root);
+    const { runtime, terminals, told } = watched(root);
     const ref = await runtime.create(agentSpec());
     const old = terminals.get(ref.terminalId)!;
-    await expect.poll(() => heard).toEqual([`${ref.terminalId}: `]);
+    await expect.poll(() => told).toEqual([ref.terminalId]);
     // The old holder keeps its connections; a new one binds the terminal's socket.
     rmSync(holderSocket(root, ref.terminalId));
     const tags = encodeTags({ kind: "agent", agentId: newId("agent") });
     const now = await fakeTerminal(root, ref.terminalId, {
       tags,
       holderStart: FAKE_START + 1,
-      title: "the new holder's",
     });
-    await expect
-      .poll(() => heard)
-      .toEqual([`${ref.terminalId}: `, `${ref.terminalId}: the new holder's`]);
+    await expect.poll(() => told).toEqual([ref.terminalId, ref.terminalId]);
     await expect.poll(() => openTo(old).length).toBe(0);
     expect((await lasting(now)).length).toBe(1);
   });
@@ -946,17 +941,6 @@ describe("HolderRuntime: watching agents' titles", () => {
     await held.answer(1, other, titleFrame("not its"));
     await expect.poll(() => hungUp.has(held.opened[1]!)).toBe(true);
     expect(told).toEqual([]);
-  });
-
-  it("tells a title its holder sent with its hello, once the hello has been checked", async () => {
-    const root = privateRoot();
-    const held = await handAnswered(root);
-    const { runtime } = runtimeAt(root, { titleSyncMs: 60_000 });
-    const heard: string[] = [];
-    onTestFinished(runtime.onTitle((_, title) => heard.push(title)));
-    await held.answer(0);
-    await held.answer(1, { title: "in hello" }, titleFrame("first"), titleFrame("latest"));
-    await expect.poll(() => heard).toEqual(["latest"]);
   });
 
   it("ends every watch once the last listener goes, and opens none after", async () => {

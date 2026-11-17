@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { newId, type RuntimeRef } from "@bazhen/core";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { newId, type RuntimeRef, type TerminalId } from "@bazhen/core";
+import { holderSocket, holdersDir } from "@bazhen/host-guard";
+import { HolderRuntime } from "@bazhen/runtime-holder";
+import { listenFakeHolder } from "@bazhen/runtime-holder/testing";
 import {
   FIXTURE_TMUX_SOCKET,
   testView,
@@ -45,8 +49,13 @@ async function setup(opts: {
   releaseFails?: boolean;
   /** Its agents still starting, their TUIs not yet up. */
   starting?: boolean;
+  /** Runs while a title is first read, before the read answers. */
+  reading?: () => void;
+  /** Runs while a thread is first resumed, before the resume answers. */
+  resuming?: () => void;
 }) {
   let unsaved = opts.unsaved ?? 0;
+  let { reading, resuming } = opts;
   const runtime = opts.runtime ?? "tmux";
   const agents = opts.starting === true ? withStartingCodexAgentsOn : withCodexAgentsOn;
   const { store, agentOn } = await agents(runtime, A, ...(opts.others ?? []));
@@ -68,6 +77,8 @@ async function setup(opts: {
     runtime: {
       title: async (ref) => {
         titled.push(ref);
+        reading?.();
+        reading = undefined;
         const title = (titles.length > 1 ? titles.shift() : titles[0]) ?? "";
         if (title === GONE) throw new Error("can't find pane: %0");
         return title;
@@ -84,6 +95,8 @@ async function setup(opts: {
       },
       resume: async (threadId) => {
         resumed.push(threadId);
+        resuming?.();
+        resuming = undefined;
         if (unsaved-- > 0) throw new Error(`no rollout found for thread id ${threadId}`);
       },
     },
@@ -141,8 +154,60 @@ function respawn(s: Awaited<ReturnType<typeof setup>>) {
     s.store.append({
       ...system,
       type: "agent.respawned",
-      payload: { externalRef, runtimeRef: { runtime: "tmux", locator: { ...ref?.locator } } },
+      payload: {
+        externalRef,
+        runtimeRef: { runtime: ref?.runtime ?? "tmux", locator: { ...ref?.locator } },
+      },
     });
+}
+
+/** Above every system's pid limit, so nothing a holder runtime does can reach a process. */
+const FAKE_PID = 2 ** 22 + 1;
+
+/**
+ * A holder runtime over one fake holder of `terminal`, as `agentId`'s, whose `hello` carries
+ * `title`: what its title watch reports goes to `report`.
+ */
+async function holderReporting(
+  terminal: TerminalId,
+  agentId: string,
+  title: string,
+  report: (...told: [TerminalId]) => void,
+) {
+  const limit = Number(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+  if (!(FAKE_PID > limit)) throw new Error(`the fake holder's pid isn't above the limit ${limit}`);
+  vi.spyOn(process, "kill").mockImplementation((pid) => {
+    throw new Error(`a test reached process.kill(${pid})`);
+  });
+  const root = mkdtempSync("/tmp/bz-th-");
+  chmodSync(root, 0o700);
+  mkdirSync(holdersDir(root), { mode: 0o700 });
+  const start = 1_700_000_000;
+  const server = await listenFakeHolder(holderSocket(root, terminal), {
+    hello: {
+      terminalId: terminal,
+      tags: { kind: "agent", agentId },
+      holderPid: FAKE_PID,
+      holderStart: start,
+      childPid: FAKE_PID,
+      childStart: start,
+      title,
+    },
+  });
+  const runtime = new HolderRuntime({
+    root,
+    binary: "/nonexistent/bazhen-holder",
+    env: { PATH: "/bin" },
+    titleSyncMs: 60_000,
+    onError: () => {},
+  });
+  const stop = runtime.onTitle(report);
+  onTestFinished(async () => {
+    stop();
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
 }
 
 describe("a Codex agent's TUI coming up", () => {
@@ -163,6 +228,78 @@ describe("a Codex agent's TUI coming up", () => {
     await s.threads.titleChanged(s.terminal);
     expect([before, s.lifecycle()]).toEqual(["starting", "running"]);
   });
+
+  it("never takes the title the last TUI's holder reported before a respawn for the new TUI's", async () => {
+    const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+    const s = await setup({ titles: [shown(C)], runtime: "holder", listing });
+    void s.threads.heard(s.terminal);
+    await expect.poll(() => s.lists.length).toBe(1);
+    s.titles.splice(0, 1, shown(A));
+    const reported: TerminalId[] = [];
+    // Everything the watch reports goes on, so a title it told would be acted on.
+    await holderReporting(s.terminal, s.agentId, shown(A), (...told) => {
+      reported.push(told[0]);
+      void s.threads.heard(...told);
+    });
+    await expect.poll(() => reported).toEqual([s.terminal]);
+    respawn(s)();
+    s.titles.splice(0, 1, "");
+    answer(undefined);
+    await s.threads.titleChanged(s.terminal);
+    expect(s.lifecycle()).toBe("starting");
+  });
+
+  it.each(["tmux", "holder"] as const)(
+    "never takes a title read as a respawn commits for the new TUI's, but takes the new TUI's, on %s",
+    async (runtime) => {
+      const s: Awaited<ReturnType<typeof setup>> = await setup({
+        titles: [shown(A)],
+        runtime,
+        reading: () => respawn(s)(),
+      });
+      await s.threads.heard(s.terminal);
+      const dropped = s.lifecycle();
+      await s.threads.titleChanged(s.terminal);
+      expect([dropped, s.lifecycle()]).toEqual(["starting", "running"]);
+    },
+  );
+
+  it.each([
+    ["no thread", shown(C), []],
+    ["several threads", shown(B), [{ id: B }, { id: B2 }]],
+  ])(
+    "neither holds the mail of, nor says it keeps its thread for, an agent respawned while the threads are listed for a title naming %s",
+    async (_, title, listed) => {
+      const { promise: listing, resolve: answer } = Promise.withResolvers<unknown>();
+      const s = await setup({ titles: [title], runtime: "holder", listing, listed });
+      const followed = s.threads.heard(s.terminal);
+      await expect.poll(() => s.lists.length).toBe(1);
+      respawn(s)();
+      answer(undefined);
+      await followed;
+      expect([s.held(), s.untracked()]).toEqual([false, false]);
+    },
+  );
+
+  it.each(["tmux", "holder"] as const)(
+    "neither moves nor readies an agent respawned while its move's thread resumes, but readies it on the new TUI's title, on %s",
+    async (runtime) => {
+      const s: Awaited<ReturnType<typeof setup>> = await setup({
+        titles: [shown(B)],
+        runtime,
+        resuming: () => respawn(s)(),
+      });
+      s.announce(B);
+      await s.threads.heard(s.terminal);
+      const dropped = [s.lifecycle(), s.boundTo()];
+      s.titles.splice(0, 1, shown(A));
+      await s.threads.titleChanged(s.terminal);
+      expect([dropped, [s.lifecycle(), s.boundTo()]]).toEqual([
+        ["starting", A],
+        ["running", A],
+      ]);
+    },
+  );
 });
 
 describe("Codex thread switches", () => {
@@ -456,19 +593,12 @@ describe("Codex thread switches", () => {
 
   it("drops at once a title heard where no Codex agent runs, while a Codex agent's follow waits", async () => {
     const { promise: listing } = Promise.withResolvers<unknown>();
-    const s = await setup({ titles: [shown(A)], runtime: "holder", listing });
-    void s.threads.heard(s.terminal, shown(C));
+    const s = await setup({ titles: [shown(C)], runtime: "holder", listing });
+    void s.threads.heard(s.terminal);
     await expect.poll(() => s.lists.length).toBe(1);
-    const other = s.threads.heard(newId("term"), "⠋ thinking").then(() => "dropped");
+    const other = s.threads.heard(newId("term")).then(() => "dropped");
     const queued = new Promise((resolve) => setTimeout(() => resolve("queued"), 200));
     await expect(Promise.race([other, queued])).resolves.toBe("dropped");
-  });
-
-  it("acts on the title a runtime told it, without reading it again", async () => {
-    const s = await setup({ titles: [shown(A)], runtime: "holder" });
-    s.announce(B);
-    await s.threads.titleChanged(s.terminal, shown(B));
-    expect([s.boundTo(), s.titled]).toEqual([B, []]);
   });
 
   it("moves an agent, after a restart, to a thread the server lists only later and never announces", async () => {
