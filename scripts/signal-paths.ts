@@ -1024,7 +1024,7 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
       /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/daemon\/src\/main\.ts"\)\],\s*\{ env: \{ \.\.\.this\.env, BAZHEN_PORT: String\(this\.port\) \}, timeout: 30_000 \}/,
       "a second daemon, which should refuse to start",
     ),
-    timedOut(/run\("codex", args, \{ env: this\.env, timeout: 90_000 \}\)/, "the codex CLI"),
+    timedOut(/run\("codex", args, \{ env, timeout: 90_000 \}\)/, "the codex CLI"),
     timedOut(
       /run\("codex", \["app-server", "daemon", "stop"\], \{ env: this\.env, timeout: 90_000 \}\)/,
       "codex's own daemon stop",

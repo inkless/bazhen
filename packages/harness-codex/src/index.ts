@@ -54,12 +54,33 @@ export class ThreadMismatch extends Error {
 
 /**
  * What a thread is given so its commands reach this daemon: Codex runs them in the app-server, out
- * of the agent's terminal and its variables. A thread takes it when it is started or loaded; a
- * resume of one already loaded leaves what it has, which is the same socket.
+ * of the agent's terminal and its variables. A thread takes it only from the request that loads
+ * it; a resume of one already loaded leaves what it has. So the daemon sends it on the threads it
+ * loads, and the TUI on those it loads itself, by `/new`, `/fork` or `/resume`.
  */
 export function threadConfig(socket: string): Readonly<Record<string, string>> {
   return { "shell_environment_policy.set.BAZHEN_SOCKET": socket };
 }
+
+/**
+ * `value` as a TOML basic string. Codex reads a `-c` value as TOML and, when that fails, takes the
+ * raw text with spaces and quotes trimmed from its ends, so a path left unescaped reaches the
+ * thread as some other path, with no error.
+ */
+export function tomlString(value: string): string {
+  let escaped = "";
+  for (const c of value) {
+    const code = c.charCodeAt(0);
+    if (c === '"' || c === "\\") escaped += `\\${c}`;
+    else if (code < 0x20 || code === 0x7f) escaped += `\\u${code.toString(16).padStart(4, "0")}`;
+    else escaped += c;
+  }
+  return `"${escaped}"`;
+}
+
+/** `config` as `-c key=value` flags, as a TUI sends them with each thread it loads. */
+const configFlags = (config: Readonly<Record<string, string>>) =>
+  Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${tomlString(value)}`]);
 
 /**
  * Codex, reached through its app-server (foundation-design §5.8). Bazhen starts the agent's
@@ -134,7 +155,8 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its terminal's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
-        ...(theme === undefined ? [] : ["-c", `tui.theme="${SYNTAX_THEME[theme]}"`]),
+        ...configFlags(this.config.config ?? {}),
+        ...configFlags(theme === undefined ? {} : { "tui.theme": SYNTAX_THEME[theme] }),
       ],
       env: {},
       ...(theme && { theme }),
