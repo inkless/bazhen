@@ -5,6 +5,7 @@ import {
   EventStreamQuery,
   parseJson,
 } from "@bazhen/protocol";
+import { DRAIN_PATIENCE, HEARTBEAT_MS, keepAlive } from "../http/heartbeat.ts";
 import { refuseUpgrade, type UpgradeRoute } from "../http/upgrades.ts";
 import type { Store } from "../store/store.ts";
 import type { Presence } from "../notify/presence.ts";
@@ -13,8 +14,20 @@ import { follow } from "./feed.ts";
 /** RFC 6455's close code for a server that can't go on. */
 const INTERNAL_ERROR = 1011;
 
+export interface EventDeps {
+  readonly store: Store;
+  readonly presence?: Presence;
+  readonly heartbeatMs?: number;
+  readonly drainPatience?: number;
+}
+
 /** The event stream's WebSocket endpoint, `/v1/events` (foundation-design §5.2). */
-export function eventRoute(store: Store, presence?: Presence): UpgradeRoute {
+export function eventRoute(deps: EventDeps): UpgradeRoute {
+  const { store, presence } = deps;
+  const every = {
+    ms: deps.heartbeatMs ?? HEARTBEAT_MS,
+    patience: deps.drainPatience ?? DRAIN_PATIENCE,
+  };
   const wss = new WebSocketServer({ noServer: true, maxPayload: EVENT_FRAME_MAX_BYTES });
   return {
     path: /^\/v1\/events$/,
@@ -23,6 +36,7 @@ export function eventRoute(store: Store, presence?: Presence): UpgradeRoute {
       if (!query.success) return refuseUpgrade(socket, "400 Bad Request");
       const cursor = { epoch: query.data.epoch, after: Number(query.data.after) };
       wss.handleUpgrade(req, socket, head, (ws) => {
+        keepAlive(ws, every);
         const stop = follow(store, cursor, {
           send: (frame, written) =>
             ws.send(JSON.stringify(frame), (err) => {

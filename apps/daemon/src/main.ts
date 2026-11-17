@@ -565,7 +565,7 @@ const terminalStream = streamRoute({
   hub,
   runtimeRef: (id) => store.runtimeRef(id),
 });
-const streams = [terminalStream, eventRoute(store, presence)];
+const streams = [terminalStream, eventRoute({ store, presence })];
 server.on("upgrade", upgrades(allow, streams, gate));
 
 // The LAN listener. A certificate it can't use stops only this listener: loopback keeps serving,
