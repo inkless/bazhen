@@ -2106,6 +2106,37 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("takes a module that may not be the one a path names for one that may not hide a carrier", () => {
+    const glob = "use crate::attach::*;\n";
+    const inline = "mod direct {\n    pub struct Step;\n}\n";
+    const takes = "pub fn f(s: direct::Step) {}\n";
+    const tree = {
+      ...repo,
+      ...steps,
+      "crates/c/Cargo.toml": '[dependencies]\nlog = "0.4"\n',
+      "crates/c/src/lib.rs": ["attach", "a", "b", "g", "l", "o", "n"]
+        .map((m) => `pub mod ${m};`)
+        .join("\n"),
+      "crates/c/src/a.rs": `${glob}#[cfg(windows)]\n${inline}${takes}`,
+      "crates/c/src/b.rs": `${glob}#[cfg(windows)]\nmod direct;\n${takes}`,
+      "crates/c/src/b/direct.rs": "pub struct Step;\n",
+      "crates/c/src/g.rs": `${glob}fn g() {\n${inline}}\n${takes}`,
+      "crates/c/src/l.rs": '#[path = "x.rs"]\nmod log;\npub fn f(s: log::Step) {}\n',
+      "crates/c/src/x.rs": "pub struct Step;\n",
+      "crates/c/src/o.rs":
+        '#[cfg_attr(unix, path = "real.rs")]\nmod os;\npub fn f(s: os::Step) {}\n',
+      "crates/c/src/o/os.rs": "pub struct Step;\n",
+      "crates/c/src/n.rs": `${glob}${inline}${takes}`,
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/c/src/a.rs::f",
+      "crates/c/src/b.rs::f",
+      "crates/c/src/g.rs::f",
+      "crates/c/src/l.rs::f",
+      "crates/c/src/o.rs::f",
+    ]);
+  });
+
   it("takes a type of cfg'd twin modules for a carrier when either twin's is one", () => {
     const tree = {
       ...repo,

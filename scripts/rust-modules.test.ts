@@ -167,6 +167,48 @@ describe("ModuleTable.resolve", () => {
     ]);
   });
 
+  it("adds a cfg'd or block-scoped module to its name and lets it shadow nothing", () => {
+    const local = "    pub struct Step;\n";
+    const table = tableOf({
+      [LIB]: "pub mod attach;\npub mod a;\npub mod b;\npub mod c;\npub mod d;\n",
+      "crates/a/src/attach/mod.rs": "pub mod direct;\n",
+      "crates/a/src/attach/direct.rs": steps["crates/a/src/attach/direct.rs"],
+      "crates/a/src/a.rs": `use crate::attach::*;\n#[cfg(windows)]\nmod direct {\n${local}}\n`,
+      "crates/a/src/b.rs": "use crate::attach::*;\n#[cfg(windows)]\nmod direct;\n",
+      "crates/a/src/b/direct.rs": "pub struct Step;\n",
+      "crates/a/src/c.rs": `use crate::attach::*;\nfn g() {\n    mod direct {\n    ${local}    }\n}\n`,
+      "crates/a/src/d.rs": `use crate::attach::*;\nmod direct {\n${local}}\n`,
+    });
+    const byte = `${LIB}::attach::direct::Step`;
+    const step = (m: string) =>
+      resolve(table, moduleOf(table, `crates/a/src/${m}.rs`, `${LIB}::${m}`), "direct::Step").items;
+    expect(step("a")).toEqual([`${LIB}::a::direct::Step`, byte]);
+    expect(step("b")).toEqual([byte, `${LIB}::b::direct::Step`]);
+    expect(step("c")).toEqual([byte, `${LIB}::c::direct::Step`]);
+    expect(step("d")).toEqual([`${LIB}::d::direct::Step`]);
+  });
+
+  it("takes a module whose file it can't read for one naming nothing it can settle", () => {
+    const table = tableOf(
+      {
+        [LIB]: [
+          '#[path = "x.rs"]',
+          "mod log;",
+          '#[cfg_attr(unix, path = "real.rs")]',
+          "mod os;",
+          "mod serde;",
+        ].join("\n"),
+        "crates/a/src/x.rs": "pub struct Step;\n",
+        "crates/a/src/os.rs": "pub struct Frame;\n",
+      },
+      [{ ...A, deps: ["serde", "log"] }],
+    );
+    const root = moduleOf(table, LIB);
+    expect(resolve(table, root, "log::Step")).toEqual({ items: [], unresolved: ["Step"] });
+    expect(resolve(table, root, "os::Frame")).toEqual({ items: [], unresolved: ["Frame"] });
+    expect(resolve(table, root, "serde::Value")).toEqual({ items: [], unresolved: ["Value"] });
+  });
+
   it("finds the module code is in, an inline one's body included", () => {
     const code = "mod inner {\n    pub struct X;\n}\npub struct Y;\n";
     const table = tableOf({ [LIB]: code });

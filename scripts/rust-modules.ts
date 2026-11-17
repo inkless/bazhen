@@ -55,7 +55,12 @@ export interface Module {
   dir: string;
   /** How many bodies define it: cfg'd twins of an inline module are one module of two. */
   spans: number;
-  children: Map<string, Module[]>;
+  /**
+   * A module declared where its body can't be read (`#[path]`, a file that isn't there): every
+   * name in it is unresolved.
+   */
+  opaque: boolean;
+  children: Map<string, Bound<Module>[]>;
   items: Map<string, Bound<Item>[]>;
   uses: Map<string, Bound<UseBinding>[]>;
   globs: Bound<UseBinding>[];
@@ -87,6 +92,12 @@ interface Region {
   end: number;
   inner: Region[];
 }
+
+/** An attribute that may leave its item out: `#[cfg(…)]`, or a `cfg_attr` that adds one. */
+const CFG = /#\s*\[\s*(?:cfg\s*\(|cfg_attr\s*\([^\]]*\bcfg\s*\()/;
+
+/** An attribute that may move a module's file: `#[path = …]`, or a `cfg_attr` that adds one. */
+const PATH = /#\s*\[\s*(?:path\b|cfg_attr\s*\([^\]]*\bpath\s*=)/;
 
 const ALWAYS_EXTERNAL = new Set(["std", "core", "alloc"]);
 
@@ -384,6 +395,7 @@ export class ModuleTable {
       parent,
       dir,
       spans: 1,
+      opaque: false,
       children: new Map(),
       items: new Map(),
       uses: new Map(),
@@ -426,23 +438,30 @@ export class ModuleTable {
       if (code[m.index - 1] === "#") continue;
       const solid = blocks.filter((b) => b !== "macro");
       const attributes = attributesBefore(code, from, m.index);
-      const conditional = solid.length > 0 || /#\s*\[\s*cfg\s*\(/.test(attributes);
+      const conditional = solid.length > 0 || CFG.test(attributes);
       if (m[1] !== undefined) {
         const name = m[2] ?? "";
         const after = m.index + m[0].length;
+        const dir = `${module.dir}${name}/`;
         if (code[after] === "{") {
           const end = itemEnd(code, after);
-          const child = this.child(module, name, module.file, `${module.dir}${name}/`);
+          const child = this.child(module, name, module.file, dir, conditional);
           const inner: Region = { module: child, start: after + 1, end: end - 1, inner: [] };
           region.inner.push(inner);
           this.visit(child, inner, code, after + 1, end - 1, reached);
           tokens.lastIndex = end;
-        } else if (solid.length === 0 && !/#\s*\[\s*path\b/.test(attributes)) {
-          const file = [`${module.dir}${name}.rs`, `${module.dir}${name}/mod.rs`].find((f) =>
-            this.files.has(f),
-          );
+        } else {
+          const file =
+            solid.length === 0 && !PATH.test(attributes)
+              ? [`${module.dir}${name}.rs`, `${dir}mod.rs`].find((f) => this.files.has(f))
+              : undefined;
+          const declared = module.children.get(name)?.some((c) => c.value.file === file);
           if (file !== undefined && !reached.has(file)) {
-            this.visitFile(this.child(module, name, file, `${module.dir}${name}/`), reached);
+            this.visitFile(this.child(module, name, file, dir, conditional), reached);
+          } else if (file !== undefined && declared === true) {
+            this.child(module, name, file, dir, conditional);
+          } else {
+            this.child(module, name, module.file, dir, conditional).opaque = true;
           }
         }
         continue;
@@ -480,14 +499,26 @@ export class ModuleTable {
     }
   }
 
-  private child(parent: Module, name: string, file: string, dir: string): Module {
-    const twin = parent.children.get(name)?.find((c) => c.file === file);
+  /**
+   * The module `parent` declares as `name`, its body in `file`. A second declaration of it is a
+   * cfg'd twin, one module of two bodies; a declaration that may not hold (cfg'd, or in a block)
+   * makes the module one that adds to what its name names and shadows nothing.
+   */
+  private child(
+    parent: Module,
+    name: string,
+    file: string,
+    dir: string,
+    conditional: boolean,
+  ): Module {
+    const twin = parent.children.get(name)?.find((c) => c.value.file === file);
     if (twin !== undefined) {
-      twin.spans++;
-      return twin;
+      twin.value.spans++;
+      twin.conditional ||= conditional;
+      return twin.value;
     }
     const child = this.module(`${parent.id}::${name}`, file, parent.crate, parent, dir);
-    push(parent.children, name, child);
+    push(parent.children, name, { value: child, conditional });
     return child;
   }
 
@@ -515,7 +546,7 @@ export class ModuleTable {
     const key = `${module.id}\0${name}\0${String(first)}`;
     const known = this.memo.get(key);
     if (known !== undefined) return known;
-    if (this.busy.has(key)) return unresolved(name);
+    if (this.busy.has(key) || module.opaque) return unresolved(name);
     this.busy.add(key);
     const sure = empty();
     const maybe = empty();
@@ -525,9 +556,9 @@ export class ModuleTable {
       (conditional || twin ? maybe : sure).items.push(value);
       shadows ||= !conditional && !twin;
     }
-    for (const child of module.children.get(name) ?? []) {
-      sure.modules.push(child);
-      shadows = true;
+    for (const { value, conditional } of module.children.get(name) ?? []) {
+      (conditional || twin ? maybe : sure).modules.push(value);
+      shadows ||= !conditional && !twin;
     }
     for (const { value, conditional } of module.uses.get(name) ?? []) {
       merge(conditional || twin ? maybe : sure, this.followUse(module, value));
