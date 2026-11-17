@@ -29,6 +29,7 @@ import { binariesOf, manifestNames, namedBinaries } from "./falsify.ts";
 import { inSignalSandbox } from "./signal-paths.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
+const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
 const CLI_MAIN = "crates/bazhen/src/main.rs";
 const TEST = "packages/a/src/x.test.ts";
@@ -146,6 +147,13 @@ case "$1" in
       "$BAZHEN_CLI" >> "$STUB_LOG"
     fi
     if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
+      # What falsify's reporter records of a run stopped while its second test ran, mid-write.
+      if [ "\${STUB_RECORD:-}" = 1 ]; then
+        file="$(pwd)/${TEST}"
+        printf '{"kind":"collected","file":"%s","tests":[{"id":"c","title":"caps"},{"id":"h","title":"hangs"}]}\\n' "$file" >> "$BZ_FALSIFY_RESULTS_FILE"
+        printf '{"kind":"result","file":"%s","id":"c","status":"failed","failureMessages":["AssertionError: expected 1 to be 2"]}\\n' "$file" >> "$BZ_FALSIFY_RESULTS_FILE"
+        printf '{"kind":"result","file":"%s","id":"h","status":"pass' "$file" >> "$BZ_FALSIFY_RESULTS_FILE"
+      fi
       echo "HANGING $$" >> "$STUB_LOG"
       echo "stub vitest: still running" >&2
       trap 'echo TERMED >> "$STUB_LOG"' TERM
@@ -611,6 +619,47 @@ describe("falsify on a branch in a linked worktree", () => {
       asks: result.output.includes(ASKS_CONTROL),
       leftovers: leftovers(),
     }).toEqual({ status: 1, block: true, line: true, asks: true, leftovers: [] });
+  }, 30_000);
+
+  it("judges the tests a run stopped at the cap finished, from the reporter beside falsify", () => {
+    write(
+      fx.linked,
+      TEST,
+      'import { v } from "./x.ts";\nit("v", () => {});\nit("caps", () => {});\nit("hangs", () => {});\n',
+    );
+    git(fx.linked, "add", TEST);
+    git(fx.linked, "commit", "--quiet", "--amend", "-m", "feat: v2");
+    const result = againstBase({
+      STUB_HANG_VITEST: "1",
+      STUB_RECORD: "1",
+      FALSIFY_VITEST_TIMEOUT_MS: "1000",
+    });
+    const why = "it timed out after 1 s, falsify's cap on one vitest run";
+    expect({
+      status: result.status,
+      block: result.output.includes(
+        `falsify: the unit run (1 file) left no report: ${why}. 1 of the 2 tests it collected ` +
+          "finished, and are judged from what falsify's reporter recorded as each ended. The " +
+          "end of what it printed:\n",
+      ),
+      finished: result.output.includes(
+        `KILLED   ${TEST} › caps\n           failed: AssertionError: expected 1 to be 2\n`,
+      ),
+      unfinished: result.output.includes(
+        `INVALID  ${TEST} › hangs (no report from the unit run: ${why})`,
+      ),
+      asks: [...result.output.matchAll(/^ {2}Control: .*$/gm)].map((m) => m[0]),
+      reporter: stubLog().includes(`--reporter=${REPORTER} --reporter=json`),
+      leftovers: leftovers(),
+    }).toEqual({
+      status: 1,
+      block: true,
+      finished: true,
+      unfinished: true,
+      asks: [`  Control: ${TEST} › hangs: <what you broke> -> <how it failed>`],
+      reporter: true,
+      leftovers: [],
+    });
   }, 30_000);
 
   it("says a vitest run exited with a code and no report, with the end of what it printed", () => {
@@ -1638,7 +1687,7 @@ describe("falsify on a branch with new tests in two vitest projects", () => {
       status: result.status,
       runs: stubLog()
         .match(/^VITEST: .*$/gm)
-        ?.map((line) => line.replace(/ --reporter=json .*$/, "")),
+        ?.map((line) => line.replace(/ --reporter=.*$/, "")),
       killed: [TEST, api].filter((f) => result.output.includes(`KILLED   ${f} › caps`)),
     }).toEqual({
       status: 0,

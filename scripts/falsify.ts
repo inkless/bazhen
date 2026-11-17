@@ -10,9 +10,11 @@
 //             survive; one that passes otherwise is unrelated to the source change and comes out
 //             INVALID.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
-//             isn't unique, its project's run left no report (falsify says why), or it passed
-//             but is unrelated to the source change; a branch that adds tests without a source
-//             change also lands here, as does every test of a brand-new symbol. Each INVALID
+//             isn't unique, it hadn't finished when its project's run left no report (falsify
+//             says why; the tests that had are judged from what falsify-reporter.ts recorded as
+//             each ended), or it passed but is unrelated to the source change; a branch that
+//             adds tests without a source change also lands here, as does every test of a
+//             brand-new symbol. Each INVALID
 //             test needs a hand-run control, recorded as a trailer in a commit on the branch
 //             that names it by its file and exact title:
 //             `Control: <file> › <title>: <what you broke> -> <how the test failed>`
@@ -84,12 +86,14 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
 import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
 import { isMain } from "./is-main.ts";
 import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
+import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -172,6 +176,8 @@ const TEST_BUILD = GATES.test.slice(
   GATES.test.indexOf("--status-level"),
 );
 const KILL_GRACE_MS = 2000;
+// Beside this file, never the worktree's copy, which the branch's revert may have changed or removed.
+const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
 const JUDGING = "BZ_FALSIFY_JUDGING";
 
 // Inherited, these point every git command at another repository or index: git exports them to
@@ -629,7 +635,6 @@ export function controlLine(t: { file: string; title: string }): string {
 export type VitestReport = {
   testResults: {
     name: string;
-    status: string;
     message?: string;
     assertionResults: { title: string; status: string; failureMessages: string[] }[];
   }[];
@@ -669,6 +674,15 @@ function readWritten(path: string): Written {
     return { kind: "json", value: JSON.parse(text) as unknown };
   } catch {
     return { kind: "not JSON" };
+  }
+}
+
+/** What falsify's reporter recorded at `path`: nothing when it wrote none, or can't be read. */
+function readRecorded(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
   }
 }
 
@@ -723,6 +737,12 @@ function resultOf(report: VitestReport, file: string, title: string) {
   const suite = report.testResults.find((r) => r.name.endsWith(file));
   const matches = suite?.assertionResults.filter((a) => a.title === title) ?? [];
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** Whether the report has one result for the test, and the test ran to an end. */
+export function finishedIn(report: VitestReport, file: string, title: string): boolean {
+  const test = resultOf(report, file, title);
+  return test !== undefined && test.status !== UNFINISHED;
 }
 
 export function classify(report: VitestReport, file: string, title: string): Outcome {
@@ -1992,9 +2012,13 @@ async function main(args: string[]): Promise<number> {
       // One run per project, as its own pnpm script runs it: two projects' global setups in one
       // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).
       const report: VitestReport = { testResults: [] };
+      // What the reporter recorded of each run that left no report, read after every report so a
+      // file another project's run judged in full keeps that run's verdict.
+      const stopped: VitestReport["testResults"] = [];
       const unreported = new Map<string, string>();
       for (const [index, [project, inProject]] of [...projects].entries()) {
         const reportFile = join(dir, `falsify-report-${index}.json`);
+        const resultsFile = join(dir, `falsify-results-${index}.jsonl`);
         const ran = await logged(
           "pnpm",
           [
@@ -2004,30 +2028,42 @@ async function main(args: string[]): Promise<number> {
             "--project",
             project,
             ...inProject,
+            `--reporter=${REPORTER}`,
             "--reporter=json",
             `--outputFile=${reportFile}`,
           ],
           dir,
           `falsify-vitest-${index}.log`,
           VITEST_TIMEOUT_MS,
-          vitestEnv,
+          { ...(vitestEnv ?? isolatedEnv()), [RESULTS_FILE_ENV]: resultsFile },
         );
         const written = readWritten(reportFile);
         if (written.kind === "json" && isReport(written.value)) {
           report.testResults.push(...written.value.testResults);
           continue;
         }
-        // Each of the run's targets is INVALID: say why once, and name it on each.
+        // The run's tests that finished are judged from what the reporter recorded; each of its
+        // targets that didn't is INVALID: say why once, and name it on each.
+        const recorded = partialReport(readRecorded(resultsFile)).testResults;
+        stopped.push(...recorded);
+        const collected = recorded.flatMap((suite) => suite.assertionResults);
+        const finished = collected.filter((t) => t.status !== UNFINISHED).length;
         const reason = noOutputReason(ran, written, "report", VITEST_TIMEOUT_MS);
         const files = `${inProject.length} file${inProject.length === 1 ? "" : "s"}`;
+        const judged =
+          collected.length === 0
+            ? ""
+            : ` ${finished} of the ${collected.length} tests it collected finished, and are judged ` +
+              "from what falsify's reporter recorded as each ended.";
         console.error(
-          `falsify: the ${project} run (${files}) left no report: ${reason}. The end of what it ` +
-            `printed:\n${indentedTail(ran.said)}`,
+          `falsify: the ${project} run (${files}) left no report: ${reason}.${judged} The end of ` +
+            `what it printed:\n${indentedTail(ran.said)}`,
         );
         for (const file of inProject) {
           unreported.set(file, `the ${project} run: ${reason}`);
         }
       }
+      report.testResults.push(...stopped);
       // A passing test that imports none of the reverted files is a test of code the branch didn't
       // change (a characterization or property test): no verdict, so it needs a control.
       const revertedPaths = reverts.flatMap(pathsOf);
@@ -2048,7 +2084,10 @@ async function main(args: string[]): Promise<number> {
           results.push({ ...t, outcome: "INVALID", unbuilt, failure });
         } else {
           // Keyed by file: a file in two projects may have its verdict from the other's report.
-          const noReport = outcome === "INVALID" ? unreported.get(t.file) : undefined;
+          const noReport =
+            outcome === "INVALID" && !finishedIn(report, t.file, t.title)
+              ? unreported.get(t.file)
+              : undefined;
           results.push({ ...t, outcome, failure, noReport });
         }
       }
