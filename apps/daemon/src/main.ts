@@ -67,7 +67,7 @@ import { Notices, deviceOf } from "./attention/notices.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
-import { stableHookClient } from "./mailbox/hook-link.ts";
+import { installHookClient } from "./mailbox/hook-link.ts";
 import { installShellIntegration } from "./shells/integration.ts";
 import { ShellReports } from "./shells/reports.ts";
 import { ActivityTracker } from "./mailbox/activity.ts";
@@ -203,7 +203,12 @@ mailbox.requeueInFlight();
 approvals.closeAbandoned();
 const hookRunner = hookClient();
 if (hookRunner === HOOK_SCRIPT) console.warn(`bazhen-hook is not built; hooks use ${HOOK_SCRIPT}`);
-const hookPath = stableHookClient(join(paths.state, "hook"), hookRunner, inputs.uid);
+const hook = await installHookClient({
+  source: hookRunner,
+  dir: join(paths.state, "hook"),
+  uid: inputs.uid,
+});
+const hookPath = hook.path;
 // Run from a copy only this user can write, under its content's hash: a reader anything could
 // replace in place could vouch for any caller.
 const peerInstall = await installHolder({
@@ -687,7 +692,7 @@ const socketListener = getRequestListener(
           ...report,
           workarounds: [...(workarounds ?? [])],
         })),
-        hookClient: { path: hookRunner, fallback: hookRunner === HOOK_SCRIPT },
+        hookClient: { path: hook.client, fallback: hookRunner === HOOK_SCRIPT },
         peerReader: peerBinary === null ? null : { path: peerBinary },
         holder: await holderDoctor(holderInstall, holderRuntime),
         containment: containmentDoctor(containment.decided),
