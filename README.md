@@ -8,7 +8,7 @@ client. Agents, tasks, and orchestration come later.
 
 ## Requirements
 
-- Node.js 24 or newer (development uses 26.13.0; see `.nvmrc` / `.tool-versions`)
+- Node.js 24 or newer (development uses the version `.nvmrc` pins)
 - pnpm 12 (pinned through `packageManager`)
 - tmux 3.x; 3.5 or later avoids a crash Bazhen can only work around before it
   ([docs/tmux.md](docs/tmux.md))

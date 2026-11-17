@@ -28,7 +28,8 @@ jobs:
         # need a Linux container or a change to tests/support/disposable-host.ts. The Rust crates
         # run on macOS in `rust-macos`.
         os: [ubuntu-latest]
-        node: ["24", "26.13.0"]
+        # "pinned" is the version in .nvmrc, so a bump never renames the check.
+        node: ["24", "pinned"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,7 +38,8 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.node != 'pinned' && matrix.node || '' }}
+          node-version-file: ${{ matrix.node == 'pinned' && '.nvmrc' || '' }}
           cache: pnpm
       - name: Install tmux
         if: runner.os == 'Linux'
@@ -78,7 +80,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.13.0
+          node-version-file: .nvmrc
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -109,7 +111,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.13.0
+          node-version-file: .nvmrc
           cache: pnpm
       - name: Install tmux
         if: runner.os == 'Linux'
@@ -146,7 +148,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.13.0
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:real integration
@@ -159,7 +161,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.13.0
+          node-version-file: .nvmrc
           cache: pnpm
       - name: Install tmux, and what the shell suite runs in a shell
         run: |
@@ -187,7 +189,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.13.0
+          node-version-file: .nvmrc
           cache: pnpm
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux fish zsh
