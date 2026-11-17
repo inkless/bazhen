@@ -29,13 +29,22 @@ fn options(verb: &str) -> &'static [&'static str] {
 
 /// Runs the lifecycle verb the command line names, and says how it went.
 pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    match verb(p, daemon) {
+    answer(verb(p, daemon), LIFECYCLE_USAGE, out)
+}
+
+/// Prints what a verb answered, or why it stopped, with `usage_text` under a usage mistake.
+pub(crate) fn answer(
+    step: Result<String, Stop>,
+    usage_text: &str,
+    out: &mut Out,
+) -> Result<Exit, Failed> {
+    match step {
         Ok(text) => {
             out.line(&text);
             Ok(Exit::Done)
         }
         Err(Stop::Usage(message)) => {
-            out.err(&format!("{message}\n{LIFECYCLE_USAGE}"));
+            out.err(&format!("{message}\n{usage_text}"));
             Ok(Exit::Usage)
         }
         Err(Stop::NotHere(message)) => {
@@ -164,7 +173,10 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
     };
     let r = command
         .send(daemon, agent.id.as_str(), generation)
-        .map_err(|stop| how_to_close_busy(stop, command))?;
+        .map_err(|stop| match command {
+            Command::Close { confirm_busy, .. } => how_to_close_busy(stop, confirm_busy),
+            _ => stop,
+        })?;
     if p.has("json") {
         return pretty(&r);
     }
@@ -213,29 +225,14 @@ fn launch(p: &Parsed, daemon: &Daemon) -> Step<String> {
     })
 }
 
-/// A close refused as `busy` names what runs; say how to end it anyway.
-fn how_to_close_busy(stop: Stop, command: Command) -> Stop {
-    let Command::Close {
-        confirm_busy: false,
-        ..
-    } = command
-    else {
-        return stop;
-    };
+/// A close refused as `busy` names what runs; unless it `confirmed` that, say how to end it.
+pub(crate) fn how_to_close_busy(stop: Stop, confirmed: bool) -> Stop {
     match stop {
-        Stop::Call(Failed::Refused(message)) if refused_as_busy(&message) => Stop::Refused(
-            format!("{message}\nclose again with --confirm-busy to end what runs"),
+        Stop::Call(Failed::Rejected(rejection)) if !confirmed && rejection.busy() => Stop::Refused(
+            format!("{rejection}\nclose again with --confirm-busy to end what runs"),
         ),
         other => other,
     }
-}
-
-/// Whether a refusal the call printed is the daemon's 409 `busy`.
-fn refused_as_busy(message: &str) -> bool {
-    message
-        .split_once(": HTTP 409: ")
-        .and_then(|(_, body)| serde_json::from_str::<serde_json::Value>(body).ok())
-        .is_some_and(|body| body.get("error").and_then(serde_json::Value::as_str) == Some("busy"))
 }
 
 /// The signal `given` names, as `kill` takes one: with or without `SIG`, in either case.
@@ -258,7 +255,7 @@ fn signal_named(given: &str) -> Step<Signal> {
 /// The agent `given` names: by its id, else by the name of one not ended, as a name an ended
 /// agent had may be another's now. A name is matched as the daemon matches one, ignoring ASCII
 /// case.
-fn find<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Agent> {
+pub(crate) fn find<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Agent> {
     state
         .agents
         .iter()
@@ -273,7 +270,7 @@ fn find<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Agent> {
 }
 
 /// An agent as the person knows it: its name and id, or its id alone when it has no name.
-fn label(agent: &Agent) -> String {
+pub(crate) fn label(agent: &Agent) -> String {
     if agent.name.is_empty() {
         agent.id.to_string()
     } else {
@@ -281,6 +278,6 @@ fn label(agent: &Agent) -> String {
     }
 }
 
-fn pretty(value: &impl Serialize) -> Step<String> {
+pub(crate) fn pretty(value: &impl Serialize) -> Step<String> {
     serde_json::to_string_pretty(value).map_err(|e| Stop::Unreadable(e.to_string()))
 }

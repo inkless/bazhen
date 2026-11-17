@@ -1,7 +1,13 @@
 // Protocol values for the fake daemon to answer with. Each is checked against its schema when a
 // route answers it, so a fixture the protocol no longer accepts fails its test at once.
 
-import type { DoctorResponse, HealthResponse, StateSnapshot, TaskDetail } from "@bazhen/protocol";
+import type {
+  DoctorResponse,
+  HealthResponse,
+  Shell,
+  StateSnapshot,
+  TaskDetail,
+} from "@bazhen/protocol";
 import { protocolId } from "@bazhen/protocol/id";
 
 /** The protocol the CLI under test speaks, and as much of it as the CLI prints. */
@@ -79,6 +85,24 @@ export const agent = (id: string, name: string, over: Partial<Agent> = {}): Agen
   needsRestart: null,
   role: null,
   promptChanged: false,
+  ...over,
+});
+
+/** A shell of its own, running at its prompt in /work, unless `over` says otherwise. */
+export const shell = (id: string, over: Partial<Shell> = {}): Shell => ({
+  id,
+  environmentId: ENV,
+  state: "running",
+  generation: 1,
+  cwd: "/work",
+  linkedAgentId: null,
+  name: null,
+  foreground: null,
+  theme: "dark",
+  attachCommand: `bazhen attach ${id}`,
+  commands: ["close", "rename"],
+  retypeable: false,
+  needsRestart: null,
   ...over,
 });
 

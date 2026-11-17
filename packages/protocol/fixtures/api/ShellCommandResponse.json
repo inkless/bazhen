@@ -1,0 +1,64 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        4
+      ]
+    },
+    "parsed": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        4
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": []
+    },
+    "parsed": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": []
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        4
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        4
+      ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": []
+    }
+  }
+]

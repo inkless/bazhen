@@ -35,6 +35,26 @@ pub enum TerminalState {
     Failed,
 }
 
+impl TerminalState {
+    /// Closed or failed: it will run nothing again.
+    pub fn ended(self) -> bool {
+        matches!(self, Self::Closed | Self::Failed)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Creating => "creating",
+            Self::Running => "running",
+            Self::Exited => "exited",
+            Self::Unknown => "unknown",
+            Self::Lost => "lost",
+            Self::Closing => "closing",
+            Self::Closed => "closed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShellCommand {
@@ -79,4 +99,39 @@ pub struct Shell {
     pub retypeable: bool,
     #[serde(default)]
     pub needs_restart: Option<NeedsRestart>,
+}
+
+/// `POST /v1/shells`: a shell beside an agent, in its directory, or a shell of its own in `cwd`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenShellRequest {
+    pub idempotency_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_agent_id: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<TuiTheme>,
+}
+
+/// `POST /v1/shells/:id/close`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseShellRequest {
+    pub idempotency_key: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_busy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_program: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+}
+
+/// What a command on a shell produced: the shell it was on, and the events it recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellCommandResponse {
+    pub terminal_id: TerminalId,
+    pub event_ids: Vec<u64>,
 }

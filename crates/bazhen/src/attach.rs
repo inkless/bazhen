@@ -122,6 +122,9 @@ pub(crate) fn run(
             Err(Failed::Refused(why) | Failed::Unsendable(why)) => {
                 break Ok(Outcome::Ended(Ending::Failed(why)));
             }
+            Err(Failed::Rejected(rejection)) => {
+                break Ok(Outcome::Ended(Ending::Failed(rejection.to_string())));
+            }
         }
         if let Err(e) = tty::clear() {
             break Err(e);

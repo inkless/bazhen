@@ -29,6 +29,7 @@ import { DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
 import { hasKeystrokes } from "./input.ts";
 import { isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
+import { CloseShellRequest, OpenShellRequest, ShellCommandResponse } from "./shells.ts";
 import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
 import {
   AddTaskNoteRequest,
@@ -501,6 +502,19 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       },
     ],
   },
+  CloseShellRequest: {
+    schema: CloseShellRequest,
+    wire: [
+      { idempotencyKey: KEY, generation: 0 },
+      {
+        idempotencyKey: KEY,
+        generation: 2,
+        confirmBusy: true,
+        confirmedProgram: "vim",
+        force: true,
+      },
+    ],
+  },
   CreateTaskRequest: {
     schema: CreateTaskRequest,
     wire: [
@@ -662,6 +676,14 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       { agentId: AGENT, terminalId: null, eventIds: [] },
     ],
   },
+  OpenShellRequest: {
+    schema: OpenShellRequest,
+    wire: [
+      { idempotencyKey: KEY },
+      { idempotencyKey: KEY, linkedAgentId: AGENT, theme: "dark" },
+      { idempotencyKey: KEY, cwd: "~/work", theme: "light" },
+    ],
+  },
   PairingCodeResponse: {
     schema: PairingCodeResponse,
     wire: [
@@ -704,6 +726,13 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   },
   SendMessageRequest: { schema: SendMessageRequest, wire: [{ idempotencyKey: KEY, body: "hi" }] },
   SendMessageResponse: { schema: SendMessageResponse, wire: [{ messageId: MSG, eventIds: [1] }] },
+  ShellCommandResponse: {
+    schema: ShellCommandResponse,
+    wire: [
+      { terminalId: TERM, eventIds: [4] },
+      { terminalId: TERM, eventIds: [] },
+    ],
+  },
   SignalAgentRequest: {
     schema: SignalAgentRequest,
     wire: [{ idempotencyKey: KEY, generation: 4, signal: "SIGTERM" }],
