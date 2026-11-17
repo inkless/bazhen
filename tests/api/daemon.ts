@@ -691,6 +691,13 @@ export class Daemon {
     return readFileSync(file, "utf8").trim();
   }
 
+  /** The environment Codex's managed app-server on this daemon's Codex home runs with (Linux only). */
+  codexServerEnv(): Record<string, string> {
+    const file = join(this.home, "codex", "app-server-daemon", "daemon.pid");
+    const pid: unknown = Reflect.get(Object(JSON.parse(readFileSync(file, "utf8"))), "pid");
+    return processEnv(Number(pid));
+  }
+
   /** The environment a shell terminal's process runs with (Linux only). */
   shellEnv(terminalId: string): Record<string, string> {
     return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
@@ -902,9 +909,20 @@ export class Daemon {
    * as the daemon runs it, since an app-server it starts would hand them to every command it runs.
    */
   async codex(...args: string[]): Promise<void> {
-    const env = Object.fromEntries(
-      Object.entries(this.env).filter(([name]) => !name.startsWith("BAZHEN_")),
-    );
+    await this.codexWith({}, ...args);
+  }
+
+  /**
+   * The Codex CLI as `codex()` runs it, with `extra` in its environment, as a command run inside
+   * an agent's terminal would have its variables.
+   */
+  async codexWith(extra: Readonly<Record<string, string>>, ...args: string[]): Promise<void> {
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(this.env).filter(([name]) => !name.startsWith("BAZHEN_")),
+      ),
+      ...extra,
+    };
     await run("codex", args, { env, timeout: 90_000 });
   }
 

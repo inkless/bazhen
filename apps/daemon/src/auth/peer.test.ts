@@ -71,11 +71,11 @@ describe("readingOf", () => {
       readingOf(via(900, chain(950, 950, 900, 15, 10, 1)), terminals),
       readingOf(via(900, chain(950, 100, 900, 1)), terminals),
     ]).toEqual([
-      { kind: "codex" },
-      { kind: "codex" },
-      { kind: "codex" },
-      { kind: "codex" },
-      { kind: "codex" },
+      { kind: "codex", via: "server" },
+      { kind: "codex", via: "environment" },
+      { kind: "codex", via: "server" },
+      { kind: "codex", via: "server" },
+      { kind: "codex", via: "server" },
     ]);
   });
 
@@ -83,7 +83,10 @@ describe("readingOf", () => {
     expect([
       readingOf(via(900, chain(950, 950, 900, 100, 10, 1)), terminals),
       readingOf(via(900, chain(150, 150, 100, 10, 900, 1)), terminals),
-    ]).toEqual([{ kind: "codex" }, { kind: "agent", agentId: agent }]);
+    ]).toEqual([
+      { kind: "codex", via: "server" },
+      { kind: "agent", agentId: agent },
+    ]);
   });
 
   it("names the agent whose terminal a caller marked only by its environment runs in", () => {
@@ -95,8 +98,8 @@ describe("readingOf", () => {
     ]).toEqual([
       { kind: "agent", agentId: agent },
       { kind: "agent", agentId: agent },
-      { kind: "codex" },
-      { kind: "codex" },
+      { kind: "codex", via: "environment" },
+      { kind: "codex", via: "environment" },
     ]);
   });
 

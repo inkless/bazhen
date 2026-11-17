@@ -54,7 +54,7 @@ describe("Codex harness", () => {
     ]);
   });
 
-  it("gives the agent's thread this daemon's socket on its start and each resume, for its commands", async () => {
+  it("gives the agent's thread this daemon's socket and no agent's id or token file, on its start and each resume", async () => {
     const { port, requests } = channel();
     const harness = new CodexHarness(port, REMOTE, "/h/run/bazhen.sock");
     await harness.launchSpec({ cwd: "/work" }, {});
@@ -63,7 +63,11 @@ describe("Codex harness", () => {
       { kind: "codex-thread", id: "thr-1" },
       {},
     );
-    const config = { "shell_environment_policy.set.BAZHEN_SOCKET": "/h/run/bazhen.sock" };
+    const config = {
+      "shell_environment_policy.set.BAZHEN_SOCKET": "/h/run/bazhen.sock",
+      "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+      "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": "",
+    };
     expect(requests.filter(([method]) => method !== "thread/inject_items")).toEqual([
       ["thread/start", { cwd: "/work", config }],
       ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
@@ -133,7 +137,7 @@ describe("Codex harness", () => {
     });
   });
 
-  it("gives the TUI this daemon's socket, for the threads it starts or loads itself", async () => {
+  it("gives the TUI this daemon's socket and no agent's id or token file, for the threads it starts or loads itself", async () => {
     const socket = "/h/run/bazhen.sock";
     const harness = new CodexHarness(channel().port, REMOTE, socket);
     const launched = await harness.launchSpec({ cwd: "/work" }, {});
@@ -147,7 +151,7 @@ describe("Codex harness", () => {
       flagValues(launched.argv, "shell_environment_policy"),
       flagValues(resumed.argv, "shell_environment_policy"),
       flagValues(without.argv, "shell_environment_policy"),
-    ]).toEqual([[{ set: { BAZHEN_SOCKET: socket } }], [{ set: { BAZHEN_SOCKET: socket } }], []]);
+    ]).toEqual([policy(socket), policy(socket), []]);
   });
 
   it("refuses to launch when the server returns no thread", async () => {
@@ -184,6 +188,16 @@ describe("Codex harness", () => {
 });
 
 /**
+ * The shell policy flags a TUI carries, as `flagValues` reads them: the daemon's socket, and an
+ * agent's id and token file set empty over whatever the app-server's own environment holds.
+ */
+const policy = (socket: string) => [
+  { set: { BAZHEN_SOCKET: socket } },
+  { set: { BAZHEN_AGENT_ID: "" } },
+  { set: { BAZHEN_AGENT_AUTH_FILE: "" } },
+];
+
+/**
  * The `-c` flags in `argv` under the top-level key `table`, each read as Codex reads one: the key
  * up to the first `=`, its value as TOML.
  */
@@ -214,9 +228,7 @@ describe("a TOML string", () => {
     const socket = "/tmp/a \"b\" \\c 'd' ü\u007f/run/bazhen.sock";
     const harness = new CodexHarness(channel().port, REMOTE, socket);
     const { argv } = await harness.launchSpec({ cwd: "/work" }, {});
-    expect(flagValues(argv, "shell_environment_policy")).toEqual([
-      { set: { BAZHEN_SOCKET: socket } },
-    ]);
+    expect(flagValues(argv, "shell_environment_policy")).toEqual(policy(socket));
   });
 });
 

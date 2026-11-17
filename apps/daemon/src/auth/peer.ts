@@ -98,10 +98,16 @@ export interface TerminalPids {
   readonly runtimes: ReadonlySet<number>;
 }
 
+/**
+ * A Codex tool call, known by the app-server among the caller and its ancestors, or only by the
+ * `CODEX_THREAD_ID` in the caller's own environment, outside every agent's terminal.
+ */
+export type CodexReading = { readonly kind: "codex"; readonly via: "server" | "environment" };
+
 /** What a socket peer's process says of the caller. */
 export type PeerReading =
   | { readonly kind: "agent"; readonly agentId: AgentSessionId }
-  | { readonly kind: "codex" }
+  | CodexReading
   | { readonly kind: "outside" }
   | { readonly kind: "refused"; readonly reason: string };
 
@@ -127,9 +133,10 @@ export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReadin
   const markedOnly = chain.codexServer === chain.pid;
   const serverAt =
     chain.codexServer === undefined || markedOnly ? -1 : line.indexOf(chain.codexServer);
-  if (serverAt !== -1 && (agentAt === -1 || serverAt < agentAt)) return { kind: "codex" };
+  if (serverAt !== -1 && (agentAt === -1 || serverAt < agentAt))
+    return { kind: "codex", via: "server" };
   if (agentId !== undefined) return { kind: "agent", agentId };
-  if (markedOnly) return { kind: "codex" };
+  if (markedOnly) return { kind: "codex", via: "environment" };
   if (line.some((pid) => terminals.shells.has(pid))) return { kind: "outside" };
   if (line.some((pid) => terminals.runtimes.has(pid)))
     return { kind: "refused", reason: "the caller runs under Bazhen's runtime, in no terminal" };

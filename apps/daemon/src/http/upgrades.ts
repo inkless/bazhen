@@ -3,8 +3,7 @@ import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { ErrorResponse } from "@bazhen/protocol";
 import { refusal, type Allowlists } from "./guard.ts";
-import { AGENT_ID_HEADER, AGENT_TOKEN_HEADER } from "../auth/agent-token.ts";
-import { identify, type AgentCredentials } from "../auth/callers.ts";
+import { identify, presentedBy, type AgentCredentials } from "../auth/callers.ts";
 import { arrivedRemotely, mustPair, tokenFrom, type DeviceGate } from "../auth/devices.ts";
 import type { PeerReading } from "../auth/peer.ts";
 import type { StoredDevice } from "../store/store.ts";
@@ -107,7 +106,7 @@ export function socketUpgrades(
       const value = req.headers[name];
       return Array.isArray(value) ? value[0] : value;
     };
-    const presented = { token: header(AGENT_TOKEN_HEADER), said: header(AGENT_ID_HEADER) };
+    const presented = presentedBy(header);
     const reading =
       peer === undefined
         ? undefined

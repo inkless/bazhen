@@ -14,7 +14,7 @@ import {
   AGENT_TOKEN_HEADER,
   CODEX_THREAD_HEADER,
 } from "./agent-token.ts";
-import type { PeerReading } from "./peer.ts";
+import type { CodexReading, PeerReading } from "./peer.ts";
 
 const hashOf = (token: string): string => createHash("sha256").update(token).digest("hex");
 
@@ -230,7 +230,7 @@ export function identify(
   peer: PeerReading = { kind: "outside" },
 ): Identity {
   if (peer.kind === "refused") return refused(peer.reason);
-  if (peer.kind === "codex") return asCodex(credentials, presented);
+  if (peer.kind === "codex") return asCodex(credentials, presented, peer.via);
   if (peer.kind === "agent") return asPeer(credentials, presented, peer.agentId);
   const { token, said } = presented;
   if (token !== undefined) {
@@ -253,16 +253,40 @@ export interface Presented {
   readonly thread?: string | undefined;
 }
 
+/**
+ * What a request presents, by its headers. An empty agent id is none: a Codex thread sets
+ * `BAZHEN_AGENT_ID` empty over the app-server's own environment, which has no way to unset it, and
+ * a caller that sends it empty could as well send nothing, so reading it as an id gives no check.
+ */
+export function presentedBy(header: (name: string) => string | undefined): Presented {
+  return {
+    token: header(AGENT_TOKEN_HEADER),
+    said: header(AGENT_ID_HEADER) || undefined,
+    thread: header(CODEX_THREAD_HEADER),
+  };
+}
+
 /** A Codex thread id as the app-server makes them; anything else names no thread. */
 const CODEX_THREAD = /^[0-9A-Za-z-]{1,64}$/;
 
-/** A Codex tool call is the live agent bound to the thread it names, else refused. */
-function asCodex(credentials: AgentCredentials, presented: Presented): Identity {
+/**
+ * A Codex tool call is the live agent bound to the thread it names, else refused. Under the
+ * server, what else it presents is the server's environment, which is whoever started the server's,
+ * an agent's tool call included, and never the thread's agent's own: it is not held against the
+ * call. A caller marked by its own environment only may be any process outside every terminal, so
+ * another agent's token or id beside the thread still refuses it.
+ */
+function asCodex(
+  credentials: AgentCredentials,
+  presented: Presented,
+  via: CodexReading["via"],
+): Identity {
   const { thread } = presented;
   if (thread === undefined) return refused("a Codex tool call names no thread");
   if (!CODEX_THREAD.test(thread)) return refused("a Codex tool call names no Codex thread");
   const agentId = credentials.codexAgent?.(thread);
   if (agentId === undefined) return refused(`Codex thread ${thread} is no live agent's`);
+  if (via === "server") return { kind: "agent", agentId };
   return asPeer(credentials, presented, agentId);
 }
 
@@ -377,12 +401,11 @@ export function guardCallers(
   app.use("/v1/*", async (c: Context<SocketEnv>, next: Next) => {
     if (SELF_IDENTIFIED.includes(c.req.path)) return next();
     const reading = peer === undefined ? undefined : await peer(c.env.incoming.socket);
-    const presented = {
-      token: c.req.header(AGENT_TOKEN_HEADER),
-      said: c.req.header(AGENT_ID_HEADER),
-      thread: c.req.header(CODEX_THREAD_HEADER),
-    };
-    const who = identify(credentials, presented, reading);
+    const who = identify(
+      credentials,
+      presentedBy((name) => c.req.header(name)),
+      reading,
+    );
     if (who.kind === "refused") c.set("refusal", who.reason);
     else c.set("caller", who.kind === "agent" ? who.agentId : null);
     return next();

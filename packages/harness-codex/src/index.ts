@@ -57,9 +57,17 @@ export class ThreadMismatch extends Error {
  * of the agent's terminal and its variables. A thread takes it only from the request that loads
  * it; a resume of one already loaded leaves what it has. So the daemon sends it on the threads it
  * loads, and the TUI on those it loads itself, by `/new`, `/fork` or `/resume`.
+ *
+ * The server's own environment is whatever started it, and an agent's tool call can start it, so
+ * every command would carry that agent's id and token file. The thread sets both empty, which the
+ * CLI and the daemon read as none. Not `exclude`: a list in a thread's config replaces the user's.
  */
 export function threadConfig(socket: string): Readonly<Record<string, string>> {
-  return { "shell_environment_policy.set.BAZHEN_SOCKET": socket };
+  return {
+    "shell_environment_policy.set.BAZHEN_SOCKET": socket,
+    "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+    "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": "",
+  };
 }
 
 /**

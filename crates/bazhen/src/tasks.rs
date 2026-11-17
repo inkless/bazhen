@@ -85,7 +85,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
         p,
         daemon,
         now_ms,
-        agent: env_text("BAZHEN_AGENT_ID"),
+        agent: agent_named(env_text("BAZHEN_AGENT_ID")),
         codex_thread: env_text("CODEX_THREAD_ID"),
     };
     match verb.run(out) {
@@ -117,6 +117,12 @@ struct Verb<'a> {
     agent: Option<String>,
     /// `CODEX_THREAD_ID`, which Codex sets in each command it runs, outside the agent's terminal.
     codex_thread: Option<String>,
+}
+
+/// The agent `BAZHEN_AGENT_ID` names: none when it is empty, as a Codex thread sets it over the
+/// app-server's own environment, which may hold the agent whose terminal started the server.
+fn agent_named(id: Option<String>) -> Option<String> {
+    id.filter(|id| !id.is_empty())
 }
 
 /// `value`, refused as missing when absent or empty.
@@ -773,4 +779,17 @@ fn resolve(dir: &str) -> String {
     let cwd = std::env::current_dir()
         .map_or_else(|_| "/".to_owned(), |c| c.to_string_lossy().into_owned());
     normalize(&format!("{cwd}/{dir}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agent_named;
+
+    #[test]
+    fn an_empty_agent_id_names_no_agent() {
+        assert_eq!(
+            [Some(String::new()), Some("agent_x".to_owned()), None].map(agent_named),
+            [None, Some("agent_x".to_owned()), None]
+        );
+    }
 }
