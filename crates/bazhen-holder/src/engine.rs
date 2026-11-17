@@ -441,6 +441,51 @@ pub(crate) mod tests {
         );
     }
 
+    /// The tests above wall a failing engine in; the holder walls this one.
+    #[test]
+    fn the_holders_engine_hands_over_its_replies() {
+        let mut walled = Walled::new(engine, SIZE, HistoryRows(100), None);
+        walled.advance(b"\x1b[c");
+        assert!(
+            !walled.take_replies().is_empty(),
+            "the control has no reply"
+        );
+        assert_eq!(walled.take_replies(), b"", "a reply handed over twice");
+    }
+
+    #[test]
+    fn the_holders_engine_reports_its_title_screen_and_size_and_a_respawn_resets_them() {
+        let mut walled = Walled::new(engine, SIZE, HistoryRows(100), None);
+        assert!(walled.stats().is_some());
+        walled.advance(b"\x1b]2;named\x07\x1b[?1049h");
+        assert_eq!(walled.title(), "named");
+        assert!(walled.alternate());
+        walled.respawned(None);
+        assert_eq!(walled.title(), "", "a respawned terminal kept its title");
+        assert!(
+            !walled.alternate(),
+            "a respawned terminal kept its alternate screen"
+        );
+        walled.resize(Size { cols: 10, rows: 5 });
+        walled.advance(b"0123456789ab\x1b[6n");
+        assert_eq!(
+            walled.take_replies(),
+            b"\x1b[2;3R",
+            "not wrapped at the new width"
+        );
+    }
+
+    #[test]
+    fn the_holders_engine_answers_a_colour_query_in_its_theme() {
+        let mut walled = Walled::new(engine, SIZE, HistoryRows(100), Some(Theme::Light));
+        walled.advance(b"\x1b]11;?\x07");
+        let [r, g, b] = Theme::Light.colours().background;
+        assert_eq!(
+            String::from_utf8_lossy(&walled.take_replies()),
+            format!("\x1b]11;rgb:{r:02x}{r:02x}/{g:02x}{g:02x}/{b:02x}{b:02x}\x07")
+        );
+    }
+
     #[test]
     fn the_failed_calls_replies_go_with_its_engine() {
         let mut walled = walled();
