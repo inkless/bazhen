@@ -1952,6 +1952,9 @@ describe("decoderFailures", () => {
       ].join("\n"),
       "crates/w/src/lib.rs": [
         "use q::{self as hw};",
+        "mod inner {",
+        "    pub struct Decoder { n: u64 }",
+        "}",
         "pub struct W { f: self::inner::Decoder, n: u64 }",
         "impl W {",
         "    pub fn f(&self) { look(&self.f) }",
@@ -1976,6 +1979,155 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  // The alias and the byte enum of one crate, as the CLI has them, in modules of their own.
+  const steps: Record<string, string> = {
+    "crates/c/src/tasks.rs": "pub struct Stop;\npub type Step<T> = Result<T, Stop>;\n",
+    "crates/c/src/attach/mod.rs": "pub mod direct;\npub use direct::Step;\n",
+    "crates/c/src/attach/direct.rs": [
+      "pub enum Step {",
+      "    Send(u32),",
+      "    Show(Vec<u8>),",
+      "    End,",
+      "}",
+    ].join("\n"),
+  };
+
+  it("takes a name for the type its module brings in, not another type of that name", () => {
+    const tree = {
+      ...repo,
+      ...steps,
+      "crates/c/src/lib.rs": [
+        "pub mod tasks;",
+        "pub mod attach;",
+        "pub mod verbs;",
+        "pub mod globbed;",
+        "pub mod both;",
+        "pub mod inline;",
+        "pub mod blocks;",
+      ].join("\n"),
+      "crates/c/src/verbs.rs": [
+        "use crate::tasks::Step;",
+        "use crate::attach::{self, direct};",
+        "pub fn answer(step: Step<String>) -> u8 { 0 }",
+        "pub fn boxed(steps: Vec<Option<Step<u8>>>) {}",
+        "pub fn shown(step: direct::Step) {}",
+        "pub fn full(step: crate::attach::direct::Step) {}",
+        "pub fn parent(step: super::attach::direct::Step) {}",
+        "pub fn exported(step: attach::Step) {}",
+        "pub fn matched(n: u8) {",
+        "    if let direct::Step::Show(b) = make(n) { look(b) }",
+        "}",
+      ].join("\n"),
+      "crates/c/src/blocks.rs": [
+        "use crate::tasks::Step;",
+        "pub fn local(n: u8) {",
+        "    use crate::attach::direct::Step;",
+        "    if let Step::Show(b) = make(n) { look(b) }",
+        "}",
+      ].join("\n"),
+      "crates/c/src/globbed.rs": "use crate::attach::direct::*;\npub fn globbed(step: Step) {}\n",
+      "crates/c/src/both.rs": [
+        "use crate::attach::direct::*;",
+        "use crate::tasks::Step;",
+        "pub fn both(step: Step<u8>) {}",
+      ].join("\n"),
+      "crates/c/src/inline.rs": [
+        "mod inner {",
+        "    pub use crate::attach::direct::Step;",
+        "}",
+        "use crate::tasks::Step;",
+        "pub fn inner(step: inner::Step) {}",
+        "pub fn outer(step: Step<u8>) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/c/src/verbs.rs::shown",
+      "crates/c/src/verbs.rs::full",
+      "crates/c/src/verbs.rs::parent",
+      "crates/c/src/verbs.rs::exported",
+      "crates/c/src/verbs.rs::matched",
+      "crates/c/src/blocks.rs::local",
+      "crates/c/src/globbed.rs::globbed",
+      "crates/c/src/inline.rs::inner",
+    ]);
+  });
+
+  it("refuses a rename of a carrier, and of its variant, but not of a type sharing its name", () => {
+    const tree = {
+      ...repo,
+      ...steps,
+      "crates/c/src/lib.rs": "pub mod tasks;\npub mod attach;\npub mod verbs;\n",
+      "crates/c/src/verbs.rs": [
+        "use crate::tasks::Step as Plain;",
+        "use crate::attach::direct::Step as Byte;",
+        "use crate::tasks::{Stop, Step as Again};",
+        "use crate::attach::direct::Step::Show;",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree)).toEqual([
+      expect.stringContaining("verbs.rs: `Step as Byte` renames a byte type"),
+      expect.stringContaining("brings in a variant of Step that carries bytes"),
+    ]);
+  });
+
+  it("doesn't take a carrier one module brings in from another crate for another module's type", () => {
+    const tree = {
+      ...repo,
+      ...steps,
+      "crates/q/src/lib.rs": "pub enum Step { Show(Vec<u8>) }\n",
+      "crates/c/src/lib.rs": "pub mod tasks;\npub mod foreign;\npub mod verbs;\n",
+      "crates/c/src/foreign.rs": "use q::Step;\npub fn foreign(step: Step) {}\n",
+      "crates/c/src/verbs.rs": "use crate::tasks::Step;\npub fn answer(step: Step<String>) {}\n",
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/c/src/foreign.rs::foreign",
+    ]);
+  });
+
+  it("takes a type through a crate it can't name for any carrier of that name", () => {
+    const tree = {
+      ...repo,
+      "Cargo.toml": '[workspace.dependencies]\nqp = { path = "crates/q" }\nserde = "1"\n',
+      "crates/q/Cargo.toml": '[package]\nname = "queue"\n',
+      "crates/q/src/lib.rs": "pub struct Frames { buf: Vec<u8> }",
+      "crates/a/src/lib.rs": carrierCrate("A", "Frames", "use mystery::Frames;"),
+      "crates/b/Cargo.toml": '[dependencies]\nqq = { path = "../q" }\n',
+      "crates/b/src/lib.rs": carrierCrate("B", "qq::Frames"),
+      "crates/c/Cargo.toml": "[dependencies]\nqp = { workspace = true }\n",
+      "crates/c/src/lib.rs": carrierCrate("C", "qp::Frames"),
+      "crates/d/Cargo.toml": "[dependencies]\nserde = { workspace = true }\n",
+      "crates/d/src/lib.rs": carrierCrate("D", "Frames", "use serde::Frames;"),
+      "crates/e/src/lib.rs": carrierCrate("E", "std::io::Frames"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/a/src/lib.rs::A::f",
+      "crates/b/src/lib.rs::B::f",
+      "crates/c/src/lib.rs::C::f",
+    ]);
+  });
+
+  it("takes a type of cfg'd twin modules for a carrier when either twin's is one", () => {
+    const tree = {
+      ...repo,
+      "crates/c/src/lib.rs": [
+        '#[cfg(target_os = "linux")]',
+        "mod imp {",
+        "    pub struct Event { b: Vec<u8> }",
+        "}",
+        '#[cfg(target_os = "macos")]',
+        "mod imp {",
+        "    pub struct Event { n: u32 }",
+        "}",
+        "pub struct Event { n: u32 }",
+        "pub fn wait(e: imp::Event) {}",
+        "pub fn top(e: Event) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
+      "crates/c/src/lib.rs::wait",
+    ]);
+  });
+
   it("names a crate by its package, and by each name a manifest gives it", () => {
     const tree = {
       ...repo,
@@ -1992,8 +2144,10 @@ describe("decoderFailures", () => {
       "crates/b/Cargo.toml": '[dependencies.qz]\npackage = "queue"\npath = "../q"\n',
       "crates/b/src/lib.rs": carrierCrate("B", "qz::Frames"),
       "crates/c/src/lib.rs": carrierCrate("C", "qw::Frames"),
+      "crates/d/Cargo.toml": '[dependencies]\nq = "1"\n',
       "crates/d/src/lib.rs": carrierCrate("D", "Frames", "use q::Frames;"),
       "crates/e/src/lib.rs": carrierCrate("E", "Frames", "use queue::Frames;"),
+      "crates/m/Cargo.toml": '[dependencies]\nqm = "1"\n',
       "crates/m/src/lib.rs": carrierCrate("M", "qm::Frames"),
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
@@ -2021,7 +2175,8 @@ describe("decoderFailures", () => {
       "crates/e/src/lib.rs": carrierCrate("E", "Frames", "use queue::Frames;"),
       "crates/f/Cargo.toml": "dev-dependencies.qv.package = 'queue'\n",
       "crates/f/src/lib.rs": carrierCrate("F", "qv::Frames"),
-      "crates/g/Cargo.toml": '[package.metadata.x]\nqx.package = "queue"\n',
+      "crates/g/Cargo.toml":
+        '[package.metadata.x]\nqx.package = "queue"\n[dependencies]\nqx = "1"\n',
       "crates/g/src/lib.rs": carrierCrate("G", "qx::Frames"),
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
@@ -2101,9 +2256,7 @@ describe("decoderFailures", () => {
     };
     expect(failures(fuzzed, exempt, tree).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/a.rs::Msg::code",
-      "crates/p/src/a.rs::Twin::n",
       "crates/p/src/a.rs::Bounded::n",
-      "crates/p/src/b.rs::Mirror::n",
     ]);
   });
 

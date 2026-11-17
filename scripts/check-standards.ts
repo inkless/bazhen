@@ -11,7 +11,16 @@ import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./cargo-gate.ts";
 import { mergeBase } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
-import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
+import {
+  type Item,
+  type Module,
+  ModuleTable,
+  pathBefore,
+  type Resolution,
+  typePaths,
+  type UseBinding,
+} from "./rust-modules.ts";
+import { isIdent, itemEnd, newlinesIn, rustCode } from "./rust-source.ts";
 import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
@@ -904,8 +913,6 @@ const NOT_DECODERS: Record<string, string> = {
     "writes a request this build encoded; reads nothing",
   "crates/bazhen/src/events.rs::drain":
     "reads the daemon's frames through tungstenite, and their text through wire::from_slice, which the wire target fuzzes",
-  "crates/bazhen/src/events.rs::follow":
-    "opens the event stream and hands it to drain, which reads it; reads no bytes itself",
   "crates/bazhen/src/attach/link.rs::pump":
     "moves bytes between the daemon's socket and the person's terminal; tungstenite frames them, and Attachment::keys and frame, which the attach target fuzzes, read them",
   "crates/bazhen/src/attach/tty.rs::Wakeups::clear":
@@ -1115,63 +1122,192 @@ const BYTE_TYPE_NAMES = new Set(
   ).split(" "),
 );
 
-/**
- * The types of a crate that carry bytes, each with the fields that hold them. `undefined` means
- * any use of `self` may reach the bytes: an enum, whose variants are read by `match self`, or a
- * struct whose bytes come by a type parameter bounded by a byte trait (`struct R<T: Read>`).
- */
-type Carriers = Map<string, Set<string> | undefined>;
+/** The fields of a carrier that hold its bytes; `undefined` when any use of `self` may reach them. */
+type Fields = Set<string> | undefined;
+
+const unionFields = (a: Fields, b: Fields): Fields =>
+  a === undefined || b === undefined ? undefined : new Set([...a, ...b]);
+
+/** A name as a type is written: the path ending at it, `undefined` when it can't be followed. */
+type Named = { name: string; path: string[] | undefined };
 
 /**
- * The structs and enums in `code` with a field that carries bytes: a byte type, or a carrier of
- * this crate or of `elsewhere`, those of other crates this crate brings in. Such a type is a byte
- * type too: a method of it reads the bytes through `self`, as a stateful frame reader does, when
- * it uses a field that holds them.
+ * What the names written in one file mean to the decoder rule. A carrier is a type holding bytes
+ * from outside, by a field of a byte type or of another carrier: an enum, whose variants are read
+ * by `match self`, holds them in any use of `self`, as does a struct whose bytes come by a type
+ * parameter bounded by a byte trait (`struct R<T: Read>`).
  */
-function byteCarriers(code: string, elsewhere: Set<string> = new Set()): Carriers {
-  const items = [...code.matchAll(/\b(struct|enum)\s+(\w+)/g)].map((m) => {
-    const body = code.slice(m.index, itemEnd(code, m.index));
-    const variants = m[1] === "enum" ? enumVariants(body) : undefined;
-    // An enum's variant names aren't types, so only its head and its fields' types are read.
-    const types =
-      variants === undefined
-        ? body.slice(m[2]?.length ?? 0)
-        : [
-            variants.head,
-            ...variants.variants.flatMap((v) => v.fields?.map((f) => f.type) ?? v.text),
-          ].join("\n");
-    return { kind: m[1], name: m[2] ?? "", body, types };
-  });
-  const names = new Set(
-    items.filter((i) => BYTES_IN.test(i.kind === "enum" ? i.types : i.body)).map((i) => i.name),
+interface Scope {
+  /** Whether a type written in `text`, at `at` in the file's code, is a carrier. */
+  names(text: string, at: number): boolean;
+  /** The fields holding the bytes of the type `named`, at `at`, names; `null` if not a carrier. */
+  carrier(named: Named, at: number): { fields: Fields } | null;
+  /** The byte-carrying variants of the enum `named`, at `at`, names, each with its byte fields. */
+  variants(named: Named, at: number): Map<string, Fields> | undefined;
+  /** The name of each enum with a byte-carrying variant. */
+  enums: Set<string>;
+}
+
+const NO_CARRIERS: Scope = {
+  names: () => false,
+  carrier: () => null,
+  variants: () => undefined,
+  enums: new Set(),
+};
+
+/** The workspace's carriers, and by name, for a name that can't be resolved to its type. */
+interface Carriers {
+  fields: Map<Item, Fields>;
+  variants: Map<Item, Map<string, Fields>>;
+  byName: Map<string, Fields>;
+  variantsByName: Map<string, Map<string, Fields>>;
+}
+
+/** What the decoder rule reads an item's bytes from: an enum's head and its fields' types. */
+function itemTypes(item: Item): string {
+  if (item.kind === "type") return /=([\s\S]*)$/.exec(item.text)?.[1] ?? "";
+  if (item.kind !== "enum") return item.text.slice(item.kind.length + 1).replace(/^\s*\w+/, "");
+  const variants = enumVariants(item.text);
+  return variants === undefined
+    ? item.text
+    : [
+        variants.head,
+        ...variants.variants.flatMap((v) => v.fields?.map((f) => f.type) ?? v.text),
+      ].join("\n");
+}
+
+const resolveNamed = (table: ModuleTable, module: Module, { name, path }: Named): Resolution =>
+  path === undefined
+    ? { items: [], modules: [], unresolved: new Set([name]) }
+    : table.resolve(module, path);
+
+/**
+ * The carriers among the workspace's types, found by resolving each name in a type from the
+ * module it is written in. A name that can't be resolved is taken for every carrier of that name,
+ * so what resolution can't settle counts as it would by name alone.
+ */
+function carriersOf(table: ModuleTable): Carriers {
+  const types = table.items.filter((i) => i.kind !== "trait");
+  const named = new Map(
+    types.map((item) => [
+      item,
+      typePaths(itemTypes(item)).map((n) => resolveNamed(table, item.module, n)),
+    ]),
+  );
+  const found = new Set(
+    types.filter((i) =>
+      BYTES_IN.test(i.kind === "struct" || i.kind === "union" ? i.text : itemTypes(i)),
+    ),
   );
   // A type holding a carrier carries bytes too, however deep: repeat until nothing is added.
   for (let grew = true; grew;) {
     grew = false;
-    for (const { name, types } of items) {
-      if (!names.has(name) && mentionsAny(types, [...names, ...elsewhere])) {
-        names.add(name);
+    const names = new Set([...found].map((i) => i.name));
+    for (const item of types.filter((t) => !found.has(t))) {
+      const resolutions = named.get(item) ?? [];
+      if (
+        resolutions.some(
+          (r) => r.items.some((i) => found.has(i)) || [...r.unresolved].some((n) => names.has(n)),
+        )
+      ) {
+        found.add(item);
         grew = true;
       }
     }
   }
-  const carriers: Carriers = new Map();
-  for (const { kind, name, body } of items.filter((i) => names.has(i.name))) {
-    const struct = kind === "struct" ? structFields(body) : undefined;
-    const holds = (type: string) =>
-      BYTES_IN.test(type) || mentionsAny(type, names) || mentionsAny(type, elsewhere);
-    const fields =
-      struct === undefined || holds(struct.head)
+  const names = new Set([...found].map((i) => i.name));
+  const isCarrier = (r: Resolution) =>
+    r.items.some((i) => found.has(i)) || [...r.unresolved].some((n) => names.has(n));
+  const holds = (type: string, module: Module) =>
+    BYTES_IN.test(type) || typePaths(type).some((n) => isCarrier(resolveNamed(table, module, n)));
+  const fields = new Map<Item, Fields>();
+  for (const item of found) {
+    const struct = item.kind === "struct" ? structFields(item.text) : undefined;
+    fields.set(
+      item,
+      struct === undefined || holds(struct.head, item.module)
         ? undefined
-        : new Set(struct.fields.filter((f) => holds(f.type)).map((f) => f.name));
-    // Two types of one name in a crate: either's byte fields may be the one a method uses.
-    const known = carriers.has(name) ? carriers.get(name) : new Set<string>();
-    carriers.set(
-      name,
-      known === undefined || fields === undefined ? undefined : new Set([...known, ...fields]),
+        : new Set(struct.fields.filter((f) => holds(f.type, item.module)).map((f) => f.name)),
     );
   }
-  return carriers;
+  const byName = new Map<string, Fields>();
+  for (const [item, f] of fields) {
+    byName.set(item.name, byName.has(item.name) ? unionFields(byName.get(item.name), f) : f);
+  }
+  const variants = new Map<Item, Map<string, Fields>>();
+  const variantsByName = new Map<string, Map<string, Fields>>();
+  for (const item of types.filter((i) => i.kind === "enum")) {
+    const parsed = enumVariants(item.text);
+    if (parsed === undefined) continue;
+    const whole = holds(parsed.head, item.module);
+    const byVariant = new Map<string, Fields>();
+    for (const v of parsed.variants) {
+      if (v.fields === undefined) {
+        if (holds(v.text.slice(v.name.length), item.module)) byVariant.set(v.name, undefined);
+        continue;
+      }
+      const held = v.fields
+        .map((f, i) => ({ ...f, last: String(i - (v.fields?.length ?? 0)) }))
+        .filter((f) => whole || holds(f.type, item.module))
+        .flatMap((f) => [f.name, f.last]);
+      if (held.length > 0) byVariant.set(v.name, new Set(held));
+    }
+    if (byVariant.size === 0) continue;
+    variants.set(item, byVariant);
+    variantsByName.set(item.name, mergeVariants(variantsByName.get(item.name), byVariant));
+  }
+  return { fields, variants, byName, variantsByName };
+}
+
+/** Two enums' byte-carrying variants, as one: either's fields may be the one a pattern binds. */
+function mergeVariants(
+  a: Map<string, Fields> | undefined,
+  b: Map<string, Fields>,
+): Map<string, Fields> {
+  const out = new Map(a);
+  for (const [v, f] of b) out.set(v, out.has(v) ? unionFields(out.get(v), f) : f);
+  return out;
+}
+
+/** What the names in `file` mean, each resolved from the module it is written in. */
+function fileScope(table: ModuleTable, carriers: Carriers, file: string): Scope {
+  const resolutions = (named: Named, at: number) => {
+    const modules = table.modulesAt(file, at);
+    return modules.length === 0
+      ? [{ items: [], modules: [], unresolved: new Set([named.name]) }]
+      : modules.map((m) => resolveNamed(table, m, named));
+  };
+  const carrier = (named: Named, at: number) => {
+    let out: { fields: Fields } | null = null;
+    const add = (f: Fields) => {
+      out = out === null ? { fields: f } : { fields: unionFields(out.fields, f) };
+    };
+    for (const r of resolutions(named, at)) {
+      for (const item of r.items) if (carriers.fields.has(item)) add(carriers.fields.get(item));
+      for (const name of r.unresolved)
+        if (carriers.byName.has(name)) add(carriers.byName.get(name));
+    }
+    return out;
+  };
+  return {
+    names: (text, at) => typePaths(text).some((n) => carrier(n, at) !== null),
+    carrier,
+    variants: (named, at) => {
+      let out: Map<string, Fields> | undefined;
+      for (const r of resolutions(named, at)) {
+        for (const item of r.items) {
+          const v = carriers.variants.get(item);
+          if (v !== undefined) out = mergeVariants(out, v);
+        }
+        for (const name of r.unresolved) {
+          const v = carriers.variantsByName.get(name);
+          if (v !== undefined) out = mergeVariants(out, v);
+        }
+      }
+      return out;
+    },
+    enums: new Set(carriers.variantsByName.keys()),
+  };
 }
 
 /**
@@ -1292,56 +1428,6 @@ function enumVariants(item: string): { head: string; variants: Variant[] } | und
     });
   return { head: item.slice(from, open), variants };
 }
-
-/**
- * Each enum of `code` with a variant that carries bytes, each such variant with the fields that
- * hold them, by name, or by index from the front and from the back (`0` and `-2` for the first of
- * two), `undefined` for any of its fields. `names` are the carriers `code`
- * sees, its own and those it brings in. A head bounded by a byte trait makes every field hold them.
- */
-function byteVariants(code: string, names: Set<string>): ByteVariants {
-  const out: ByteVariants = new Map();
-  for (const m of code.matchAll(/\benum\s+(\w+)/g)) {
-    const parsed = enumVariants(code.slice(m.index, itemEnd(code, m.index)));
-    if (parsed === undefined) continue;
-    const holds = (type: string) => BYTES_IN.test(type) || mentionsAny(type, names);
-    const whole = holds(parsed.head);
-    const variants = new Map<string, Set<string> | undefined>();
-    for (const v of parsed.variants) {
-      if (v.fields === undefined) {
-        if (holds(v.text.slice(v.name.length))) variants.set(v.name, undefined);
-        continue;
-      }
-      const held = v.fields
-        .map((f, i) => ({ ...f, last: String(i - (v.fields?.length ?? 0)) }))
-        .filter((f) => whole || holds(f.type))
-        .flatMap((f) => [f.name, f.last]);
-      if (held.length > 0) variants.set(v.name, new Set(held));
-    }
-    if (variants.size === 0) continue;
-    const known = out.get(m[1] ?? "") ?? new Map();
-    for (const [v, fields] of variants) {
-      // Two enums of one name in a crate: either's fields may be the one a pattern binds.
-      const before = known.get(v);
-      known.set(
-        v,
-        !known.has(v)
-          ? fields
-          : before === undefined || fields === undefined
-            ? undefined
-            : new Set([...before, ...fields]),
-      );
-    }
-    out.set(m[1] ?? "", known);
-  }
-  return out;
-}
-
-/** Each enum's variants that carry bytes, with the fields holding them (`undefined`: any). */
-type ByteVariants = Map<string, Map<string, Set<string> | undefined>>;
-
-const mentionsAny = (text: string, names: Iterable<string>) =>
-  [...names].some((n) => new RegExp(`\\b${n}\\b`).test(text));
 
 /**
  * Whether a method body reaches the bytes of `self`, whose type holds them in `fields`
@@ -1496,29 +1582,41 @@ function atBindings(body: string): [number, number][] {
 const TURBOFISH = String.raw`(?:\s*::\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?`;
 
 /**
- * Whether `body` has a pattern naming a variant of `variants` that binds a field holding bytes, or
- * binds a value holding the variant whole (`r @ Reply::Data { .. }`, `r @ Some(Reply::Data { .. })`).
- * `own`, the type an impl is for, is what `Self::` names there.
+ * Whether `body`, at `offset` in its file's code, has a pattern naming a variant of an enum with
+ * one carrying bytes that binds a field holding them, or binds a value holding the variant whole
+ * (`r @ Reply::Data { .. }`, `r @ Some(Reply::Data { .. })`). `own`, the type an impl is for, is
+ * what `Self::` names there.
  */
-function bindsByteVariant(body: string, variants: ByteVariants, own?: string): boolean {
+function bindsByteVariant(
+  body: string,
+  offset: number,
+  scope: Scope,
+  own?: { named: Named; at: number },
+): boolean {
+  const ownVariants = own === undefined ? undefined : scope.variants(own.named, own.at);
+  const enums = [...scope.enums, ...(ownVariants === undefined ? [] : ["Self"])];
+  if (enums.length === 0) return false;
   const bound = atBindings(body);
-  for (const [name, byVariant] of variants) {
-    const enums = own === name ? `(?:${name}|Self)` : name;
-    const path = new RegExp(
-      `\\b${enums}${TURBOFISH}\\s*::\\s*(${[...byVariant.keys()].join("|")})\\b${TURBOFISH}(?!\\s*::)`,
-      "g",
-    );
-    for (const m of body.matchAll(path)) {
-      if (bound.some(([from, to]) => from <= m.index && m.index < to)) return true;
-      const after = m.index + m[0].length;
-      const open = after + (body.slice(after).length - body.slice(after).trimStart().length);
-      const bracket = body[open] === "(" || body[open] === "{";
-      const close = bracket ? matchingBracket(body, open) : after - 1;
-      if (!inPattern(body, m.index, close + 1)) continue;
-      const fields = byVariant.get(m[1] ?? "");
-      if (bracket && bindsField(body.slice(open + 1, close), body[open] === "{", fields)) {
-        return true;
-      }
+  const path = new RegExp(
+    `\\b(${enums.join("|")})${TURBOFISH}\\s*::\\s*(\\w+)\\b${TURBOFISH}(?!\\s*::)`,
+    "g",
+  );
+  for (const m of body.matchAll(path)) {
+    const name = m[1] ?? "";
+    const byVariant =
+      name === "Self"
+        ? ownVariants
+        : scope.variants({ name, path: pathBefore(body, m.index, name) }, offset + m.index);
+    if (byVariant === undefined || !byVariant.has(m[2] ?? "")) continue;
+    if (bound.some(([from, to]) => from <= m.index && m.index < to)) return true;
+    const after = m.index + m[0].length;
+    const open = after + (body.slice(after).length - body.slice(after).trimStart().length);
+    const bracket = body[open] === "(" || body[open] === "{";
+    const close = bracket ? matchingBracket(body, open) : after - 1;
+    if (!inPattern(body, m.index, close + 1)) continue;
+    const fields = byVariant.get(m[2] ?? "");
+    if (bracket && bindsField(body.slice(open + 1, close), body[open] === "{", fields)) {
+      return true;
     }
   }
   return false;
@@ -1530,40 +1628,22 @@ function bindsByteVariant(body: string, variants: ByteVariants, own?: string): b
  */
 function implBlocks(
   code: string,
-): { start: number; end: number; type: string; byteBound: boolean }[] {
+): { start: number; end: number; type: string; named: Named; byteBound: boolean }[] {
   return [...code.matchAll(IMPL_BLOCK)].map((m) => {
     const head = m[0].replace(/^[\s\S]*?\bimpl\b\s*/, "").replace(/^<(?:[^<>]|<[^<>]*>)*>\s*/, "");
-    const type = /(?:\bfor\s+)?(?:[\w:]+::)?(\w+)\s*(?:<|where\b|$)/.exec(
+    const type = /(?:\bfor\s+)?((?:[\w:]+::)?)(\w+)\s*(?:<|where\b|$)/.exec(
       head.split(/\bfor\b/).pop() ?? "",
     );
+    const name = type?.[2] ?? "";
+    const prefix = (type?.[1] ?? "").split("::").slice(0, -1);
     return {
       start: m.index,
       end: itemEnd(code, m.index + m[0].length),
-      type: type?.[1] ?? "",
+      type: name,
+      named: { name, path: [...prefix, name] },
       byteBound: BYTES_IN.test(m[0]),
     };
   });
-}
-
-/**
- * The index just past the item starting at `start`: past its `{ … }` body, or its `;`. Only `(`
- * and `[` are counted on the way, since a `<` in an item may be a comparison, not a generic.
- */
-function itemEnd(code: string, start: number): number {
-  let depth = 0;
-  for (let i = start; i < code.length; i++) {
-    const c = code[i];
-    if (c === "(" || c === "[") depth++;
-    else if (c === ")" || c === "]") depth--;
-    else if (c === ";" && depth <= 0) return i + 1;
-    else if (c === "{" && depth <= 0) {
-      for (let braces = 0; i < code.length; i++) {
-        if (code[i] === "{") braces++;
-        else if (code[i] === "}" && --braces === 0) return i + 1;
-      }
-    }
-  }
-  return code.length;
 }
 
 /** `code` with each item matched by `head` blanked to its end, newlines kept. */
@@ -1619,14 +1699,12 @@ const inside = (i: number, spans: { start: number; end: number }[]) =>
  * enum is. A method is named with its type (`Reader::next_frame`), so two types' methods of one
  * name stay apart.
  */
-export function byteTakers(
-  source: string,
-  carriers: Carriers = new Map(),
-  elsewhere: Set<string> = new Set(),
-  variants: ByteVariants = new Map(),
-): string[] {
+export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[] {
   const code = withoutTests(rustCode(source));
   const blocks = implBlocks(code);
+  const carrierOf = new Map(
+    blocks.map((b) => [b, b.byteBound ? { fields: undefined } : scope.carrier(b.named, b.start)]),
+  );
   const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
     const { end, takes } = signature(code.slice(m.index));
     const open = m.index + end;
@@ -1644,7 +1722,7 @@ export function byteTakers(
   const selfMethods = fns.filter(
     (f) =>
       f.block !== undefined &&
-      (carriers.has(f.block.type) || f.block.byteBound) &&
+      (carrierOf.get(f.block) ?? null) !== null &&
       /\bself\b/.test(f.takes),
   );
   // A method reaching bytes through a method of its own: repeat until nothing is added.
@@ -1653,7 +1731,7 @@ export function byteTakers(
     grew = false;
     for (const f of selfMethods.filter((s) => !viaSelf.has(s))) {
       const type = f.block?.type ?? "";
-      const fields = f.block?.byteBound ? undefined : carriers.get(type);
+      const fields = f.block === undefined ? undefined : carrierOf.get(f.block)?.fields;
       const calls = (name: string) => {
         const called = methods(type).filter((g) => g.fn === name);
         return called.length === 0 || called.some((g) => viaSelf.has(g));
@@ -1669,14 +1747,19 @@ export function byteTakers(
     const name = block === undefined ? fn : `${block.type}::${fn}`;
     const takesSelfType =
       block !== undefined &&
-      (carriers.has(block.type) || block.byteBound) &&
+      (carrierOf.get(block) ?? null) !== null &&
       /\bSelf\b/.test(takes.replace(/\bself\s*:[^,)]*/, ""));
     const reads =
       BODY_READS.test(body) ||
       [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g)) ||
-      bindsByteVariant(body, variants, block?.type);
+      bindsByteVariant(
+        body,
+        f.open,
+        scope,
+        block === undefined ? undefined : { named: block.named, at: block.start },
+      );
     return BYTES_IN.test(takes) ||
-      mentionsAny(takes, [...carriers.keys(), ...elsewhere]) ||
+      scope.names(takes, f.m.index) ||
       takesSelfType ||
       viaSelf.has(f) ||
       reads
@@ -1714,90 +1797,50 @@ export function decoderFailures(
   const sources = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
   const testOnly = testModuleFiles(sources, read);
   const product = sources.filter((p) => !testOnly.has(p));
-  const crateCode = new Map<string, string>();
-  for (const file of product) {
-    const crate = crateOf(file);
-    crateCode.set(crate, `${crateCode.get(crate) ?? ""}\n${withoutTests(rustCode(read(file)))}`);
-  }
-  // A field may hold another crate's carrier, which may hold this crate's: repeat until no crate
-  // finds another.
-  let crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
-  const imported = new Map<string, Set<string>>();
-  const idents = crateIdents(paths, read, [...crateCode.keys()]);
-  for (let grew = true; grew;) {
-    grew = false;
-    // A crate's own carriers, and the ones it brings in, which a `pub use` passes on.
-    const visible = new Map(
-      [...crateCode.keys()].map((c) => [
-        c,
-        new Set([...(crateCarriers.get(c)?.keys() ?? []), ...(imported.get(c) ?? [])]),
-      ]),
-    );
-    for (const [crate, code] of crateCode) {
-      const names = importedCarriers(code, crate, visible, idents);
-      if (names.size !== (imported.get(crate)?.size ?? 0)) {
-        imported.set(crate, names);
-        crateCarriers.set(crate, byteCarriers(code, names));
-        grew = true;
-      }
-    }
-  }
-  const ownVariants = new Map(
-    [...crateCode].map(([crate, code]) => [
-      crate,
-      byteVariants(
-        code,
-        new Set([...(crateCarriers.get(crate)?.keys() ?? []), ...(imported.get(crate) ?? [])]),
-      ),
-    ]),
+  const codes = new Map(product.map((file) => [file, withoutTests(rustCode(read(file)))]));
+  const crates = [...new Set(product.map(crateOf))];
+  const idents = crateIdents(paths, read, crates);
+  const table = new ModuleTable(
+    codes,
+    crates.map((dir) => ({
+      dir,
+      idents: idents.get(dir) ?? [],
+      deps: outsideDependencies(paths, read, dir),
+    })),
   );
-  // A crate sees its own enums' variants and those of the enums it brings in.
-  const seenVariants = new Map(
-    [...crateCode.keys()].map((crate) => {
-      const seen: ByteVariants = new Map(ownVariants.get(crate));
-      for (const [other, variants] of ownVariants) {
-        if (other === crate) continue;
-        for (const [name, byVariant] of variants) {
-          if (!(imported.get(crate)?.has(name) ?? false)) continue;
-          seen.set(name, new Map([...(seen.get(name) ?? []), ...byVariant]));
-        }
-      }
-      return [crate, seen];
-    }),
-  );
+  const carriers = carriersOf(table);
   for (const file of product) {
-    const carriers: Carriers = crateCarriers.get(crateOf(file)) ?? new Map();
-    const variants = seenVariants.get(crateOf(file)) ?? new Map();
-    const code = blankItems(withoutTests(rustCode(read(file))), IMPL_BLOCK);
+    const scope = fileScope(table, carriers, file);
+    const code = blankItems(codes.get(file) ?? "", IMPL_BLOCK);
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
-    for (const use of withoutTests(rustCode(read(file))).matchAll(/\buse\b[^;]*;/g)) {
-      for (const rename of use[0].matchAll(/\b(\w+)\s+as\s+(\w+)/g)) {
-        const [written = "", named = "", to = ""] = rename;
-        // `self` in a group names the path before it: `Frame::{self as F}` renames `Frame`.
-        const from =
-          named === "self"
-            ? (/(\w+)\s*::\s*\{[^{}]*$/.exec(use[0].slice(0, rename.index))?.[1] ?? "")
-            : named;
-        const foreign = imported.get(crateOf(file))?.has(from) ?? false;
-        if (to !== "_" && (BYTE_TYPE_NAMES.has(from) || carriers.has(from) || foreign)) {
+    for (const { statement, bindings } of useStatements(table, file)) {
+      for (const { path, renamed, at } of bindings) {
+        const to = renamed?.split(" as ")[1];
+        if (renamed === undefined || to === "_") continue;
+        const from = path.at(-1) ?? "";
+        if (BYTE_TYPE_NAMES.has(from) || scope.carrier({ name: from, path }, at) !== null) {
           out.push(
-            `${file}: \`${written}\` renames a byte type, which hides it from the decoder ` +
+            `${file}: \`${renamed}\` renames a byte type, which hides it from the decoder ` +
               "rule. Use the type's own name.",
           );
         }
       }
-      for (const [name, byVariant] of variants) {
-        const names = [...byVariant.keys()].join("|");
-        const bare = new RegExp(
-          `\\b${name}\\s*::\\s*(?:\\*|(?:${names})\\b|\\{[^}]*(?:\\*|\\b(?:${names})\\b))`,
-        );
-        if (bare.test(use[0])) {
-          out.push(
-            `${file}: \`${use[0]}\` brings in a variant of ${name} that carries bytes by its own ` +
-              "name, which hides a match on it from the decoder rule. Name it as " +
-              `\`${name}::Variant\`.`,
-          );
+      const named = new Set<string>();
+      for (const { name, path, at } of bindings) {
+        const enumPath = name === "*" ? path : path.slice(0, -1);
+        const enumName = enumPath.at(-1);
+        if (enumName === undefined || enumName === "") continue;
+        const variants = scope.variants({ name: enumName, path: enumPath }, at);
+        if (variants !== undefined && (name === "*" || variants.has(path.at(-1) ?? ""))) {
+          named.add(enumName);
         }
+      }
+      for (const name of named) {
+        out.push(
+          `${file}: \`${statement}\` brings in a variant of ${name} that carries bytes by its own ` +
+            "name, which hides a match on it from the decoder rule. Name it as " +
+            `\`${name}::Variant\`.`,
+        );
       }
     }
     for (const item of code.matchAll(/\benum\s+(\w+)/g)) {
@@ -1833,15 +1876,14 @@ export function decoderFailures(
       }
     }
     for (const alias of code.matchAll(/\btype\s+(\w+)[^=;]*=([^;]*);/g)) {
-      const named = [...carriers.keys(), ...(imported.get(crateOf(file)) ?? [])];
-      if (BYTES_IN.test(alias[2] ?? "") || mentionsAny(alias[2] ?? "", named)) {
+      if (BYTES_IN.test(alias[2] ?? "") || scope.names(alias[2] ?? "", alias.index)) {
         out.push(
           `${file}::${alias[1]}: names a byte type, which hides it from the decoder rule. ` +
             "Write the byte type in each signature instead.",
         );
       }
     }
-    for (const fn of byteTakers(read(file), carriers, imported.get(crateOf(file)), variants)) {
+    for (const fn of byteTakers(read(file), scope)) {
       const key = `${file}::${fn}`;
       found.add(key);
       if (!(key in fuzzed) && !(key in notDecoders)) {
@@ -1896,6 +1938,31 @@ export function decoderFailures(
 }
 
 /**
+ * The `use` statements of `file`, in order, each with its bindings, once each however many crate
+ * roots reach the file.
+ */
+function useStatements(
+  table: ModuleTable,
+  file: string,
+): { statement: string; bindings: UseBinding[] }[] {
+  const out = new Map<number, { statement: string; bindings: UseBinding[] }>();
+  for (const module of table.modulesIn(file)) {
+    for (const binding of module.bindings) {
+      const known = out.get(binding.at);
+      if (known === undefined) {
+        out.set(binding.at, { statement: binding.statement, bindings: [binding] });
+      } else if (!known.bindings.some((b) => sameBinding(b, binding))) {
+        known.bindings.push(binding);
+      }
+    }
+  }
+  return [...out].toSorted(([a], [b]) => a - b).map(([, statement]) => statement);
+}
+
+const sameBinding = (a: UseBinding, b: UseBinding) =>
+  a.name === b.name && a.renamed === b.renamed && a.path.join("::") === b.path.join("::");
+
+/**
  * The files among `paths` that hold a module compiled only under test: one declared out of line
  * as `#[cfg(test)] mod name;`, and every module inside it. A declaration inside an inline `mod
  * outer { … }` names `outer/name.rs`. A declaration with another attribute, such as `#[path]`, is
@@ -1924,48 +1991,6 @@ function testModuleFiles(paths: string[], read: (path: string) => string): Set<s
 }
 
 const crateOf = (file: string) => /^crates\/[^/]+/.exec(file)?.[0] ?? "";
-
-/**
- * The carriers of other crates that `code`, the code of `crate`, names. Another crate's type is
- * named only through that crate: in a `use` of it (all of its carriers for a glob), or in a path
- * through a name for it or for one of its modules (`bazhen_holder_proto::frame::Request`,
- * `proto::Request` after `use bazhen_holder_proto as proto;`, `frame::Request` after
- * `use bazhen_holder_proto::frame;`). So a type of the same name that `crate` doesn't bring in
- * isn't taken for one. `visible` is each crate's carriers, its own and those it brings in, which
- * it can pass on; `idents` is each crate's names in code.
- */
-function importedCarriers(
-  code: string,
-  crate: string,
-  visible: Map<string, Set<string>>,
-  idents: Map<string, string[]>,
-): Set<string> {
-  const out = new Set<string>();
-  for (const [other, carriers] of visible) {
-    if (other === crate || carriers.size === 0) continue;
-    const crateNames = `(?:${(idents.get(other) ?? []).join("|")})`;
-    const uses = [...code.matchAll(new RegExp(`\\buse\\s+(?:::\\s*)?${crateNames}\\b[^;]*;`, "g"))];
-    const externs = code.matchAll(
-      new RegExp(`\\bextern\\s+crate\\s+${crateNames}\\s+as\\s+(\\w+)`, "g"),
-    );
-    // Every name a `use` of the crate binds may be the crate or a module of it, under any alias.
-    const bound = new Set([
-      ...(idents.get(other) ?? []),
-      ...[...externs].map((m) => m[1] ?? ""),
-      ...uses.flatMap((m) => m[0].match(/\b\w+\b/g) ?? []),
-    ]);
-    for (const keyword of ["use", "pub", "crate", "self", "super", "as", "in"])
-      bound.delete(keyword);
-    const paths = code.matchAll(
-      new RegExp(`\\b(?:${[...bound].join("|")})(?:\\s*::\\s*\\w+)+`, "g"),
-    );
-    const text = [...uses, ...paths].map((m) => m[0]).join("\n");
-    for (const name of carriers) {
-      if (uses.some((m) => m[0].includes("*")) || mentionsAny(text, [name])) out.add(name);
-    }
-  }
-  return out;
-}
 
 /** `text` split at each top-level `sep` outside strings and brackets, each part trimmed. */
 function tomlSplit(text: string, sep: string, limit = Infinity): string[] {
@@ -2022,11 +2047,18 @@ const isDependencies = (key: string[]) =>
 function manifestNames(
   manifest: string,
   text: string,
-): { name?: string | undefined; renames: [string, string][]; failures: string[] } {
-  const out: { name?: string | undefined; renames: [string, string][]; failures: string[] } = {
-    renames: [],
-    failures: [],
-  };
+): {
+  name?: string | undefined;
+  renames: [string, string][];
+  deps: Map<string, Set<string>>;
+  failures: string[];
+} {
+  const out: {
+    name?: string | undefined;
+    renames: [string, string][];
+    deps: Map<string, Set<string>>;
+    failures: string[];
+  } = { renames: [], deps: new Map(), failures: [] };
   const unreadable = (line: string) =>
     out.failures.push(
       `${manifest}: can't read \`${line}\` for a package's name, so neither the decoder rule nor ` +
@@ -2042,19 +2074,28 @@ function manifestNames(
     const at = [1, 2, 3].find((i) => isDependencies(key.slice(0, i)));
     if (at === undefined) return;
     const [dependency = "", ...rest] = key.slice(at);
+    const keys = out.deps.get(dependency.replace(/-/g, "_")) ?? new Set<string>();
+    out.deps.set(dependency.replace(/-/g, "_"), keys);
+    if (rest[0] !== undefined) keys.add(rest[0]);
     if (rest.length === 0 && value.startsWith("{") && value.endsWith("}")) {
       for (const part of tomlSplit(value.slice(1, -1), ",").filter((p) => p !== "")) {
         const [inner = "", innerValue = ""] = tomlSplit(part, "=", 2);
         const innerKey = tomlKey(inner);
         if (innerKey === undefined) {
+          keys.add("?");
           if (/\bpackage\b/.test(inner)) unreadable(line);
         } else entry(line, [...key, ...innerKey], innerValue);
       }
     } else if (rest.length === 1 && rest[0] === "package") {
       const name = tomlString(value);
-      if (name === undefined) unreadable(line);
-      else out.renames.push([dependency, name]);
-    } else if (rest.includes("package")) unreadable(line);
+      if (name === undefined) {
+        keys.add("?");
+        unreadable(line);
+      } else out.renames.push([dependency, name]);
+    } else if (rest.includes("package")) {
+      keys.add("?");
+      unreadable(line);
+    }
   };
   let table: string[] = [];
   let header: string | undefined;
@@ -2105,6 +2146,27 @@ function crateIdents(
     }
   }
   return idents;
+}
+
+const isOutside = (keys: Set<string> | undefined) =>
+  keys !== undefined && !keys.has("path") && !keys.has("?");
+
+/**
+ * The names `dir`'s crate gives the crates outside the workspace it depends on: each dependency
+ * its manifest declares that isn't a path to another crate, directly or through the workspace's
+ * table, and whose entry reads cleanly. A path dependency may be a workspace crate under a name
+ * nothing else gives it, so a path through it is never taken for one into a crate outside.
+ */
+function outsideDependencies(paths: string[], read: (path: string) => string, dir: string) {
+  const deps = (manifest: string) =>
+    paths.includes(manifest) ? manifestNames(manifest, read(manifest)).deps : new Map();
+  const workspace = deps("Cargo.toml");
+  return [...deps(`${dir}/Cargo.toml`)]
+    .filter(
+      ([name, keys]) =>
+        isOutside(keys) && (!keys.has("workspace") || isOutside(workspace.get(name))),
+    )
+    .map(([name]) => name);
 }
 
 /**
