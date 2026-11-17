@@ -20,8 +20,8 @@ export interface ClaudeCodeOptions {
    * none, leaving Claude Code's own (foundation-design §11.2).
    */
   readonly statusLine?: (cwd: string) => StatusLineChoice;
-  /** Whether a file is there, to tell a session with a conversation to resume from one without. */
-  readonly exists: (path: string) => boolean;
+  /** Whether a transcript holds a conversation `--resume` can load: an `isConversationEntry`. */
+  readonly holdsConversation: (path: string) => boolean;
   /** The time in ms, for how long a file's answer stands; the clock by default. */
   readonly now?: () => number;
 }
@@ -35,7 +35,33 @@ export interface UserStatusLine {
   readonly padding?: number;
 }
 
-/** How long a transcript's existence is taken as read before the file is looked at again. */
+/**
+ * The entries `--resume` loads a session from. A session where only a command such as `/model`
+ * ran holds `system` entries and no message, and resumes. Claude Code also writes metadata lines
+ * (`mode`, `permission-mode`, `atis-latch`, `file-history-snapshot`), ahead of a turn too, and a
+ * transcript of only those is "No conversation found".
+ */
+const CONVERSATION_TYPES: ReadonlySet<unknown> = new Set([
+  "user",
+  "assistant",
+  "attachment",
+  "system",
+]);
+
+/** Whether a line of a Claude Code transcript is one `--resume` can load the session from. */
+export function isConversationEntry(line: string): boolean {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  const type: unknown =
+    typeof entry === "object" && entry !== null ? Reflect.get(entry, "type") : undefined;
+  return CONVERSATION_TYPES.has(type);
+}
+
+/** How long a transcript found to hold a conversation is taken as read before it is looked at again. */
 const TRANSCRIPT_CHECK_MS = 2_000;
 
 /**
@@ -44,8 +70,8 @@ const TRANSCRIPT_CHECK_MS = 2_000;
  * hooks with the launch, beside the user's own, so nothing is written to the user's settings.
  */
 export class ClaudeCodeHarness implements HarnessAdapter {
-  /** Each transcript asked about lately, and whether it was there: a snapshot asks per agent. */
-  private readonly checked = new Map<string, { exists: boolean; at: number }>();
+  /** When each transcript was last found to hold a conversation: a snapshot asks per agent. */
+  private readonly held = new Map<string, number>();
   readonly id = "claude-code";
   readonly themes = ["light", "dark"] as const;
   private readonly opts: ClaudeCodeOptions;
@@ -60,19 +86,22 @@ export class ClaudeCodeHarness implements HarnessAdapter {
   }
 
   /**
-   * `--resume` finds a session only once Claude Code has written its transcript, which a session
-   * killed before its first turn never has; its hooks name the file.
+   * `--resume` loads a session only once its transcript, which its hooks name, holds a
+   * conversation. A session killed before its first turn has no file, and one killed just after a
+   * turn ended can have only the metadata Claude Code writes ahead of the turn. A "no" is never
+   * kept: nothing tells a client to read the agent again when the turn lands, so the next read
+   * must see it.
    */
   canResume({ transcript }: { readonly transcript: string | null }): boolean {
     if (transcript === null) return false;
     const now = (this.opts.now ?? Date.now)();
-    const known = this.checked.get(transcript);
-    if (known !== undefined && now - known.at < TRANSCRIPT_CHECK_MS) return known.exists;
-    for (const [path, { at }] of this.checked)
-      if (now - at >= TRANSCRIPT_CHECK_MS) this.checked.delete(path);
-    const exists = this.opts.exists(transcript);
-    this.checked.set(transcript, { exists, at: now });
-    return exists;
+    const at = this.held.get(transcript);
+    if (at !== undefined && now - at < TRANSCRIPT_CHECK_MS) return true;
+    for (const [path, when] of this.held)
+      if (now - when >= TRANSCRIPT_CHECK_MS) this.held.delete(path);
+    const holds = this.opts.holdsConversation(transcript);
+    if (holds) this.held.set(transcript, now);
+    return holds;
   }
 
   /** The same TUI, with its hooks, on the session the agent already had. */

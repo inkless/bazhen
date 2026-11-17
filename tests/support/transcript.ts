@@ -13,7 +13,7 @@ export async function giveTranscript(
   sessionId: string,
 ): Promise<void> {
   const transcript = join(home, `${sessionId}.jsonl`);
-  writeFileSync(transcript, "{}\n");
+  writeFileSync(transcript, `${JSON.stringify({ type: "user", sessionId })}\n`);
   const body = JSON.stringify({
     protocolVersion: HOOK_PROTOCOL_VERSION,
     agentId,
