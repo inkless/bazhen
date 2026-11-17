@@ -184,7 +184,12 @@ mod tests {
     use std::io::{BufRead as _, BufReader, Read as _};
     use std::process::{Command, Stdio};
 
-    use super::*;
+    #[cfg(target_os = "macos")]
+    use super::Errno;
+    use super::{
+        DISPOSABLE_HOST_MARKER, Pid, Refused, SendError, Signal, getpgrp, getpid, getppid, getsid,
+        signal_group, signal_member, tripwire, tripwire_at, vet, vet_leader, vet_member,
+    };
 
     #[test]
     fn the_tripwire_passes_only_a_plain_file_root_owns() {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowedSignalFailures,
+  chokepointReaches,
   isSignallingSource,
   isSignallingTest,
   rawSignalCalls,
@@ -90,6 +91,33 @@ describe("raw signal calls in Rust", () => {
       "child.kill();",
     ].join("\n");
     expect(calls("a.rs", source)).toEqual([]);
+  });
+});
+
+describe("chokepointReaches", () => {
+  it("finds each glob use and each kill named other than as a method, by line", () => {
+    const source = [
+      "use super::*;",
+      "use crate::{a::{b, *}, c};",
+      "use std::process::Command;",
+      "kill(p, 9);",
+      "super::kill(p, 9);",
+      "let k = r#kill;",
+      "child.kill();",
+      "child . r#kill();",
+      "// kill(p, 9)",
+      '"kill(p, 9)";',
+      "let killed = kill_switch;",
+      "test_kill_process(p);",
+      "Signal::KILL;",
+    ].join("\n");
+    expect(chokepointReaches(source)).toEqual([
+      { line: 1, call: "use super::*" },
+      { line: 2, call: "use crate::{a::{b, *}, c}" },
+      { line: 4, call: "a bare `kill`" },
+      { line: 5, call: "a bare `kill`" },
+      { line: 6, call: "a bare `kill`" },
+    ]);
   });
 });
 

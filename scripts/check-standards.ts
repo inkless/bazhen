@@ -15,10 +15,12 @@ import { isIdent, newlinesIn, rustCode } from "./rust-source.ts";
 import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
+  SIGNAL_CRATES,
   ALLOWED_SIGNALS,
   ENDS_WITHOUT_A_CALL,
   allowedSignalFailures,
   chokepointFor,
+  chokepointReaches,
   rawSignalCalls,
 } from "./signal-paths.ts";
 
@@ -1717,8 +1719,7 @@ export function decoderFailures(
   // finds another.
   let crateCarriers = new Map([...crateCode].map(([crate, code]) => [crate, byteCarriers(code)]));
   const imported = new Map<string, Set<string>>();
-  const { idents, failures: manifestFailures } = crateIdents(paths, read, [...crateCode.keys()]);
-  out.push(...manifestFailures);
+  const idents = crateIdents(paths, read, [...crateCode.keys()]);
   for (let grew = true; grew;) {
     grew = false;
     // A crate's own carriers, and the ones it brings in, which a `pub use` passes on.
@@ -2024,8 +2025,9 @@ function manifestNames(
   };
   const unreadable = (line: string) =>
     out.failures.push(
-      `${manifest}: can't read \`${line}\` for a package's name, so the decoder rule can't tell ` +
-        'which crate it names: write it as a plain string (`package = "name"`).',
+      `${manifest}: can't read \`${line}\` for a package's name, so neither the decoder rule nor ` +
+        "the signal scan can tell which crate it names: write it as a plain string " +
+        '(`package = "name"`).',
     );
   const entry = (line: string, key: string[], value: string) => {
     if (key.length === 2 && key[0] === "package" && key[1] === "name") {
@@ -2074,13 +2076,13 @@ function manifestNames(
 
 /**
  * The names Rust code may give each crate of `crates`: its package name, with `-` as `_`, and each
- * name a manifest gives it by `package = "…"`; and why a manifest's names can't be read.
+ * name a manifest gives it by `package = "…"`. A name it can't read fails `cargoManifestFailures`.
  */
 function crateIdents(
   paths: string[],
   read: (path: string) => string,
   crates: string[],
-): { idents: Map<string, string[]>; failures: string[] } {
+): Map<string, string[]> {
   const manifests = new Map(
     paths
       .filter((p) => /(?:^|\/)Cargo\.toml$/.test(p))
@@ -2098,7 +2100,29 @@ function crateIdents(
       if (crate !== undefined) idents.get(crate)?.push(key.replace(/-/g, "_"));
     }
   }
-  return { idents, failures: [...manifests.values()].flatMap((m) => m.failures) };
+  return idents;
+}
+
+/**
+ * Each crate of SIGNAL_CRATES a manifest takes under another name, which the signal scan, reading
+ * that crate's kills by its name, wouldn't read; and each name a manifest gives that can't be read,
+ * which may be one of those or a crate the decoder rule follows.
+ */
+export function cargoManifestFailures(paths: string[], read: (path: string) => string): string[] {
+  return paths
+    .filter((p) => /(?:^|\/)Cargo\.toml$/.test(p))
+    .flatMap((manifest) => {
+      const { renames, failures: unread } = manifestNames(manifest, read(manifest));
+      const hidden = renames.filter(([key, name]) => SIGNAL_CRATES.includes(name) && key !== name);
+      return [
+        ...unread,
+        ...hidden.map(
+          ([key, name]) =>
+            `${manifest}: renames ${name} to \`${key}\`, a name the signal scan doesn't read ` +
+            `${name}'s kills by; take ${name} by its own name (docs/standards/rust.md § Signals).`,
+        ),
+      ];
+    });
 }
 
 /** Why a crate's fuzz manifest isn't a cargo-fuzz crate of its own with exact pins. */
@@ -3145,8 +3169,18 @@ export function signalChokepointFailures(
     const text = read(file);
     const tests = file.endsWith(".rs") ? testLines(text) : new Set<number>();
     out.push(...allowedSignalFailures(file, text));
-    for (const { line, call, unread, unfollowed } of rawSignalCalls(file, text)) {
-      if (product && !tests.has(line)) continue;
+    const calls = rawSignalCalls(file, text);
+    for (const { line, call, unread, unfollowed, held } of calls) {
+      if (product && !tests.has(line)) {
+        if (held !== undefined) {
+          out.push(
+            `${file}:${line}: ${held === "imported" ? "imports a raw signal" : "takes a raw signal as a value"} ` +
+              `(${call}); a chokepoint calls each by its path where it names it, as a name it ` +
+              "imports or holds reaches the file's tests (docs/standards/rust.md § Signals).",
+          );
+        }
+        continue;
+      }
       if (unfollowed === true) {
         out.push(
           `${file}:${line}: ${call}, so the check can't read the options a start there is given, ` +
@@ -3170,6 +3204,18 @@ export function signalChokepointFailures(
           `${chokepointFor(file, tests.has(line))}, which checks its target ` +
           "(docs/standards/testing.md).",
       );
+    }
+    if (product) {
+      const reaches = chokepointReaches(text).filter(
+        (r) => tests.has(r.line) && !calls.some((c) => c.line === r.line),
+      );
+      for (const { line, call } of reaches) {
+        out.push(
+          `${file}:${line}: a test in a chokepoint reaches its product code's imports through ` +
+            `${call}, which the scan doesn't read; name what it takes, and send through ` +
+            "bazhen_test_signal (docs/standards/rust.md § Signals).",
+        );
+      }
     }
     if (/^crates\/[^/]+\/Cargo\.toml$/.test(file) && file !== TEST_SIGNAL_MANIFEST) {
       out.push(...testSignalDependencyFailures(file, text));
@@ -3203,6 +3249,7 @@ function checkSignalChokepoints(): void {
   failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
   failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
+  failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
 function checkCappedScripts(): void {

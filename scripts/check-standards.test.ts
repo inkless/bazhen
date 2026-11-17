@@ -11,6 +11,7 @@ import {
   RUST_GATE_SCRIPTS,
   WORKSPACE_LINTS,
   byteTakers,
+  cargoManifestFailures,
   decoderFailures,
   declaredTokens,
   fuzzManifestFailures,
@@ -1602,6 +1603,9 @@ const carrierCrate = (name: string, field: string, head = "") =>
     "}",
   ].join("\n");
 
+const manifestFailures = (tree: Record<string, string>) =>
+  cargoManifestFailures(Object.keys(tree), (p) => tree[p] ?? "");
+
 describe("decoderFailures", () => {
   const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
   const repo: Record<string, string> = {
@@ -2030,7 +2034,7 @@ describe("decoderFailures", () => {
     ]);
   });
 
-  it("names a manifest whose package name it can't read", () => {
+  it("leaves a manifest whose package name it can't read to the manifest check, which names it", () => {
     const tree = {
       ...repo,
       "Cargo.toml": [
@@ -2049,7 +2053,8 @@ describe("decoderFailures", () => {
       ].join("\n"),
       "crates/q/Cargo.toml": '[package]\nname = """queue"""\n',
     };
-    expect(failures(fuzzed, exempt, tree)).toEqual([
+    expect(failures(fuzzed, exempt, tree)).toEqual([]);
+    expect(manifestFailures(tree)).toEqual([
       expect.stringContaining('Cargo.toml: can\'t read `qe = { package = "qu\\u0065ue" }`'),
       expect.stringContaining("Cargo.toml: can't read `qn.package = 1`"),
       expect.stringContaining("Cargo.toml: can't read `qp.package.name = 'queue'`"),
@@ -2811,9 +2816,125 @@ describe("the signal chokepoints", () => {
     ).toEqual(["crates/bazhen-holder/src/guard.rs:4"]);
   });
 
+  it("fails a glob use or a bare kill in a chokepoint's tests, which reach its imports unseen", () => {
+    // Built, as a string holding `kill(` reads as a shell's kill to the scan of this file.
+    const bare = "kill";
+    const source = [
+      `use std::io::*; fn f() { ${bare}(p, 9); }`,
+      "#[cfg(test)]",
+      "mod tests {",
+      "    use super::*;",
+      "    use crate::guard::{self, *};",
+      "    use std::process::Command;",
+      "    fn g() {",
+      `        ${bare}(p, 9);`,
+      "        super::kill(p, 9);",
+      "        let k = r#kill;",
+      "        child.kill().unwrap();",
+      "        child . r#kill();",
+      "        test_kill_process(p);",
+      "        let _ = Signal::KILL;",
+      "        unsafe { libc::kill(p, 9) };",
+      "        // kill(p, 9) in a comment",
+      `        let s = "${bare}";`,
+      "        let killed = kill_switch.is_on();",
+      "    }",
+      "}",
+    ].join("\n");
+    const found = signalChokepointFailures(CHOKEPOINTS, guardOnly(source));
+    expect(found.map((f) => f.split(": ")[0])).toEqual([
+      "crates/bazhen-holder/src/guard.rs:15",
+      "crates/bazhen-holder/src/guard.rs:4",
+      "crates/bazhen-holder/src/guard.rs:5",
+      "crates/bazhen-holder/src/guard.rs:8",
+      "crates/bazhen-holder/src/guard.rs:9",
+      "crates/bazhen-holder/src/guard.rs:10",
+    ]);
+    expect(found[0]).toMatch(/sends a signal directly \(libc::kill\)/);
+    expect(found[1]).toMatch(/use super::\*.*name what it takes/);
+    expect(found[3]).toMatch(/a bare `kill`.*bazhen_test_signal/);
+  });
+
+  it("fails a raw call imported or held as a value on a chokepoint's product lines, not one called by its path", () => {
+    const source = [
+      "use libc::kill as k;",
+      "use nix::sys::signal as s;",
+      "extern crate libc as l;",
+      "pub use libc::kill;",
+      "use rustix::process::kill_process;",
+      "use rustix::process::{Pid, Signal};",
+      "fn f() { rustix::process::kill_process_group(p, s); unsafe { libc::kill(p, 9) }; }",
+      "const K: fn(Pid, Signal) -> io::Result<()> = rustix::process::kill_process;",
+      "const N: c_long = libc::SYS_kill;",
+      "fn g() { unsafe { f(libc::SYS_tkill) } }",
+      "fn h() { unsafe { libc::syscall(libc::SYS_pidfd_send_signal, fd, 0, none, 0) }; }",
+      "fn i() { rustix::process::kill_process_group::<P>(p, s); }",
+      "pub use nix::sys::signal::Signal;",
+    ].join("\n");
+    const found = signalChokepointFailures(CHOKEPOINTS, guardOnly(source));
+    expect(found.map((f) => f.split(": ")[0])).toEqual([
+      "crates/bazhen-holder/src/guard.rs:1",
+      "crates/bazhen-holder/src/guard.rs:2",
+      "crates/bazhen-holder/src/guard.rs:3",
+      "crates/bazhen-holder/src/guard.rs:4",
+      "crates/bazhen-holder/src/guard.rs:5",
+      "crates/bazhen-holder/src/guard.rs:8",
+      "crates/bazhen-holder/src/guard.rs:9",
+      "crates/bazhen-holder/src/guard.rs:10",
+      "crates/bazhen-holder/src/guard.rs:13",
+    ]);
+    expect(found[0]).toMatch(/imports a raw signal \(libc::kill\).*by its path/);
+    expect(found[5]).toMatch(/takes a raw signal as a value \(kill_process\)/);
+    expect(found[8]).toMatch(
+      /imports a raw signal \(pub use nix::sys::signal::Signal, which names a `signal` module and is a `pub use`\)/,
+    );
+  });
+
   it("names a chokepoint that no longer exists", () => {
     expect(signalChokepointFailures(CHOKEPOINTS.slice(1), () => "")).toEqual([
       "scripts/signal-paths.ts: SIGNAL_CHOKEPOINTS lists missing packages/host-guard/src/signal.ts.",
+    ]);
+  });
+});
+
+describe("cargoManifestFailures", () => {
+  it("fails libc or nix taken under another name, in every table a manifest names them in", () => {
+    const tree = {
+      "Cargo.toml": [
+        "[workspace.dependencies]",
+        'lc = { version = "=0.2.191", package = "libc" }',
+        'libc = { version = "=0.2.191" }',
+      ].join("\n"),
+      "crates/a/Cargo.toml": [
+        "[package]",
+        'name = "a"',
+        "[dependencies]",
+        'l = { package = "libc", workspace = true }',
+        "\"q\" = { package = 'nix' }",
+        "libc = { workspace = true }",
+        'nix = { package = "nix" }',
+        "[dependencies.n2]",
+        'package = "nix"',
+        "[dev-dependencies]",
+        'n3.package = "libc"',
+        "[target.'cfg(unix)'.dependencies]",
+        'n4 = { package = "nix" }',
+        "[target.'cfg(unix)'.dependencies.n5]",
+        'package = "nix"',
+        "[build-dependencies]",
+        's = { package = "serde" }',
+      ].join("\n"),
+    };
+    expect(
+      manifestFailures(tree).map((f) => /^(\S+): renames (\w+) to `(\w+)`/.exec(f)?.slice(1)),
+    ).toEqual([
+      ["Cargo.toml", "libc", "lc"],
+      ["crates/a/Cargo.toml", "libc", "l"],
+      ["crates/a/Cargo.toml", "nix", "q"],
+      ["crates/a/Cargo.toml", "nix", "n2"],
+      ["crates/a/Cargo.toml", "libc", "n3"],
+      ["crates/a/Cargo.toml", "nix", "n4"],
+      ["crates/a/Cargo.toml", "nix", "n5"],
     ]);
   });
 });
