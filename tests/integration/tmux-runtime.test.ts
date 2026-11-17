@@ -43,6 +43,19 @@ const spec = (
 
 afterAll(() => server.killServer());
 
+/** A program that titles its terminal `title` as its first output, then runs `then`. */
+const titled = (title: string, then: string): [string, ...string[]] => [
+  "sh",
+  "-c",
+  `printf '\\033]2;%s\\007' "$1"; ${then}`,
+  "_",
+  title,
+];
+
+/** How the terminal's process ended; null while it runs, or once the server no longer has it. */
+const exitOf = async (terminalId: string) =>
+  (await runtime.inventory()).find((e) => e.ref.terminalId === terminalId)?.exit ?? null;
+
 /** The buffers a paste made and left behind; one that typed nothing never set one. */
 const pasteBuffers = () =>
   tmuxOut(server, "list-buffers", "-F", "#{buffer_name}")
@@ -287,6 +300,27 @@ describe("tmux runtime on a private server", () => {
     stream.onData((b) => (seen += Buffer.from(b).toString("utf8")));
     await expect.poll(() => seen, { timeout: 3000 }).toContain("<x;>");
     stream.close();
+  });
+
+  it("titles a respawned pane as its new program does: with the first title it sets, or none", async () => {
+    const s = spec(titled("the old thread", "exit 0"));
+    const ref = await runtime.create(s);
+    await expect.poll(() => exitOf(ref.terminalId), { timeout: 3000 }).not.toBeNull();
+    const titledAtOnce = await runtime.respawn(ref, {
+      ...s,
+      generation: 1,
+      argv: titled("the new thread", "exit 0"),
+    });
+    await expect.poll(() => exitOf(ref.terminalId), { timeout: 3000 }).not.toBeNull();
+    // Long enough for a title reset that raced the new program, rather than preceding it, to land.
+    await sleep(200);
+    const first = await runtime.title(titledAtOnce);
+    const untitled = await runtime.respawn(titledAtOnce, {
+      ...s,
+      generation: 2,
+      argv: ["sleep", "300"],
+    });
+    expect([first, await runtime.title(untitled)]).toEqual(["the new thread", ""]);
   });
 
   it("gives a pane the filtered environment and Bazhen's variables, never the daemon's own", async () => {

@@ -692,6 +692,8 @@ export class TmuxRuntime implements RuntimeAdapter {
       ...sequence([
         generationCommand(target, spec.generation),
         styleCommand(target, spec.theme),
+        // A killed program never empties its title, and respawn-pane keeps it for the next one.
+        ["select-pane", "-T", "", "-t", target],
         ["respawn-pane", "-t", target, ...processArgs(spec)],
         ["display-message", "-p", "-t", target, LOCATION.format],
       ]),
