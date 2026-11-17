@@ -161,6 +161,15 @@ describe("bazhen close, respawn, relaunch and signal", () => {
     ]);
   });
 
+  it("takes a name in any case, as the daemon does", async () => {
+    holding([running]);
+    const ran = await s.bazhen(["respawn", "REVIEWER"]);
+    expect([ran, s.daemon.calls(`POST /v1/agents/${AGENT}/respawn`).length]).toEqual([
+      { code: 0, stdout: `respawned reviewer (${AGENT})\n`, stderr: "" },
+      1,
+    ]);
+  });
+
   it("reads a signal as kill does, with or without SIG, in either case, and refuses any other", async () => {
     holding([running]);
     for (const given of ["int", "SIGHUP", "Kill", "sigterm"])
@@ -201,6 +210,39 @@ describe("bazhen close, respawn, relaunch and signal", () => {
         stderr: `/v1/agents/${AGENT}/close: HTTP 409: ${JSON.stringify(stale)}\n`,
       },
       [expect.anything()],
+    ]);
+  });
+
+  it("prints a busy close's refusal and exits 1, saying how to close anyway", async () => {
+    holding([running]);
+    const busy = {
+      error: "busy" as const,
+      message: "vim is running in reviewer; close anyway to end it",
+      busy: [{ terminalId: TERM, program: "vim" }],
+    };
+    s.daemon.fail(`POST /v1/agents/${AGENT}/close`, 409, busy);
+    const ran = await s.bazhen(["close", "reviewer"]);
+    expect(ran).toEqual({
+      code: 1,
+      stdout: "",
+      stderr:
+        `/v1/agents/${AGENT}/close: HTTP 409: ${JSON.stringify(busy)}\n` +
+        "close again with --confirm-busy to end what runs\n",
+    });
+  });
+
+  it("adds nothing to a close refused but not as busy, nor to one that confirmed", async () => {
+    holding([running]);
+    const path = `/v1/agents/${AGENT}/close`;
+    const busy = { error: "busy" as const, message: "less is running in reviewer" };
+    const conflict = { error: "conflict" as const, message: "reviewer is closing" };
+    s.daemon.fail(`POST ${path}`, 409, busy);
+    const confirmed = await s.bazhen(["close", "reviewer", "--confirm-busy"]);
+    s.daemon.fail(`POST ${path}`, 409, conflict);
+    const other = await s.bazhen(["close", "reviewer"]);
+    expect([confirmed, other]).toEqual([
+      { code: 1, stdout: "", stderr: `${path}: HTTP 409: ${JSON.stringify(busy)}\n` },
+      { code: 1, stdout: "", stderr: `${path}: HTTP 409: ${JSON.stringify(conflict)}\n` },
     ]);
   });
 

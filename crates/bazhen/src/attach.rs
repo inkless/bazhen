@@ -238,7 +238,7 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
 fn terminal_of(state: &StateSnapshot, target: &str) -> Result<String, String> {
     let agent = state.agents.iter().find(|a| {
         a.id.as_str() == target
-            || a.name == target
+            || a.name.eq_ignore_ascii_case(target)
             || a.terminal_id.as_ref().is_some_and(|t| t.as_str() == target)
     });
     let found = agent

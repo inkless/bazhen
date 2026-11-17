@@ -162,7 +162,9 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
     let Some(generation) = agent.generation else {
         return Err(Stop::Refused(format!("{label} has no terminal yet")));
     };
-    let r = command.send(daemon, agent.id.as_str(), generation)?;
+    let r = command
+        .send(daemon, agent.id.as_str(), generation)
+        .map_err(|stop| how_to_close_busy(stop, command))?;
     if p.has("json") {
         return pretty(&r);
     }
@@ -211,6 +213,31 @@ fn launch(p: &Parsed, daemon: &Daemon) -> Step<String> {
     })
 }
 
+/// A close refused as `busy` names what runs; say how to end it anyway.
+fn how_to_close_busy(stop: Stop, command: Command) -> Stop {
+    let Command::Close {
+        confirm_busy: false,
+        ..
+    } = command
+    else {
+        return stop;
+    };
+    match stop {
+        Stop::Call(Failed::Refused(message)) if refused_as_busy(&message) => Stop::Refused(
+            format!("{message}\nclose again with --confirm-busy to end what runs"),
+        ),
+        other => other,
+    }
+}
+
+/// Whether a refusal the call printed is the daemon's 409 `busy`.
+fn refused_as_busy(message: &str) -> bool {
+    message
+        .split_once(": HTTP 409: ")
+        .and_then(|(_, body)| serde_json::from_str::<serde_json::Value>(body).ok())
+        .is_some_and(|body| body.get("error").and_then(serde_json::Value::as_str) == Some("busy"))
+}
+
 /// The signal `given` names, as `kill` takes one: with or without `SIG`, in either case.
 fn signal_named(given: &str) -> Step<Signal> {
     Signal::ALL
@@ -229,7 +256,8 @@ fn signal_named(given: &str) -> Step<Signal> {
 }
 
 /// The agent `given` names: by its id, else by the name of one not ended, as a name an ended
-/// agent had may be another's now.
+/// agent had may be another's now. A name is matched as the daemon matches one, ignoring ASCII
+/// case.
 fn find<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Agent> {
     state
         .agents
@@ -239,7 +267,7 @@ fn find<'s>(state: &'s StateSnapshot, given: &str) -> Step<&'s Agent> {
             state
                 .agents
                 .iter()
-                .find(|a| a.name == given && !a.state.ended())
+                .find(|a| a.name.eq_ignore_ascii_case(given) && !a.state.ended())
         })
         .ok_or_else(|| Stop::Refused(format!("the daemon has no agent {}", printable(given))))
 }
