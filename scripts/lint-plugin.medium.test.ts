@@ -120,6 +120,7 @@ const IMPORTS = [
   'import { default as cpx } from "node:child_process";',
   'import type * as cpt from "node:child_process";',
   'import type { spawn as typedSpawn } from "node:child_process";',
+  'import { type spawn as inlineTyped } from "node:child_process";',
   'import { spawnGroup, runBounded, TmuxServer } from "@bazhen/host-guard";',
   'import * as hg from "@bazhen/host-guard";',
   'import { runIn } from "../packages/host-guard/src/index.ts";',
@@ -147,7 +148,8 @@ const UNFOLLOWED = [
   "export const uncalled = cp.spawn;",
   "export const { execSync } = cp;",
   "export const bound = hg.spawnGroup.bind(null);",
-  "export const defaulted = [cpd, cpx];",
+  "export const defaulted = [cpd];",
+  "export const renamedDefault = [cpx];",
   "export const nested = cpd.default;",
   'export const dynamic = (name: "spawn") => cp[name];',
   "export const subpath = [runOwned];",
@@ -190,7 +192,8 @@ const FOLLOWED = [
   'export type { ChildProcess as Child } from "node:child_process";',
   "export const child: ChildProcess | null = null;",
   "export type Spawned = ReturnType<typeof cpt.spawn>;",
-  "export type { typedSpawn };",
+  "export type { typedSpawn, inlineTyped };",
+  'export { type spawn as InlineSpawnType } from "node:child_process";',
   'export type { spawn as SpawnType } from "node:child_process";',
   'export type * from "node:child_process";',
   'import type cpTyped = require("node:child_process");',
@@ -214,12 +217,14 @@ describe("the host-guard rule's reach", () => {
           'import { default as cpx } from "node:child_process";',
           'import util from "node:util";',
           'export function early() { lateAlias("tmux", []); execFile(lateBin, []); }',
+          'export function chained() { lastAlias("tmux", []); }',
+          "const lastAlias = lateAlias;",
           'cpx.execFileSync("tmux", ["kill-server"]);',
           "const lateAlias = execFile;",
           'const lateBin = "tmux";',
           'const viaUtil = util.promisify(execFile); void viaUtil("tmux", []);',
         ].join("\n"),
       ),
-    ).toEqual([4, 4, 5, 8]);
+    ).toEqual([4, 4, 5, 7, 10]);
   });
 });
