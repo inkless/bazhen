@@ -33,8 +33,8 @@ export interface RoutedRuntimeOptions {
   readonly runtimes: readonly RuntimeAdapter[];
   /** The kind a terminal is created on when its spec names none. */
   readonly defaultKind: string;
-  /** Where a runtime's failure goes when the others still answer for it. */
-  readonly onError: (err: unknown) => void;
+  /** Where a runtime's failure goes when the others still answer for it, and its recovery. */
+  readonly log: (message: string, err?: unknown) => void;
 }
 
 /** Each runtime of `runtime`'s, by kind, with its own health: one, unless it is routed. */
@@ -62,7 +62,9 @@ export class RoutedRuntime implements RuntimeAdapter {
   readonly kinds: readonly string[];
   readonly defaultKind: string;
   private readonly runtimes: ReadonlyMap<string, RuntimeAdapter>;
-  private readonly onError: (err: unknown) => void;
+  private readonly log: (message: string, err?: unknown) => void;
+  /** The foreground fault last said of each runtime, so one that persists is said once. */
+  private readonly faults = new Map<string, string>();
 
   constructor(opts: RoutedRuntimeOptions) {
     const runtimes = new Map<string, RuntimeAdapter>();
@@ -74,7 +76,7 @@ export class RoutedRuntime implements RuntimeAdapter {
     this.runtimes = runtimes;
     this.kinds = [...runtimes.keys()];
     this.defaultKind = opts.defaultKind;
-    this.onError = opts.onError;
+    this.log = opts.log;
   }
 
   /** The one runtime of `kind`. */
@@ -152,15 +154,32 @@ export class RoutedRuntime implements RuntimeAdapter {
   /**
    * Each runtime's foregrounds. One that can't be read leaves its terminals out, which the
    * contract allows, so the rest are still seen; only when none can be read does this throw.
+   * A runtime's fault is said when it starts or changes, and its recovery once.
    */
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
-    const read = await Promise.allSettled(
-      [...this.runtimes.values()].map((r) => r.foregrounds(terminalIds)),
+    const read = await Promise.all(
+      this.kinds.map((kind) =>
+        this.only(kind)
+          .foregrounds(terminalIds)
+          .then(
+            (seen) => ({ kind, seen }),
+            (err: unknown) => ({ kind, seen: [], err }),
+          ),
+      ),
     );
-    const failed = read.flatMap((r) => (r.status === "rejected" ? [r.reason as unknown] : []));
-    if (failed.length === read.length) throw failed[0];
-    for (const err of failed) this.onError(err);
-    return read.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    const failed = read.filter((r) => "err" in r);
+    if (failed.length === read.length) throw failed[0]?.err;
+    for (const r of read) {
+      if (!("err" in r)) {
+        if (this.faults.delete(r.kind)) this.log(`runtime ${r.kind}: foregrounds read again`);
+        continue;
+      }
+      const fault = String(r.err);
+      if (this.faults.get(r.kind) !== fault)
+        this.log(`runtime ${r.kind}: can't read foregrounds:`, r.err);
+      this.faults.set(r.kind, fault);
+    }
+    return read.flatMap((r) => r.seen);
   }
 
   async title(ref: RuntimeRef): Promise<string> {

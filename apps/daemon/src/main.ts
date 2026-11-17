@@ -307,7 +307,7 @@ const tmux = new TmuxRuntime({
 const runtime = new RoutedRuntime({
   runtimes: [tmux, holderRuntime],
   defaultKind: config.defaultRuntime,
-  onError: (err: unknown) => console.warn("runtime:", err),
+  log: console.warn,
 });
 // Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).
 const codexThreads = new CodexThreads({
