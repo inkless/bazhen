@@ -68,6 +68,27 @@ const RUST_RAW =
 // statement so no nesting of groups hides it.
 const RUST_USE = /\b(?:(pub)\b(?:\s*\([^)]*\))?\s*)?use\b[^;]*/g;
 
+/** The crates whose kills RUST_RAW reads by the crate's name, which a Cargo rename would hide. */
+export const SIGNAL_CRATES: readonly string[] = ["libc", "nix"];
+
+/**
+ * Each glob `use` and each bare `kill`, not a method's, in Rust source. In a chokepoint's tests
+ * either reaches a name its product code imports, which the scan doesn't read there.
+ */
+export function chokepointReaches(text: string): { line: number; call: string }[] {
+  const code = rustCode(text);
+  const globs = [...code.matchAll(RUST_USE)]
+    .filter((m) => m[0].includes("*"))
+    .map((m) => ({ index: m.index, call: m[0].replaceAll(/\s+/g, " ").trim() }));
+  const bare = [...code.matchAll(/(?<!\.\s*(?:r#)?)\b(?:r#)?kill\b/g)].map((m) => ({
+    index: m.index,
+    call: "a bare `kill`",
+  }));
+  return [...globs, ...bare]
+    .toSorted((a, b) => a.index - b.index)
+    .map(({ index, call }) => ({ line: lineAt(code, index), call }));
+}
+
 function signalImports(code: string) {
   return [...code.matchAll(RUST_USE)].flatMap((m) => {
     const words = (m[0].match(/(?:r#)?[A-Za-z_]\w*|\*/g) ?? []).map((w) => w.replace(/^r#/, ""));
@@ -1081,7 +1102,8 @@ function allowedIn(file: string, text: string) {
  * A signal found in a file. `unread` marks a start's options the scan can't read, which may set a
  * kill or not; `unfollowed` a start reached where the scan can't follow it to a call, or
  * child_process loaded where it can't see what is started. `literal` marks text that names a
- * kill or child_process, which a fixture may hold.
+ * kill or child_process, which a fixture may hold. `imported` marks a Rust `use` or `extern crate`
+ * that brings a raw call in, whose name reaches the file's child modules.
  */
 type Signal = {
   index: number;
@@ -1090,6 +1112,7 @@ type Signal = {
   literal?: boolean;
   unread?: boolean;
   unfollowed?: boolean;
+  imported?: boolean;
 };
 
 /** Whether one of `allowed` lets `signal` through: a fixture lets only its text's, `literal`. */
@@ -1103,8 +1126,9 @@ const allows = (allowed: ReturnType<typeof allowedIn>, signal: Signal) =>
 const asCalls = (signals: Signal[]) =>
   signals
     .toSorted((a, b) => a.index - b.index)
-    .map(({ line, call, unread, unfollowed }) => {
+    .map(({ line, call, unread, unfollowed, imported }) => {
       if (unread === true) return { line, call, unread };
+      if (imported === true) return { line, call, imported };
       return unfollowed === true ? { line, call, unfollowed } : { line, call };
     });
 
@@ -1112,7 +1136,7 @@ const asCalls = (signals: Signal[]) =>
 export function rawSignalCalls(
   file: string,
   text: string,
-): { line: number; call: string; unread?: true; unfollowed?: true }[] {
+): { line: number; call: string; unread?: true; unfollowed?: true; imported?: true }[] {
   const { signals, allowed } = signalsIn(file, text);
   return asCalls(signals.filter((s) => !allows(allowed, s)));
 }
@@ -1146,10 +1170,16 @@ function signalsIn(
       body: strings[n] ?? "",
       cooked: raw[n],
     }));
-    const direct = found(code, RUST_RAW);
-    const imports = signalImports(code).filter(
-      (u) => !direct.some((d) => d.index >= u.index && d.index < u.end),
-    );
+    const uses = [...code.matchAll(RUST_USE)].map((m) => [m.index, m.index + m[0].length]);
+    const direct = found(code, RUST_RAW).map((d) => ({
+      ...d,
+      imported:
+        d.call.startsWith("extern") ||
+        uses.some(([from = 0, to = 0]) => d.index >= from && d.index < to),
+    }));
+    const imports = signalImports(code)
+      .filter((u) => !direct.some((d) => d.index >= u.index && d.index < u.end))
+      .map(({ index, line, call }) => ({ index, line, call, imported: true }));
     return {
       signals: [...direct, ...imports, ...kills(literals, code)],
       allowed: allowedIn(file, code),

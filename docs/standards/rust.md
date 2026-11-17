@@ -28,7 +28,7 @@ a review asks for something no check covers.
 | Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
 | No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)           |
 | Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)              |
-| No dependency that signals any pid through a method (`sysinfo`, `psutil`, `heim`)                                                       | `pnpm deny`                                           |
+| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `pnpm deny`                                           |
 | A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
 | API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
 | Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                                |
@@ -303,6 +303,13 @@ groups, counts as a raw call, since it hides the `kill` the scan reads for. So d
 `pub use` of either, which would let another file import one through a path of ours. The crates
 known so far whose methods signal any pid, or hold one to signal (`sysinfo`, `psutil`, `heim`,
 `kill_tree`, `pidfd`), are banned in `deny.toml`: a method call is text the scan can't tell from a child's own `kill`.
+
+A chokepoint's product code is exempt only in its calls, so it calls a raw function by its path
+and never imports one: an imported name reaches the file's tests, which `super::` can name with
+nothing in sight the scan reads. Its tests take no glob `use` and name no bare `kill`, a method's
+`.kill()` aside, so they reach nothing the product code imports. And no manifest takes `libc` or
+`nix` under another name (`package = "libc"`), which the scan, reading their kills by the crate's
+name, wouldn't read; a `package` it can't read as a plain string fails too.
 
 ## Command-line programs
 
