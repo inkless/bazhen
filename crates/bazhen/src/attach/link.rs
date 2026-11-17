@@ -13,7 +13,7 @@ use tungstenite::{Message, WebSocket};
 
 use super::attachment::{Attachment, Effect, Ending};
 use super::tty::{self, Stops, Wakeups};
-use crate::call::{Failed, upgrade};
+use crate::call::{CALL, Failed, upgrade};
 use crate::fmt::encode_uri_component;
 
 /// The most keys read from the person's terminal at once.
@@ -39,6 +39,7 @@ pub(crate) fn open(
         caller,
         &format!("/v1/terminals/{}/stream", encode_uri_component(terminal)),
         "the daemon refused to attach",
+        CALL,
     )?;
     let hello = serde_json::to_string(hello).map_err(|e| Failed::Unsendable(e.to_string()))?;
     ws.send(Message::text(hello))

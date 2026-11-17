@@ -5,6 +5,7 @@
 // daemon, remain the end-to-end gate.
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import {
   createServer,
@@ -123,12 +124,30 @@ export interface EventStream {
   readonly close: () => void;
 }
 
+/** RFC 6455's key suffix, from which a server's `Sec-WebSocket-Accept` is made. */
+const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+/** `text` as a server's WebSocket text frame, unmasked. */
+function textFrame(text: string): Buffer {
+  const data = Buffer.from(text, "utf8");
+  if (data.length >= 65536) throw new Error("a frame this long needs the 64-bit length");
+  const head =
+    data.length < 126
+      ? Buffer.from([0x81, data.length])
+      : Buffer.from([0x81, 126, data.length >> 8, data.length & 0xff]);
+  return Buffer.concat([head, data]);
+}
+
 export class FakeDaemon {
   readonly received: Received[] = [];
   readonly #routes = new Map<string, (r: Received) => Reply>();
   readonly #server: Server;
   readonly #hung: ServerResponse[] = [];
   readonly #sockets = new WebSocketServer({ noServer: true });
+  /** Streams answered by hand, closed with the daemon. */
+  readonly #held: Duplex[] = [];
+  /** Answers an upgrade by hand, in place of the WebSocket server. */
+  #byHand: ((conn: Duplex, key: string) => void) | undefined;
   /** The `/v1/events` streams the CLI opened, in order. */
   readonly opened: EventStream[] = [];
   #serve: readonly ((stream: EventStream) => void)[] | undefined;
@@ -150,6 +169,11 @@ export class FakeDaemon {
     server.on("upgrade", (req, conn: Duplex, head: Buffer) => {
       const path = req.url ?? "";
       daemon.received.push({ method: "GET", path, headers: req.headers, body: undefined });
+      if (daemon.#byHand !== undefined) {
+        daemon.#held.push(conn);
+        daemon.#byHand(conn, String(req.headers["sec-websocket-key"]));
+        return;
+      }
       const serve = daemon.#serve;
       if (serve === undefined) {
         const reply = daemon.#refuse;
@@ -263,6 +287,31 @@ export class FakeDaemon {
     return this;
   }
 
+  /** Never answers a `/v1/events` upgrade, as a wedged daemon doesn't. */
+  hangEvents(): this {
+    this.#byHand = () => undefined;
+    return this;
+  }
+
+  /**
+   * Answers the CLI's `/v1/events` streams with `texts` as frames in the same write as the 101,
+   * then leaves them open; what the stream sends after goes as frames written by hand too.
+   */
+  eventsWithTheAnswer(...texts: string[]): this {
+    this.#byHand = (conn, key) => {
+      const accept = createHash("sha1").update(`${key}${WEBSOCKET_GUID}`).digest("base64");
+      const answer =
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`;
+      conn.write(Buffer.concat([Buffer.from(answer), ...texts.map(textFrame)]));
+      this.opened.push({
+        send: (frame) => conn.write(textFrame(JSON.stringify(EventEnvelopeFrame.parse(frame)))),
+        close: () => conn.end(Buffer.from([0x88, 0])),
+      });
+    };
+    return this;
+  }
+
   /** Never answers `route`, as a wedged daemon doesn't. */
   hang(route: string): this {
     this.#routes.set(route, () => "hang");
@@ -282,6 +331,7 @@ export class FakeDaemon {
   /** Stops answering: the socket refuses connections from now on, as a stopped daemon's does. */
   async close(): Promise<void> {
     for (const res of this.#hung.splice(0)) res.destroy();
+    for (const conn of this.#held.splice(0)) conn.destroy();
     for (const ws of this.#sockets.clients) ws.terminate();
     this.#sockets.close();
     if (!this.#server.listening) return;

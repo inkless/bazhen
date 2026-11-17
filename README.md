@@ -309,8 +309,10 @@ shell `{ terminalId, eventIds }`, and for `shells list` the shells as `/v1/state
 `events --follow` prints a line an event, or with `--json` each event as the daemon sent it, and
 says so when events were missed and it follows on from the daemon's state. `wait` exits 0 once
 the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
-given) runs out first; with `--json` it prints the record that met it. Both are yours alone too:
-the daemon refuses an agent the event stream.
+given, at least 1) runs out first, whatever the daemon is doing; with `--json` it prints the
+record that met it. Both are yours alone too: the daemon refuses an agent the event stream.
+Ctrl-C ends `events --follow` at once while it waits on the stream, and within 5 s while it waits
+on a call to the daemon, such as opening the stream again.
 
 ## What Bazhen knows about who is calling
 

@@ -109,6 +109,7 @@ fn events(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
                 }
             }
             Seen::Lost => out.err("the daemon isn't answering; trying again"),
+            Seen::Opened => {}
         }
         // No one reads on, as when `head` has had its lines: the following is over.
         Ok(if out.closed() {
@@ -163,17 +164,29 @@ fn wait(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
     only(p, "wait", &["timeout"], 3)?;
     let given = need(p.word(1), "the agent or shell")?;
     let condition = need(p.word(2), "the state")?;
+    if condition != "ended"
+        && !AGENT_STATES.contains(&condition)
+        && !SHELL_STATES.contains(&condition)
+    {
+        return usage(format!(
+            "the state is an agent's ({}), a shell's ({}), or ended; not {condition}",
+            AGENT_STATES.join(", "),
+            SHELL_STATES.join(", ")
+        ));
+    }
     let timeout = match p.value("timeout") {
         None => DEFAULT_WAIT,
-        Some(t) => whole(t)
-            .map(Duration::from_secs)
-            .map_or_else(|| usage(format!("--timeout is whole seconds, not {t}")), Ok)?,
+        Some(t) => match whole(t) {
+            Some(0) => return usage("--timeout is at least 1 s"),
+            Some(secs) => Duration::from_secs(secs),
+            None => return usage(format!("--timeout is whole seconds, not {t}")),
+        },
     };
     let Some(deadline) = Instant::now().checked_add(timeout) else {
         return usage(format!("--timeout is too long: {} s", timeout.as_secs()));
     };
     let json = p.has("json");
-    let state: StateSnapshot = daemon.get("/v1/state", CALL)?;
+    let state: StateSnapshot = daemon.get("/v1/state", CALL.min(timeout))?;
     let (kind, id) = target(&state, given)?;
     let states = match kind {
         Kind::Agent => &AGENT_STATES,
@@ -196,18 +209,46 @@ fn wait(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
         Verdict::Never(said) => return Err(Stop::Refused(said)),
         Verdict::NotYet(said) => said,
     };
+    let mut watched = watching(&state, kind, &id);
+    // The first stream opens from the state just judged; one opened again may have missed changes.
+    let mut first = true;
+    // A read of the state failed, so the next events are judged whatever they are on.
+    let mut unsure = false;
     let ended = follow(daemon, Cursor::of(&state), None, Some(deadline), |seen| {
-        let verdict = match seen {
-            Seen::Events(_) => match daemon.get::<StateSnapshot>("/v1/state", CALL) {
-                Ok(state) => judge(&state)?,
-                // The stream finds out it's gone, and tries again.
-                Err(Failed::NotRunning) => return Ok(Flow::On),
-                Err(failed) => return Err(failed.into()),
-            },
-            Seen::Reset(_, state) => judge(state)?,
+        let read;
+        let state = match seen {
+            Seen::Reset(_, state) => state,
+            Seen::Events(events)
+                if !unsure && !events.iter().any(|e| watched.contains(&e.entity_id)) =>
+            {
+                return Ok(Flow::On);
+            }
+            Seen::Opened if first => {
+                first = false;
+                return Ok(Flow::On);
+            }
             Seen::Lost => return Ok(Flow::On),
+            Seen::Events(_) | Seen::Opened => {
+                let Some(within) = bound(Some(deadline)) else {
+                    return Ok(Flow::On);
+                };
+                match daemon.get::<StateSnapshot>("/v1/state", within) {
+                    Ok(state) => {
+                        read = state;
+                        &read
+                    }
+                    // The stream finds out it's gone, and tries again.
+                    Err(Failed::NotRunning) => {
+                        unsure = true;
+                        return Ok(Flow::On);
+                    }
+                    Err(failed) => return Err(failed.into()),
+                }
+            }
         };
-        Ok(match verdict {
+        unsure = false;
+        watched = watching(state, kind, &id);
+        Ok(match judge(state)? {
             Verdict::NotYet(said) => {
                 latest = said;
                 Flow::On
@@ -228,6 +269,21 @@ fn wait(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
 fn met(said: &str, out: &mut Out) -> Exit {
     out.line(said);
     Exit::Done
+}
+
+/// The entities whose events may move the target: itself, and an agent's terminal.
+fn watching(state: &StateSnapshot, kind: Kind, id: &str) -> Vec<String> {
+    let mut ids = vec![id.to_owned()];
+    if kind == Kind::Agent
+        && let Some(terminal) = state
+            .agents
+            .iter()
+            .find(|a| a.id.as_str() == id)
+            .and_then(|a| a.terminal_id.as_ref())
+    {
+        ids.push(terminal.as_str().to_owned());
+    }
+    ids
 }
 
 /// The agent or shell `given` names: an agent by its id or a name one not ended has, else a
@@ -338,6 +394,8 @@ enum Seen<'a> {
     Reset(ResetReason, &'a StateSnapshot),
     /// The daemon stopped answering; said once each time it goes.
     Lost,
+    /// The stream is open, first or again; what it missed while closed comes after.
+    Opened,
 }
 
 enum Flow<T> {
@@ -376,7 +434,11 @@ fn follow<T>(
                 Woke::Time | Woke::Stream => {}
             }
         }
-        let mut ws = match daemon.upgrade(&cursor.path(), "the daemon refused the event stream") {
+        let Some(within) = bound(deadline) else {
+            return Ok(Ended::TimedOut);
+        };
+        let refused = "the daemon refused the event stream";
+        let mut ws = match daemon.upgrade(&cursor.path(), refused, within) {
             Ok(ws) => ws,
             Err(Failed::NotRunning) => {
                 // A stop that came mid-handshake cut it short: the daemon isn't gone.
@@ -400,11 +462,18 @@ fn follow<T>(
             .and_then(|()| ws.get_ref().set_write_timeout(None))
             .and_then(|()| ws.get_ref().set_nonblocking(true))
             .map_err(|_| Failed::NotRunning)?;
+        if let Flow::Done(done) = on(Seen::Opened)? {
+            return Ok(Ended::Done(done));
+        }
         let mut heard = false;
         // Frames that came with the handshake's answer wait in tungstenite, not on the socket: read
         // them before waiting on it.
         let mut waited = false;
         loop {
+            // A stream that is never quiet would keep the wait from timing out.
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                return Ok(Ended::TimedOut);
+            }
             if waited {
                 match ready(Some(ws.get_ref()), stop, deadline)? {
                     Woke::Stop => return Ok(Ended::Stopped),
@@ -413,19 +482,23 @@ fn follow<T>(
                 }
             }
             waited = true;
-            let mut events = Vec::new();
-            let mut reset = None;
-            let closed = drain(&mut ws, &mut events, &mut reset)?;
-            if let Some(last) = events.last() {
+            let batch = drain(&mut ws, deadline);
+            if let Some(last) = batch.events.last() {
                 heard = true;
                 cursor.after = last.id;
-                if let Flow::Done(done) = on(Seen::Events(&events))? {
+                if let Flow::Done(done) = on(Seen::Events(&batch.events))? {
                     return Ok(Ended::Done(done));
                 }
             }
-            if let Some(reason) = reset {
+            if let Some(unreadable) = batch.unreadable {
+                return Err(Stop::Unreadable(unreadable));
+            }
+            if let Some(reason) = batch.reset {
                 heard = true;
-                let state: StateSnapshot = match daemon.get("/v1/state", CALL) {
+                let Some(within) = bound(deadline) else {
+                    return Ok(Ended::TimedOut);
+                };
+                let state: StateSnapshot = match daemon.get("/v1/state", within) {
                     Ok(state) => state,
                     Err(Failed::NotRunning) => break,
                     Err(failed) => return Err(failed.into()),
@@ -436,12 +509,21 @@ fn follow<T>(
                 }
                 break;
             }
-            if closed {
+            if batch.closed {
                 break;
             }
         }
         retry = if heard { Duration::ZERO } else { next(retry) };
     }
+}
+
+/// How long a call may take: `CALL`, or less as `deadline` nears; None once it has passed.
+fn bound(deadline: Option<Instant>) -> Option<Duration> {
+    let Some(deadline) = deadline else {
+        return Some(CALL);
+    };
+    let left = deadline.saturating_duration_since(Instant::now());
+    (!left.is_zero()).then(|| left.min(CALL))
 }
 
 fn next(retry: Duration) -> Duration {
@@ -491,34 +573,48 @@ fn ready(
     }
 }
 
-/// Reads all the daemon has sent so far into `events`, and a reset into `reset`. True once the
-/// stream is closed.
-fn drain(
-    ws: &mut WebSocket<UnixStream>,
-    events: &mut Vec<Event>,
-    reset: &mut Option<ResetReason>,
-) -> Step<bool> {
-    let closed = loop {
+/// What one drain read: the events in order, a reset, whether the stream closed, and a frame this
+/// build can't read, which ends the batch after the events before it.
+#[derive(Default)]
+struct Batch {
+    events: Vec<Event>,
+    reset: Option<ResetReason>,
+    closed: bool,
+    unreadable: Option<String>,
+}
+
+/// Reads all the daemon has sent so far, or all it sent before `deadline` passed.
+fn drain(ws: &mut WebSocket<UnixStream>, deadline: Option<Instant>) -> Batch {
+    let mut batch = Batch::default();
+    while deadline.is_none_or(|d| Instant::now() < d) {
         match ws.read() {
             Ok(Message::Text(text)) => match wire::from_slice::<EventFrame>(text.as_bytes()) {
-                Ok(EventFrame::Event { event }) => events.push(event),
-                Ok(EventFrame::Reset { reason }) => *reset = Some(reason),
+                Ok(EventFrame::Event { event }) => batch.events.push(event),
+                Ok(EventFrame::Reset { reason }) => batch.reset = Some(reason),
                 Err(e) => {
-                    return Err(Stop::Unreadable(format!(
+                    batch.unreadable = Some(format!(
                         "the daemon sent an event this build can't read: {e}"
-                    )));
+                    ));
+                    break;
                 }
             },
-            Ok(Message::Close(_)) => break true,
+            Ok(Message::Close(_)) => {
+                batch.closed = true;
+                break;
+            }
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => break false,
-            Err(_) => break true,
+            Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => break,
+            Err(_) => {
+                batch.closed = true;
+                break;
+            }
         }
-    };
+    }
     // A pong the read queued goes out now, or with the next read.
     match ws.flush() {
-        Ok(()) => Ok(closed),
-        Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => Ok(closed),
-        Err(_) => Ok(true),
+        Ok(()) => {}
+        Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
+        Err(_) => batch.closed = true,
     }
+    batch
 }

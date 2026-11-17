@@ -76,13 +76,15 @@ pub(crate) struct Daemon {
 }
 
 impl Daemon {
-    /// The WebSocket at `path`; a refusal says `refused` and its status when it gives no reason.
+    /// The WebSocket at `path`, its handshake bounded by `within`; a refusal says `refused` and
+    /// its status when it gives no reason.
     pub(crate) fn upgrade(
         &self,
         path: &str,
         refused: &str,
+        within: Duration,
     ) -> Result<WebSocket<UnixStream>, Failed> {
-        upgrade(&self.socket, &self.caller, path, refused)
+        upgrade(&self.socket, &self.caller, path, refused, within)
     }
 
     pub(crate) fn at(socket: impl Into<PathBuf>) -> Self {
@@ -197,17 +199,18 @@ struct Refusal {
 }
 
 /// The WebSocket at `path` through the daemon at `socket`, as `caller`, its reads and writes
-/// bounded by `CALL`. A refusal says what the daemon said, else `refused` and its status.
+/// bounded by `within`. A refusal says what the daemon said, else `refused` and its status.
 pub(crate) fn upgrade(
     socket: &Path,
     caller: &Caller,
     path: &str,
     refused: &str,
+    within: Duration,
 ) -> Result<WebSocket<UnixStream>, Failed> {
     let stream = UnixStream::connect(socket).map_err(|_| Failed::NotRunning)?;
     stream
-        .set_read_timeout(Some(CALL))
-        .and_then(|()| stream.set_write_timeout(Some(CALL)))
+        .set_read_timeout(Some(within))
+        .and_then(|()| stream.set_write_timeout(Some(within)))
         .map_err(|_| Failed::NotRunning)?;
     let mut request = Request::builder()
         .uri(format!("ws://localhost{path}"))

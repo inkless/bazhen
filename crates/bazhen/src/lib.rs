@@ -109,9 +109,10 @@ pub(crate) const EVENTS_USAGE: &str = "usage:
   bazhen events --follow [--after <event>] [--json]
   bazhen wait <agent|shell> <state>|ended [--timeout <seconds>] [--json]
 events --follow prints each event as it happens, after the event --after names if given, until
-Ctrl-C; when the daemon goes away it tries again until it is back. wait exits 0 once the agent
-or shell is in <state>, or closed or failed for ended (an agent is running once its harness is
-up and ready), 1 if it ended otherwise, and 5 if the timeout (60 s unless given) runs out.";
+Ctrl-C, which may wait up to 5 s for a call to the daemon to end; when the daemon goes away it
+tries again until it is back. wait exits 0 once the agent or shell is in <state>, or closed or
+failed for ended (an agent is running once its harness is up and ready), 1 if it ended
+otherwise, and 5 if the timeout (60 s unless given, at least 1) runs out.";
 
 const DAEMON_USAGE: &str = concat!(
     "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
