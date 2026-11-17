@@ -153,6 +153,13 @@ const UNFOLLOWED = [
   "export const nested = cpd.default;",
   'export const dynamic = (name: "spawn") => cp[name];',
   "export const subpath = [runOwned];",
+  "export const applied = (argv: string[]) => runBounded.apply(null, argv);",
+  "export const appliedSpread = (argv: string[]) => execFile.apply(null, [...argv]);",
+  "export const spread = (argv: [string]) => spawnGroup(...argv);",
+  "export const spreadCall = (argv: [string]) => execFile.call(null, ...argv);",
+  "export const spreadMember = (argv: [string]) => cp.execFile(...argv);",
+  "export const spreadGuard = (argv: [string]) => hg.spawnGroup(...argv);",
+  "import qualified = cp.execFile;",
   "export { fork };",
   "export default runBounded;",
   'require("child_process");',
@@ -198,6 +205,9 @@ const FOLLOWED = [
   'export type * from "node:child_process";',
   'import type cpTyped = require("node:child_process");',
   "export type Typed = typeof cpTyped;",
+  'export const isStart = typeof spawn === "function" && typeof cp === "object";',
+  'runBounded.apply(null, ["git"]);',
+  "declare const statement: { run(...values: unknown[]): void }; statement.run(...[1, 2]);",
   'const viaUtil = util.promisify(execFile); void viaUtil("git", []);',
 ];
 
@@ -216,6 +226,7 @@ describe("the host-guard rule's reach", () => {
           'import { execFile } from "node:child_process";',
           'import { default as cpx } from "node:child_process";',
           'import util from "node:util";',
+          'import { runBounded as rb } from "@bazhen/host-guard";',
           'export function early() { lateAlias("tmux", []); execFile(lateBin, []); }',
           'export function chained() { lastAlias("tmux", []); }',
           "const lastAlias = lateAlias;",
@@ -223,8 +234,9 @@ describe("the host-guard rule's reach", () => {
           "const lateAlias = execFile;",
           'const lateBin = "tmux";',
           'const viaUtil = util.promisify(execFile); void viaUtil("tmux", []);',
+          'rb("tmux", ["kill-server"]);',
         ].join("\n"),
       ),
-    ).toEqual([4, 4, 5, 7, 10]);
+    ).toEqual([5, 5, 6, 8, 11, 12]);
   });
 });

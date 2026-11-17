@@ -113,6 +113,17 @@ const isCalled = (node: Node): boolean => {
   );
 };
 
+/**
+ * Whether `id` is read for its type alone: a `typeof`, or a type named through it, as in
+ * `cp.SpawnOptions`. `import ef = cp.execFile` is qualified too, but binds the start.
+ */
+const isTypeOf = (id: Node): boolean => {
+  let parent = parentOf(id);
+  if (parent?.type === "UnaryExpression" && parent["operator"] === "typeof") return true;
+  while (parent?.type === "TSQualifiedName") parent = parentOf(parent);
+  return parent?.type === "TSTypeQuery" || parent?.type === "TSTypeReference";
+};
+
 /** The `const x = <id>` or `const x = promisify(<id>)` binding `x` to what `id` starts, if any. */
 const aliasing = (id: Node): Node | undefined => {
   const parent = parentOf(id);
@@ -130,6 +141,9 @@ const isExported = (declarator: Node) => {
   return declaration !== undefined && parentOf(declaration)?.type === "ExportNamedDeclaration";
 };
 
+/** An `.apply`'s arguments not written as an array, read as a spread of them. */
+const UNLISTED: Node = { type: "SpreadElement" };
+
 /** A command that runs tmux: its basename, or `tmux` as a word in a shell string. */
 export const runsTmux = (text: string) =>
   text.split("/").at(-1) === "tmux" || /(^|[\s;&|`(/])tmux(\s|$|[;&|)`])/.test(text);
@@ -139,6 +153,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
   create(context: Context) {
     const starts = new Set(STARTS);
     const childProcess = new Set<string>();
+    const hostGuards = new Set<string>();
     const processes = new Set(["process"]);
     const constants = new Map<string, Node>();
     /** Names a call of which loads the module its first argument names. */
@@ -186,22 +201,41 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           GLOBALS.has(nameOf(node["object"]) ?? "") &&
           nameOf(node["property"]) === "process"));
 
-    /** The call's real arguments if its callee starts a process, else undefined. */
-    function startArguments(callee: unknown, args: Node[]): Node[] | undefined {
-      if (!isNode(callee)) return undefined;
+    /**
+     * How a callee starts a process, if it does: `known` a start by its name, or as a member of
+     * child_process or host-guard imported whole; `named` a member of anything else named like
+     * one, as a PTY's `spawn` or a statement's `run` is.
+     */
+    function startKind(callee: Node): "known" | "named" | undefined {
       if (callee.type === "Identifier")
-        return starts.has(String(callee["name"])) ? args : undefined;
+        return starts.has(String(callee["name"])) ? "known" : undefined;
       if (callee.type !== "MemberExpression") return undefined;
       const property = nameOf(callee["property"]);
-      if (property === "call") return startArguments(callee["object"], args.slice(1));
-      if (property === "apply") {
-        return startArguments(callee["object"], nodes(isNode(args[1]) ? args[1]["elements"] : []));
+      const object = nameOf(callee["object"]) ?? "";
+      if (property === undefined) return undefined;
+      if (childProcess.has(object) || (hostGuards.has(object) && STARTS.has(property)))
+        return "known";
+      return STARTS.has(property) ? "named" : undefined;
+    }
+
+    /**
+     * The call's real arguments if its callee starts a process, else undefined; `"unread"` where
+     * a known start's can't all be read: one spread, or `.apply`'s not written as an array.
+     */
+    function startArguments(callee: unknown, args: Node[]): Node[] | "unread" | undefined {
+      if (!isNode(callee)) return undefined;
+      if (callee.type === "MemberExpression") {
+        const property = nameOf(callee["property"]);
+        if (property === "call") return startArguments(callee["object"], args.slice(1));
+        if (property === "apply") {
+          const list = args[1];
+          const listed = list === undefined || list.type === "ArrayExpression";
+          return startArguments(callee["object"], listed ? nodes(list?.["elements"]) : [UNLISTED]);
+        }
       }
-      const object = nameOf(callee["object"]);
-      return STARTS.has(property ?? "") ||
-        (object !== undefined && childProcess.has(object) && property !== undefined)
-        ? args
-        : undefined;
+      const kind = startKind(callee);
+      if (kind === undefined) return undefined;
+      return kind === "known" && args.some((a) => a.type === "SpreadElement") ? "unread" : args;
     }
 
     /** Whether a call loads a module: by `require`, a loader's name or result, or a member. */
@@ -242,7 +276,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           const id = reference.identifier;
           const parent = parentOf(id);
           if ((reference.isWrite() && !reference.isRead()) || parent === undefined) continue;
-          if (parent.type === "TSTypeQuery" || parent.type === "TSQualifiedName") continue;
+          if (isTypeOf(id)) continue;
           if (starters !== undefined) {
             const name =
               parent.type === "MemberExpression" && parent["object"] === id
@@ -281,7 +315,9 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
             (!named || starters.has(imported ?? ""))
           ) {
             bind(spec, named ? undefined : starters);
+            if (named) starts.add(local);
           }
+          if (isHostGuard(source) && !named) hostGuards.add(local);
           if (PROCESS.has(source)) {
             if (spec.type === "ImportSpecifier" && SENDS.has(imported ?? "")) {
               if (reports.signals) context.report({ node: spec, message: KILL });
@@ -360,7 +396,8 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
         for (const node of calls) {
           const args = nodes(node["arguments"]);
           const started = startArguments(node["callee"], args);
-          if (reports.tmux && started?.flatMap((a) => strings(a)).some(runsTmux))
+          if (started === "unread") unfollowed(node);
+          else if (reports.tmux && started?.flatMap((a) => strings(a)).some(runsTmux))
             context.report({ node, message: TMUX });
           if (loads(node["callee"]) && namesModule(args[0])) unfollowed(node);
         }
