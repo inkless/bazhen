@@ -1,3 +1,4 @@
+import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import type { HarnessChannelPort } from "@bazhen/core";
 import { ZodError } from "zod";
@@ -16,6 +17,7 @@ import {
   readUserMessage,
   ThreadMismatch,
   titlePrefix,
+  tomlString,
 } from "./index.ts";
 
 const REMOTE = "unix:///codex/app-server-control.sock";
@@ -131,6 +133,23 @@ describe("Codex harness", () => {
     });
   });
 
+  it("gives the TUI this daemon's socket, for the threads it starts or loads itself", async () => {
+    const socket = "/h/run/bazhen.sock";
+    const harness = new CodexHarness(channel().port, REMOTE, socket);
+    const launched = await harness.launchSpec({ cwd: "/work" }, {});
+    const resumed = await harness.resumeSpec(
+      { harness: "codex", project: "p", cwd: "/work" },
+      { kind: "codex-thread", id: "thr-1" },
+      {},
+    );
+    const without = await new CodexHarness(channel().port, REMOTE).launchSpec({ cwd: "/work" }, {});
+    expect([
+      flagValues(launched.argv, "shell_environment_policy"),
+      flagValues(resumed.argv, "shell_environment_policy"),
+      flagValues(without.argv, "shell_environment_policy"),
+    ]).toEqual([[{ set: { BAZHEN_SOCKET: socket } }], [{ set: { BAZHEN_SOCKET: socket } }], []]);
+  });
+
   it("refuses to launch when the server returns no thread", async () => {
     await expect(
       new CodexHarness(channel({}).port, REMOTE).launchSpec({ cwd: "/work" }, {}),
@@ -161,6 +180,43 @@ describe("Codex harness", () => {
         {},
       ),
     ).rejects.toThrow(ThreadMismatch);
+  });
+});
+
+/**
+ * The `-c` flags in `argv` under the top-level key `table`, each read as Codex reads one: the key
+ * up to the first `=`, its value as TOML.
+ */
+const flagValues = (argv: readonly string[], table: string) =>
+  argv
+    .filter((arg, i) => argv[i - 1] === "-c" && arg.startsWith(`${table}.`))
+    .map((arg) => {
+      const at = arg.indexOf("=");
+      return Reflect.get(parse(`${arg.slice(0, at)} = ${arg.slice(at + 1)}`), table);
+    });
+
+describe("a TOML string", () => {
+  it("reads back as the path it was made from, whatever the path holds", () => {
+    const paths = [
+      "/plain/run/bazhen.sock",
+      '/q"uote/run/bazhen.sock',
+      "/back\\slash/\\n/bazhen.sock",
+      "/with space/and 'single' quotes/bazhen.sock",
+      "/'''/\"\"\"/bazhen.sock",
+      "/ünïcödé/目录/🚀/bazhen.sock",
+      "/hash#and=equals/bazhen.sock",
+      "/ctl\t\n\r\u0000\u001b\u007f/bazhen.sock",
+    ];
+    expect(paths.map((p) => parse(`v = ${tomlString(p)}`)["v"])).toEqual(paths);
+  });
+
+  it("is a TUI flag that reads back as the socket, from a hostile path", async () => {
+    const socket = "/tmp/a \"b\" \\c 'd' ü\u007f/run/bazhen.sock";
+    const harness = new CodexHarness(channel().port, REMOTE, socket);
+    const { argv } = await harness.launchSpec({ cwd: "/work" }, {});
+    expect(flagValues(argv, "shell_environment_policy")).toEqual([
+      { set: { BAZHEN_SOCKET: socket } },
+    ]);
   });
 });
 
