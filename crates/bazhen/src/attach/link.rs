@@ -245,7 +245,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             read_head(&mut stream);
-            let body = r#"{"error":"forbidden","message":"an agent can't attach to a terminal"}"#;
+            let body = r#"{"error":"forbidden","message":"an agent can't open a stream"}"#;
             // In one write, as the daemon answers: a reader that sees the head without the body
             // has no reason to give.
             let refusal = format!(
@@ -258,7 +258,7 @@ mod tests {
         let refused = open(&dir.socket(), "term_x", &Caller::default(), &hello).unwrap_err();
         server.join().unwrap();
         assert!(
-            matches!(&refused, Failed::Refused(m) if m == "an agent can't attach to a terminal"),
+            matches!(&refused, Failed::Refused(m) if m == "an agent can't open a stream"),
             "{refused:?}"
         );
     }

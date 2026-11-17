@@ -62,8 +62,18 @@ describe.each([
       const token = daemon.agentToken(ids.agentId);
       expect(await outcome(onSocket(), { "bazhen-agent-token": token })).toEqual([
         403,
-        "an agent can't attach to a terminal",
+        "an agent can't open a stream",
       ]);
+    });
+
+    it("opens the human the event stream, and refuses it the terminal's agent", async () => {
+      const { epoch } = StateSnapshot.parse((await daemon.request("/v1/state")).body);
+      const events = `ws+unix://${daemon.socket}:/v1/events?epoch=${encodeURIComponent(epoch)}&after=0`;
+      const token = daemon.agentToken(ids.agentId);
+      expect([
+        await outcome(events),
+        await outcome(events, { "bazhen-agent-token": token }),
+      ]).toEqual(["open", [403, "an agent can't open a stream"]]);
     });
 
     it("refuses a process Bazhen's runtime runs in no agent's or shell's terminal, by its process", async () => {
@@ -125,7 +135,7 @@ describe("a process an agent runs, asking for a terminal's stream on the socket"
     await waitUntil(() => answered(daemon).includes("\r\n\r\n"), "the probe's answer");
     expect(answered(daemon).split("\r\n\r\n")).toEqual([
       expect.stringMatching(/^HTTP\/1\.1 403 Forbidden\r\n/),
-      JSON.stringify({ error: "forbidden", message: "an agent can't attach to a terminal" }),
+      JSON.stringify({ error: "forbidden", message: "an agent can't open a stream" }),
     ]);
   });
 });

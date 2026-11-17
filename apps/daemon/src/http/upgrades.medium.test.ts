@@ -256,14 +256,14 @@ describe("WebSocket upgrades on the daemon's socket", () => {
   it("refuses an agent that presents its token, 403, saying why", async () => {
     const url = await servingOnSocket();
     const ws = new WebSocket(url("/echo/hi"), { headers: { "bazhen-agent-token": TOKEN } });
-    expect(await refusalOf(ws)).toEqual([403, "an agent can't attach to a terminal"]);
+    expect(await refusalOf(ws)).toEqual([403, "an agent can't open a stream"]);
   });
 
   it("refuses a caller whose process is an agent's, though it presents nothing", async () => {
     const url = await servingOnSocket(async () => ({ kind: "agent", agentId: agent }));
     expect(await refusalOf(new WebSocket(url("/echo/hi")))).toEqual([
       403,
-      "an agent can't attach to a terminal",
+      "an agent can't open a stream",
     ]);
   });
 
