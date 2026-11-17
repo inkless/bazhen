@@ -102,18 +102,24 @@ describe("identify, with the caller's process read", () => {
     ]);
   });
 
-  it("refuses a Codex tool call that names no thread, whatever it presents, and never takes it for the human", () => {
-    const presented = [
-      { token: undefined, said: undefined },
-      { token: TOKEN, said: undefined },
-      { token: TOKEN, said: tokened },
-      { token: undefined, said: other },
-    ];
+  it("refuses a Codex tool call, whatever it presents, and never takes it for the human", () => {
+    const tokensOnly: AgentCredentials = {
+      agentOf: (token) => credentials.agentOf(token),
+      untokened: (agentId) => credentials.untokened(agentId),
+    };
+    const unbound = "01a1e0f0-0000-7000-8000-0";
+    const kinds = [
+      [credentials, { token: undefined, said: undefined }],
+      [credentials, { token: TOKEN, said: undefined }],
+      [credentials, { token: TOKEN, said: tokened }],
+      [credentials, { token: undefined, said: other }],
+      [credentials, { token: TOKEN, said: undefined, thread: unbound }],
+      [credentials, { token: undefined, said: undefined, thread: "not a thread" }],
+      [tokensOnly, { token: undefined, said: undefined, thread: THREAD }],
+    ] as const;
     expect(
-      [underServer, markedOnly].flatMap((r) =>
-        presented.map((p) => identify(credentials, p, r).kind),
-      ),
-    ).toEqual(Array(8).fill("refused"));
+      [underServer, markedOnly].flatMap((r) => kinds.map(([c, p]) => identify(c, p, r).kind)),
+    ).toEqual(Array.from({ length: 14 }, () => "refused"));
   });
 
   it("takes a Codex tool call as the live agent bound to the thread it names, and only it", () => {
@@ -133,21 +139,6 @@ describe("identify, with the caller's process read", () => {
     ]);
   });
 
-  it("refuses a Codex tool call whose thread is no live agent's, or that names none", () => {
-    const tokensOnly: AgentCredentials = {
-      agentOf: (token) => credentials.agentOf(token),
-      untokened: (agentId) => credentials.untokened(agentId),
-    };
-    const kinds = [
-      [credentials, { token: undefined, said: undefined, thread: "01a1e0f0-0000-7000-8000-0" }],
-      [credentials, { token: undefined, said: undefined, thread: "not a thread" }],
-      [tokensOnly, { token: undefined, said: undefined, thread: THREAD }],
-    ] as const;
-    expect(
-      [underServer, markedOnly].flatMap((r) => kinds.map(([c, p]) => identify(c, p, r).kind)),
-    ).toEqual(Array(6).fill("refused"));
-  });
-
   // The app-server's environment is whoever started it, which may be another agent's terminal:
   // every command on every thread then presents that agent's id and token.
   it("takes a call under the app-server as its thread's agent, whatever id or token the server's environment gave it", () => {
@@ -162,30 +153,27 @@ describe("identify, with the caller's process read", () => {
     );
   });
 
-  it("refuses a caller marked only by its environment beside another agent's token or id", () => {
-    const presented = [
-      { token: TOKEN, said: undefined, thread: CODER_THREAD },
-      { token: undefined, said: tokened, thread: CODER_THREAD },
-      { token: "u".repeat(43), said: undefined, thread: CODER_THREAD },
-    ];
-    expect(presented.map((p) => identify(credentials, p, markedOnly).kind)).toEqual(
-      Array(3).fill("refused"),
-    );
-  });
-
-  it("never takes a caller in an agent's terminal or outside every one for the thread it names", () => {
+  // One process can set CODEX_THREAD_ID and present the token it can read: only an app-server
+  // above it makes the thread outweigh the token.
+  it("says who presents one agent's token on another agent's thread by where it runs, the thread winning only under the app-server", () => {
     const own = { token: TOKEN, said: undefined, thread: CODER_THREAD };
-    expect([
-      identify(credentials, own, under(tokened)),
-      identify(credentials, own, under(other)).kind,
-      identify(credentials, own, { kind: "outside" }),
-      identify(credentials, own),
-    ]).toEqual([
-      { kind: "agent", agentId: tokened },
-      "refused",
-      { kind: "agent", agentId: tokened },
-      { kind: "agent", agentId: tokened },
-    ]);
+    const idOnly = { token: undefined, said: tokened, thread: CODER_THREAD };
+    const stale = { token: "u".repeat(43), said: undefined, thread: CODER_THREAD };
+    expect({
+      underServer: identify(credentials, own, underServer),
+      markedOnly: [own, idOnly, stale].map((p) => identify(credentials, p, markedOnly).kind),
+      inItsTerminal: identify(credentials, own, under(tokened)),
+      inAnothersTerminal: identify(credentials, own, under(other)).kind,
+      outside: identify(credentials, own, { kind: "outside" }),
+      unread: identify(credentials, own),
+    }).toEqual({
+      underServer: { kind: "agent", agentId: coder },
+      markedOnly: ["refused", "refused", "refused"],
+      inItsTerminal: { kind: "agent", agentId: tokened },
+      inAnothersTerminal: "refused",
+      outside: { kind: "agent", agentId: tokened },
+      unread: { kind: "agent", agentId: tokened },
+    });
   });
 
   it("refuses a caller whose process the reading refused, whatever it presents", () => {
