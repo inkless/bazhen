@@ -679,7 +679,9 @@
               },
               {
                 "group": [
-                  "./*"
+                  "./**",
+                  "../**",
+                  "**/host-guard/src/**"
                 ],
                 "importNamePattern": "(?:At|With)$",
                 "message": "packages/host-guard (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports no *At or *With form of a sibling module: those take a clock or replace a check, for tests only. Call the product form; a helper that only happens to end in At or With is renamed, not exempted."

@@ -43,6 +43,12 @@ const FIXTURES: Record<string, string> = {
     'export { signalPaneAt } from "./signal.ts";\n' +
     'export { startHolderWith as start } from "./holder";\n',
   "packages/host-guard/src/o.ts": 'import * as signal from "./signal.ts";\nexport { signal };\n',
+  "packages/host-guard/src/r.ts": 'export * from "./signal.ts";\n',
+  "packages/host-guard/src/s.ts":
+    'export { vouchAt } from "../src/signal.ts";\n' +
+    'export { killHolderAt } from "../../host-guard/src/signal.ts";\n',
+  "packages/host-guard/src/t.ts":
+    'export { vouch } from "./signal.ts";\nexport { formatWith } from "node:util";\n',
   "packages/host-guard/src/p.test.ts":
     'export { signalPaneAt } from "./signal.ts";\nexport { vouchHolderWith } from "./holder.ts";\n',
   "packages/host-guard/src/q.medium.test.ts": 'export { killHolderAt } from "./signal.ts";\n',
@@ -117,6 +123,12 @@ describe("the generated oxlint config, run by oxlint", () => {
         "eslint(no-restricted-imports)",
       ],
       "packages/host-guard/src/o.ts": ["eslint(no-restricted-imports)"],
+      "packages/host-guard/src/r.ts": ["eslint(no-restricted-imports)"],
+      "packages/host-guard/src/s.ts": [
+        "eslint(no-restricted-imports)",
+        "eslint(no-restricted-imports)",
+      ],
+      "packages/host-guard/src/t.ts": [],
       "packages/host-guard/src/p.test.ts": [],
       "packages/host-guard/src/q.medium.test.ts": [],
     });

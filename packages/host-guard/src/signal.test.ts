@@ -31,6 +31,8 @@ import {
 const pane = { pid: 2 ** 22 + 1, server: "/tmp/bz-x/s", pane: "%1", generation: "0" };
 
 describe("the signal guard", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("refuses a group it did not start", () => {
     expect(() => signalGroup({ pid: pane.pid }, "SIGTERM")).toThrow("not started here");
   });
@@ -47,6 +49,19 @@ describe("the signal guard", () => {
   it("refuses a proof spent before it was made, as a clock set back would have it", () => {
     const proof = vouchAt(pane, 5_000);
     expect(() => signalPaneAt(proof, "SIGTERM", 4_999)).toThrow("stale proof");
+  });
+
+  // Stubbed, so the send each proof reaches sends nothing.
+  it("sends on a proof spent the moment it was made", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    signalPaneAt(vouchAt(pane, 5_000), "SIGTERM", 5_000);
+    expect(kill.mock.calls).toEqual([[-pane.pid, "SIGTERM"]]);
+  });
+
+  it("sends on a proof spent exactly a second after it was made", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    signalPaneAt(vouchAt(pane, 0), "SIGTERM", PROOF_MS);
+    expect(kill.mock.calls).toEqual([[-pane.pid, "SIGTERM"]]);
   });
 
   it("refuses to probe init, every process, or a group", () => {

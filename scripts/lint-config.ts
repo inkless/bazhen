@@ -284,11 +284,14 @@ function hostGuardByPath(where: string, area?: Area): Pattern {
 /**
  * Bans a module's own seams from its siblings' product code: a `*At` form spends or makes a proof
  * at a time its caller picks, so a stale one passes for fresh, and a `*With` form swaps out the
- * check it exists for. Outside the package, `hostGuardByPath` already keeps them out.
+ * check it exists for. Outside the package, `hostGuardByPath` already keeps them out. Named
+ * imports, re-exports, `import * as` and `export *` are all caught, by any relative path. Known
+ * gaps, accepted: a dynamic `import()` or `require`, and a seam a module exports under a name
+ * without the suffix, none of which the pattern matches.
  */
 function seamsPattern(where: string): Pattern {
   return {
-    group: ["./*"],
+    group: ["./**", "../**", "**/host-guard/src/**"],
     importNamePattern: "(?:At|With)$",
     message:
       `${where} imports no *At or *With form of a sibling module: those take a clock or replace ` +
