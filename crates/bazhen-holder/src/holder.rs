@@ -581,13 +581,9 @@ mod tests {
         turn_until(&mut holder, "the exit", |h| h.exit().is_some());
     }
 
-    std::thread_local! {
-        static LISTINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
     /// This system's processes, each listing counted.
     fn counted() -> io::Result<Vec<Listed>> {
-        LISTINGS.with(|made| made.set(made.get() + 1));
+        session::listings::count_one();
         session::list()
     }
 
@@ -607,13 +603,16 @@ mod tests {
         }
         let now = Instant::now();
         holder.close(now);
-        let listings = || LISTINGS.with(std::cell::Cell::get);
         holder.step(now);
-        assert_eq!(listings(), 1, "three sessions hung up");
+        assert_eq!(session::listings::made(), 1, "three sessions hung up");
         holder.step(now + CLOSE_GRACE / 2);
-        assert_eq!(listings(), 1, "a step no session has a pass due in");
+        assert_eq!(
+            session::listings::made(),
+            1,
+            "a step no session has a pass due in"
+        );
         holder.step(now + CLOSE_GRACE);
-        assert_eq!(listings(), 2, "three sessions killed");
+        assert_eq!(session::listings::made(), 2, "three sessions killed");
         turn_until(&mut holder, "every session's end", Holder::ended);
     }
 

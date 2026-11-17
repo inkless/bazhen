@@ -22,8 +22,9 @@ use crate::guard::{self, Refused, SendError};
 pub const SWEEP_EVERY: Duration = Duration::from_millis(50);
 /// How many `SIGKILL` passes an ending makes before it gives up on what is left.
 pub const KILL_SWEEPS: u32 = 10;
-/// How many empty passes in a row end a session. One isn't enough: a pass lists every process
-/// first, so a member's child started after the listing is missed if the member then exits.
+/// How many empty passes in a row end a session. One isn't enough: a pass works from its step's
+/// listing, made before it, so a member's child started after the listing is missed if the member
+/// then exits.
 pub const EMPTY_PASSES: u32 = 2;
 
 /// What one pass over the session found.
@@ -422,18 +423,28 @@ mod os {
     }
 
     pub(super) fn list() -> io::Result<Vec<Listed>> {
-        let mut listed = Vec::new();
-        for pid in pids()? {
-            match std::fs::read(format!("/proc/{}/stat", pid.as_raw_nonzero())) {
-                Ok(stat) => listed.push(Listed {
+        Ok(pids()?
+            .into_iter()
+            .filter_map(|pid| {
+                seen(
                     pid,
-                    session: listed_session(&stat),
-                }),
-                Err(error) if gone(&error) => {}
-                Err(_) => listed.push(Listed { pid, session: None }),
-            }
+                    std::fs::read(format!("/proc/{}/stat", pid.as_raw_nonzero())),
+                )
+            })
+            .collect())
+    }
+
+    /// What a read of `pid`'s `/proc/<pid>/stat` puts in the listing: nothing for a process
+    /// gone, and a session left unknown for one that couldn't be read.
+    pub(super) fn seen(pid: Pid, stat: io::Result<Vec<u8>>) -> Option<Listed> {
+        match stat {
+            Ok(stat) => Some(Listed {
+                pid,
+                session: listed_session(&stat),
+            }),
+            Err(error) if gone(&error) => None,
+            Err(_) => Some(Listed { pid, session: None }),
         }
-        Ok(listed)
     }
 
     /// The session a `/proc/<pid>/stat` line says its process is in, `None` for a line
@@ -506,6 +517,24 @@ mod os {
 
     pub(super) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
         crate::macos::visit(pid, session, signal)
+    }
+}
+
+/// How many listings the counting sources of a test on this thread have made.
+#[cfg(test)]
+pub(crate) mod listings {
+    use std::cell::Cell;
+
+    std::thread_local! {
+        static MADE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn made() -> usize {
+        MADE.with(Cell::get)
+    }
+
+    pub(crate) fn count_one() {
+        MADE.with(|made| made.set(made.get() + 1));
     }
 }
 
@@ -922,15 +951,6 @@ mod tests {
         Listing::by(never)
     }
 
-    std::thread_local! {
-        static LISTINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    }
-
-    /// How many listings this thread's counting sources have made.
-    fn listings() -> usize {
-        LISTINGS.with(std::cell::Cell::get)
-    }
-
     fn listed(pid: i32, session: Option<i32>) -> Listed {
         Listed {
             pid: Pid::from_raw(pid).unwrap(),
@@ -943,7 +963,7 @@ mod tests {
 
     /// Three processes, the first in the first of `SESSIONS` and so on, counted as one listing.
     fn three_sessions() -> Vec<Listed> {
-        LISTINGS.with(|made| made.set(made.get() + 1));
+        listings::count_one();
         SESSIONS
             .iter()
             .zip(NO_PROCESS..)
@@ -989,11 +1009,11 @@ mod tests {
             }
         };
         step(&mut endings, now);
-        assert_eq!(listings(), 1, "the hangups, two passes each");
+        assert_eq!(listings::made(), 1, "the hangups, two passes each");
         step(&mut endings, now + CLOSE_GRACE / 2);
-        assert_eq!(listings(), 1, "a step none of them has a pass due in");
+        assert_eq!(listings::made(), 1, "a step none of them has a pass due in");
         step(&mut endings, now + CLOSE_GRACE);
-        assert_eq!(listings(), 2, "the kills");
+        assert_eq!(listings::made(), 2, "the kills");
         for (at, ending) in endings.iter().enumerate() {
             let own = vec![Pid::from_raw(NO_PROCESS + i32::try_from(at).unwrap()).unwrap()];
             assert_eq!(ending.sweeper.found, vec![own; 3], "ending {at}");
@@ -1022,10 +1042,48 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn a_process_whose_stat_cant_be_read_or_made_sense_of_is_listed_with_its_session_unknown() {
+        let pid = Pid::from_raw(NO_PROCESS).unwrap();
+        let unknown = Some(Listed { pid, session: None });
+        let unreadable = io::Error::from_raw_os_error(libc::EMFILE);
+        assert_eq!(os::seen(pid, Err(unreadable)), unknown);
+        let no_threads = b"42 (a) S 1 42 42".as_slice();
+        let bad_threads = b"42 (a) S 1 42 42 0 -1 0 0 0 0 0 0 0 0 0 20 0 x 0 100".as_slice();
+        for line in [no_threads, bad_threads] {
+            assert_eq!(member_state(line, 42), Member::Failed);
+            assert_eq!(os::seen(pid, Ok(line.to_vec())), unknown, "{line:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_process_gone_is_left_out_and_one_read_is_listed_in_its_session_zombie_or_not() {
+        let pid = Pid::from_raw(NO_PROCESS).unwrap();
+        for errno in [libc::ENOENT, libc::ESRCH] {
+            assert_eq!(
+                os::seen(pid, Err(io::Error::from_raw_os_error(errno))),
+                None
+            );
+        }
+        let in_42 = Some(Listed {
+            pid,
+            session: Some(42),
+        });
+        for (state, threads) in [("S", 1), ("Z", 1), ("Z", 3), ("X", 1)] {
+            assert_eq!(
+                os::seen(pid, Ok(stat(state, 42, threads))),
+                in_42,
+                "{state}"
+            );
+        }
+    }
+
+    #[test]
     fn a_failed_listing_is_made_again_by_the_next_pass_and_one_made_is_kept() {
         fn fails_once() -> io::Result<Vec<Listed>> {
-            if listings() == 0 {
-                LISTINGS.with(|made| made.set(1));
+            if listings::made() == 0 {
+                listings::count_one();
                 return Err(io::Error::from_raw_os_error(libc::EMFILE));
             }
             Ok(three_sessions())
@@ -1036,7 +1094,7 @@ mod tests {
         let own = vec![Pid::from_raw(NO_PROCESS).unwrap()];
         assert_eq!(listing.candidates(session).unwrap(), own);
         assert_eq!(listing.candidates(session).unwrap(), own);
-        assert_eq!(listings(), 2);
+        assert_eq!(listings::made(), 2);
     }
 
     #[test]

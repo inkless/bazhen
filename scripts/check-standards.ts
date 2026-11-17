@@ -1042,7 +1042,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/self/statm for resident_pages, which proc_stat fuzzes",
   "crates/bazhen-holder/src/session.rs::visit":
     "reads /proc/<pid>/stat for member_state, which proc_stat fuzzes",
-  "crates/bazhen-holder/src/session.rs::list": "reads /proc/<pid>/stat for listed_session",
+  "crates/bazhen-holder/src/session.rs::list": "reads /proc/<pid>/stat for seen",
+  "crates/bazhen-holder/src/session.rs::seen": "passes the line read to listed_session",
   "crates/bazhen-holder/src/session.rs::listed_session":
     "reads the line only through session_field and member_state, which proc_stat fuzzes",
   "crates/bazhen-holder/src/start.rs::run": "reads stdin only through read_spec",
