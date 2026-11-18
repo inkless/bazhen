@@ -89,6 +89,7 @@ function daemon(root: string = bundle(), always = true) {
       note: refuse,
     },
     waitMessages: refuse,
+    wait: refuse,
     pairing: { codes: new PairingCodes({ log: () => {} }), devices },
     gate: { devices, always },
     web: { root },

@@ -64,7 +64,7 @@ import { streamRoute } from "./stream/server.ts";
 import { Approvals } from "./mailbox/approvals.ts";
 import { Inbox } from "./attention/inbox.ts";
 import { Readiness } from "./agents/readiness.ts";
-import { Notices, deviceOf } from "./attention/notices.ts";
+import { Notices, deviceOf, type Viewer } from "./attention/notices.ts";
 import { MAC_APP, desktopNotifier, hostNotifier, notifyOnAttention } from "./notify/desktop.ts";
 import { Presence } from "./notify/presence.ts";
 import { HOOK_SCRIPT, hookClient, hookCommand } from "./mailbox/hook-command.ts";
@@ -108,6 +108,7 @@ import { defaultRuntimeRefusal } from "./terminals/runtimes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
 import { waitForMail } from "./mailbox/wait.ts";
+import { waitFor } from "./waits/waits.ts";
 import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
@@ -512,12 +513,13 @@ for (const a of store.snapshot(snapshotView).agents) {
   if (a.harness === "claude-code" && (a.state === "running" || a.state === "starting"))
     activity.restarted(a.id);
 }
+const stateFor = (viewer: Viewer) =>
+  store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) });
 const commands = {
   appVersion: APP_VERSION,
   protocolId: PROTOCOL_ID,
   runtime,
-  state: (viewer) =>
-    store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) }),
+  state: stateFor,
   roles: () => {
     const { book, problems } = roles.current();
     return { roles: [...book.roles], problems: [...problems] };
@@ -542,6 +544,8 @@ const commands = {
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,
   waitMessages: (req, signal) => waitForMail(store, req, signal),
+  wait: (caller, req, viewer, signal) =>
+    waitFor({ store, view: () => stateFor(viewer) }, caller, req, signal),
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({
   ...commands,
