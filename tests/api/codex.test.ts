@@ -20,7 +20,11 @@ let asker: LaunchAgentResponse;
 beforeAll(async () => {
   model = await startFakeResponses();
   // BZ_HIDE reaches the app-server as the user's own variable, for a policy to exclude.
-  daemon = await Daemon.start({ responsesUrl: model.url, env: { BZ_HIDE: "leaked" } });
+  daemon = await Daemon.start({
+    runtime: "tmux",
+    responsesUrl: model.url,
+    env: { BZ_HIDE: "leaked" },
+  });
   [launched, asker] = await Promise.all([
     daemon.launch("codex", "codex"),
     daemon.launch("codex-asker", "codex"),

@@ -41,7 +41,7 @@ describe.each([
     let daemon: Daemon;
     let ids: { agentId: string; terminalId: string };
     beforeAll(async () => {
-      daemon = await Daemon.start({ env });
+      daemon = await Daemon.start({ runtime: "tmux", env });
       ids = await daemon.program(["sh", "-c", "echo on-the-socket; exec sleep 600"]);
     });
     afterAll(async () => {
@@ -105,7 +105,7 @@ describe("a process an agent runs, asking for a terminal's stream on the socket"
   let daemon: Daemon;
   beforeAll(async () => {
     model = await startFakeModel();
-    daemon = await Daemon.start({ modelUrl: model.url });
+    daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
   });
   afterAll(async () => {
     await daemon?.stop();

@@ -6,7 +6,7 @@ const TAG = "@bazhen_terminal_id";
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -130,7 +130,7 @@ describe("a shell after its tmux server died", () => {
   let restarted: Daemon;
   let terminalId: string;
   beforeAll(async () => {
-    restarted = await Daemon.start();
+    restarted = await Daemon.start({ runtime: "tmux" });
     terminalId = await open(restarted);
     const view = await restarted.view(terminalId, "interactive");
     await view.drive();

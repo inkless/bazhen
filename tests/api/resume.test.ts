@@ -11,7 +11,7 @@ let model: FakeModel;
 let daemon: Daemon;
 beforeAll(async () => {
   model = await startFakeModel();
-  daemon = await Daemon.start({ modelUrl: model.url, claudeDebugLog: true });
+  daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url, claudeDebugLog: true });
 });
 afterAll(async () => {
   await daemon?.stop();

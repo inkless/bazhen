@@ -50,9 +50,6 @@ async function following() {
 beforeAll(async () => {
   model = await startFakeResponses();
   daemon = await Daemon.start({ responsesUrl: model.url });
-  await daemon.crash();
-  daemon.writeConfig('[runtime]\ndefault = "holder"\n');
-  await daemon.restart();
   launched = await daemon.launch("codex-on-holder", "codex");
   await waitUntil(
     async () => (await daemon.shows(launched.agentId)).includes(BANNER.codex),

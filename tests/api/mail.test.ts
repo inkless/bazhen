@@ -9,7 +9,7 @@ let agentId = "";
 let terminalId: string | null = null;
 beforeAll(async () => {
   model = await startFakeModel();
-  daemon = await Daemon.start({ modelUrl: model.url });
+  daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
   // The user's own status line, which Bazhen's must keep drawing.
   daemon.claudeSettings({
     statusLine: { type: "command", command: "printf 'user line: '; cat >/dev/null; printf ok" },

@@ -10,7 +10,7 @@ let daemon: Daemon;
 let terminalId = "";
 let log = "";
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
   log = join(daemon.work, "keys.log");
   const program = await daemon.program([process.execPath, probe, log]);
   terminalId = program.terminalId;
