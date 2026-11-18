@@ -41,7 +41,7 @@ export function noteAccepted(connection: Socket, now = Date.now()): void {
 /** How long one reading may take: the peer is waiting on its own reply meanwhile. */
 const READ_MS = 2000;
 /** The most readings at once; more wait their turn rather than each starting a process. */
-const MAX_READING = 8;
+export const MAX_READING = 8;
 let reading = 0;
 const queued: (() => void)[] = [];
 
