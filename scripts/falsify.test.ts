@@ -6,6 +6,7 @@ import {
   indentedTail,
   controlLine,
   addedRustTests,
+  appliedRenames,
   binaryInputs,
   cargoErrors,
   depInfoSources,
@@ -1157,6 +1158,84 @@ const olds = (head: string | undefined) => [
 
 /** The base test the first test renamed to "adds one to v" in `head` is, if it is one. */
 const renamedIn = (head: string) => renamedFrom(end("adds one to v", BASE_TESTS, head), olds(head));
+
+describe("renameRefusal, when git renamed a file", () => {
+  it("names the file's path on the side the copy is", () => {
+    const renamedFile = "packages/core/src/x2.test.ts";
+    const from = { ...end("adds one", BASE_TESTS, BASE_TESTS), counterpart: renamedFile };
+    const to = end("adds one", undefined, movedTo("adds one"), OTHER);
+    expect(renameRefusal(from, to)).toBe(`HEAD still has a test "adds one" in ${renamedFile}`);
+  });
+});
+
+const THIRD = "packages/core/src/z.test.ts";
+
+/** What `appliedRenames` makes of `messages` when the base's first test left FILE for `found`. */
+const applied = (found: { file: string; title: string }[], ...messages: string[]) =>
+  appliedRenames(
+    found,
+    renameTrailers(lines(...messages)),
+    new Map([[FILE, { file: FILE, base: BASE_TESTS, head: LEFT }]]),
+    (file) => ({ file, base: undefined, head: movedTo("adds one") }),
+  );
+
+describe("appliedRenames", () => {
+  it("leaves out a test one trailer moves, and refuses a trailer that applies to none", () => {
+    const moved = `${FILE} › adds one -> ${OTHER} › adds one`;
+    expect(
+      applied(
+        [ref(OTHER, "adds one")],
+        `Renamed: ${moved}`,
+        "Renamed: a.test.ts › x -> b.test.ts › y",
+      ),
+    ).toEqual({
+      renamed: [{ from: ref(FILE, "adds one"), to: ref(OTHER, "adds one") }],
+      refused: new Map([
+        ["a.test.ts › x -> b.test.ts › y", "the branch adds no test of that name"],
+      ]),
+    });
+  });
+
+  it("refuses every trailer that claims one base test as two tests", () => {
+    const twice = [
+      `${FILE} › adds one -> ${OTHER} › adds one`,
+      `${FILE} › adds one -> ${THIRD} › adds one`,
+    ];
+    const why = `${FILE} › adds one is named the old test of more than one test`;
+    expect(
+      applied(
+        [ref(OTHER, "adds one"), ref(THIRD, "adds one")],
+        ...twice.map((t) => `Renamed: ${t}`),
+      ),
+    ).toEqual({ renamed: [], refused: new Map(twice.map((t) => [t, why])) });
+  });
+
+  it("refuses an old file that isn't exactly the base path of a test file the branch changed", () => {
+    const aliased = `./${FILE} › adds one -> ${OTHER} › adds one`;
+    const source = `packages/core/src/x.ts › adds one -> ${OTHER} › adds one`;
+    expect(applied([ref(OTHER, "adds one")], `Renamed: ${aliased}`, `Renamed: ${source}`)).toEqual({
+      renamed: [],
+      refused: new Map([
+        [aliased, `./${FILE} isn't the base path of a .test.ts file the branch changed`],
+        [
+          source,
+          "packages/core/src/x.ts isn't the base path of a .test.ts file the branch changed",
+        ],
+      ]),
+    });
+  });
+
+  it("refuses a trailer that names no file", () => {
+    expect(applied([ref(OTHER, "adds one")], "Renamed: adds one -> adds one").refused).toEqual(
+      new Map([
+        [
+          "adds one -> adds one",
+          `it names no file: write it as <old file> › <old title> -> <new file> › <new title>`,
+        ],
+      ]),
+    );
+  });
+});
 
 describe("renamedFrom", () => {
   it("names the lost base test a new test renames, and nothing for a new test", () => {

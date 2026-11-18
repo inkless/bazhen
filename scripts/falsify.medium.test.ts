@@ -419,6 +419,7 @@ function renameTest(call: string, trailer?: string): void {
 const IMPORTS = 'import { v } from "./x.ts";\n';
 
 const MOVED = "packages/a/src/y.test.ts";
+const THIRD = "packages/a/src/z.test.ts";
 const RENAMED = `Renamed: ${TEST} › v -> ${TEST} › caps`;
 const MOVED_RENAMED = `Renamed: ${TEST} › v -> ${MOVED} › caps`;
 const escape = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -611,8 +612,55 @@ describe("falsify on a branch in a linked worktree", () => {
       },
       copied: {
         status: 1,
-        output: expect.stringContaining(`HEAD still has a test "v" in ${TEST}`),
+        output: expect.stringContaining(`HEAD still has a test "v" in ${MOVED}`),
       },
+    });
+  });
+
+  it("judges a test moved out of a file named by another spelling of its path", () => {
+    const kept = lines(
+      'it("keeps", () => {',
+      "  expect(v).toBe(1);",
+      "  expect(v).not.toBe(0);",
+      "});",
+    );
+    branchOn(IMPORTS + kept + 'it("v", () => {});\n', IMPORTS + kept + 'it("v", () => {});\n');
+    git(fx.linked, "mv", TEST, MOVED);
+    write(fx.linked, THIRD, `${IMPORTS}it("v", () => {});\n`);
+    git(fx.linked, "add", THIRD);
+    const aliased = `Renamed: ./${TEST} › v -> ${THIRD} › v`;
+    git(fx.linked, "commit", "--quiet", "--amend", "-m", "feat: v2", "-m", aliased);
+    expect(git(fx.linked, "diff", "--name-status", "-M", fx.base)).toMatch(/^R\d+\t/m);
+    expect(againstBase({ STUB_STATUS: "passed", STUB_TEST: THIRD })).toEqual({
+      status: 1,
+      output: expect.stringMatching(
+        new RegExp(
+          `${escape(aliased)} doesn't apply \\(\\./${escape(TEST)} isn't the base path of a .test.ts file the branch changed\\)`,
+        ),
+      ),
+    });
+  });
+
+  it("judges a test moved out of a .tsx test file, whose tests falsify can't read", () => {
+    const tsx = "packages/a/src/w.test.tsx";
+    const view = lines("const a = <p>{v}</p>;", "const b = <b>{v}</b>;", "const c = <i>{v}</i>;");
+    git(fx.linked, "reset", "--quiet", "--hard", fx.base);
+    write(fx.linked, tsx, `${IMPORTS}${view}it("caps", () => {});\n`);
+    git(fx.linked, "add", tsx);
+    git(fx.linked, "commit", "--quiet", "-m", "test: base");
+    fx.base = git(fx.linked, "rev-parse", "HEAD").trim();
+    git(fx.linked, "rm", "--quiet", tsx);
+    write(fx.linked, SOURCE, "export const v = 2;\n");
+    write(fx.linked, MOVED, `${IMPORTS}it("caps", () => {});\n`);
+    git(fx.linked, "add", SOURCE, MOVED);
+    const fromTsx = `Renamed: ${tsx} › caps -> ${MOVED} › caps`;
+    git(fx.linked, "commit", "--quiet", "-m", "feat: v2", "-m", fromTsx);
+    expect(git(fx.linked, "diff", "--name-status", "-M", fx.base)).toMatch(/^D\t.*w\.test\.tsx$/m);
+    expect(againstBase({ STUB_STATUS: "passed", STUB_TEST: MOVED })).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `${fromTsx} doesn't apply (${tsx} isn't the base path of a .test.ts file the branch changed)`,
+      ),
     });
   });
 

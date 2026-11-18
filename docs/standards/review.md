@@ -18,7 +18,9 @@ already checked (listed at the end).
    falsify prints as RENAMED have a new title that says what its unchanged body does? For one
    that moved to another file or into a `describe`, do the names its body uses still mean what
    they did, through the new file's imports and helpers and the hooks it now runs under?
-   Falsify compares only the test's call.
+   Falsify compares only the test's call. It does refuse a trailer whose old file isn't a
+   `*.test.ts` file the branch changed, and every trailer that names one base test the old test of
+   two tests.
 5. **Errors.** Are expected failures typed? Is anything swallowed? Are third-party errors
    wrapped at the seam?
 6. **Names and comments.** Do names say what things are? Does every comment explain a _why_ the
