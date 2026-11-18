@@ -17,6 +17,7 @@ name = "bazhen-hook"
 version = "0.1.0"
 dependencies = [
  "bazhen-client",
+ "bazhen-pid",
  "rustix",
 ]
 
@@ -26,6 +27,14 @@ version = "0.0.0"
 dependencies = [
  "bazhen-hook",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "bazhen-pid"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]
