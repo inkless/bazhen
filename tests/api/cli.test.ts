@@ -144,7 +144,7 @@ describe("bazhen stop with no daemon", () => {
 describe("bazhen stop", () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.start();
+    daemon = await Daemon.start({ runtime: "tmux" });
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -162,10 +162,11 @@ describe("bazhen start's environment", () => {
   beforeAll(async () => {
     // From inside a parent Claude Code session, with a name the denylist drops unless passed
     // (not TERM_PROGRAM, which tmux sets in every pane itself).
-    daemon = await Daemon.startWithCli('[agents.env]\npassthrough = ["ITERM_PROFILE"]\n', {
-      CLAUDECODE: "1",
-      ITERM_PROFILE: "kept-by-config",
-    });
+    daemon = await Daemon.startWithCli(
+      '[agents.env]\npassthrough = ["ITERM_PROFILE"]\n',
+      { CLAUDECODE: "1", ITERM_PROFILE: "kept-by-config" },
+      "tmux",
+    );
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -216,7 +217,11 @@ describe("bazhen doctor", () => {
 describe('agents.shell = "login"', () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.startWithCli('[agents]\nshell = "login"\n', { SHELL: LOGIN_SHELL });
+    daemon = await Daemon.startWithCli(
+      '[agents]\nshell = "login"\n',
+      { SHELL: LOGIN_SHELL },
+      "tmux",
+    );
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -240,7 +245,7 @@ describe('agents.shell = "login"', () => {
 describe("bazhen env refresh", () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.startWithCli("", { BZ_STALE: "from-start" });
+    daemon = await Daemon.startWithCli("", { BZ_STALE: "from-start" }, "tmux");
   });
   afterAll(async () => {
     await daemon?.stop();

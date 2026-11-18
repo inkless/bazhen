@@ -40,6 +40,7 @@ const send = async (agentId: string, key: string, body: string) =>
 beforeAll(async () => {
   [model, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
   daemon = await Daemon.start({
+    runtime: "tmux",
     modelUrl: model.url,
     responsesUrl: responses.url,
     claudeDebugLog: true,

@@ -23,7 +23,7 @@ const messageOf = async (daemon: Daemon, messageId: string) =>
 
 /** A daemon with one Claude Code agent up, running and showing its banner. */
 async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResponse }> {
-  const daemon = await Daemon.start({ modelUrl: model.url });
+  const daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
   const agent = await daemon.launch("agent", "claude-code");
   await waitUntil(
     () => daemon.screen(agent.agentId).includes(BANNER["claude-code"]),

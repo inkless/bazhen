@@ -7,7 +7,7 @@ const size = { cols: 100, rows: 30 };
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
 });
 afterAll(async () => {
   await daemon?.stop();

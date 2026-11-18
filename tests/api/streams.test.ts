@@ -5,7 +5,7 @@ let daemon: Daemon;
 /** The daemon's PTYs before any view has opened, so with no tmux client of its own. */
 let baseline = 0;
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
   baseline = daemon.ptyHandles();
 });
 afterAll(async () => {

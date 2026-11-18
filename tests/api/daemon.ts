@@ -223,11 +223,18 @@ export interface DaemonOptions {
   /** The daemon's config.toml. */
   readonly config?: string;
   /**
+   * The runtime it makes new terminals on, written into its config.toml as `runtime.default`:
+   * unset, the daemon's own default. The helpers that read tmux refuse unless this is tmux.
+   */
+  readonly runtime?: RuntimeKind;
+  /**
    * Whether each Claude Code agent writes its debug log, for `explained` to show. Off unless asked
    * for, since a TUI in debug mode says so on its screen.
    */
   readonly claudeDebugLog?: boolean;
 }
+
+export type RuntimeKind = "tmux" | "holder";
 
 /** A process's environment, from /proc (Linux only). */
 function processEnv(pid: number): Record<string, string> {
@@ -243,8 +250,9 @@ function processEnv(pid: number): Record<string, string> {
 export class Daemon {
   readonly home: string;
   readonly work: string;
-  /** The daemon's private server: `<home>/run/tmux.sock`, for a home this short. */
-  readonly tmuxServer: TmuxServer;
+  readonly #tmuxServer: TmuxServer;
+  #runtime: RuntimeKind | undefined;
+  #config = "";
   /** What the daemon runs with; the CLI reaches this daemon with it too. */
   readonly env: Record<string, string>;
   private port = 0;
@@ -254,9 +262,11 @@ export class Daemon {
   private constructor(home: string, opts: DaemonOptions) {
     this.home = home;
     this.work = join(home, "work");
-    this.tmuxServer = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
+    this.#tmuxServer = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
+    this.#runtime = opts.runtime;
     mkdirSync(this.work, { recursive: true });
-    if (opts.config !== undefined) this.writeConfig(opts.config);
+    if (opts.config !== undefined || opts.runtime !== undefined)
+      this.writeConfig(opts.config ?? "");
 
     this.env = {
       ...homeEnv(home),
@@ -278,11 +288,17 @@ export class Daemon {
    * A daemon started as a user starts it: `bazhen start`, from a shell whose environment adds
    * `env`, with `config` as its config.toml. `stop` ends it with `bazhen stop`.
    */
-  static async startWithCli(config: string, env: Record<string, string>): Promise<Daemon> {
-    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), {});
+  static async startWithCli(
+    config: string,
+    env: Record<string, string>,
+    runtime?: RuntimeKind,
+  ): Promise<Daemon> {
+    const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), {
+      config,
+      ...(runtime !== undefined && { runtime }),
+    });
     daemon.port = await freePort();
     Object.assign(daemon.env, { BAZHEN_PORT: String(daemon.port) });
-    daemon.writeConfig(config);
     const started = await bazhen(["start"], { ...daemon.env, ...env });
     if (started.code !== 0) {
       await daemon.stop();
@@ -297,10 +313,33 @@ export class Daemon {
     writeFileSync(join(this.home, "config", "roles", `${key}.md`), text);
   }
 
-  /** Replaces its config.toml, which the daemon reads when it next starts. */
+  /**
+   * Replaces its config.toml, which the daemon reads when it next starts. The runtime it was
+   * given stays in it, as a table after `toml`, so `toml`'s top-level keys stay top-level.
+   */
   writeConfig(toml: string): void {
+    this.#config = toml;
+    const runtime =
+      this.#runtime === undefined ? "" : `\n[runtime]\ndefault = "${this.#runtime}"\n`;
     mkdirSync(join(this.home, "config"), { recursive: true });
-    writeFileSync(join(this.home, "config", "config.toml"), toml);
+    writeFileSync(join(this.home, "config", "config.toml"), toml + runtime);
+  }
+
+  /** Makes new terminals on `runtime` from its next start, keeping the rest of its config. */
+  useRuntime(runtime: RuntimeKind): void {
+    this.#runtime = runtime;
+    this.writeConfig(this.#config);
+  }
+
+  /** The daemon's private tmux server, `<home>/run/tmux.sock`, for a test of tmux terminals. */
+  get tmuxServer(): TmuxServer {
+    if (this.#runtime !== "tmux") {
+      throw new Error(
+        `this daemon makes its terminals on ${this.#runtime ?? "its default runtime"}, and a ` +
+          `helper that reads tmux would find none there: start it with runtime: "tmux"`,
+      );
+    }
+    return this.#tmuxServer;
   }
 
   /**
@@ -1071,7 +1110,7 @@ export class Daemon {
     const codexStopped = codexDaemonStarted(this.home)
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
-    this.tmuxServer.killServer();
+    this.#tmuxServer.killServer();
     await this.closeHolders();
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.

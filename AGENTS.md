@@ -1,6 +1,7 @@
 # Bazhen
 
-A local daemon that owns durable terminals on a private tmux server, plus a web client.
+A local daemon that owns durable terminals, each held by a process of its own (`bazhen-holder`)
+or, where configured, on a private tmux server, plus a web client.
 TypeScript in a pnpm workspace, and Rust in a Cargo workspace (`crates/`).
 
 ## Rules

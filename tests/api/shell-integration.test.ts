@@ -48,6 +48,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, RC[kind]);
       daemon = await Daemon.start({
+        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -313,6 +314,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, SLOW_RC[kind]);
       daemon = await Daemon.start({
+        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -401,6 +403,7 @@ describe.each<"zsh" | "bash">(["zsh", "bash"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, KEYS_RC[kind]);
       daemon = await Daemon.start({
+        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -438,6 +441,7 @@ describe("a bash shell with no line editor", () => {
   beforeAll(async () => {
     shell = shellWithRc("bash", `${RC_LINE.bash}\nset +o emacs +o vi\nPS1='[st=0] '`);
     daemon = await Daemon.start({
+      runtime: "tmux",
       config: "[shells]\nretype_last_command = true\n",
       env: { SHELL: shell.shell },
     });

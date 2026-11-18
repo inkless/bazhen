@@ -10,7 +10,7 @@ import { Daemon, overSocket } from "./daemon.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
 });
 afterAll(async () => {
   // A daemon that never started has already cleaned up after itself.

@@ -11,7 +11,11 @@ let claude: LaunchAgentResponse;
 let codex: LaunchAgentResponse;
 beforeAll(async () => {
   [messages, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
-  daemon = await Daemon.start({ modelUrl: messages.url, responsesUrl: responses.url });
+  daemon = await Daemon.start({
+    runtime: "tmux",
+    modelUrl: messages.url,
+    responsesUrl: responses.url,
+  });
   [claude, codex] = await Promise.all([
     daemon.launch("claude-reviewer", "claude-code", "reviewer"),
     daemon.launch("codex-reviewer", "codex", "reviewer"),

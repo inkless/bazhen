@@ -9,7 +9,7 @@ describe("bazhen terminals attach, on a holder terminal", () => {
   let daemon: Daemon;
   let left: (() => void)[] = [];
   beforeAll(async () => {
-    daemon = await Daemon.start({ config: '[runtime]\ndefault = "holder"\n' });
+    daemon = await Daemon.start();
   });
   afterEach(() => {
     for (const leave of left) leave();
@@ -80,7 +80,7 @@ describe("bazhen terminals attach, straight to the holder while the daemon is do
   let daemon: Daemon;
   let left: (() => void)[] = [];
   beforeAll(async () => {
-    daemon = await Daemon.start({ config: '[runtime]\ndefault = "holder"\n' });
+    daemon = await Daemon.start();
   });
   afterEach(() => {
     for (const leave of left) leave();

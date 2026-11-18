@@ -6,7 +6,7 @@ let daemon: Daemon;
 let agentId = "";
 let terminalId = "";
 beforeAll(async () => {
-  daemon = await Daemon.start();
+  daemon = await Daemon.start({ runtime: "tmux" });
   const launched = LaunchAgentResponse.parse(
     (
       await daemon.request("/v1/agents", {

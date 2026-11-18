@@ -26,7 +26,7 @@ describe("resolveConfig", () => {
       startDeadlineMs: 60_000,
       maxOpenTerminals: 100,
       historyLines: 10_000,
-      defaultRuntime: "tmux",
+      defaultRuntime: "holder",
       terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
   });
@@ -49,7 +49,7 @@ describe("resolveConfig", () => {
       startDeadlineMs: 60_000,
       maxOpenTerminals: 100,
       historyLines: 10_000,
-      defaultRuntime: "tmux",
+      defaultRuntime: "holder",
       terminalCaps: { terminal: "50%", total: "80%", swap: "0" },
     });
   });
@@ -84,7 +84,7 @@ describe("resolveConfig", () => {
   });
 
   it("takes the runtime new terminals are made on from the file", () => {
-    expect(resolveConfig({ runtime: { default: "holder" } }, {}).defaultRuntime).toBe("holder");
+    expect(resolveConfig({ runtime: { default: "tmux" } }, {}).defaultRuntime).toBe("tmux");
   });
 
   it("lists the origins the user's own route to the daemon presents, and where they came from", () => {

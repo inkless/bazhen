@@ -42,10 +42,10 @@ describe("a daemon running terminals on both runtimes", () => {
   let holderAgent: string;
 
   beforeAll(async () => {
-    daemon = await Daemon.start({ modelUrl: model.url });
+    daemon = await Daemon.start({ modelUrl: model.url, runtime: "tmux" });
     onTmux = await openShell(daemon, "tmux-shell");
     await daemon.crash();
-    daemon.writeConfig('[runtime]\ndefault = "holder"\n');
+    daemon.useRuntime("holder");
     await daemon.restart();
     holderShell = await openShell(daemon, "holder-shell");
     const launched = await daemon.launch("holder-agent");

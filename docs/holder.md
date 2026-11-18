@@ -6,7 +6,7 @@ terminal, and each outlives the daemon.
 
 ## Installing and upgrading
 
-`pnpm build` and `pnpm dev` build the holder with the `release-holder` profile, into
+`pnpm build`, `pnpm dev` and `pnpm bazhen` build the holder with the `release-holder` profile, into
 `target/release-holder/bazhen-holder`. At start, the daemon copies it into Bazhen's state
 directory, at `holder/<build>/bazhen-holder`, where `<build>` is the first 16 hex digits of the
 binary's SHA-256. New terminals run that copy. Nothing writes to it again, so `cargo build` and
@@ -22,8 +22,9 @@ print as it is. Under such
 a path, old builds stay until you remove them.
 
 The daemon refuses to install into a `holder` directory that is a symlink, belongs to another
-user, or that others may write. Then no build is installed, holder terminals can't be created,
-and `bazhen doctor` says why.
+user, or that others may write. Then no build is installed. New terminals go to holders unless
+`runtime.default = "tmux"`, so the daemon then refuses to start, saying why; with tmux the
+default it starts, and `bazhen doctor` says why holder terminals can't be created.
 
 ## What closing a terminal ends
 
