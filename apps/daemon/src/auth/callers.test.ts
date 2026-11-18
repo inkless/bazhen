@@ -84,6 +84,22 @@ const peer = (token: string | undefined, said: string | undefined, of: typeof to
   identify(credentials, { token, said }, under(of));
 
 describe("identify, with the caller's process read", () => {
+  it("refuses a caller whose process wasn't read in time, whatever it presents, as one to retry", () => {
+    const late = { kind: "late" } as const;
+    const presented = [
+      { token: undefined, said: undefined },
+      { token: TOKEN, said: undefined },
+      { token: undefined, said: other },
+    ];
+    expect(presented.map((p) => identify(credentials, p, late))).toEqual(
+      presented.map(() => ({
+        kind: "refused",
+        reason: "the caller's process wasn't read in time; try again",
+        retry: true,
+      })),
+    );
+  });
+
   it("takes a caller under an agent's process as that agent, though it presents nothing", () => {
     expect(peer(undefined, undefined, tokened)).toEqual({ kind: "agent", agentId: tokened });
   });
