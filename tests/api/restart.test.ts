@@ -21,7 +21,7 @@ const messageState = async (id: string) => (await state()).messages.find((m) => 
 const launch = async (key: string, harness: "claude-code" | "codex" = "claude-code") => {
   const launched = await daemon.launch(key, harness);
   await waitUntil(
-    () => daemon.screen(launched.agentId).includes(BANNER[harness]),
+    async () => (await daemon.screen(launched.agentId)).includes(BANNER[harness]),
     BANNER[harness],
     30_000,
   );
@@ -40,7 +40,6 @@ const send = async (agentId: string, key: string, body: string) =>
 beforeAll(async () => {
   [model, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
   daemon = await Daemon.start({
-    runtime: "tmux",
     modelUrl: model.url,
     responsesUrl: responses.url,
     claudeDebugLog: true,
@@ -63,8 +62,8 @@ beforeAll(async () => {
     await waitUntil(async () => (await messageState(held)) === "seen", "the held message seen");
   });
   await daemon.crash();
-  // While the daemon is down, one agent's terminal ends; the other keeps the tmux server up.
-  daemon.endTerminal(victim.agentId);
+  // While the daemon is down, one agent's terminal ends; the other's runs on.
+  await daemon.endTerminal(victim.agentId);
   await daemon.restart();
   // Taken at once, while the held message's slow turn still runs.
   afterRestart = (await state()).agents.find((a) => a.id === survivor.agentId)?.activity;
@@ -93,7 +92,7 @@ describe("after the daemon is killed with -9 and started again", () => {
       .toBe("idle");
   });
 
-  it("still runs the agent tmux kept, under the same ids, and has lost the one it didn't", async () => {
+  it("still runs the agent whose terminal outlived it, under the same ids, and has lost the other", async () => {
     const agents = (await state()).agents;
     expect([
       agents.find((a) => a.id === survivor.agentId),

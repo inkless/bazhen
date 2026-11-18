@@ -17,7 +17,10 @@ beforeAll(async () => {
   );
   agentId = launched.agentId;
   terminalId = String(launched.terminalId);
-  await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
+  await waitUntil(
+    async () => (await daemon.screen(agentId)).includes("Claude Code"),
+    "Claude Code's TUI",
+  );
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -47,7 +50,7 @@ describe("the terminal stream", () => {
       .toContainEqual(expect.objectContaining({ type: "attached" }));
     watcher.type("observer-typed-this");
     await expect.poll(() => watcher.frames).toContainEqual({ type: "input_dropped" });
-    expect(daemon.screen(agentId)).not.toContain("observer-typed-this");
+    expect(await daemon.screen(agentId)).not.toContain("observer-typed-this");
     driver.close();
     watcher.close();
   });
@@ -81,8 +84,11 @@ describe("the terminal stream", () => {
       "-c",
       'echo ready; read line; echo "got $line"; exec sleep 600',
     ]);
-    await waitUntil(() => daemon.screen(program.agentId).includes("ready"), "the program");
-    const session = String(daemon.paneFact(program.agentId, "session_name"));
+    await waitUntil(
+      async () => (await daemon.screen(program.agentId)).includes("ready"),
+      "the program",
+    );
+    const session = String(daemon.paneFact(program.terminalId, "session_name"));
     // tmux runs the hook as each client attaches, so this lists how many clients the session had
     // at each attach, in tmux's own order.
     daemon.tmux(

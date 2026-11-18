@@ -16,7 +16,7 @@ beforeAll(async () => {
   ]);
   await waitUntil(
     async () =>
-      (await Promise.all([coordinator, worker].map((a) => daemon.shows(a.agentId)))).every((s) =>
+      (await Promise.all([coordinator, worker].map((a) => daemon.screen(a.agentId)))).every((s) =>
         s.includes(BANNER["claude-code"]),
       ),
     "Claude Code's TUIs",

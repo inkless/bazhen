@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ErrorResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
-
-const TAG = "@bazhen_terminal_id";
+import { closeHoldersUnder } from "../support/holder-close.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -27,8 +26,6 @@ const close = (on: Daemon, terminalId: string, body: Record<string, unknown> = {
   });
 const shellOf = async (on: Daemon, terminalId: string) =>
   StateSnapshot.parse((await on.request("/v1/state")).body).shells.find((s) => s.id === terminalId);
-const hasSession = (on: Daemon, terminalId: string) =>
-  on.paneFact(terminalId, "session_name", TAG) !== undefined;
 
 /** A view driving the shell, once its prompt has drawn. */
 async function driving(terminalId: string): Promise<View> {
@@ -40,9 +37,9 @@ async function driving(terminalId: string): Promise<View> {
 describe("a shell terminal", () => {
   it("runs the user's shell in the directory asked for, told its terminal but no agent", async () => {
     const terminalId = await open(daemon);
-    await waitUntil(() => hasSession(daemon, terminalId), "the shell's session");
-    const env = daemon.shellEnv(terminalId);
-    expect(daemon.paneFact(terminalId, "pane_current_path", TAG)).toBe(daemon.work);
+    await waitUntil(() => daemon.terminalOpen(terminalId), "the shell's terminal");
+    const env = await daemon.terminalEnv(terminalId);
+    expect(await daemon.terminalCwd(terminalId)).toBe(daemon.work);
     expect([env.BAZHEN_TERMINAL_ID, env.BAZHEN_AGENT_ID]).toEqual([terminalId, undefined]);
     expect((await shellOf(daemon, terminalId))?.state).toBe("running");
   });
@@ -52,7 +49,7 @@ describe("a shell terminal", () => {
     const view = await driving(terminalId);
     view.type("sleep 300\r");
     await waitUntil(
-      () => daemon.paneFact(terminalId, "pane_current_command", TAG) === "sleep",
+      async () => (await shellOf(daemon, terminalId))?.foreground?.command === "sleep",
       "sleep in the foreground",
     );
     const refused = await close(daemon, terminalId);
@@ -62,9 +59,9 @@ describe("a shell terminal", () => {
       "busy",
       expect.stringContaining("sleep"),
     ]);
-    expect(hasSession(daemon, terminalId)).toBe(true);
+    expect(await daemon.terminalOpen(terminalId)).toBe(true);
     const confirmed = await close(daemon, terminalId, { confirmBusy: true });
-    expect([confirmed.status, hasSession(daemon, terminalId)]).toEqual([200, false]);
+    expect([confirmed.status, await daemon.terminalOpen(terminalId)]).toEqual([200, false]);
     expect(await shellOf(daemon, terminalId)).toBeUndefined();
     view.close();
   });
@@ -91,7 +88,7 @@ describe("a shell terminal", () => {
     view.type("echo ready-$((40+2))\r");
     await waitUntil(() => view.output().includes("ready-42"), "the shell's answer");
     const closed = await close(daemon, terminalId);
-    expect([closed.status, hasSession(daemon, terminalId)]).toEqual([200, false]);
+    expect([closed.status, await daemon.terminalOpen(terminalId)]).toEqual([200, false]);
     view.close();
   });
 
@@ -102,7 +99,7 @@ describe("a shell terminal", () => {
     await expect
       .poll(async () => (await shellOf(daemon, terminalId))?.state, { timeout: 10_000 })
       .toBeUndefined();
-    expect(hasSession(daemon, terminalId)).toBe(false);
+    expect(await daemon.terminalOpen(terminalId)).toBe(false);
     view.close();
   });
 });
@@ -114,23 +111,27 @@ describe("shells beside an agent", () => {
       await open(daemon, { cwd: undefined, linkedAgentId: agentId }),
       await open(daemon, { cwd: undefined, linkedAgentId: agentId }),
     ];
-    await waitUntil(() => hasSession(daemon, kept), "the kept shell's session");
+    await waitUntil(() => daemon.terminalOpen(kept), "the kept shell's terminal");
+    expect(await daemon.linkedAgentOf(kept)).toBe(agentId);
     const closed = await daemon.request(`/v1/agents/${agentId}/close`, {
       method: "POST",
       body: { idempotencyKey: `close-agent-${++keys}`, generation: 0, keepShells: [kept] },
     });
     expect(closed.status).toBe(200);
-    expect([hasSession(daemon, closing), hasSession(daemon, kept)]).toEqual([false, true]);
-    expect(daemon.paneFact(kept, "@bazhen_linked_agent_id", TAG)).toBe("");
+    expect([await daemon.terminalOpen(closing), await daemon.terminalOpen(kept)]).toEqual([
+      false,
+      true,
+    ]);
+    expect(await daemon.linkedAgentOf(kept)).toBeUndefined();
     expect((await shellOf(daemon, kept))?.linkedAgentId).toBeNull();
   });
 });
 
-describe("a shell after its tmux server died", () => {
+describe("a shell whose terminal ended while the daemon was down", () => {
   let restarted: Daemon;
   let terminalId: string;
   beforeAll(async () => {
-    restarted = await Daemon.start({ runtime: "tmux" });
+    restarted = await Daemon.start();
     terminalId = await open(restarted);
     const view = await restarted.view(terminalId, "interactive");
     await view.drive();
@@ -143,7 +144,7 @@ describe("a shell after its tmux server died", () => {
     );
     view.close();
     await restarted.crash();
-    restarted.tmuxServer.killServer();
+    await closeHoldersUnder(restarted.home);
     await restarted.restart();
   });
   afterAll(async () => {
@@ -157,10 +158,8 @@ describe("a shell after its tmux server died", () => {
       body: { idempotencyKey: `restart-${++keys}`, generation: 0 },
     });
     const replacement = ShellCommandResponse.parse(res.body).terminalId;
-    await waitUntil(() => hasSession(restarted, replacement), "the new shell's session");
-    expect(restarted.paneFact(replacement, "pane_current_path", TAG)).toBe(
-      `${restarted.work}/moved`,
-    );
+    await waitUntil(() => restarted.terminalOpen(replacement), "the new shell's terminal");
+    expect(await restarted.terminalCwd(replacement)).toBe(`${restarted.work}/moved`);
     expect(await shellOf(restarted, terminalId)).toBeUndefined();
   });
 });

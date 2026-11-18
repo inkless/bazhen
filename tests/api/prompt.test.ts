@@ -9,7 +9,7 @@ const ECHO_MS = 300;
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -31,7 +31,7 @@ describe("a prompt typed through a view", () => {
       `--echo-after=${ECHO_MS}`,
     ]);
     await waitUntil(
-      () => daemon.screen(program.agentId).includes("key-probe ready"),
+      async () => (await daemon.screen(program.agentId)).includes("key-probe ready"),
       "the key probe",
     );
     await daemon.prompt(program, "line 1");

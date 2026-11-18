@@ -33,14 +33,17 @@ import {
   HOLDER_PROTOCOL_VERSION,
   holderReplyDecoder,
   type HolderReply,
+  type HolderRequest,
+  type HolderSignal,
   LaunchAgentResponse,
   StreamServerFrame,
   PairingCodeResponse,
   StateSnapshot,
+  TerminalScreen,
 } from "@bazhen/protocol";
 import { protocolId } from "@bazhen/protocol/id";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
-import { closeHoldersUnder } from "../support/holder-close.ts";
+import { closeHolderAt, closeHoldersUnder, leftBehind } from "../support/holder-close.ts";
 import { giveTranscript } from "../support/transcript.ts";
 import { LogTail } from "../support/log-tail.ts";
 import { replay } from "./fixtures/browser.ts";
@@ -144,6 +147,30 @@ function cliOnPath(home: string): string {
   symlinkSync(CLI, join(dir, "bazhen"));
   return dir;
 }
+
+/**
+ * A directory under `home` holding a `claude` that runs the program `Daemon.program` queued, as
+ * the agent's own process, or else the real Claude Code. The queued script is claimed by a rename,
+ * which only one launch can win, under the id of the agent that won it.
+ */
+function programsOnPath(home: string): string {
+  const dir = join(home, "programs");
+  mkdirSync(dir, { recursive: true });
+  const shim = join(dir, "claude");
+  writeFileSync(
+    shim,
+    `#!/bin/sh\n` +
+      `if mv ${shellWord(`${dir}/next`)} ${shellWord(dir)}"/taken-$BAZHEN_AGENT_ID" 2>/dev/null; then\n` +
+      `  exec /bin/sh ${shellWord(dir)}"/taken-$BAZHEN_AGENT_ID"\n` +
+      `fi\n` +
+      `exec ${shellWord(join(bin, "claude"))} "$@"\n`,
+  );
+  chmodSync(shim, 0o755);
+  return dir;
+}
+
+/** `arg` quoted for sh, as one word. */
+const shellWord = (arg: string) => `'${arg.replaceAll("'", `'\\''`)}'`;
 
 /** A directory under `home` holding a `tmux` that runs nothing, and records each command line. */
 function absentTmux(home: string): string {
@@ -261,6 +288,16 @@ export interface DaemonOptions {
 
 export type RuntimeKind = "tmux" | "holder";
 
+/**
+ * Whether a socket is still bound at `path`, from /proc (Linux only): a holder that unlinked its
+ * socket's file but still runs keeps it bound, so a terminal it holds isn't ended.
+ */
+function listeningAt(path: string): boolean {
+  return readFileSync("/proc/net/unix", "utf8")
+    .split("\n")
+    .some((line) => line.endsWith(` ${path}`));
+}
+
 /** A process's environment, from /proc (Linux only). */
 function processEnv(pid: number): Record<string, string> {
   const environ = readFileSync(`/proc/${pid}/environ`, "utf8");
@@ -294,8 +331,11 @@ export class Daemon {
     if (opts.config !== undefined || opts.runtime !== undefined)
       this.writeConfig(opts.config ?? "");
 
-    const first =
-      opts.withoutTmux === true ? [cliOnPath(home), absentTmux(home)] : [cliOnPath(home)];
+    const first = [
+      cliOnPath(home),
+      programsOnPath(home),
+      ...(opts.withoutTmux === true ? [absentTmux(home)] : []),
+    ];
     this.env = {
       ...homeEnv(home),
       PATH: `${first.join(":")}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
@@ -382,19 +422,10 @@ export class Daemon {
    * shown it, so a test that the right line was kept can only look there.
    */
   keptShellLine(terminalId: string): string | null {
-    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
-    try {
-      const row = db.prepare("SELECT last_command FROM terminals WHERE id = ?").get(terminalId);
-      return typeof row?.last_command === "string" ? row.last_command : null;
-    } finally {
-      db.close();
-    }
-  }
-
-  /** A shell's visible screen, as tmux holds it. */
-  shellScreen(terminalId: string): string {
-    const session = this.paneFact(terminalId, "session_name", "@bazhen_terminal_id");
-    return session === undefined ? "" : this.tmux("capture-pane", "-p", "-t", session);
+    const row = this.#read((db) =>
+      db.prepare("SELECT last_command FROM terminals WHERE id = ?").get(terminalId),
+    );
+    return typeof row?.last_command === "string" ? row.last_command : null;
   }
 
   /** What the daemon has printed since it last started. */
@@ -446,18 +477,15 @@ export class Daemon {
 
   /** Each Claude Code agent's id and the session it is bound to, as the daemon recorded them. */
   private claudeSessions(): [string, string][] {
-    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
-    try {
-      return db
+    return this.#read((db) =>
+      db
         .prepare(`SELECT id, external_ref FROM agent_sessions WHERE external_ref IS NOT NULL`)
         .all()
         .flatMap((row): [string, string][] => {
           const ref = ExternalRef.parse(JSON.parse(String(row.external_ref)));
           return ref.kind === "claude-session" ? [[String(row.id), ref.id]] : [];
-        });
-    } finally {
-      db.close();
-    }
+        }),
+    );
   }
 
   /**
@@ -477,13 +505,10 @@ export class Daemon {
   }
 
   private transcriptPath(agentId: string): string | null {
-    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
-    try {
-      const row = db.prepare(`SELECT transcript FROM agent_sessions WHERE id = ?`).get(agentId);
-      return typeof row?.transcript === "string" ? row.transcript : null;
-    } finally {
-      db.close();
-    }
+    const row = this.#read((db) =>
+      db.prepare(`SELECT transcript FROM agent_sessions WHERE id = ?`).get(agentId),
+    );
+    return typeof row?.transcript === "string" ? row.transcript : null;
   }
 
   /** A new directory beside the work directory, which no harness has been told to trust. */
@@ -524,12 +549,7 @@ export class Daemon {
   async prompt(launched: { agentId: string; terminalId: string | null }, text: string) {
     const view = await this.view(String(launched.terminalId), "interactive");
     await view.drive();
-    const holder = this.holderOf(launched.agentId);
-    const row = async () =>
-      holder === undefined
-        ? this.cursorRow(launched.agentId)
-        : (await holderLook(holder)).cursorRow;
-    const atCursor = async () => (await row()).split(text).length - 1;
+    const atCursor = async () => (await this.cursorRow(launched.agentId)).split(text).length - 1;
     const before = await atCursor();
     view.type(text);
     await waitUntil(
@@ -738,55 +758,182 @@ export class Daemon {
     return this.tmuxServer.runSync(args);
   }
 
-  /** The agent's tmux session, found by the tag Bazhen wrote on it. */
-  private session(agentId: string): string | undefined {
-    return this.paneFact(agentId, "session_name");
+  /** The terminal's tmux session, found by the tag Bazhen wrote on it. */
+  private session(terminalId: string): string | undefined {
+    return this.paneFact(terminalId, "session_name");
+  }
+
+  /** The terminal's tmux session; an empty target would let tmux pick one of its own. */
+  private requireSession(terminalId: string): string {
+    const session = this.session(terminalId);
+    if (session === undefined) throw new Error(`no tmux session for ${terminalId}`);
+    return session;
   }
 
   /** The tmux clients attached to the terminal's session, one line each. */
   clientsOf(terminalId: string): string[] {
-    const session = this.paneFact(terminalId, "session_name", "@bazhen_terminal_id");
+    const session = this.session(terminalId);
     if (session === undefined) return [];
     return this.tmux("list-clients", "-t", session)
       .split("\n")
       .filter((line) => line.trim() !== "");
   }
 
-  /**
-   * A tmux format value of the agent's pane, found by the tag Bazhen wrote on it: its agent id,
-   * or with `tag`, another of its tags, such as a shell's terminal id.
-   */
-  paneFact(id: string, format: string, tag = "@bazhen_agent_id"): string | undefined {
-    const panes = this.tmux("list-panes", "-a", "-F", `#{${tag}} #{${format}}`);
+  /** A tmux format value of the terminal's pane, found by the tag Bazhen wrote on it. */
+  paneFact(terminalId: string, format: string): string | undefined {
+    const panes = this.tmux("list-panes", "-a", "-F", `#{@bazhen_terminal_id} #{${format}}`);
     return panes
       .split("\n")
-      .find((l) => l.startsWith(`${id} `))
+      .find((l) => l.startsWith(`${terminalId} `))
       ?.split(" ")[1];
   }
 
-  /** The title the agent's TUI gave its pane. */
-  paneTitle(agentId: string): string {
-    return this.paneFact(agentId, "pane_title") ?? "";
-  }
-
-  /** The socket of the holder the agent's terminal runs on; none for one on tmux, or none yet. */
-  holderOf(agentId: string): string | undefined {
-    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), { readOnly: true });
+  /** Reads the daemon's database, which no client is shown, for what only it records. */
+  #read<T>(query: (db: DatabaseSync) => T): T {
+    const db = new DatabaseSync(join(this.home, "data", "bazhen.db"), {
+      readOnly: true,
+      timeout: 5_000,
+    });
     try {
-      const row = db
-        .prepare(
-          `SELECT t.id, t.runtime FROM agent_sessions a JOIN terminals t ON t.id = a.terminal_id
-           WHERE a.id = ?`,
-        )
-        .get(agentId);
-      return row?.runtime === "holder" ? this.holderSocket(String(row.id)) : undefined;
+      return query(db);
     } finally {
       db.close();
     }
   }
 
+  /** The agent's terminal, as the daemon recorded it; none before it has one. */
+  terminalOf(agentId: string): string | undefined {
+    const row = this.#read((db) =>
+      db.prepare(`SELECT terminal_id FROM agent_sessions WHERE id = ?`).get(agentId),
+    );
+    return typeof row?.terminal_id === "string" ? row.terminal_id : undefined;
+  }
+
+  private requireTerminal(agentId: string): string {
+    const terminalId = this.terminalOf(agentId);
+    if (terminalId === undefined) throw new Error(`no terminal for ${agentId}`);
+    return terminalId;
+  }
+
+  /**
+   * The socket of the holder the terminal runs on; none for one on tmux. A terminal the daemon no
+   * longer records, as a closed one, is taken to be on the runtime it makes new terminals on.
+   */
+  holderAt(terminalId: string): string | undefined {
+    const row = this.#read((db) =>
+      db.prepare(`SELECT runtime FROM terminals WHERE id = ?`).get(terminalId),
+    );
+    const runtime = row?.runtime ?? this.#runtime ?? "holder";
+    return runtime === "holder" ? this.holderSocket(terminalId) : undefined;
+  }
+
   private holderSocket(terminalId: string): string {
     return join(this.home, "run", "holders", `${terminalId}.sock`);
+  }
+
+  /** The socket of the holder the agent's terminal runs on; none for one on tmux, or none yet. */
+  holderOf(agentId: string): string | undefined {
+    const terminalId = this.terminalOf(agentId);
+    return terminalId === undefined ? undefined : this.holderAt(terminalId);
+  }
+
+  /** Whether the terminal is still open: its holder answers, or its tmux session is there. */
+  async terminalOpen(terminalId: string): Promise<boolean> {
+    const holder = this.holderAt(terminalId);
+    if (holder === undefined) return this.session(terminalId) !== undefined;
+    try {
+      await askHolder(holder);
+      return true;
+    } catch (error) {
+      if (!leftBehind(error)) throw error;
+      // A holder that is ending may unlink its socket's file a moment before it lets the socket go.
+      for (const start = Date.now(); Date.now() - start < 2_000;) {
+        if (!listeningAt(holder)) return false;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return true;
+    }
+  }
+
+  /** Whether the agent's terminal is still open. */
+  async hasTerminal(agentId: string): Promise<boolean> {
+    const terminalId = this.terminalOf(agentId);
+    return terminalId !== undefined && (await this.terminalOpen(terminalId));
+  }
+
+  /** The agent a shell terminal is linked to, by the tag Bazhen wrote on it; none if unlinked. */
+  async linkedAgentOf(terminalId: string): Promise<string | undefined> {
+    const holder = this.holderAt(terminalId);
+    if (holder === undefined)
+      return this.paneFact(terminalId, "@bazhen_linked_agent_id") || undefined;
+    return (await askHolder(holder)).hello.tags["linkedAgentId"];
+  }
+
+  /** The terminal's process: its holder's child, or its tmux pane's (Linux only for what reads it). */
+  async terminalPid(terminalId: string): Promise<number> {
+    const holder = this.holderAt(terminalId);
+    const pid =
+      holder === undefined
+        ? Number(this.paneFact(terminalId, "pane_pid"))
+        : (await askHolder(holder)).hello.childPid;
+    if (!Number.isInteger(pid) || pid <= 1) throw new Error(`no process for ${terminalId}`);
+    return pid;
+  }
+
+  /** The agent's process, as the agent's own tools would find it. */
+  agentPid(agentId: string): Promise<number> {
+    return this.terminalPid(this.requireTerminal(agentId));
+  }
+
+  /** The directory the terminal's process is in now (Linux only). */
+  async terminalCwd(terminalId: string): Promise<string> {
+    return readlinkSync(`/proc/${await this.terminalPid(terminalId)}/cwd`);
+  }
+
+  /** The environment the terminal's process runs with (Linux only). */
+  async terminalEnv(terminalId: string): Promise<Record<string, string>> {
+    return processEnv(await this.terminalPid(terminalId));
+  }
+
+  /**
+   * What the terminal shows, after up to `history` rows above it, as the daemon reads it for a
+   * client; nothing once the daemon no longer has it.
+   */
+  async terminalScreen(terminalId: string, history = 0): Promise<string> {
+    if (this.holderAt(terminalId) === undefined) {
+      const session = this.session(terminalId);
+      return session === undefined
+        ? ""
+        : this.tmux("capture-pane", "-p", "-t", session, "-S", `-${history}`);
+    }
+    const res = await this.request(`/v1/terminals/${terminalId}/screen?history=${history}`);
+    if (res.status === 404) return "";
+    if (res.status !== 200) {
+      throw new Error(
+        `reading ${terminalId}'s screen answered ${res.status}: ${JSON.stringify(res.body)}`,
+      );
+    }
+    return TerminalScreen.parse(res.body).text;
+  }
+
+  /**
+   * The agent's screen with its colours and attributes as escape sequences: the snapshot a view
+   * of its terminal is opened on.
+   */
+  async styledScreen(agentId: string): Promise<string> {
+    const view = await this.view(this.requireTerminal(agentId), "observe");
+    try {
+      await waitUntil(() => view.hasSnapshot(), "the view's snapshot");
+      return view.snapshot().toString("utf8");
+    } finally {
+      view.close();
+    }
+  }
+
+  /** What the agent's terminal shows, after up to `history` rows above it; nothing before it has one. */
+  async screen(agentId: string, history = 0): Promise<string> {
+    const terminalId = this.terminalOf(agentId);
+    return terminalId === undefined ? "" : this.terminalScreen(terminalId, history);
   }
 
   /** The agent's lifecycle state, as the daemon's state shows it now. */
@@ -806,20 +953,42 @@ export class Daemon {
 
   /** The title the agent's TUI set, from its holder or its tmux pane. */
   async title(agentId: string): Promise<string> {
-    const holder = this.holderOf(agentId);
-    return holder === undefined ? this.paneTitle(agentId) : (await holderLook(holder)).title;
+    const terminalId = this.requireTerminal(agentId);
+    const holder = this.holderAt(terminalId);
+    return holder === undefined
+      ? (this.paneFact(terminalId, "pane_title") ?? "")
+      : (await holderLook(holder)).title;
   }
 
-  /** What the agent's terminal shows, from its holder or its tmux pane; nothing before it has one. */
-  async shows(agentId: string): Promise<string> {
-    const holder = this.holderOf(agentId);
-    if (holder === undefined) return this.screen(agentId);
-    return existsSync(holder) ? (await holderLook(holder)).screen.join("\n") : "";
+  /** Where the agent's program has its cursor: column and row on the screen, from zero. */
+  async cursor(agentId: string): Promise<[number, number]> {
+    const terminalId = this.requireTerminal(agentId);
+    const holder = this.holderAt(terminalId);
+    if (holder !== undefined) return (await holderLook(holder)).cursor;
+    const out = this.tmux(
+      "display-message",
+      "-p",
+      "-t",
+      this.requireSession(terminalId),
+      "#{cursor_x} #{cursor_y}",
+    );
+    const [x = 0, y = 0] = out.trim().split(" ").map(Number);
+    return [x, y];
+  }
+
+  /** The screen row the agent's program has its cursor on. */
+  async cursorRow(agentId: string): Promise<string> {
+    const terminalId = this.requireTerminal(agentId);
+    const holder = this.holderAt(terminalId);
+    if (holder !== undefined) return (await holderLook(holder)).cursorRow;
+    const [, row] = await this.cursor(agentId);
+    const session = this.requireSession(terminalId);
+    return this.tmux("capture-pane", "-p", "-t", session, "-S", `${row}`, "-E", `${row}`);
   }
 
   /** The environment the agent's process runs with, as its own tools see it (Linux only). */
-  agentEnv(agentId: string): Record<string, string> {
-    return processEnv(this.panePid(agentId));
+  async agentEnv(agentId: string): Promise<Record<string, string>> {
+    return this.terminalEnv(this.requireTerminal(agentId));
   }
 
   /**
@@ -841,8 +1010,8 @@ export class Daemon {
   }
 
   /** The token the agent's process presents, from the file its environment names (Linux only). */
-  agentToken(agentId: string): string {
-    const file = this.agentEnv(agentId)["BAZHEN_AGENT_AUTH_FILE"];
+  async agentToken(agentId: string): Promise<string> {
+    const file = (await this.agentEnv(agentId))["BAZHEN_AGENT_AUTH_FILE"];
     if (file === undefined) throw new Error(`agent ${agentId} runs with no token file`);
     return readFileSync(file, "utf8").trim();
   }
@@ -854,20 +1023,10 @@ export class Daemon {
     return processEnv(Number(pid));
   }
 
-  /** The environment a shell terminal's process runs with (Linux only). */
-  shellEnv(terminalId: string): Record<string, string> {
-    return processEnv(Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id")));
-  }
-
   /** What a file in the work directory holds, or null when there is none. */
   workFile(name: string): string | null {
     const path = join(this.work, name);
     return existsSync(path) ? readFileSync(path, "utf8") : null;
-  }
-
-  /** A shell terminal's process, as its pane's pid. */
-  shellPid(terminalId: string): number {
-    return Number(this.paneFact(terminalId, "pane_pid", "@bazhen_terminal_id"));
   }
 
   /**
@@ -933,39 +1092,49 @@ export class Daemon {
   }
 
   /** The command line of the agent's process (Linux only). */
-  agentCommand(agentId: string): string[] {
-    return readFileSync(`/proc/${this.panePid(agentId)}/cmdline`, "utf8")
+  async agentCommand(agentId: string): Promise<string[]> {
+    return readFileSync(`/proc/${await this.agentPid(agentId)}/cmdline`, "utf8")
       .split("\0")
       .filter(Boolean);
   }
 
-  /** Whether the agent still has a tmux session. */
-  hasTerminal(agentId: string): boolean {
-    return this.session(agentId) !== undefined;
-  }
-
-  /** The process tmux runs for the agent, as the agent's own tools would find it. */
-  panePid(agentId: string): number {
-    return Number(this.paneFact(agentId, "pane_pid"));
-  }
-
   /**
-   * Signals the agent's process from outside the daemon, as a user's `kill` would. host-guard
-   * reaches it only once the private server confirms the pane still runs that process.
+   * Signals the agent's process group from outside the daemon, as a user's `kill` would. A holder
+   * sends it through its own guard, to the child it started; tmux's is reached by host-guard only
+   * once the private server confirms the pane still runs that process.
    */
-  async signalAgent(agentId: string, signal: NodeJS.Signals): Promise<void> {
-    const pane = this.paneFact(agentId, "pane_id") ?? "";
+  async signalAgent(agentId: string, signal: HolderSignal): Promise<void> {
+    const terminalId = this.requireTerminal(agentId);
+    const holder = this.holderAt(terminalId);
+    if (holder !== undefined) {
+      await askHolder(holder, (_, id) => ({ type: "signal", id, body: { signal } }));
+      return;
+    }
+    const pane = this.paneFact(terminalId, "pane_id") ?? "";
     const expected = {
-      pid: this.paneFact(agentId, "pane_pid") ?? "",
-      generation: this.paneFact(agentId, GENERATION_OPTION) ?? "",
+      pid: this.paneFact(terminalId, "pane_pid") ?? "",
+      generation: this.paneFact(terminalId, GENERATION_OPTION) ?? "",
     };
     signalPane(await this.tmuxServer.paneGroup(pane, expected), signal);
   }
 
-  private requireSession(agentId: string): string {
-    const session = this.session(agentId);
-    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
-    return session;
+  /**
+   * Starts `argv` on the agent's holder once its process has exited, as a new generation the
+   * daemon didn't ask for: what a terminal looks like to a daemon that was down while its program
+   * was replaced.
+   */
+  async respawnOnHolder(agentId: string, argv: readonly string[]): Promise<void> {
+    const holder = this.holderOf(agentId);
+    if (holder === undefined) throw new Error(`agent ${agentId}'s terminal is on no holder`);
+    await waitUntil(
+      async () => (await askHolder(holder)).hello.exit !== null,
+      `agent ${agentId}'s process to exit`,
+    );
+    await askHolder(holder, (hello, id) => ({
+      type: "respawn",
+      id,
+      body: { argv: [...argv], cwd: this.work, env: {}, generation: hello.generation + 1 },
+    }));
   }
 
   /** Gives the agent's bound Claude Code session a conversation to resume (`giveTranscript`). */
@@ -973,61 +1142,39 @@ export class Daemon {
     return giveTranscript(this.home, agentId, sessionId);
   }
 
-  /** What the agent's terminal shows, or nothing while it has no terminal yet. */
-  screen(agentId: string): string {
-    return this.session(agentId) === undefined ? "" : this.capture(agentId);
-  }
-
   /**
-   * A terminal running `argv`: an agent is launched, then its program is replaced, so the
-   * terminal is one the daemon knows and streams.
+   * A terminal running `argv` as an agent's process, on either runtime: the agent's launch runs
+   * the `claude` on the daemon's PATH, which runs `argv` instead of Claude Code. The terminal is
+   * one the daemon knows and streams, and `argv` is the process it records.
    */
   async program(argv: readonly string[]): Promise<{ agentId: string; terminalId: string }> {
-    const launched = await this.launch(`program-${++programs}`);
-    const ids = { agentId: launched.agentId, terminalId: String(launched.terminalId) };
-    await waitUntil(() => this.session(ids.agentId) !== undefined, "the agent's terminal");
-    this.runInTerminal(ids.agentId, argv);
+    const dir = join(this.home, "programs");
+    const next = join(dir, "next");
+    writeFileSync(next, `exec ${argv.map(shellWord).join(" ")}\n`);
+    let ids: { agentId: string; terminalId: string };
+    try {
+      const launched = await this.launch(`program-${++programs}`);
+      ids = { agentId: launched.agentId, terminalId: String(launched.terminalId) };
+      await waitUntil(() => !existsSync(next), "a launch to take the program");
+    } catch (error) {
+      // Left queued, it would run in place of the next Claude Code this daemon launches.
+      rmSync(next, { force: true });
+      throw error;
+    }
+    if (!existsSync(join(dir, `taken-${ids.agentId}`))) {
+      throw new Error(`another launch took the program meant for ${ids.agentId}`);
+    }
     return ids;
   }
 
   /**
-   * The visible screen and up to `history` lines above it, as tmux holds them; with `escapes`,
-   * with the colours and attributes as escape sequences.
-   */
-  capture(agentId: string, history = 0, escapes = false): string {
-    const session = this.requireSession(agentId);
-    return this.tmux(
-      "capture-pane",
-      "-p",
-      ...(escapes ? ["-e"] : []),
-      "-t",
-      session,
-      "-S",
-      `-${history}`,
-    );
-  }
-
-  /** Where tmux has the program's cursor: column and row on the screen, from zero. */
-  cursor(agentId: string): [number, number] {
-    const session = this.requireSession(agentId);
-    const out = this.tmux("display-message", "-p", "-t", session, "#{cursor_x} #{cursor_y}");
-    const [x = 0, y = 0] = out.trim().split(" ").map(Number);
-    return [x, y];
-  }
-
-  /** The screen row the program's cursor is on. */
-  cursorRow(agentId: string): string {
-    const session = this.requireSession(agentId);
-    const [, row] = this.cursor(agentId);
-    return this.tmux("capture-pane", "-p", "-t", session, "-S", `${row}`, "-E", `${row}`);
-  }
-
-  /**
-   * Runs another program in the agent's terminal, as if the agent had started it. The terminal
-   * Bazhen knows stays the same, so its stream serves the new program.
+   * Runs another program in a tmux agent's pane, killing its own: the terminal Bazhen knows stays
+   * the same, but the process in it isn't the one the daemon recorded.
    */
   runInTerminal(agentId: string, argv: readonly string[]): void {
-    this.tmux("respawn-pane", "-k", "-t", `${this.requireSession(agentId)}:0`, ...argv);
+    const session = this.session(this.requireTerminal(agentId));
+    if (session === undefined) throw new Error(`no tmux session for ${agentId}`);
+    this.tmux("respawn-pane", "-k", "-t", `${session}:0`, ...argv);
   }
 
   /**
@@ -1061,10 +1208,16 @@ export class Daemon {
     rmSync(this.tmuxServer.socket);
   }
 
-  /** Ends the agent's terminal, as if its tmux session had been killed by hand. */
-  endTerminal(agentId: string): void {
-    const session = this.session(agentId);
-    if (session === undefined) throw new Error(`no terminal for ${agentId}`);
+  /**
+   * Ends the agent's terminal from outside the daemon, as a user would by hand: its holder closed
+   * by its own protocol, or its tmux session killed.
+   */
+  async endTerminal(agentId: string): Promise<void> {
+    const terminalId = this.requireTerminal(agentId);
+    const holder = this.holderAt(terminalId);
+    if (holder !== undefined) return closeHolderAt(holder);
+    const session = this.session(terminalId);
+    if (session === undefined) throw new Error(`no tmux session for ${agentId}`);
     this.tmux("kill-session", "-t", session);
   }
 
@@ -1164,7 +1317,7 @@ export class Daemon {
 
   /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
   detachClients(agentId: string): void {
-    this.tmux("detach-client", "-s", this.requireSession(agentId));
+    this.tmux("detach-client", "-s", this.requireSession(this.requireTerminal(agentId)));
   }
 
   /** Stops the daemon, its tmux server, its holders and every file under its home. */
@@ -1233,36 +1386,52 @@ export interface HolderLook {
   readonly title: string;
   /** The visible screen's lines, as a browser replaying its snapshot shows them. */
   readonly screen: string[];
+  /** The cursor's column and row on the visible screen, from zero. */
+  readonly cursor: [number, number];
   /** The screen line the cursor is on. */
   readonly cursorRow: string;
 }
 
+type HolderHello = Extract<HolderReply, { type: "hello" }>["body"];
+
+/** The id `askHolder` gives the one request it sends after `hello`. */
+const ASKED = 2;
+
 /**
- * Says `hello` to the holder at `socket` and asks for a snapshot, then hangs up. Nothing it asks
- * changes the terminal: no writer slot, no subscription.
+ * Says `hello` to the holder at `socket`, without asking for the writer slot, then sends the
+ * request `ask` makes of the hello, if any, and resolves with the holder's answer to it. A
+ * refusal throws. Rejects with the connection's own error when nothing listens there.
  */
-export async function holderLook(socket: string): Promise<HolderLook> {
+async function askHolder(
+  socket: string,
+  ask?: (hello: HolderHello, id: number) => HolderRequest,
+): Promise<{ hello: HolderHello; answer: HolderReply | undefined }> {
   const connection = createConnection(socket);
-  connection.on("error", () => {});
   const decoder = holderReplyDecoder();
-  let hello: Extract<HolderReply, { type: "hello" }> | undefined;
-  let snapshot: Extract<HolderReply, { type: "snapshot" }> | undefined;
+  let hello: HolderHello | undefined;
+  let answer: HolderReply | undefined;
+  let failure: Error | undefined;
   const answered = new Promise<void>((resolve, reject) => {
+    connection.on("error", (error) => (failure = error));
     connection.on("data", (chunk: Buffer) => {
       const { frames, malformed } = decoder.push(new Uint8Array(chunk));
       for (const frame of frames) {
-        if (frame.type === "hello") hello = frame;
-        if (frame.type === "snapshot") snapshot = { ...frame, bytes: frame.bytes.slice() };
+        if (frame.type === "hello" && hello === undefined) {
+          hello = frame.body;
+          if (ask === undefined) resolve();
+          else connection.write(encodeHolderRequest(ask(hello, ASKED)));
+        } else if (frame.type !== "unknown" && "id" in frame && frame.id === ASKED) {
+          answer = frame.type === "snapshot" ? { ...frame, bytes: frame.bytes.slice() } : frame;
+          resolve();
+        }
       }
       if (malformed !== null) reject(new Error(`${socket} sent ${malformed}`));
-      if (snapshot !== undefined) resolve();
     });
-    connection.on("close", () => reject(new Error(`${socket} hung up before its snapshot`)));
+    connection.on("close", () => reject(failure ?? new Error(`${socket} hung up unanswered`)));
   });
   connection.write(
     encodeHolderRequest({ type: "hello", id: 1, body: { protocol: [HOLDER_PROTOCOL_VERSION] } }),
   );
-  connection.write(encodeHolderRequest({ type: "snapshot", id: 2 }));
   const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't answer`)), 5_000);
   try {
     await answered;
@@ -1270,13 +1439,74 @@ export async function holderLook(socket: string): Promise<HolderLook> {
     clearTimeout(timer);
     connection.end();
   }
-  if (hello === undefined || snapshot === undefined) throw new Error(`${socket} said no hello`);
-  const shown = await replay(snapshot.bytes, hello.body.size);
+  if (hello === undefined) throw new Error(`${socket} said no hello`);
+  if (answer?.type === "error") {
+    throw new Error(
+      `${socket} refused ${answer.body.request}: ${answer.body.code} ${answer.body.message}`,
+    );
+  }
+  return { hello, answer };
+}
+
+/**
+ * Says `hello` to the holder at `socket` and asks for a snapshot, then hangs up. Nothing it asks
+ * changes the terminal: no writer slot, no subscription.
+ */
+export async function holderLook(socket: string): Promise<HolderLook> {
+  const { hello, answer } = await askHolder(socket, (_, id) => ({ type: "snapshot", id }));
+  if (answer?.type !== "snapshot") throw new Error(`${socket} answered no snapshot`);
+  const shown = await replay(answer.bytes, hello.size);
   return {
-    title: hello.body.title,
+    title: hello.title,
     screen: shown.screen,
+    cursor: shown.cursor,
     cursorRow: shown.screen[shown.cursor[1]] ?? "",
   };
+}
+
+/**
+ * A writer connection of its own to the holder at `socket`, for while no daemon holds the writer
+ * slot: `type` sends input to its program as keys would, `end` resolves once the holder has it.
+ */
+async function holderWriter(socket: string) {
+  const connection = createConnection(socket);
+  let failure: Error | undefined;
+  connection.on("error", (error) => (failure = error));
+  const decoder = holderReplyDecoder();
+  const writer = new Promise<boolean>((resolve, reject) => {
+    connection.on("data", (chunk: Buffer) => {
+      for (const frame of decoder.push(new Uint8Array(chunk)).frames)
+        if (frame.type === "hello") resolve(frame.body.writer);
+    });
+    connection.on("close", () => reject(failure ?? new Error(`${socket} hung up before hello`)));
+  });
+  const hello = { protocol: [HOLDER_PROTOCOL_VERSION], writer: true };
+  connection.write(encodeHolderRequest({ type: "hello", id: 1, body: hello }));
+  const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't answer`)), 5_000);
+  try {
+    if (!(await writer)) throw new Error(`${socket} gave its writer slot to another connection`);
+  } catch (error) {
+    connection.destroy();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  let id = 1;
+  return {
+    type: (input: string) =>
+      connection.write(encodeHolderRequest({ type: "input", id: ++id, bytes: Buffer.from(input) })),
+    end: async () => {
+      await new Promise<void>((resolve) => connection.end(resolve));
+      connection.destroy();
+    },
+  };
+}
+
+/** Types `input` into the program on the holder at `socket`, at once, as keys would. */
+export async function typeOnHolder(socket: string, input: string): Promise<void> {
+  const writer = await holderWriter(socket);
+  writer.type(input);
+  await writer.end();
 }
 
 /**
@@ -1284,33 +1514,18 @@ export async function holderLook(socket: string): Promise<HolderLook> {
  * writer connection of its own: for while no daemon holds the writer slot, as when it is down.
  */
 export async function promptHolder(socket: string, text: string): Promise<void> {
-  const connection = createConnection(socket);
-  connection.on("error", () => {});
-  const decoder = holderReplyDecoder();
-  const writer = new Promise<boolean>((resolve, reject) => {
-    connection.on("data", (chunk: Buffer) => {
-      for (const frame of decoder.push(new Uint8Array(chunk)).frames)
-        if (frame.type === "hello") resolve(frame.body.writer);
-    });
-    connection.on("close", () => reject(new Error(`${socket} hung up before hello`)));
-  });
-  const hello = { protocol: [HOLDER_PROTOCOL_VERSION], writer: true };
-  connection.write(encodeHolderRequest({ type: "hello", id: 1, body: hello }));
+  const writer = await holderWriter(socket);
   try {
-    if (!(await writer)) throw new Error(`${socket} gave its writer slot to another connection`);
-    const type = (id: number, input: string) =>
-      connection.write(encodeHolderRequest({ type: "input", id, bytes: Buffer.from(input) }));
     const atCursor = async () => (await holderLook(socket)).cursorRow.split(text).length - 1;
     const before = await atCursor();
-    type(2, text);
+    writer.type(text);
     await waitUntil(
       async () => (await atCursor()) > before,
       "the typed prompt on the cursor's row",
     );
-    type(3, "\r");
-    await new Promise<void>((resolve) => connection.end(resolve));
+    writer.type("\r");
   } finally {
-    connection.destroy();
+    await writer.end();
   }
 }
 

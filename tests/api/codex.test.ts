@@ -9,8 +9,14 @@ import { BANNER, Daemon, overSocket, showsThread, waitUntil } from "./daemon.ts"
 import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";
 
-/** The 24-bit background Codex 0.166 draws its prompt on, told a light terminal. */
-const LIGHT_TINT = "\x1b[48;2;242;242;242m";
+/**
+ * The 24-bit background Codex 0.166 draws its prompt on, told a light or a dark terminal, as an SGR
+ * sets it among any other attributes.
+ */
+const TINT = {
+  light: /[[;]48;2;242;242;242m/,
+  dark: /[[;]48;2;43;43;44m/,
+};
 
 let model: FakeModel;
 let daemon: Daemon;
@@ -21,7 +27,6 @@ beforeAll(async () => {
   model = await startFakeResponses();
   // BZ_HIDE reaches the app-server as the user's own variable, for a policy to exclude.
   daemon = await Daemon.start({
-    runtime: "tmux",
     responsesUrl: model.url,
     env: { BZ_HIDE: "leaked" },
   });
@@ -29,7 +34,11 @@ beforeAll(async () => {
     daemon.launch("codex", "codex"),
     daemon.launch("codex-asker", "codex"),
   ]);
-  await waitUntil(() => daemon.screen(asker.agentId).includes(BANNER.codex), "Codex's TUI", 30_000);
+  await waitUntil(
+    async () => (await daemon.screen(asker.agentId)).includes(BANNER.codex),
+    "Codex's TUI",
+    30_000,
+  );
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -83,7 +92,7 @@ async function switched(command: string): Promise<void> {
   const before = await bound();
   await daemon.prompt(launched, command);
   await expect
-    .poll(() => showsThread(daemon.paneTitle(launched.agentId), String(before)), {
+    .poll(async () => showsThread(await daemon.title(launched.agentId), String(before)), {
       timeout: 30_000,
     })
     .toBe(false);
@@ -94,7 +103,7 @@ async function switched(command: string): Promise<void> {
         const now = await bound();
         return {
           moved: now !== before,
-          shown: showsThread(daemon.paneTitle(launched.agentId), String(now)),
+          shown: showsThread(await daemon.title(launched.agentId), String(now)),
         };
       },
       { timeout: 30_000 },
@@ -185,8 +194,7 @@ async function untilAsked(agent: LaunchAgentResponse, text: string) {
           onItsThread: model.requests.filter((r) => thread !== undefined && r.includes(thread))
             .length,
         },
-        screen: daemon
-          .screen(agent.agentId)
+        screen: (await daemon.screen(agent.agentId))
           .split("\n")
           .filter((line) => line.trim() !== "")
           .slice(-12),
@@ -202,16 +210,18 @@ describe("a Codex agent", () => {
     });
     const light = LaunchAgentResponse.parse(res.body);
     await waitUntil(
-      () => daemon.screen(light.agentId).includes(BANNER.codex),
+      async () => (await daemon.screen(light.agentId)).includes(BANNER.codex),
       "Codex's TUI",
       30_000,
     );
-    expect(daemon.agentCommand(light.agentId)).toContain('tui.theme="one-half-light"');
+    expect(await daemon.agentCommand(light.agentId)).toContain('tui.theme="one-half-light"');
     expect((await state()).agents.find((a) => a.id === light.agentId)?.theme).toBe("light");
-    // Codex tints its prompt from the background it was told: a light grey on light. Told nothing,
-    // as the agents launched without a theme are, it draws no tint at all.
-    await expect.poll(() => daemon.capture(light.agentId, 0, true)).toContain(LIGHT_TINT);
-    expect(daemon.capture(asker.agentId, 0, true)).not.toContain("\x1b[48;2;");
+    // Codex tints its prompt from the background it was told: a light grey on light. An agent
+    // launched without a theme is told dark, and draws a dark grey.
+    await expect
+      .poll(() => daemon.styledScreen(light.agentId), { timeout: 15_000 })
+      .toMatch(TINT.light);
+    expect(await daemon.styledScreen(asker.agentId)).toMatch(TINT.dark);
   });
 
   it("is bound to the thread Bazhen started for it, before its TUI runs", async () => {
@@ -223,7 +233,7 @@ describe("a Codex agent", () => {
 
   it("runs its TUI in its terminal, which takes a turn through the fake model", async () => {
     await waitUntil(
-      () => daemon.screen(launched.agentId).includes(BANNER.codex),
+      async () => (await daemon.screen(launched.agentId)).includes(BANNER.codex),
       "Codex's TUI",
       30_000,
     );
@@ -365,9 +375,11 @@ describe("a Codex agent", () => {
       (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id,
     );
     // With nothing but Bazhen to subscribe, a restarted Codex has the thread loaded only if
-    // Bazhen resumed it.
-    daemon.runInTerminal(launched.agentId, ["sleep", "600"]);
+    // Bazhen resumed it: while the daemon is down, its TUI is killed and something else takes its
+    // terminal.
     await daemon.crash();
+    await daemon.signalAgent(launched.agentId, "SIGKILL");
+    await daemon.respawnOnHolder(launched.agentId, ["sleep", "600"]);
     // A stop and a start, not a restart: a restarted server reloads its threads by itself.
     await daemon.codex("app-server", "daemon", "stop");
     await daemon.codex("app-server", "daemon", "start");
@@ -384,61 +396,29 @@ describe("a Codex agent", () => {
     const thread = (await agent())?.externalRef;
     await daemon.signalAgent(launched.agentId, "SIGKILL");
     await expect.poll(async () => (await agent())?.state, { timeout: 10_000 }).toBe("exited");
+    const exitedAt = Number((await agent())?.generation);
     const respawned = await daemon.request(`/v1/agents/${launched.agentId}/respawn`, {
       method: "POST",
-      body: { idempotencyKey: "respawn", generation: Number((await agent())?.generation) },
+      body: { idempotencyKey: "respawn", generation: exitedAt },
     });
     expect(respawned.status).toBe(200);
     await waitUntil(
-      () => daemon.screen(launched.agentId).includes(BANNER.codex),
+      async () => (await daemon.screen(launched.agentId)).includes(BANNER.codex),
       "Codex's TUI after the respawn",
       30_000,
     );
     await daemon.running(launched.agentId);
-    expect(await agent()).toMatchObject({ state: "running", generation: 1, externalRef: thread });
-    // The TUI titles its pane with the thread it shows: the same thread, not a new one.
+    expect(await agent()).toMatchObject({
+      state: "running",
+      generation: exitedAt + 1,
+      externalRef: thread,
+    });
+    // The TUI titles its terminal with the thread it shows: the same thread, not a new one.
     await expect
-      .poll(() => showsThread(daemon.paneTitle(launched.agentId), String(thread?.id)), {
+      .poll(async () => showsThread(await daemon.title(launched.agentId), String(thread?.id)), {
         timeout: 30_000,
       })
       .toBe(true);
-  });
-
-  it("follows its TUI to the new thread a /new starts, and takes mail there", async () => {
-    const bound = async () =>
-      (await state()).agents.find((a) => a.id === launched.agentId)?.externalRef?.id;
-    const before = await bound();
-    await daemon.prompt(launched, "/new");
-    // The new session is up once the TUI titles its pane with another thread.
-    await expect
-      .poll(() => showsThread(daemon.paneTitle(launched.agentId), String(before)), {
-        timeout: 30_000,
-      })
-      .toBe(false);
-    await daemon.prompt(launched, "hello from the new thread");
-    // The pane's title names the thread the TUI shows; the agent is bound to that one now.
-    await expect
-      .poll(
-        async () => {
-          const now = await bound();
-          return {
-            moved: now !== before,
-            shown: showsThread(daemon.paneTitle(launched.agentId), String(now)),
-          };
-        },
-        { timeout: 30_000 },
-      )
-      .toEqual({ moved: true, shown: true });
-    const sent = await daemon.request(`/v1/agents/${launched.agentId}/messages`, {
-      method: "POST",
-      body: { idempotencyKey: "mail-after-new", body: "mail for the new thread" },
-    });
-    const { messageId } = SendMessageResponse.parse(sent.body);
-    await expect
-      .poll(async () => (await state()).messages.find((m) => m.id === messageId)?.state, {
-        timeout: 30_000,
-      })
-      .toBe("delivered");
   });
 
   // The TUI loads the threads it starts itself, so only its own flags can give them the socket:
@@ -477,7 +457,10 @@ describe("a Codex agent", () => {
   it("answers a respawn Codex refuses with Codex's own reason, and records it", async () => {
     const quitter = await daemon.launch("codex-refused", "codex");
     const agent = async () => (await state()).agents.find((a) => a.id === quitter.agentId);
-    await waitUntil(() => daemon.screen(quitter.agentId).includes(BANNER.codex), "Codex's TUI");
+    await waitUntil(
+      async () => (await daemon.screen(quitter.agentId)).includes(BANNER.codex),
+      "Codex's TUI",
+    );
     await daemon.prompt(quitter, "/quit");
     await expect.poll(async () => (await agent())?.state, { timeout: 15_000 }).toBe("exited");
     // The provider the thread started on is taken out of the user's config, and a server started
@@ -515,8 +498,11 @@ describe("a Codex agent", () => {
   // can start it. Its commands on every thread then inherit that agent's variables.
   it("keeps a command the agent runs its own, on a server started inside another agent", async () => {
     const starter = await daemon.launch("codex-starter", "codex");
-    await waitUntil(() => daemon.screen(starter.agentId).includes(BANNER.codex), "Codex's TUI");
-    const own = daemon.agentEnv(starter.agentId);
+    await waitUntil(
+      async () => (await daemon.screen(starter.agentId)).includes(BANNER.codex),
+      "Codex's TUI",
+    );
+    const own = await daemon.agentEnv(starter.agentId);
     const leaked = Object.fromEntries(
       ["BAZHEN_AGENT_ID", "BAZHEN_AGENT_AUTH_FILE", "BAZHEN_SOCKET"].map((name) => [
         name,
@@ -535,7 +521,10 @@ describe("a Codex agent", () => {
       }
       expect(daemon.codexServerEnv()["BAZHEN_AGENT_ID"]).toBe(starter.agentId);
       const agent = await daemon.launch("codex-on-leaked", "codex");
-      await waitUntil(() => daemon.screen(agent.agentId).includes(BANNER.codex), "Codex's TUI");
+      await waitUntil(
+        async () => (await daemon.screen(agent.agentId)).includes(BANNER.codex),
+        "Codex's TUI",
+      );
       const output = await ranAllowed(
         "env | grep ^BAZHEN_AGENT; ../cli/bazhen agents whoami",
         "leak",

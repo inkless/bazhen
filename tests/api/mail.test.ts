@@ -9,13 +9,16 @@ let agentId = "";
 let terminalId: string | null = null;
 beforeAll(async () => {
   model = await startFakeModel();
-  daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
+  daemon = await Daemon.start({ modelUrl: model.url });
   // The user's own status line, which Bazhen's must keep drawing.
   daemon.claudeSettings({
     statusLine: { type: "command", command: "printf 'user line: '; cat >/dev/null; printf ok" },
   });
   ({ agentId, terminalId } = await daemon.launch("mail"));
-  await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
+  await waitUntil(
+    async () => (await daemon.screen(agentId)).includes("Claude Code"),
+    "Claude Code's TUI",
+  );
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -45,8 +48,8 @@ const withToolResult = (request: string) => request.includes("tool_result");
  * slow runner lost is sent again, and none once the turn stops, since Esc at the prompt opens a
  * menu.
  */
-const interrupt = (view: { type(text: string): void }) => {
-  const still = busy();
+const interrupt = async (view: { type(text: string): void }) => {
+  const still = await busy();
   if (still) view.type("\x1b");
   return still;
 };
@@ -68,7 +71,7 @@ const doing = async () => agentIn(await state())?.activity?.value;
  * in "…" (a finished turn's line, "✻ Worked for 3s", has none). With a status line set, as
  * Bazhen always sets one, the TUI shows no "esc to interrupt" hint.
  */
-const busy = () => /^\s*[·✢✳✶✻✽*] \S[^\n]*…/m.test(daemon.screen(agentId));
+const busy = async () => /^\s*[·✢✳✶✻✽*] \S[^\n]*…/m.test(await daemon.screen(agentId));
 /** The events a stream received about one entity, in order. */
 const eventsAbout = (stream: EventClient, entityId: string): Event[] =>
   stream.frames.flatMap((f) =>
@@ -233,7 +236,7 @@ describe("mail to a Claude Code agent", () => {
     const before = agentIn(await state())?.externalRef?.id;
     expect(before).toEqual(expect.any(String));
     await daemon.prompt({ agentId, terminalId }, "/clear");
-    // The new session's SessionStart, from the pane's own process, moves the binding.
+    // The new session's SessionStart, from the terminal's own process, moves the binding.
     await expect
       .poll(async () => agentIn(await state())?.externalRef?.id, { timeout: 20_000 })
       .not.toBe(before);

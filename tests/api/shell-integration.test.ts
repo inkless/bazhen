@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
-import { Daemon, shellWithRc, typesBack, waitUntil, type IntegratedShell } from "./daemon.ts";
+import {
+  Daemon,
+  shellWithRc,
+  typeOnHolder,
+  typesBack,
+  waitUntil,
+  type IntegratedShell,
+} from "./daemon.ts";
+import { closeHoldersUnder } from "../support/holder-close.ts";
 
 /** The line docs/shell-integration.md gives each shell's rc file. */
 const RC_LINE: Record<IntegratedShell, string> = {
@@ -48,7 +56,6 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, RC[kind]);
       daemon = await Daemon.start({
-        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -73,7 +80,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       await view.drive();
       // Polled with expect, so a prompt that never comes fails showing what the screen did hold.
       await expect
-        .poll(() => daemon.shellScreen(terminalId), { timeout: 20_000 })
+        .poll(() => daemon.terminalScreen(terminalId), { timeout: 20_000 })
         .toContain("[st=0]");
       return { terminalId, view };
     }
@@ -85,7 +92,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       view.type(`${HIDDEN}\r`);
       view.type("true\r");
       await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe("true");
-      const token = String(daemon.shellEnv(terminalId).BAZHEN_SHELL_TOKEN);
+      const token = String((await daemon.terminalEnv(terminalId)).BAZHEN_SHELL_TOKEN);
 
       const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
       const events = await daemon.events({ epoch: state.epoch, eventId: 0 });
@@ -109,11 +116,11 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       const { terminalId, view } = await driven();
       view.type("false\r");
       await expect
-        .poll(() => daemon.shellScreen(terminalId), { timeout: 15_000 })
+        .poll(() => daemon.terminalScreen(terminalId), { timeout: 15_000 })
         .toContain("[st=1]");
       view.type("true\r");
       await expect
-        .poll(() => daemon.shellScreen(terminalId).trimEnd().split("\n").at(-1), {
+        .poll(async () => (await daemon.terminalScreen(terminalId)).trimEnd().split("\n").at(-1), {
           timeout: 15_000,
         })
         .toBe("[st=0]");
@@ -139,32 +146,32 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       const { terminalId, view } = await driven();
       view.type(`${BACKGROUND[kind].start}\r`);
       await expect
-        .poll(() => daemon.shellScreen(terminalId), { timeout: 15_000 })
+        .poll(() => daemon.terminalScreen(terminalId), { timeout: 15_000 })
         .toMatch(/^bg=\d+$/m);
       view.type("true\r");
       view.type(`${BACKGROUND[kind].show}\r`);
       await expect
-        .poll(() => daemon.shellScreen(terminalId), { timeout: 15_000 })
+        .poll(() => daemon.terminalScreen(terminalId), { timeout: 15_000 })
         .toMatch(/^now=\d+$/m);
-      const screen = daemon.shellScreen(terminalId);
+      const screen = await daemon.terminalScreen(terminalId);
       const started = /^bg=(\d+)$/m.exec(screen)?.[1];
       const now = /^now=(\d+)$/m.exec(screen)?.[1];
       view.close();
       expect(now).toBe(started);
     });
 
-    // These two come last, and only one of them runs: each ends the daemon and its tmux server, as
-    // a reboot would.
+    // These two come last, and only one of them runs: each ends the daemon and every terminal, as a
+    // reboot would.
     it.runIf(typesBack(kind))(
       "types the line back at a restarted shell's prompt, exactly and without running it",
       async () => {
         const { terminalId, view } = await driven();
         view.type(`${TYPED}\r`);
         await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe(TYPED);
-        const ran = `${daemon.shellEnv(terminalId).HOME} a  b`;
+        const ran = `${(await daemon.terminalEnv(terminalId)).HOME} a  b`;
         view.close();
         await daemon.crash();
-        daemon.tmuxServer.killServer();
+        await closeHoldersUnder(daemon.home);
         await daemon.restart();
 
         const lost = StateSnapshot.parse((await daemon.request("/v1/state")).body).shells.find(
@@ -176,11 +183,12 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
           body: { idempotencyKey: "retype", generation: lost?.generation, retype: true },
         });
         const { terminalId: next } = ShellCommandResponse.parse(restarted.body);
-        const lastLine = () => daemon.shellScreen(next).trimEnd().split("\n").at(-1);
+        const lastLine = async () =>
+          (await daemon.terminalScreen(next)).trimEnd().split("\n").at(-1);
         await expect.poll(lastLine, { timeout: 20_000 }).toBe(`[st=0] ${TYPED}`);
         // Had Enter been pressed, the line's output and a new prompt would follow it.
         await new Promise((resolve) => setTimeout(resolve, 1_000));
-        expect([lastLine(), daemon.shellScreen(next).includes(ran)]).toEqual([
+        expect([await lastLine(), (await daemon.terminalScreen(next)).includes(ran)]).toEqual([
           `[st=0] ${TYPED}`,
           false,
         ]);
@@ -206,10 +214,10 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
         await expect
           .poll(() => daemon.log(), { timeout: DECLINED_WITHIN_MS })
           .toContain(notRetyped(next));
-        expect([lastLine(daemon, next)(), daemon.shellScreen(next).includes("a  b")]).toEqual([
-          "[st=0]",
-          false,
-        ]);
+        expect([
+          await lastLine(daemon, next)(),
+          (await daemon.terminalScreen(next)).includes("a  b"),
+        ]).toEqual(["[st=0]", false]);
       },
       DECLINED_WITHIN_MS + 60_000,
     );
@@ -225,7 +233,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
  * would run the editor's binding for Z. Typed by hand into the first shell, before the marker
  * exists, a Z is a Z. bash's case tells only whether the wait for the editor works, not whether
  * the paste is marked: readline asks for bracketed paste as it leaves canonical mode, so a paste
- * typed after that is marked by tmux either way.
+ * typed after that is marked either way.
  */
 const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
   zsh: (marker) =>
@@ -255,7 +263,7 @@ const SLOW_RC: Record<IntegratedShell, (marker: string) => string> = {
 const SLOW_TYPED = `echo Z "$HOME"`;
 
 /**
- * Runs `line` in a new shell, then ends the daemon and its tmux server, as a reboot would; runs
+ * Runs `line` in a new shell, then ends the daemon and every terminal, as a reboot would; runs
  * `before` and starts the daemon again; and restarts the shell, asking for its line typed back.
  * Resolves with the new shell.
  */
@@ -267,12 +275,14 @@ async function retypedAfterReboot(daemon: Daemon, line: string, before = () => {
   const { terminalId } = ShellCommandResponse.parse(opened.body);
   const view = await daemon.view(terminalId, "interactive");
   await view.drive();
-  await expect.poll(() => daemon.shellScreen(terminalId), { timeout: 20_000 }).toContain("[st=0]");
+  await expect
+    .poll(() => daemon.terminalScreen(terminalId), { timeout: 20_000 })
+    .toContain("[st=0]");
   view.type(`${line}\r`);
   await expect.poll(() => daemon.keptShellLine(terminalId), { timeout: 15_000 }).toBe(line);
   view.close();
   await daemon.crash();
-  daemon.tmuxServer.killServer();
+  await closeHoldersUnder(daemon.home);
   before();
   await daemon.restart();
   const restarted = await daemon.request(`/v1/shells/${terminalId}/restart`, {
@@ -287,9 +297,9 @@ async function retypedAfterReboot(daemon: Daemon, line: string, before = () => {
  * for the shell's editor, as it is while what a line typed ahead started reads: an editor that
  * read that line at once never left canonical mode for it.
  */
-const heldBack = (daemon: Daemon, terminalId: string) => () =>
+const heldBack = (daemon: Daemon, terminalId: string) => async () =>
   daemon.log().includes(`shell ${terminalId}: last command not retyped`) ||
-  Daemon.promptWaiters(daemon.shellPid(terminalId)) === 1;
+  Daemon.promptWaiters(await daemon.terminalPid(terminalId)) === 1;
 
 /**
  * What the daemon logs for a restarted shell whose integration said at its first prompt that it
@@ -303,8 +313,8 @@ const notRetyped = (terminalId: string) =>
  */
 const DECLINED_WITHIN_MS = 15_000;
 
-const lastLine = (daemon: Daemon, terminalId: string) => () =>
-  daemon.shellScreen(terminalId).trimEnd().split("\n").at(-1);
+const lastLine = (daemon: Daemon, terminalId: string) => async () =>
+  (await daemon.terminalScreen(terminalId)).trimEnd().split("\n").at(-1);
 
 describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
   "a %s shell whose prompt is slow to draw, restarted with its last line",
@@ -314,7 +324,6 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, SLOW_RC[kind]);
       daemon = await Daemon.start({
-        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -329,13 +338,15 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       const next = await retypedAfterReboot(daemon, "echo typed-back");
       // Typed straight into the new terminal as its shell starts, well before its slow prompt is
       // drawn, so it is read before anything pasted could be.
-      const session = String(daemon.paneFact(next, "session_name", "@bazhen_terminal_id"));
-      daemon.tmux("send-keys", "-t", session, "-l", "cat > typed-ahead.out");
-      daemon.tmux("send-keys", "-t", session, "Enter");
-      const running = () => daemon.paneFact(next, "pane_current_command", "@bazhen_terminal_id");
+      const holder = String(daemon.holderAt(next));
+      await typeOnHolder(holder, "cat > typed-ahead.out\r");
+      const running = async () =>
+        StateSnapshot.parse((await daemon.request("/v1/state")).body).shells.find(
+          (s) => s.id === next,
+        )?.foreground?.command;
       await expect.poll(running, { timeout: 20_000 }).toBe("cat");
       await expect.poll(heldBack(daemon, next), { timeout: 20_000 }).toBe(true);
-      daemon.tmux("send-keys", "-t", session, "C-d");
+      await typeOnHolder(holder, "\x04");
       await expect
         .poll(lastLine(daemon, next), { timeout: 20_000 })
         .toMatch(/^\[st=0\]( echo typed-back)?$/);
@@ -348,7 +359,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
         shell?.unmark();
         const next = await retypedAfterReboot(daemon, SLOW_TYPED, () => shell?.mark());
         await expect.poll(lastLine(daemon, next), { timeout: 20_000 }).toBe(`[st=0] ${SLOW_TYPED}`);
-        const screen = daemon.shellScreen(next);
+        const screen = await daemon.terminalScreen(next);
         expect([screen.split("echo").length - 1, screen.includes("X")]).toEqual([1, false]);
       },
     );
@@ -363,7 +374,7 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
           .toContain(notRetyped(next));
         // The shell says so as its first prompt starts, before the slow prompt is drawn.
         await expect.poll(lastLine(daemon, next), { timeout: 20_000 }).toBe("[st=0]");
-        expect(daemon.shellScreen(next).includes("X")).toBe(false);
+        expect((await daemon.terminalScreen(next)).includes("X")).toBe(false);
       },
       DECLINED_WITHIN_MS + 60_000,
     );
@@ -403,7 +414,6 @@ describe.each<"zsh" | "bash">(["zsh", "bash"])(
     beforeAll(async () => {
       shell = shellWithRc(kind, KEYS_RC[kind]);
       daemon = await Daemon.start({
-        runtime: "tmux",
         config: "[shells]\nretype_last_command = true\n",
         env: { SHELL: shell.shell },
       });
@@ -419,7 +429,7 @@ describe.each<"zsh" | "bash">(["zsh", "bash"])(
       await expect
         .poll(lastLine(daemon, next), { timeout: 20_000 })
         .toBe("[st=0] echo plain-ascii");
-      const screen = daemon.shellScreen(next);
+      const screen = await daemon.terminalScreen(next);
       expect([screen.includes("200~"), screen.includes("201~")]).toEqual([false, false]);
     });
 
@@ -430,7 +440,10 @@ describe.each<"zsh" | "bash">(["zsh", "bash"])(
       await expect
         .poll(() => daemon.log(), { timeout: 20_000 })
         .toContain(`shell ${next}: last command not retyped`);
-      expect([lastLine(daemon, next)(), daemon.log().includes("café")]).toEqual(["[st=0]", false]);
+      expect([await lastLine(daemon, next)(), daemon.log().includes("café")]).toEqual([
+        "[st=0]",
+        false,
+      ]);
     });
   },
 );
@@ -441,7 +454,6 @@ describe("a bash shell with no line editor", () => {
   beforeAll(async () => {
     shell = shellWithRc("bash", `${RC_LINE.bash}\nset +o emacs +o vi\nPS1='[st=0] '`);
     daemon = await Daemon.start({
-      runtime: "tmux",
       config: "[shells]\nretype_last_command = true\n",
       env: { SHELL: shell.shell },
     });
@@ -458,11 +470,11 @@ describe("a bash shell with no line editor", () => {
     });
     const { terminalId } = ShellCommandResponse.parse(opened.body);
     await expect
-      .poll(() => daemon.shellScreen(terminalId), { timeout: 20_000 })
+      .poll(() => daemon.terminalScreen(terminalId), { timeout: 20_000 })
       .toContain("[st=0]");
-    const pid = daemon.shellPid(terminalId);
+    const pid = await daemon.terminalPid(terminalId);
     // The terminal stays canonical, so the copy waits, for up to 10 s, until the shell has gone:
-    // its terminal hangs up as tmux closes the pane's, which ends the wait.
+    // its terminal hangs up as the shell's closes, which ends the wait.
     await expect.poll(() => Daemon.promptWaiters(pid), { timeout: 5_000 }).toBe(1);
     const view = await daemon.view(terminalId, "interactive");
     await view.drive();

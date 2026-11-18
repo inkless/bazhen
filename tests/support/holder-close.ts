@@ -34,8 +34,11 @@ export async function closeHolderAt(socket: string): Promise<void> {
   await ended.finally(() => clearTimeout(timer));
 }
 
-/** Whether `error` says no holder listens on the socket any more: one that died left it behind. */
-function leftBehind(error: unknown): boolean {
+/**
+ * Whether `error` says no holder listens on the socket: none was ever there, or one that died left
+ * it behind.
+ */
+export function leftBehind(error: unknown): boolean {
   const code: unknown = Reflect.get(Object(error), "code");
   return code === "ECONNREFUSED" || code === "ENOENT";
 }

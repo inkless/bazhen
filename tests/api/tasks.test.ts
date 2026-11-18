@@ -22,7 +22,6 @@ let codex: LaunchAgentResponse;
 beforeAll(async () => {
   [claudeModel, codexModel] = await Promise.all([startFakeModel(), startFakeResponses()]);
   daemon = await Daemon.start({
-    runtime: "tmux",
     modelUrl: claudeModel.url,
     responsesUrl: codexModel.url,
   });
@@ -32,12 +31,18 @@ beforeAll(async () => {
     daemon.launch("codex", "codex"),
   ]);
   await waitUntil(
-    () =>
-      [coordinator, worker].every((a) => daemon.screen(a.agentId).includes(BANNER["claude-code"])),
+    async () =>
+      (await Promise.all([coordinator, worker].map((a) => daemon.screen(a.agentId)))).every((s) =>
+        s.includes(BANNER["claude-code"]),
+      ),
     "Claude Code's TUIs",
     30_000,
   );
-  await waitUntil(() => daemon.screen(codex.agentId).includes(BANNER.codex), "Codex's TUI", 30_000);
+  await waitUntil(
+    async () => (await daemon.screen(codex.agentId)).includes(BANNER.codex),
+    "Codex's TUI",
+    30_000,
+  );
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -45,12 +50,12 @@ afterAll(async () => {
 });
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
-/** `bazhen <args>` as the agent would run it, inside its pane. */
+/** `bazhen <args>` as the agent would run it, inside its terminal. */
 const asAgent = (agentId: string, args: string[]) =>
   bazhen(args, {
     ...daemon.env,
     BAZHEN_AGENT_ID: agentId,
-    BAZHEN_AGENT_AUTH_FILE: daemon.agentEnv(agentId)["BAZHEN_AGENT_AUTH_FILE"] ?? "",
+    BAZHEN_AGENT_AUTH_FILE: daemon.tokenFile(agentId),
   });
 /** The subtask `bazhen tasks delegate` reports it made. */
 const subtaskOf = (out: string) => String(/delegated (task_\S+)/.exec(out)?.[1]);

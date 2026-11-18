@@ -47,7 +47,7 @@ describe("Claude Code launched in a folder it hasn't been told to trust", () => 
 
   it("stays starting at the trust question, and tells the human to look at its terminal", async () => {
     await waitUntil(
-      async () => /trust this folder/i.test(await daemon.shows(launched.agentId)),
+      async () => /trust this folder/i.test(await daemon.screen(launched.agentId)),
       "the trust question",
       30_000,
     );
@@ -59,7 +59,7 @@ describe("Claude Code launched in a folder it hasn't been told to trust", () => 
       expect.stringContaining("Look in its terminal for a dialog"),
     ]);
     // Nothing answered it while Bazhen waited.
-    expect(await daemon.shows(launched.agentId)).toMatch(/trust this folder/i);
+    expect(await daemon.screen(launched.agentId)).toMatch(/trust this folder/i);
   });
 
   it("runs once the human answers in its terminal, which closes the item as answered there", async () => {
@@ -69,7 +69,7 @@ describe("Claude Code launched in a folder it hasn't been told to trust", () => 
     // the fleet's tools once typed, ends the agent. The human moves to trusting the folder first.
     view.type("\x1b[B");
     await waitUntil(
-      async () => /❯ Yes, I trust this folder/.test(await daemon.shows(launched.agentId)),
+      async () => /❯ Yes, I trust this folder/.test(await daemon.screen(launched.agentId)),
       "the trusting answer chosen",
     );
     view.type("\r");
@@ -86,10 +86,10 @@ describe("Codex launched in a folder it hasn't been told to trust", () => {
   // Bazhen starts the thread and the TUI joins it on the app-server, where Codex asks nothing.
   it("comes up without a trust question, runs, and tells the human nothing", async () => {
     const { agentId } = await launchIn("codex", "codex-elsewhere");
-    await waitUntil(async () => (await daemon.shows(agentId)).includes(BANNER.codex), "Codex");
+    await waitUntil(async () => (await daemon.screen(agentId)).includes(BANNER.codex), "Codex");
     await expect.poll(() => daemon.agentState(agentId), { timeout: 30_000 }).toBe("running");
     await new Promise((resolve) => setTimeout(resolve, DEADLINE_S * 2000));
-    expect([await daemon.shows(agentId), await stuck(agentId)]).toEqual([
+    expect([await daemon.screen(agentId), await stuck(agentId)]).toEqual([
       expect.not.stringMatching(/trust/i),
       [],
     ]);
