@@ -74,7 +74,7 @@ pub(crate) const AGENTS_USAGE: &str = "usage:
   bazhen agents whoami
   bazhen agents rename <agent> <name>
   bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]
-  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]
+  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--compact-window <tokens>] [--json]
   bazhen agents close <agent> [--confirm-busy] [--force] [--json]
   bazhen agents respawn <agent> [--json]
   bazhen agents relaunch <agent> [--fresh] [--json]
@@ -83,7 +83,8 @@ pub(crate) const AGENTS_USAGE: &str = "usage:
 <agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send --wait
 exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
 if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.
-launch starts in --dir, else where it runs. close --confirm-busy ends what runs in the agent's
+launch starts in --dir, else where it runs, and --compact-window sets the tokens of context the
+harness compacts at, on every start of the agent. close --confirm-busy ends what runs in the agent's
 shells; --force records closed an agent whose terminal's server can't be shown gone, though it
 may still run. relaunch --fresh starts a new harness session when the old one can't resume.
 wait exits 0 once the agent is in <state>, or closed or failed for ended (an agent is running

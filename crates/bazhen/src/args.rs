@@ -8,7 +8,7 @@ use clap::parser::ValueSource;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 /// The options that take a value.
-const VALUED: [&str; 16] = [
+const VALUED: [&str; 17] = [
     "title",
     "brief",
     "brief-file",
@@ -25,6 +25,7 @@ const VALUED: [&str; 16] = [
     "port",
     "timeout",
     "after",
+    "compact-window",
 ];
 
 /// The options that are on or off.

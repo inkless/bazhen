@@ -68,6 +68,19 @@ describe("bazhen agents launch", () => {
     ]);
   });
 
+  it("asks for the compaction window given, in whole tokens", async () => {
+    launched();
+    await s.bazhen(["agents", "launch", "codex", "--compact-window", "300000"]);
+    expect(s.daemon.calls("POST /v1/agents").map((r) => r.body)).toEqual([
+      {
+        idempotencyKey: expect.stringMatching(UUID),
+        harness: "codex",
+        cwd: s.dir,
+        compactWindowTokens: 300_000,
+      },
+    ]);
+  });
+
   it("starts in --dir, made absolute from where it runs, or left for the daemon under ~", async () => {
     launched();
     await s.bazhen(["agents", "launch", "codex", "--dir", "sub/../app"]);
@@ -88,13 +101,15 @@ describe("bazhen agents launch", () => {
     ]);
   });
 
-  it("refuses, sending nothing, a harness it doesn't know, a bad name or role, and a word too many", async () => {
+  it("refuses, sending nothing, a harness it doesn't know, a bad name, role or window, and a word too many", async () => {
     const runs = await Promise.all([
       s.bazhen(["agents", "launch"]),
       s.bazhen(["agents", "launch", "vim"]),
       s.bazhen(["agents", "launch", "codex", "--name", "two words"]),
       s.bazhen(["agents", "launch", "codex", "--role", "Lead"]),
       s.bazhen(["agents", "launch", "codex", "now"]),
+      s.bazhen(["agents", "launch", "codex", "--compact-window", "99999"]),
+      s.bazhen(["agents", "launch", "codex", "--compact-window", "300k"]),
     ]);
     expect(runs.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
       [2, "missing the harness"],
@@ -102,6 +117,8 @@ describe("bazhen agents launch", () => {
       [2, expect.stringMatching(/^a name is 1 to 40 letters/)],
       [2, "--role is a role bazhen roles lists, not Lead"],
       [2, "agents launch takes no now"],
+      [2, "--compact-window is whole tokens, 100000 to 10000000, not 99999"],
+      [2, "--compact-window is whole tokens, 100000 to 10000000, not 300k"],
     ]);
     expect(s.daemon.received).toEqual([]);
   });

@@ -305,19 +305,19 @@ exit 3.
 
 The verbs the web client's agent controls use, for a terminal or a script:
 
-| Command                                                                   | Does                                                                              |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `bazhen agents launch claude-code\|codex [--dir …] [--name …] [--role …]` | Start an agent in `--dir`, else where the command runs                            |
-| `bazhen agents close <agent> [--confirm-busy] [--force]`                  | Close it; `--confirm-busy` also ends what runs in its shells                      |
-| `bazhen agents respawn <agent>`                                           | Start an exited agent again, on its harness session                               |
-| `bazhen agents relaunch <agent> [--fresh]`                                | Start a lost agent again on a new terminal; `--fresh` if its session can't resume |
-| `bazhen agents signal <agent> INT\|TERM\|HUP\|KILL`                       | Send its process a signal, named with or without `SIG`                            |
-| `bazhen shells list [--all]`                                              | The shells neither closed nor failed, or with `--all` every one                   |
-| `bazhen shells open [<agent> \| --dir …]`                                 | A shell beside an agent, in its directory, else in `--dir` or where it runs       |
-| `bazhen shells close <shell> [--confirm-busy] [--force]`                  | Close a shell, named by its id or a name one open shell has, in any case          |
-| `bazhen events follow [--after <event>]`                                  | Each event as it happens, until Ctrl-C; it tries again while the daemon is away   |
-| `bazhen agents wait <agent> <state>\|ended [--timeout <s>]`               | Wait for an agent to be in a state; it is `running` once ready                    |
-| `bazhen shells wait <shell> <state>\|ended [--timeout <s>]`               | Wait for a shell to be in a state                                                 |
+| Command                                                                                               | Does                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `bazhen agents launch claude-code\|codex [--dir …] [--name …] [--role …] [--compact-window <tokens>]` | Start an agent in `--dir`, else where the command runs; `--compact-window` sets when its harness compacts, on every start |
+| `bazhen agents close <agent> [--confirm-busy] [--force]`                                              | Close it; `--confirm-busy` also ends what runs in its shells                                                              |
+| `bazhen agents respawn <agent>`                                                                       | Start an exited agent again, on its harness session                                                                       |
+| `bazhen agents relaunch <agent> [--fresh]`                                                            | Start a lost agent again on a new terminal; `--fresh` if its session can't resume                                         |
+| `bazhen agents signal <agent> INT\|TERM\|HUP\|KILL`                                                   | Send its process a signal, named with or without `SIG`                                                                    |
+| `bazhen shells list [--all]`                                                                          | The shells neither closed nor failed, or with `--all` every one                                                           |
+| `bazhen shells open [<agent> \| --dir …]`                                                             | A shell beside an agent, in its directory, else in `--dir` or where it runs                                               |
+| `bazhen shells close <shell> [--confirm-busy] [--force]`                                              | Close a shell, named by its id or a name one open shell has, in any case                                                  |
+| `bazhen events follow [--after <event>]`                                                              | Each event as it happens, until Ctrl-C; it tries again while the daemon is away                                           |
+| `bazhen agents wait <agent> <state>\|ended [--timeout <s>]`                                           | Wait for an agent to be in a state; it is `running` once ready                                                            |
+| `bazhen shells wait <shell> <state>\|ended [--timeout <s>]`                                           | Wait for a shell to be in a state                                                                                         |
 
 All but `shells list`, which only reads, are yours alone: the daemon refuses them to an agent, and
 the CLI prints its refusal. A command acts on the agent or shell as `/v1/state` shows it at that
@@ -328,7 +328,9 @@ CLI's reading of the daemon's answer: `{ agentId, eventIds }`, and a launch's `t
 shell `{ terminalId, eventIds }`, and for `shells list` the shells as `/v1/state` shows them.
 
 `events follow` prints a line an event, or with `--json` each event as the daemon sent it, and
-says so when events were missed and it follows on from the daemon's state. `agents wait` and
+says so when events were missed and it follows on from the daemon's state. An agent's harness
+compacting its context shows as `agent.compacted`, with the context use recorded before it.
+`agents wait` and
 `shells wait` exit 0 once the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
 given, at least 1) runs out first, whatever the daemon is doing; with `--json` it prints the
 record that met it. Both are yours alone too: the daemon refuses an agent the event stream.
