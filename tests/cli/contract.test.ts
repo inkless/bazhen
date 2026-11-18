@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AgentCommandResponse,
@@ -24,7 +26,7 @@ import {
   StopResponse,
   WaitMessagesResponse,
 } from "@bazhen/protocol";
-import { FakeDaemon, type Scene, scene } from "./cli.ts";
+import { FakeDaemon, type Scene, checkoutWith, scene } from "./cli.ts";
 import {
   AGENT,
   ANOTHER_BUILD,
@@ -49,6 +51,8 @@ afterEach(async () => {
 });
 
 const NOT_RUNNING = "bazhen is not running; start it with `bazhen start`\n";
+const execFileAsync = promisify(execFile);
+const PATH = process.env["PATH"] ?? "/usr/bin:/bin";
 
 describe("the command line", () => {
   it("prints the usage of every verb and exits 2 with no verb, or one it doesn't know", async () => {
@@ -180,21 +184,19 @@ async function callers(): Promise<{ daemon: FakeDaemon; env: { BAZHEN_SOCKET: st
   return { daemon: await FakeDaemon.listen(socket), env: { BAZHEN_SOCKET: socket } };
 }
 
-const OVERRIDES = (socket: string, home: string) =>
-  `bazhen: using BAZHEN_SOCKET ${socket}, not --home ${home}; run with BAZHEN_SOCKET= to use --home\n`;
+const CONFLICT = (socket: string, home: string) =>
+  `--home ${home} names another daemon than BAZHEN_SOCKET ${socket}; run with BAZHEN_SOCKET= to use --home\n`;
 
 describe("the daemon any verb reaches", () => {
-  it("is the one whose socket started its caller, over BAZHEN_HOME and --home", async () => {
+  it("is the one whose socket started its caller, over BAZHEN_HOME", async () => {
     const theirs = await callers();
     try {
       theirs.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
       state();
-      const byEnv = await s.bazhen(["task", "list", "--all"], theirs.env);
-      const byFlag = await s.bazhen(["task", "list", "--all", "--home", s.home], theirs.env);
-      expect([byEnv.code, byFlag.code, theirs.daemon.routes(), s.daemon.routes()]).toEqual([
-        0,
-        0,
-        ["GET /v1/state", "GET /v1/state"],
+      const ran = await s.bazhen(["task", "list", "--all"], theirs.env);
+      expect([ran, theirs.daemon.routes(), s.daemon.routes()]).toEqual([
+        { code: 0, stdout: expect.any(String), stderr: "" },
+        ["GET /v1/state"],
         [],
       ]);
     } finally {
@@ -249,16 +251,19 @@ describe("the daemon any verb reaches", () => {
     }
   });
 
-  it("is not running when nothing answers on its caller's socket, though the home's daemon does", async () => {
+  it("is not running when nothing answers on its caller's socket, naming it and the way to the home's", async () => {
     state().answer("GET /v1/health", HealthResponse, health());
     const gone = { BAZHEN_SOCKET: join(s.dir, "gone.sock") };
+    const notRunning = {
+      code: 3,
+      stdout: "",
+      stderr:
+        `bazhen is not running on BAZHEN_SOCKET ${gone.BAZHEN_SOCKET}; run with BAZHEN_SOCKET= ` +
+        "to reach the daemon your home names\n",
+    };
     const listed = await s.bazhen(["task", "list"], gone);
     const status = await s.bazhen(["status"], gone);
-    expect([listed, status, s.daemon.received]).toEqual([
-      { code: 3, stdout: "", stderr: NOT_RUNNING },
-      { code: 3, stdout: "", stderr: NOT_RUNNING },
-      [],
-    ]);
+    expect([listed, status, s.daemon.received]).toEqual([notRunning, notRunning, []]);
   });
 
   it("is the one the home names when BAZHEN_SOCKET is empty", async () => {
@@ -272,27 +277,74 @@ describe("the daemon any verb reaches", () => {
     ]);
   });
 
-  it("says so on stderr when BAZHEN_SOCKET overrides a --home that names another daemon", async () => {
+  it("is none when --home names another daemon than BAZHEN_SOCKET, refused on stderr alone", async () => {
     const theirs = await callers();
     try {
-      theirs.daemon
-        .answer("GET /v1/health", HealthResponse, health())
-        .answer("GET /v1/state", StateSnapshot, snapshot());
-      state().answer("GET /v1/health", HealthResponse, health());
-      const other = await s.bazhen(["status", "--home", s.home], theirs.env);
-      const overHome = await s.bazhen(["status"], theirs.env);
-      const same = await s.bazhen(["status", "--home", `${s.home}/`], {
-        BAZHEN_SOCKET: s.socket,
-      });
-      expect([other, overHome, same].map((r) => [r.code, r.stderr])).toEqual([
-        [0, OVERRIDES(theirs.env.BAZHEN_SOCKET, s.home)],
-        [0, ""],
-        [0, ""],
+      theirs.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
+      state();
+      const refused = { code: 1, stdout: "", stderr: CONFLICT(theirs.env.BAZHEN_SOCKET, s.home) };
+      const stop = await s.bazhen(["stop", "--home", s.home], theirs.env);
+      const json = await s.bazhen(["shells", "list", "--json", "--home", s.home], theirs.env);
+      const listed = await s.bazhen(["task", "list", "--home", s.home], theirs.env);
+      expect([stop, json, listed, theirs.daemon.received, s.daemon.received]).toEqual([
+        refused,
+        refused,
+        refused,
+        [],
+        [],
       ]);
-      expect(s.daemon.routes().toSorted()).toEqual(["GET /v1/health", "GET /v1/state"]);
     } finally {
       await theirs.daemon.close();
     }
+  });
+
+  it("is BAZHEN_SOCKET's when --home names that socket, by another spelling or a symlink", async () => {
+    state().answer("GET /v1/health", HealthResponse, health());
+    const linked = join(s.root, "linked-home");
+    symlinkSync(s.home, linked);
+    const env = { BAZHEN_SOCKET: s.socket };
+    const slash = await s.bazhen(["status", "--home", `${s.home}/`], env);
+    const symlink = await s.bazhen(["status", "--home", linked], env);
+    expect([slash, symlink].map((r) => [r.code, r.stderr])).toEqual([
+      [0, ""],
+      [0, ""],
+    ]);
+  });
+
+  it("is none for a BAZHEN_SOCKET no daemon would set: relative, or with a stray newline", async () => {
+    const relative = await s.bazhen(["status"], { BAZHEN_SOCKET: "run/bazhen.sock" });
+    const newline = await s.bazhen(["status"], { BAZHEN_SOCKET: `${s.socket}\n` });
+    expect([relative, newline, s.daemon.received]).toEqual([
+      {
+        code: 1,
+        stdout: "",
+        stderr: 'BAZHEN_SOCKET must be an absolute path, not "run/bazhen.sock"\n',
+      },
+      {
+        code: 1,
+        stdout: "",
+        stderr: `BAZHEN_SOCKET must be an absolute path, not "${s.socket}\\n"\n`,
+      },
+      [],
+    ]);
+  });
+
+  it("doesn't decide what start starts: it runs the daemon of the home --home names", async () => {
+    const binary = checkoutWith(
+      join(s.root, "checkout"),
+      "process.stdout.write(`home=${process.env.BAZHEN_HOME}`);\n",
+    );
+    const start = (socket: string) =>
+      execFileAsync(binary, ["start", "--home", s.home], {
+        env: { PATH, HOME: s.root, BAZHEN_SOCKET: socket },
+        cwd: s.dir,
+      });
+    const other = await start(join(s.dir, "agent-run", "bazhen.sock"));
+    const relative = await start("relative.sock");
+    expect([other, relative]).toEqual([
+      { stdout: `home=${s.home}`, stderr: "" },
+      { stdout: `home=${s.home}`, stderr: "" },
+    ]);
   });
 
   it("is under --home over BAZHEN_HOME, and under a home given with a trailing slash", async () => {

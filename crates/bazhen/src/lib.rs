@@ -150,21 +150,16 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
             return Exit::Usage;
         }
     };
-    let socket = match paths::socket(&inputs(p.value("home"))) {
+    let verb = p.word(0).unwrap_or_default();
+    // `start` hands `--home` to the daemon it starts and reaches no socket.
+    let inputs = inputs(p.value("home"), verb != "start");
+    let socket = match paths::socket(&inputs, paths::same_socket) {
         Ok(socket) => socket,
-        Err(relative) => {
-            out.err(&relative.to_string());
+        Err(refused) => {
+            out.err(&refused.to_string());
             return Exit::Failed;
         }
     };
-    let verb = p.word(0).unwrap_or_default();
-    // `start` hands `--home` to the daemon it starts, reaching no socket: nothing overrides it.
-    if let Some(home) = socket.overridden_home.filter(|_| verb != "start") {
-        out.err(&format!(
-            "bazhen: using BAZHEN_SOCKET {}, not --home {home}; run with BAZHEN_SOCKET= to use --home",
-            socket.path
-        ));
-    }
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
@@ -193,6 +188,14 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
     };
     match result {
         Ok(exit) => exit,
+        Err(Failed::NotRunning) if socket.from_env => {
+            out.err(&format!(
+                "bazhen is not running on BAZHEN_SOCKET {}; run with BAZHEN_SOCKET= to reach \
+                 the daemon your home names",
+                socket.path
+            ));
+            Exit::NotRunning
+        }
         Err(Failed::NotRunning) => {
             out.err(NOT_RUNNING);
             Exit::NotRunning
@@ -208,9 +211,9 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
     }
 }
 
-/// This process's inputs to the socket's place: `BAZHEN_SOCKET`, then `--home`, then
-/// `BAZHEN_HOME`.
-fn inputs(home_flag: Option<&str>) -> paths::Inputs {
+/// This process's inputs to the socket's place: `BAZHEN_SOCKET` if `with_socket`, then `--home`,
+/// then `BAZHEN_HOME`.
+fn inputs(home_flag: Option<&str>, with_socket: bool) -> paths::Inputs {
     let var = |name: &str| std::env::var(name).ok();
     let tmp = ["TMPDIR", "TMP", "TEMP"]
         .iter()
@@ -227,7 +230,9 @@ fn inputs(home_flag: Option<&str>) -> paths::Inputs {
             },
         );
     paths::Inputs {
-        bazhen_socket: var("BAZHEN_SOCKET"),
+        bazhen_socket: std::env::var_os("BAZHEN_SOCKET")
+            .filter(|_| with_socket)
+            .map(|v| v.to_string_lossy().into_owned()),
         home_flag: home_flag.map(str::to_owned),
         bazhen_home: var("BAZHEN_HOME"),
         xdg_runtime_dir: var("XDG_RUNTIME_DIR"),

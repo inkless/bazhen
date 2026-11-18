@@ -213,9 +213,12 @@ on Linux, or `<BAZHEN_HOME>/run/tmux.sock` under a relocated home. A runtime dir
 socket path would be too long moves to `/tmp/bazhen-<uid>-<hash>`.
 
 Every agent and shell Bazhen opens gets the daemon's socket as `BAZHEN_SOCKET`, and every
-`bazhen` verb run there reaches that daemon, over `--home` and `BAZHEN_HOME`. When it overrides a
-`--home` that names another daemon, it says so on stderr. To reach another instance from inside
-one, empty it: `BAZHEN_SOCKET= bazhen status --home <dir>`.
+`bazhen` verb run there but `start` reaches that daemon. It wins over `BAZHEN_HOME` without a
+word, as both come from the environment. A `--home` naming another daemon is refused instead
+(exit 1), so `bazhen stop --home <dir>` typed in a Bazhen shell never stops the daemon hosting it.
+To reach another instance from inside one, empty it: `BAZHEN_SOCKET= bazhen status --home <dir>`.
+`start` ignores `BAZHEN_SOCKET`: it starts the daemon of the home `--home` or `BAZHEN_HOME` names,
+else the default one.
 
 ## Tasks
 

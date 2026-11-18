@@ -6,7 +6,7 @@
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -14,7 +14,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createServer as createSocketServer, type Socket } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
@@ -50,6 +50,25 @@ import { WebSocketServer } from "ws";
 
 const repo = fileURLToPath(new URL("../..", import.meta.url));
 const RUST_CLI = join(repo, "target/release/bazhen");
+/** The CLI under test: `BAZHEN_CLI` when set, else the checkout's release build. */
+export const cliBinary = () => {
+  const binary = process.env["BAZHEN_CLI"] ?? "";
+  return binary === "" ? RUST_CLI : binary;
+};
+/**
+ * A copy of the CLI under test in a checkout of its own under `root`, whose daemon start-up is
+ * `startTs`, so `bazhen start` runs that instead of starting a daemon. Returns the copy's path.
+ */
+export function checkoutWith(root: string, startTs: string): string {
+  const binary = join(root, "target", "release", "bazhen");
+  const entry = join(root, "apps", "daemon", "src", "start.ts");
+  mkdirSync(dirname(binary), { recursive: true });
+  mkdirSync(dirname(entry), { recursive: true });
+  copyFileSync(cliBinary(), binary);
+  writeFileSync(entry, startTs);
+  return binary;
+}
+
 /** Past any call the CLI makes here, and short of the project's test timeout. */
 export const RUN_MS = 20_000;
 
@@ -416,8 +435,7 @@ export interface Running {
 }
 
 function start(args: readonly string[], env: Record<string, string>, cwd: string): Running {
-  const binary = process.env["BAZHEN_CLI"] ?? "";
-  const file = binary === "" ? RUST_CLI : binary;
+  const file = cliBinary();
   const child = spawn(file, args, { env, cwd, timeout: RUN_MS });
   let stdout = "";
   let stderr = "";
@@ -472,8 +490,7 @@ function run(
   cwd: string,
   input = "",
 ): Promise<Ran> {
-  const binary = process.env["BAZHEN_CLI"] ?? "";
-  const file = binary === "" ? RUST_CLI : binary;
+  const file = cliBinary();
   return new Promise((resolve, reject) => {
     const child = execFile(file, args, { env, cwd, timeout: RUN_MS }, (err, stdout, stderr) => {
       if (err?.killed === true) {
