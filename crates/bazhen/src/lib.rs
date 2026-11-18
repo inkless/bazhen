@@ -74,23 +74,26 @@ pub(crate) const AGENTS_USAGE: &str = "usage:
   bazhen agents [list] [--json]
   bazhen agents whoami
   bazhen agents rename <agent> <name>
-  bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]
+  bazhen agents send <agent> (<text> | --file <path>) [--wait | --reply] [--timeout <seconds>] [--json]
   bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--compact-window <tokens>] [--json]
   bazhen agents close <agent> [--confirm-busy] [--force] [--json]
   bazhen agents respawn <agent> [--json]
   bazhen agents relaunch <agent> [--fresh] [--json]
   bazhen agents signal <agent> INT|TERM|HUP|KILL [--json]
-  bazhen agents wait <agent> <state>|ended [--timeout <seconds>] [--json]
+  bazhen agents wait <agent> <state>|ended|ready|idle [--timeout <seconds>] [--json]
 <agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send --wait
 exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
 if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.
+send --reply, from inside an agent, waits instead for the agent's reply, and prints who replied
+and the reply's id; the reply arrives as mail.
 launch starts in --dir, else where it runs, and --compact-window sets the tokens of context the
 harness compacts at, on every start of the agent. close --confirm-busy ends what runs in the agent's
 shells; --force records closed an agent whose terminal's server can't be shown gone, though it
 may still run. relaunch --fresh starts a new harness session when the old one can't resume.
-wait exits 0 once the agent is in <state>, or closed or failed for ended (an agent is running
-once its harness is up and ready), 1 if it ended otherwise, and 5 if the timeout (60 s unless
-given, at least 1) runs out.";
+wait exits 0 once the agent is in <state>, closed or failed for ended, running for ready (its
+harness is up), or idle: its harness ended a turn after every message sent to it arrived. It
+exits 1 if the agent ended otherwise, 4 if a --reply message bounced, and 5 if the timeout (60 s
+unless given, at least 1) runs out; --json prints the daemon's whole answer.";
 
 pub(crate) const TASKS_USAGE: &str = "usage:
   bazhen tasks [list] [--all]
@@ -103,8 +106,11 @@ pub(crate) const TASKS_USAGE: &str = "usage:
   bazhen tasks note [<task>] <text> [--handoff]
   bazhen tasks send <task> (<text> | --file <path>) [--wait [--timeout <seconds>]]
   bazhen tasks delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
+  bazhen tasks wait <task> done [--timeout <seconds>] [--json]
 <agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send sends to
-everyone else on the task, and exits 4 if it skipped anyone; with --wait, as agents send --wait.";
+everyone else on the task, and exits 4 if it skipped anyone; with --wait, as agents send --wait.
+wait exits 0 once the task is done, or no one is still on it and someone completed their part, 1
+if it is cancelled, and 5 if the timeout runs out, as agents wait.";
 
 pub(crate) const INBOX_USAGE: &str = "usage:
   bazhen inbox escalate <question> [--task <task>]";

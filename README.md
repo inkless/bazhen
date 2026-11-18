@@ -230,30 +230,33 @@ else the default one.
 A task is a title and a brief, given to agents as its coordinator, lead or worker. Giving an agent
 a task mails it the brief and the commands to answer with:
 
-| Command                                                        | Does                                                                                 |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `bazhen tasks list [--all]`                                    | Open tasks; inside an agent, its own                                                 |
-| `bazhen tasks show <task>`                                     | One task in full: brief, assignments, subtasks, note                                 |
-| `bazhen tasks create --title … --brief …\|--brief-file …`      | A new task, optionally `--assign <agent> --role <role>`, or `--parent <task>`        |
-| `bazhen tasks assign <task> <agent> [--role …]`                | Give the task to another agent                                                       |
-| `bazhen tasks unassign <task> <assignment>`                    | Take it back, with everything that agent handed on                                   |
-| `bazhen tasks done [<task>] [--note …] [--cascade]`            | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks         |
-| `bazhen tasks cancel <task> [--note …] [--cascade]`            | Cancel it                                                                            |
-| `bazhen tasks send <task> <text>\|--file …`                    | Message everyone else on the task                                                    |
-| `bazhen agents list [--json]`                                  | The agents running, by name and id, to delegate to                                   |
-| `bazhen agents whoami`                                         | Inside an agent: its name, id, tasks, and whom it reports to on each                 |
-| `bazhen roles`                                                 | The roles defined, what each hands on, and any role file skipped                     |
-| `bazhen agents rename <agent> <name>`                          | Rename an agent; inside an agent, only itself                                        |
-| `bazhen inbox escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                      |
-| `bazhen tasks delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent        |
-| `bazhen tasks delegate --launch <harness> [--dir …] --title …` | The same, to a new agent it starts for the work, in its own directory unless `--dir` |
+| Command                                                        | Does                                                                                   |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `bazhen tasks list [--all]`                                    | Open tasks; inside an agent, its own                                                   |
+| `bazhen tasks show <task>`                                     | One task in full: brief, assignments, subtasks, note                                   |
+| `bazhen tasks create --title … --brief …\|--brief-file …`      | A new task, optionally `--assign <agent> --role <role>`, or `--parent <task>`          |
+| `bazhen tasks assign <task> <agent> [--role …]`                | Give the task to another agent                                                         |
+| `bazhen tasks unassign <task> <assignment>`                    | Take it back, with everything that agent handed on                                     |
+| `bazhen tasks done [<task>] [--note …] [--cascade]`            | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks           |
+| `bazhen tasks cancel <task> [--note …] [--cascade]`            | Cancel it                                                                              |
+| `bazhen tasks send <task> <text>\|--file …`                    | Message everyone else on the task                                                      |
+| `bazhen tasks wait <task> done`                                | Wait until the task is done, or no one is still on it and someone completed their part |
+| `bazhen agents list [--json]`                                  | The agents running, by name and id, to delegate to                                     |
+| `bazhen agents whoami`                                         | Inside an agent: its name, id, tasks, and whom it reports to on each                   |
+| `bazhen roles`                                                 | The roles defined, what each hands on, and any role file skipped                       |
+| `bazhen agents rename <agent> <name>`                          | Rename an agent; inside an agent, only itself                                          |
+| `bazhen agents wait <agent> idle\|ready\|ended\|<state>`       | Wait until the agent is idle, running, closed or failed, or in a lifecycle state       |
+| `bazhen agents send <agent> <text> --reply`                    | Inside an agent: send, then wait for that agent's reply                                |
+| `bazhen inbox escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                        |
+| `bazhen tasks delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent          |
+| `bazhen tasks delegate --launch <harness> [--dir …] --title …` | The same, to a new agent it starts for the work, in its own directory unless `--dir`   |
 
 `<agent>` is an agent's name or its id. Every agent has a name, unique among those not closed or
 failed: the one it was launched with (`--name`), or `<project>-<n>`, whose number is never given
 twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
 agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
-A Claude Code agent runs `bazhen agents list`, `agents whoami`, `agents rename`, `agents send`,
+A Claude Code agent runs `bazhen agents list`, `agents whoami`, `agents rename`, `agents send`, `agents wait`,
 every `bazhen tasks` verb, `bazhen inbox escalate` and `bazhen roles` without a permission
 prompt: the settings it starts with allow them, beside your own, and the daemon decides what each
 agent may do with them. Other `bazhen` commands still ask, the other `agents` verbs among them, and so
@@ -263,6 +266,23 @@ that messages another with Claude Code's own SendMessage instead of `bazhen agen
 message on both agents' pages, as sent and with delivery not tracked: Bazhen sees it leave, never
 arrive. It is matched to the agent whose session answers to the name it was sent to, the name
 that agent was last started with.
+
+### Waiting
+
+A wait blocks until what it waits for happens, then exits once, so an agent can run one in the
+background and act when it ends, rather than polling `agents list` or sleeping. The daemon judges
+the wait when it arrives and again after every change it records, so nothing that happens between
+asking and listening is missed. An agent is `idle` once its harness reports a turn ended after
+every message sent to it arrived: an agent just sent work isn't idle until it has taken it up.
+`ready` is `running`, its harness up. `--reply` prints who replied and the reply's id, not its
+text, which arrives as mail; only the agent that sent a message may wait for its reply. Each wait
+exits 0 when it happened, 1 when it can't now (the agent ended otherwise, or the task was
+cancelled), 4 when a `--reply` message bounced, 5 when `--timeout` (60 s unless given, at least
+
+1. ran out first, and 3 when no daemon is running. While the daemon is away it tries again until
+   it is back or the timeout runs out. `--json` prints the daemon's whole answer. A caller may wait on
+   any agent, shell or task it can read in `/v1/state`, and is told nothing more than that shows.
+   `bazhen shells wait <shell> <state>|ended` waits on a shell the same way.
 
 Roles are configuration. Bazhen ships four, coordinator, lead, worker and reviewer, each a
 Markdown file whose front matter says which roles it may hand on (`grants`), whether a task has
@@ -316,8 +336,6 @@ The verbs the web client's agent controls use, for a terminal or a script:
 | `bazhen shells open [<agent> \| --dir …]`                                                             | A shell beside an agent, in its directory, else in `--dir` or where it runs                                               |
 | `bazhen shells close <shell> [--confirm-busy] [--force]`                                              | Close a shell, named by its id or a name one open shell has, in any case                                                  |
 | `bazhen events follow [--after <event>]`                                                              | Each event as it happens, until Ctrl-C; it tries again while the daemon is away                                           |
-| `bazhen agents wait <agent> <state>\|ended [--timeout <s>]`                                           | Wait for an agent to be in a state; it is `running` once ready                                                            |
-| `bazhen shells wait <shell> <state>\|ended [--timeout <s>]`                                           | Wait for a shell to be in a state                                                                                         |
 
 All but `shells list`, which only reads, are yours alone: the daemon refuses them to an agent, and
 the CLI prints its refusal. A command acts on the agent or shell as `/v1/state` shows it at that
@@ -330,11 +348,7 @@ shell `{ terminalId, eventIds }`, and for `shells list` the shells as `/v1/state
 `events follow` prints a line an event, or with `--json` each event as the daemon sent it, and
 says so when events were missed and it follows on from the daemon's state. An agent's harness
 compacting its context shows as `agent.compacted`, with the context use recorded before it.
-`agents wait` and
-`shells wait` exit 0 once the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
-given, at least 1) runs out first, whatever the daemon is doing; with `--json` it prints the
-record that met it. Both are yours alone too: the daemon refuses an agent the event stream.
-Ctrl-C ends `events follow` at once while it waits on the stream, and within 5 s while it waits
+`events follow` is yours alone too: the daemon refuses an agent the event stream. Ctrl-C ends `events follow` at once while it waits on the stream, and within 5 s while it waits
 on a call to the daemon, such as opening the stream again.
 
 ## What Bazhen knows about who is calling

@@ -165,6 +165,7 @@ const AGENT_VERBS = [
   "agents whoami",
   "agents rename",
   "agents send",
+  "agents wait",
   "tasks",
   "inbox escalate",
   "roles",

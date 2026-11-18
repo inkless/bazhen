@@ -235,6 +235,7 @@ describe("Claude Code's permissions", () => {
         "Bash(bazhen agents whoami:*)",
         "Bash(bazhen agents rename:*)",
         "Bash(bazhen agents send:*)",
+        "Bash(bazhen agents wait:*)",
         "Bash(bazhen tasks:*)",
         "Bash(bazhen inbox escalate:*)",
         "Bash(bazhen roles:*)",
