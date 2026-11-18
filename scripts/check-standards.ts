@@ -441,7 +441,9 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
-    "only a real signal",
+    "only a real signal. And libc's getsockopt(SO_PEERCRED) and getsid, since rustix's " +
+    "socket_peercred and getsid build a non-zero Pid from the kernel's answer, which is 0 for " +
+    "a process outside this one's PID namespace",
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +

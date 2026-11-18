@@ -318,7 +318,7 @@ pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
 /// The process `LOCAL_PEERPID` names at the other end of a Unix socket. As XNU's source reads, that
 /// is the peer socket's last user, the last process to send or receive on it, which need not be
 /// the one that connected.
-pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<Pid> {
+pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<libc::pid_t> {
     let mut pid: libc::pid_t = 0;
     let mut len =
         libc::socklen_t::try_from(std::mem::size_of::<libc::pid_t>()).map_err(io::Error::other)?;
@@ -333,8 +333,9 @@ pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<Pid> {
             &raw mut len,
         )
     };
-    if status != 0 {
-        return Err(io::Error::last_os_error());
+    if status == 0 {
+        Ok(pid)
+    } else {
+        Err(io::Error::last_os_error())
     }
-    Pid::from_raw(pid).ok_or_else(|| io::Error::other("the socket's peer has no process"))
 }
