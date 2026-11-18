@@ -5,7 +5,7 @@ import type { Socket } from "node:net";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { newId } from "@bazhen/core";
 import { guardCallers, type SocketEnv } from "./callers.ts";
 import {
@@ -380,6 +380,7 @@ describe("readPeer", () => {
       const conns = await connections(WAVES * MAX_READING);
       const readings = Promise.all(conns.map((conn) => readPeer(PEER_SOURCE, conn, DEADLINE_MS)));
       const stop = stallEveryTurn(STALL_MS);
+      onTestFinished(stop);
       const read = await readings.finally(stop);
       for (const conn of conns) conn.destroy();
       expect(read).toEqual(
