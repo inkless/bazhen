@@ -1,12 +1,12 @@
 //! What a connection asks of the terminal through the built binary: input, its size, signals, its
-//! tags and its foreground.
+//! tags, its foreground and its screen as text.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use bazhen_holder_proto::body::{
-    Cols, ErrorBody, Foreground, Rows, SetTagsRequest, Signal, SignalRequest, Size, TagName,
-    TagValue, Tags,
+    Cols, Count, ErrorBody, Foreground, Rows, Screen, ScreenRequest, SetTagsRequest, Signal,
+    SignalRequest, Size, TagName, TagValue, Tags,
 };
 use bazhen_holder_proto::{Reply, Request};
 
@@ -29,7 +29,10 @@ impl Client {
             match self.reply()? {
                 Reply::Data { bytes, .. } => seen.extend_from_slice(&bytes),
                 reply if is_report(&reply) => {}
-                Reply::Ok { id, .. } | Reply::Error { id, .. } | Reply::Foreground { id, .. }
+                Reply::Ok { id, .. }
+                | Reply::Error { id, .. }
+                | Reply::Foreground { id, .. }
+                | Reply::Screen { id, .. }
                     if id != request.id() =>
                 {
                     return Err(format!("an answer to {id:?} while waiting for another").into());
@@ -81,6 +84,19 @@ impl Client {
             Reply::Foreground { body, .. } => Ok(Ok(body)),
             Reply::Error { body, .. } => Ok(Err(body)),
             other => Err(format!("foreground was answered {other:?}").into()),
+        }
+    }
+
+    fn screen(&mut self, history: u64) -> Result<Screen> {
+        let request = Request::Screen {
+            id: self.id(),
+            body: ScreenRequest {
+                history: Count::new(history)?,
+            },
+        };
+        match self.ask(&request, &mut Vec::new())? {
+            Reply::Screen { body, .. } => Ok(body),
+            other => Err(format!("screen was answered {other:?}").into()),
         }
     }
 
@@ -492,4 +508,29 @@ fn a_foreground_group_whose_leader_has_exited_is_refused_failed() {
     let refused = client.foreground().unwrap().unwrap_err();
     assert_eq!(refused.code, "failed");
     assert!(refused.message.contains("leader has exited"), "{refused:?}");
+}
+
+#[test]
+#[ignore = "signals processes; runs in pnpm test:real rust"]
+fn a_reader_reads_the_screen_as_text_without_its_colours() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("screen").unwrap();
+    let script = "printf '\\033[1;31mbold red\\033[0m plain'; exec sleep 30";
+    let (_holder, socket) = serving(&home, &["sh", "-c", script]).unwrap();
+    let mut client = Client::connect(&socket).unwrap();
+    assert!(!client.hello(false).unwrap().writer);
+    let deadline = Instant::now() + DEADLINE;
+    let mut screen = client.screen(0).unwrap();
+    while !screen.text().contains("plain") {
+        assert!(
+            Instant::now() < deadline,
+            "the output never reached the screen"
+        );
+        screen = client.screen(0).unwrap();
+    }
+    assert_eq!(
+        (screen.text(), screen.history().get()),
+        ("bold red plain\n", 0)
+    );
 }

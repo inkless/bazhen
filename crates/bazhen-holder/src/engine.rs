@@ -29,6 +29,10 @@ pub trait Vt: fmt::Debug {
     ///
     /// As [`Engine::snapshot`].
     fn snapshot(&mut self, most: usize, out: &mut String) -> Result<usize, TooLarge>;
+    /// # Errors
+    ///
+    /// As [`Engine::text`].
+    fn text(&mut self, history: usize, most: usize, out: &mut String) -> Result<usize, TooLarge>;
     fn stats(&self) -> Stats;
     fn title(&self) -> Option<&str>;
     fn alternate(&self) -> bool;
@@ -59,6 +63,10 @@ impl Vt for Engine {
 
     fn snapshot(&mut self, most: usize, out: &mut String) -> Result<usize, TooLarge> {
         Self::snapshot(self, most, out)
+    }
+
+    fn text(&mut self, history: usize, most: usize, out: &mut String) -> Result<usize, TooLarge> {
+        Self::text(self, history, most, out)
     }
 
     fn stats(&self) -> Stats {
@@ -174,6 +182,22 @@ impl Walled {
     pub fn snapshot(&mut self, most: usize, out: &mut String) -> Option<Result<usize, TooLarge>> {
         let start = out.len();
         let written = self.call("snapshot", |vt| vt.snapshot(most, out));
+        if written.is_none() {
+            out.truncate(start);
+        }
+        written
+    }
+
+    /// The engine's plain text (`Engine::text`); `None` with no engine, or when it failed
+    /// writing it, and `out` is then as it was.
+    pub fn text(
+        &mut self,
+        history: usize,
+        most: usize,
+        out: &mut String,
+    ) -> Option<Result<usize, TooLarge>> {
+        let start = out.len();
+        let written = self.call("text", |vt| vt.text(history, most, out));
         if written.is_none() {
             out.truncate(start);
         }
@@ -374,6 +398,16 @@ pub(crate) mod tests {
                 panic!("a snapshot failing on cue");
             }
             written
+        }
+
+        fn text(
+            &mut self,
+            history: usize,
+            most: usize,
+            out: &mut String,
+        ) -> Result<usize, TooLarge> {
+            self.check();
+            self.engine.text(history, most, out)
         }
 
         fn stats(&self) -> Stats {

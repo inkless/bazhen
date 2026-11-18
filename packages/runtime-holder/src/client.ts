@@ -113,8 +113,15 @@ export interface RequestOptions {
   readonly signal?: AbortSignal;
 }
 
-type AnswerName = "hello" | "snapshot" | "stats" | "foreground" | "ok";
-const ANSWERS: ReadonlySet<string> = new Set(["hello", "snapshot", "stats", "foreground", "ok"]);
+type AnswerName = "hello" | "snapshot" | "stats" | "foreground" | "screen" | "ok";
+const ANSWERS: ReadonlySet<string> = new Set([
+  "hello",
+  "snapshot",
+  "stats",
+  "foreground",
+  "screen",
+  "ok",
+]);
 const isAnswer = (frame: HolderReply): frame is ReplyOf<AnswerName> => ANSWERS.has(frame.type);
 
 const isReplyOf = <K extends AnswerName>(reply: HolderReply, type: K): reply is ReplyOf<K> =>
@@ -608,6 +615,19 @@ export class HolderClient {
     const reply = await this.connection.ask(
       (id) => ({ type: "foreground", id }),
       "foreground",
+      options,
+    );
+    return reply.body;
+  }
+
+  /**
+   * The screen shown as plain text, after the newest `history` rows of history; a reader may ask,
+   * and after the child has exited too. Since holder/1.4.
+   */
+  async screen(history: number, options?: RequestOptions): Promise<ReplyOf<"screen">["body"]> {
+    const reply = await this.connection.ask(
+      (id) => ({ type: "screen", id, body: { history } }),
+      "screen",
       options,
     );
     return reply.body;

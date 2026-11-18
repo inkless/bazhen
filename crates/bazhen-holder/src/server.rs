@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use bazhen_holder_engine::TooLarge;
 use bazhen_holder_proto::body::{
     self, Alternate, Count, ErrorBody, ErrorCode, Exited, Foreground, HelloReply, HelloRequest,
-    Offset, OkBody, PasteRequest, ProcessSpec, ProtocolVersion, Resized, Respawned, Size,
-    StartTime, Stats, SubscribeFrom, Tags, TerminalId, Title, Versions,
+    Offset, OkBody, PasteRequest, ProcessSpec, ProtocolVersion, Resized, Respawned, ScreenRequest,
+    Size, StartTime, Stats, SubscribeFrom, Tags, TerminalId, Title, Versions,
 };
 use bazhen_holder_proto::{
     MOST_SNAPSHOT_TEXT, PROTOCOL_VERSION, Reply, Request, RequestId, SNAPSHOT_HEAD, SnapshotFrame,
@@ -54,6 +54,9 @@ pub const NEW_GRACE: Duration = Duration::from_millis(250);
 pub const STUCK_TO_EVICT: Duration = Duration::from_secs(1);
 /// How many times `foreground` reads the group again when it changed while its start was read.
 const FOREGROUND_TRIES: usize = 3;
+/// The most text a `screen` answer carries: any screen and thousands of rows of history, and,
+/// escaped as JSON, far under the reply cap.
+const MOST_SCREEN_TEXT: usize = 1 << 20;
 /// The largest snapshot frame, header and all.
 pub const LARGEST_SNAPSHOT: usize = SNAPSHOT_HEAD + MOST_SNAPSHOT_TEXT;
 /// The most bytes of snapshots owed at once across a holder's connections: two of the largest,
@@ -819,6 +822,7 @@ fn answer(
             Err((code, why)) => refuse(conn, id, "foreground", code, why),
         },
         Request::Paste { id, body } => paste(conn, holder, id, &body),
+        Request::Screen { id, body } => screen(conn, holder, id, body),
         Request::Close { id } => {
             ok(conn, id, "close");
             shared.close_requested = true;
@@ -912,6 +916,55 @@ fn snapshot(
             );
         }
     }
+}
+
+/// The screen shown as plain text, after the history asked for, whether or not the child has
+/// exited. An engine that fails as it writes is replaced by an empty one, which the text is then
+/// of, as for a snapshot.
+fn screen(conn: &mut Connection, holder: &mut Holder<Screen>, id: RequestId, body: ScreenRequest) {
+    match screen_text(holder, body) {
+        Ok(body) => send(conn, &Reply::Screen { id, body }),
+        Err((code, why)) => refuse(conn, id, "screen", code, why),
+    }
+}
+
+fn screen_text(
+    holder: &mut Holder<Screen>,
+    request: ScreenRequest,
+) -> Result<body::Screen, (ErrorCode, &'static str)> {
+    let history = usize::try_from(request.history.get()).unwrap_or(usize::MAX);
+    let walled = holder.output_mut().engine_mut();
+    let mut text = String::new();
+    let mut written = walled.text(history, MOST_SCREEN_TEXT, &mut text);
+    if written.is_none() && walled.alive() {
+        written = walled.text(history, MOST_SCREEN_TEXT, &mut text);
+    }
+    let rows = match written {
+        Some(Ok(rows)) => rows,
+        Some(Err(TooLarge)) => {
+            return Err((
+                ErrorCode::SnapshotTooLarge,
+                "the screen alone is over the text's cap",
+            ));
+        }
+        None if walled.alive() => {
+            return Err((
+                ErrorCode::Failed,
+                "the terminal engine failed writing it, twice",
+            ));
+        }
+        None => {
+            return Err((
+                ErrorCode::Unavailable,
+                "the terminal engine has failed for good",
+            ));
+        }
+    };
+    let failed = (ErrorCode::Failed, "the holder can't say it");
+    let rows = u64::try_from(rows)
+        .ok()
+        .and_then(|rows| Count::new(rows).ok());
+    body::Screen::new(text, rows.ok_or(failed)?).map_err(|_| failed)
 }
 
 /// The child's `exited`, as it is sent.
@@ -1802,6 +1855,60 @@ mod tests {
                 let text = String::from_utf8_lossy(bytes);
                 assert_eq!(text.matches("xyzzy").count(), 1, "{text:?}");
             }
+            other => panic!("answered {other:?}"),
+        }
+    }
+
+    fn screen_request(history: u64) -> Request {
+        Request::Screen {
+            id: RequestId(2),
+            body: ScreenRequest {
+                history: Count::new(history).unwrap(),
+            },
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_connection_without_the_writer_slot_reads_the_screen_and_history_as_text() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let script = "for n in $(seq 1 30); do printf '%s\\r\\n' $n; done; printf '\\033[31mred'; exec sleep 30";
+        let mut f = Failing::start("screen-text", script);
+        f.until("the output", |f| f.output().contains("red"));
+        match f.ask(&screen_request(2)).as_slice() {
+            [Reply::Hello { body: hello, .. }, Reply::Screen { body, .. }] => {
+                assert!(!hello.writer);
+                let rows: Vec<String> = (8..=30).map(|n| n.to_string()).collect();
+                assert_eq!(body.text(), format!("6\n7\n{}\nred\n", rows.join("\n")));
+                assert_eq!(body.history().get(), 2);
+            }
+            other => panic!("answered {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_screen_is_read_after_its_child_has_exited() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("screen-exited", "printf 'last words'");
+        f.until("the child's exit", |f| f.holder.exit().is_some());
+        match f.ask(&screen_request(0)).as_slice() {
+            [_, Reply::Screen { body, .. }] => assert_eq!(body.text(), "last words\n"),
+            other => panic!("answered {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    fn a_screen_with_no_engine_left_is_refused_unavailable() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let script = "while :; do printf '<fail>'; sleep 0.02; done";
+        let mut f = Failing::start("screen-no-engine", script);
+        f.until("the engine given up", |f| {
+            !f.holder.output().engine().alive()
+        });
+        match f.ask(&screen_request(0)).as_slice() {
+            [_, Reply::Error { body, .. }] => assert_eq!(body.code, "unavailable"),
             other => panic!("answered {other:?}"),
         }
     }

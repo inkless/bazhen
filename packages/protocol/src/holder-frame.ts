@@ -9,6 +9,8 @@ import {
   HolderError,
   HolderExited,
   HolderForeground,
+  HolderScreen,
+  HolderScreenRequest,
   HolderGap,
   HolderHelloFrozen,
   HolderHelloReply,
@@ -68,6 +70,7 @@ interface RequestFields {
   "set-tags": Body<HolderSetTagsRequest>;
   "set-theme": Body<HolderSetThemeRequest>;
   paste: Body<HolderPasteRequest>;
+  screen: Body<HolderScreenRequest>;
 }
 
 interface ReplyFields {
@@ -78,6 +81,7 @@ interface ReplyFields {
   resized: Body<HolderResized>;
   stats: Answer & Body<HolderStats>;
   foreground: Answer & Body<HolderForeground>;
+  screen: Answer & Body<HolderScreen>;
   title: Body<HolderTitle>;
   alternate: Body<HolderAlternate>;
   exited: Body<HolderExited>;
@@ -318,6 +322,7 @@ const REQUESTS: { readonly [K in HolderRequestName]: Codec<RequestFields[K]> } =
   "set-tags": json(HolderSetTagsRequest),
   "set-theme": json(HolderSetThemeRequest),
   paste: json(HolderPasteRequest),
+  screen: json(HolderScreenRequest),
 };
 
 const REPLIES: { readonly [K in HolderReplyName]: Codec<ReplyFields[K]> } = {
@@ -328,6 +333,7 @@ const REPLIES: { readonly [K in HolderReplyName]: Codec<ReplyFields[K]> } = {
   resized: json(HolderResized),
   stats: answering(json(HolderStats)),
   foreground: answering(json(HolderForeground)),
+  screen: answering(json(HolderScreen)),
   title: json(HolderTitle),
   alternate: json(HolderAlternate),
   exited: json(HolderExited),

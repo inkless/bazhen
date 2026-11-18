@@ -15,6 +15,7 @@
     "respawn",
     "set-tags",
     "set-theme",
-    "paste"
+    "paste",
+    "screen"
   ]
 }

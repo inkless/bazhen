@@ -112,7 +112,7 @@ describe("encoding a holder frame", () => {
   });
 });
 
-const OWN_REPLIES = ["hello", "snapshot", "stats", "foreground"] as const;
+const OWN_REPLIES = ["hello", "snapshot", "stats", "foreground", "screen"] as const;
 const isOwnReply = (name: string) => OWN_REPLIES.some((own) => own === name);
 const withoutOwnReply = (code: number) => code >= 0x40 && code <= 0x7f;
 
@@ -135,6 +135,7 @@ describe("holder type bytes", () => {
         snapshot: 0x02,
         stats: 0x03,
         foreground: 0x04,
+        screen: 0x06,
         subscribe: 0x40,
         input: 0x41,
         resize: 0x42,
@@ -150,6 +151,7 @@ describe("holder type bytes", () => {
         snapshot: 0x82,
         stats: 0x83,
         foreground: 0x84,
+        screen: 0x86,
         data: 0xc0,
         gap: 0xc1,
         resized: 0xc2,

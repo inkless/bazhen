@@ -27,7 +27,7 @@ import { ProtocolVersion } from "./version.ts";
  *   agree on, so the rest of its `hello` must satisfy the schema of every major it lists;
  * - `error`, and its codes `no-shared-version` and `invalid`.
  */
-export const HOLDER_PROTOCOL_VERSION = "1.3";
+export const HOLDER_PROTOCOL_VERSION = "1.4";
 
 /** Byte limits, in UTF-8 bytes, that both peers enforce on strings. */
 export const HOLDER_VERSION_MAX_BYTES = 32;
@@ -146,6 +146,14 @@ export const HOLDER_PASTE_VERSION = "1.3";
  */
 export function holderHasPaste(agreed: string): boolean {
   return negotiateHolder([agreed], [HOLDER_PASTE_VERSION]) === HOLDER_PASTE_VERSION;
+}
+
+/** The version that added `screen`, the plain-text screen read. */
+export const HOLDER_SCREEN_VERSION = "1.4";
+
+/** Whether `agreed` has `screen`, as `holderHasPaste` reads it for `paste`. */
+export function holderHasScreen(agreed: string): boolean {
+  return negotiateHolder([agreed], [HOLDER_SCREEN_VERSION]) === HOLDER_SCREEN_VERSION;
 }
 
 /**
@@ -404,6 +412,28 @@ export const HolderForeground = z.object({
 export type HolderForeground = z.infer<typeof HolderForeground>;
 
 /**
+ * Reads the screen shown as plain text, after the newest `history` rows of the main screen's
+ * history. Needs no writer slot, and is answered after the child has exited too. Answered
+ * `unavailable` when the holder's engine has failed for good, and `snapshot-too-large` when the
+ * screen alone passes the holder's cap on the text. Since 1.4.
+ */
+export const HolderScreenRequest = z.object({ history: Count });
+export type HolderScreenRequest = z.infer<typeof HolderScreenRequest>;
+
+/**
+ * The screen as text: a line a row, each ended by `\n`, with no other control, so it can be
+ * printed to a terminal as it is. History gives way to the holder's cap first, its oldest rows;
+ * `history` is how many rows of the text are history. Since 1.4.
+ */
+export const HolderScreen = z.object({
+  text: wellFormed()
+    .refine((text) => !hasControl(text.replaceAll("\n", "")), "a control character")
+    .describe("No C0 or C1 control or DEL but the newline ending each row."),
+  history: Count,
+});
+export type HolderScreen = z.infer<typeof HolderScreen>;
+
+/**
  * The subscriber isn't sent `[from, to)`: the ring no longer holds it, or the subscriber was owed
  * more `resized` than the holder keeps for one that lags. Either way it snapshots again.
  */
@@ -461,16 +491,19 @@ export const HolderRequestName = z.enum([
   "set-tags",
   "set-theme",
   "paste",
+  "screen",
 ]);
 export type HolderRequestName = z.infer<typeof HolderRequestName>;
 
 /**
  * Each request's type byte. Never renumber one or give it to another request: a type byte means
- * the same in every version. A request with a reply of its own is `0x01`–`0x3f`, so that reply's
- * byte stays below the events; a request without one is `0x40`–`0x7f`.
+ * the same in every version. `0x05` and its reply's `0x85` are never given: the fixtures of 1.0 to
+ * 1.3, which every build must still read, send them as types no build knows. A request with a
+ * reply of its own is `0x01`–`0x3f`, so that reply's byte stays below the events; a request
+ * without one is `0x40`–`0x7f`.
  *
  * Every request gets one answer under its id, except `input`, which gets one only when refused:
- * - `hello`, `snapshot`, `stats`, `foreground`: their own reply, or `error`;
+ * - `hello`, `snapshot`, `stats`, `foreground`, `screen`: their own reply, or `error`;
  * - `subscribe`, `resize`, `signal`, `respawn`, `set-tags`, `set-theme`, `paste`: `ok`, or
  *   `error`;
  * - `input`: nothing, or `error` (`not-writer`, `input-full`, `exited`);
@@ -482,6 +515,7 @@ export const HOLDER_REQUEST_CODES = {
   snapshot: 0x02,
   stats: 0x03,
   foreground: 0x04,
+  screen: 0x06,
   subscribe: 0x40,
   input: 0x41,
   resize: 0x42,
@@ -524,15 +558,16 @@ export const HOLDER_ERROR_CODES = [
   "input-full",
   /** The request needs a child, and it has exited. */
   "exited",
-  /** A snapshot over the reply cap even with all its history left out. */
+  /** A `snapshot`, or a `screen`, over its cap even with all its history left out. */
   "snapshot-too-large",
   /** The holder tried and the system refused, as a respawn that can't start its program. */
   "failed",
   /** The request needs the child to have exited, and it still runs: a `respawn`. */
   "running",
   /**
-   * The holder's terminal engine has failed for good, so it has no screen: a `snapshot`, or an
-   * unmarked `paste`, which needs to know whether the program asked for bracketed paste.
+   * The holder's terminal engine has failed for good, so it has no screen: a `snapshot`, a
+   * `screen`, or an unmarked `paste`, which needs to know whether the program asked for bracketed
+   * paste.
    */
   "unavailable",
   /** A `paste` the program wouldn't read as text now; the message says which check failed. */
@@ -560,6 +595,7 @@ export const HOLDER_REPLY_CODES = {
   snapshot: 0x82,
   stats: 0x83,
   foreground: 0x84,
+  screen: 0x86,
   data: 0xc0,
   gap: 0xc1,
   resized: 0xc2,
