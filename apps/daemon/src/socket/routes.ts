@@ -12,6 +12,7 @@ import { UnknownDevice } from "../store/store.ts";
 import {
   EnvRefreshRequest,
   PaneTitleChanged,
+  ShellDecline,
   ShellPrompt,
   ShellReport,
   DoctorResponse,
@@ -48,6 +49,8 @@ export interface SocketParts {
   readonly shellReport: (terminalId: string, report: ShellReport) => ReportOutcome;
   /** It reached its first prompt; false when the report wasn't the shell's own. */
   readonly shellPrompt: (terminalId: string, report: ShellPrompt) => boolean;
+  /** At its first prompt, it won't take a line typed back; false when not the shell's own. */
+  readonly shellDecline: (terminalId: string, report: ShellDecline) => boolean;
 }
 
 /**
@@ -55,7 +58,7 @@ export interface SocketParts {
  * every character escaped as `\uXXXX`, its token and the fields around them fit with room.
  */
 const REPORT_MAX_BYTES = 16 * 1024;
-/** A prompt report is its token alone. */
+/** A prompt report, or a decline, is its token alone. */
 const PROMPT_MAX_BYTES = 1024;
 
 const tooLarge = (c: Context) => {
@@ -171,6 +174,21 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings } &
         return c.json(body, 400);
       }
       if (!parts.shellPrompt(c.req.param("id"), req.data))
+        return forbidden(c, "no such shell, or not its token");
+      return c.body(null, 204);
+    },
+  );
+
+  app.post(
+    "/v1/shells/:id/decline",
+    bodyLimit({ maxSize: PROMPT_MAX_BYTES, onError: tooLarge }),
+    async (c) => {
+      const req = ShellDecline.safeParse(await c.req.json().catch(() => undefined));
+      if (!req.success) {
+        const body: ErrorResponse = { error: "invalid_request", message: "expected { token }" };
+        return c.json(body, 400);
+      }
+      if (!parts.shellDecline(c.req.param("id"), req.data))
         return forbidden(c, "no such shell, or not its token");
       return c.body(null, 204);
     },

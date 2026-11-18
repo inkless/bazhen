@@ -7,6 +7,7 @@ import {
   RestartShellRequest,
   Shell,
   ShellCommandLine,
+  ShellDecline,
   ShellPrompt,
 } from "./shells.ts";
 
@@ -58,6 +59,13 @@ describe("shell requests", () => {
   it("takes a prompt report with the shell's token alone, and refuses one without a token", () => {
     const parsed = ["t", "", "x".repeat(129), undefined].map(
       (token) => ShellPrompt.safeParse({ token }).success,
+    );
+    expect(parsed).toEqual([true, false, false, false]);
+  });
+
+  it("takes a shell's word that it won't take a line back with its token alone", () => {
+    const parsed = ["t", "", "x".repeat(129), undefined].map(
+      (token) => ShellDecline.safeParse({ token }).success,
     );
     expect(parsed).toEqual([true, false, false, false]);
   });

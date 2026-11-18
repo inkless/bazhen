@@ -412,9 +412,7 @@ const shells = new ShellLifecycle({
   budget,
   ...(integration && { integration }),
 });
-const shellReports = new ShellReports(store, (terminalId, brackets) =>
-  shells.prompted(terminalId, brackets),
-);
+const shellReports = new ShellReports(store, shells);
 await reconcileShells(store, environment, shells);
 const restarts = new RestartWatch({ store, environment });
 await restarts.sweep().catch((err: unknown) => {
@@ -664,6 +662,7 @@ const socketListener = getRequestListener(
     },
     shellReport: (terminalId, report) => shellReports.report(terminalId, report),
     shellPrompt: (terminalId, report) => shellReports.prompt(terminalId, report),
+    shellDecline: (terminalId, report) => shellReports.decline(terminalId, report),
     refreshEnv: async (env) => {
       const next = filterEnv(env, config.envRules);
       const { refused } = await tmux.replaceEnv(next.env);

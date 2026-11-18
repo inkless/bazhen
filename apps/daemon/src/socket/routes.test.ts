@@ -60,6 +60,7 @@ function app(
   shellReport: SocketParts["shellReport"] = () => "kept",
   shellPrompt: SocketParts["shellPrompt"] = () => true,
   peer?: SocketParts["peer"],
+  shellDecline: SocketParts["shellDecline"] = () => true,
 ) {
   const commands = new Hono<AppEnv>();
   commands.post("/v1/attention/:id/answer", (c) => c.json({ answered: c.req.param("id") }));
@@ -85,6 +86,7 @@ function app(
     lan,
     shellReport,
     shellPrompt,
+    shellDecline,
     ...(peer && { peer }),
   });
 }
@@ -224,6 +226,38 @@ describe("socketApp", () => {
     expect([large.status, await large.json()]).toEqual([
       413,
       { error: "invalid_request", message: "report too large" },
+    ]);
+  });
+
+  it("hands on a shell's word that it won't take a line back, on a route of its own", async () => {
+    const received: { terminalId: string; sent: unknown }[] = [];
+    const prompts: unknown[] = [];
+    const daemon = app(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (_terminalId, sent) => prompts.push(sent) > 0,
+      undefined,
+      (terminalId, sent) => {
+        received.push({ terminalId, sent });
+        return sent.token === "mine";
+      },
+    );
+    const post = (body: unknown) =>
+      daemon.request("/v1/shells/term_x/decline", { method: "POST", body: JSON.stringify(body) });
+    const statuses = [
+      (await post({ token: "mine" })).status,
+      (await post({ token: "theirs" })).status,
+      (await post({ token: "" })).status,
+    ];
+    expect([statuses, received, prompts]).toEqual([
+      [204, 403, 400],
+      [
+        { terminalId: "term_x", sent: { token: "mine" } },
+        { terminalId: "term_x", sent: { token: "theirs" } },
+      ],
+      [],
     ]);
   });
 

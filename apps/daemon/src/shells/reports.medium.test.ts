@@ -47,11 +47,7 @@ function setup(integration: typeof INTEGRATION | null = INTEGRATION, nowMicros =
     path,
     store,
     open,
-    reports: new ShellReports(
-      store,
-      () => {},
-      () => nowMicros(),
-    ),
+    reports: new ShellReports(store, { prompted: () => {}, declined: () => {} }, () => nowMicros()),
   };
 }
 
