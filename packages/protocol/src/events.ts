@@ -283,6 +283,12 @@ export const EVENTS = {
       sign: z.enum(["claude_hook", "codex_item"]),
       /** The model and context use last recorded before it; absent when none was. */
       before: Usage.optional(),
+      /**
+       * The Claude Code hook that said so: its session and process. The hook client sends the
+       * same report again when the daemon drops it, as across a restart, and a report the same as
+       * the last compaction's is that one again, not a second compaction.
+       */
+      hook: z.object({ sessionId: z.string().nullable(), pid: z.number().int() }).optional(),
     }),
   },
   /** The agent's process ended; its terminal stays, with its last screen (§4.1, §4.5). */

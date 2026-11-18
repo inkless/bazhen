@@ -1,4 +1,5 @@
 import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import type { Listener } from "../mailbox/listening.ts";
 import type { TerminalPids } from "../auth/peer.ts";
@@ -1012,19 +1013,38 @@ export class Store {
    * it. Returns the event id, or null for an agent whose process has gone. An agent this daemon
    * never ran is refused.
    */
-  recordCompaction(agentId: string, sign: EventPayload<"agent.compacted">["sign"]): number | null {
+  recordCompaction(
+    agentId: string,
+    sign: EventPayload<"agent.compacted">["sign"],
+    hook?: EventPayload<"agent.compacted">["hook"],
+  ): number | null {
     return this.transaction(() => {
       const row = this.prepare("SELECT state, usage FROM agent_sessions WHERE id = ?").get(agentId);
       if (row === undefined) throw new UnknownAgent(agentId);
       if (!REPORTING.has(AgentState.parse(row.state))) return null;
+      if (hook !== undefined && isDeepStrictEqual(this.lastCompaction(agentId)?.hook, hook))
+        return null;
+      // The status line reports apart from the hook, so a reading taken just after the compaction
+      // may land first, and `before` then holds the use after it.
       const before = typeof row.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
       return this.append({
         type: "agent.compacted",
         entityId: agentId,
         actor: "system",
-        payload: { sign, ...(before && { before }) },
+        payload: { sign, ...(before && { before }), ...(hook && { hook }) },
       });
     });
+  }
+
+  /** The agent's last recorded compaction, if any. */
+  private lastCompaction(agentId: string): EventPayload<"agent.compacted"> | undefined {
+    const row = this.prepare(
+      `SELECT payload FROM events WHERE entity_type = 'agent' AND entity_id = ?
+         AND type = 'agent.compacted' ORDER BY id DESC LIMIT 1`,
+    ).get(agentId);
+    return row === undefined
+      ? undefined
+      : EVENTS["agent.compacted"].payload.parse(JSON.parse(String(row.payload)));
   }
 
   /** What an agent's harness last reported it doing in this process, if anything. */

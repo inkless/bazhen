@@ -235,6 +235,9 @@ function shapeWithLast(migrations: readonly Migration[], last?: Migration) {
   return shapeOf(path);
 }
 
+/** The hook process `pid` of session s-1, as a compaction names it. */
+const hook = (pid: number) => ({ sessionId: "s-1", pid });
+
 describe("Store migrations", () => {
   it.each(Array.from({ length: NUMBERED_MIGRATIONS.length + 1 }, (_, v) => v))(
     "upgrades a database the numbering runner left at version %i to a fresh one's schema",
@@ -1247,6 +1250,17 @@ describe("Store usage", () => {
       { sign: "codex_item" },
       { sign: "claude_hook", before: { model: "Opus", contextUsedPercent: 88 } },
     ]);
+  });
+
+  it("records a hook's compaction once, however often the same hook reports it", async () => {
+    const { store, agentId } = await withAgent();
+    const recorded = [
+      store.recordCompaction(agentId, "claude_hook", hook(41)),
+      store.recordCompaction(agentId, "claude_hook", hook(41)),
+      store.recordCompaction(agentId, "claude_hook", hook(42)),
+      store.recordCompaction(agentId, "claude_hook", { sessionId: "s-2", pid: 42 }),
+    ];
+    expect(recorded.map((id) => id !== null)).toEqual([true, false, true, true]);
   });
 
   it("records no compaction for an agent whose process has exited, and refuses one it never ran", async () => {

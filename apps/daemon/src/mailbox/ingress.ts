@@ -41,8 +41,11 @@ export interface IngressDeps {
   readonly activity: ActivityTracker;
   /** Records the model the agent runs and its context use (§11.2). */
   readonly recordUsage: (agentId: string, usage: Usage) => void;
-  /** Records that the agent's own session compacted its context. */
-  readonly compacted: (agentId: string) => void;
+  /** Records that the agent's own session compacted its context, as the hook `hook` said. */
+  readonly compacted: (
+    agentId: string,
+    hook: { readonly sessionId: string | null; readonly pid: number },
+  ) => void;
   /** Records a message the agent sent through its harness's own channel (§5.6). */
   readonly observeSend: (agentId: string, toolUseId: string, sent: SentMessage) => void;
   /** Where a dropped hook is reported; console.error unless given. */
@@ -72,7 +75,7 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
       report(`a hook request it can't read: ${clip([...new Set(fields)].join(", "))}`);
       return framed(QUIET);
     }
-    const { event, payload, ppid } = hook.data;
+    const { event, payload, pid, ppid } = hook.data;
     // The status line refreshes too often to report, and a lost reading of it costs nothing.
     const dropped = (agentId: string, why: string) => {
       if (event !== "statusline") report(`the ${quoted(event)} hook for agent ${agentId}: ${why}`);
@@ -120,7 +123,8 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
               : `session ${origin.sessionId === null ? "none" : quoted(origin.sessionId)} isn't the agent's`,
           );
         if (read.sessionStarted) deps.mailbox.sessionStarted(agentId, read.compacted);
-        if (read.sessionStarted && read.compacted) deps.compacted(agentId);
+        if (read.sessionStarted && read.compacted)
+          deps.compacted(agentId, { sessionId: origin.sessionId, pid });
         if (read.sessionStarted && !read.compacted) deps.activity.sessionStarted(agentId);
         observe();
         // The waiter runs beside each Stop and StopFailure report, so either ends the turn.

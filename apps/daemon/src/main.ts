@@ -654,7 +654,8 @@ const socketListener = getRequestListener(
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
-      compacted: (agentId) => void store.recordCompaction(agentId, "claude_hook"),
+      compacted: (agentId, reporter) =>
+        void store.recordCompaction(agentId, "claude_hook", reporter),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
     credentials: agentTokens,

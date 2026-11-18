@@ -78,7 +78,7 @@ async function daemon(
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
-    compacted: (id) => store.recordCompaction(id, "claude_hook"),
+    compacted: (id, hook) => store.recordCompaction(id, "claude_hook", hook),
     observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
     log: (line) => logged.push(line),
     now: () => new Date("2026-11-17T00:00:00.000Z"),
@@ -402,7 +402,39 @@ describe.each([
       {
         sign: "claude_hook",
         before: { contextUsedPercent: 91, contextWindowTokens: 200_000 },
+        hook: { sessionId: CLAUDE_SESSION, pid: expect.any(Number) },
       },
+    ]);
+  });
+
+  it("records a compaction once, however often its hook's client sends the report", async () => {
+    const { socket, agentId, mailbox, compactions } = await daemon();
+    const report = (pid: number) => ({
+      protocolVersion: "1.0",
+      agentId,
+      event: "wait",
+      pid,
+      ppid: process.pid,
+      payload: JSON.parse(compact()),
+    });
+    // The client sends the same report again once the daemon drops it, as across a restart.
+    const dropped = new AbortController();
+    const first = post(socket, "/v1/hooks", report(4242), {}, dropped.signal).catch(
+      () => "dropped",
+    );
+    await expect.poll(() => compactions().length).toBe(1);
+    dropped.abort();
+    await expect(first).resolves.toBe("dropped");
+    const again = post(socket, "/v1/hooks", report(4242));
+    mailbox.send(agentId, { idempotencyKey: "m1", body: "release the waiter" });
+    await again;
+    // The next compaction runs a new hook process.
+    const next = post(socket, "/v1/hooks", report(4243));
+    mailbox.send(agentId, { idempotencyKey: "m2", body: "release the waiter" });
+    await next;
+    expect(compactions()).toEqual([
+      { sign: "claude_hook", hook: { sessionId: CLAUDE_SESSION, pid: 4242 } },
+      { sign: "claude_hook", hook: { sessionId: CLAUDE_SESSION, pid: 4243 } },
     ]);
   });
 
@@ -423,8 +455,17 @@ describe.each([
   });
 });
 
-/** One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended. */
-function post(socket: string, path: string, body: unknown, headers: Record<string, string> = {}) {
+/**
+ * One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended, and
+ * rejects if `signal` drops it first.
+ */
+function post(
+  socket: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+  signal?: AbortSignal,
+) {
   return new Promise<void>((resolve, reject) => {
     const req = request(
       {
@@ -432,6 +473,7 @@ function post(socket: string, path: string, body: unknown, headers: Record<strin
         method: "POST",
         path,
         headers: { "content-type": "application/json", ...headers },
+        ...(signal && { signal }),
       },
       (res) => res.resume().on("end", resolve),
     );
