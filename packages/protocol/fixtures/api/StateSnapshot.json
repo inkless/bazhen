@@ -37,16 +37,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -360,16 +372,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -830,16 +854,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -898,16 +934,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2238,16 +2286,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2306,16 +2366,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2382,16 +2454,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2450,16 +2534,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2526,16 +2622,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2594,16 +2702,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2670,16 +2790,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2738,16 +2870,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2814,16 +2958,28 @@
             "light"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2882,16 +3038,28 @@
             "light"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -2958,16 +3126,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3026,16 +3206,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3106,12 +3298,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3174,12 +3378,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3250,12 +3466,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3318,12 +3546,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3394,12 +3634,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3462,12 +3714,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3538,12 +3802,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3606,12 +3882,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3682,12 +3970,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3750,12 +4050,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3826,12 +4138,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3894,12 +4218,192 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
+          },
+          "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+          "commands": [
+            "close",
+            "respawn",
+            "signal",
+            "relaunch"
+          ],
+          "resumable": true,
+          "canOpenShell": true,
+          "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "listening": true,
+          "headline": {
+            "text": "Halfway.",
+            "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "at": "2026-11-16T12:00:00.000Z"
+          },
+          "needsRestart": {
+            "holderPid": 4242,
+            "served": true
+          },
+          "role": "reviewer",
+          "promptChanged": true
+        }
+      ],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  },
+  {
+    "name": "agents[].activity.value = \"limited\"",
+    "wire": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "BZ-127",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "claude-code",
+          "project": "bazhen",
+          "cwd": "/work",
+          "state": "running",
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "generation": 3,
+          "externalRef": {
+            "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "kind": "claude-session",
+            "id": "s-1"
+          },
+          "exit": {
+            "type": "exited",
+            "code": 1
+          },
+          "theme": "light",
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "activity": {
+            "value": "limited",
+            "source": "native",
+            "confidence": 0.75,
+            "observedAt": "2026-11-16T12:00:00.000Z",
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
+          },
+          "usage": {
+            "model": "claude-opus-5-5",
+            "contextUsedPercent": 41.5,
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
+          },
+          "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+          "commands": [
+            "close",
+            "respawn",
+            "signal",
+            "relaunch"
+          ],
+          "resumable": true,
+          "canOpenShell": true,
+          "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+          "listening": true,
+          "headline": {
+            "text": "Halfway.",
+            "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "at": "2026-11-16T12:00:00.000Z"
+          },
+          "needsRestart": {
+            "holderPid": 4242,
+            "served": true
+          },
+          "role": "reviewer",
+          "promptChanged": true
+        }
+      ],
+      "attention": [],
+      "messages": []
+    },
+    "parsed": {
+      "epoch": "e",
+      "eventId": 1,
+      "environments": [],
+      "agents": [
+        {
+          "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "BZ-127",
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "harness": "claude-code",
+          "project": "bazhen",
+          "cwd": "/work",
+          "state": "running",
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "generation": 3,
+          "externalRef": {
+            "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+            "kind": "claude-session",
+            "id": "s-1"
+          },
+          "exit": {
+            "type": "exited",
+            "code": 1
+          },
+          "theme": "light",
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "activity": {
+            "value": "limited",
+            "source": "native",
+            "confidence": 0.75,
+            "observedAt": "2026-11-16T12:00:00.000Z",
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
+          },
+          "usage": {
+            "model": "claude-opus-5-5",
+            "contextUsedPercent": 41.5,
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -3970,12 +4474,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4038,12 +4554,24 @@
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4110,16 +4638,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4178,16 +4718,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4254,16 +4806,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "heuristic",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4322,16 +4886,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "heuristic",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4398,16 +4974,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4466,16 +5054,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4542,16 +5142,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4610,16 +5222,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4686,16 +5310,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4754,16 +5390,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4830,16 +5478,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -4898,16 +5558,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -8251,11 +8923,12 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests",
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z",
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -8266,6 +8939,27 @@
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
             "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z",
+                "fieldFromANewerDaemon": {
+                  "any": [
+                    1
+                  ]
+                }
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5,
+                "fieldFromANewerDaemon": {
+                  "any": [
+                    1
+                  ]
+                }
+              }
+            ],
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -8740,16 +9434,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [
@@ -9250,11 +9956,12 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests",
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z",
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -9265,6 +9972,27 @@
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
             "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z",
+                "fieldFromANewerDaemon": {
+                  "any": [
+                    1
+                  ]
+                }
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5,
+                "fieldFromANewerDaemon": {
+                  "any": [
+                    1
+                  ]
+                }
+              }
+            ],
             "fieldFromANewerDaemon": {
               "any": [
                 1
@@ -9348,16 +10076,28 @@
             "dark"
           ],
           "activity": {
-            "value": "working",
+            "value": "limited",
             "source": "native",
             "confidence": 0.75,
             "observedAt": "2026-11-16T12:00:00.000Z",
-            "detail": "running tests"
+            "detail": "rate_limit",
+            "resetsAt": "2026-11-16T12:00:00.000Z"
           },
           "usage": {
             "model": "claude-opus-5-5",
             "contextUsedPercent": 41.5,
-            "contextWindowTokens": 200000
+            "contextWindowTokens": 200000,
+            "limits": [
+              {
+                "window": "five_hour",
+                "usedPercent": 100,
+                "resetsAt": "2026-11-16T12:00:00.000Z"
+              },
+              {
+                "window": "spend_limit",
+                "usedPercent": 104.5
+              }
+            ]
           },
           "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
           "commands": [

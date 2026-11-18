@@ -67,6 +67,8 @@ export const Activity = z.object({
     "idle",
     "done",
     "failed",
+    /** Stopped until the account's limit resets on its schedule; failed when that can't be shown. */
+    "limited",
     "unknown",
   ]),
   /** Native when the harness said so itself; heuristic when Bazhen inferred it. */
@@ -79,13 +81,26 @@ export const Activity = z.object({
    * signal says, so it names a reason, never per-call data such as a tool's name.
    */
   detail: z.string().max(200).optional(),
+  /** When a `limited` agent's limit resets, as an ISO timestamp, if its harness says. */
+  resetsAt: z.iso.datetime().optional(),
 });
 export type Activity = z.infer<typeof Activity>;
 
+/** One of an account's usage limits, as the agent's harness last reported it. */
+export const UsageLimit = z.object({
+  /** The harness's name for it, such as `five_hour`. */
+  window: z.string().min(1).max(60),
+  /** The share of it in use: 100 is the limit, and a spend limit can go past it. */
+  usedPercent: z.number().min(0),
+  /** When it resets, as an ISO timestamp. */
+  resetsAt: z.iso.datetime().optional(),
+});
+export type UsageLimit = z.infer<typeof UsageLimit>;
+
 /**
- * What an agent's harness says of the model it runs and how full that model's context is, as a
- * Claude Code status line reports them (foundation-design §11.2). Each part is absent until the
- * harness says it.
+ * What an agent's harness says of the model it runs, how full that model's context is, and how
+ * near its account is to each usage limit (foundation-design §11.2). Each part is absent until
+ * the harness says it.
  */
 export const Usage = z.object({
   model: z.string().max(200).optional(),
@@ -93,6 +108,7 @@ export const Usage = z.object({
   contextUsedPercent: z.number().min(0).max(100).optional(),
   /** The context window's size, in tokens. */
   contextWindowTokens: z.number().int().positive().optional(),
+  limits: z.array(UsageLimit).max(20).optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 
@@ -193,7 +209,12 @@ export const FleetAgent = z.object({
   cwd: z.string(),
   launchedBy: Id("agent").nullable(),
   signal: z
-    .object({ value: Activity.shape.value, source: Activity.shape.source, ageSeconds })
+    .object({
+      value: Activity.shape.value,
+      source: Activity.shape.source,
+      ageSeconds,
+      resetsAt: Activity.shape.resetsAt,
+    })
     .nullable(),
   listening: z.boolean(),
   headline: z.object({ text: z.string(), taskId: Id("task"), ageSeconds }).nullable(),

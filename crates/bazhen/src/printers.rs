@@ -10,7 +10,7 @@ use bazhen_protocol::roles::RolesResponse;
 use bazhen_protocol::tasks::{Assignment, AssignmentState, Task, TaskDetail, TaskNote, TaskState};
 use bazhen_protocol::text::quote_note;
 
-use crate::fmt::{age_seconds, ago};
+use crate::fmt::{age_seconds, ago, seconds_until};
 
 /// An agent's active assignments, in the snapshot's order.
 pub(crate) fn active_for<'a>(s: &'a StateSnapshot, agent: &str) -> Vec<&'a Assignment> {
@@ -39,7 +39,16 @@ pub(crate) fn list_agents(s: &StateSnapshot, now_ms: i64) -> String {
     for a in live {
         let signal = a.activity.as_ref().map_or_else(String::new, |activity| {
             let age = ago(age_seconds(&activity.observed_at, now_ms));
-            format!("{} {age}", activity.value.as_str())
+            let reset = activity
+                .resets_at
+                .as_deref()
+                .map_or_else(String::new, |at| {
+                    seconds_until(at, now_ms).map_or_else(
+                        || ", reset passed".to_owned(),
+                        |s| format!(", resets in {}", ago(s)),
+                    )
+                });
+            format!("{} {age}{reset}", activity.value.as_str())
         });
         let fields = [
             a.name.as_str(),
@@ -77,6 +86,7 @@ pub(crate) fn fleet(s: &StateSnapshot, now_ms: i64) -> Vec<FleetAgent> {
                 value: activity.value,
                 source: activity.source,
                 age_seconds: age_seconds(&activity.observed_at, now_ms),
+                resets_at: activity.resets_at.clone(),
             }),
             listening: a.listening,
             headline: a.headline.as_ref().map(|h| FleetHeadline {

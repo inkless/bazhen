@@ -120,6 +120,7 @@ pub enum ActivityValue {
     Idle,
     Done,
     Failed,
+    Limited,
     Unknown,
 }
 
@@ -132,6 +133,7 @@ impl ActivityValue {
             Self::Idle => "idle",
             Self::Done => "done",
             Self::Failed => "failed",
+            Self::Limited => "limited",
             Self::Unknown => "unknown",
         }
     }
@@ -154,9 +156,22 @@ pub struct Activity {
     pub observed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
 }
 
-/// The model an agent runs and how full its context is, each part once its harness says it.
+/// One of an account's usage limits: the share of it in use, and when it resets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimit {
+    pub window: String,
+    pub used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
+}
+
+/// The model an agent runs, how full its context is and how near each usage limit its account
+/// is, each part once its harness says it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
@@ -166,6 +181,8 @@ pub struct Usage {
     pub context_used_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Vec<UsageLimit>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,6 +291,8 @@ pub struct FleetSignal {
     pub value: ActivityValue,
     pub source: ActivitySource,
     pub age_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

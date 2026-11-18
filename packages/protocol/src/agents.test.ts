@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  Activity,
   CallerResponse,
   LaunchAgentRequest,
   RespawnAgentRequest,
   StateSnapshot,
+  Usage,
 } from "./agents.ts";
 
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
@@ -100,5 +102,32 @@ describe("StateSnapshot", () => {
       read.agents[0]?.listening,
       read.agents[0]?.headline,
     ]).toEqual(["", null, [], false, null]);
+  });
+});
+
+describe("Activity", () => {
+  const signal = { source: "native", confidence: 1, observedAt: "2026-11-18T10:00:00.000Z" };
+
+  it("says an agent is stopped at its account's limit, and when the limit resets", () => {
+    expect([
+      Activity.safeParse({ ...signal, value: "limited", resetsAt: "2026-11-18T15:00:00.000Z" })
+        .success,
+      Activity.safeParse({ ...signal, value: "limited" }).success,
+      Activity.safeParse({ ...signal, value: "limited", resetsAt: "at three" }).success,
+    ]).toEqual([true, true, false]);
+  });
+});
+
+describe("Usage", () => {
+  it("carries each limit window's share used and its reset, which can be past 100", () => {
+    const limits = [
+      { window: "five_hour", usedPercent: 100, resetsAt: "2026-11-18T15:00:00.000Z" },
+      { window: "spend_limit", usedPercent: 104.5 },
+    ];
+    expect([
+      Usage.safeParse({ limits }).success,
+      Usage.safeParse({ limits: [{ window: "five_hour", usedPercent: -1 }] }).success,
+      Usage.safeParse({ limits: [{ window: "", usedPercent: 1 }] }).success,
+    ]).toEqual([true, false, false]);
   });
 });
