@@ -1,7 +1,7 @@
 import type { AgentInventoryEntry, EnvironmentAdapter } from "@bazhen/core";
 import { runtimePayload, type AgentTerminal, type Store } from "../store/store.ts";
 import { byRuntime, unrouted } from "../terminals/runtimes.ts";
-import { recordClosed } from "./lifecycle.ts";
+import { adopts, recordAdopted, recordClosed } from "./lifecycle.ts";
 
 /**
  * After a restart, matches the environment's agents against the store's (foundation-design §7.1),
@@ -129,9 +129,15 @@ export function settle(
       payload: { reason: "daemon_restart" },
     });
     if (found === undefined) store.append({ ...system, type: "agent.lost", payload: {} });
+    else if (adopts({ ...agent, state: "exited" }, found.ref))
+      recordAdopted(store, agentId, found.ref);
     return;
   }
-  if (found !== undefined) return;
+  if (found !== undefined) {
+    // Dead, it is the exit poller's to record, on its first check, at the generation adopted.
+    if (adopts(agent, found.ref)) recordAdopted(store, agentId, found.ref);
+    return;
+  }
   // A starting agent whose terminal runs is waiting on its harness, and is lost as a running one.
   const ran = state === "running" || (state === "starting" && terminalState === "running");
   if (ran || state === "exited") store.append({ ...system, type: "agent.lost", payload: {} });
