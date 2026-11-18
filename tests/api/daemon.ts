@@ -1652,6 +1652,7 @@ export class EventClient {
 export class View {
   readonly frames: StreamServerFrame[] = [];
   private readonly raw: Buffer[] = [];
+  private rawBytes = 0;
   private readonly outputListeners: ((chunk: Buffer) => void)[] = [];
   private snapshotEnd: number | undefined;
   private readonly ws: WebSocket;
@@ -1661,6 +1662,7 @@ export class View {
     ws.on("message", (data: Buffer, binary: boolean) => {
       if (binary) {
         this.raw.push(data);
+        this.rawBytes += data.length;
         for (const listener of this.outputListeners) listener(data);
         return;
       }
@@ -1696,6 +1698,11 @@ export class View {
     return this.snapshotEnd !== undefined;
   }
 
+  /** How many bytes of terminal output this view has received, without copying them. */
+  receivedBytes(): number {
+    return this.rawBytes;
+  }
+
   /** Every byte of terminal output this view has received, in order. */
   received(): Buffer {
     return Buffer.concat(this.raw);
@@ -1709,6 +1716,13 @@ export class View {
   /** Resolves once the daemon has attached this view to the terminal. */
   async attached(): Promise<void> {
     await waitUntil(() => this.frames.some((f) => f.type === "attached"), "the attachment");
+  }
+
+  /** The id of this view's attachment, from the frame that told it it is attached. */
+  attachmentId(): string {
+    const attached = this.frames.find((f) => f.type === "attached");
+    if (attached?.type !== "attached") throw new Error("the view is not attached yet");
+    return attached.attachmentId;
   }
 
   /** Engages this view, as a click would, and resolves once it drives the terminal. */
