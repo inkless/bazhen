@@ -3,6 +3,7 @@ import type {
   Attached,
   Compatibility,
   Foreground,
+  ScreenText,
   ProcessSpec,
   RuntimeAdapter,
   RuntimeHealth,
@@ -188,6 +189,10 @@ export class RoutedRuntime implements RuntimeAdapter {
 
   async unlink(ref: RuntimeRef): Promise<void> {
     return this.of(ref).unlink(ref);
+  }
+
+  async screen(ref: RuntimeRef, history: number): Promise<ScreenText> {
+    return this.of(ref).screen(ref, history);
   }
 
   async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {

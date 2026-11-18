@@ -538,6 +538,14 @@ describe("a holder's terminal engine", () => {
     expect(event).toMatchObject({ body: { offset: outputEnd(before), cols: 100, rows: 30 } });
   });
 
+  it("reads its screen as text to a reader, its history first, after its child has exited", async () => {
+    const holder = await started("screen", ["sh", "-c", "seq 30; printf '\\033[1;31mred\\033[0m'"]);
+    await exitedHello(holder);
+    const { client } = await listen(holder);
+    const rows = Array.from({ length: 25 }, (_, n) => `${n + 6}\n`).join("");
+    expect(await client.screen(2)).toEqual({ text: `${rows}red\n`, history: 2 });
+  });
+
   it("answers every query with no connection subscribed, at once, in its theme", async () => {
     const queries = [
       ["cpr", `${ESC}[3;5H${ESC}[6n`, `${ESC}\\[\\d+;\\d+R`],

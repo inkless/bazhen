@@ -123,6 +123,15 @@ describe("RoutedRuntime", () => {
     ]).toEqual([[], [onTmux.terminalId], "history", `fake-attach ${onTmux.terminalId}`]);
   });
 
+  it("reads a terminal's screen from the runtime its ref names", async () => {
+    const { tmux, holder, routed } = pair();
+    const onTmux = await routed.create(spec());
+    const onHolder = await routed.create({ ...spec(), runtime: "holder" });
+    tmux.output(onTmux, "on tmux");
+    holder.output(onHolder, "on the holder");
+    expect(await routed.screen(onHolder, 0)).toEqual({ text: "on the holder\n", history: 0 });
+  });
+
   it("refuses a ref on a runtime it doesn't run, and never calls that terminal gone", async () => {
     const { routed } = pair();
     const ref: RuntimeRef = { terminalId: newId("term"), runtime: "elsewhere", locator: {} };

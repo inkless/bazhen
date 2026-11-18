@@ -13,7 +13,9 @@ import {
 import {
   newId,
   ProcessState,
+  ScreenUnreadable,
   StaleIncarnation,
+  TerminalPredates,
   TerminalUnconfirmed,
   TerminalUnservable,
   type RuntimeRef,
@@ -862,6 +864,56 @@ describe("HolderRuntime: pasting through the holder's gate", () => {
       ProcessState,
     );
   });
+});
+
+/** Answers `screen` with a prompt and the history asked for, or refuses it with `code`. */
+const screens =
+  (code?: string): Handler =>
+  (holder, request) => {
+    if (request.type !== "screen") return ok(holder, request);
+    if (code !== undefined) {
+      const body = { request: "screen", code, message: "lost" };
+      return holder.send({ type: "error", id: request.id, body });
+    }
+    const body = { text: "$ ls\n", history: request.body.history };
+    holder.send({ type: "screen", id: request.id, body });
+  };
+
+async function screened(hello: Partial<HolderHelloReply>, handle: Handler) {
+  const { runtime, terminals } = startingFakes(privateRoot(), hello, handle);
+  const ref = await runtime.create(spec());
+  return { runtime, ref, fake: terminals.get(ref.terminalId)! };
+}
+
+const screenReaders = (fake: FakeTerminal) =>
+  fake.connections.filter((c) => c.requests.some((r) => r.type === "screen"));
+
+describe("HolderRuntime: reading a terminal's screen", () => {
+  it("reads it once its process has exited too, then hangs up", async () => {
+    const { runtime, ref, fake } = await screened({ exit: { type: "exited", code: 0 } }, screens());
+    expect(await runtime.screen(ref, 3)).toEqual({ text: "$ ls\n", history: 3 });
+    const [reader, ...more] = screenReaders(fake);
+    expect([reader?.requests.map((r) => r.type), more]).toEqual([["screen"], []]);
+    await expect.poll(() => hungUp.has(reader!.holder)).toBe(true);
+  });
+
+  it("refuses a holder older than screen reads, to be restarted, and asks it nothing", async () => {
+    const { runtime, ref, fake } = await screened({ version: "1.3", protocol: ["1.3"] }, screens());
+    await expect(runtime.screen(ref, 0)).rejects.toThrow(
+      new TerminalPredates(ref.terminalId, "screen reads"),
+    );
+    expect(screenReaders(fake)).toEqual([]);
+  });
+
+  it.each(["unavailable", "snapshot-too-large"] as const)(
+    "calls a screen its holder refuses as %s unreadable",
+    async (code) => {
+      const { runtime, ref } = await screened({}, screens(code));
+      await expect(runtime.screen(ref, 0)).rejects.toThrow(
+        new ScreenUnreadable(ref.terminalId, "lost"),
+      );
+    },
+  );
 });
 
 describe("HolderRuntime: watching agents' titles", () => {

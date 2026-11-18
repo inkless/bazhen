@@ -42,7 +42,9 @@ import {
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
+  UnsupportedRuntime,
   type DeadTerminal,
+  type ScreenText,
 } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
 import { redacted } from "./redact.ts";
@@ -763,6 +765,13 @@ export class TmuxRuntime implements RuntimeAdapter {
   async unlink(ref: RuntimeRef): Promise<void> {
     const pane = await this.paneOf(ref);
     await this.tmux("set-option", "-u", "-t", located(pane.ref, "sessionId"), COLUMN.linkedAgentId);
+  }
+
+  /** Not on tmux: a screen is read from a holder's engine, which a tmux terminal has none of. */
+  async screen(ref: RuntimeRef): Promise<ScreenText> {
+    throw new UnsupportedRuntime(
+      `terminal ${ref.terminalId} runs on tmux, whose screens can't be read: only a holder terminal's can`,
+    );
   }
 
   /**

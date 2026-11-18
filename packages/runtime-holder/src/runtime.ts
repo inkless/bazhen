@@ -3,6 +3,9 @@ import { basename, join } from "node:path";
 import {
   assertSameGeneration,
   ExitWatch,
+  ScreenUnreadable,
+  TerminalPredates,
+  type ScreenText,
   ProcessState,
   shellCommand,
   StaleIncarnation,
@@ -48,6 +51,7 @@ import {
 import {
   HOLDER_PROTOCOL_VERSION,
   holderHasPaste,
+  holderHasScreen,
   isOlderHolderMajor,
   type ExitStatus,
   type HolderHelloReply,
@@ -775,6 +779,27 @@ export class HolderRuntime implements RuntimeAdapter {
         throw pasteRefusal(ref, error);
       });
     });
+  }
+
+  /** Read on a reader's connection to the holder, which answers after its process has exited too. */
+  async screen(ref: RuntimeRef, history: number): Promise<ScreenText> {
+    const client = await this.holderOf(ref);
+    try {
+      if (!holderHasScreen(client.hello.version)) {
+        throw new TerminalPredates(ref.terminalId, "screen reads");
+      }
+      return await client.screen(history).catch((error: unknown) => {
+        if (
+          error instanceof HolderRequestError &&
+          (error.code === "unavailable" || error.code === "snapshot-too-large")
+        ) {
+          throw new ScreenUnreadable(ref.terminalId, error.reason);
+        }
+        throw error;
+      });
+    } finally {
+      client.end();
+    }
   }
 
   async signal(ref: RuntimeRef, signal: Signal): Promise<void> {
