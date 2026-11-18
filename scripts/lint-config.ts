@@ -261,6 +261,7 @@ export type Override = {
     "bazhen/host-guard"?: "off";
     "bazhen/signal-guard"?: "off";
     "bazhen/stdio-guard"?: "error" | "off";
+    "bazhen/ws-loads-statically"?: "error" | "off";
   };
 };
 type Restriction = ["error", { patterns: Pattern[] }];
@@ -387,10 +388,19 @@ function restrictions(
 function overrides(): Override[] {
   const areas = MATRIX.flatMap((area): Override[] => {
     const base = area.platformFree ? { "import/no-nodejs-modules": "error" as const } : {};
+    // The ban on WebSocketServer reads static imports only, so ws is loaded no other way there.
+    const wsLoads = (banned: boolean) =>
+      area.webSocketServersIn === undefined
+        ? {}
+        : { "bazhen/ws-loads-statically": banned ? ("error" as const) : ("off" as const) };
     return [
       {
         files: [`${area.dir}/**/*.ts`, `${area.dir}/**/*.tsx`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, false, false) },
+        rules: {
+          ...base,
+          ...wsLoads(true),
+          "no-restricted-imports": restrictions(area, false, false),
+        },
       },
       // Before the tests' overrides, so that a test among these files keeps the tests' bans.
       ...(area.webSocketServersIn === undefined
@@ -398,19 +408,28 @@ function overrides(): Override[] {
         : [
             {
               files: area.webSocketServersIn.map((f) => `${area.dir}/${f}`),
-              rules: { ...base, "no-restricted-imports": restrictions(area, false, false, true) },
+              rules: {
+                ...base,
+                ...wsLoads(false),
+                "no-restricted-imports": restrictions(area, false, false, true),
+              },
             },
           ]),
       {
         files: [`${area.dir}/**/*.test.ts`, `${area.dir}/**/*.test.tsx`],
         rules: {
           ...base,
+          ...wsLoads(false),
           "no-restricted-imports": restrictions(area, area.medium !== true, true),
         },
       },
       {
         files: [`${area.dir}/**/*.medium.test.ts`],
-        rules: { ...base, "no-restricted-imports": restrictions(area, false, true) },
+        rules: {
+          ...base,
+          ...wsLoads(false),
+          "no-restricted-imports": restrictions(area, false, true),
+        },
       },
     ];
   });
@@ -462,6 +481,7 @@ export const config = {
     "bazhen/host-guard": "error",
     "bazhen/signal-guard": "error",
     "bazhen/stdio-guard": "off",
+    "bazhen/ws-loads-statically": "off",
   },
   overrides: overrides(),
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],

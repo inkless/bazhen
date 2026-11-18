@@ -274,14 +274,14 @@ describe("the signal-guard rule on process passed on whole", () => {
   });
 });
 
-/** The lines oxlint reports under `bazhen(stdio-guard)` in `source`, the rule on as in product. */
-function unheard(source: string): number[] {
-  const config = join(dir, "stdio-guard.json");
+/** The lines oxlint reports under `bazhen(<rule>)` in `source`, the rule on as in product. */
+function reportedBy(rule: string, source: string): number[] {
+  const config = join(dir, `${rule}.json`);
   writeFileSync(
     config,
     JSON.stringify({
       jsPlugins: [join(repo, "scripts/lint-plugin.ts")],
-      rules: { "bazhen/stdio-guard": "error" },
+      rules: { [`bazhen/${rule}`]: "error" },
     }),
   );
   const file = join(dir, "stdio.ts");
@@ -295,10 +295,13 @@ function unheard(source: string): number[] {
   } catch (error) {
     out = String(Reflect.get(Object(error), "stdout"));
   }
-  return [...out.matchAll(/stdio\.ts:(\d+):\d+: .* \[\w+\/bazhen\(stdio-guard\)\]/g)]
+  return [...out.matchAll(/stdio\.ts:(\d+):\d+: .* \[\w+\/bazhen\(([\w-]+)\)\]/g)]
+    .filter((m) => m[2] === rule)
     .map((m) => Number(m[1]))
     .toSorted((a, b) => a - b);
 }
+
+const unheard = (source: string) => reportedBy("stdio-guard", source);
 
 describe("the stdio-guard rule", () => {
   it("flags each async start not wrapped in heard where it is made, by whatever name it is bound", () => {
@@ -375,5 +378,27 @@ describe("the stdio-guard rule", () => {
         ].join("\n"),
       ),
     ).toEqual([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 26, 28, 29, 30, 31, 32]);
+  });
+});
+
+describe("the ws-loads-statically rule", () => {
+  it("flags ws loaded other than by a static import, and nothing merely named ws", () => {
+    expect(
+      reportedBy(
+        "ws-loads-statically",
+        [
+          'import { WebSocket } from "ws";',
+          'import { createRequire } from "node:module";',
+          "declare const ws: WebSocket;",
+          "declare function keepAlive(socket: WebSocket): void;",
+          "keepAlive(ws);",
+          'export const a = await import("ws");',
+          "export const b = await import(`ws`);",
+          'export const c = createRequire(import.meta.url)("ws");',
+          'import d = require("ws");',
+          "export { d };",
+        ].join("\n"),
+      ),
+    ).toEqual([6, 7, 8, 9]);
   });
 });

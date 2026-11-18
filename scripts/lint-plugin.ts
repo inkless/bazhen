@@ -11,6 +11,7 @@
 // other than as a call (`Reflect.apply`, a seam object, an export), and either module loaded other
 // than by a static import (`require`, `import()`, a re-export). `stdio-guard`: in product source,
 // each async child_process start is wrapped in host-guard's `heard()` where it is made.
+// `ws-loads-statically`: where WebSocket servers are banned, ws is loaded only by a static import.
 
 import { CHILD_PROCESS_MODULES, CHILD_PROCESS_STARTS } from "./child-process.ts";
 
@@ -432,14 +433,45 @@ const UNHEARD =
 const ASYNC_STARTS = new Set(["spawn", "exec", "execFile", "fork"]);
 
 /**
- * Whether an argument or source names child_process, as a string or a template with no
+ * Whether an argument or source names one of `modules`, as a string or a template with no
  * substitutions: `require`, `import()` and the like. A name made at run time can't be read.
  */
-const loadsChildProcess = (arg: unknown) => {
+const loadsOneOf = (modules: ReadonlySet<string>) => (arg: unknown) => {
   const quasis = isNode(arg) && arg.type === "TemplateLiteral" ? nodes(arg["quasis"]) : [];
   const template =
     quasis.length === 1 ? String(Reflect.get(Object(quasis[0]?.["value"]), "cooked")) : undefined;
-  return CHILD_PROCESS.has(template ?? nameOf(arg) ?? "");
+  return modules.has(template ?? nameOf(arg) ?? "");
+};
+const loadsChildProcess = loadsOneOf(CHILD_PROCESS);
+/** A module named by a string or a template: a variable that happens to be called `ws` isn't one. */
+const loadsWs = (arg: unknown) =>
+  isNode(arg) && arg.type !== "Identifier" && loadsOneOf(new Set(["ws"]))(arg);
+
+const WS_LOADED =
+  "Import ws only statically, which the import matrix reads: a WebSocket server is made only " +
+  "through heardWebSockets, which hears each socket (docs/standards/code.md).";
+
+/**
+ * `ws-loads-statically`: the import matrix keeps `WebSocketServer` to the module that hears each
+ * socket, and it reads static imports only, so ws loaded any other way (`import()`, `require`,
+ * `import = require`) is an error where the matrix bans the server.
+ */
+const wsLoadsStatically = {
+  create(context: Context) {
+    const report = (node: Node) => context.report({ node, message: WS_LOADED });
+    return {
+      ImportExpression(node: Node) {
+        if (loadsWs(node["source"])) report(node);
+      },
+      CallExpression(node: Node) {
+        if (nodes(node["arguments"]).some(loadsWs)) report(node);
+      },
+      TSImportEqualsDeclaration(node: Node) {
+        const reference = node["moduleReference"];
+        if (isNode(reference) && loadsWs(reference["expression"])) report(node);
+      },
+    };
+  },
 };
 
 /**
@@ -572,5 +604,6 @@ export default {
     "host-guard": guard({ tmux: true, signals: false }),
     "signal-guard": guard({ tmux: false, signals: true }),
     "stdio-guard": stdioGuard,
+    "ws-loads-statically": wsLoadsStatically,
   },
 };

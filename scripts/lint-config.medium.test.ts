@@ -56,9 +56,12 @@ const FIXTURES: Record<string, string> = {
     'export { WebSocketServer } from "ws";\n' +
     'import ws from "ws";\nexport const server = ws.Server;\n' +
     'export type { WebSocket as Socket } from "ws";\n',
-  "apps/daemon/src/http/connections.ts": 'export { WebSocketServer } from "ws";\n',
+  "apps/daemon/src/http/connections.ts":
+    'export { WebSocketServer } from "ws";\nexport const ws = await import("ws");\n',
   "apps/daemon/src/testing/v.ts": 'export { WebSocketServer } from "ws";\n',
-  "apps/daemon/src/w.medium.test.ts": 'export { WebSocketServer } from "ws";\n',
+  "apps/daemon/src/w.medium.test.ts":
+    'export { WebSocketServer } from "ws";\nexport const ws = await import("ws");\n',
+  "apps/daemon/src/y.ts": 'export const { WebSocketServer } = await import("ws");\n',
   "apps/daemon/src/testing/x.test.ts": 'export { readFileSync } from "node:fs";\n',
   "tests/holder/g.test.ts":
     'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
@@ -144,6 +147,8 @@ describe("the generated oxlint config, run by oxlint", () => {
       "apps/daemon/src/http/connections.ts": [],
       "apps/daemon/src/testing/v.ts": [],
       "apps/daemon/src/w.medium.test.ts": [],
+      // The ban reads static imports, so ws is loaded no other way where it applies.
+      "apps/daemon/src/y.ts": ["bazhen(ws-loads-statically)"],
       // A small test there is still a small test.
       "apps/daemon/src/testing/x.test.ts": ["eslint(no-restricted-imports)"],
     });

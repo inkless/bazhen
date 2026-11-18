@@ -40,7 +40,8 @@
     "react/react-in-jsx-scope": "off",
     "bazhen/host-guard": "error",
     "bazhen/signal-guard": "error",
-    "bazhen/stdio-guard": "off"
+    "bazhen/stdio-guard": "off",
+    "bazhen/ws-loads-statically": "off"
   },
   "overrides": [
     {
@@ -2306,6 +2307,7 @@
         "apps/daemon/**/*.tsx"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "error",
         "no-restricted-imports": [
           "error",
           {
@@ -2343,6 +2345,7 @@
         "apps/daemon/src/testing/**"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
@@ -2373,6 +2376,7 @@
         "apps/daemon/**/*.test.tsx"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
@@ -2432,6 +2436,7 @@
         "apps/daemon/**/*.medium.test.ts"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
