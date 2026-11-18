@@ -1,19 +1,22 @@
+import type { LimitStop } from "@bazhen/core";
 import {
   readCompaction,
   readItemStarted,
+  readRateLimits,
   readThreadStatus,
   readTurn,
   resultActivity,
   resultNotLoaded,
   type CodexActivity,
 } from "@bazhen/harness-codex";
-import type { Activity } from "@bazhen/protocol";
+import type { Activity, UsageLimit } from "@bazhen/protocol";
 import type { ChannelListener } from "./channel.ts";
 
 export interface CodexSignalsOptions {
   /** The running agent bound to a thread, if any. */
   readonly agentOf: (threadId: string) => string | undefined;
-  readonly record: (agentId: string, signal: Activity) => void;
+  /** Records a signal, and whether the account's limit may have stopped the turn it ends. */
+  readonly record: (agentId: string, signal: Activity, limit?: LimitStop) => void;
   /** The thread's turns, as the inbox follows them for failures. */
   readonly turns?: {
     started(agentId: string): void;
@@ -21,6 +24,11 @@ export interface CodexSignalsOptions {
   };
   /** Records that a bound thread's context was compacted. */
   readonly compacted?: (agentId: string) => void;
+  /**
+   * The windows of a rate-limit update. They are the account's, which every thread on this
+   * Codex home shares, so the update names no thread.
+   */
+  readonly limits?: (limits: UsageLimit[]) => void;
   /** Resumes a thread that unloaded, which loads it again and subscribes to it. */
   readonly resume: (threadId: string) => Promise<void>;
   readonly now?: () => Date;
@@ -76,20 +84,28 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
     activity.delete(threadId);
   };
 
-  const signal = (threadId: string, value: CodexActivity) => {
+  const signal = (
+    threadId: string,
+    value: CodexActivity,
+    failure?: { readonly error: string | null; readonly limit: LimitStop | null },
+  ) => {
     const agentId = opts.agentOf(threadId);
     if (agentId === undefined) return forget(threadId);
     activity.set(threadId, value);
-    const detail = labels.get(threadId);
+    const detail = failure?.error ?? labels.get(threadId);
     try {
       // An agent that has closed or exited records nothing; it doesn't throw.
-      opts.record(agentId, {
-        value,
-        source: "native",
-        confidence: 1,
-        observedAt: now().toISOString(),
-        ...(detail === undefined ? {} : { detail }),
-      });
+      opts.record(
+        agentId,
+        {
+          value,
+          source: "native",
+          confidence: 1,
+          observedAt: now().toISOString(),
+          ...(detail == null ? {} : { detail }),
+        },
+        failure?.limit ?? undefined,
+      );
     } catch (err) {
       // The store failed, or doesn't know the agent; the thread's next status is tried again.
       log(`codex: could not record activity for ${agentId}: ${String(err)}`);
@@ -154,12 +170,21 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
         firstItem.delete(threadId);
         if (labels.get(threadId) === AUTO_CONTINUED) labels.delete(threadId);
         if (ended === "failed") {
-          if (agentId !== undefined) opts.turns?.failed(agentId, null);
+          if (agentId !== undefined) opts.turns?.failed(agentId, turn.error);
           failed.add(threadId);
-          return signal(threadId, "failed");
+          return signal(threadId, "failed", turn);
         }
         // One that doesn't say how it ended is left to the thread's status.
         return ended === null ? undefined : signal(threadId, "idle");
+      }
+      const limits = readRateLimits(method, params);
+      if (limits !== null) {
+        try {
+          opts.limits?.(limits);
+        } catch (err) {
+          log(`codex: could not record rate limits: ${String(err)}`);
+        }
+        return;
       }
       const item = readItemStarted(method, params);
       if (item === null || !firstItem.delete(item.threadId) || item.userInput) return;

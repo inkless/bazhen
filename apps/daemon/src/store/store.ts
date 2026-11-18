@@ -1058,9 +1058,9 @@ export class Store {
 
   /**
    * Records what an agent's harness reports it doing. Nothing is recorded, and null returned,
-   * for a signal that repeats the latest one (the same value, source and detail: a new observed
-   * time or confidence alone is no change, so a stream of tool calls appends one event, and the
-   * standing signal's age shows how long it has held), or for one observed before the latest,
+   * for a signal that repeats the latest one (the same value, source, detail and reset: a new
+   * observed time or confidence alone is no change, so a stream of tool calls appends one event,
+   * and the standing signal's age shows how long it has held), or for one observed before the latest,
    * which arrived late, or for an agent whose process has gone (exited, closed, lost): a
    * harness's last report can land a moment after that, and is about a process no longer there.
    * An agent this daemon never ran is refused.
@@ -1144,6 +1144,12 @@ export class Store {
       AND type = 'agent.compacted' AND json_extract(payload, '$.hook.pid') = ?
       AND json_extract(payload, '$.hook.sessionId') IS ? LIMIT 1`;
     return this.prepare(sql).get(agentId, hook.pid, hook.sessionId) !== undefined;
+  }
+
+  /** The usage an agent's harness last reported in this process, if any. */
+  usage(agentId: string): Usage | undefined {
+    const row = this.prepare("SELECT usage FROM agent_sessions WHERE id = ?").get(agentId);
+    return typeof row?.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
   }
 
   /** What an agent's harness last reported it doing in this process, if anything. */
@@ -2245,7 +2251,10 @@ const REPORTING: ReadonlySet<AgentState> = new Set(["starting", "running", "unkn
 
 /** Two signals that say the same thing, whenever each was observed and however sure. */
 const sameActivity = (a: Activity, b: Activity) =>
-  a.value === b.value && a.source === b.source && a.detail === b.detail;
+  a.value === b.value &&
+  a.source === b.source &&
+  a.detail === b.detail &&
+  a.resetsAt === b.resetsAt;
 
 const activityOf = (column: SQLOutputValue | undefined): Activity =>
   Activity.parse(JSON.parse(String(column)));

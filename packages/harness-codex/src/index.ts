@@ -6,10 +6,12 @@ import {
   type HarnessAdapter,
   type HarnessChannelPort,
   type HarnessLaunch,
+  isoOfUnixSeconds,
   type LaunchOptions,
+  type LimitStop,
   whole,
 } from "@bazhen/core";
-import type { Activity, ApprovalDecision, ExternalRef } from "@bazhen/protocol";
+import type { Activity, ApprovalDecision, ExternalRef, UsageLimit } from "@bazhen/protocol";
 import { z } from "zod";
 
 const ThreadStarted = z.object({ thread: z.object({ id: z.string() }) });
@@ -460,13 +462,35 @@ export const resultNotLoaded = (result: unknown): boolean => isNotLoaded(statusI
 
 const TurnEvent = z.object({
   threadId: z.string(),
-  turn: z.object({ status: z.string().optional() }).optional(),
+  turn: z
+    .object({
+      status: z.string().optional(),
+      error: z.object({ codexErrorInfo: z.unknown() }).nullish().catch(null),
+    })
+    .optional(),
 });
+
+/** Codex's errors that the account's limit may have caused, by its name for them. */
+const LIMITS: ReadonlyMap<string, LimitStop> = new Map([
+  ["usageLimitExceeded", "quota"],
+  ["rateLimitExceeded", "rate"],
+]);
+
+/**
+ * Codex's name for an error, as `TurnError.codexErrorInfo` gives it: the string, or the one key of
+ * a variant that carries data, such as `httpConnectionFailed`.
+ */
+function errorName(info: unknown): string | null {
+  if (typeof info === "string") return info === "" ? null : whole(info, 200);
+  const keys = typeof info === "object" && info !== null ? Object.keys(info) : [];
+  return keys.length === 1 && keys[0] !== undefined ? whole(keys[0], 200) : null;
+}
 
 /**
  * A turn that started, or one that ended and how (`completed`, `interrupted`, `failed`, or null
  * when it doesn't say, which the thread's status then tells), from `turn/started` and
- * `turn/completed`; null for any other notification.
+ * `turn/completed`, with the error a failed one names and whether the account's limit may have
+ * caused it; null for any other notification.
  */
 export function readTurn(
   method: string,
@@ -475,16 +499,56 @@ export function readTurn(
   readonly threadId: string;
   readonly started: boolean;
   readonly ended: string | null;
+  readonly error: string | null;
+  readonly limit: LimitStop | null;
 } | null {
   if (method !== "turn/started" && method !== "turn/completed") return null;
   const p = TurnEvent.safeParse(params);
   if (!p.success) return null;
   const started = method === "turn/started";
+  const error = started ? null : errorName(p.data.turn?.error?.codexErrorInfo);
   return {
     threadId: p.data.threadId,
     started,
     ended: started ? null : (p.data.turn?.status ?? null),
+    error,
+    limit: error === null ? null : (LIMITS.get(error) ?? null),
   };
+}
+
+const RateLimitWindow = z.object({
+  usedPercent: z.number().min(0),
+  resetsAt: z.unknown(),
+});
+
+const RateLimitsUpdated = z.object({
+  rateLimits: z.object({
+    limitId: z.string().min(1).max(40).nullish().catch(null),
+    primary: RateLimitWindow.nullish().catch(null),
+    secondary: RateLimitWindow.nullish().catch(null),
+  }),
+});
+
+/**
+ * The windows an `account/rateLimits/updated` notification gives, each named by its limit and
+ * slot, such as `codex.primary`; null for any other notification. The update is sparse: a window
+ * it leaves out keeps what was last said of it. Codex gives a reset in Unix seconds.
+ */
+export function readRateLimits(method: string, params: unknown): UsageLimit[] | null {
+  if (method !== "account/rateLimits/updated") return null;
+  const p = RateLimitsUpdated.safeParse(params);
+  if (!p.success) return null;
+  const { limitId, primary, secondary } = p.data.rateLimits;
+  const named = (slot: string) => (limitId == null ? slot : `${limitId}.${slot}`);
+  const windows = [
+    ["primary", primary],
+    ["secondary", secondary],
+  ] as const;
+  return windows.flatMap(([slot, w]) => {
+    if (w == null) return [];
+    const resetsAt = isoOfUnixSeconds(w.resetsAt);
+    return [{ window: named(slot), usedPercent: w.usedPercent, ...(resetsAt && { resetsAt }) }];
+  });
 }
 
 const ThreadItem = z.object({ threadId: z.string(), item: z.object({ type: z.string() }) });

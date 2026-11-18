@@ -30,6 +30,26 @@ function tracked() {
 }
 
 describe("ActivityTracker", () => {
+  it("hands on a stop the account's limit may have caused as marked, and keeps the mark out of the activity", () => {
+    const recorded: [Activity, string | undefined][] = [];
+    const tracker = new ActivityTracker((_agent, activity, limit) =>
+      recorded.push([activity, limit]),
+    );
+    tracker.observe("a", MAIN, readHook("StopFailure", { error: "rate_limit" }));
+    tracker.observe("a", MAIN, readHook("StopFailure", { error: "server_error" }));
+    expect(
+      recorded.map(([a, limit]) => [a.value, a.detail, limit, Object.keys(a).toSorted()]),
+    ).toEqual([
+      ["failed", "rate_limit", "rate", ["confidence", "detail", "observedAt", "source", "value"]],
+      [
+        "failed",
+        "server_error",
+        undefined,
+        ["confidence", "detail", "observedAt", "source", "value"],
+      ],
+    ]);
+  });
+
   it("keeps the agent working while a background subagent outlives the turn that started it", () => {
     const { hook, now } = tracked();
     hook("UserPromptSubmit", MAIN, { prompt: "go" });

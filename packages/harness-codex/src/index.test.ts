@@ -11,10 +11,12 @@ import {
   readApproval,
   readCompaction,
   readQuestion,
+  readRateLimits,
   questionResult,
   readResolved,
   readThreadList,
   readThreadStarted,
+  readTurn,
   readUserMessage,
   ThreadMismatch,
   titlePrefix,
@@ -486,6 +488,71 @@ describe("Codex thread titles", () => {
       { threads: ["a"], nextCursor: "c2" },
       { threads: ["a"], nextCursor: null },
       { threads: [], nextCursor: null },
+    ]);
+  });
+});
+
+const ended = (error: unknown) =>
+  readTurn("turn/completed", { threadId: "t", turn: { status: "failed", error } });
+const window = (usedPercent: number, resetsAt: number | null) => ({
+  usedPercent,
+  windowDurationMins: 300,
+  resetsAt,
+});
+
+describe("Codex turns and usage limits", () => {
+  it("reads why a turn failed, and marks a usage or rate limit as one the account's limit may have caused", () => {
+    expect([
+      ended({ message: "m", codexErrorInfo: "usageLimitExceeded" }),
+      ended({ message: "m", codexErrorInfo: "rateLimitExceeded" }),
+      ended({ message: "m", codexErrorInfo: "sessionBudgetExceeded" }),
+      ended({ message: "m", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 502 } } }),
+      ended(null),
+    ]).toEqual([
+      {
+        threadId: "t",
+        started: false,
+        ended: "failed",
+        error: "usageLimitExceeded",
+        limit: "quota",
+      },
+      { threadId: "t", started: false, ended: "failed", error: "rateLimitExceeded", limit: "rate" },
+      {
+        threadId: "t",
+        started: false,
+        ended: "failed",
+        error: "sessionBudgetExceeded",
+        limit: null,
+      },
+      {
+        threadId: "t",
+        started: false,
+        ended: "failed",
+        error: "httpConnectionFailed",
+        limit: null,
+      },
+      { threadId: "t", started: false, ended: "failed", error: null, limit: null },
+    ]);
+  });
+
+  it("reads each window of a rate-limit update, by its limit and slot, with its reset", () => {
+    expect([
+      readRateLimits("account/rateLimits/updated", {
+        rateLimits: { limitId: "codex", primary: window(100, 1_795_006_800), secondary: null },
+      }),
+      readRateLimits("account/rateLimits/updated", {
+        rateLimits: { limitId: null, primary: window(12, null), secondary: window(3, null) },
+      }),
+      readRateLimits("account/rateLimits/updated", { rateLimits: { limitId: "codex" } }),
+      readRateLimits("thread/tokenUsage/updated", { rateLimits: { primary: window(1, null) } }),
+    ]).toEqual([
+      [{ window: "codex.primary", usedPercent: 100, resetsAt: "2026-11-18T13:00:00.000Z" }],
+      [
+        { window: "primary", usedPercent: 12 },
+        { window: "secondary", usedPercent: 3 },
+      ],
+      [],
+      null,
     ]);
   });
 });

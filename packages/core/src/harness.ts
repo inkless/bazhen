@@ -1,5 +1,16 @@
 import type { AgentLaunchRequest } from "./agent.ts";
-import type { ExternalRef, HarnessId, TuiTheme } from "@bazhen/protocol";
+import type { Activity, ExternalRef, HarnessId, TuiTheme } from "@bazhen/protocol";
+
+/**
+ * A turn's end that the account's limit may have caused, as its harness reports it: `quota` when
+ * the harness names the account's usage limit, `rate` for a rate limit it can't tell from one
+ * that passes in moments. Only the daemon, which holds the usage limits the harness last
+ * reported, can say whether the agent is `limited` until a reset.
+ */
+export type LimitStop = "quota" | "rate";
+
+/** What a harness's report says the agent is doing, before the daemon stamps and records it. */
+export type HarnessActivity = Pick<Activity, "value" | "detail"> & { readonly limit?: LimitStop };
 
 /** How to start one harness's TUI; the local environment turns it into a terminal. */
 export interface HarnessLaunch {

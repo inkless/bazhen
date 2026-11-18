@@ -33,6 +33,17 @@ const working = (signalAge: number, headlineAge: number) => ({
   headline: { text: "Halfway through the tests.", taskId: TASK, at: ago(headlineAge) },
 });
 
+const limited = (resetsAt: string) => ({
+  activity: {
+    value: "limited" as const,
+    source: "native" as const,
+    confidence: 1,
+    observedAt: ago(125),
+    detail: "rate_limit",
+    resetsAt,
+  },
+});
+
 const item = (id: string, state: "open" | "closed") => ({
   id,
   agentId: AGENT,
@@ -108,6 +119,29 @@ describe("bazhen agents", () => {
       "quiet  agent_0190c3b2a1d47a3b8c1d2e3f4a5b6cbd  codex  running  bazhen  /work",
       "",
     ]);
+  });
+
+  it("says when a limited agent's limit resets, or that its reset has passed", async () => {
+    const resetsAt = ago(-3 * 3600 - 1800);
+    s.daemon.answer(
+      "GET /v1/state",
+      StateSnapshot,
+      snapshot({
+        agents: [agent(AGENT, "waits", limited(resetsAt)), agent(OTHER, "due", limited(ago(60)))],
+      }),
+    );
+    expect((await s.bazhen(["agents"])).stdout.split("\n")).toEqual([
+      `waits  ${AGENT}  codex  running  limited 2m, resets in 3h  bazhen  /work`,
+      `due  ${OTHER}  codex  running  limited 2m, reset passed  bazhen  /work`,
+      "",
+    ]);
+    const [fleet] = FleetAgents.parse(JSON.parse((await s.bazhen(["agents", "--json"])).stdout));
+    expect(fleet?.signal).toEqual({
+      value: "limited",
+      source: "native",
+      ageSeconds: expect.any(Number),
+      resetsAt,
+    });
   });
 
   it("says when no agent runs", async () => {

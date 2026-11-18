@@ -50,6 +50,7 @@ import {
 import { CodexMail } from "./codex/mail.ts";
 import { recordCodexVersion } from "./codex/version.ts";
 import { codexSignals } from "./codex/signals.ts";
+import { Limits } from "./agents/limits.ts";
 import { CodexThreads, paneTitleCommand, resumeConfig } from "./codex/threads.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
@@ -321,6 +322,12 @@ const runtime = new RoutedRuntime({
   inUse,
   log: console.warn,
 });
+const limits = new Limits({
+  usage: (agentId) => store.usage(agentId),
+  recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
+  record: (agentId, a) => store.recordActivity(agentId, a),
+});
+limits.follow((reactor) => store.react(reactor));
 // Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).
 const codexThreads = new CodexThreads({
   store,
@@ -348,8 +355,13 @@ const codex = new CodexChannel({
     codexMail.listener,
     codexSignals({
       agentOf: (threadId) => store.codexAgent(threadId),
-      record: (agentId, activity) => void store.recordActivity(agentId, activity),
+      record: (agentId, activity, limit) => limits.record(agentId, activity, limit),
       compacted: (agentId) => void store.recordCompaction(agentId, "codex_item"),
+      limits: (update) =>
+        limits.accountLimits(
+          store.codexThreads().flatMap((threadId) => store.codexAgent(threadId) ?? []),
+          update,
+        ),
       resume: (threadId) => codex.resume(threadId),
       turns: {
         started: (agentId) => inbox.turnStarted(agentId),
@@ -397,7 +409,7 @@ const readiness = new Readiness({
 });
 const stopReadiness = readiness.follow();
 // What a Claude Code agent was doing went with the last daemon's memory (foundation-design §4.6).
-const activity = new ActivityTracker((agentId, a) => store.recordActivity(agentId, a));
+const activity = new ActivityTracker((agentId, a, limit) => limits.record(agentId, a, limit));
 const queue = new AgentQueue();
 const launchDeps: LaunchDeps = {
   store,
@@ -666,7 +678,7 @@ const socketListener = getRequestListener(
       ...(peer && { peer }),
       binding: new SessionBinding(store, psTable),
       activity,
-      recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
+      recordUsage: (agentId, usage) => limits.recordUsage(agentId, usage),
       compacted: (agentId, reporter) =>
         void store.recordCompaction(agentId, "claude_hook", reporter),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),

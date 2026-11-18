@@ -73,6 +73,14 @@ pub(crate) fn age_seconds(at: &str, now_ms: i64) -> u64 {
     u64::try_from((now_ms - then).max(0) / 1000).unwrap_or(0)
 }
 
+/// Whole seconds from `now_ms` to a time on the wire, or none once it has come or can't be read.
+pub(crate) fn seconds_until(at: &str, now_ms: i64) -> Option<u64> {
+    let then = bazhen_protocol::time::timestamp_ms(at)?;
+    u64::try_from((then - now_ms) / 1000)
+        .ok()
+        .filter(|_| then > now_ms)
+}
+
 /// `bytes` in GiB to one decimal, rounded as JavaScript's `toFixed(1)` rounds: a tie upward, where
 /// Rust's `{:.1}` would round it to even.
 pub(crate) fn gib(bytes: u64) -> String {
@@ -171,6 +179,22 @@ mod tests {
             .map(ago)
             .collect();
         assert_eq!(ages, ["0s", "59s", "1m", "59m", "1h", "23h", "1d", "2d"]);
+    }
+
+    #[test]
+    fn counts_the_seconds_to_a_time_still_to_come_and_none_once_it_has() {
+        let at = "2026-11-18T13:00:00.000Z";
+        let then = 1_795_006_800_000;
+        assert_eq!(
+            [
+                seconds_until(at, then - 10_800_000),
+                seconds_until(at, then - 1_500),
+                seconds_until(at, then),
+                seconds_until(at, then + 1),
+                seconds_until("at three", 0),
+            ],
+            [Some(10_800), Some(1), None, None, None]
+        );
     }
 
     #[test]
