@@ -43,12 +43,12 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
         encode_uri_component(&terminal)
     );
     let screen: TerminalScreen = daemon.get(&path, CALL)?;
-    let text = printable(&screen.text);
     if p.has("json") {
         // JSON escapes C0 controls but writes DEL and the C1 controls as they are.
+        let text = printable(&screen.text);
         return pretty(&TerminalScreen { text, ..screen });
     }
-    Ok(text.strip_suffix('\n').unwrap_or(&text).to_owned())
+    Ok(printed(&screen.text))
 }
 
 /// `--history`'s rows, a whole number up to the most.
@@ -59,6 +59,16 @@ fn history(given: &str) -> Step<u32> {
             "--history is a whole number of rows from 0 to {HISTORY_MAX}, not {given}"
         )),
     }
+}
+
+/// The text as printed: `printable`, without the newline its last row ends in, which printing
+/// adds back.
+fn printed(text: &str) -> String {
+    let mut text = printable(text);
+    if text.ends_with('\n') {
+        text.pop();
+    }
+    text
 }
 
 /// The text with any control but a newline, which the daemon never sends, written as U+FFFD all
@@ -99,6 +109,13 @@ mod tests {
                 None
             ]
         );
+    }
+
+    #[test]
+    fn a_screen_is_printed_without_the_newline_its_last_row_ends_in() {
+        assert_eq!(printed("one\n\x1b\n"), "one\n\u{fffd}");
+        assert_eq!(printed("one"), "one");
+        assert_eq!(printed(""), "");
     }
 
     #[test]

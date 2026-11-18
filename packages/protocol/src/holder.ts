@@ -413,9 +413,9 @@ export type HolderForeground = z.infer<typeof HolderForeground>;
 
 /**
  * Reads the screen shown as plain text, after the newest `history` rows of the main screen's
- * history, 10 000 at most however many are asked for. Needs no writer slot, and is answered after the child has exited too. Answered
- * `unavailable` when the holder's engine has failed for good, and `snapshot-too-large` when the
- * screen alone passes the holder's cap on the text. Since 1.4.
+ * history, 10 000 at most however many are asked for. Needs no writer slot, and is answered after
+ * the child has exited too. Answered `unavailable` when the holder's engine has failed for good,
+ * and `snapshot-too-large` when the screen alone passes the holder's cap on the text. Since 1.4.
  */
 export const HolderScreenRequest = z.object({ history: Count });
 export type HolderScreenRequest = z.infer<typeof HolderScreenRequest>;
