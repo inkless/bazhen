@@ -9,29 +9,6 @@
     "protocolId": {
       "type": "string"
     },
-    "runtime": {
-      "type": "object",
-      "properties": {
-        "state": {
-          "type": "string",
-          "enum": [
-            "healthy",
-            "unreachable",
-            "not-running"
-          ]
-        },
-        "version": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "state",
-        "version"
-      ]
-    },
     "runtimes": {
       "type": "array",
       "items": {
@@ -45,7 +22,8 @@
             "enum": [
               "healthy",
               "unreachable",
-              "not-running"
+              "not-running",
+              "unused"
             ]
           },
           "version": {
@@ -714,7 +692,7 @@
   "required": [
     "appVersion",
     "protocolId",
-    "runtime",
+    "runtimes",
     "hookClient",
     "config",
     "agents",

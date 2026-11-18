@@ -304,27 +304,33 @@ describe("HTTP app", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       protocolId: "protocol-of-this-build",
-      runtime: { state: "not-running", version: "fake" },
+      runtimes: [{ kind: "fake", state: "not-running", version: "fake" }],
     });
   });
 
-  it("reports each runtime of a routed one by itself, and the worst of them as the runtime", async () => {
+  it("reports each runtime of a routed one by itself, one in use by nothing as unused", async () => {
     const tmux = new FakeRuntime({ kind: "tmux" });
     const holder = new FakeRuntime({ kind: "holder" });
+    const other = new FakeRuntime({ kind: "other" });
     const routed = new RoutedRuntime({
-      runtimes: [tmux, holder],
+      runtimes: [tmux, holder, other],
       defaultKind: "tmux",
+      inUse: (kind) => kind === "holder",
       log: () => {},
     });
     holder.disconnect();
+    other.disconnect();
     const res = await createApp({ ...deps, runtime: routed }).request("/v1/health", {
       headers: { host },
     });
-    expect(await res.json()).toMatchObject({
-      runtime: { kind: "tmux", state: "unreachable", version: "fake" },
+    expect(await res.json()).toEqual({
+      status: "ok",
+      appVersion: expect.any(String),
+      protocolId: "protocol-of-this-build",
       runtimes: [
         { kind: "tmux", state: "not-running", version: "fake" },
         { kind: "holder", state: "unreachable", version: null },
+        { kind: "other", state: "unused", version: null },
       ],
     });
   });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { HealthResponse } from "@bazhen/protocol";
 import { PAGE_PROTOCOL, noticeUnpaired, onAnotherBuild, onUnpaired } from "./api.ts";
 import { isAnotherBuild } from "./build.ts";
@@ -72,11 +72,15 @@ export function App() {
               <dd>{status.health.appVersion}</dd>
               <dt>Protocol</dt>
               <dd>{status.health.protocolId.slice(0, 12)}</dd>
-              <dt>tmux</dt>
-              <dd>
-                {status.health.runtime.state}
-                {status.health.runtime.version ? ` (${status.health.runtime.version})` : ""}
-              </dd>
+              {status.health.runtimes.map((r) => (
+                <Fragment key={r.kind}>
+                  <dt>{r.kind}</dt>
+                  <dd>
+                    {r.state}
+                    {r.version ? ` (${r.version})` : ""}
+                  </dd>
+                </Fragment>
+              ))}
             </dl>
           )}
           <ThemeSwitch />

@@ -26,7 +26,7 @@ const health = {
   status: "ok",
   appVersion: "0.1.0",
   protocolId: "protocol-of-this-build",
-  runtime: { kind: "tmux", state: "healthy", version: "3.5a" },
+  runtimes: [{ kind: "holder", state: "healthy", version: "holder/1.2" }],
 };
 
 /** A socket answering every request with `body`; records the headers it was sent. */

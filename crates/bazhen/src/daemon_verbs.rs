@@ -102,20 +102,15 @@ pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     for line in doctor::build_lines(&health.app_version, &health.protocol_id, ", running") {
         out.line(&line);
     }
-    let reports = doctor::reports(
-        health.runtimes.as_ref(),
-        health.runtime.state,
-        health.runtime.version.as_ref(),
-    );
-    for r in &reports {
+    for r in &health.runtimes {
         out.line(&doctor::runtime_line(r));
     }
     out.line(&format!("agents: {agents}"));
     Ok(Exit::Done)
 }
 
-/// What the daemon runs with, for diagnosing it. Fails when the daemon or any of its runtimes
-/// can't be reached; a missing hook binary is a warning.
+/// What the daemon runs with, for diagnosing it. Fails when the daemon or a runtime it read can't
+/// be reached; an unused runtime isn't read, and a missing hook binary is a warning.
 pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     if !daemon.answers()? {
         out.line(&format!(
@@ -128,12 +123,7 @@ pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     for line in doctor::lines(&d, std::env::consts::OS == "macos") {
         out.line(&line);
     }
-    let reports = doctor::reports(
-        d.runtimes.as_ref(),
-        d.runtime.state,
-        d.runtime.version.as_ref(),
-    );
-    Ok(if doctor::any_unreachable(&reports) {
+    Ok(if doctor::any_unreachable(&d.runtimes) {
         Exit::Failed
     } else {
         Exit::Done

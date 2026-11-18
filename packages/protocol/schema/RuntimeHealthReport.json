@@ -11,7 +11,8 @@
       "enum": [
         "healthy",
         "unreachable",
-        "not-running"
+        "not-running",
+        "unused"
       ]
     },
     "version": {

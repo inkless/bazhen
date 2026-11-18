@@ -2,7 +2,7 @@
 
 use bazhen_protocol::daemon::{
     AgentCli, AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap,
-    OriginsFrom, Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals,
+    OriginsFrom, Refusing, RunningHolder, RuntimeHealthReport, RuntimeReportState, Terminals,
     ToolCalls, Web,
 };
 use bazhen_protocol::id::PROTOCOL_ID;
@@ -12,28 +12,13 @@ use bazhen_protocol::text::is_plain_remote;
 use crate::call::ANOTHER_BUILD;
 use crate::fmt::{gib, mib};
 
-fn state(s: RuntimeHealthState) -> &'static str {
+fn state(s: RuntimeReportState) -> &'static str {
     match s {
-        RuntimeHealthState::Healthy => "healthy",
-        RuntimeHealthState::Unreachable => "unreachable",
-        RuntimeHealthState::NotRunning => "not-running",
+        RuntimeReportState::Healthy => "healthy",
+        RuntimeReportState::Unreachable => "unreachable",
+        RuntimeReportState::NotRunning => "not-running",
+        RuntimeReportState::Unused => "unused",
     }
-}
-
-/// Every runtime the daemon reported, or tmux's alone from a daemon that reports only that.
-pub(crate) fn reports(
-    runtimes: Option<&Vec<RuntimeHealthReport>>,
-    tmux_state: RuntimeHealthState,
-    tmux_version: Option<&String>,
-) -> Vec<RuntimeHealthReport> {
-    runtimes.cloned().unwrap_or_else(|| {
-        vec![RuntimeHealthReport {
-            kind: "tmux".to_owned(),
-            state: tmux_state,
-            version: tmux_version.cloned(),
-            workarounds: None,
-        }]
-    })
 }
 
 /// A runtime as a line: its kind, its state, and its version when it has one.
@@ -48,7 +33,7 @@ pub(crate) fn runtime_line(r: &RuntimeHealthReport) -> String {
 pub(crate) fn any_unreachable(reports: &[RuntimeHealthReport]) -> bool {
     reports
         .iter()
-        .any(|r| r.state == RuntimeHealthState::Unreachable)
+        .any(|r| r.state == RuntimeReportState::Unreachable)
 }
 
 /// As much of a protocol id as a person compares by eye.
@@ -77,13 +62,8 @@ pub(crate) fn build_lines(app_version: &str, protocol_id: &str, state: &str) -> 
 
 /// Everything `bazhen doctor` prints of `d`.
 pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
-    let reported = reports(
-        d.runtimes.as_ref(),
-        d.runtime.state,
-        d.runtime.version.as_ref(),
-    );
     let mut out = build_lines(&d.app_version, &d.protocol_id, "");
-    for r in &reported {
+    for r in &d.runtimes {
         out.push(runtime_line(r));
         for w in r.workarounds.iter().flatten() {
             out.push(format!("  warning: {w}"));
@@ -144,7 +124,10 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
     }
     if let Some(c) = &d.containment {
         let holders = d.holder.as_ref().map_or(&[][..], |h| h.holders.as_slice());
-        let tmux = reported.iter().any(|r| r.kind == "tmux");
+        let tmux = d
+            .runtimes
+            .iter()
+            .any(|r| r.kind == "tmux" && r.state != RuntimeReportState::Unused);
         out.extend(containment_lines(c, holders, tmux));
     }
     let source = match d.env.source {

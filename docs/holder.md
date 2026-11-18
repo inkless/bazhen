@@ -24,7 +24,9 @@ a path, old builds stay until you remove them.
 The daemon refuses to install into a `holder` directory that is a symlink, belongs to another
 user, or that others may write. Then no build is installed. New terminals go to holders unless
 `runtime.default = "tmux"`, so the daemon then refuses to start, saying why; with tmux the
-default it starts, and `bazhen doctor` says why holder terminals can't be created.
+default it starts, and `bazhen doctor` says why holder terminals can't be created. The other way
+round, a holder daemon needs no tmux: until a terminal is open on tmux, the daemon neither
+configures nor polls it, and status and doctor show it as `unused`.
 
 ## What closing a terminal ends
 

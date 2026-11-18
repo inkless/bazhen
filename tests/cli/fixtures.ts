@@ -135,14 +135,14 @@ export const health = (over: Partial<HealthResponse> = {}): HealthResponse => ({
   status: "ok",
   appVersion: "0.1.0",
   protocolId: PROTOCOL_ID,
-  runtime: { kind: "tmux", state: "healthy", version: "3.4" },
+  runtimes: [{ kind: "holder", state: "healthy", version: "holder/1.2" }],
   ...over,
 });
 
 export const doctor = (over: Partial<DoctorResponse> = {}): DoctorResponse => ({
   appVersion: "0.1.0",
   protocolId: PROTOCOL_ID,
-  runtime: { state: "healthy", version: "3.4" },
+  runtimes: [{ kind: "holder", state: "healthy", version: "holder/1.2" }],
   hookClient: { path: "/repo/target/release/bazhen-hook", fallback: false },
   config: { path: "/home/u/.config/bazhen/config.toml", found: true },
   agents: { shell: "direct", loginShell: null },

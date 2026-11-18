@@ -7,19 +7,22 @@ use crate::ids::AgentId;
 use crate::nullable::Nullable;
 use crate::record::Record;
 
+/// A runtime's state as the daemon reports it: its health when it was read, or `Unused` when it
+/// wasn't, since it is not the default and no terminal is open on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum RuntimeHealthState {
+pub enum RuntimeReportState {
     Healthy,
     Unreachable,
     NotRunning,
+    Unused,
 }
 
 /// One runtime's health, as `bazhen status` and `bazhen doctor` show it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeHealthReport {
     pub kind: String,
-    pub state: RuntimeHealthState,
+    pub state: RuntimeReportState,
     pub version: Option<String>,
     /// Each defect of this runtime's that Bazhen works around.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,20 +36,6 @@ pub enum HealthStatus {
     Ok,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Tmux {
-    Tmux,
-}
-
-/// tmux's health, the first runtime, as every daemon reports it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TmuxHealth {
-    pub kind: Tmux,
-    pub state: RuntimeHealthState,
-    pub version: Option<String>,
-}
-
 /// `GET /v1/health`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,16 +44,8 @@ pub struct HealthResponse {
     pub app_version: String,
     /// The protocol the daemon speaks: a client of another is another build, to restart.
     pub protocol_id: String,
-    pub runtime: TmuxHealth,
-    /// Every runtime, each read by itself; absent from an older daemon.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtimes: Option<Vec<RuntimeHealthReport>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DoctorRuntime {
-    pub state: RuntimeHealthState,
-    pub version: Option<String>,
+    /// Every runtime, each read by itself.
+    pub runtimes: Vec<RuntimeHealthReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,9 +318,7 @@ pub struct CapturedEnv {
 pub struct DoctorResponse {
     pub app_version: String,
     pub protocol_id: String,
-    pub runtime: DoctorRuntime,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtimes: Option<Vec<RuntimeHealthReport>>,
+    pub runtimes: Vec<RuntimeHealthReport>,
     pub hook_client: HookClient,
     /// Null when none is installed, an incomplete install; absent from an older daemon.
     #[serde(

@@ -4,15 +4,11 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -152,15 +148,11 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -303,10 +295,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -329,10 +324,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -358,10 +356,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -453,10 +454,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -551,10 +555,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -618,10 +625,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -688,10 +698,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -726,10 +739,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -753,171 +769,6 @@
       },
       "containment": {
         "state": "unchecked"
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"healthy\"",
-    "wire": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "healthy",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "healthy",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"unreachable\"",
-    "wire": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "unreachable",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "unreachable",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"not-running\"",
-    "wire": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "start",
-        "kept": 3,
-        "removed": {}
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
-      "hookClient": {
-        "path": "/r/hook.sh",
-        "fallback": true
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": false
-      },
-      "agents": {
-        "shell": "direct",
-        "loginShell": null
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -931,908 +782,14 @@
     "name": "runtimes[].state = \"healthy\"",
     "wire": {
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "healthy",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "healthy",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    }
-  },
-  {
-    "name": "runtimes[].state = \"unreachable\"",
-    "wire": {
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "unreachable",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "unreachable",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "unreachable",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "unreachable",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    }
-  },
-  {
-    "name": "runtimes[].state = \"not-running\"",
-    "wire": {
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "not-running",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "not-running",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    },
-    "parsed": {
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
-      "runtimes": [
-        {
-          "kind": "tmux",
-          "state": "not-running",
-          "version": "3.4"
-        },
-        {
-          "kind": "holder",
-          "state": "not-running",
-          "version": null,
-          "workarounds": [
-            "w"
-          ]
-        }
-      ],
-      "hookClient": {
-        "path": "/r/target/release/bazhen-hook",
-        "fallback": false
-      },
-      "peerReader": {
-        "path": "/r/target/release/bazhen-peer"
-      },
-      "agentCli": {
-        "expected": "/r/target/release/bazhen",
-        "onPath": "/h/bin/bazhen"
-      },
-      "config": {
-        "path": "/c.toml",
-        "found": true
-      },
-      "agents": {
-        "shell": "login",
-        "loginShell": "/bin/zsh"
-      },
-      "codex": {
-        "daemon": "0.160.0",
-        "cli": "0.166.0",
-        "toolCalls": "unmarked"
-      },
-      "web": {
-        "externalOrigins": [
-          "https://box.ts.net"
-        ],
-        "from": "config",
-        "allowInsecureOrigins": true,
-        "pairing": {
-          "mode": "always",
-          "required": true
-        },
-        "app": "/r/apps/web/dist",
-        "lan": {
-          "url": "https://my-mac.local:7942",
-          "allow": [
-            "192.168.1.0/24"
-          ],
-          "certificate": {
-            "fingerprint": "AB:CD",
-            "path": "/s/lan.crt",
-            "expiresAt": "2026-11-16T12:00:00.000Z"
-          },
-          "error": "stopped",
-          "subnets": [
-            {
-              "interface": "eno1",
-              "cidr": "192.168.1.0/24"
-            }
-          ]
-        }
-      },
-      "notifications": {
-        "desktop": true,
-        "notifier": "notify-send"
-      },
-      "terminals": {
-        "open": 3,
-        "max": 100,
-        "host": {
-          "used": 37,
-          "max": 4096,
-          "exact": true
-        },
-        "refusing": "budget"
-      },
-      "holder": {
-        "binary": "/s/holder/3f9a/bazhen-holder",
-        "build": "3f9a",
-        "reason": "x",
-        "holders": [
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ],
-            "contained": true,
-            "socket": "/run/bazhen/holders/term.sock",
-            "holderPid": 4242,
-            "stats": {
-              "engineBytes": 2097152,
-              "rss": 9437184,
-              "ringBytes": 1048576,
-              "historyLines": 812,
-              "engineResets": 0
-            }
-          },
-          {
-            "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
-            "build": "3f9a",
-            "protocol": [
-              "1.2"
-            ]
-          }
-        ]
-      },
-      "containment": {
-        "state": "scoped",
-        "systemd": 255,
-        "oomPolicy": true,
-        "terminal": {
-          "asked": "50%",
-          "bytes": 33285996544
-        },
-        "total": {
-          "asked": "infinity",
-          "bytes": null
-        },
-        "swap": {
-          "asked": "0",
-          "bytes": 0
-        }
-      },
-      "env": {
-        "capturedAt": "2026-11-16T12:00:00.000Z",
-        "source": "refresh",
-        "kept": 40,
-        "removed": {
-          "secrets": 2,
-          "session": 1
-        }
-      }
-    }
-  },
-  {
-    "name": "agents.shell = \"direct\"",
-    "wire": {
-      "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -1855,10 +812,257 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
       },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"unreachable\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unreachable",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"not-running\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "runtimes[].state = \"unused\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unused",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unused",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    }
+  },
+  {
+    "name": "agents.shell = \"direct\"",
+    "wire": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
+      "hookClient": {
+        "path": "/r/hook.sh",
+        "fallback": true
+      },
+      "config": {
+        "path": "/c.toml",
+        "found": false
+      },
+      "agents": {
+        "shell": "direct",
+        "loginShell": null
+      },
+      "env": {
+        "capturedAt": "2026-11-16T12:00:00.000Z",
+        "source": "start",
+        "kept": 3,
+        "removed": {}
+      }
+    },
+    "parsed": {
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -1884,10 +1088,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -1910,10 +1117,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -1939,15 +1149,11 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2087,15 +1293,11 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2238,15 +1440,11 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2386,15 +1584,11 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2537,15 +1731,11 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2685,15 +1875,11 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -2836,10 +2022,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -2903,10 +2092,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -2973,10 +2165,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3040,10 +2235,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3110,10 +2308,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3205,10 +2406,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3303,10 +2507,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3398,10 +2605,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3496,10 +2706,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3563,10 +2776,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3633,10 +2849,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3700,10 +2919,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3770,10 +2992,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3796,10 +3021,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3825,10 +3053,13 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3851,10 +3082,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -3880,20 +3114,11 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4",
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
-        }
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4",
+          "state": "unused",
+          "version": null,
           "fieldFromANewerDaemon": {
             "any": [
               1
@@ -4163,15 +3388,11 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4"
+          "state": "unused",
+          "version": null
         },
         {
           "kind": "holder",
@@ -4314,15 +3535,18 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null,
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
-      },
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true,
@@ -4370,10 +3594,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -4399,15 +3626,18 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null,
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
-      },
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true,
@@ -4579,10 +3809,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -4677,15 +3910,18 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null,
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
-      },
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true,
@@ -4814,10 +4050,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true
@@ -4884,15 +4123,18 @@
     "wire": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null,
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
-      },
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true,
@@ -4967,10 +4209,13 @@
     "parsed": {
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "state": "not-running",
-        "version": null
-      },
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "not-running",
+          "version": null
+        }
+      ],
       "hookClient": {
         "path": "/r/hook.sh",
         "fallback": true

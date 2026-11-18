@@ -37,6 +37,20 @@ describe("exit watch", () => {
     expect(seen).toEqual([`${dead.ref.terminalId}:signalled`, `${dead.ref.terminalId}:signalled`]);
   });
 
+  it("reads nothing while inactive, and reports a death from then on the next active tick", async () => {
+    let active = false;
+    const read = vi.fn<() => Promise<DeadTerminal[]>>(async () => [dead]);
+    const w = watch({ read, active: () => active });
+    const seen: string[] = [];
+    const stop = w.subscribe((ref) => seen.push(ref.terminalId));
+    await vi.advanceTimersByTimeAsync(3000);
+    const whileInactive = read.mock.calls.length;
+    active = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    stop();
+    expect([whileInactive, seen]).toEqual([0, [dead.ref.terminalId]]);
+  });
+
   it("stops reading the runtime once the last listener leaves", async () => {
     const read = vi.fn<() => Promise<DeadTerminal[]>>(async () => []);
     const w = watch({ read });

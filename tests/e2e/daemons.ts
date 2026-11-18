@@ -14,6 +14,7 @@ export const isRuntime = (name: string): name is Runtime =>
 /** The specs that make real terminals but read nothing of tmux, so they run on holders too. */
 export const RUNTIME_AGNOSTIC_SPECS = [
   "dashboard.spec.ts",
+  "health.spec.ts",
   "inbox.spec.ts",
   "layout.spec.ts",
   "shells.spec.ts",

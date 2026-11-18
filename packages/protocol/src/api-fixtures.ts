@@ -295,9 +295,8 @@ const loneStates = [
 const fullDoctor = {
   appVersion: "0.1.0",
   protocolId: "a".repeat(64),
-  runtime: { state: "healthy", version: "3.4" },
   runtimes: [
-    { kind: "tmux", state: "healthy", version: "3.4" },
+    { kind: "tmux", state: "unused", version: null },
     { kind: "holder", state: "unreachable", version: null, workarounds: ["w"] },
   ],
   hookClient: { path: "/r/target/release/bazhen-hook", fallback: false },
@@ -359,7 +358,7 @@ const fullDoctor = {
 const bareDoctor = {
   appVersion: "0.1.0",
   protocolId: "b".repeat(64),
-  runtime: { state: "not-running", version: null },
+  runtimes: [{ kind: "holder", state: "not-running", version: null }],
   hookClient: { path: "/r/hook.sh", fallback: true },
   config: { path: "/c.toml", found: false },
   agents: { shell: "direct", loginShell: null },
@@ -679,7 +678,6 @@ const MESSAGES: Readonly<Record<string, Example>> = {
         status: "ok",
         appVersion: "0.1.0",
         protocolId: "a".repeat(64),
-        runtime: { kind: "tmux", state: "healthy", version: "3.4" },
         runtimes: [
           { kind: "holder", state: "not-running", version: "holder/1.2" },
           { kind: "tmux", state: "healthy", version: "3.4", workarounds: ["w"] },
@@ -690,7 +688,10 @@ const MESSAGES: Readonly<Record<string, Example>> = {
         status: "ok",
         appVersion: "0.1.0",
         protocolId: "b".repeat(64),
-        runtime: { kind: "tmux", state: "unreachable", version: null },
+        runtimes: [
+          { kind: "holder", state: "healthy", version: "holder/1.2" },
+          { kind: "tmux", state: "unused", version: null },
+        ],
       },
     ],
   },

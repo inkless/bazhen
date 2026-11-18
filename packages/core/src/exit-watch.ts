@@ -15,12 +15,14 @@ type Listener = (ref: RuntimeRef, status: ExitStatus) => void;
 export interface ExitWatchOptions {
   readonly read: () => Promise<readonly DeadTerminal[]>;
   readonly intervalMs: number;
+  /** Whether a tick reads at all; without it, every tick does. */
+  readonly active?: () => boolean;
   /** Where a failed read or a throwing listener goes; neither stops the timer or the others. */
   readonly onError: (err: unknown) => void;
 }
 
 /**
- * Polls for dead terminals while anyone listens, and reports every one on every tick, so a
+ * Polls for dead terminals while anyone listens and it is active, and reports every one on every tick, so a
  * listener that missed one, or a death the runtime only learns of by asking, is still told.
  */
 export class ExitWatch {
@@ -48,6 +50,7 @@ export class ExitWatch {
     if (this.reading) return;
     this.reading = true;
     try {
+      if (this.opts.active?.() === false) return;
       for (const { ref, status } of await this.opts.read())
         for (const listener of this.listeners) this.call(listener, ref, status);
     } catch (err) {
