@@ -224,6 +224,9 @@ mod tests {
             let mut ws = tungstenite::accept_hdr(stream, Asking(tell)).unwrap();
             let asked = asked.recv().unwrap();
             let hello = ws.read().unwrap().into_text().unwrap().to_string();
+            // Held until the client hangs up, as the daemon holds it: on macOS a socket whose
+            // other end has closed refuses the options `open` sets once the hello is sent.
+            while ws.read().is_ok() {}
             (asked, hello)
         });
         let hello = Attachment::hello(Size {
@@ -232,8 +235,8 @@ mod tests {
         });
         let caller = Caller::with_token(Some(TOKEN.to_owned()));
         let ws = open(&dir.socket(), "term_x", &caller, &hello).unwrap();
-        let ((path, token), said) = server.join().unwrap();
         drop(ws);
+        let ((path, token), said) = server.join().unwrap();
         assert_eq!(path, "/v1/terminals/term_x/stream");
         assert_eq!(token.as_deref(), Some(TOKEN));
         assert_eq!(said, serde_json::to_string(&hello).unwrap());
