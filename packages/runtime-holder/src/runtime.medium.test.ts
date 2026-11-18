@@ -879,6 +879,10 @@ const screens =
     holder.send({ type: "screen", id: request.id, body });
   };
 
+/** Answers as `ok` does, but hangs up on a `screen` without answering it. */
+const hangsUpOnScreen: Handler = (holder, request) =>
+  request.type === "screen" ? holder.hangUp() : ok(holder, request);
+
 async function screened(hello: Partial<HolderHelloReply>, handle: Handler) {
   const { runtime, terminals } = startingFakes(privateRoot(), hello, handle);
   const ref = await runtime.create(spec());
@@ -914,6 +918,13 @@ describe("HolderRuntime: reading a terminal's screen", () => {
       );
     },
   );
+
+  it("calls a screen unreadable when its holder hangs up before answering", async () => {
+    const { runtime, ref } = await screened({}, hangsUpOnScreen);
+    await expect(runtime.screen(ref, 0)).rejects.toThrow(
+      new ScreenUnreadable(ref.terminalId, "holder connection ended: hung up"),
+    );
+  });
 });
 
 describe("HolderRuntime: watching agents' titles", () => {

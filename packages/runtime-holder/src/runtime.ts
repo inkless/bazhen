@@ -797,6 +797,10 @@ export class HolderRuntime implements RuntimeAdapter {
         ) {
           throw new ScreenUnreadable(ref.terminalId, error.reason);
         }
+        // A holder gone mid-read is a read to try again, as one that couldn't write the text is.
+        if (error instanceof HolderDisconnected) {
+          throw new ScreenUnreadable(ref.terminalId, error.message);
+        }
         throw error;
       });
     } finally {
