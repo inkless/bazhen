@@ -118,6 +118,28 @@ export function assertSameGeneration(ref: RuntimeRef, current: string | undefine
   if (recorded !== current) throw new StaleIncarnation(ref.terminalId, "process-replaced");
 }
 
+/** The locator keys that name a terminal's process, which a respawn changes; the rest name what runs it. */
+const PROCESS_KEYS = new Set(["generation", "childPid", "childStart", "panePid"]);
+
+const GENERATION = /^(0|[1-9]\d*)$/;
+
+/**
+ * `found` is a later process of the terminal `recorded` names, run by the same holder or server:
+ * one the daemon didn't issue when `recorded` is the latest it did. A generation that isn't a
+ * whole number proves nothing.
+ */
+export function laterGeneration(recorded: RuntimeRef, found: RuntimeRef): boolean {
+  const before = recorded.locator.generation ?? "";
+  const after = found.locator.generation ?? "";
+  if (!GENERATION.test(before) || !GENERATION.test(after)) return false;
+  if (found.terminalId !== recorded.terminalId || found.runtime !== recorded.runtime) return false;
+  const keys = new Set([...Object.keys(recorded.locator), ...Object.keys(found.locator)]);
+  for (const key of keys) {
+    if (!PROCESS_KEYS.has(key) && recorded.locator[key] !== found.locator[key]) return false;
+  }
+  return Number(after) > Number(before);
+}
+
 /**
  * The runtime no longer shows the terminal, but the server it was made on may still run it, its
  * socket deleted or taken by another, so it can't be called ended (foundation-design §7.1).

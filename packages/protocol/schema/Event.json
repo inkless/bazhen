@@ -704,6 +704,91 @@
         },
         "type": {
           "type": "string",
+          "const": "agent.process_adopted"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "agent"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            }
+          },
+          "required": [
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "agent.respawn_requested"
         },
         "entityType": {
@@ -2239,6 +2324,91 @@
           },
           "required": [
             "reason"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "terminal.process_adopted"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "terminal"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            }
+          },
+          "required": [
+            "runtimeRef"
           ]
         }
       },

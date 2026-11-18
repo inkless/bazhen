@@ -41,6 +41,22 @@ describe("agent session lifecycle", () => {
     ]).toEqual(["exited", "lost", "closing", false]);
   });
 
+  it("waits on its harness again when its terminal's process is replaced from outside", () => {
+    expect([
+      agent.next("running", "process.adopted"),
+      agent.next("exited", "process.adopted"),
+      agent.next("starting", "process.adopted"),
+    ]).toEqual(["starting", "starting", "starting"]);
+  });
+
+  it("adopts no process while closing, lost, unknown or ended", () => {
+    expect(
+      (["closing", "lost", "unknown", "closed", "failed"] as const).map((s) =>
+        agent.accepts(s, "process.adopted"),
+      ),
+    ).toEqual([false, false, false, false, false]);
+  });
+
   it("cannot be respawned while still running", () => {
     expect(() => agent.next("running", "respawn.requested")).toThrow(InvalidTransition);
   });

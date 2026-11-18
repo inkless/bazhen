@@ -76,6 +76,7 @@ const TERMINAL_EVENTS: [TerminalEvent, number][] = [
   ["target.absent", 1],
   ["respawned", 4],
   ["relinked", 1],
+  ["adopted", 2],
   ["close.requested", 1],
   ["close.completed", 1],
 ];
@@ -146,6 +147,7 @@ const AGENT_EVENTS: [AgentEvent, number][] = [
   ["relaunch.requested", 2],
   ["relaunch.rejected", 2],
   ["respawn.rejected", 1],
+  ["process.adopted", 2],
   ["close.requested", 1],
   ["close.completed", 1],
 ];
@@ -185,10 +187,15 @@ describe("agent session, over any sequence of events", () => {
     expect(check(agentWalks, runsOnlyOnceReady)).not.toThrow();
   });
 
-  it("starts again only on an explicit respawn or relaunch", () => {
+  // Adopting starts nothing: it records that something outside the daemon started a process.
+  it("starts again only on an explicit respawn or relaunch, or a process replaced from outside", () => {
     expect(
       check(agentWalks, (steps) =>
-        entersOnlyBy(steps, "starting", ["respawn.requested", "relaunch.requested"]),
+        entersOnlyBy(steps, "starting", [
+          "respawn.requested",
+          "relaunch.requested",
+          "process.adopted",
+        ]),
       ),
     ).not.toThrow();
   });

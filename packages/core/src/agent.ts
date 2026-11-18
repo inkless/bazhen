@@ -36,6 +36,7 @@ export type AgentEvent =
   | "environment.unreachable"
   | "environment.reconfirmed"
   | "target.absent"
+  | "process.adopted"
   | "respawn.requested"
   | "respawn.rejected"
   | "relaunch.requested"
@@ -54,6 +55,8 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
   // A rejected respawn returns to exited, where the terminal still is: it stays closable, and
   // failed would leave its tmux session with nothing to close it. A rejected relaunch returns to
   // lost the same way, so it can be relaunched again or removed.
+  // A process started in its terminal from outside the daemon is adopted as the agent's, which
+  // then waits on its harness's sign as after any start.
   starting: {
     "launch.confirmed": "starting",
     "harness.ready": "running",
@@ -62,10 +65,12 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
     "relaunch.rejected": "lost",
     "process.exited": "exited",
     "target.absent": "lost",
+    "process.adopted": "starting",
     "close.requested": "closing",
   },
   running: {
     "process.exited": "exited",
+    "process.adopted": "starting",
     "environment.unreachable": "unknown",
     "target.absent": "lost",
     "close.requested": "closing",
@@ -78,6 +83,7 @@ export const agent = machine<AgentState, AgentEvent>("agent session", {
   },
   exited: {
     "respawn.requested": "starting",
+    "process.adopted": "starting",
     "target.absent": "lost",
     "close.requested": "closing",
   },

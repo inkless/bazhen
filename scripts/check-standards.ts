@@ -63,7 +63,6 @@ const COVERED_ELSEWHERE: Record<string, string> = {
     "packages/runtime-tmux/src/server-exit.medium.test.ts",
   "packages/core/src/environment.ts": "packages/env-local/src/index.test.ts",
   "packages/protocol/src/holder-fixtures.ts": "scripts/protocol-schema.medium.test.ts",
-  "packages/core/src/runtime.ts": "packages/core/src/testing/fake-runtime.test.ts",
   "packages/core/src/testing/runtime-contract.ts": "packages/core/src/testing/fake-runtime.test.ts",
   "packages/core/src/testing/platform.ts": "packages/core/src/testing/fake-runtime.test.ts",
   "apps/web/src/App.tsx": "tests/e2e/health.spec.ts",
