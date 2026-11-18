@@ -22,7 +22,7 @@ use crate::lifecycle::{self, answer, pretty};
 use crate::out::Out;
 use crate::shells;
 use crate::tasks::{Step, Stop, need, usage};
-use crate::{EVENTS_USAGE, Exit};
+use crate::{AGENTS_USAGE, EVENTS_USAGE, Exit, SHELLS_USAGE};
 
 /// The first wait before trying a daemon that has gone away again; each failure doubles it.
 const FIRST_RETRY: Duration = Duration::from_millis(500);
@@ -36,16 +36,24 @@ const SHELL_STATES: [&str; 8] = [
     "creating", "running", "exited", "unknown", "lost", "closing", "closed", "failed",
 ];
 
-/// Runs `events` or `wait`, and says how it went.
-pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    let ran = if p.word(0) == Some("events") {
-        events(p, daemon, out)
-    } else {
-        wait(p, daemon, out)
-    };
-    match ran {
+/// Runs `events follow`, and says how it went.
+pub(crate) fn run_follow(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
+    match events(p, daemon, out) {
         Ok(exit) => Ok(exit),
         Err(stop) => answer(Err(stop), EVENTS_USAGE, out),
+    }
+}
+
+/// Runs `agents wait` or `shells wait`, for `kind`, and says how it went.
+pub(crate) fn run_wait(
+    p: &Parsed,
+    kind: Kind,
+    daemon: &Daemon,
+    out: &mut Out,
+) -> Result<Exit, Failed> {
+    match wait(p, kind, daemon, out) {
+        Ok(exit) => Ok(exit),
+        Err(stop) => answer(Err(stop), kind.usage(), out),
     }
 }
 
@@ -64,10 +72,10 @@ fn only(p: &Parsed, verb: &str, own: &[&str], words: usize) -> Step<()> {
 }
 
 fn events(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
-    only(p, "events", &["follow", "after"], 1)?;
-    if !p.has("follow") {
-        return usage("events takes --follow: the daemon keeps no history to list");
+    if p.word(1) != Some("follow") {
+        return usage("events takes follow: the daemon keeps no history to list");
     }
+    only(p, "events follow", &["after"], 2)?;
     let after = p
         .value("after")
         .map(|given| {
@@ -148,9 +156,39 @@ fn whole(given: &str) -> Option<u64> {
 
 /// What a wait is on: an agent or a shell, by id, as it was named once at the start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Agent,
     Shell,
+}
+
+impl Kind {
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Shell => "shell",
+        }
+    }
+
+    fn whose(self) -> &'static str {
+        match self {
+            Self::Agent => "an agent's",
+            Self::Shell => "a shell's",
+        }
+    }
+
+    fn states(self) -> &'static [&'static str; 8] {
+        match self {
+            Self::Agent => &AGENT_STATES,
+            Self::Shell => &SHELL_STATES,
+        }
+    }
+
+    fn usage(self) -> &'static str {
+        match self {
+            Self::Agent => AGENTS_USAGE,
+            Self::Shell => SHELLS_USAGE,
+        }
+    }
 }
 
 /// How the target stands against the condition.
@@ -160,18 +198,16 @@ enum Verdict {
     NotYet(String),
 }
 
-fn wait(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
-    only(p, "wait", &["timeout"], 3)?;
-    let given = need(p.word(1), "the agent or shell")?;
+fn wait(p: &Parsed, kind: Kind, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
+    let noun = kind.noun();
+    only(p, &format!("{noun}s wait"), &["timeout"], 3)?;
+    let given = need(p.word(1), &format!("the {noun}"))?;
     let condition = need(p.word(2), "the state")?;
-    if condition != "ended"
-        && !AGENT_STATES.contains(&condition)
-        && !SHELL_STATES.contains(&condition)
-    {
+    if condition != "ended" && !kind.states().contains(&condition) {
         return usage(format!(
-            "the state is an agent's ({}), a shell's ({}), or ended; not {condition}",
-            AGENT_STATES.join(", "),
-            SHELL_STATES.join(", ")
+            "{} state is {}, or ended; not {condition}",
+            kind.whose(),
+            kind.states().join(", ")
         ));
     }
     let timeout = match p.value("timeout") {
@@ -187,22 +223,7 @@ fn wait(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
     };
     let json = p.has("json");
     let state: StateSnapshot = daemon.get("/v1/state", CALL.min(timeout))?;
-    let (kind, id) = target(&state, given)?;
-    let states = match kind {
-        Kind::Agent => &AGENT_STATES,
-        Kind::Shell => &SHELL_STATES,
-    };
-    if condition != "ended" && !states.contains(&condition) {
-        let whose = if kind == Kind::Agent {
-            "an agent's"
-        } else {
-            "a shell's"
-        };
-        return usage(format!(
-            "{whose} state is {}, or ended; not {condition}",
-            states.join(", ")
-        ));
-    }
+    let id = target(&state, kind, given)?;
     let judge = |state: &StateSnapshot| judge(state, kind, &id, condition, json);
     let mut latest = match judge(&state)? {
         Verdict::Met(said) => return Ok(met(&said, out)),
@@ -288,27 +309,11 @@ fn watching(state: &StateSnapshot, kind: Kind, id: &str) -> Vec<String> {
 
 /// The agent or shell `given` names: an agent by its id or a name one not ended has, else a
 /// shell by its id or a name one open shell has.
-fn target(state: &StateSnapshot, given: &str) -> Step<(Kind, String)> {
-    let an_agent = state.agents.iter().any(|a| {
-        a.id.as_str() == given || (!a.state.ended() && a.name.eq_ignore_ascii_case(given))
-    });
-    if an_agent {
-        return lifecycle::find(state, given).map(|a| (Kind::Agent, a.id.to_string()));
+fn target(state: &StateSnapshot, kind: Kind, given: &str) -> Step<String> {
+    match kind {
+        Kind::Agent => lifecycle::find(state, given).map(|a| a.id.to_string()),
+        Kind::Shell => shells::shell_named(state, given).map(|s| s.id.to_string()),
     }
-    let a_shell = state.shells.iter().any(|s| {
-        s.id.as_str() == given
-            || (!s.state.ended()
-                && s.name
-                    .as_deref()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(given)))
-    });
-    if a_shell {
-        return shells::shell_named(state, given).map(|s| (Kind::Shell, s.id.to_string()));
-    }
-    Err(Stop::Refused(format!(
-        "the daemon has no agent or open shell {}",
-        printable(given)
-    )))
 }
 
 /// Whether the agent or shell `id` is in `condition`, can't be now, or may yet be; each says

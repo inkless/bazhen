@@ -87,12 +87,12 @@ describe("Claude Code harness", () => {
       hookCommand: "bazhen-hook",
       holdsConversation: () => false,
     });
-    const options = { instructions: "Use bazhen task done." };
+    const options = { instructions: "Use bazhen tasks done." };
     const launched = await harness.launchSpec(request, options);
     const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s" }, options);
     expect([flag(launched.argv), flag(resumed.argv)]).toEqual([
-      "Use bazhen task done.",
-      "Use bazhen task done.",
+      "Use bazhen tasks done.",
+      "Use bazhen tasks done.",
     ]);
   });
 
@@ -211,14 +211,13 @@ describe("Claude Code's permissions", () => {
     const { argv } = await claude(() => "s").launchSpec(request, {});
     expect(Reflect.get(Object(settingsOf(argv)), "permissions")).toEqual({
       allow: [
-        "Bash(bazhen agents:*)",
-        "Bash(bazhen whoami:*)",
+        "Bash(bazhen agents list:*)",
+        "Bash(bazhen agents whoami:*)",
+        "Bash(bazhen agents rename:*)",
+        "Bash(bazhen agents send:*)",
+        "Bash(bazhen tasks:*)",
+        "Bash(bazhen inbox escalate:*)",
         "Bash(bazhen roles:*)",
-        "Bash(bazhen rename:*)",
-        "Bash(bazhen task:*)",
-        "Bash(bazhen delegate:*)",
-        "Bash(bazhen escalate:*)",
-        "Bash(bazhen send:*)",
       ],
       ask: ["Bash(bazhen *-file*)"],
     });

@@ -112,7 +112,7 @@ export const FinishNoteText = z.string().max(20_000).refine(noteSafe, {
 });
 
 /**
- * Every line of a note marked as quoted, as a brief and `task show` print it, so no line of it
+ * Every line of a note marked as quoted, as a brief and `tasks show` print it, so no line of it
  * can pass for Bazhen's own text around it: not a header, not the line that ends the note, not a
  * command to run.
  */

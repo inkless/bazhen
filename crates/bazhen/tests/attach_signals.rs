@@ -1,4 +1,4 @@
-//! `bazhen attach` can't be left running past two requests to stop it, even stuck writing to a
+//! `bazhen terminals attach` can't be left running past two requests to stop it, even stuck writing to a
 //! terminal that stopped reading: the first wakes its loop, which never reads the wake-up while
 //! the write blocks, so the second must end the process by itself. The first alone, to an attach
 //! that isn't stuck, ends it cleanly.
@@ -101,7 +101,7 @@ fn daemon(
     }))
 }
 
-/// `bazhen attach TERMINAL` on a PTY whose other end only the test reads, against the daemon in
+/// `bazhen terminals attach TERMINAL` on a PTY whose other end only the test reads, against the daemon in
 /// `home`.
 fn attach(home: &Path) -> Res<(Child, OwnedFd)> {
     let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
@@ -114,7 +114,7 @@ fn attach(home: &Path) -> Res<(Child, OwnedFd)> {
         .custom_flags(i32::try_from(OFlags::NOCTTY.bits())?)
         .open(path.to_str()?)?;
     let child = Command::new(env!("CARGO_BIN_EXE_bazhen"))
-        .args(["attach", TERMINAL])
+        .args(["terminals", "attach", TERMINAL])
         .env_clear()
         .env("BAZHEN_HOME", home)
         .stdin(Stdio::from(slave.try_clone()?))

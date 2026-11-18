@@ -49,13 +49,13 @@ own domain or Caddy's local authority.
    directory. It names this machine's `.local` name only, such as `my-mac.local`, and lasts 820
    days; `bazhen doctor` shows when it expires.
 
-4. Run `bazhen pair`. Besides the code, it prints the address to open, such as
+4. Run `bazhen devices pair`. Besides the code, it prints the address to open, such as
    `https://my-mac.local:7942`, the certificate's SHA-256 fingerprint and when the certificate
    expires.
 
 5. On the device, open that address. The browser warns that the certificate isn't trusted. Open
    its details (Safari: Show Details, then view the certificate) and compare the SHA-256 with the
-   one `bazhen pair` printed, every pair of characters; both are lowercase. Only if they match,
+   one `bazhen devices pair` printed, every pair of characters; both are lowercase. Only if they match,
    choose to visit the site.
 
 6. Enter the pairing code.

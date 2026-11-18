@@ -54,7 +54,7 @@ describe("Tasks", () => {
     // Its first, the worker's prompt, comes because it wasn't launched as a worker.
     const mail = inbox(store, worker).at(-1);
     expect(mail).toContain("It fails on Node 26.");
-    expect(mail).toContain(`bazhen task done ${taskId}`);
+    expect(mail).toContain(`bazhen tasks done ${taskId}`);
   });
 
   it("records nothing when the assignee takes no mail", async () => {

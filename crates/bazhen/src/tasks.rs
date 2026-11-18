@@ -26,13 +26,13 @@ use bazhen_protocol::tasks::{
 };
 use bazhen_protocol::text::task_note_text;
 
+use crate::Exit;
 use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed, WAIT_MARGIN};
 use crate::fmt::{encode_uri_component, uuid};
 use crate::out::Out;
 use crate::paths::normalize;
 use crate::printers::{active_for, fleet, list_agents, list_roles, list_tasks, show_task, whoami};
-use crate::{Exit, TASK_USAGE};
 
 /// Why a task verb stopped before it was done.
 #[derive(Debug)]
@@ -75,14 +75,21 @@ impl From<String> for Answer {
     }
 }
 
-/// The options `send` takes beside its text; `--home` and `--port` are every verb's.
-const SEND_OPTIONS: [&str; 6] = ["file", "task", "wait", "timeout", "home", "port"];
-const SEND_TO_AGENT_OPTIONS: [&str; 5] = ["file", "wait", "timeout", "home", "port"];
+/// The options `agents send` and `tasks send` take beside their text; `--home` and `--port` are
+/// every verb's.
+const SEND_OPTIONS: [&str; 5] = ["file", "wait", "timeout", "home", "port"];
 const NOTE_OPTIONS: [&str; 3] = ["handoff", "home", "port"];
 const DEFAULT_WAIT_S: u64 = 60;
 
-/// Runs the task verb the command line names, and says how it went.
-pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Result<Exit, Failed> {
+/// Runs the verb the command line names, and says how it went, with `usage_text` under a usage
+/// mistake.
+pub(crate) fn run(
+    p: &Parsed,
+    daemon: &Daemon,
+    now_ms: i64,
+    usage_text: &str,
+    out: &mut Out,
+) -> Result<Exit, Failed> {
     let verb = Verb { p, daemon, now_ms };
     match verb.run(out) {
         Ok(answer) => {
@@ -90,7 +97,7 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, now_ms: i64, out: &mut Out) -> Re
             Ok(answer.exit)
         }
         Err(Stop::Usage(message)) => {
-            out.err(&format!("{message}\n{TASK_USAGE}"));
+            out.err(&format!("{message}\n{usage_text}"));
             Ok(Exit::Usage)
         }
         Err(Stop::NotHere(message)) => {
@@ -247,23 +254,33 @@ impl Verb<'_> {
     fn run(&self, out: &mut Out) -> Step<Answer> {
         let name = self.word(0).unwrap_or_default();
         let sub = self.word(1);
-        if name != "send" && self.has("file") {
-            return usage("--file is for send; a brief takes --brief-file");
+        let sends = name == "send" || (name == "tasks" && sub == Some("send"));
+        if !sends && self.has("file") {
+            return usage("--file is for agents send and tasks send; a brief takes --brief-file");
         }
-        for (option, owner) in [
-            ("wait", "send"),
-            ("timeout", "send"),
-            ("json", "agents"),
-            ("force", "close"),
-            ("confirm-busy", "close"),
-            ("fresh", "relaunch"),
+        for (option, allowed, owner) in [
+            ("wait", sends, "agents send and tasks send"),
+            ("timeout", sends, "agents send and tasks send"),
+            ("json", name == "agents", "agents list"),
+            ("force", false, "agents close and shells close"),
+            ("confirm-busy", false, "agents close and shells close"),
+            ("fresh", false, "agents relaunch"),
         ] {
-            if self.has(option) && name != owner {
+            if self.has(option) && !allowed {
                 return usage(format!("--{option} is for {owner}"));
             }
         }
-        if self.has("handoff") && !(name == "task" && sub == Some("note")) {
-            return usage("--handoff is for task note");
+        if self.has("handoff") && !(name == "tasks" && sub == Some("note")) {
+            return usage("--handoff is for tasks note");
+        }
+        let (verb, words) = match (name, sub) {
+            ("agents" | "roles" | "tasks", Some("list")) => (format!("{name} list"), 2),
+            ("agents" | "roles", _) => (name.to_owned(), 1),
+            ("whoami", _) => ("agents whoami".to_owned(), 1),
+            _ => (String::new(), usize::MAX),
+        };
+        if let Some(extra) = self.word(words) {
+            return usage(format!("{verb} takes no {extra}"));
         }
         match name {
             "agents" => {
@@ -283,7 +300,7 @@ impl Verb<'_> {
             "whoami" => {
                 let Some(me) = self.me()? else {
                     return Err(Stop::NotHere(
-                        "whoami runs inside an agent Bazhen launched".to_owned(),
+                        "agents whoami runs inside an agent Bazhen launched".to_owned(),
                     ));
                 };
                 let s = self.state()?;
@@ -295,7 +312,7 @@ impl Verb<'_> {
             "escalate" => self.escalate(),
             "send" => self.send(out),
             "delegate" => self.delegate(),
-            "task" => self.task(),
+            "tasks" => self.task(out),
             other => usage(format!("unknown verb {other}")),
         }
     }
@@ -366,54 +383,31 @@ impl Verb<'_> {
         )
     }
 
-    fn send(&self, out: &mut Out) -> Step<Answer> {
-        // Only before any word of the text, so a --task in unquoted text is refused rather than
-        // read as a broadcast of the words before it.
-        let first_word = self.p.word_place(1);
-        let task_at = self.p.place("task");
-        let broadcasts = task_at.is_some_and(|t| first_word.is_none_or(|w| t < w));
-        if !broadcasts && self.has("task") {
-            return usage(
-                "put the text in quotes: it holds --task; to send to a task's agents, put --task \
-                 <task> before the text",
-            );
-        }
-        let to_agent = if broadcasts {
-            None
-        } else {
-            Some(agent_ref(self.word(1), "the agent to send to")?)
-        };
-        let words = if broadcasts {
-            self.p.words_from(1)
-        } else {
-            self.p.words_from(2)
-        };
-        let allowed: &[&str] = if broadcasts {
-            &SEND_OPTIONS
-        } else {
-            &SEND_TO_AGENT_OPTIONS
-        };
-        let text = self.words(&words, allowed)?;
+    /// The text of a message: its words, or the file `--file` names, never both.
+    fn body(&self, words: &[&str]) -> Step<String> {
+        let text = self.words(words, &SEND_OPTIONS)?;
         if !text.is_empty() && self.has("file") {
             return usage("give the text or --file, not both");
         }
-        let body = match self.value("file") {
-            Some(file) => read_file(file)?,
-            None => need(Some(&text), "the text to send")?.to_owned(),
-        };
+        match self.value("file") {
+            Some(file) => read_file(file),
+            None => Ok(need(Some(&text), "the text to send")?.to_owned()),
+        }
+    }
+
+    fn send(&self, out: &mut Out) -> Step<Answer> {
+        if self.has("task") {
+            return usage(
+                "agents send takes no --task: to send to a task's agents, use tasks send <task>; \
+                 to send text that holds --task, put it in quotes",
+            );
+        }
+        let agent = agent_ref(self.word(1), "the agent to send to")?;
+        let body = self.body(&self.p.words_from(2))?;
         let wait = self.wait_ms()?;
         let request = SendMessageRequest {
             idempotency_key: key()?,
             body,
-        };
-        let Some(agent) = to_agent else {
-            let task = need(self.value("task"), "--task")?;
-            let r: BroadcastMessageResponse = self.daemon.post(
-                &format!("/v1/tasks/{}/messages", encode_uri_component(task)),
-                &request,
-                CALL,
-            )?;
-            return self.broadcast(&r, wait, out);
         };
         let r: SendMessageResponse = self.daemon.post(
             &format!(
@@ -436,6 +430,21 @@ impl Verb<'_> {
                 )
             }
         }
+    }
+
+    fn task_send(&self, out: &mut Out) -> Step<Answer> {
+        let task = need(self.word(2), "the task to send to")?;
+        let body = self.body(&self.p.words_from(3))?;
+        let wait = self.wait_ms()?;
+        let r: BroadcastMessageResponse = self.daemon.post(
+            &format!("/v1/tasks/{}/messages", encode_uri_component(task)),
+            &SendMessageRequest {
+                idempotency_key: key()?,
+                body,
+            },
+            CALL,
+        )?;
+        self.broadcast(&r, wait, out)
     }
 
     /// A task's broadcast: each message sent and each assignee skipped, waited on when asked. One
@@ -540,7 +549,7 @@ impl Verb<'_> {
         }
         if harness.is_none() && self.has("name") {
             return usage(
-                "--name names a --launch agent; give --launch too, or bazhen rename one that runs",
+                "--name names a --launch agent; give --launch too, or bazhen agents rename one that runs",
             );
         }
         let launched = match harness {
@@ -597,9 +606,9 @@ impl Verb<'_> {
         .into())
     }
 
-    fn task(&self) -> Step<Answer> {
+    fn task(&self, out: &mut Out) -> Step<Answer> {
         match self.word(1) {
-            Some("list") => {
+            None | Some("list") => {
                 let me = if self.has("all") { None } else { self.me()? };
                 let s = self.state()?;
                 Ok(list_tasks(&s, me.as_deref()).into())
@@ -655,7 +664,8 @@ impl Verb<'_> {
                 }
             }
             Some("note") => self.note(),
-            other => usage(format!("unknown task verb {}", other.unwrap_or_default())),
+            Some("send") => self.task_send(out),
+            Some(other) => usage(format!("unknown tasks verb {other}")),
         }
     }
 

@@ -1,6 +1,8 @@
-//! `bazhen <verb>`: the daemon's command-line client. It holds no logic of the daemon's: every
-//! verb is a call to the daemon's API over its Unix socket, except `start`, which runs the
-//! daemon's own start-up, and `attach`, which holds a terminal's stream open over that socket.
+//! `bazhen <namespace> <verb>`: the daemon's command-line client. It holds no logic of the
+//! daemon's: every verb is a call to the daemon's API over its Unix socket, except `start`, which
+//! runs the daemon's own start-up, and `terminals attach`, which holds a terminal's stream open
+//! over that socket. Only the verbs whose object is Bazhen itself (`start`, `stop`, `status`,
+//! `doctor`) have no namespace.
 //!
 //! Its decoders are public so the fuzz targets in `fuzz/` can reach them.
 
@@ -42,11 +44,12 @@ pub enum Exit {
     Usage,
     /// No daemon answers.
     NotRunning,
-    /// `send --wait`: the message bounced, or a broadcast skipped someone.
+    /// `agents send --wait`, `tasks send`: the message bounced, or a broadcast skipped someone.
     Bounced,
-    /// `send --wait`: the message was still on its way when the wait ran out.
+    /// `agents send --wait`, `tasks send --wait`: the message was still on its way when the wait
+    /// ran out.
     Queued,
-    /// `wait`: the agent or shell wasn't in the state when the wait ran out.
+    /// `agents wait`, `shells wait`: the agent or shell wasn't in the state when the wait ran out.
     TimedOut,
     /// The status of the daemon's own start-up, as it exited.
     Code(u8),
@@ -66,58 +69,67 @@ impl Exit {
     }
 }
 
-pub(crate) const TASK_USAGE: &str = "usage:
-  bazhen agents [--json]
-  bazhen whoami
-  bazhen roles
-  bazhen rename <agent> <name>
-  bazhen task list [--all]
-  bazhen task show <task>
-  bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
-  bazhen task assign <task> <agent> [--role <role>]
-  bazhen task unassign <task> <assignment>
-  bazhen task done [<task>] [--note <text>] [--cascade]
-  bazhen task cancel <task> [--note <text>] [--cascade]
-  bazhen task note [<task>] <text> [--handoff]
-  bazhen escalate <question> [--task <task>]
-  bazhen send (<agent> | --task <task>) (<text> | --file <path>) [--wait [--timeout <seconds>]]
-  bazhen delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
+pub(crate) const AGENTS_USAGE: &str = "usage:
+  bazhen agents [list] [--json]
+  bazhen agents whoami
+  bazhen agents rename <agent> <name>
+  bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]
+  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]
+  bazhen agents close <agent> [--confirm-busy] [--force] [--json]
+  bazhen agents respawn <agent> [--json]
+  bazhen agents relaunch <agent> [--fresh] [--json]
+  bazhen agents signal <agent> INT|TERM|HUP|KILL [--json]
+  bazhen agents wait <agent> <state>|ended [--timeout <seconds>] [--json]
 <agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send --wait
 exits 0 once the agent has the message in a prompt (a turn cut short may still get it again), 4
-if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.";
-
-pub(crate) const LIFECYCLE_USAGE: &str = "usage:
-  bazhen launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]
-  bazhen close <agent> [--confirm-busy] [--force] [--json]
-  bazhen respawn <agent> [--json]
-  bazhen relaunch <agent> [--fresh] [--json]
-  bazhen signal <agent> INT|TERM|HUP|KILL [--json]
+if it bounced, and 5 if it is still on its way when the timeout (60 s unless given) runs out.
 launch starts in --dir, else where it runs. close --confirm-busy ends what runs in the agent's
 shells; --force records closed an agent whose terminal's server can't be shown gone, though it
-may still run. relaunch --fresh starts a new harness session when the old one can't resume.";
+may still run. relaunch --fresh starts a new harness session when the old one can't resume.
+wait exits 0 once the agent is in <state>, or closed or failed for ended (an agent is running
+once its harness is up and ready), 1 if it ended otherwise, and 5 if the timeout (60 s unless
+given, at least 1) runs out.";
+
+pub(crate) const TASKS_USAGE: &str = "usage:
+  bazhen tasks [list] [--all]
+  bazhen tasks show <task>
+  bazhen tasks create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]
+  bazhen tasks assign <task> <agent> [--role <role>]
+  bazhen tasks unassign <task> <assignment>
+  bazhen tasks done [<task>] [--note <text>] [--cascade]
+  bazhen tasks cancel <task> [--note <text>] [--cascade]
+  bazhen tasks note [<task>] <text> [--handoff]
+  bazhen tasks send <task> (<text> | --file <path>) [--wait [--timeout <seconds>]]
+  bazhen tasks delegate (<agent> | --launch claude-code|codex [--dir <dir>] [--name <name>]) --title <title> (--brief <text> | --brief-file <path>) [--task <task>] [--role <role>]
+<agent> is an agent's name or id, and <role> one of the roles bazhen roles lists. send sends to
+everyone else on the task, and exits 4 if it skipped anyone; with --wait, as agents send --wait.";
+
+pub(crate) const INBOX_USAGE: &str = "usage:
+  bazhen inbox escalate <question> [--task <task>]";
+
+pub(crate) const ROLES_USAGE: &str = "usage:
+  bazhen roles [list]";
 
 pub(crate) const SHELLS_USAGE: &str = "usage:
-  bazhen shells list [--all] [--json]
+  bazhen shells [list] [--all] [--json]
   bazhen shells open [<agent> | --dir <dir>] [--json]
   bazhen shells close <shell> [--confirm-busy] [--force] [--json]
+  bazhen shells wait <shell> <state>|ended [--timeout <seconds>] [--json]
 shells list shows the shells neither closed nor failed, --all every one. A shell opens beside
 <agent>, in its directory, else in --dir, else where it runs. <shell> is a shell's id, or a name
 one open shell has, in any case. close --confirm-busy ends what runs in it; --force records
-closed a shell whose server can't be shown gone.";
+closed a shell whose server can't be shown gone. wait exits as agents wait does.";
 
 pub(crate) const EVENTS_USAGE: &str = "usage:
-  bazhen events --follow [--after <event>] [--json]
-  bazhen wait <agent|shell> <state>|ended [--timeout <seconds>] [--json]
-events --follow prints each event as it happens, after the event --after names if given, until
+  bazhen events follow [--after <event>] [--json]
+events follow prints each event as it happens, after the event --after names if given, until
 Ctrl-C, which may wait up to 5 s for a call to the daemon to end; when the daemon goes away it
-tries again until it is back. wait exits 0 once the agent or shell is in <state>, or closed or
-failed for ended (an agent is running once its harness is up and ready), 1 if it ended
-otherwise, and 5 if the timeout (60 s unless given, at least 1) runs out.";
+tries again until it is back.";
 
 const DAEMON_USAGE: &str = concat!(
-    "usage: bazhen <start|stop|status|doctor|env refresh|pair|devices [revoke|dismiss <id>]> ",
-    "[--home <dir>] [--port <port>]\n",
-    "usage: bazhen attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
+    "usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]\n",
+    "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]\n",
+    "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
     "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
     "  --direct types only while no daemon is there, and lets go of the input once one is back",
 );
@@ -126,12 +138,95 @@ const DAEMON_USAGE: &str = concat!(
 pub(crate) fn usage() -> String {
     [
         DAEMON_USAGE,
-        TASK_USAGE,
-        LIFECYCLE_USAGE,
+        AGENTS_USAGE,
+        TASKS_USAGE,
+        INBOX_USAGE,
+        ROLES_USAGE,
         SHELLS_USAGE,
         EVENTS_USAGE,
     ]
     .join("\n")
+}
+
+/// Each namespace, with the usage a verb it doesn't have is answered with.
+const NAMESPACES: [(&str, &str); 8] = [
+    ("agents", AGENTS_USAGE),
+    ("tasks", TASKS_USAGE),
+    ("inbox", INBOX_USAGE),
+    ("roles", ROLES_USAGE),
+    ("shells", SHELLS_USAGE),
+    ("devices", DAEMON_USAGE),
+    ("terminals", DAEMON_USAGE),
+    ("env", DAEMON_USAGE),
+];
+
+/// The code a command runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Handler {
+    /// The verbs an agent runs on tasks and on other agents, on its own socket when it has one.
+    Fleet(&'static str),
+    Lifecycle,
+    Shells,
+    Wait(events::Kind),
+    Follow,
+    Attach,
+    Start,
+    Stop,
+    Status,
+    Doctor,
+    Pair,
+    Devices,
+    EnvRefresh,
+}
+
+/// The code the command `p` names runs on, and how many of its first words name the namespace
+/// that code doesn't read: `agents send` reaches `send` as its first word.
+fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
+    use Handler::{
+        Attach, Devices, Doctor, EnvRefresh, Fleet, Follow, Lifecycle, Pair, Shells, Start, Status,
+        Stop, Wait,
+    };
+    Some(match (p.word(0)?, p.word(1)) {
+        ("start", _) => (Start, 0),
+        ("stop", _) => (Stop, 0),
+        ("status", _) => (Status, 0),
+        ("doctor", _) => (Doctor, 0),
+        ("agents", None | Some("list")) => (Fleet(AGENTS_USAGE), 0),
+        ("agents", Some("whoami" | "rename" | "send")) => (Fleet(AGENTS_USAGE), 1),
+        ("agents", Some("launch" | "close" | "respawn" | "relaunch" | "signal")) => (Lifecycle, 1),
+        ("agents", Some("wait")) => (Wait(events::Kind::Agent), 1),
+        (
+            "tasks",
+            None
+            | Some(
+                "list" | "show" | "create" | "assign" | "unassign" | "done" | "cancel" | "note"
+                | "send",
+            ),
+        ) => (Fleet(TASKS_USAGE), 0),
+        ("tasks", Some("delegate")) => (Fleet(TASKS_USAGE), 1),
+        ("inbox", Some("escalate")) => (Fleet(INBOX_USAGE), 1),
+        ("roles", None | Some("list")) => (Fleet(ROLES_USAGE), 0),
+        ("shells", None | Some("list" | "open" | "close")) => (Shells, 0),
+        ("shells", Some("wait")) => (Wait(events::Kind::Shell), 1),
+        ("events", _) => (Follow, 0),
+        ("terminals", Some("attach")) => (Attach, 1),
+        ("devices", Some("pair")) => (Pair, 0),
+        ("devices", None | Some("list" | "revoke" | "dismiss")) => (Devices, 0),
+        ("env", Some("refresh")) => (EnvRefresh, 0),
+        _ => return None,
+    })
+}
+
+/// What a command line that names no command is told: its namespace's usage when it names one.
+fn unknown(p: &args::Parsed) -> String {
+    let namespace = p.word(0).unwrap_or_default();
+    match NAMESPACES.iter().find(|(name, _)| *name == namespace) {
+        Some((name, text)) => match p.word(1) {
+            Some(verb) => format!("{name} has no verb {verb}\n{text}"),
+            None => format!("{name} needs a verb\n{text}"),
+        },
+        None => usage(),
+    }
 }
 
 const NOT_RUNNING: &str = "bazhen is not running; start it with `bazhen start`";
@@ -150,9 +245,12 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
             return Exit::Usage;
         }
     };
-    let verb = p.word(0).unwrap_or_default();
+    let Some((handler, namespace)) = route(&p) else {
+        out.err(&unknown(&p));
+        return Exit::Usage;
+    };
     // `start` hands `--home` to the daemon it starts and reaches no socket.
-    let inputs = inputs(p.value("home"), verb != "start");
+    let inputs = inputs(p.value("home"), !matches!(handler, Handler::Start));
     let socket = match paths::socket(&inputs, paths::same_socket) {
         Ok(socket) => socket,
         Err(refused) => {
@@ -166,25 +264,21 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         .and_then(|d| i64::try_from(d.as_millis()).ok())
         .unwrap_or(0);
     let daemon = Daemon::at(&socket.path);
-    let result = match verb {
-        "agents" | "whoami" | "roles" | "rename" | "task" | "delegate" | "escalate" | "send" => {
-            tasks::run(&p, &daemon, now_ms, out)
-        }
-        "launch" | "close" | "respawn" | "relaunch" | "signal" => lifecycle::run(&p, &daemon, out),
-        "shells" => shells::run(&p, &daemon, out),
-        "events" | "wait" => events::run(&p, &daemon, out),
-        "attach" => attach::run(&p, Path::new(&daemon.socket()), &daemon, out),
-        "start" => Ok(daemon_verbs::start(&p, out)),
-        "stop" => daemon_verbs::stop(&daemon, out),
-        "status" => daemon_verbs::status(&daemon, out),
-        "doctor" => daemon_verbs::doctor(&daemon, out),
-        "pair" => daemon_verbs::pair(&daemon, out),
-        "devices" => daemon_verbs::devices(&p, &daemon, now_ms, out),
-        "env" => daemon_verbs::env_refresh(&p, &daemon, out),
-        _ => {
-            out.err(&usage());
-            Ok(Exit::Usage)
-        }
+    let v = p.skip(namespace);
+    let result = match handler {
+        Handler::Fleet(usage_text) => tasks::run(&v, &daemon, now_ms, usage_text, out),
+        Handler::Lifecycle => lifecycle::run(&v, &daemon, out),
+        Handler::Shells => shells::run(&v, &daemon, out),
+        Handler::Wait(kind) => events::run_wait(&v, kind, &daemon, out),
+        Handler::Follow => events::run_follow(&v, &daemon, out),
+        Handler::Attach => attach::run(&v, Path::new(&daemon.socket()), &daemon, out),
+        Handler::Start => Ok(daemon_verbs::start(&v, out)),
+        Handler::Stop => daemon_verbs::stop(&daemon, out),
+        Handler::Status => daemon_verbs::status(&daemon, out),
+        Handler::Doctor => daemon_verbs::doctor(&daemon, out),
+        Handler::Pair => daemon_verbs::pair(&daemon, out),
+        Handler::Devices => daemon_verbs::devices(&v, &daemon, now_ms, out),
+        Handler::EnvRefresh => daemon_verbs::env_refresh(&v, &daemon, out),
     };
     match result {
         Ok(exit) => exit,

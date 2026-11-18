@@ -214,7 +214,7 @@ describe("a handoff in the next brief", () => {
     const brief = lastMail(store, lead);
     expect([
       brief.includes("h".repeat(3000)),
-      brief.includes(`bazhen task show ${taskId}`),
+      brief.includes(`bazhen tasks show ${taskId}`),
     ]).toEqual([false, true]);
   });
   it("gives the task with no handoff when even a pointer to it would not fit beside the brief", async () => {

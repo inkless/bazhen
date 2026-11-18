@@ -38,7 +38,7 @@ function socketCall(method: string, path: string, body?: object): Promise<unknow
   });
 }
 
-/** A fresh pairing code, asked of the run's daemon over its socket, as `bazhen pair` does. */
+/** A fresh pairing code, asked of the run's daemon over its socket, as `bazhen devices pair` does. */
 export async function issueCode(): Promise<string> {
   const body = await socketCall("POST", "/v1/pairing/codes");
   const code: unknown = Reflect.get(Object(body), "code");

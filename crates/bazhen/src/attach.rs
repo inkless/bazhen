@@ -1,4 +1,4 @@
-//! `bazhen attach <agent|shell|terminal>`: the person's own terminal on one of Bazhen's, through
+//! `bazhen terminals attach <agent|shell|terminal>`: the person's own terminal on one of Bazhen's, through
 //! the daemon's socket, as an interactive view like the web app's; or with `--direct`, straight to
 //! a terminal's holder when the daemon is down. `Ctrl-\ Ctrl-\` detaches.
 //!
@@ -27,7 +27,7 @@ use crate::out::Out;
 use crate::{Exit, usage};
 
 const NOT_A_TERMINAL: &str =
-    "bazhen attach takes over a terminal: run it in one, not from a pipe or a script";
+    "bazhen terminals attach takes over a terminal: run it in one, not from a pipe or a script";
 
 /// All attaching reads of `/v1/health`, so a daemon of another build still answers it.
 #[derive(Deserialize)]
@@ -60,7 +60,7 @@ pub(crate) fn run(
         .collect();
     let (Some(target), None, true) = (p.word(1), p.word(2), stray.is_empty()) else {
         out.err(&format!(
-            "bazhen attach takes one agent, shell or terminal, and no option but --direct and \
+            "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and \
              --home\n{}",
             usage()
         ));
@@ -80,7 +80,7 @@ pub(crate) fn run(
             if let Err(why) = direct::daemon_absent(socket) {
                 out.err(&format!(
                     "the daemon doesn't answer, but may be running ({why}), so attach won't go \
-                     around it: `bazhen attach --direct {target}` can view the terminal"
+                     around it: `bazhen terminals attach --direct {target}` can view the terminal"
                 ));
                 return Ok(Exit::NotRunning);
             }
@@ -143,7 +143,7 @@ pub(crate) fn run(
 /// answers, and says so when it can't.
 fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Result<Exit, Failed> {
     if !is_id("term", target) {
-        out.err("bazhen attach --direct takes a terminal id: names are the daemon's to resolve");
+        out.err("bazhen terminals attach --direct takes a terminal id: names are the daemon's to resolve");
         return Ok(Exit::Usage);
     }
     if !tty::interactive() {
@@ -210,7 +210,7 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
         Done::Ended(Ending::Yielded) => (
             format!(
                 "the daemon is back, so this attachment let go of {target}'s input: \
-                 `bazhen attach {target}` goes on through it"
+                 `bazhen terminals attach {target}` goes on through it"
             ),
             Exit::Done,
         ),

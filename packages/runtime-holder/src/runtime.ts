@@ -800,7 +800,7 @@ export class HolderRuntime implements RuntimeAdapter {
   }
 
   attachCommand(ref: RuntimeRef): string {
-    return shellCommand(["bazhen", "attach", ref.terminalId]);
+    return shellCommand(["bazhen", "terminals", "attach", ref.terminalId]);
   }
 
   private async deadTerminals(): Promise<DeadTerminal[]> {

@@ -260,9 +260,8 @@ describe("bazhen shells close", () => {
 });
 
 describe("bazhen shells", () => {
-  it("refuses a missing or unknown action, another's option, and a word too many, sending nothing", async () => {
+  it("refuses an unknown verb, another's option, and a word too many, sending nothing", async () => {
     const runs = await Promise.all([
-      s.bazhen(["shells"]),
       s.bazhen(["shells", "restart", SH1]),
       s.bazhen(["shells", "list", "--force"]),
       s.bazhen(["shells", "open", "--confirm-busy"]),
@@ -272,8 +271,7 @@ describe("bazhen shells", () => {
       s.bazhen(["shells", "close"]),
     ]);
     expect(runs.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
-      [2, "missing list, open or close"],
-      [2, "shells takes list, open or close, not restart"],
+      [2, "shells has no verb restart"],
       [2, "shells list takes no --force"],
       [2, "shells open takes no --confirm-busy"],
       [2, "shells close takes no --dir"],

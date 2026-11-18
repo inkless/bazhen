@@ -5,7 +5,7 @@ import { attachInScript, Daemon, DETACH } from "./daemon.ts";
 const state = async (daemon: Daemon) =>
   StateSnapshot.parse((await daemon.request("/v1/state")).body);
 
-describe("bazhen attach, on a holder terminal", () => {
+describe("bazhen terminals attach, on a holder terminal", () => {
   let daemon: Daemon;
   let left: (() => void)[] = [];
   beforeAll(async () => {
@@ -76,7 +76,7 @@ describe("bazhen attach, on a holder terminal", () => {
   });
 });
 
-describe("bazhen attach, straight to the holder while the daemon is down", () => {
+describe("bazhen terminals attach, straight to the holder while the daemon is down", () => {
   let daemon: Daemon;
   let left: (() => void)[] = [];
   beforeAll(async () => {

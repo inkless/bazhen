@@ -725,7 +725,7 @@ class Soak {
     const shell = StateSnapshot.parse((await daemon.request("/v1/state")).body).shells.find(
       (s) => s.id === terminalId,
     );
-    if (!shell?.attachCommand?.startsWith("bazhen attach")) {
+    if (!shell?.attachCommand?.startsWith("bazhen terminals attach")) {
       throw new Error(`${name} is not on the holder runtime: ${shell?.attachCommand ?? "none"}`);
     }
     const terminal: Terminal = { name, load: mode, terminalId };

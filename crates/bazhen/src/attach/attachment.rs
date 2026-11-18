@@ -1,4 +1,4 @@
-//! What `bazhen attach` makes of each thing that happens while it is attached: a key the person
+//! What `bazhen terminals attach` makes of each thing that happens while it is attached: a key the person
 //! typed, a frame the daemon sent, the terminal resized. No I/O: each step returns what to do.
 
 use bazhen_protocol::id::PROTOCOL_ID;

@@ -271,15 +271,11 @@ pub(crate) fn devices(
             out.line(&format!("revoked {id}; its open views are closed"));
             Ok(Exit::Done)
         }
-        Some(_) => {
-            out.err(&usage());
-            Ok(Exit::Usage)
-        }
-        None => {
+        None | Some("list") => {
             let r: DevicesResponse = daemon.get("/v1/devices", CALL)?;
             let pending = open_pairings(daemon)?;
             if r.devices.is_empty() {
-                out.line("no paired devices; pair one with `bazhen pair`");
+                out.line("no paired devices; pair one with `bazhen devices pair`");
             }
             for d in &r.devices {
                 let expires = bazhen_protocol::time::timestamp_ms(&d.expires_at);
@@ -302,6 +298,10 @@ pub(crate) fn devices(
                 ));
             }
             Ok(Exit::Done)
+        }
+        Some(_) => {
+            out.err(&usage());
+            Ok(Exit::Usage)
         }
     }
 }

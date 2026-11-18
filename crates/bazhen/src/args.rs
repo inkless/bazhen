@@ -28,7 +28,7 @@ const VALUED: [&str; 16] = [
 ];
 
 /// The options that are on or off.
-const SWITCHES: [&str; 10] = [
+const SWITCHES: [&str; 9] = [
     "all",
     "cascade",
     "json",
@@ -38,14 +38,13 @@ const SWITCHES: [&str; 10] = [
     "force",
     "confirm-busy",
     "fresh",
-    "follow",
 ];
 
 /// What the command line said.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Parsed {
-    /// The words that aren't options, in order, each with its place on the command line.
-    words: Vec<(usize, String)>,
+    /// The words that aren't options, in order.
+    words: Vec<String>,
     /// Each option given, in the order it first came, with its value and its place.
     options: Vec<(&'static str, Option<String>, usize)>,
 }
@@ -87,11 +86,10 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Parsed, BadLine> {
         .try_get_matches_from(args)
         .map_err(|e| BadLine(error_text(&e)))?;
     let words = matches
-        .indices_of("words")
+        .get_many::<String>("words")
         .into_iter()
         .flatten()
-        .zip(matches.get_many::<String>("words").into_iter().flatten())
-        .map(|(at, word)| (at, word.clone()))
+        .cloned()
         .collect();
     let mut options: Vec<(&'static str, Option<String>, usize)> = VALUED
         .iter()
@@ -127,12 +125,12 @@ fn error_text(error: &clap::Error) -> String {
 impl Parsed {
     /// The word at `n`, counting from the verb.
     pub(crate) fn word(&self, n: usize) -> Option<&str> {
-        self.words.get(n).map(|(_, w)| w.as_str())
+        self.words.get(n).map(String::as_str)
     }
 
     /// The words from `n` on.
     pub(crate) fn words_from(&self, n: usize) -> Vec<&str> {
-        self.words.iter().skip(n).map(|(_, w)| w.as_str()).collect()
+        self.words.iter().skip(n).map(String::as_str).collect()
     }
 
     /// The value of option `name`, if given.
@@ -148,17 +146,12 @@ impl Parsed {
         self.options.iter().any(|(n, _, _)| *n == name)
     }
 
-    /// Where option `name` was given.
-    pub(crate) fn place(&self, name: &str) -> Option<usize> {
-        self.options
-            .iter()
-            .find(|(n, _, _)| *n == name)
-            .map(|&(_, _, at)| at)
-    }
-
-    /// Where the word at `n` was given.
-    pub(crate) fn word_place(&self, n: usize) -> Option<usize> {
-        self.words.get(n).map(|&(at, _)| at)
+    /// The command line without its first `n` words, as a verb under a namespace reads it.
+    pub(crate) fn skip(&self, n: usize) -> Self {
+        Self {
+            words: self.words.iter().skip(n).cloned().collect(),
+            options: self.options.clone(),
+        }
     }
 
     /// The options given, in the order they came.
@@ -177,39 +170,47 @@ mod tests {
 
     #[test]
     fn reads_options_anywhere_among_the_words_and_an_inline_value() {
-        let p = parse_line(&["send", "--wait", "a", "hi", "--timeout=10", "there"]).unwrap();
-        assert_eq!(p.words_from(0), ["send", "a", "hi", "there"]);
+        let p = parse_line(&[
+            "agents",
+            "send",
+            "--wait",
+            "a",
+            "hi",
+            "--timeout=10",
+            "there",
+        ])
+        .unwrap();
+        assert_eq!(p.words_from(0), ["agents", "send", "a", "hi", "there"]);
         assert_eq!(p.value("timeout"), Some("10"));
         assert!(p.has("wait"));
         assert_eq!(p.given().collect::<Vec<_>>(), ["wait", "timeout"]);
-        assert!(p.place("wait") < p.word_place(1));
     }
 
     #[test]
     fn refuses_an_option_it_doesnt_know_a_prefix_a_short_one_and_help() {
         for line in [
-            &["task", "list", "--everything"][..],
-            &["task", "create", "--tit", "t"],
+            &["tasks", "list", "--everything"][..],
+            &["tasks", "create", "--tit", "t"],
             &["status", "-h"],
             &["status", "--help"],
             &["status", "--version"],
         ] {
             assert!(parse_line(line).is_err(), "{line:?}");
         }
-        let error = parse_line(&["task", "list", "--everything"]).unwrap_err();
+        let error = parse_line(&["tasks", "list", "--everything"]).unwrap_err();
         assert!(error.0.contains("--everything"), "{}", error.0);
     }
 
     #[test]
     fn keeps_the_last_value_of_an_option_given_twice() {
-        let p = parse_line(&["task", "--title", "a", "--title", "b"]).unwrap();
+        let p = parse_line(&["tasks", "--title", "a", "--title", "b"]).unwrap();
         assert_eq!(p.value("title"), Some("b"));
     }
 
     #[test]
     fn reads_everything_after_a_double_dash_as_words() {
-        let p = parse_line(&["send", "a", "--", "--all", "-x"]).unwrap();
-        assert_eq!(p.words_from(1), ["a", "--all", "-x"]);
+        let p = parse_line(&["agents", "send", "a", "--", "--all", "-x"]).unwrap();
+        assert_eq!(p.words_from(2), ["a", "--all", "-x"]);
         assert!(!p.has("all"));
     }
 }

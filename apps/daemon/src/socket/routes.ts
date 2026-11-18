@@ -41,9 +41,9 @@ export interface SocketParts {
   readonly paneTitleChanged: (pane: string) => void;
   readonly pairing: Pick<PairingCodes, "issue">;
   readonly devices: Pick<DeviceAuth, "list" | "revoke">;
-  /** The configured external origins, which `bazhen pair` shows as the addresses to open. */
+  /** The configured external origins, which `bazhen devices pair` shows as the addresses to open. */
   readonly externalOrigins: readonly string[];
-  /** The LAN listener's address and fingerprint while it serves, for `bazhen pair` to show. */
+  /** The LAN listener's address and fingerprint while it serves, for `bazhen devices pair` to show. */
   readonly lan: () => PairingCodeResponse["lan"];
   /** A shell's integration reported the line it is running (foundation-design §4.8). */
   readonly shellReport: (terminalId: string, report: ShellReport) => ReportOutcome;
@@ -80,7 +80,7 @@ export function socketApp(parts: SocketParts): Hono<{ Bindings: HttpBindings } &
 
   guardCallers(app, parts.credentials, parts.peer);
 
-  // The code is in this reply only, to the person who ran `bazhen pair`; the daemon never logs it.
+  // The code is in this reply only, to the person who ran `bazhen devices pair`; the daemon never logs it.
   app.post("/v1/pairing/codes", (c) => {
     const { code, expiresAt } = parts.pairing.issue();
     const lan = parts.lan();

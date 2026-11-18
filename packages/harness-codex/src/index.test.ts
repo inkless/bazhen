@@ -77,7 +77,7 @@ describe("Codex harness", () => {
   it("tells the agent's thread Bazhen's instructions once, in its first item, and not again on a resume", async () => {
     const { port, requests } = channel();
     const harness = new CodexHarness(port, REMOTE);
-    const options = { instructions: "Use bazhen task done." };
+    const options = { instructions: "Use bazhen tasks done." };
     await harness.launchSpec({ cwd: "/work" }, options);
     await harness.resumeSpec(
       { harness: "codex", project: "p", cwd: "/work" },
@@ -85,7 +85,7 @@ describe("Codex harness", () => {
       options,
     );
     const told = requests.filter(([, params]) =>
-      JSON.stringify(params).includes("Use bazhen task done."),
+      JSON.stringify(params).includes("Use bazhen tasks done."),
     );
     expect(told.map(([method]) => method)).toEqual(["thread/inject_items"]);
   });

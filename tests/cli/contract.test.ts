@@ -63,26 +63,109 @@ describe("the command line", () => {
     ]);
     expect(runs[0]?.stderr.split("\n")).toEqual(
       expect.arrayContaining([
-        expect.stringMatching(/^usage: bazhen <start\|stop\|status\|doctor\|env refresh\|pair\|/),
-        "  bazhen agents [--json]",
-        "  bazhen task create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]",
-        "  bazhen send (<agent> | --task <task>) (<text> | --file <path>) [--wait [--timeout <seconds>]]",
-        "  bazhen launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]",
-        "  bazhen signal <agent> INT|TERM|HUP|KILL [--json]",
+        "usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]",
+        "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]",
+        "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
+        "  bazhen agents [list] [--json]",
+        "  bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]",
+        "  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]",
+        "  bazhen agents signal <agent> INT|TERM|HUP|KILL [--json]",
+        "  bazhen agents wait <agent> <state>|ended [--timeout <seconds>] [--json]",
+        "  bazhen tasks create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]",
+        "  bazhen tasks send <task> (<text> | --file <path>) [--wait [--timeout <seconds>]]",
+        "  bazhen inbox escalate <question> [--task <task>]",
         "  bazhen shells open [<agent> | --dir <dir>] [--json]",
+        "  bazhen shells wait <shell> <state>|ended [--timeout <seconds>] [--json]",
+        "  bazhen events follow [--after <event>] [--json]",
       ]),
     );
     expect(runs[1]?.stderr).toBe(runs[0]?.stderr);
     expect(s.daemon.received).toEqual([]);
   });
 
-  it("refuses a task verb it doesn't know", async () => {
-    const ran = await s.bazhen(["task", "frobnicate"]);
-    expect(ran).toEqual({
-      code: 2,
-      stdout: "",
-      stderr: expect.stringContaining("unknown task verb frobnicate"),
-    });
+  it("refuses each command that has a namespace when it is given without one, sending nothing", async () => {
+    const usage = (await s.bazhen([])).stderr;
+    const runs = await Promise.all(
+      [
+        ["send", OTHER, "hi"],
+        ["send", "--task", TASK, "hi"],
+        ["task", "list"],
+        ["whoami"],
+        ["rename", OTHER, "reviewer"],
+        ["delegate", OTHER, "--title", "t", "--brief", "b"],
+        ["escalate", "Pin it?"],
+        ["launch", "codex"],
+        ["close", OTHER],
+        ["respawn", OTHER],
+        ["relaunch", OTHER],
+        ["signal", OTHER, "INT"],
+        ["wait", OTHER, "running"],
+        ["attach", OTHER],
+        ["pair"],
+      ].map((argv) => s.bazhen(argv, { BAZHEN_AGENT_ID: AGENT })),
+    );
+    expect(runs).toEqual(runs.map(() => ({ code: 2, stdout: "", stderr: usage })));
+    expect(s.daemon.received).toEqual([]);
+  });
+
+  it("refuses events --follow, whose switch is now the verb follow", async () => {
+    const ran = await s.bazhen(["events", "--follow"]);
+    expect([ran.code, ran.stdout, ran.stderr.split("\n")[0]]).toEqual([
+      2,
+      "",
+      "unexpected argument '--follow' found",
+    ]);
+  });
+
+  it("answers a verb a namespace doesn't have, or none, with that namespace's usage alone", async () => {
+    const runs = await Promise.all([
+      s.bazhen(["tasks", "frobnicate"]),
+      s.bazhen(["agents", "frobnicate"]),
+      s.bazhen(["inbox"]),
+    ]);
+    expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n").slice(0, 3)])).toEqual([
+      [2, "", ["tasks has no verb frobnicate", "usage:", "  bazhen tasks [list] [--all]"]],
+      [2, "", ["agents has no verb frobnicate", "usage:", "  bazhen agents [list] [--json]"]],
+      [
+        2,
+        "",
+        ["inbox needs a verb", "usage:", "  bazhen inbox escalate <question> [--task <task>]"],
+      ],
+    ]);
+    expect(runs.map((r) => r.stderr.includes("bazhen shells"))).toEqual([false, false, false]);
+    expect(s.daemon.received).toEqual([]);
+  });
+
+  it("refuses a word after a verb that lists, sending nothing", async () => {
+    const runs = await Promise.all(
+      [
+        ["agents", "list", "all"],
+        ["roles", "list", "all"],
+        ["tasks", "list", "all"],
+        ["agents", "whoami", OTHER],
+      ].map((argv) => s.bazhen(argv)),
+    );
+    expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n")[0]])).toEqual([
+      [2, "", "agents list takes no all"],
+      [2, "", "roles list takes no all"],
+      [2, "", "tasks list takes no all"],
+      [2, "", `agents whoami takes no ${OTHER}`],
+    ]);
+    expect(s.daemon.received).toEqual([]);
+  });
+
+  it.each([
+    [
+      ["tasks", "--all"],
+      ["tasks", "list", "--all"],
+    ],
+    [["agents"], ["agents", "list"]],
+    [["shells"], ["shells", "list"]],
+  ])("lists with %j as with %j", async (bare, listed) => {
+    s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
+    const runs = [await s.bazhen(bare), await s.bazhen(listed)];
+    expect(runs[0]).toEqual(runs[1]);
+    expect(runs[0]?.code).toBe(0);
   });
 });
 
@@ -91,8 +174,8 @@ describe("a daemon that isn't running", () => {
     await s.daemon.close();
     const runs = await Promise.all([
       s.bazhen(["status"]),
-      s.bazhen(["task", "list"]),
-      s.bazhen(["pair"]),
+      s.bazhen(["tasks", "list"]),
+      s.bazhen(["devices", "pair"]),
     ]);
     expect(runs).toEqual(
       Array.from({ length: 3 }, () => ({ code: 3, stdout: "", stderr: NOT_RUNNING })),
@@ -102,7 +185,7 @@ describe("a daemon that isn't running", () => {
   it("exits 3 when it holds a read past five seconds, as one wedged does", async () => {
     s.daemon.hang("GET /v1/state");
     const begun = Date.now();
-    const ran = await s.bazhen(["task", "list", "--all"]);
+    const ran = await s.bazhen(["tasks", "list", "--all"]);
     expect(ran).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
@@ -110,7 +193,7 @@ describe("a daemon that isn't running", () => {
   it("exits 3 when it holds its answer on who is calling, rather than taking the caller for the human", async () => {
     s.daemon.hang("GET /v1/caller");
     const begun = Date.now();
-    const ran = await s.bazhen(["whoami"]);
+    const ran = await s.bazhen(["agents", "whoami"]);
     expect([ran, s.daemon.routes()]).toEqual([
       { code: 3, stdout: "", stderr: NOT_RUNNING },
       ["GET /v1/caller"],
@@ -123,7 +206,7 @@ describe("a daemon that refuses", () => {
   it("exits 1 on a refused read, saying the path, the status and what the daemon said", async () => {
     const body = { error: "not_found" as const, message: "no task" };
     s.daemon.fail(`GET /v1/tasks/${TASK}`, 404, body);
-    const ran = await s.bazhen(["task", "show", TASK]);
+    const ran = await s.bazhen(["tasks", "show", TASK]);
     expect(ran).toEqual({
       code: 1,
       stdout: "",
@@ -137,8 +220,8 @@ describe("a daemon that refuses", () => {
     s.daemon
       .fail(`POST /v1/tasks/${TASK}/assign`, 409, conflict)
       .fail("POST /v1/pairing/codes", 403, forbidden);
-    const assign = await s.bazhen(["task", "assign", TASK, OTHER]);
-    const pair = await s.bazhen(["pair"], { BAZHEN_AGENT_ID: AGENT });
+    const assign = await s.bazhen(["tasks", "assign", TASK, OTHER]);
+    const pair = await s.bazhen(["devices", "pair"], { BAZHEN_AGENT_ID: AGENT });
     expect([assign, pair]).toEqual([
       {
         code: 1,
@@ -155,7 +238,7 @@ describe("a daemon that refuses", () => {
 
   it("exits 1 on a route the daemon doesn't have, which it answers in plain text, saying to restart it", async () => {
     const roles = await s.bazhen(["roles"]);
-    const caller = await s.bazhen(["whoami"]);
+    const caller = await s.bazhen(["agents", "whoami"]);
     expect([roles, caller]).toEqual([
       { code: 1, stdout: "", stderr: `/v1/roles: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
       { code: 1, stdout: "", stderr: `/v1/caller: HTTP 404: 404 Not Found\n${ANOTHER_BUILD}\n` },
@@ -209,14 +292,14 @@ describe("the daemon any verb reaches", () => {
           unchanged: [],
         });
       const verbs = [
-        ["task", "list", "--all"],
+        ["tasks", "list", "--all"],
         ["status"],
         ["doctor"],
-        ["pair"],
+        ["devices", "pair"],
         ["devices"],
         ["env", "refresh"],
         ["shells", "list"],
-        ["wait", AGENT, "running", "--timeout", "1"],
+        ["agents", "wait", AGENT, "running", "--timeout", "1"],
       ];
       const codes = [];
       for (const verb of verbs) codes.push((await s.bazhen(verb, theirs.env)).code);
@@ -246,14 +329,14 @@ describe("the daemon any verb reaches", () => {
         `bazhen is not running on BAZHEN_SOCKET ${gone.BAZHEN_SOCKET}; run with BAZHEN_SOCKET= ` +
         "to reach the daemon your home names\n",
     };
-    const listed = await s.bazhen(["task", "list"], gone);
+    const listed = await s.bazhen(["tasks", "list"], gone);
     const status = await s.bazhen(["status"], gone);
     expect([listed, status, s.daemon.received]).toEqual([notRunning, notRunning, []]);
   });
 
   it("is the one the home names when BAZHEN_SOCKET is empty", async () => {
     state().answer("GET /v1/health", HealthResponse, health());
-    const listed = await s.bazhen(["task", "list", "--all"], { BAZHEN_SOCKET: "" });
+    const listed = await s.bazhen(["tasks", "list", "--all"], { BAZHEN_SOCKET: "" });
     const status = await s.bazhen(["status"], { BAZHEN_SOCKET: "" });
     expect([listed.code, status.code, s.daemon.routes().toSorted()]).toEqual([
       0,
@@ -270,7 +353,7 @@ describe("the daemon any verb reaches", () => {
       const refused = { code: 1, stdout: "", stderr: CONFLICT(theirs.env.BAZHEN_SOCKET, s.home) };
       const stop = await s.bazhen(["stop", "--home", s.home], theirs.env);
       const json = await s.bazhen(["shells", "list", "--json", "--home", s.home], theirs.env);
-      const listed = await s.bazhen(["task", "list", "--home", s.home], theirs.env);
+      const listed = await s.bazhen(["tasks", "list", "--home", s.home], theirs.env);
       expect([stop, json, listed, theirs.daemon.received, s.daemon.received]).toEqual([
         refused,
         refused,
@@ -343,10 +426,10 @@ describe("the daemon any verb reaches", () => {
 
   it("is under --home over BAZHEN_HOME, and under a home given with a trailing slash", async () => {
     state();
-    const flag = await s.bazhen(["task", "list", "--all", "--home", s.home], {
+    const flag = await s.bazhen(["tasks", "list", "--all", "--home", s.home], {
       BAZHEN_HOME: join(s.dir, "other"),
     });
-    const slash = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: `${s.home}/` });
+    const slash = await s.bazhen(["tasks", "list", "--all"], { BAZHEN_HOME: `${s.home}/` });
     expect([flag.code, slash.code, s.daemon.routes()]).toEqual([
       0,
       0,
@@ -355,7 +438,7 @@ describe("the daemon any verb reaches", () => {
   });
 
   it("refuses a home that isn't an absolute path, reaching no daemon", async () => {
-    const ran = await s.bazhen(["task", "list", "--home", "relative/home"]);
+    const ran = await s.bazhen(["tasks", "list", "--home", "relative/home"]);
     expect([ran.code, ran.stdout, ran.stderr]).toEqual([
       1,
       "",
@@ -370,7 +453,7 @@ describe("the daemon any verb reaches", () => {
     const theirs = await FakeDaemon.listen(join(runtime, "bazhen", "bazhen.sock"));
     try {
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bare(["task", "list", "--all"], { XDG_RUNTIME_DIR: runtime });
+      const ran = await s.bare(["tasks", "list", "--all"], { XDG_RUNTIME_DIR: runtime });
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {
       await theirs.close();
@@ -385,7 +468,7 @@ describe("the daemon any verb reaches", () => {
     try {
       const theirs = await FakeDaemon.listen(join(run, "bazhen.sock"));
       theirs.answer("GET /v1/state", StateSnapshot, snapshot());
-      const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_HOME: home });
+      const ran = await s.bazhen(["tasks", "list", "--all"], { BAZHEN_HOME: home });
       await theirs.close();
       expect([ran.code, theirs.routes()]).toEqual([0, ["GET /v1/state"]]);
     } finally {
@@ -461,8 +544,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "pair",
-    ["pair"],
+    "devices pair",
+    ["devices", "pair"],
     (d) =>
       d.answer("POST /v1/pairing/codes", PairingCodeResponse, {
         code: "ABCD2345",
@@ -492,13 +575,13 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
         .answer(`POST /v1/notices/${NTC}/dismiss`, DismissNoticeResponse, { eventIds: [1] }),
   ],
   [
-    "task list",
-    ["task", "list", "--all"],
+    "tasks list",
+    ["tasks", "list", "--all"],
     (d) => d.answer("GET /v1/state", StateSnapshot, snapshot()),
   ],
   [
-    "task assign",
-    ["task", "assign", TASK, OTHER],
+    "tasks assign",
+    ["tasks", "assign", TASK, OTHER],
     (d) =>
       d.answer(`POST /v1/tasks/${TASK}/assign`, AssignTaskResponse, {
         assignmentId: "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
@@ -506,8 +589,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "send --wait",
-    ["send", OTHER, "hi", "--wait"],
+    "agents send --wait",
+    ["agents", "send", OTHER, "hi", "--wait"],
     (d) =>
       d
         .answer(`POST /v1/agents/${OTHER}/messages`, SendMessageResponse, {
@@ -525,8 +608,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
     (d) => d.answer("GET /v1/roles", RolesResponse, { roles: [], problems: [] }),
   ],
   [
-    "rename",
-    ["rename", OTHER, "reviewer"],
+    "agents rename",
+    ["agents", "rename", OTHER, "reviewer"],
     (d) =>
       d.answer(`POST /v1/agents/${OTHER}/rename`, AgentCommandResponse, {
         agentId: OTHER,
@@ -534,8 +617,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "task create",
-    ["task", "create", "--title", "t", "--brief", "b"],
+    "tasks create",
+    ["tasks", "create", "--title", "t", "--brief", "b"],
     (d) =>
       d.answer("POST /v1/tasks", CreateTaskResponse, {
         taskId: TASK,
@@ -544,44 +627,44 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "task show",
-    ["task", "show", TASK],
+    "tasks show",
+    ["tasks", "show", TASK],
     (d) =>
       d
         .answer(`GET /v1/tasks/${TASK}`, TaskDetail, detail())
         .answer("GET /v1/state", StateSnapshot, snapshot()),
   ],
   [
-    "task unassign",
-    ["task", "unassign", TASK, "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"],
+    "tasks unassign",
+    ["tasks", "unassign", TASK, "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"],
     (d) => d.answer(`POST /v1/tasks/${TASK}/unassign`, TaskCommandResponse, { eventIds: [1] }),
   ],
   [
-    "task done",
-    ["task", "done", TASK],
+    "tasks done",
+    ["tasks", "done", TASK],
     (d) => d.answer(`POST /v1/tasks/${TASK}/finish`, TaskCommandResponse, { eventIds: [1] }),
   ],
   [
-    "task cancel",
-    ["task", "cancel", TASK],
+    "tasks cancel",
+    ["tasks", "cancel", TASK],
     (d) => d.answer(`POST /v1/tasks/${TASK}/finish`, TaskCommandResponse, { eventIds: [1] }),
   ],
   [
-    "task note",
-    ["task", "note", TASK, "Tests pass."],
+    "tasks note",
+    ["tasks", "note", TASK, "Tests pass."],
     (d) => d.answer(`POST /v1/tasks/${TASK}/notes`, TaskCommandResponse, { eventIds: [1] }),
   ],
   [
-    "escalate",
-    ["escalate", "Pin it?"],
+    "inbox escalate",
+    ["inbox", "escalate", "Pin it?"],
     (d) =>
       d.answer("POST /v1/escalations", EscalateResponse, {
         attentionId: "attn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
       }),
   ],
   [
-    "delegate",
-    ["delegate", OTHER, "--title", "t", "--brief", "b"],
+    "tasks delegate",
+    ["tasks", "delegate", OTHER, "--title", "t", "--brief", "b"],
     (d) =>
       d.answer("POST /v1/tasks/delegate", CreateTaskResponse, {
         taskId: TASK,
@@ -590,8 +673,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "send",
-    ["send", OTHER, "hi"],
+    "agents send",
+    ["agents", "send", OTHER, "hi"],
     (d) =>
       d.answer(`POST /v1/agents/${OTHER}/messages`, SendMessageResponse, {
         messageId: MSG,
@@ -599,8 +682,8 @@ const VERBS: readonly (readonly [string, readonly string[], (d: FakeDaemon) => u
       }),
   ],
   [
-    "send --task",
-    ["send", "--task", TASK, "hi"],
+    "tasks send",
+    ["tasks", "send", TASK, "hi"],
     (d) =>
       d.answer(`POST /v1/tasks/${TASK}/messages`, BroadcastMessageResponse, {
         sent: [{ agentId: OTHER, messageId: MSG }],
@@ -654,13 +737,13 @@ describe("who is asking", () => {
     state();
     const file = join(s.dir, "token");
     writeFileSync(file, content);
-    await s.bazhen(["task", "list"], { BAZHEN_AGENT_ID: AGENT, BAZHEN_AGENT_AUTH_FILE: file });
+    await s.bazhen(["tasks", "list"], { BAZHEN_AGENT_ID: AGENT, BAZHEN_AGENT_AUTH_FILE: file });
     expect(asking()).toEqual([[AGENT, undefined, undefined]]);
   });
 
   it("sends no token when the file can't be read, and still runs", async () => {
     state();
-    const ran = await s.bazhen(["task", "list", "--all"], {
+    const ran = await s.bazhen(["tasks", "list", "--all"], {
       BAZHEN_AGENT_ID: AGENT,
       BAZHEN_AGENT_AUTH_FILE: join(s.dir, "missing"),
     });
@@ -669,7 +752,7 @@ describe("who is asking", () => {
 
   it("refuses an agent id no request header can carry, before calling the daemon", async () => {
     state();
-    const ran = await s.bazhen(["task", "list", "--all"], { BAZHEN_AGENT_ID: "agént" });
+    const ran = await s.bazhen(["tasks", "list", "--all"], { BAZHEN_AGENT_ID: "agént" });
     expect([ran, s.daemon.received]).toEqual([
       {
         code: 1,
@@ -682,7 +765,7 @@ describe("who is asking", () => {
 
   it("names an empty agent when BAZHEN_AGENT_ID is set but empty", async () => {
     state();
-    await s.bazhen(["task", "list", "--all"], { BAZHEN_AGENT_ID: "" });
+    await s.bazhen(["tasks", "list", "--all"], { BAZHEN_AGENT_ID: "" });
     expect(asking()).toEqual([["", undefined, undefined]]);
   });
 
@@ -698,7 +781,7 @@ describe("who is asking", () => {
     );
     const file = join(s.dir, "token");
     writeFileSync(file, TOKEN);
-    const ran = await s.bazhen(["whoami"], {
+    const ran = await s.bazhen(["agents", "whoami"], {
       BAZHEN_AGENT_ID: AGENT,
       BAZHEN_DEVICE_ID: DEV,
       BAZHEN_AGENT_AUTH_FILE: file,
@@ -719,7 +802,7 @@ describe("who is asking", () => {
     const file = join(s.dir, "token");
     writeFileSync(file, TOKEN);
     chmodSync(file, 0o000);
-    const ran = await s.bazhen(["task", "list", "--all"], {
+    const ran = await s.bazhen(["tasks", "list", "--all"], {
       BAZHEN_AGENT_ID: AGENT,
       BAZHEN_AGENT_AUTH_FILE: file,
     });

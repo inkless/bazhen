@@ -39,7 +39,7 @@ describe("the daemon's Unix socket", () => {
     expect([offered(asOwner), offered(overHttp)]).toEqual([[["dismiss"]], [[]]]);
   });
 
-  it("follows its events with bazhen events --follow until Ctrl-C, which ends it with 0", async () => {
+  it("follows its events with bazhen events follow until Ctrl-C, which ends it with 0", async () => {
     const follow = followEvents(daemon);
     let opened = 0;
     try {
@@ -50,7 +50,7 @@ describe("the daemon's Unix socket", () => {
           body: { idempotencyKey: `follow-${opened++}`, cwd: daemon.work },
         });
         return follow.printed().includes(" terminal ");
-      }, "an event printed by bazhen events --follow");
+      }, "an event printed by bazhen events follow");
       signalOwnChild(follow.child, "SIGINT");
       expect(await follow.exited).toEqual({ code: 0, signal: null });
     } finally {

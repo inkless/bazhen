@@ -20,7 +20,8 @@ afterEach(async () => {
 });
 
 const asAgent = { BAZHEN_AGENT_ID: AGENT };
-const send = (argv: string[]) => s.bazhen(["send", ...argv], asAgent);
+const send = (argv: string[]) => s.bazhen(["agents", "send", ...argv], asAgent);
+const taskSend = (argv: string[]) => s.bazhen(["tasks", "send", ...argv], asAgent);
 const toAgent = (agentId: string) => `POST /v1/agents/${agentId}/messages`;
 const toTask = `POST /v1/tasks/${TASK}/messages`;
 const WAIT = "POST /v1/messages/wait";
@@ -30,7 +31,7 @@ const waited = (...states: [string, string, MailboxState][]) => ({
   messages: states.map(([id, agentId, state]) => ({ id, agentId, state })),
 });
 
-describe("bazhen send", () => {
+describe("bazhen agents send", () => {
   it("sends the words after the agent as one message, or a file's text, and says what it sent", async () => {
     writeFileSync(join(s.dir, "notes.md"), "from a file\n");
     s.daemon.answer(toAgent(OTHER), SendMessageResponse, { messageId: MSG, eventIds: [1] });
@@ -81,19 +82,21 @@ describe("bazhen send", () => {
     const runs = await Promise.all([
       send([OTHER, "run", "it", "with", "--all"]),
       send([OTHER, "use", "--task", TASK]),
-      s.bazhen(["escalate", "Pin", "it?", "--file", "q.md"], asAgent),
+      s.bazhen(["inbox", "escalate", "Pin", "it?", "--file", "q.md"], asAgent),
     ]);
     expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
     expect(runs.map((r) => r.stderr)).toEqual([
       expect.stringContaining("quotes: it holds --all"),
-      expect.stringMatching(/quotes: it holds --task; .* before the text/),
-      expect.stringContaining("--file is for send"),
+      expect.stringContaining(
+        "agents send takes no --task: to send to a task's agents, use tasks send",
+      ),
+      expect.stringContaining("--file is for agents send and tasks send"),
     ]);
     expect(s.daemon.received).toEqual([]);
   });
 });
 
-describe("bazhen send --wait", () => {
+describe("bazhen agents send --wait", () => {
   it("says what it sent before it waits, waits as long as asked, and exits as the message stands", async () => {
     s.daemon
       .answer(toAgent(OTHER), SendMessageResponse, { messageId: MSG, eventIds: [1] })
@@ -160,16 +163,16 @@ describe("bazhen send --wait", () => {
       send([OTHER, "hi", "--timeout", "5"]),
       send([OTHER, "hi", "--wait", "--timeout", "601"]),
       send([OTHER, "hi", "--wait", "--timeout", "1.5"]),
-      s.bazhen(["task", "list", "--wait"], asAgent),
-      s.bazhen(["task", "list", "--timeout", "5"], asAgent),
+      s.bazhen(["tasks", "list", "--wait"], asAgent),
+      s.bazhen(["tasks", "list", "--timeout", "5"], asAgent),
     ]);
     expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
     expect(runs.map((r) => r.stderr)).toEqual([
       expect.stringContaining("give --wait too"),
       expect.stringContaining("at most 600"),
       expect.stringContaining("not 1.5"),
-      expect.stringContaining("--wait is for send"),
-      expect.stringContaining("--timeout is for send"),
+      expect.stringContaining("--wait is for agents send and tasks send"),
+      expect.stringContaining("--timeout is for agents send and tasks send"),
     ]);
     expect(s.daemon.received).toEqual([]);
   });
@@ -178,7 +181,7 @@ describe("bazhen send --wait", () => {
 const sent = (...pairs: [string, string][]) =>
   pairs.map(([agentId, messageId]) => ({ agentId, messageId }));
 
-describe("bazhen send --task", () => {
+describe("bazhen tasks send", () => {
   const skipped = [{ agentId: AGENT, reason: "it is closing" }];
 
   it("sends every word after the task to the task's assignees, and says what it sent", async () => {
@@ -187,7 +190,7 @@ describe("bazhen send --task", () => {
       skipped: [],
       eventIds: [1],
     });
-    const ran = await send(["--task", TASK, "Rebase", "now."]);
+    const ran = await taskSend([TASK, "Rebase", "now."]);
     expect([ran.code, ran.stdout]).toEqual([0, `sent ${MSG} to ${OTHER}\n`]);
     expect(s.daemon.calls(toTask)[0]?.body).toEqual({
       idempotencyKey: expect.stringMatching(UUID),
@@ -195,14 +198,14 @@ describe("bazhen send --task", () => {
     });
   });
 
-  it("reads --task as a broadcast after other options too, as long as it comes before the text", async () => {
+  it("reads the task from the first word after the verb, whatever options come before it", async () => {
     s.daemon.answer(toTask, BroadcastMessageResponse, {
       sent: sent([OTHER, MSG]),
       skipped: [],
       eventIds: [1],
     });
     writeFileSync(join(s.dir, "m.md"), "file text");
-    const ran = await s.bazhen(["send", "--file", "m.md", "--task", TASK], asAgent);
+    const ran = await taskSend(["--file", "m.md", TASK]);
     expect(ran.code).toBe(0);
     expect(s.daemon.calls(toTask).map((r) => r.body)).toEqual([
       { idempotencyKey: expect.stringMatching(UUID), body: "file text" },
@@ -216,7 +219,7 @@ describe("bazhen send --task", () => {
       eventIds: [1],
     });
     const ran = await s.bazhen(
-      ["send", "--task", TASK, "--file", "/dev/stdin"],
+      ["tasks", "send", TASK, "--file", "/dev/stdin"],
       asAgent,
       "from a pipe\n",
     );
@@ -248,17 +251,32 @@ describe("bazhen send --task", () => {
     ],
   ] as const)("refuses, sending nothing, to send %s", async ([, make, why]) => {
     const path = make();
-    const ran = await s.bazhen(["send", "--task", TASK, "--file", path], asAgent);
+    const ran = await s.bazhen(["tasks", "send", TASK, "--file", path], asAgent);
     expect(ran).toEqual({ code: 1, stdout: "", stderr: `can't read ${path}: ${why}\n` });
     expect(s.daemon.received).toEqual([]);
   });
 
   it("fails, sending nothing, when the file to send can't be read", async () => {
-    const ran = await s.bazhen(["send", "--task", TASK, "--file", "missing.md"], asAgent);
+    const ran = await s.bazhen(["tasks", "send", TASK, "--file", "missing.md"], asAgent);
     expect([ran.code, ran.stdout, ran.stderr]).toEqual([
       1,
       "",
       expect.stringContaining("missing.md"),
+    ]);
+    expect(s.daemon.received).toEqual([]);
+  });
+
+  it("wants the task and one text to send, and sends nothing without them", async () => {
+    const runs = await Promise.all([
+      taskSend([]),
+      taskSend([TASK]),
+      taskSend([TASK, "hi", "--file", "f"]),
+    ]);
+    expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
+    expect(runs.map((r) => r.stderr)).toEqual([
+      expect.stringContaining("missing the task to send to"),
+      expect.stringContaining("the text"),
+      expect.stringContaining("not both"),
     ]);
     expect(s.daemon.received).toEqual([]);
   });
@@ -269,7 +287,7 @@ describe("bazhen send --task", () => {
       skipped,
       eventIds: [1],
     });
-    const ran = await send(["--task", TASK, "hi"]);
+    const ran = await taskSend([TASK, "hi"]);
     expect([ran.code, ran.stdout]).toEqual([
       4,
       `sent ${MSG} to ${OTHER}\nskipped ${AGENT}: it is closing\n`,
@@ -278,8 +296,8 @@ describe("bazhen send --task", () => {
 
   it("exits as bounced when it could send to no one, waiting or not, and waits on nothing", async () => {
     s.daemon.answer(toTask, BroadcastMessageResponse, { sent: [], skipped, eventIds: [] });
-    const plain = await send(["--task", TASK, "hi"]);
-    const waiting = await send(["--task", TASK, "hi", "--wait"]);
+    const plain = await taskSend([TASK, "hi"]);
+    const waiting = await taskSend([TASK, "hi", "--wait"]);
     expect([plain.code, plain.stdout, waiting.code, waiting.stdout]).toEqual([
       4,
       `skipped ${AGENT}: it is closing\n`,
@@ -303,7 +321,7 @@ describe("bazhen send --task", () => {
           eventIds: [],
         })
         .answer(WAIT, WaitMessagesResponse, waited([MSG, OTHER, first], [MSG2, AGENT, second]));
-      const ran = await send(["--task", TASK, "hi", "--wait"]);
+      const ran = await taskSend([TASK, "hi", "--wait"]);
       expect([ran.code, ran.stderr]).toEqual([
         code,
         `sent ${MSG} to ${OTHER}\nsent ${MSG2} to ${AGENT}\nwaiting up to 60 s\n`,
@@ -319,7 +337,7 @@ describe("bazhen send --task", () => {
     s.daemon
       .answer(toTask, BroadcastMessageResponse, { sent: sent([OTHER, MSG]), skipped, eventIds: [] })
       .answer(WAIT, WaitMessagesResponse, waited([MSG, OTHER, "seen"]));
-    const ran = await send(["--task", TASK, "hi", "--wait"]);
+    const ran = await taskSend([TASK, "hi", "--wait"]);
     expect([ran.code, ran.stdout]).toEqual([
       4,
       `skipped ${AGENT}: it is closing\n${MSG} to ${OTHER}: seen\n`,

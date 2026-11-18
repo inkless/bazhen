@@ -31,10 +31,10 @@ export function assignedMail(
   const full = mail(handoffLines(handoff));
   if (full.length <= MAIL_LIMIT) return full;
   const pointed = mail([
-    `${handoffHead(handoff)} is too long to carry here: bazhen task show ${task.id} has it.`,
+    `${handoffHead(handoff)} is too long to carry here: bazhen tasks show ${task.id} has it.`,
   ]);
   // A brief that fills the message leaves no room even to point at the note; the task is still
-  // given, and `task show` still has it.
+  // given, and `tasks show` still has it.
   return pointed.length <= MAIL_LIMIT ? pointed : mail([]);
 }
 
@@ -77,10 +77,10 @@ function assigned(
     task.brief,
     ...handoff,
     "When it is finished, run:",
-    `  bazhen task done ${task.id} --note "<what you did, in a sentence or two>"`,
+    `  bazhen tasks done ${task.id} --note "<what you did, in a sentence or two>"`,
     ...(grants.length === 0 ? [] : [DELEGATE(task.id, grants)]),
-    `If you are stuck, or need the human to decide: bazhen escalate "<question>" --task ${task.id}`,
-    `To read the task again: bazhen task show ${task.id}`,
+    `If you are stuck, or need the human to decide: bazhen inbox escalate "<question>" --task ${task.id}`,
+    `To read the task again: bazhen tasks show ${task.id}`,
   ].join("\n\n");
 }
 
@@ -88,8 +88,8 @@ function assigned(
 const DELEGATE = (taskId: string, grants: readonly Role[]) =>
   [
     `To hand part of it to another agent (as ${orList(grants.map(article))}), run:`,
-    `  bazhen delegate <agent> --task ${taskId} --title "<title>" --brief "<instructions>" [--role ${grants.join("|")}]`,
-    "  <agent> is a name or id; `bazhen agents` lists them, and whoever you delegate to tells you when they finish.",
+    `  bazhen tasks delegate <agent> --task ${taskId} --title "<title>" --brief "<instructions>" [--role ${grants.join("|")}]`,
+    "  <agent> is a name or id; `bazhen agents list` lists them, and whoever you delegate to tells you when they finish.",
     "  To start a new agent for it instead, put --launch claude-code or --launch codex in place of the agent, and --name <name> to name it.",
   ].join("\n");
 
@@ -132,7 +132,7 @@ export function peerMail(
   text: string,
 ) {
   const sender = from.name === "" ? `agent ${from.id} (` : `${from.name} (${from.id}, `;
-  return `From ${sender}${from.harness}, ${from.cwd}). If it needs an answer: bazhen send ${from.id} "<answer>"\n\n${text}`;
+  return `From ${sender}${from.harness}, ${from.cwd}). If it needs an answer: bazhen agents send ${from.id} "<answer>"\n\n${text}`;
 }
 
 /** A message's limit in the mailbox, which every composed one is held to. */
@@ -170,11 +170,11 @@ export function cancelledMail(task: Named, from: Who) {
  * What every agent Bazhen launches is told about the fleet it runs in, beside its harness's own
  * instructions, so it knows the task verbs before any task arrives.
  */
-export const FLEET_INSTRUCTIONS = `You are an agent in a Bazhen fleet, launched and managed by Bazhen. Your agent id is in $BAZHEN_AGENT_ID; bazhen whoami says your name, your tasks and whom you report to.
+export const FLEET_INSTRUCTIONS = `You are an agent in a Bazhen fleet, launched and managed by Bazhen. Your agent id is in $BAZHEN_AGENT_ID; bazhen agents whoami says your name, your tasks and whom you report to.
 Tasks reach you as messages from Bazhen, and you answer them with the bazhen command:
-- bazhen task list: the tasks you are assigned; bazhen task show <task>: one in full.
-- bazhen task done <task> --note "<what you did>": report a task finished, to whoever gave it to you.
-- bazhen task note [<task>] "<text>": say in a line how your work on a task stands, at a milestone or when it changes; your latest note is your headline in the fleet. Add --handoff when it is what whoever takes the task after you needs to pick it up: their brief carries it.
-- bazhen escalate "<question>" [--task <task>]: put a question or problem in the human's inbox.
-- bazhen agents lists the other agents, with what each is doing and its headline (--json for a program), and bazhen send <agent> "<text>" (or --file <path>, for text with quotes or several lines) sends one a message: a question it can answer, or something it needs to act on. bazhen send --task <task> "<text>" sends it to everyone else on that task. With --wait, send waits until the agent's prompt carries the message and exits 0, or 4 if it bounced, or 5 if it is still on its way at the timeout. An agent is named by its name or its id. A message from another agent names its sender. Answer it only when there is something to answer or act on, never just to acknowledge or thank.
-- As a task's coordinator or lead, bazhen delegate <agent> --task <task> --title "<title>" --brief "<instructions>" hands part of it to another agent; with --launch claude-code or --launch codex in place of the agent, to a new agent started for it.`;
+- bazhen tasks list: the tasks you are assigned; bazhen tasks show <task>: one in full.
+- bazhen tasks done <task> --note "<what you did>": report a task finished, to whoever gave it to you.
+- bazhen tasks note [<task>] "<text>": say in a line how your work on a task stands, at a milestone or when it changes; your latest note is your headline in the fleet. Add --handoff when it is what whoever takes the task after you needs to pick it up: their brief carries it.
+- bazhen inbox escalate "<question>" [--task <task>]: put a question or problem in the human's inbox.
+- bazhen agents list shows the other agents, with what each is doing and its headline (--json for a program), and bazhen agents send <agent> "<text>" (or --file <path>, for text with quotes or several lines) sends one a message: a question it can answer, or something it needs to act on. bazhen tasks send <task> "<text>" sends it to everyone else on that task. With --wait, either send waits until the agent's prompt carries the message and exits 0, or 4 if it bounced, or 5 if it is still on its way at the timeout. An agent is named by its name or its id. A message from another agent names its sender. Answer it only when there is something to answer or act on, never just to acknowledge or thank.
+- As a task's coordinator or lead, bazhen tasks delegate <agent> --task <task> --title "<title>" --brief "<instructions>" hands part of it to another agent; with --launch claude-code or --launch codex in place of the agent, to a new agent started for it.`;

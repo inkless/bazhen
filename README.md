@@ -144,8 +144,8 @@ network could read the traffic.
 
 Once any external origin is set, every browser must pair before it can reach anything, on
 loopback too. A proxy in front can make any request look like loopback's, so loopback alone
-proves nothing. Run `bazhen pair` and enter the code it prints on the page. The code works once,
-for 5 minutes, and after 20 wrong tries it is burned and `bazhen pair` must issue another. A
+proves nothing. Run `bazhen devices pair` and enter the code it prints on the page. The code works once,
+for 5 minutes, and after 20 wrong tries it is burned and `bazhen devices pair` must issue another. A
 browser paired over HTTPS stays paired until it goes 30 days unused. One paired over plain HTTP
 stays paired for a day: a browser sends a cookie to every port on a host, so other servers on
 this machine's loopback can receive that one. `bazhen devices` lists paired browsers, and
@@ -174,7 +174,7 @@ terminal. Ctrl+Shift+W still closes the window, and Ctrl+Shift+N still opens a b
 Bazhen in Chrome or Chromium, at `http://127.0.0.1:7900` or your HTTPS route, click the install
 icon in the address bar, and open Bazhen from your app launcher from then on. The app runs in the
 same browser profile, so at the same address it keeps the browser's pairing and needs no second
-`bazhen pair`.
+`bazhen devices pair`.
 
 While Ctrl is down in a terminal, closing a tab, or the app's window, asks first: Ctrl+W in a tab,
 and Ctrl+Shift+W in the app. Firefox can't install Bazhen as an app, so there the question is all
@@ -225,34 +225,36 @@ else the default one.
 A task is a title and a brief, given to agents as its coordinator, lead or worker. Giving an agent
 a task mails it the brief and the commands to answer with:
 
-| Command                                                  | Does                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `bazhen task list [--all]`                               | Open tasks; inside an agent, its own                                                 |
-| `bazhen task show <task>`                                | One task in full: brief, assignments, subtasks, note                                 |
-| `bazhen task create --title … --brief …\|--brief-file …` | A new task, optionally `--assign <agent> --role <role>`, or `--parent <task>`        |
-| `bazhen task assign <task> <agent> [--role …]`           | Give the task to another agent                                                       |
-| `bazhen task unassign <task> <assignment>`               | Take it back, with everything that agent handed on                                   |
-| `bazhen task done [<task>] [--note …] [--cascade]`       | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks         |
-| `bazhen task cancel <task> [--note …] [--cascade]`       | Cancel it                                                                            |
-| `bazhen agents`                                          | The agents running, by name and id, to delegate to                                   |
-| `bazhen whoami`                                          | Inside an agent: its name, id, tasks, and whom it reports to on each                 |
-| `bazhen roles`                                           | The roles defined, what each hands on, and any role file skipped                     |
-| `bazhen rename <agent> <name>`                           | Rename an agent; inside an agent, only itself                                        |
-| `bazhen escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                      |
-| `bazhen delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent        |
-| `bazhen delegate --launch <harness> [--dir …] --title …` | The same, to a new agent it starts for the work, in its own directory unless `--dir` |
+| Command                                                        | Does                                                                                 |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `bazhen tasks list [--all]`                                    | Open tasks; inside an agent, its own                                                 |
+| `bazhen tasks show <task>`                                     | One task in full: brief, assignments, subtasks, note                                 |
+| `bazhen tasks create --title … --brief …\|--brief-file …`      | A new task, optionally `--assign <agent> --role <role>`, or `--parent <task>`        |
+| `bazhen tasks assign <task> <agent> [--role …]`                | Give the task to another agent                                                       |
+| `bazhen tasks unassign <task> <assignment>`                    | Take it back, with everything that agent handed on                                   |
+| `bazhen tasks done [<task>] [--note …] [--cascade]`            | Finish it; a worker finishes only its own part. `--cascade` cancels subtasks         |
+| `bazhen tasks cancel <task> [--note …] [--cascade]`            | Cancel it                                                                            |
+| `bazhen tasks send <task> <text>\|--file …`                    | Message everyone else on the task                                                    |
+| `bazhen agents list [--json]`                                  | The agents running, by name and id, to delegate to                                   |
+| `bazhen agents whoami`                                         | Inside an agent: its name, id, tasks, and whom it reports to on each                 |
+| `bazhen roles`                                                 | The roles defined, what each hands on, and any role file skipped                     |
+| `bazhen agents rename <agent> <name>`                          | Rename an agent; inside an agent, only itself                                        |
+| `bazhen inbox escalate <question> [--task …]`                  | Inside an agent: put a question or problem in the human's inbox                      |
+| `bazhen tasks delegate <agent> --title … --brief … [--task …]` | Inside an agent: hand part of a task it coordinates or leads to another agent        |
+| `bazhen tasks delegate --launch <harness> [--dir …] --title …` | The same, to a new agent it starts for the work, in its own directory unless `--dir` |
 
 `<agent>` is an agent's name or its id. Every agent has a name, unique among those not closed or
 failed: the one it was launched with (`--name`), or `<project>-<n>`, whose number is never given
 twice. Claude Code shows it as its session's name, which keeps the old one after a rename until the
 agent next starts. Mail stays with the agent's id, which a rename doesn't change.
 
-A Claude Code agent runs `bazhen agents`, `whoami`, `roles`, `rename`, `task`, `delegate`,
-`escalate` and `send` without a permission prompt: the settings it starts with allow them, beside your own, and
-the daemon decides what each agent may do with them. Other `bazhen` commands still ask, and so
+A Claude Code agent runs `bazhen agents list`, `agents whoami`, `agents rename`, `agents send`,
+every `bazhen tasks` verb, `bazhen inbox escalate` and `bazhen roles` without a permission
+prompt: the settings it starts with allow them, beside your own, and the daemon decides what each
+agent may do with them. Other `bazhen` commands still ask, the other `agents` verbs among them, and so
 does one given a file to read (`--file`, `--brief-file`), which would otherwise put any file the
 agent can read into mail without a prompt. An agent
-that messages another with Claude Code's own SendMessage instead of `bazhen send` shows the
+that messages another with Claude Code's own SendMessage instead of `bazhen agents send` shows the
 message on both agents' pages, as sent and with delivery not tracked: Bazhen sees it leave, never
 arrive. It is matched to the agent whose session answers to the name it was sent to, the name
 that agent was last started with.
@@ -266,7 +268,7 @@ takes effect at its next use. A file that doesn't parse is reported and skipped,
 stands; `bazhen roles` lists both.
 
 An agent launched in a role starts with Bazhen's fleet instructions, then `## Your role: <title>`
-and the role's prompt. `delegate --launch` launches in the role it delegates; a launch request
+and the role's prompt. `tasks delegate --launch` launches in the role it delegates; a launch request
 names one with `role`. Claude Code reads the prompt from a file only you can read, in the daemon's
 run directory (`--append-system-prompt-file`), so it is never in a process's arguments; Codex gets
 it in its thread's first item. An edit to the role's file reaches the agent at its next start, and
@@ -287,8 +289,8 @@ the daemon that started it, wherever its home is. The daemon checks that against
 calls (see below). Without a peer reading, it takes that at its word, but refuses an agent that is
 closed, lost or unknown. Over TCP, from the web client, the caller is always you.
 
-A verb that defaults to the asking agent (`whoami`, `task list`, and `task done` or `task note`
-with no task named) asks the daemon which agent it takes the command for, and uses that one,
+A verb that defaults to the asking agent (`agents whoami`, `tasks list`, and `tasks done` or
+`tasks note` with no task named) asks the daemon which agent it takes the command for, and uses that one,
 whatever the environment names, and even when it names no agent. A Codex command's
 `BAZHEN_AGENT_ID` can be whichever agent started its app-server, and a process in an agent's
 terminal is that agent's with no variable set. With no daemon running, these verbs say so and
@@ -298,18 +300,19 @@ exit 3.
 
 The verbs the web client's agent controls use, for a terminal or a script:
 
-| Command                                                            | Does                                                                              |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `bazhen launch claude-code\|codex [--dir …] [--name …] [--role …]` | Start an agent in `--dir`, else where the command runs                            |
-| `bazhen close <agent> [--confirm-busy] [--force]`                  | Close it; `--confirm-busy` also ends what runs in its shells                      |
-| `bazhen respawn <agent>`                                           | Start an exited agent again, on its harness session                               |
-| `bazhen relaunch <agent> [--fresh]`                                | Start a lost agent again on a new terminal; `--fresh` if its session can't resume |
-| `bazhen signal <agent> INT\|TERM\|HUP\|KILL`                       | Send its process a signal, named with or without `SIG`                            |
-| `bazhen shells list [--all]`                                       | The shells neither closed nor failed, or with `--all` every one                   |
-| `bazhen shells open [<agent> \| --dir …]`                          | A shell beside an agent, in its directory, else in `--dir` or where it runs       |
-| `bazhen shells close <shell> [--confirm-busy] [--force]`           | Close a shell, named by its id or a name one open shell has, in any case          |
-| `bazhen events --follow [--after <event>]`                         | Each event as it happens, until Ctrl-C; it tries again while the daemon is away   |
-| `bazhen wait <agent\|shell> <state>\|ended [--timeout <s>]`        | Wait for an agent or shell to be in a state; an agent is `running` once ready     |
+| Command                                                                   | Does                                                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `bazhen agents launch claude-code\|codex [--dir …] [--name …] [--role …]` | Start an agent in `--dir`, else where the command runs                            |
+| `bazhen agents close <agent> [--confirm-busy] [--force]`                  | Close it; `--confirm-busy` also ends what runs in its shells                      |
+| `bazhen agents respawn <agent>`                                           | Start an exited agent again, on its harness session                               |
+| `bazhen agents relaunch <agent> [--fresh]`                                | Start a lost agent again on a new terminal; `--fresh` if its session can't resume |
+| `bazhen agents signal <agent> INT\|TERM\|HUP\|KILL`                       | Send its process a signal, named with or without `SIG`                            |
+| `bazhen shells list [--all]`                                              | The shells neither closed nor failed, or with `--all` every one                   |
+| `bazhen shells open [<agent> \| --dir …]`                                 | A shell beside an agent, in its directory, else in `--dir` or where it runs       |
+| `bazhen shells close <shell> [--confirm-busy] [--force]`                  | Close a shell, named by its id or a name one open shell has, in any case          |
+| `bazhen events follow [--after <event>]`                                  | Each event as it happens, until Ctrl-C; it tries again while the daemon is away   |
+| `bazhen agents wait <agent> <state>\|ended [--timeout <s>]`               | Wait for an agent to be in a state; it is `running` once ready                    |
+| `bazhen shells wait <shell> <state>\|ended [--timeout <s>]`               | Wait for a shell to be in a state                                                 |
 
 All but `shells list`, which only reads, are yours alone: the daemon refuses them to an agent, and
 the CLI prints its refusal. A command acts on the agent or shell as `/v1/state` shows it at that
@@ -319,12 +322,12 @@ mistake in the command line, with nothing sent, and 3 when no daemon is running.
 CLI's reading of the daemon's answer: `{ agentId, eventIds }`, and a launch's `terminalId`; for a
 shell `{ terminalId, eventIds }`, and for `shells list` the shells as `/v1/state` shows them.
 
-`events --follow` prints a line an event, or with `--json` each event as the daemon sent it, and
-says so when events were missed and it follows on from the daemon's state. `wait` exits 0 once
-the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
+`events follow` prints a line an event, or with `--json` each event as the daemon sent it, and
+says so when events were missed and it follows on from the daemon's state. `agents wait` and
+`shells wait` exit 0 once the agent or shell is in the state, 1 if it ended otherwise, and 5 if the timeout (60 s unless
 given, at least 1) runs out first, whatever the daemon is doing; with `--json` it prints the
 record that met it. Both are yours alone too: the daemon refuses an agent the event stream.
-Ctrl-C ends `events --follow` at once while it waits on the stream, and within 5 s while it waits
+Ctrl-C ends `events follow` at once while it waits on the stream, and within 5 s while it waits
 on a call to the daemon, such as opening the stream again.
 
 ## What Bazhen knows about who is calling
@@ -366,7 +369,7 @@ These checks catch an agent's ordinary and accidental calls, not a determined ag
 as you, the same user, so an agent that does any of these looks like you to Bazhen:
 
 - leaves its terminal's process tree
-  (`setsid -f env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE bazhen pair`, `systemd-run --user`,
+  (`setsid -f env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE bazhen devices pair`, `systemd-run --user`,
   `at`), or, from Codex, leaves the app-server's tree with `CODEX_THREAD_ID` unset;
 - types into one of your shells (`tmux -S <socket> send-keys -t <shell pane>`);
 - reaches the web port on loopback where pairing isn't required (trusted by design under

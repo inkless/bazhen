@@ -79,14 +79,14 @@ async function asks(key: string, command: string, shownAs: string): Promise<bool
 
 describe("the bazhen verbs a Claude Code agent is taught", () => {
   it("run without asking, while the daemon's other commands still ask", async () => {
-    const { messageId } = await mail("whoami", "[[fake:bash:bazhen whoami]]");
+    const { messageId } = await mail("whoami", "[[fake:bash:bazhen agents whoami]]");
     // The turn ends, or stops at an ask, which is the one thing the verb must not do.
     await expect
-      .poll(() => endedOrAsked(messageId, "bazhen whoami"), { timeout: 30_000 })
+      .poll(() => endedOrAsked(messageId, "bazhen agents whoami"), { timeout: 30_000 })
       .toBe(true);
     const name = await nameOf(sender.agentId);
     const ran = model.requests.filter((r) => r.includes("tool_result")).at(-1);
-    expect([(await openFor("bazhen whoami")).length, ran]).toEqual([
+    expect([(await openFor("bazhen agents whoami")).length, ran]).toEqual([
       0,
       expect.stringContaining(`${name}  ${sender.agentId}`),
     ]);
@@ -97,10 +97,10 @@ describe("the bazhen verbs a Claude Code agent is taught", () => {
   it("still ask to read a file, to run another command with one, or to run a substitution", async () => {
     const to = await nameOf(peer.agentId);
     expect([
-      await asks("file", `bazhen send ${to} --file notes.txt`, "--file notes.txt"),
-      await asks("brief", "bazhen task create --title t --brief-file brief.md", "brief.md"),
-      await asks("compound", "bazhen whoami && touch compound-x", "touch compound-x"),
-      await asks("substitution", `bazhen send ${to} "$(cat secret-x)"`, "cat secret-x"),
+      await asks("file", `bazhen agents send ${to} --file notes.txt`, "--file notes.txt"),
+      await asks("brief", "bazhen tasks create --title t --brief-file brief.md", "brief.md"),
+      await asks("compound", "bazhen agents whoami && touch compound-x", "touch compound-x"),
+      await asks("substitution", `bazhen agents send ${to} "$(cat secret-x)"`, "cat secret-x"),
     ]).toEqual([true, true, true, true]);
   });
 });
@@ -114,7 +114,7 @@ describe("an agent that unsets its environment", () => {
     async () => {
       // `pair` finds the daemon by its home, which agents aren't given; this test's daemon isn't
       // at the default one.
-      const command = `env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE BAZHEN_HOME=${daemon.home} bazhen pair > unset-pair.txt 2>&1`;
+      const command = `env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE BAZHEN_HOME=${daemon.home} bazhen devices pair > unset-pair.txt 2>&1`;
       await mail("unset", `[[fake:bash:${command}]]`);
       await expect.poll(async () => (await openFor(command)).length, { timeout: 30_000 }).toBe(1);
       for (const item of await openFor(command))

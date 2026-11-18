@@ -257,7 +257,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       if (verified !== null) c.set("device", verified.device.id);
       if (required) {
         if (verified === null)
-          return fail(c, 401, "unpaired", "pair this browser: run `bazhen pair`");
+          return fail(c, 401, "unpaired", "pair this browser: run `bazhen devices pair`");
         if (!SAFE_METHODS.has(c.req.method) && origin === undefined) {
           return fail(c, 403, "origin_not_allowed", "");
         }

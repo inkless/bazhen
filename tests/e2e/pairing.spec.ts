@@ -7,7 +7,9 @@ test.afterEach(() => dismissNotices());
 
 test("an unpaired browser sees only the pairing form, and pairs with a code", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Run bazhen pair in a terminal and enter the code")).toBeVisible();
+  await expect(
+    page.getByText("Run bazhen devices pair in a terminal and enter the code"),
+  ).toBeVisible();
   await expect(page.getByRole("term")).toHaveCount(0);
 
   await page.getByLabel("Code").fill("AAAA-AAAA");

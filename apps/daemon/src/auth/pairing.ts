@@ -7,7 +7,7 @@ export const ATTEMPTS_PER_ORIGIN = 5;
 /** Origin is the client's to choose, so the window across all of them is bounded too. */
 export const ATTEMPTS_OVERALL = 10;
 /**
- * Failures, from anywhere, that burn the live code; `bazhen pair` must then issue another. Enough
+ * Failures, from anywhere, that burn the live code; `bazhen devices pair` must then issue another. Enough
  * that a client faking an allowed Origin can't easily keep everyone from pairing, still nothing
  * against 40 bits.
  */
@@ -50,7 +50,7 @@ export const normalizeCode = (typed: string) => typed.toUpperCase().replace(/[\s
 
 /**
  * The one live pairing code, held as its hash, and the attempt windows that guard it. Nothing
- * here is persisted: a restarted daemon has no code until `bazhen pair` asks for one.
+ * here is persisted: a restarted daemon has no code until `bazhen devices pair` asks for one.
  */
 export class PairingCodes {
   private live: LiveCode | undefined;

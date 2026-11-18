@@ -26,7 +26,7 @@ proxy set to rewrite Host, from this machine's own browser.
 
 ## Before you start: what protects it
 
-With an external origin configured, every browser must pair (`bazhen pair`) before it reaches
+With an external origin configured, every browser must pair (`bazhen devices pair`) before it reaches
 the API, but a paired phone can do anything you can, and the pairing form itself is open to
 whoever reaches Caddy. The page itself loads unpaired, since it shows the pairing form: it is the
 same built bundle for everyone and holds nothing secret. Two lines in the Caddyfile below decide

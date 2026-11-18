@@ -99,7 +99,7 @@ export const shell = (id: string, over: Partial<Shell> = {}): Shell => ({
   name: null,
   foreground: null,
   theme: "dark",
-  attachCommand: `bazhen attach ${id}`,
+  attachCommand: `bazhen terminals attach ${id}`,
   commands: ["close", "rename"],
   retypeable: false,
   needsRestart: null,
