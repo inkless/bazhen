@@ -149,9 +149,14 @@ describe("a wait on an agent", () => {
   it("misses no commit made in the same turn it was asked", async () => {
     const { store, environmentId } = fresh();
     const agentId = launch(store, environmentId, false);
-    const { answer } = waiting(store, { on: "agent", agentId, until: "running" });
+    const { answer, timer } = waiting(store, { on: "agent", agentId, until: "running" });
     running(store, agentId);
-    expect((await answer).verdict).toBe("met");
+    await settled();
+    // Met on that commit, it holds no timer; one that missed it is still waiting, and the
+    // timer then answers it.
+    const missed = timer.pending.size;
+    timer.fire();
+    expect([(await answer).verdict, missed]).toEqual(["met", 0]);
   });
 
   it("answers never once the agent ends otherwise, and met for ended", async () => {
