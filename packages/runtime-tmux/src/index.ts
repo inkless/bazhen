@@ -257,6 +257,11 @@ export interface TmuxRuntimeOptions {
   readonly env: Readonly<Record<string, string>>;
   /** How often dead terminals are looked for while anyone listens. */
   readonly exitPollMs?: number;
+  /**
+   * Whether a terminal is open on this runtime. While none is, dead terminals aren't looked for,
+   * so a daemon with no tmux terminal doesn't poll tmux. Without it, they always are.
+   */
+  readonly inUse?: () => boolean;
   /** The most a history capture may print; tests lower it. */
   readonly captureMaxBytes?: number;
   /**
@@ -292,6 +297,7 @@ export class TmuxRuntime implements RuntimeAdapter {
     this.exits = new ExitWatch({
       read: () => this.deadTerminals(),
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      ...(opts.inUse && { active: opts.inUse }),
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
     });
     const installed = (() => {

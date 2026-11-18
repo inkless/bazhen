@@ -300,7 +300,9 @@ function shellIntegration(): { hook: string; dir: string } | undefined {
     return undefined;
   }
 }
+const inUse = (kind: string) => store.openTerminalsOn(kind) > 0;
 const tmux = new TmuxRuntime({
+  inUse: () => inUse("tmux"),
   server: TmuxServer.at(paths.tmuxSocket, {
     root: paths.run,
     config: join(paths.run, "tmux.conf"),
@@ -315,6 +317,7 @@ const tmux = new TmuxRuntime({
 const runtime = new RoutedRuntime({
   runtimes: [tmux, holderRuntime],
   defaultKind: config.defaultRuntime,
+  inUse,
   log: console.warn,
 });
 // Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).
@@ -422,9 +425,11 @@ await restarts.sweep().catch((err: unknown) => {
   console.warn("terminals on holders this build can't fully serve weren't read:", err);
 });
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
-await tmux.applyServerSettings().catch((err: unknown) => {
-  console.warn("tmux server settings were not applied:", err);
-});
+// A daemon with no use for tmux doesn't configure it, so a machine without tmux starts quietly.
+if (runtime.reads("tmux"))
+  await tmux.applyServerSettings().catch((err: unknown) => {
+    console.warn("tmux server settings were not applied:", err);
+  });
 await shells.settleOrphans();
 for (const warning of budget.startupWarnings()) console.warn(`bazhen: ${warning}`);
 const foreground = new ForegroundWatch({ store, environment });
@@ -702,12 +707,10 @@ const socketListener = getRequestListener(
       };
     },
     doctor: async () => {
-      const [runtimes, worst] = await Promise.all([healthOfEach(runtime), runtime.health()]);
-      const tmuxVersion = runtimes.find((r) => r.kind === "tmux")?.version ?? null;
+      const runtimes = await healthOfEach(runtime);
       return {
         appVersion: APP_VERSION,
         protocolId: PROTOCOL_ID,
-        runtime: { state: worst.state, version: tmuxVersion },
         runtimes: runtimes.map(({ workarounds, ...report }) => ({
           ...report,
           workarounds: [...(workarounds ?? [])],

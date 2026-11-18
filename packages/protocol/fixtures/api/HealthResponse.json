@@ -5,11 +5,6 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "holder",
@@ -35,11 +30,6 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "holder",
@@ -68,103 +58,6 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null
-      }
-    },
-    "parsed": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"healthy\"",
-    "wire": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": null
-      }
-    },
-    "parsed": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": null
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"unreachable\"",
-    "wire": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null
-      }
-    },
-    "parsed": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null
-      }
-    }
-  },
-  {
-    "name": "runtime.state = \"not-running\"",
-    "wire": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "not-running",
-        "version": null
-      }
-    },
-    "parsed": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "not-running",
-        "version": null
-      }
-    }
-  },
-  {
-    "name": "runtimes[].state = \"healthy\"",
-    "wire": {
-      "status": "ok",
-      "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "holder",
@@ -173,14 +66,43 @@
         },
         {
           "kind": "tmux",
+          "state": "unused",
+          "version": null
+        }
+      ]
+    },
+    "parsed": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
           "state": "healthy",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
+          "version": "holder/1.2"
         },
         {
-          "kind": "other",
+          "kind": "tmux",
+          "state": "unused",
+          "version": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "runtimes[].state = \"healthy\"",
+    "wire": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": "holder/1.2"
+        },
+        {
+          "kind": "tmux",
           "state": "healthy",
           "version": null
         }
@@ -189,12 +111,7 @@
     "parsed": {
       "status": "ok",
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtimes": [
         {
           "kind": "holder",
@@ -203,14 +120,6 @@
         },
         {
           "kind": "tmux",
-          "state": "healthy",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
-        },
-        {
-          "kind": "other",
           "state": "healthy",
           "version": null
         }
@@ -222,12 +131,7 @@
     "wire": {
       "status": "ok",
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtimes": [
         {
           "kind": "holder",
@@ -236,14 +140,6 @@
         },
         {
           "kind": "tmux",
-          "state": "unreachable",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
-        },
-        {
-          "kind": "other",
           "state": "unreachable",
           "version": null
         }
@@ -252,12 +148,7 @@
     "parsed": {
       "status": "ok",
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtimes": [
         {
           "kind": "holder",
@@ -266,14 +157,6 @@
         },
         {
           "kind": "tmux",
-          "state": "unreachable",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
-        },
-        {
-          "kind": "other",
           "state": "unreachable",
           "version": null
         }
@@ -285,12 +168,7 @@
     "wire": {
       "status": "ok",
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtimes": [
         {
           "kind": "holder",
@@ -299,14 +177,6 @@
         },
         {
           "kind": "tmux",
-          "state": "not-running",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
-        },
-        {
-          "kind": "other",
           "state": "not-running",
           "version": null
         }
@@ -315,12 +185,7 @@
     "parsed": {
       "status": "ok",
       "appVersion": "0.1.0",
-      "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "runtimes": [
         {
           "kind": "holder",
@@ -330,14 +195,43 @@
         {
           "kind": "tmux",
           "state": "not-running",
-          "version": "3.4",
-          "workarounds": [
-            "w"
-          ]
+          "version": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "runtimes[].state = \"unused\"",
+    "wire": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unused",
+          "version": "holder/1.2"
         },
         {
-          "kind": "other",
-          "state": "not-running",
+          "kind": "tmux",
+          "state": "unused",
+          "version": null
+        }
+      ]
+    },
+    "parsed": {
+      "status": "ok",
+      "appVersion": "0.1.0",
+      "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "unused",
+          "version": "holder/1.2"
+        },
+        {
+          "kind": "tmux",
+          "state": "unused",
           "version": null
         }
       ]
@@ -349,16 +243,6 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4",
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
-        }
-      },
       "runtimes": [
         {
           "kind": "holder",
@@ -404,11 +288,6 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "runtime": {
-        "kind": "tmux",
-        "state": "healthy",
-        "version": "3.4"
-      },
       "runtimes": [
         {
           "kind": "holder",
@@ -437,16 +316,28 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null,
-        "fieldFromANewerDaemon": {
-          "any": [
-            1
-          ]
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": "holder/1.2",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        {
+          "kind": "tmux",
+          "state": "unused",
+          "version": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
         }
-      },
+      ],
       "fieldFromANewerDaemon": {
         "any": [
           1
@@ -457,11 +348,18 @@
       "status": "ok",
       "appVersion": "0.1.0",
       "protocolId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "runtime": {
-        "kind": "tmux",
-        "state": "unreachable",
-        "version": null
-      }
+      "runtimes": [
+        {
+          "kind": "holder",
+          "state": "healthy",
+          "version": "holder/1.2"
+        },
+        {
+          "kind": "tmux",
+          "state": "unused",
+          "version": null
+        }
+      ]
     }
   }
 ]

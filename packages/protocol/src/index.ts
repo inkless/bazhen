@@ -26,10 +26,17 @@ export * from "./waits.ts";
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);
 export type RuntimeHealthState = z.infer<typeof RuntimeHealthState>;
 
+/**
+ * A runtime's state as the daemon reports it: its health when it was read, or `unused` when it
+ * wasn't, since it is not the default and no terminal is open on it.
+ */
+export const RuntimeReportState = z.enum([...RuntimeHealthState.options, "unused"]);
+export type RuntimeReportState = z.infer<typeof RuntimeReportState>;
+
 /** One runtime's health, as `bazhen status` and `bazhen doctor` show it. */
 export const RuntimeHealthReport = z.object({
   kind: z.string(),
-  state: RuntimeHealthState,
+  state: RuntimeReportState,
   version: z.string().nullable(),
   /**
    * Defects of this runtime's version that Bazhen works around, each with what it costs, worded
@@ -44,16 +51,8 @@ export const HealthResponse = z.object({
   appVersion: z.string(),
   /** The protocol the daemon speaks (`protocolId()`): a client of another one should reload. */
   protocolId: z.string(),
-  runtime: z.object({
-    kind: z.literal("tmux"),
-    state: RuntimeHealthState,
-    version: z.string().nullable(),
-  }),
-  /**
-   * Every runtime the daemon runs terminals on, each read by itself; `runtime` is the worst of
-   * them, with tmux's version. Absent from an older daemon.
-   */
-  runtimes: z.array(RuntimeHealthReport).optional(),
+  /** Every runtime the daemon runs terminals on, each read by itself. */
+  runtimes: z.array(RuntimeHealthReport),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
@@ -72,9 +71,8 @@ export const memoryCapText = ({ asked, bytes }: MemoryCap) =>
 export const DoctorResponse = z.object({
   appVersion: z.string(),
   protocolId: z.string(),
-  runtime: z.object({ state: RuntimeHealthState, version: z.string().nullable() }),
-  /** As in `HealthResponse`. Absent from an older daemon. */
-  runtimes: z.array(RuntimeHealthReport).optional(),
+  /** As in `HealthResponse`. */
+  runtimes: z.array(RuntimeHealthReport),
   hookClient: z.object({ path: z.string(), fallback: z.boolean() }),
   /**
    * The installed binary that reads which process calls on the socket, so a call from inside an

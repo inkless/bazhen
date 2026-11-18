@@ -1,22 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { DoctorResponse, ErrorResponse, HealthResponse, memoryCapText } from "./index.ts";
 
+const health = (state: string) =>
+  HealthResponse.safeParse({
+    status: "ok",
+    appVersion: "0.1.0",
+    protocolId: "protocol-of-this-build",
+    runtimes: [{ kind: "tmux", state, version: null }],
+  }).success;
+
 describe("HealthResponse schema", () => {
-  it("rejects a runtime state outside the declared set", () => {
-    const parsed = HealthResponse.safeParse({
-      status: "ok",
-      appVersion: "0.1.0",
-      protocolId: "protocol-of-this-build",
-      runtime: { kind: "tmux", state: "dead", version: null },
-    });
-    expect(parsed.success).toBe(false);
+  it("takes a runtime that wasn't read as unused, and no state outside the declared set", () => {
+    expect([health("unused"), health("dead")]).toEqual([true, false]);
   });
 });
 
 const doctor = (lan: unknown) => ({
   appVersion: "0.1.0",
   protocolId: "protocol-of-this-build",
-  runtime: { state: "healthy", version: "3.4" },
+  runtimes: [{ kind: "holder", state: "healthy", version: "holder/1.2" }],
   hookClient: { path: "/bin/bazhen-hook", fallback: false },
   config: { path: "/c/config.toml", found: true },
   agents: { shell: "direct", loginShell: null },

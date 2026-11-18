@@ -1,4 +1,4 @@
-import type { ExitStatus, RuntimeHealthState, Signal } from "@bazhen/protocol";
+import type { ExitStatus, RuntimeHealthState, RuntimeReportState, Signal } from "@bazhen/protocol";
 import type {
   Attached,
   Compatibility,
@@ -36,15 +36,33 @@ export interface RoutedRuntimeOptions {
   readonly defaultKind: string;
   /** Where a runtime's failure goes when the others still answer for it, and its recovery. */
   readonly log: (message: string, err?: unknown) => void;
+  /**
+   * Whether a terminal is open on the runtime of `kind`. One that isn't, and isn't the default,
+   * is never read for health, so a runtime nobody uses can't fail it. Without this, every
+   * runtime is read.
+   */
+  readonly inUse?: (kind: string) => boolean;
+}
+
+/** A runtime's health as reported: `unused` when it wasn't read. */
+export interface RuntimeReport {
+  readonly kind: string;
+  readonly state: RuntimeReportState;
+  readonly version: string | null;
+  readonly workarounds?: readonly string[];
 }
 
 /** Each runtime of `runtime`'s, by kind, with its own health: one, unless it is routed. */
-export async function healthOfEach(
-  runtime: RuntimeAdapter,
-): Promise<(RuntimeHealth & { readonly kind: string })[]> {
-  const each =
-    runtime instanceof RoutedRuntime ? runtime.kinds.map((k) => runtime.only(k)) : [runtime];
-  return Promise.all(each.map(async (r) => ({ kind: r.kind, ...(await r.health()) })));
+export async function healthOfEach(runtime: RuntimeAdapter): Promise<RuntimeReport[]> {
+  if (!(runtime instanceof RoutedRuntime))
+    return [{ kind: runtime.kind, ...(await runtime.health()) }];
+  return Promise.all(
+    runtime.kinds.map(async (kind) =>
+      runtime.reads(kind)
+        ? { kind, ...(await runtime.only(kind).health()) }
+        : { kind, state: "unused" as const, version: null },
+    ),
+  );
 }
 
 /** Worst first: one runtime that can't be read is what a reader of all of them must know. */
@@ -64,6 +82,7 @@ export class RoutedRuntime implements RuntimeAdapter {
   readonly defaultKind: string;
   private readonly runtimes: ReadonlyMap<string, RuntimeAdapter>;
   private readonly log: (message: string, err?: unknown) => void;
+  private readonly inUse: (kind: string) => boolean;
   /** The foreground fault last said of each runtime, so one that persists is said once. */
   private readonly faults = new Map<string, string>();
 
@@ -78,6 +97,12 @@ export class RoutedRuntime implements RuntimeAdapter {
     this.kinds = [...runtimes.keys()];
     this.defaultKind = opts.defaultKind;
     this.log = opts.log;
+    this.inUse = opts.inUse ?? (() => true);
+  }
+
+  /** Whether `kind`'s health is read: it is the default, or a terminal is open on it. */
+  reads(kind: string): boolean {
+    return kind === this.defaultKind || this.inUse(kind);
   }
 
   /** The one runtime of `kind`. */
@@ -94,15 +119,17 @@ export class RoutedRuntime implements RuntimeAdapter {
   }
 
   /**
-   * The worst of each runtime's health, each judged by the refs recorded on it, with the default
-   * runtime's version.
+   * The worst of the health of each runtime that is read, each judged by the refs recorded on it,
+   * with the default runtime's version.
    */
   async health(recorded: readonly RuntimeRef[] = []): Promise<RuntimeHealth> {
     const read = await Promise.all(
-      this.kinds.map(async (kind) => ({
-        kind,
-        ...(await this.only(kind).health(recorded.filter((ref) => ref.runtime === kind))),
-      })),
+      this.kinds
+        .filter((kind) => this.reads(kind))
+        .map(async (kind) => ({
+          kind,
+          ...(await this.only(kind).health(recorded.filter((ref) => ref.runtime === kind))),
+        })),
     );
     const worst = read.reduce((a, b) => (SEVERITY[b.state] > SEVERITY[a.state] ? b : a));
     const version = read.find((r) => r.kind === this.defaultKind)?.version ?? null;

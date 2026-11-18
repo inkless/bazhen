@@ -13,34 +13,6 @@
     "protocolId": {
       "type": "string"
     },
-    "runtime": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "tmux"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "healthy",
-            "unreachable",
-            "not-running"
-          ]
-        },
-        "version": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "kind",
-        "state",
-        "version"
-      ]
-    },
     "runtimes": {
       "type": "array",
       "items": {
@@ -54,7 +26,8 @@
             "enum": [
               "healthy",
               "unreachable",
-              "not-running"
+              "not-running",
+              "unused"
             ]
           },
           "version": {
@@ -82,6 +55,6 @@
     "status",
     "appVersion",
     "protocolId",
-    "runtime"
+    "runtimes"
   ]
 }

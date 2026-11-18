@@ -271,6 +271,9 @@ const STRANDED = `t.state = 'open' AND t.owner_agent_id IS NOT NULL AND t.parent
 const ASSIGNMENT = `SELECT id, task_id AS taskId, agent_session_id AS agentId, role,
     parent_assignment_id AS parentAssignmentId, state, end_reason AS endReason FROM assignments`;
 
+/** A terminal that holds a PTY, or may take one back without a new terminal. */
+const OPEN_TERMINAL = "state IN ('creating', 'running', 'unknown', 'exited', 'closing')";
+
 /** An agent whose name no other may take: one not ended. */
 const LIVE_NAME = "state NOT IN ('closed', 'failed')";
 
@@ -1873,10 +1876,15 @@ export class Store {
    * terminal: an exited one is respawned on the same terminal. Lost, closed and failed hold none.
    */
   openTerminals(): number {
+    const row = this.prepare(`SELECT count(*) AS n FROM terminals WHERE ${OPEN_TERMINAL}`).get();
+    return Number(row?.n ?? 0);
+  }
+
+  /** How many of the open terminals are on the runtime of `kind`. */
+  openTerminalsOn(kind: string): number {
     const row = this.prepare(
-      `SELECT count(*) AS n FROM terminals
-       WHERE state IN ('creating', 'running', 'unknown', 'exited', 'closing')`,
-    ).get();
+      `SELECT count(*) AS n FROM terminals WHERE runtime_kind = ? AND ${OPEN_TERMINAL}`,
+    ).get(kind);
     return Number(row?.n ?? 0);
   }
 

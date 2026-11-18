@@ -764,6 +764,28 @@ describe("Store", () => {
       failed: [0, 0],
     });
   });
+
+  it("counts the open terminals on each runtime by the runtime each was made on", () => {
+    const path = dbPath();
+    const store = Store.open(path);
+    const environmentId = withEnvironment(store);
+    const opened = (runtime: string) => {
+      const event = shellOpened(newId("term"), environmentId, null);
+      store.append({ ...event, payload: { ...event.payload, runtime } });
+      return event.entityId;
+    };
+    opened("tmux");
+    opened("holder");
+    const closedOnHolder = opened("holder");
+    store.close();
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE terminals SET state = 'closed' WHERE id = ?").run(closedOnHolder);
+    raw.close();
+    const reopened = Store.open(path);
+    const counted = ["tmux", "holder", "other"].map((k) => reopened.openTerminalsOn(k));
+    reopened.close();
+    expect(counted).toEqual([1, 1, 0]);
+  });
 });
 
 /**

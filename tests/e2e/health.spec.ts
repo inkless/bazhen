@@ -7,7 +7,7 @@ test("the web client shows the daemon's live health through the dev proxy", asyn
   await expect(page.getByRole("heading", { name: "Bazhen" })).toBeVisible();
   await expect(page.getByRole("term").filter({ hasText: "Protocol" })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: /^[0-9a-f]{12}$/ })).toBeVisible();
-  await expect(page.getByRole("definition").filter({ hasText: /tmux 3\./ })).toBeVisible();
+  await expect(page.getByRole("definition").filter({ hasText: /^healthy \(.+\)$/ })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -15,7 +15,7 @@ test("asks to reload a page the daemon's protocol has moved past", async ({ page
   const health = { status: "ok", appVersion: "0.1.0", protocolId: "0".repeat(64) };
   await page.route("**/v1/health", (route) =>
     route.fulfill({
-      json: { ...health, runtime: { kind: "tmux", state: "healthy", version: "3.4" } },
+      json: { ...health, runtimes: [{ kind: "holder", state: "healthy", version: "holder/1.2" }] },
     }),
   );
   await page.goto("/");

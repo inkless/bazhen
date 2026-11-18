@@ -77,12 +77,26 @@ describe("bazhen status", () => {
     ]);
   });
 
-  it("says tmux alone for a daemon that reports only that, and no agents", async () => {
+  it("says a runtime the daemon didn't read is unused, and no agents", async () => {
     s.daemon
-      .answer("GET /v1/health", HealthResponse, health())
+      .answer(
+        "GET /v1/health",
+        HealthResponse,
+        health({
+          runtimes: [
+            { kind: "holder", state: "healthy", version: "holder/1.2" },
+            { kind: "tmux", state: "unused", version: null },
+          ],
+        }),
+      )
       .answer("GET /v1/state", StateSnapshot, snapshot());
     const ran = await s.bazhen(["status"]);
-    expect(lines(ran.stdout).slice(1)).toEqual(["tmux: healthy 3.4", "agents: none", ""]);
+    expect(lines(ran.stdout).slice(1)).toEqual([
+      "holder: healthy holder/1.2",
+      "tmux: unused",
+      "agents: none",
+      "",
+    ]);
   });
 
   it("says a daemon speaking another protocol is another build, to restart", async () => {
@@ -128,6 +142,12 @@ const tail = async (over: Partial<DoctorResponse>) => {
 };
 
 const on = (build: string | null, protocol = ["1.2"]) => ({ terminalId: "t", build, protocol });
+
+/** A holder runtime, and tmux in `state`. */
+const withTmux = (state: "healthy" | "unused") => [
+  { kind: "holder", state: "healthy" as const, version: "holder/1.2" },
+  { kind: "tmux", state, version: state === "unused" ? null : "3.4" },
+];
 
 /** `bazhen doctor` against a daemon whose doctor names `peerReader` as the peer reader. */
 const doctorWith = (peerReader: DoctorResponse["peerReader"]) => {
@@ -284,6 +304,24 @@ describe("bazhen doctor", () => {
     expect([ran.code, lines(ran.stdout).slice(1, 3)]).toEqual([
       1,
       ["tmux: healthy 3.4", "holder: unreachable holder/1.2"],
+    ]);
+  });
+
+  it("passes with a runtime it didn't read, which is unused, not unreachable", async () => {
+    s.daemon.answer("GET /v1/health", HealthResponse, health()).answer(
+      "GET /v1/daemon/doctor",
+      DoctorResponse,
+      doctor({
+        runtimes: [
+          { kind: "holder", state: "healthy", version: "holder/1.2" },
+          { kind: "tmux", state: "unused", version: null },
+        ],
+      }),
+    );
+    const ran = await s.bazhen(["doctor"]);
+    expect([ran.code, lines(ran.stdout).slice(1, 3)]).toEqual([
+      0,
+      ["holder: healthy holder/1.2", "tmux: unused"],
     ]);
   });
 
@@ -526,10 +564,16 @@ describe("bazhen doctor", () => {
     };
 
     it("says each holder terminal runs in a scope of its own, with its caps", async () => {
-      expect(await tail({ containment: scoped })).toEqual([
+      const said = await tail({ containment: scoped, runtimes: withTmux("healthy") });
+      expect(said.slice(1)).toEqual([
         "containment: each holder terminal in a systemd scope of its own, at most 50% (31.0 GiB) each with 0 (none) of swap, and infinity (no cap) together",
         "  tmux terminals are not contained",
       ]);
+    });
+
+    it("says nothing of tmux terminals' containment while tmux is unused", async () => {
+      const said = await tail({ containment: scoped, runtimes: withTmux("unused") });
+      expect(said.filter((l) => l.includes("tmux terminals"))).toEqual([]);
     });
 
     it("rounds a cap's GiB half up, as it is said, and notes a systemd too old for OOMPolicy", async () => {
@@ -589,7 +633,11 @@ describe("bazhen doctor", () => {
     });
 
     it("says containment hasn't been checked before a holder terminal starts", async () => {
-      expect(await tail({ containment: { state: "unchecked" } })).toEqual([
+      const said = await tail({
+        containment: { state: "unchecked" },
+        runtimes: withTmux("healthy"),
+      });
+      expect(said.slice(1)).toEqual([
         "containment: not checked yet (no holder terminal has started since the daemon did)",
         "  tmux terminals are not contained",
       ]);

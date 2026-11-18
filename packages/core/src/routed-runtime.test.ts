@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newId } from "./ids.ts";
-import { RoutedRuntime, UnknownRuntime } from "./routed-runtime.ts";
+import { healthOfEach, RoutedRuntime, UnknownRuntime } from "./routed-runtime.ts";
 import type { RuntimeAdapter, RuntimeRef, TerminalSpec } from "./runtime.ts";
 import { FakeRuntime, fakeContractHarness } from "./testing/fake-runtime.ts";
 import { runtimeContract } from "./testing/runtime-contract.ts";
@@ -95,6 +95,20 @@ runtimeContract("RoutedRuntime over two FakeRuntimes", {
 const make = (runtimes: RuntimeAdapter[], defaultKind: string) =>
   new RoutedRuntime({ runtimes, defaultKind, log: () => {} });
 
+/** tmux and a default holder, neither of which can be read, each in use while `inUse` has it. */
+function unreadable(inUse: ReadonlySet<string>): RoutedRuntime {
+  const tmux = new FakeRuntime({ kind: "tmux" });
+  const holder = new FakeRuntime({ kind: "holder" });
+  tmux.disconnect();
+  holder.disconnect();
+  return new RoutedRuntime({
+    runtimes: [tmux, holder],
+    defaultKind: "holder",
+    inUse: (kind) => inUse.has(kind),
+    log: () => {},
+  });
+}
+
 describe("RoutedRuntime", () => {
   it("creates a terminal on the runtime its spec names, and on the default when none", async () => {
     const { tmux, holder, routed } = pair();
@@ -172,6 +186,45 @@ describe("RoutedRuntime", () => {
       "unreachable",
       "fake",
     ]);
+  });
+
+  describe("a runtime neither the default nor in use", () => {
+    it("is reported unused without being read, and counts for nothing in the worst", async () => {
+      const routed = unreadable(new Set());
+      expect([await healthOfEach(routed), (await routed.health()).state]).toEqual([
+        [
+          { kind: "tmux", state: "unused", version: null },
+          { kind: "holder", state: "unreachable", version: null },
+        ],
+        "unreachable",
+      ]);
+    });
+
+    it("is read once a terminal is open on it, and fails like any other", async () => {
+      const inUse = new Set<string>();
+      const routed = unreadable(inUse);
+      const idle = (await healthOfEach(routed)).map((r) => r.state);
+      inUse.add("tmux");
+      const used = (await healthOfEach(routed)).map((r) => r.state);
+      expect([idle, used]).toEqual([
+        ["unused", "unreachable"],
+        ["unreachable", "unreachable"],
+      ]);
+    });
+
+    it("leaves the worst to the runtimes read", async () => {
+      const tmux = new FakeRuntime({ kind: "tmux" });
+      const holder = new FakeRuntime({ kind: "holder" });
+      tmux.disconnect();
+      await holder.create(spec());
+      const routed = new RoutedRuntime({
+        runtimes: [tmux, holder],
+        defaultKind: "holder",
+        inUse: () => false,
+        log: () => {},
+      });
+      expect(await routed.health()).toEqual({ state: "healthy", version: "fake" });
+    });
   });
 
   it("still sees one runtime's foregrounds while the other can't be read, and says why", async () => {

@@ -351,19 +351,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   }
 
   app.get("/v1/health", async (c) => {
-    // `runtime` reads as every runtime's worst, as it did with tmux alone; `runtimes` says each.
-    const [runtimes, worst] = await Promise.all([
-      healthOfEach(deps.runtime),
-      deps.runtime.health(),
-    ]);
-    const version = runtimes.find((r) => r.kind === "tmux")?.version ?? worst.version;
-    const runtime = { state: worst.state, version };
     const body = HealthResponse.parse({
       status: "ok",
       appVersion: deps.appVersion,
       protocolId: deps.protocolId,
-      runtime: { kind: "tmux", state: runtime.state, version: runtime.version },
-      runtimes,
+      runtimes: await healthOfEach(deps.runtime),
     });
     return c.json(body);
   });
