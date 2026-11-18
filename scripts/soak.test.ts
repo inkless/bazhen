@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATE } from "./soak-judge.ts";
 import {
   attachMarkers,
@@ -11,6 +11,7 @@ import {
   ptyMasters,
   outliving,
   screenOf,
+  sleepUntil,
   splitAtCursor,
   type Viewing,
   watch,
@@ -191,6 +192,22 @@ describe("watch", () => {
       snapshot: Buffer.from("snap"),
       stream: Buffer.from("stream"),
     });
+  });
+});
+
+describe("sleepUntil", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("asks for no wait, never a negative one, when the deadline has passed", async () => {
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    await sleepUntil(1_000, () => 1_466);
+    expect(timer.mock.calls.map(([, ms]) => ms)).toEqual([0]);
+  });
+
+  it("waits what is left until a deadline still to come", async () => {
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    await sleepUntil(1_010, () => 1_000);
+    expect(timer.mock.calls.map(([, ms]) => ms)).toEqual([10]);
   });
 });
 
