@@ -49,12 +49,22 @@ describe("agent session lifecycle", () => {
     ]).toEqual(["starting", "starting", "starting"]);
   });
 
-  it("adopts no process while closing, lost, unknown or ended", () => {
-    expect(
-      (["closing", "lost", "unknown", "closed", "failed"] as const).map((s) =>
-        agent.accepts(s, "process.adopted"),
-      ),
-    ).toEqual([false, false, false, false, false]);
+  it("adopts a process only while starting, running or exited", () => {
+    const states = [
+      "starting",
+      "running",
+      "exited",
+      "closing",
+      "lost",
+      "unknown",
+      "closed",
+      "failed",
+    ] as const;
+    expect(states.filter((s) => agent.accepts(s, "process.adopted"))).toEqual([
+      "starting",
+      "running",
+      "exited",
+    ]);
   });
 
   it("cannot be respawned while still running", () => {

@@ -34,12 +34,18 @@ describe("terminal state machine", () => {
     ]);
   });
 
-  it("adopts no process once it is closing, lost or ended", () => {
-    expect(
-      (["creating", "unknown", "lost", "closing", "closed", "failed"] as const).map((s) =>
-        terminal.accepts(s, "adopted"),
-      ),
-    ).toEqual([false, false, false, false, false, false]);
+  it("adopts a process only while running or exited", () => {
+    const states = [
+      "creating",
+      "running",
+      "exited",
+      "unknown",
+      "lost",
+      "closing",
+      "closed",
+      "failed",
+    ] as const;
+    expect(states.filter((s) => terminal.accepts(s, "adopted"))).toEqual(["running", "exited"]);
   });
 
   it("refuses to revive a closed terminal", () => {

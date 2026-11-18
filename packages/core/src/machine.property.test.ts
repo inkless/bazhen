@@ -198,6 +198,7 @@ describe("agent session, over any sequence of events", () => {
         ]),
       ),
     ).not.toThrow();
+    expect(tryNext(agent, "running", "process.adopted")).toBe("starting");
   });
 
   it("can reach every state", () => {
