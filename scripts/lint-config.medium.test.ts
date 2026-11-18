@@ -25,6 +25,9 @@ const FIXTURES: Record<string, string> = {
   "tests/e2e/u.spec.ts":
     'export { test } from "@playwright/test";\nexport { expect } from "@playwright/test";\n',
   "tests/e2e/v.ts": 'import * as playwright from "@playwright/test";\nexport { playwright };\n',
+  "tests/e2e/w.spec.ts":
+    'import t from "@playwright/test";\nimport { default as u } from "@playwright/test";\n' +
+    "export { t, u };\n",
   "tests/e2e/page.ts": 'export { test } from "@playwright/test";\n',
   "tests/e2e/h.spec.ts":
     'export { TmuxServer } from "@bazhen/host-guard";\n' +
@@ -124,6 +127,8 @@ describe("the generated oxlint config, run by oxlint", () => {
       // Playwright's `test` comes only through the module that stops each page's routes.
       "tests/e2e/u.spec.ts": ["eslint(no-restricted-imports)"],
       "tests/e2e/v.ts": ["eslint(no-restricted-imports)"],
+      // @playwright/test's default export is its `test`.
+      "tests/e2e/w.spec.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       "tests/e2e/page.ts": [],
       "tests/holder/f.test.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       // The re-export of `spawn` hands a start to files the tmux guard can't read it in.

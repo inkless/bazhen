@@ -361,7 +361,7 @@ function restrictions(
   if (area.playwrightTestIn !== undefined && exempt.extendsPlaywrightTest !== true) {
     patterns.push({
       group: ["@playwright/test"],
-      importNamePattern: "^test$",
+      importNamePattern: "^(?:test|default)$",
       message: `${where} takes \`test\` from ${area.dir}/${area.playwrightTestIn}, whose page stops its routes before the test's context closes.`,
     });
   }

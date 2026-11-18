@@ -2861,7 +2861,7 @@
                 "group": [
                   "@playwright/test"
                 ],
-                "importNamePattern": "^test$",
+                "importNamePattern": "^(?:test|default)$",
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
               }
             ]
@@ -3053,7 +3053,7 @@
                 "group": [
                   "@playwright/test"
                 ],
-                "importNamePattern": "^test$",
+                "importNamePattern": "^(?:test|default)$",
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
               },
               {
@@ -3182,7 +3182,7 @@
                 "group": [
                   "@playwright/test"
                 ],
-                "importNamePattern": "^test$",
+                "importNamePattern": "^(?:test|default)$",
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
               }
             ]
