@@ -29,6 +29,22 @@ describe("the fake runtime's controls", () => {
     expect(pushed).toEqual([true, false]);
   });
 
+  it("reads what the current process printed as a screen, a control in it as U+FFFD", async () => {
+    const fake = new FakeRuntime();
+    const ref = await fake.create({
+      terminalId: newId("term"),
+      tags: { kind: "shell" },
+      argv: ["cat"],
+      cwd: "/w",
+      env: {},
+      size: { cols: 80, rows: 24 },
+      generation: 0,
+      historyLines: 10_000,
+    });
+    fake.output(ref, "one  \r\n\x1b[31mtwo\x07\x1b[0m\r\n\r\n");
+    expect(await fake.screen(ref, 5)).toEqual({ text: "one\ntwo\u{fffd}\n", history: 0 });
+  });
+
   it("records what reached a terminal, and ends every client when the terminal goes", async () => {
     const fake = new FakeRuntime();
     const ref = await fake.create({

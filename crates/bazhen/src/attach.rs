@@ -24,6 +24,7 @@ use self::link::Outcome;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
+use crate::target::{Named, named, unknown};
 use crate::{Exit, TERMINALS_USAGE};
 
 const NOT_A_TERMINAL: &str =
@@ -235,39 +236,16 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
     exit
 }
 
-/// The terminal `target` names: an agent's or a shell's, by its name or id, or a terminal by its
-/// own id. Refused, saying why, when there's none or it can't be attached to.
+/// The terminal `target` names, refused, saying why, when there's none or it can't be attached to.
 fn terminal_of(state: &StateSnapshot, target: &str) -> Result<String, String> {
-    let agent = state.agents.iter().find(|a| {
-        a.id.as_str() == target
-            || a.name.eq_ignore_ascii_case(target)
-            || a.terminal_id.as_ref().is_some_and(|t| t.as_str() == target)
-    });
-    let found = agent
-        .map(|a| {
-            (
-                a.terminal_id.as_ref(),
-                a.attach_command.is_some(),
-                a.needs_restart.as_ref(),
-            )
-        })
-        .or_else(|| {
-            state
-                .shells
-                .iter()
-                .find(|s| s.id.as_str() == target || s.name.as_deref() == Some(target))
-                .map(|s| {
-                    (
-                        Some(&s.id),
-                        s.attach_command.is_some(),
-                        s.needs_restart.as_ref(),
-                    )
-                })
-        });
-    match found {
-        None => Err(format!("no agent, shell or terminal is named {target}")),
-        Some((Some(terminal), true, _)) => Ok(terminal.as_str().to_owned()),
-        Some((_, _, Some(restart))) if !restart.served => Err(format!(
+    match named(state, target) {
+        None => Err(unknown(target)),
+        Some(Named {
+            terminal: Some(terminal),
+            attachable: true,
+            ..
+        }) => Ok(terminal),
+        Some(Named { unserved: true, .. }) => Err(format!(
             "{target} runs on a holder this build can't speak to: restart it, then attach"
         )),
         Some(_) => Err(format!("{target} has no running terminal to attach to")),

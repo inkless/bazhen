@@ -12,7 +12,8 @@ use thiserror::Error;
 use crate::body::{
     Alternate, ErrorBody, Exited, Foreground, FrozenHelloReply, FrozenProtocol, Gap, HelloReply,
     HelloRequest, MAX_SAFE_INTEGER, Offset, OkBody, PasteRequest, ProcessSpec, Resized, Respawned,
-    SetTagsRequest, SetThemeRequest, SignalRequest, Size, Stats, SubscribeRequest, Title,
+    Screen, ScreenRequest, SetTagsRequest, SetThemeRequest, SignalRequest, Size, Stats,
+    SubscribeRequest, Title,
 };
 use crate::json;
 use crate::version::speaks;
@@ -23,12 +24,14 @@ pub const MAX_REQUEST_BYTES: usize = 1 << 20;
 pub const MAX_REPLY_BYTES: usize = 64 << 20;
 
 /// Each request's type byte. A request with a reply of its own is `0x01`–`0x3f`; one without,
-/// `0x40`–`0x7f`. A type byte means the same in every version.
+/// `0x40`–`0x7f`. A type byte means the same in every version. `0x05` and its reply's `0x85` are
+/// never given: the fixtures of 1.0 to 1.3 send them as types no build knows.
 pub mod request_code {
     pub const HELLO: u8 = 0x01;
     pub const SNAPSHOT: u8 = 0x02;
     pub const STATS: u8 = 0x03;
     pub const FOREGROUND: u8 = 0x04;
+    pub const SCREEN: u8 = 0x06;
     pub const SUBSCRIBE: u8 = 0x40;
     pub const INPUT: u8 = 0x41;
     pub const RESIZE: u8 = 0x42;
@@ -48,6 +51,7 @@ pub mod reply_code {
     pub const SNAPSHOT: u8 = 0x82;
     pub const STATS: u8 = 0x83;
     pub const FOREGROUND: u8 = 0x84;
+    pub const SCREEN: u8 = 0x86;
     pub const DATA: u8 = 0xc0;
     pub const GAP: u8 = 0xc1;
     pub const RESIZED: u8 = 0xc2;
@@ -74,6 +78,7 @@ pub fn request_name(code: u8) -> Cow<'static, str> {
         request_code::SNAPSHOT => "snapshot",
         request_code::STATS => "stats",
         request_code::FOREGROUND => "foreground",
+        request_code::SCREEN => "screen",
         request_code::SUBSCRIBE => "subscribe",
         request_code::INPUT => "input",
         request_code::RESIZE => "resize",
@@ -107,6 +112,10 @@ pub enum Request {
     },
     Foreground {
         id: RequestId,
+    },
+    Screen {
+        id: RequestId,
+        body: ScreenRequest,
     },
     Subscribe {
         id: RequestId,
@@ -170,6 +179,10 @@ pub enum Reply {
     Foreground {
         id: RequestId,
         body: Foreground,
+    },
+    Screen {
+        id: RequestId,
+        body: Screen,
     },
     Data {
         offset: Offset,
@@ -354,6 +367,7 @@ impl Request {
             Self::Snapshot { .. } => request_code::SNAPSHOT,
             Self::Stats { .. } => request_code::STATS,
             Self::Foreground { .. } => request_code::FOREGROUND,
+            Self::Screen { .. } => request_code::SCREEN,
             Self::Subscribe { .. } => request_code::SUBSCRIBE,
             Self::Input { .. } => request_code::INPUT,
             Self::Resize { .. } => request_code::RESIZE,
@@ -373,6 +387,7 @@ impl Request {
             | Self::Snapshot { id }
             | Self::Stats { id }
             | Self::Foreground { id }
+            | Self::Screen { id, .. }
             | Self::Subscribe { id, .. }
             | Self::Input { id, .. }
             | Self::Resize { id, .. }
@@ -406,6 +421,7 @@ impl Request {
             Self::SetTags { body, .. } => with_json(&id, body)?,
             Self::SetTheme { body, .. } => with_json(&id, body)?,
             Self::Paste { body, .. } => with_json(&id, body)?,
+            Self::Screen { body, .. } => with_json(&id, body)?,
         };
         frame(self.code(), &payload, MAX_REQUEST_BYTES)
     }
@@ -418,6 +434,7 @@ impl Reply {
             Self::Snapshot { .. } => reply_code::SNAPSHOT,
             Self::Stats { .. } => reply_code::STATS,
             Self::Foreground { .. } => reply_code::FOREGROUND,
+            Self::Screen { .. } => reply_code::SCREEN,
             Self::Data { .. } => reply_code::DATA,
             Self::Gap(_) => reply_code::GAP,
             Self::Resized(_) => reply_code::RESIZED,
@@ -440,6 +457,7 @@ impl Reply {
             Self::Hello { id, body } => with_json(&id.0.to_be_bytes(), body)?,
             Self::Stats { id, body } => with_json(&id.0.to_be_bytes(), body)?,
             Self::Foreground { id, body } => with_json(&id.0.to_be_bytes(), body)?,
+            Self::Screen { id, body } => with_json(&id.0.to_be_bytes(), body)?,
             Self::Ok { id, body } => with_json(&id.0.to_be_bytes(), body)?,
             Self::Error { id, body } => with_json(&id.0.to_be_bytes(), body)?,
             Self::Snapshot {
@@ -549,6 +567,10 @@ fn request_body(code: u8, id: RequestId, rest: &[u8]) -> Result<Request, Malform
         request_code::SNAPSHOT => Request::Snapshot { id },
         request_code::STATS => Request::Stats { id },
         request_code::FOREGROUND => Request::Foreground { id },
+        request_code::SCREEN => Request::Screen {
+            id,
+            body: body("screen", rest)?,
+        },
         request_code::CLOSE => Request::Close { id },
         request_code::INPUT => Request::Input {
             id,
@@ -619,6 +641,13 @@ fn decode_reply(code: u8, payload: &[u8]) -> Result<Reply, Malformed> {
             Reply::Foreground {
                 id,
                 body: body("foreground", rest)?,
+            }
+        }
+        reply_code::SCREEN => {
+            let (id, rest) = answer("screen")?;
+            Reply::Screen {
+                id,
+                body: body("screen", rest)?,
             }
         }
         reply_code::OK => {

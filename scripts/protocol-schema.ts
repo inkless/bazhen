@@ -37,6 +37,7 @@ export const FROZEN_HOLDER_FIXTURES: Readonly<Record<string, string>> = {
   "1.0": "95fc5e9e131f49682d48f9f38d0d95ef4f64027064cca1649465e4c9c9107657",
   "1.1": "ee44ec4937861b11b86e3224ca37ed6067982e2e03d51b438a39a0208216ef1d",
   "1.2": "600eb94fb9d51ad6a2016d16c5c305846ca4f718a11949b75107ebd1c6f21c53",
+  "1.3": "3c2f3c0d11f50daf718d2edc8e687dae91b127b41424c2922f9803ecec66d466",
 };
 
 /**

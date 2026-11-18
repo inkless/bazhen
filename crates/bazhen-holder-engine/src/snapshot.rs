@@ -303,7 +303,7 @@ impl Engine {
 }
 
 /// Calls `f` with the primary grid: shown, or brought into reach from under the alternate screen.
-fn with_primary<R>(term: &mut Term<Sink>, f: impl FnOnce(&Grid<Cell>) -> R) -> R {
+pub(crate) fn with_primary<R>(term: &mut Term<Sink>, f: impl FnOnce(&Grid<Cell>) -> R) -> R {
     if let Some(primary) = PrimaryShown::new(term) {
         return f(primary.grid());
     }

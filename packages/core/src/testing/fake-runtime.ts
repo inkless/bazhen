@@ -22,6 +22,7 @@ import {
   type StreamEnd,
   type StreamFailure,
   type Foreground,
+  type ScreenText,
   type RuntimeAdapter,
   type TerminalForeground,
   type RuntimeHealth,
@@ -34,6 +35,9 @@ import {
 } from "../runtime.ts";
 import { concat, decode, encode } from "./platform.ts";
 import type { ContractHarness } from "./runtime-contract.ts";
+
+/** A CSI sequence, as a program colours or moves on its screen with. */
+const CSI = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;?]*[ -/]*[@-~]`, "gu");
 
 /** What reached one terminal from its clients, for a test to assert on. */
 export interface ClientRecord {
@@ -338,6 +342,20 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     const own = t.spec.argv[0].split("/").at(-1) ?? "";
     return { command: t.pane.child ?? own, own: t.pane.child === undefined };
+  }
+
+  /**
+   * What the current process printed, a line a row, its CSI sequences dropped and any other
+   * control written as U+FFFD: every row the screen, none history.
+   */
+  async screen(ref: RuntimeRef, _history: number): Promise<ScreenText> {
+    const t = this.paneOf(ref);
+    const rows = decode(t.printed.subarray(t.printed.length - t.offset))
+      .replace(CSI, "")
+      .split(/\r?\n/u)
+      .map((row) => row.replace(/\p{Cc}/gu, "\u{fffd}").trimEnd());
+    while (rows.at(-1) === "") rows.pop();
+    return { text: rows.map((row) => `${row}\n`).join(""), history: 0 };
   }
 
   async paste(ref: RuntimeRef, text: string, brackets: boolean): Promise<void> {

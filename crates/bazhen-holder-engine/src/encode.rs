@@ -248,16 +248,22 @@ pub(crate) fn drawable(c: char) -> char {
 
 /// The cells a row [`encode_row`] wrote draws: its chars' widths, past the SGR it writes.
 pub(crate) fn cells(text: &str) -> usize {
+    past_pen(text).map(|c| c.width().unwrap_or(0)).sum()
+}
+
+/// The chars a row [`encode_row`] wrote, past the SGR it writes.
+pub(crate) fn past_pen(text: &str) -> impl Iterator<Item = char> + '_ {
     let mut chars = text.chars();
-    let mut cells = 0;
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            chars.by_ref().find(|&c| c == 'm');
-        } else {
-            cells += c.width().unwrap_or(0);
+    std::iter::from_fn(move || {
+        loop {
+            match chars.next()? {
+                '\x1b' => {
+                    chars.by_ref().find(|&c| c == 'm');
+                }
+                c => return Some(c),
+            }
         }
-    }
-    cells
+    })
 }
 
 /// The attributes that make a space visible: a foreground colour alone doesn't.

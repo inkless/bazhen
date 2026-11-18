@@ -31,6 +31,7 @@ import { DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
 import { hasKeystrokes } from "./input.ts";
 import { isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
+import { TerminalScreen } from "./terminals.ts";
 import { CloseShellRequest, OpenShellRequest, ShellCommandResponse } from "./shells.ts";
 import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
 import {
@@ -771,6 +772,13 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     wire: [
       { terminalId: TERM, eventIds: [4] },
       { terminalId: TERM, eventIds: [] },
+    ],
+  },
+  TerminalScreen: {
+    schema: TerminalScreen,
+    wire: [
+      { text: "$ ls\nREADME.md\n", history: 1 },
+      { text: "", history: 0 },
     ],
   },
   SignalAgentRequest: {

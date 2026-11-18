@@ -257,6 +257,12 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     id: 76,
     body: { generation: 0, text: "", brackets: false },
   }),
+  request("screen alone", { type: "screen", id: 85, body: { history: 0 } }),
+  request("screen with the largest safe history", {
+    type: "screen",
+    id: 86,
+    body: { history: MAX_SAFE },
+  }),
 
   inbound("unknown request with a reply of its own", "unknown", rawRequest(0x05, 22, "{}")),
   inbound("unknown request without one", "unknown", rawRequest(0x7f, 23, "")),
@@ -496,6 +502,12 @@ const REQUEST_SOURCES: readonly FrameSource[] = [
     "valid",
     rawRequest(req.paste, 84, '{"generation":0,"text":"make","brackets":true,"later":1}'),
   ),
+  inbound("screen without history", "malformed", rawRequest(req.screen, 87, "{}")),
+  inbound(
+    "screen with negative history",
+    "malformed",
+    rawRequest(req.screen, 88, '{"history":-1}'),
+  ),
 ];
 
 const REPLY_SOURCES: readonly FrameSource[] = [
@@ -559,6 +571,12 @@ const REPLY_SOURCES: readonly FrameSource[] = [
     id: 5,
     body: { childPid: 42, childStart: 1, pgid: 43, pgidStart: 2 },
   }),
+  reply("screen, wide and marked chars after a row of history", {
+    type: "screen",
+    id: 34,
+    body: { text: "$ ls\n你好 e\u0301\n\n$\n", history: 1 },
+  }),
+  reply("screen of nothing", { type: "screen", id: 35, body: { text: "", history: 0 } }),
   reply("ok", { type: "ok", id: 6, body: { request: "resize" } }),
   ...HOLDER_ERROR_CODES.map((code, i) =>
     reply(`error ${code}`, {
@@ -664,6 +682,21 @@ const REPLY_SOURCES: readonly FrameSource[] = [
     "malformed",
     rawEvent(rep.title, '{"offset":0,"text":"\\ud800"}'),
   ),
+  ...(
+    [
+      ["screen with an ESC", "a\u001b[2Jb\n"],
+      ["screen with a C1 control", "\u009b2J\n"],
+      ["screen with a carriage return", "a\r\n"],
+      ["screen with a tab", "a\tb\n"],
+    ] as const
+  ).map(([name, text], i) =>
+    outbound(
+      name,
+      "malformed",
+      rawAnswer(rep.screen, 36 + i, JSON.stringify({ text, history: 0 })),
+    ),
+  ),
+  outbound("screen without history", "malformed", rawAnswer(rep.screen, 40, '{"text":""}')),
 ];
 
 function errorBody(code: unknown) {
@@ -686,11 +719,13 @@ const BODY: Record<Direction, Record<string, { at: number; json: boolean }>> = {
     "set-tags": { at: 4, json: true },
     "set-theme": { at: 4, json: true },
     paste: { at: 4, json: true },
+    screen: { at: 4, json: true },
   },
   reply: {
     hello: { at: 4, json: true },
     stats: { at: 4, json: true },
     foreground: { at: 4, json: true },
+    screen: { at: 4, json: true },
     ok: { at: 4, json: true },
     error: { at: 4, json: true },
     snapshot: { at: 12, json: false },

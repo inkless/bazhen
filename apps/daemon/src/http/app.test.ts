@@ -4,7 +4,11 @@ import {
   HarnessRefused,
   newId,
   RoutedRuntime,
+  ScreenUnreadable,
+  StaleIncarnation,
+  TerminalPredates,
   TerminalUnservable,
+  UnsupportedRuntime,
   NotResumable,
   TaskRefused,
   UnsupportedHarness,
@@ -217,7 +221,10 @@ const deps: AppDeps = {
     }
     return { verdict: "met", said: "worker-1 is idle" };
   },
+  terminalScreen: (terminalId, history) => readScreen(terminalId, history),
 };
+/** What the screen route's dep does: each test sets its own. */
+let readScreen: AppDeps["terminalScreen"] = async () => undefined;
 const restarts: unknown[] = [];
 const app = createApp(deps);
 /** The commands as the socket serves them: behind its guard, which says who called. */
@@ -605,6 +612,99 @@ describe("socket callers", () => {
       }),
     );
     expect(replies).toEqual(routes.map((r) => [r.path, 403, true]));
+  });
+});
+
+/** Records each read the route asks of the runtime, answering it with `answer`. */
+function reading(answer: () => Promise<Awaited<ReturnType<AppDeps["terminalScreen"]>>>) {
+  const asked: [string, number][] = [];
+  readScreen = async (terminalId, history) => {
+    asked.push([terminalId, history]);
+    return answer();
+  };
+  return asked;
+}
+/** A refusal's status and body. */
+const refusalOf = async (res: Response) => [res.status, ErrorResponse.parse(await res.json())];
+
+describe("the screen route", () => {
+  const term = newId("term");
+  const screenOf = (query = "", on: Served = app, headers: Record<string, string> = {}) =>
+    on.request(`/v1/terminals/${term}/screen${query}`, { headers: { host, ...headers } });
+
+  it("reads a terminal's screen with the history asked for, none when unset", async () => {
+    const screen = { text: "$ ls\nREADME.md\n", history: 1 };
+    const asked = reading(async () => screen);
+    const replies = [await screenOf("?history=3"), await screenOf("", socket)];
+    expect(await Promise.all(replies.map(async (r) => [r.status, await r.json()]))).toEqual([
+      [200, screen],
+      [200, screen],
+    ]);
+    expect(asked).toEqual([
+      [term, 3],
+      [term, 0],
+    ]);
+  });
+
+  it("refuses an agent on the socket before reading anything", async () => {
+    const asked = reading(async () => ({ text: "", history: 0 }));
+    const res = await screenOf("", socket, { "bazhen-agent-token": AGENT_TOKEN });
+    expect(await refusalOf(res)).toEqual([
+      403,
+      { error: "forbidden", message: "an agent can't read a terminal's screen" },
+    ]);
+    expect(asked).toEqual([]);
+  });
+
+  it.each(["-1", "x", "1.5", "10001", "", "0x1"])(
+    "refuses history=%s, reading nothing",
+    async (rows) => {
+      const asked = reading(async () => ({ text: "", history: 0 }));
+      expect((await screenOf(`?history=${rows}`)).status).toBe(400);
+      expect(asked).toEqual([]);
+    },
+  );
+
+  it("answers a terminal with no record as not found", async () => {
+    reading(async () => undefined);
+    expect(await refusalOf(await screenOf())).toEqual([
+      404,
+      expect.objectContaining({ error: "not_found" }),
+    ]);
+  });
+
+  const refusals: [string, number, string, Error][] = [
+    ["one its runtime no longer has", 404, "not_found", new StaleIncarnation(term, "gone")],
+    ["one on tmux", 422, "unsupported", new UnsupportedRuntime("on tmux")],
+    [
+      "one on a holder older than screen reads",
+      409,
+      "needs_restart",
+      new TerminalPredates(term, "screen reads"),
+    ],
+    [
+      "one on a holder this build can't speak to",
+      409,
+      "needs_restart",
+      new TerminalUnservable(term, ["9.0"], null),
+    ],
+    [
+      "one whose screen its holder can't read",
+      503,
+      "unavailable",
+      new ScreenUnreadable(term, "no engine"),
+    ],
+  ];
+  it.each(refusals)("answers %s as %i", async (_, status, error, thrown) => {
+    reading(async () => {
+      throw thrown;
+    });
+    expect(await refusalOf(await screenOf())).toEqual([status, expect.objectContaining({ error })]);
+  });
+
+  it("never sends a screen holding a control, which would act on the reader's terminal", async () => {
+    reading(async () => ({ text: "\u{1b}]0;owned\u{7}\n", history: 0 }));
+    await expect(screenOf()).rejects.toThrow("a control character");
   });
 });
 

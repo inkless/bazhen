@@ -18,8 +18,10 @@ mod out;
 mod paths;
 mod printers;
 pub mod reply;
+mod screen;
 mod sha256;
 mod shells;
+mod target;
 mod tasks;
 mod waits;
 
@@ -140,11 +142,13 @@ const DAEMON_USAGE: &str =
 
 const DEVICES_USAGE: &str = "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]";
 
-pub(crate) const TERMINALS_USAGE: &str = concat!(
-    "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
-    "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
-    "  --direct types only while no daemon is there, and lets go of the input once one is back",
-);
+pub(crate) const TERMINALS_USAGE: &str = r"usage:
+  bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]
+  bazhen terminals screen <agent|shell|terminal> [--history <n>] [--json] [--home <dir>]
+attach: Ctrl-\ Ctrl-\ detaches; a second kill ends it at once, after which `reset` repairs the
+terminal. --direct types only while no daemon is there, and lets go of the input once one is
+back. screen prints the screen shown as text, after the newest <n> rows of its history (0 unless
+given, at most 10000), and reads a terminal whose program has exited too.";
 
 /// The usage of every verb.
 pub(crate) fn usage() -> String {
@@ -185,6 +189,7 @@ enum Handler {
     Wait(waits::Noun),
     Follow,
     Attach,
+    Screen,
     Start,
     Stop,
     Status,
@@ -198,8 +203,8 @@ enum Handler {
 /// that code doesn't read: `agents send` reaches `send` as its first word.
 fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
     use Handler::{
-        Attach, Devices, Doctor, EnvRefresh, Fleet, Follow, Lifecycle, Pair, Shells, Start, Status,
-        Stop, Wait,
+        Attach, Devices, Doctor, EnvRefresh, Fleet, Follow, Lifecycle, Pair, Screen, Shells, Start,
+        Status, Stop, Wait,
     };
     Some(match (p.word(0)?, p.word(1)) {
         ("start", _) => (Start, 0),
@@ -226,6 +231,7 @@ fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
         ("shells", Some("wait")) => (Wait(waits::Noun::Shell), 1),
         ("events", Some("follow")) => (Follow, 0),
         ("terminals", Some("attach")) => (Attach, 1),
+        ("terminals", Some("screen")) => (Screen, 1),
         ("devices", Some("pair")) => (Pair, 0),
         ("devices", None | Some("list" | "revoke" | "dismiss")) => (Devices, 0),
         ("env", Some("refresh")) => (EnvRefresh, 0),
@@ -315,6 +321,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         Handler::Wait(noun) => waits::run(&v, noun, &daemon, out),
         Handler::Follow => events::run_follow(&v, &daemon, out),
         Handler::Attach => attach::run(&v, Path::new(&daemon.socket()), &daemon, out),
+        Handler::Screen => screen::run(&v, &daemon, out),
         Handler::Start => Ok(daemon_verbs::start(&v, out)),
         Handler::Stop => daemon_verbs::stop(&daemon, out),
         Handler::Status => daemon_verbs::status(&daemon, out),

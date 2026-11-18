@@ -808,6 +808,60 @@ pub struct Foreground {
     pub pgid_start: StartTime,
 }
 
+/// Reads the screen shown as plain text, after the newest `history` rows of the main screen's
+/// history: see `HolderScreenRequest` in `holder.ts` for the answers. Since 1.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenRequest {
+    pub history: Count,
+}
+
+/// The screen as text: a line a row, each ended by `\n`, with no other control, so it can be
+/// printed to a terminal as it is. `history` is how many rows of the text are history. Since 1.4.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ScreenFields", into = "ScreenFields")]
+pub struct Screen(ScreenFields);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ScreenFields {
+    text: String,
+    history: Count,
+}
+
+impl Screen {
+    /// # Errors
+    ///
+    /// When `text` holds a control but a newline.
+    pub fn new(text: impl Into<String>, history: Count) -> Result<Self, Invalid> {
+        let text = text.into();
+        if text.chars().any(|c| c != '\n' && c.is_control()) {
+            return Err(Invalid("the text holds a control character".to_owned()));
+        }
+        Ok(Self(ScreenFields { text, history }))
+    }
+
+    pub fn text(&self) -> &str {
+        &self.0.text
+    }
+
+    pub const fn history(&self) -> Count {
+        self.0.history
+    }
+}
+
+impl TryFrom<ScreenFields> for Screen {
+    type Error = Invalid;
+
+    fn try_from(fields: ScreenFields) -> Result<Self, Invalid> {
+        Self::new(fields.text, fields.history)
+    }
+}
+
+impl From<Screen> for ScreenFields {
+    fn from(screen: Screen) -> Self {
+        screen.0
+    }
+}
+
 /// The subscriber isn't sent `[from, to)`: the ring no longer holds it, or the subscriber was
 /// owed more `resized` than the holder keeps for one that lags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

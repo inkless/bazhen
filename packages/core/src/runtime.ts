@@ -148,6 +148,44 @@ export class TerminalUnservable extends TerminalUnconfirmed {
   }
 }
 
+/** The runtime can't do what was asked for any terminal it runs. */
+export class UnsupportedRuntime extends Error {}
+
+/**
+ * The terminal's server predates what was asked of it; restarting the terminal starts it on one
+ * that has it.
+ */
+export class TerminalPredates extends Error {
+  readonly terminalId: TerminalId;
+
+  constructor(terminalId: TerminalId, what: string) {
+    super(`terminal ${terminalId} runs on a holder that predates ${what}: restart it to use them`);
+    this.terminalId = terminalId;
+  }
+}
+
+/** The terminal's screen can't be read just now, as when its server has lost it. */
+export class ScreenUnreadable extends Error {
+  readonly terminalId: TerminalId;
+
+  constructor(terminalId: TerminalId, reason: string) {
+    super(`terminal ${terminalId}'s screen can't be read: ${reason}`);
+    this.terminalId = terminalId;
+  }
+}
+
+/** A terminal's screen as plain text: what `RuntimeAdapter.screen` reads. */
+export interface ScreenText {
+  /**
+   * The rows of history read, then the screen shown: a line a row, each ended by a newline, the
+   * blanks a row ends in and the empty rows the screen ends in left out. It holds no control
+   * character but those newlines.
+   */
+  readonly text: string;
+  /** How many rows of history it starts with. */
+  readonly history: number;
+}
+
 /** The right incarnation, but its process is not in the state the request needs. */
 export class ProcessState extends Error {
   readonly terminalId: TerminalId;
@@ -335,6 +373,12 @@ export interface RuntimeAdapter {
    * whose process has exited is `ProcessState`.
    */
   foreground(ref: RuntimeRef): Promise<Foreground>;
+  /**
+   * The screen shown, the alternate one while it is up, as plain text after the newest `history`
+   * rows of the primary screen's history, read without input or a lease and whether or not the
+   * terminal's process has exited. A runtime that can't read screens is `UnsupportedRuntime`.
+   */
+  screen(ref: RuntimeRef, history: number): Promise<ScreenText>;
   /**
    * The foregrounds of the live terminals among `terminalIds`, in one read, never a screen's. An
    * unreadable server throws; a terminal whose processes can't be read is left out.

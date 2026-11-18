@@ -24,6 +24,8 @@ import {
   type CreateTaskResponse,
   type TaskCommandResponse,
   RolesResponse,
+  SCREEN_HISTORY_MAX,
+  TerminalScreen,
   type TaskDetail,
   CloseAgentRequest,
   CloseShellRequest,
@@ -64,8 +66,15 @@ import {
   NoTerminal,
   NotResumable,
   ProcessState,
+  ScreenUnreadable,
+  StaleIncarnation,
+  TerminalPredates,
+  TerminalUnconfirmed,
+  TerminalUnservable,
   UnsupportedHarness,
+  UnsupportedRuntime,
   type RuntimeAdapter,
+  type ScreenText,
 } from "@bazhen/core";
 import { z } from "zod";
 import { InvalidDirectory } from "../agents/cwd.ts";
@@ -186,6 +195,8 @@ export interface AppDeps {
     viewer: Viewer,
     signal: AbortSignal,
   ) => Promise<WaitResponse>;
+  /** The terminal's screen as its runtime reads it; undefined for a terminal there is no record of. */
+  readonly terminalScreen: (terminalId: string, history: number) => Promise<ScreenText | undefined>;
 }
 
 /** Task commands, each told who asks: an agent by its id, or the human as null. */
@@ -220,6 +231,29 @@ function fail(
 ) {
   const body: ErrorResponse = { error, message };
   return c.json(body, status);
+}
+
+/** `?history=`: a whole number of rows up to the most, 0 when unset; undefined when neither. */
+function screenHistory(raw: string | undefined): number | undefined {
+  if (raw === undefined) return 0;
+  if (!/^\d{1,5}$/u.test(raw)) return undefined;
+  const rows = Number(raw);
+  return rows <= SCREEN_HISTORY_MAX ? rows : undefined;
+}
+
+/** A screen read's typed failure as the error it answers; undefined for one it doesn't expect. */
+function screenFailure(c: Context, terminalId: string, err: unknown) {
+  if (err instanceof UnsupportedRuntime) return fail(c, 422, "unsupported", err.message);
+  if (err instanceof TerminalPredates || err instanceof TerminalUnservable) {
+    return fail(c, 409, "needs_restart", err.message);
+  }
+  if (err instanceof StaleIncarnation) {
+    return fail(c, 404, "not_found", `no running terminal ${terminalId}`);
+  }
+  if (err instanceof ScreenUnreadable || err instanceof TerminalUnconfirmed) {
+    return fail(c, 503, "unavailable", err.message);
+  }
+  return undefined;
 }
 
 /** The paired device a request came from, as the gate verified it; unset for the owner. */
@@ -438,6 +472,25 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!body.success) return invalid(c, body.error);
     const answer = await deps.wait(callerOf(c), body.data, viewerOf(c), c.req.raw.signal);
     return c.json(WaitResponse.parse(answer));
+  });
+  // A read: no lease, and nothing reaches the terminal.
+  app.get("/v1/terminals/:id/screen", async (c) => {
+    const terminalId = c.req.param("id");
+    const history = screenHistory(c.req.query("history"));
+    if (history === undefined) {
+      const why = `history is a whole number of rows from 0 to ${SCREEN_HISTORY_MAX}`;
+      return fail(c, 400, "invalid_request", why);
+    }
+    let screen: ScreenText | undefined;
+    try {
+      screen = await deps.terminalScreen(terminalId, history);
+    } catch (err) {
+      const failed = screenFailure(c, terminalId, err);
+      if (failed === undefined) throw err;
+      return failed;
+    }
+    if (screen === undefined) return fail(c, 404, "not_found", `no terminal ${terminalId}`);
+    return c.json(TerminalScreen.parse(screen));
   });
   app.get("/v1/tasks/:id", (c) => {
     const detail = tasks.show(c.req.param("id"));

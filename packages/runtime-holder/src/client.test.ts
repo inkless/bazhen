@@ -98,7 +98,7 @@ describe("HolderClient", () => {
   it("says hello first, with its version and the writer flag it was given", async () => {
     const { holder, opening } = pair({ hello: false }, { writer: true });
     const hello = await holder.request();
-    expect(hello).toMatchObject({ type: "hello", body: { protocol: ["1.3"], writer: true } });
+    expect(hello).toMatchObject({ type: "hello", body: { protocol: ["1.4"], writer: true } });
     expect(holder.chunks).toHaveLength(1);
     holder.send({ type: "hello", id: hello.id, body: fakeHello({ writer: true }) });
     await expect(opening).resolves.toMatchObject({ hello: { writer: true } });
