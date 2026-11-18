@@ -12,11 +12,12 @@ export default async function teardown(): Promise<void> {
   if (!onDisposableHost()) return;
   const root = process.env["BZ_E2E_ROOT"];
   if (root) {
-    for (const runtime of RUNTIMES) {
-      const home = daemonHome(runtime);
-      // The daemon's own server, by its socket in its home: run/tmux.sock, for a home this short.
+    const homes = RUNTIMES.map(daemonHome);
+    // Before tmux, so a refused socket below can't leave holders running.
+    await Promise.all(homes.map(closeHoldersUnder));
+    // Each daemon's own server, by its socket in its home: run/tmux.sock, for a home this short.
+    for (const home of homes) {
       TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).killServer();
-      await closeHoldersUnder(home);
     }
   }
   const tmuxDir = process.env["BZ_E2E_TMUX_TMPDIR"];

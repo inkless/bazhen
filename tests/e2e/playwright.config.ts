@@ -74,6 +74,8 @@ const claudeBin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
  * depends on which one is the default.
  */
 function daemonEnv({ runtime, home, daemonPort, webPort }: E2eDaemon): Record<string, string> {
+  // Private: tmux's guard refuses a socket under a home other users can open.
+  mkdirSync(home, { recursive: true, mode: 0o700 });
   mkdirSync(join(home, "config"), { recursive: true });
   writeFileSync(join(home, "config", "config.toml"), `[runtime]\ndefault = "${runtime}"\n`);
   return {
