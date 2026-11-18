@@ -642,10 +642,12 @@ const found = (code: string, pattern: RegExp) =>
   }));
 
 const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall|killall5|skill)$/;
-// What runs a program named by the literal that follows: Rust's Command, and Node's and
-// host-guard's process starts.
-const STARTS_PROGRAM =
-  /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
+// What starts a program: Rust's Command, and Node's and host-guard's process starts.
+const PROGRAM_START = String.raw`(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))`;
+// What runs a program named by the literal that follows.
+const STARTS_PROGRAM = new RegExp(String.raw`${PROGRAM_START}\s*\(\s*\[?\s*$`);
+// A call of anything named like a process start, a member's included.
+const STARTS_A_PROGRAM = new RegExp(PROGRAM_START + CALLED, "g");
 // Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill.
 const LAUNCHER =
   /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su|busybox|toybox|exec|command|builtin)$/;
@@ -1158,11 +1160,6 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
     ),
   ],
 };
-
-// A call of anything named like a process start, as STARTS_PROGRAM names them, a member's
-// included.
-const STARTS_A_PROGRAM =
-  /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*(?:<[^()<>;{}]*>\s*)?(?:\?\.\s*)?\(/g;
 
 /**
  * The literals that start a kill: a program sending one, or a shell or systemctl doing so. One
