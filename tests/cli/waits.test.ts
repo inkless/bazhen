@@ -269,6 +269,18 @@ describe("bazhen agents send --reply", () => {
     ]);
   });
 
+  it("exits 5 at the timeout though the daemon never says who calls, or never takes the send", async () => {
+    s.daemon.hang("GET /v1/caller");
+    const unsaid = await s.bazhen(["agents", "send", OTHER, "hi", "--reply", "--timeout", "1"]);
+    s.daemon.takes(AGENT).hang(`POST /v1/agents/${OTHER}/messages`);
+    const untaken = await s.bazhen(["agents", "send", OTHER, "hi", "--reply", "--timeout", "1"]);
+    expect([unsaid, untaken].map((r) => [r.code, r.stderr])).toEqual([
+      [5, "the daemon didn't answer the wait within 1 s\n"],
+      [5, "the daemon didn't answer the wait within 1 s\n"],
+    ]);
+    expect(asked()).toEqual([]);
+  });
+
   it("refuses the human, and --reply beside --wait or on tasks send, before sending", async () => {
     s.daemon.takes(null);
     const ran = await Promise.all(

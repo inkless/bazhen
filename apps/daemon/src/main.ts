@@ -546,8 +546,14 @@ const commands = {
   unlinkShell: (terminalId, req) => shells.unlink(terminalId, req),
   tasks,
   waitMessages: (req, signal) => waitForMail(store, req, signal),
-  wait: (caller, req, viewer, signal) =>
-    waitFor({ store, view: () => waitViews.of(viewer), limit: waitLimit }, caller, req, signal),
+  wait: async (caller, req, viewer, signal) => {
+    const held = waitViews.hold(viewer);
+    try {
+      return await waitFor({ store, view: held.view, limit: waitLimit }, caller, req, signal);
+    } finally {
+      held.release();
+    }
+  },
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({
   ...commands,

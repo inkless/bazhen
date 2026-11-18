@@ -451,7 +451,17 @@ impl Verb<'_> {
             );
         }
         let deadline = waits::Deadline::start(waits::timeout(self.p)?);
-        let caller: CallerResponse = self.daemon.get("/v1/caller", deadline.within(CALL))?;
+        let timed_out = |out: &mut Out| Answer {
+            text: None,
+            exit: waits::unanswered(deadline, out),
+        };
+        let Some(caller) = waits::in_time::<CallerResponse>(
+            deadline,
+            self.daemon.get("/v1/caller", deadline.left()),
+        )?
+        else {
+            return Ok(timed_out(out));
+        };
         if caller.agent_id.is_none() {
             return Err(Stop::NotHere(
                 "agents send --reply runs inside an agent Bazhen launched: only an agent can be \
@@ -459,7 +469,7 @@ impl Verb<'_> {
                     .to_owned(),
             ));
         }
-        let r: SendMessageResponse = self.daemon.post(
+        let sent = self.daemon.post(
             &format!(
                 "/v1/agents/{}/messages",
                 encode_uri_component(agent.as_str())
@@ -468,8 +478,11 @@ impl Verb<'_> {
                 idempotency_key: key()?,
                 body,
             },
-            deadline.within(CALL),
-        )?;
+            deadline.left(),
+        );
+        let Some(r) = waits::in_time::<SendMessageResponse>(deadline, sent)? else {
+            return Ok(timed_out(out));
+        };
         out.err(&format!(
             "sent {} to {agent}\nwaiting up to {} s for a reply",
             r.message_id,

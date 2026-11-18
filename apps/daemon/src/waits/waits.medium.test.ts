@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { newId, type Caller } from "@bazhen/core";
 import type { StateSnapshot, WaitCondition } from "@bazhen/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { RESTARTED } from "../mailbox/activity.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
 import { UnknownShell } from "../shells/lifecycle.ts";
 import { Store, UnknownAgent } from "../store/store.ts";
@@ -217,6 +218,35 @@ describe("a wait for an agent to be idle", () => {
     expect((await now(store, { on: "agent", agentId, until: "idle" })).said).toBe(
       `${agentId} is idle`,
     );
+  });
+
+  it("takes an idle reported before a daemon restart, and says why it can't when it was busy", async () => {
+    const { store, environmentId } = fresh();
+    const restarted = (agentId: string) =>
+      system(store, "agent.activity", agentId, {
+        value: "unknown",
+        detail: RESTARTED,
+        source: "heuristic",
+        confidence: 1,
+        observedAt: "2026-11-18T00:00:00Z",
+      });
+    const parked = launch(store, environmentId);
+    reportIdle(store, parked);
+    restarted(parked);
+    const busy = launch(store, environmentId);
+    reportIdle(store, busy, "working");
+    restarted(busy);
+    const mailed = launch(store, environmentId);
+    reportIdle(store, mailed);
+    see(store, mail(store, mailed));
+    restarted(mailed);
+    const said = async (agentId: string) =>
+      (await now(store, { on: "agent", agentId, until: "idle" })).said;
+    expect([await said(parked), await said(busy), await said(mailed)]).toEqual([
+      `${parked} is idle, as it was when the daemon restarted`,
+      `${busy} is running: the daemon restarted while it was working; idle once it reports a turn ended`,
+      `${mailed} is running: the daemon restarted before it reported a turn after its last message`,
+    ]);
   });
 
   it("doesn't take an idle Bazhen inferred for one its harness reported", async () => {
@@ -448,7 +478,7 @@ describe("the waits a caller holds", () => {
 });
 
 describe("the snapshots waits judge through", () => {
-  it("are made once per viewer per commit, however many waits read them", () => {
+  it("are made once per viewer per commit, however many waits read them, and kept no longer", () => {
     const { store, environmentId } = fresh();
     const made: string[] = [];
     const views = new SharedViews(
@@ -458,11 +488,20 @@ describe("the snapshots waits judge through", () => {
         return store.snapshot(testView);
       },
     );
-    views.of("owner");
-    views.of("owner");
-    views.of("device");
+    const owner = views.hold("owner");
+    const again = views.hold("owner");
+    owner.view();
+    again.view();
     launch(store, environmentId, false);
-    views.of("owner");
-    expect(made).toEqual(["owner", "device", "owner"]);
+    owner.view();
+    owner.release();
+    again.view();
+    // A viewer no wait holds any more, as a revoked device's, keeps nothing: on the same
+    // commit, the next wait's view is made anew.
+    const device = views.hold("device");
+    device.view();
+    device.release();
+    views.hold("device").view();
+    expect(made).toEqual(["owner", "owner", "device", "device"]);
   });
 });

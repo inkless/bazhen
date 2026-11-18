@@ -103,6 +103,8 @@ export interface TurnAfterMail {
   readonly inFlight: number;
   /** The last message that reached it; one that bounced never did, so no turn need follow it. */
   readonly lastSettled: number | null;
+  /** When the latest activity isn't the harness's own: the latest that was, and when. */
+  readonly lastNative?: { readonly activity: Activity; readonly at: number };
 }
 
 export interface OpenAttention {
@@ -788,11 +790,23 @@ export class Store {
          max(settled_event_id) FILTER (WHERE state <> 'undeliverable') AS settled
        FROM mailbox WHERE agent_session_id = ?`,
     ).get(agentId);
+    const latest = activity === undefined ? undefined : activityOf(activity.activity);
+    const native =
+      latest === undefined || latest.source === "native"
+        ? undefined
+        : this.prepare(
+            `SELECT id, payload FROM events WHERE entity_type = 'agent' AND entity_id = ?
+               AND type = 'agent.activity' AND json_extract(payload, '$.source') = 'native'
+             ORDER BY id DESC LIMIT 1`,
+          ).get(agentId);
     return {
-      activity: activity === undefined ? undefined : activityOf(activity.activity),
+      activity: latest,
       activityAt: typeof activity?.at === "number" ? activity.at : null,
       inFlight: typeof mail?.moving === "number" ? mail.moving : 0,
       lastSettled: typeof mail?.settled === "number" ? mail.settled : null,
+      ...(typeof native?.id === "number" && {
+        lastNative: { activity: activityOf(native.payload), at: native.id },
+      }),
     };
   }
 

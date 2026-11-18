@@ -10,6 +10,7 @@ import type {
   WaitResponse,
 } from "@bazhen/protocol";
 import type { Caller } from "@bazhen/core";
+import { RESTARTED } from "../mailbox/activity.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
 import { UnknownShell } from "../shells/lifecycle.ts";
 import { UnknownAgent, type Store } from "../store/store.ts";
@@ -61,6 +62,7 @@ export class WaitLimit {
  */
 export class SharedViews<V> {
   readonly #made = new Map<V, { readonly at: number; readonly view: StateSnapshot }>();
+  readonly #holders = new Map<V, number>();
   readonly #latest: () => number;
   readonly #make: (viewer: V) => StateSnapshot;
 
@@ -70,13 +72,36 @@ export class SharedViews<V> {
     this.#make = make;
   }
 
-  /** What `viewer`'s `/v1/state` shows as of the latest event. */
+  /**
+   * `viewer`'s view, for one wait, kept until the last wait holding it releases it: a revoked
+   * device's view, or any viewer's no wait reads, isn't kept.
+   */
+  hold(viewer: V): { readonly view: () => StateSnapshot; readonly release: () => void } {
+    this.#holders.set(viewer, (this.#holders.get(viewer) ?? 0) + 1);
+    let released = false;
+    return {
+      view: () => this.of(viewer),
+      release: () => {
+        if (released) return;
+        released = true;
+        const left = (this.#holders.get(viewer) ?? 1) - 1;
+        if (left > 0) {
+          this.#holders.set(viewer, left);
+          return;
+        }
+        this.#holders.delete(viewer);
+        this.#made.delete(viewer);
+      },
+    };
+  }
+
+  /** What `viewer`'s `/v1/state` shows as of the latest event; kept only while a wait holds it. */
   of(viewer: V): StateSnapshot {
     const at = this.#latest();
     const kept = this.#made.get(viewer);
     if (kept?.at === at) return kept.view;
     const view = this.#make(viewer);
-    this.#made.set(viewer, { at, view });
+    if (this.#holders.has(viewer)) this.#made.set(viewer, { at, view });
     return view;
   }
 }
@@ -116,22 +141,49 @@ const pending = (said: string, on: Partial<WaitResponse> = {}): Judged<WaitRespo
 const gone = (id: string, want: string) =>
   want === "ended" ? met(`${id} is gone`) : never(`${id} is gone, and can't be ${want} now`);
 
+type Idleness =
+  | { readonly idle: true; readonly how: string }
+  | { readonly idle: false; readonly why: string };
+
 /**
  * Idle: its harness said itself that a turn ended, nothing sent to it is still on the way, and
- * that turn ended after the last message reached it. Otherwise, why not, for a person.
+ * that turn ended after the last message reached it. A daemon restart puts an unknown over what
+ * the harness last said, until its next hook; a parked agent sends none, so an idle it reported
+ * before the restart, after its last message, still counts, and the answer says so. Otherwise,
+ * why not, for a person.
  */
-function idleness(store: WaitDeps["store"], agent: Agent): string | null {
+function idleness(store: WaitDeps["store"], agent: Agent): Idleness {
   const turn = store.turnAfterMail(agent.id);
   if (turn.inFlight > 0) {
-    return turn.inFlight === 1
-      ? "1 message to it on the way"
-      : `${turn.inFlight} messages on the way`;
+    const why =
+      turn.inFlight === 1 ? "1 message to it on the way" : `${turn.inFlight} messages on the way`;
+    return { idle: false, why };
   }
+  const afterMail = (at: number | null) =>
+    turn.lastSettled === null || (at ?? 0) > turn.lastSettled;
   const activity = turn.activity;
-  if (activity === undefined || activity.source !== "native") return "no turn reported";
-  if (activity.value !== "idle") return activity.value;
-  const after = turn.lastSettled === null || (turn.activityAt ?? 0) > turn.lastSettled;
-  return after ? null : "no turn since its last message";
+  if (activity?.source === "heuristic" && activity.detail === RESTARTED) {
+    const before = turn.lastNative;
+    if (before?.activity.value === "idle") {
+      return afterMail(before.at)
+        ? { idle: true, how: ", as it was when the daemon restarted" }
+        : {
+            idle: false,
+            why: "the daemon restarted before it reported a turn after its last message",
+          };
+    }
+    return {
+      idle: false,
+      why: `the daemon restarted while it was ${before?.activity.value ?? "not reporting"}; idle once it reports a turn ended`,
+    };
+  }
+  if (activity === undefined || activity.source !== "native") {
+    return { idle: false, why: "no turn reported" };
+  }
+  if (activity.value !== "idle") return { idle: false, why: activity.value };
+  return afterMail(turn.activityAt)
+    ? { idle: true, how: "" }
+    : { idle: false, why: "no turn since its last message" };
 }
 
 function onAgent(store: WaitDeps["store"], agentId: string, want: AgentCondition): Judge {
@@ -148,10 +200,10 @@ function onAgent(store: WaitDeps["store"], agentId: string, want: AgentCondition
       return ended(now) ? met(`${label} is ${now}`, on) : pending(`${label} is ${now}`, on);
     if (want === "ready" && now === "running") return met(`${label} is ready`, on);
     if (want === "idle" && now === "running") {
-      const why = idleness(store, agent);
-      return why === null
-        ? met(`${label} is idle`, on)
-        : pending(`${label} is running: ${why}`, on);
+      const is = idleness(store, agent);
+      return is.idle
+        ? met(`${label} is idle${is.how}`, on)
+        : pending(`${label} is running: ${is.why}`, on);
     }
     if (want === now) return met(`${label} is ${now}`, on);
     if (ended(now)) return never(`${label} is ${now}, and can't be ${want} now`, on);

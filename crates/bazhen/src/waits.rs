@@ -48,11 +48,11 @@ impl Deadline {
         self.timeout
     }
 
-    fn left(self) -> Duration {
+    pub(crate) fn left(self) -> Duration {
         self.at.saturating_duration_since(Instant::now())
     }
 
-    fn passed(self) -> bool {
+    pub(crate) fn passed(self) -> bool {
         self.left().is_zero()
     }
 
@@ -60,15 +60,10 @@ impl Deadline {
     fn left_to_ask(self) -> Duration {
         self.left().saturating_sub(GRACE.min(self.timeout / 4))
     }
-
-    /// What is left, capped at `most`: one call may take no longer than the wait has.
-    pub(crate) fn within(self, most: Duration) -> Duration {
-        most.min(self.left())
-    }
 }
 
 /// The daemon answered no call before the wait ran out, though one took the call.
-fn unanswered(deadline: Deadline, out: &mut Out) -> Exit {
+pub(crate) fn unanswered(deadline: Deadline, out: &mut Out) -> Exit {
     out.err(&format!(
         "the daemon didn't answer the wait within {} s",
         deadline.timeout.as_secs()
@@ -189,8 +184,14 @@ fn wait(p: &Parsed, noun: Noun, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
 
 /// The daemon's state, to find a name in; none when it took the call but answered too late.
 fn read_state(daemon: &Daemon, deadline: Deadline) -> Step<Option<StateSnapshot>> {
-    match daemon.get("/v1/state", deadline.left()) {
-        Ok(state) => Ok(Some(state)),
+    in_time(deadline, daemon.get("/v1/state", deadline.left()))
+}
+
+/// What a call made before the wait answered, given all the time the wait has left; none when
+/// the daemon took the call but answered only once that ran out, which runs the wait out.
+pub(crate) fn in_time<T>(deadline: Deadline, called: Result<T, Failed>) -> Step<Option<T>> {
+    match called {
+        Ok(answer) => Ok(Some(answer)),
         Err(Failed::NotRunning) if deadline.passed() => Ok(None),
         Err(failed) => Err(failed.into()),
     }

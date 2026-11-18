@@ -274,7 +274,9 @@ background and act when it ends, rather than polling `agents list` or sleeping. 
 the wait when it arrives and again after every change it records, so nothing that happens between
 asking and listening is missed. An agent is `idle` once its harness reports a turn ended after
 every message sent to it arrived: an agent just sent work isn't idle until it has taken it up,
-whether as a new turn or folded into the one it is running. `ready` is `running`, its harness up.
+whether as a new turn or folded into the one it is running. One that was idle when the daemon
+restarted, with no message since, is still idle; one that was busy is idle once it next reports
+a turn ended, and the wait says so. `ready` is `running`, its harness up.
 
 `--reply` prints who replied and the reply's id, not its text, which arrives as mail. A reply is
 the first message the agent sends back after yours reached it: one it wrote before then crossed
