@@ -50,6 +50,23 @@ export interface TerminalSample {
   readonly state: string;
 }
 
+/** Consecutive marker numbers, from the first to the last. */
+export type MarkerRun = readonly [first: number, last: number];
+
+/**
+ * `numbers` as runs of consecutive numbers, in the order seen: expanded, the runs are `numbers`
+ * again. A flood's attach sees millions of markers, which as runs are one or two.
+ */
+export function markerRuns(numbers: readonly number[]): MarkerRun[] {
+  const runs: [number, number][] = [];
+  for (const n of numbers) {
+    const last = runs.at(-1);
+    if (last !== undefined && n === last[1] + 1) last[1] = n;
+    else runs.push([n, n]);
+  }
+  return runs;
+}
+
 export type SoakEvent =
   /** Warm-up ends at `measure`; the run at `end`. */
   | { readonly kind: "window"; readonly t: number; readonly phase: "measure" | "end" }
@@ -80,13 +97,13 @@ export type SoakEvent =
   /** The driver is about to close a terminal: its holder and program may end from here on. */
   | { readonly kind: "close"; readonly t: number; readonly name: string }
   | { readonly kind: "daemon"; readonly t: number; readonly up: boolean }
-  /** The marker numbers one attach saw, in its snapshot and then in its stream. */
+  /** The marker numbers one attach saw, in its snapshot and then in its stream, as runs. */
   | {
       readonly kind: "attach";
       readonly t: number;
       readonly name: string;
-      readonly snapshot: readonly number[];
-      readonly stream: readonly number[];
+      readonly snapshot: readonly MarkerRun[];
+      readonly stream: readonly MarkerRun[];
     }
   /** A seam tried on a terminal whose output never paused long enough to compare. */
   | { readonly kind: "unpaused"; readonly t: number; readonly name: string }
@@ -429,15 +446,19 @@ function terminalStates({ samples, opens, closes, options }: Run) {
   return result("terminal-states", [...faults], `${opens.length} terminals, none lost or broken`);
 }
 
-/** Where `numbers` skips or repeats: each pair that isn't n, n + 1. */
-function breaks(numbers: readonly number[]): string[] {
+/** Where the numbers `runs` hold skip or repeat: each two in a row that aren't n, n + 1. */
+function breaks(runs: readonly MarkerRun[]): string[] {
   const found: string[] = [];
-  for (let i = 1; i < numbers.length; i++) {
-    const [a = 0, b = 0] = [numbers[i - 1], numbers[i]];
+  for (let i = 1; i < runs.length; i++) {
+    const [a = 0, b = 0] = [runs[i - 1]?.[1], runs[i]?.[0]];
     if (b !== a + 1) found.push(b <= a ? `${b} after ${a}` : `${a + 1}..${b - 1} missing`);
   }
   return found;
 }
+
+const newest = (runs: readonly MarkerRun[]) => largest(runs.map(([, last]) => last));
+const howMany = (runs: readonly MarkerRun[]) =>
+  runs.reduce((sum, [first, last]) => sum + last - first + 1, 0);
 
 /**
  * Every attach whole and in order, and holding every marker its worker had written a moment
@@ -448,15 +469,15 @@ function breaks(numbers: readonly number[]): string[] {
 function outputLoss(run: Run) {
   const seen = ofKind(run.events, "attach").map((a) => ({
     ...a,
-    markers: [...a.snapshot, ...a.stream],
+    runs: [...a.snapshot, ...a.stream],
   }));
-  const faults = seen.flatMap((a) => breaks(a.markers).map((b) => `${a.name} at ${a.t}: ${b}`));
+  const faults = seen.flatMap((a) => breaks(a.runs).map((b) => `${a.name} at ${a.t}: ${b}`));
   const written = Map.groupBy(ofKind(run.events, "marker"), (m) => m.name);
   for (const a of seen) {
     const before = written.get(a.name)?.findLast((m) => m.t <= a.t - WRITE_LAG_MS);
-    const newest = largest(a.markers);
-    if (before !== undefined && newest < before.n) {
-      faults.push(`${a.name} at ${a.t} saw up to ${newest}, of ${before.n} written`);
+    const upTo = newest(a.runs);
+    if (before !== undefined && upTo < before.n) {
+      faults.push(`${a.name} at ${a.t} saw up to ${upTo}, of ${before.n} written`);
     }
   }
   if (!hasWindow(run)) {
@@ -467,7 +488,7 @@ function outputLoss(run: Run) {
   const workers = run.opens.filter((o) => o.load !== "agent");
   if (workers.length === 0) faults.push("no worker terminal was opened");
   const checkable = Map.groupBy(
-    seen.filter((a) => a.markers.length >= 2),
+    seen.filter((a) => howMany(a.runs) >= 2),
     (a) => a.name,
   );
   let watched = 0;
@@ -484,8 +505,8 @@ function outputLoss(run: Run) {
     const [first, last] = [checked[0], checked.at(-1)];
     if (first === undefined || last === undefined || first === last) {
       faults.push(`${name} was checked ${checked.length} times, not twice`);
-    } else if (largest(last.markers) <= largest(first.markers)) {
-      faults.push(`${name}'s markers stopped at ${largest(last.markers)}`);
+    } else if (newest(last.runs) <= newest(first.runs)) {
+      faults.push(`${name}'s markers stopped at ${newest(last.runs)}`);
     }
   }
   if (watched === 0) faults.push("no worker terminal was open 30 s of the window to check");
