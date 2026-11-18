@@ -984,7 +984,38 @@ describe("kills by a process started to send them", () => {
       "process.kill(pid);",
     ].join("\n");
     for (const file of ["scripts/signal-paths.test.ts", "scripts/signal-paths.ts"])
-      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 2, 4]);
+      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 2, 2, 4]);
+  });
+
+  it("finds a kill a fixture file runs, or child_process it loads, as no fixture", () => {
+    const source = [
+      'execSync("kill -9 -1");',
+      'spawnSync("sh", ["-c", "kill -9 -1"]);',
+      'x.run("pkill node");',
+      'const cp = require("child_process");',
+      'const p = await import("node:child_process");',
+      'export { exec } from "child_process";',
+      'const s = "kill -9 -1"; execSync(s);',
+      'const t = "kill -9 -1";',
+      "const u = `kill -9 ${pid}`;",
+      'const v = ["child_process"];',
+      'expect(calls("a.ts", \'execSync("kill -9 -1")\')).toEqual([]);',
+    ].join("\n");
+    for (const file of ["scripts/signal-paths.test.ts", "scripts/signal-paths.ts"])
+      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 1, 2, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("finds a start called inside a fixture's span, and lets one outside it be", () => {
+    const fixture = [
+      'execFileSync("oxlint", []);',
+      "const FIXTURE = [",
+      "  'child.kill();',",
+      '  execSync("true"),',
+      '].join("\\n");',
+    ].join("\n");
+    expect(
+      rawSignalCalls("scripts/lint-plugin.medium.test.ts", fixture).map((c) => c.line),
+    ).toEqual([4]);
   });
 
   it("allows a start's timeout, and no other option at that call", () => {

@@ -429,7 +429,10 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
     .filter((m) => code[m.index] === kept[m.index] && !imported(m.index))
     .map((m) => ({
       ...unfollowed(m.index, "child_process named outside an import"),
-      literal: true,
+      // Loaded, by `require`, `import()` or a re-export, it is no fixture's text.
+      literal: !/\b(?:(?:require|import)\s*\(|from)\s*$/.test(
+        code.slice(Math.max(0, m.index - 40), m.index),
+      ),
     }));
   return [...references, ...loads];
 }
@@ -1087,11 +1090,24 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
   ],
 };
 
-/** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
+// A call of anything named like a process start, as STARTS_PROGRAM names them, a member's
+// included.
+const STARTS_A_PROGRAM =
+  /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*(?:<[^()<>;{}]*>\s*)?(?:\?\.\s*)?\(/g;
+
+/**
+ * The literals that start a kill: a program sending one, or a shell or systemctl doing so. One
+ * passed to a start is run here, so it is no fixture's text, though its file's are.
+ */
 function kills(
   literals: { index: number; body: string; cooked?: boolean | undefined }[],
   code: string,
 ) {
+  const started = [...code.matchAll(STARTS_A_PROGRAM)].map((m) => {
+    const open = m.index + m[0].length - 1;
+    return [open, closingParen(code, open)] as const;
+  });
+  const literal = (index: number) => !started.some(([from, to]) => index > from && index < to);
   const out = literals
     .filter(
       (l) =>
@@ -1103,14 +1119,14 @@ function kills(
       index: l.index,
       line: lineAt(code, l.index),
       call: `a kill by "${l.body}"`,
-      literal: true,
+      literal: literal(l.index),
     }));
   // A program and its arguments as literals in a row: systemctl's or loginctl's kill verbs,
   // fuser -k, or a launcher handed a kill program.
   literals.forEach((l, n) => {
     const next = literals.slice(n + 1, n + 5).map((a) => a.body);
     const hit = (call: string) =>
-      out.push({ index: l.index, line: lineAt(code, l.index), call, literal: true });
+      out.push({ index: l.index, line: lineAt(code, l.index), call, literal: literal(l.index) });
     if (SYSTEMCTL.test(l.body) && next.includes("kill")) hit("systemctl kill");
     if (LOGINCTL.test(l.body) && next.some((a) => LOGINCTL_KILL.test(a))) hit("loginctl kill");
     if (FUSER.test(l.body) && next.some((a) => FUSER_KILL.test(a))) hit("fuser -k");
@@ -1262,6 +1278,7 @@ function signalsIn(
     .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
     .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
   const starts = startBindings(code, kept);
+  const allowed = allowedIn(file, kept);
   const seen = new Set<number>();
   const signals = [
     ...found(code, TS_KILL),
@@ -1276,8 +1293,24 @@ function signalsIn(
     ...startOptions(code, starts),
     ...unfollowedStarts(code, kept, starts),
     ...kills(literals, code),
+    ...fixtureStarts(code, starts, allowed),
   ].filter((m) => !seen.has(m.index) && seen.add(m.index));
-  return { signals, allowed: allowedIn(file, kept) };
+  return { signals, allowed };
+}
+
+/**
+ * Each start called in a fixture's text. A fixture runs nothing, and a start called there may run
+ * a kill the fixture's literals hold, through a variable the scan doesn't follow.
+ */
+function fixtureStarts(code: string, starts: StartBindings, allowed: ReturnType<typeof allowedIn>) {
+  const fixtures = allowed.flatMap(({ entry, spans }) => (entry.fixture === true ? spans : []));
+  return [...code.matchAll(startCalls(starts))]
+    .filter((m) => fixtures.some(([from, to]) => m.index >= from && m.index < to))
+    .map((m): Signal => ({
+      index: m.index,
+      line: lineAt(code, m.index),
+      call: `${m[1] ?? m[2] ?? "a start"} called in fixture text`,
+    }));
 }
 
 /**
