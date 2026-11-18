@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { launch, uniqueName } from "./page.ts";
+import type { Page } from "@playwright/test";
+import { expect, launch, test, uniqueName } from "./page.ts";
 
 test("gives an agent a task from the page, shows it on the agent, unassigns it, and marks it done", async ({
   page,

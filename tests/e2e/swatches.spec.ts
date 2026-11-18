@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./page.ts";
 
 test("the dev swatch page shows every colour token in both themes, resolved differently", async ({
   page,

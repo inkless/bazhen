@@ -1,6 +1,6 @@
-import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import { answerPatched } from "../support/state-route.ts";
-import { launch } from "./page.ts";
+import { expect, launch, test } from "./page.ts";
 
 test("the web client shows the daemon's live health through the dev proxy", async ({ page }) => {
   await page.goto("/");

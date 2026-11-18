@@ -1,11 +1,5 @@
-import {
-  expect,
-  test,
-  type Browser,
-  type BrowserContextOptions,
-  type Page,
-} from "@playwright/test";
-import { launch, screen, status, uniqueName, viewportTop } from "./page.ts";
+import type { Browser, BrowserContextOptions, Page } from "@playwright/test";
+import { expect, launch, screen, status, test, uniqueName, viewportTop } from "./page.ts";
 
 // The page is an app the size of the screen: the document never scrolls, and the terminal is in
 // view without scrolling anything, on a phone and an iPad either way up and on a desktop.

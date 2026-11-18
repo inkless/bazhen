@@ -1,12 +1,73 @@
+import { join } from "node:path";
 import {
+  test as playwrightTest,
   expect,
   type Browser,
   type BrowserContextOptions,
   type Locator,
   type Page,
 } from "@playwright/test";
+import { TmuxServer } from "@bazhen/host-guard";
 import { answerPatched } from "../support/state-route.ts";
 import { giveTranscript } from "../support/transcript.ts";
+import { closableAgents, closeAgents, homeOf, isRuntime, type Runtime } from "./daemons.ts";
+
+/** The options each project gives its tests: `home`, its daemon's. */
+export interface DaemonOptions {
+  readonly home: string;
+}
+
+/**
+ * Playwright's test, closing the agents each test opened once it ends, and when its worker stops,
+ * every agent still open on its daemon: those a `beforeAll` opened, and all of its project's
+ * before the next project starts.
+ */
+export const test = playwrightTest.extend<
+  { closesItsAgents: void },
+  DaemonOptions & { closesAgentsLeft: void }
+>({
+  home: ["", { scope: "worker", option: true }],
+  closesAgentsLeft: [
+    async ({ home }, use) => {
+      await use();
+      await closeAgents(home, await closableAgents(home));
+    },
+    { scope: "worker", auto: true, timeout: 120_000 },
+  ],
+  closesItsAgents: [
+    async ({ home }, use) => {
+      const before = new Set((await closableAgents(home)).map(({ id }) => id));
+      await use();
+      await closeAgents(
+        home,
+        (await closableAgents(home)).filter(({ id }) => !before.has(id)),
+      );
+    },
+    { auto: true, timeout: 30_000 },
+  ],
+});
+
+export { expect };
+
+/** The runtime the running test's daemon makes its terminals on: its project's name. */
+export function runtime(): Runtime {
+  const name = test.info().project.name;
+  if (!isRuntime(name)) throw new Error(`project ${name} names no runtime`);
+  return name;
+}
+
+/** The home of the running test's daemon. */
+export const daemonHome = () => homeOf(runtime());
+
+/**
+ * The running test's daemon's private tmux server, by its socket in the daemon's home, as teardown
+ * finds it. Refused on any other runtime, whose terminals tmux doesn't hold.
+ */
+export function daemonTmux(): TmuxServer {
+  if (runtime() !== "tmux") throw new Error(`the ${runtime()} daemon has no tmux server`);
+  const home = daemonHome();
+  return TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
+}
 
 type Hook =
   | "screen"
@@ -132,6 +193,23 @@ export function generationOf(page: Page, agentId: string): Promise<unknown> {
 }
 
 /**
+ * The attach command the page should show for the agent: tmux's, attaching its session, or a
+ * holder's, `bazhen terminals attach` with the id of the agent's terminal.
+ */
+export async function attachCommandFor(page: Page, agentId: string): Promise<RegExp | string> {
+  if (runtime() === "tmux") return / attach-session -t /;
+  const terminalId = await page.evaluate(async (id) => {
+    const state: unknown = await (await fetch("/v1/state")).json();
+    const agents: unknown = Reflect.get(Object(state), "agents");
+    const agent: unknown = Array.isArray(agents)
+      ? agents.find((a: unknown) => Reflect.get(Object(a), "id") === id)
+      : undefined;
+    return String(Reflect.get(Object(agent), "terminalId"));
+  }, agentId);
+  return `bazhen terminals attach ${terminalId}`;
+}
+
+/**
  * Gives an agent's Claude Code session a conversation to resume, as its hooks would report it.
  * Its own TUI names a transcript it hasn't written, so only once that TUI has exited.
  */
@@ -144,7 +222,7 @@ export async function givePageAgentTranscript(page: Page, agentId: string): Prom
       : undefined;
     return String(Reflect.get(Object(Reflect.get(Object(agent), "externalRef")), "id"));
   }, agentId);
-  await giveTranscript(String(process.env["BZ_E2E_HOME"]), agentId, session);
+  await giveTranscript(daemonHome(), agentId, session);
 }
 
 /**

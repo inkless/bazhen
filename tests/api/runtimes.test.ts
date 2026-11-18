@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
-import { closeHolder, Daemon, holderSockets } from "./daemon.ts";
+import { closeHolderAt, holderSockets } from "../support/holder-close.ts";
+import { Daemon } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
 let model: FakeModel;
@@ -78,7 +79,7 @@ describe("a daemon running terminals on both runtimes", () => {
   });
 
   it("calls only the agent whose holder ended lost, while the daemon runs, and leaves the rest", async () => {
-    await closeHolder(`${daemon.home}/run/holders/${holderAgent}.sock`);
+    await closeHolderAt(`${daemon.home}/run/holders/${holderAgent}.sock`);
     await expect
       .poll(async () => (await terminals(daemon))[holderAgent], { timeout: 30_000 })
       .toBe("lost on none");

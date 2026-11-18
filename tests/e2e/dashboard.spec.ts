@@ -1,13 +1,16 @@
 import { hostname } from "node:os";
 import { basename } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
+  attachCommandFor,
+  expect,
   generationOf,
   givePageAgentTranscript,
   kill,
   launch,
   patchState,
   screen,
+  test,
   uniqueName,
 } from "./page.ts";
 
@@ -95,7 +98,9 @@ test("shows the fleet under its host, and closes an agent from its workspace", a
   );
 
   await workspace(page).getByText("Attach from a terminal").click();
-  await expect(workspace(page).locator(".attach code")).toContainText(" attach-session -t ");
+  await expect(workspace(page).locator(".attach code")).toHaveText(
+    await attachCommandFor(page, agentId),
+  );
 
   await workspace(page).getByRole("button", { name: "Close agent…" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Close agent" }).click();

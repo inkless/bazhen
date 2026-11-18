@@ -1,5 +1,6 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 import {
+  expect,
   foregrounds,
   givePageAgentTranscript,
   kill,
@@ -7,6 +8,7 @@ import {
   screen,
   status,
   terminalBackground,
+  test,
 } from "./page.ts";
 
 test("launches Claude Code from the page and types into its terminal", async ({ page }) => {

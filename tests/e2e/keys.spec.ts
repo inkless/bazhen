@@ -1,16 +1,18 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  expect,
-  test,
-  type Browser,
-  type BrowserContextOptions,
-  type CDPSession,
-  type Page,
-} from "@playwright/test";
-import { TmuxServer } from "@bazhen/host-guard";
+import type { Browser, BrowserContextOptions, CDPSession, Page } from "@playwright/test";
 import { readKeyLog } from "../support/key-log.ts";
-import { gliding, onAlternateScreen, openSecondView, screen, viewportTop, status } from "./page.ts";
+import {
+  daemonTmux,
+  expect,
+  gliding,
+  onAlternateScreen,
+  openSecondView,
+  screen,
+  status,
+  test,
+  viewportTop,
+} from "./page.ts";
 
 // The page's terminal against the real daemon and tmux. Each test launches an agent from the page,
 // then runs a key probe in its terminal in place of the agent: the probe logs exactly the bytes
@@ -19,11 +21,7 @@ import { gliding, onAlternateScreen, openSecondView, screen, viewportTop, status
 const probe = fileURLToPath(new URL("../support/key-probe.ts", import.meta.url));
 const work = String(process.env["BZ_E2E_WORK"]);
 
-/** The daemon's private tmux server, by its socket in the run's own home, as teardown finds it. */
-function tmux(...args: string[]): Promise<string> {
-  const home = String(process.env["BZ_E2E_HOME"]);
-  return TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).run(args);
-}
+const tmux = (...args: string[]) => daemonTmux().run(args);
 
 /** The id of the agent launched last, from the daemon's state. */
 function newestAgentId(state: unknown): string {
