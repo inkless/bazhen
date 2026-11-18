@@ -29,7 +29,21 @@ async function opened(
 const FLOOD = ["sh", "-c", "while :; do seq -f '%0990g' 1 100000; done"];
 const BIG = { cols: 1000, rows: 500 };
 
+const screens = (view: View) =>
+  view.frames.flatMap((f) => (f.type === "screen" ? [f.alternate] : []));
+
 describe("a view's stream of a tmux terminal over time", () => {
+  it("tells a view when the program enters and leaves its alternate screen", async () => {
+    const { terminalId } = await daemon.program([
+      "sh",
+      "-c",
+      "sleep 1; printf '\\033[?1049hfull screen'; sleep 1; printf '\\033[?1049lback'; sleep 600",
+    ]);
+    const view = await opened(terminalId, "observe");
+    await expect.poll(() => screens(view), { timeout: 5000 }).toEqual([false, true, false]);
+    view.close();
+  });
+
   it("ends a view whose socket stops reading, and keeps serving the others", async () => {
     const { terminalId } = await daemon.program(FLOOD);
     const stalled = await opened(terminalId, "observe", BIG);

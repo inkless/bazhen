@@ -68,9 +68,6 @@ async function evicted(events: EventClient, stalled: View, live: View): Promise<
   }
 }
 
-const screens = (view: View) =>
-  view.frames.flatMap((f) => (f.type === "screen" ? [f.alternate] : []));
-
 /**
  * What `count` reads once it has read the same for 3 s: longer than the daemon keeps the client of
  * a terminal no view shows (`lingerMs`, 2 s), so none is parked, and any closing has closed.
@@ -85,14 +82,22 @@ async function steady(count: () => number): Promise<number> {
 }
 
 describe("a view's stream over time", () => {
-  it("tells a view when the program enters and leaves its alternate screen", async () => {
+  it("carries the program's switches of screen in a view's bytes, with no screen frame", async () => {
     const { terminalId } = await daemon.program([
       "sh",
       "-c",
       "sleep 1; printf '\\033[?1049hfull screen'; sleep 1; printf '\\033[?1049lback'; sleep 600",
     ]);
     const view = await opened(terminalId, "observe");
-    await expect.poll(() => screens(view), { timeout: 5000 }).toEqual([false, true, false]);
+    await expect.poll(() => view.output(), { timeout: 5000 }).toContain("back");
+    const output = view.output();
+    const entered = output.indexOf("\x1b[?1049hfull screen");
+    const left = output.indexOf("\x1b[?1049lback");
+    expect([entered >= 0, left > entered, view.frames.filter((f) => f.type === "screen")]).toEqual([
+      true,
+      true,
+      [],
+    ]);
     view.close();
   });
 
