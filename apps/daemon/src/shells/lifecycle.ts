@@ -177,7 +177,9 @@ export class ShellLifecycle implements PromptListener {
 
   /** Closes shells whose process the environment reports ended; returns the stop function. */
   watch(): () => void {
-    return this.deps.environment.onExit((ref) => void this.exited(ref));
+    return this.deps.environment.onProcess((ref, exit) => {
+      if (exit !== null) void this.exited(ref);
+    });
   }
 
   /**

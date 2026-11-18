@@ -2,7 +2,7 @@ import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   assertSameGeneration,
-  ExitWatch,
+  ProcessWatch,
   ScreenUnreadable,
   TerminalPredates,
   type ScreenText,
@@ -13,7 +13,6 @@ import {
   TerminalUnconfirmed,
   TerminalUnservable,
   type Compatibility,
-  type DeadTerminal,
   type Foreground,
   type ProcessSpec,
   type RuntimeAdapter,
@@ -187,7 +186,7 @@ export class HolderRuntime implements RuntimeAdapter {
   readonly kind = "holder";
   private readonly opts: HolderRuntimeOptions;
   private env: Readonly<Record<string, string>>;
-  private readonly exits: ExitWatch;
+  private readonly processes: ProcessWatch;
   private readonly titles: TitleWatch;
   private readonly controls = new Map<string, Control>();
   /** For each terminal, what settles once its last control connection has closed. */
@@ -198,8 +197,8 @@ export class HolderRuntime implements RuntimeAdapter {
   constructor(opts: HolderRuntimeOptions) {
     this.opts = opts;
     this.env = opts.env;
-    this.exits = new ExitWatch({
-      read: () => this.deadTerminals(),
+    this.processes = new ProcessWatch({
+      read: async () => (await this.listed()).entries,
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       onError: this.report,
     });
@@ -832,8 +831,8 @@ export class HolderRuntime implements RuntimeAdapter {
     });
   }
 
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    return this.exits.subscribe(cb);
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void {
+    return this.processes.subscribe(cb);
   }
 
   /**
@@ -847,12 +846,6 @@ export class HolderRuntime implements RuntimeAdapter {
 
   attachCommand(ref: RuntimeRef): string {
     return shellCommand(["bazhen", "terminals", "attach", ref.terminalId]);
-  }
-
-  private async deadTerminals(): Promise<DeadTerminal[]> {
-    return (await this.listed()).entries.flatMap((e) =>
-      e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
-    );
   }
 }
 

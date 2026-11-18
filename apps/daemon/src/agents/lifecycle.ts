@@ -162,7 +162,9 @@ export class Lifecycle {
 
   /** Records agents' exits as the environment reports them; returns the stop function. */
   watch(): () => void {
-    return this.environment.onExit((ref, status) => this.exited(ref, status));
+    return this.environment.onProcess((ref, exit) => {
+      if (exit !== null) this.exited(ref, exit);
+    });
   }
 
   /**

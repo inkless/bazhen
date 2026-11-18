@@ -165,7 +165,7 @@ export function fakeEnvironment(
     unlinkShell: async () => {},
     pasteShell: async () => {},
     shellForegrounds: async () => [],
-    onExit: () => () => {},
+    onProcess: () => () => {},
   };
 }
 

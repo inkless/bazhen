@@ -36,14 +36,14 @@ import {
 } from "@bazhen/host-guard";
 import {
   assertSameGeneration,
-  ExitWatch,
+  ProcessWatch,
   isId,
   ProcessState,
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
   UnsupportedRuntime,
-  type DeadTerminal,
+  type ObservedProcess,
   type ScreenText,
 } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
@@ -284,7 +284,7 @@ export class TmuxRuntime implements RuntimeAdapter {
   private readonly opts: TmuxRuntimeOptions;
   /** `opts.env` until `replaceEnv` changes it. */
   private env: Readonly<Record<string, string>>;
-  private readonly exits: ExitWatch;
+  private readonly processes: ProcessWatch;
   private readonly unknownCause = new UnknownCause(UNKNOWN_EXIT_AFTER_MS);
   /** Until `applyServerSettings` reaches a running server; `health` applies them meanwhile. */
   private settingsPending = true;
@@ -294,8 +294,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
     this.env = opts.env;
-    this.exits = new ExitWatch({
-      read: () => this.deadTerminals(),
+    this.processes = new ProcessWatch({
+      read: () => this.observed(),
       intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
       ...(opts.inUse && { active: opts.inUse }),
       onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
@@ -828,8 +828,8 @@ export class TmuxRuntime implements RuntimeAdapter {
     signalPane(group, signal);
   }
 
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    return this.exits.subscribe(cb);
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void {
+    return this.processes.subscribe(cb);
   }
 
   /** By session id, which no other session can take while this one lives, unlike its name. */
@@ -840,13 +840,11 @@ export class TmuxRuntime implements RuntimeAdapter {
     return shellCommand(["env", "-u", "TMUX", ...argv]);
   }
 
-  private async deadTerminals(): Promise<DeadTerminal[]> {
+  private async observed(): Promise<readonly ObservedProcess[]> {
     try {
-      return (await this.inventory()).flatMap((e) =>
-        e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
-      );
+      return await this.inventory();
     } catch (err) {
-      // An unreadable server is no evidence that anything exited (foundation-design §7.1).
+      // An unreadable server is no evidence of what its terminals run (foundation-design §7.1).
       if (err instanceof TmuxError) return [];
       throw err;
     }

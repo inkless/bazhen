@@ -440,11 +440,13 @@ export interface RuntimeAdapter {
   /** Signals the terminal's process and its process group. */
   signal(ref: RuntimeRef, signal: Signal): Promise<void>;
   /**
-   * Reports every dead terminal on every check, so the caller drops repeats and stale
-   * incarnations by the generation in the ref. A cause first reported unknown may be named by a
-   * later report, never the other way. Returns the unsubscribe function.
+   * Reports every terminal's current process on every check, at the generation it runs: with how
+   * it ended once it has, null while it runs. A check that can't read a server reports nothing of
+   * it. The caller drops repeats and stale incarnations by the generation in the ref. A cause
+   * first reported unknown may be named by a later report, never the other way. Returns the
+   * unsubscribe function.
    */
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void;
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void;
   /**
    * A shell command a human can paste to attach their own terminal emulator to the terminal, for
    * when no Bazhen client works. Only formatted, never run by the daemon.

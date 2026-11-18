@@ -105,7 +105,7 @@ interface Client {
   end(why?: StreamEnd): void;
 }
 
-type ExitListener = (ref: RuntimeRef, status: ExitStatus) => void;
+type ProcessListener = (ref: RuntimeRef, exit: ExitStatus | null) => void;
 
 export interface FakeRuntimeOptions {
   /** Which `Attached` it returns: tmux's, by default, or a holder's. */
@@ -156,7 +156,7 @@ export interface Pasted {
 export class FakeRuntime implements RuntimeAdapter {
   readonly kind: string;
   private readonly terminals = new Map<TerminalId, Terminal>();
-  private readonly listeners = new Set<ExitListener>();
+  private readonly listeners = new Set<ProcessListener>();
   private reachable = true;
   /** The server's start time, as TmuxRuntime records it; empty while no server runs. */
   private serverStart = "";
@@ -382,13 +382,15 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t.spec.tags.kind === "shell") t.spec = { ...t.spec, tags: { kind: "shell" } };
   }
 
-  /** Reports every terminal already dead on the next turn, as a poll would, then each exit. */
-  onExit(cb: ExitListener): () => void {
+  /**
+   * Reports every terminal's process on the next turn, as a poll would, then each exit and each
+   * process started outside Bazhen.
+   */
+  onProcess(cb: ProcessListener): () => void {
     this.listeners.add(cb);
     void Promise.resolve().then(() => {
       if (!this.listeners.has(cb) || !this.reachable) return;
-      for (const t of this.terminals.values())
-        if (t.pane.exit !== null) cb(this.refOf(t), t.pane.exit);
+      for (const t of this.terminals.values()) cb(this.refOf(t), t.pane.exit);
     });
     return () => void this.listeners.delete(cb);
   }
@@ -475,6 +477,23 @@ export class FakeRuntime implements RuntimeAdapter {
   replaceProcess(ref: RuntimeRef): void {
     const t = this.terminalOf(ref);
     t.pane = { ...this.pane(t.spec), generation: t.pane.generation };
+  }
+
+  /**
+   * A client of the terminal's own server ends its process and starts another at the next
+   * generation, as anything reaching a holder's socket can; reported running, as the next poll
+   * would see it.
+   */
+  respawnOutside(ref: RuntimeRef): RuntimeRef {
+    const t = this.terminalOf(ref);
+    t.pane = { ...this.pane(t.spec), generation: t.pane.generation + 1, exit: null };
+    t.title = "";
+    if (this.attachKind === "snapshot") {
+      for (const client of t.streams) client.respawned(t.pane.generation);
+    }
+    const now = this.refOf(t);
+    if (this.reachable) for (const cb of this.listeners) cb(now, null);
+    return now;
   }
 
   /** The terminal ends outside Bazhen, as a killed session would; every client closes. */

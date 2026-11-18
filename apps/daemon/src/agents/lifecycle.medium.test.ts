@@ -92,7 +92,7 @@ async function running({
   const signalled: Signal[] = [];
   let failure: Error | undefined;
   const statesAtClose: (string | undefined)[] = [];
-  let report: ((ref: RuntimeRef, status: ExitStatus) => void) | undefined;
+  let report: ((ref: RuntimeRef, exit: ExitStatus | null) => void) | undefined;
   const { store, agentId, terminalId, environment } = await withAgent(
     (s) => {
       const environmentId = localEnvironmentId(s);
@@ -131,7 +131,7 @@ async function running({
           if (failure !== undefined) throw failure;
           closed.push(refs);
         },
-        onExit: (cb) => {
+        onProcess: (cb) => {
           report = cb;
           return () => (report = undefined);
         },

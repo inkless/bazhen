@@ -352,7 +352,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
     const fake = await fakeTerminal(root, newId("term"), { exit: { type: "exited", code: 0 } });
     chmodSync(fake.server.path, 0o000);
     const seen: string[] = [];
-    const stop = runtime.onExit((ref) => seen.push(ref.terminalId));
+    const stop = runtime.onProcess((ref) => seen.push(ref.terminalId));
     await new Promise((wait) => setTimeout(wait, 100));
     stop();
     expect([(await runtime.health()).state, seen]).toEqual(["unreachable", []]);
@@ -365,7 +365,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
     await fakeTerminal(root, ended, { exit: { type: "exited", code: 0 } });
     chmodSync((await fakeTerminal(root, newId("term"))).server.path, 0o000);
     const seen: string[] = [];
-    const stop = runtime.onExit((ref) => seen.push(ref.terminalId));
+    const stop = runtime.onProcess((ref) => seen.push(ref.terminalId));
     await expect.poll(() => seen.length).toBeGreaterThan(1);
     stop();
     await expect(runtime.inventory()).rejects.toThrow("can't be read");
@@ -382,10 +382,27 @@ describe("HolderRuntime: creating and finding terminals", () => {
       exit: { type: "signalled", signal: "SIGTERM" },
     });
     const seen: unknown[] = [];
-    const stop = runtime.onExit((ref, status) => seen.push([ref.locator.generation, status]));
+    const stop = runtime.onProcess((ref, exit) => seen.push([ref.locator.generation, exit]));
     await expect.poll(() => seen.length).toBeGreaterThanOrEqual(2);
     stop();
     expect(seen[0]).toEqual(["3", { type: "signalled", signal: "SIGTERM" }]);
+  });
+
+  it("reports a running terminal on every check, at the generation its holder runs", async () => {
+    const root = privateRoot();
+    const { runtime } = runtimeAt(root, { exitPollMs: 20 });
+    const terminalId = newId("term");
+    await fakeTerminal(root, terminalId, { generation: 4, exit: null });
+    const seen: unknown[] = [];
+    const stop = runtime.onProcess((ref, exit) =>
+      seen.push([ref.terminalId, ref.locator.generation, exit]),
+    );
+    await expect.poll(() => seen.length).toBeGreaterThanOrEqual(2);
+    stop();
+    expect(seen.slice(0, 2)).toEqual([
+      [terminalId, "4", null],
+      [terminalId, "4", null],
+    ]);
   });
 });
 
