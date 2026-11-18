@@ -965,6 +965,9 @@ const floodEchoesFrom = (t: number, ms: number, count: number) =>
 const HOUR_TWO = MEASURE + HOUR;
 /** What a run recorded in its warm-up, before it recorded its window. */
 const inWarmUp = (e: SoakEvent) => e.t < MEASURE && e.kind !== "window";
+const notWindowEnd = (e: SoakEvent) => e.kind !== "window" || e.phase === "measure";
+const inFirstHalfHourUnwindowed = (e: SoakEvent) =>
+  e.kind !== "window" && e.t <= MEASURE + 30 * MIN;
 const notEchoInHourOne = (e: SoakEvent) => e.kind !== "echo" || e.t < MEASURE || e.t >= HOUR_TWO;
 
 describe("judge, with one daemon life", () => {
@@ -1024,7 +1027,8 @@ describe("judge, with one daemon life", () => {
     const events = [...oneLifeRun(), died(HOUR)];
     expect(notPassing(events, ONE_LIFE)).toEqual(["daemon-memory: fail"]);
     expect(criterion(events, "daemon-memory")?.detail).toBe(
-      "the daemon went down at 1970-01-01T01:00:00.000Z: it was killed by SIGKILL",
+      "the daemon went down at 1970-01-01T01:00:00.000Z: it was killed by SIGKILL; " +
+        "one life, 0.00 MiB/h; RSS 100.0 MiB at the window's start, 100.0 at its end, 100.0 at most",
     );
   });
 
@@ -1047,7 +1051,7 @@ describe("judge, with one daemon life", () => {
     );
     expect(criterion(events, "daemon-memory")).toMatchObject({
       status: "fail",
-      detail: "the daemon ran as 2 processes: 1000, 2000",
+      detail: expect.stringMatching(/^the daemon ran as 2 processes: 1000, 2000; one life, /),
     });
   });
 
@@ -1059,7 +1063,29 @@ describe("judge, with one daemon life", () => {
     expect(criterion(events, "daemon-memory")).toMatchObject({
       status: "fail",
       detail:
-        "the daemon went unread in 1 of the window's 121 samples, first at 1970-01-01T01:00:00.000Z",
+        "the daemon went unread in 1 of the window's 121 samples, first at 1970-01-01T01:00:00.000Z; " +
+        "one life, 0.00 MiB/h; RSS 100.0 MiB at the window's start, 100.0 at its end, 100.0 at most",
+    });
+  });
+
+  it("judges the echo of a run cut short with no window end, as an unbounded window can't be split into hours", () => {
+    const cutShort = oneLifeRun().filter(notWindowEnd);
+    expect(criterion(cutShort, "echo")).toMatchObject({
+      status: "pass",
+      detail: expect.not.stringContaining("hour"),
+    });
+  });
+
+  it("judges no hour of a window shorter than one, and says nothing of one", () => {
+    const halfHour = oneLifeRun()
+      .filter(inFirstHalfHourUnwindowed)
+      .concat(
+        { kind: "window", t: MEASURE, phase: "measure" },
+        { kind: "window", t: MEASURE + 30 * MIN, phase: "end" },
+      );
+    expect(criterion(halfHour, "echo")).toMatchObject({
+      status: "pass",
+      detail: expect.not.stringContaining("hour"),
     });
   });
 

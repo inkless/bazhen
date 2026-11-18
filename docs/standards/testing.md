@@ -297,7 +297,8 @@ long-life`) is the gate's without them: one daemon for the whole run. Its daemon
 fits that daemon's RSS over the window against the same bar, and fails if the daemon went down,
 went unread or changed pid. Its echo criterion also holds each measured hour to the bar, since a
 heap that ages slows its later hours first. A daemon that dies ends the run there, with the death
-recorded. Probes no longer have to be taken while the daemon is down, since it never is.
+recorded; the churn steps it failed and the short window fail churn and duration beside it.
+Probes aren't required while the daemon is down, since it never is.
 
 It runs three ways:
 
@@ -322,8 +323,9 @@ It runs three ways:
 On a Linux x86_64 host with KVM, `pnpm soak:vm` (`scripts/soak-vm.sh`) runs the steps below in a
 libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); `create [--commit
 <sha>]` makes an Ubuntu 24.04 VM and provisions it at the commit, `main` by default; `start
-[--profile gate|long-life] [--hours 24]` marks the VM disposable and starts the run; `status` shows it; `collect` copies the
-run's directory and log to `~/bazhen-soak-results`; `destroy` deletes the VM after asking.
+[--profile gate|long-life] [--hours 24]` marks the VM disposable and starts the run; `status`
+shows it; `collect` copies the run's directory and log to `~/bazhen-soak-results`; `destroy`
+deletes the VM after asking.
 Everything that marks the VM or starts the soak runs over ssh only after the far end proves it is
 the VM `create` made: its hostname, a machine-id that isn't the host's, and an instance token
 `create` gave it. It refuses a VM it didn't create or one a soak has already run on. Every VM it

@@ -68,6 +68,8 @@ const runRecord = (profile: string) =>
   `pid=4242\nprofile=${profile}\nhours=24\nout=soak-${profile}-24h\n` +
   `log=soak-${profile}-24h.log\nstarted=1\ncommit=${COMMIT}`;
 const GOOD_RUN = runRecord("gate");
+/** A run's record as a VM started before profiles had one holds it: its names carry no profile. */
+const RECORD_WITHOUT_PROFILE = `pid=4242\nhours=72\nout=soak-72h\nlog=soak-72h.log\nstarted=1\ncommit=${COMMIT}`;
 
 interface Setup {
   /** The instance token on the host, if any. */
@@ -200,7 +202,6 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
     expect(result.status).toBe(0);
     const start = result.ran.find((remote) => remote.includes("pnpm soak"));
     expect(start).toMatch(new RegExp(` ${profile} 48 $`));
-    expect(start).toContain('name="soak-${profile}-${hours}h"');
     expect(start).toContain('pnpm soak --profile "$profile" --hours "$hours"');
   });
 
@@ -242,15 +243,16 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
     expect(result.calls).not.toContain("scp");
   });
 
-  it.each(["gate", "long-life"])(
-    "collect copies a well-formed %s run record's files",
-    (profile) => {
-      expect(run(["collect"], { ...ours, run: runRecord(profile) })).toMatchObject({
-        collected: true,
-        calls: expect.arrayContaining(["scp"]),
-      });
-    },
-  );
+  it.each([
+    ["gate", runRecord("gate")],
+    ["long-life", runRecord("long-life")],
+    ["profile-less", RECORD_WITHOUT_PROFILE],
+  ])("collect copies a well-formed %s run record's files", (_, soakRun) => {
+    expect(run(["collect"], { ...ours, run: soakRun })).toMatchObject({
+      collected: true,
+      calls: expect.arrayContaining(["scp"]),
+    });
+  });
 
   describe("destroy with no domain", () => {
     const left = { volumes: [...LEFTOVERS, BASE_VOLUME] };

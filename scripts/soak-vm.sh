@@ -617,7 +617,8 @@ pid=$(get pid); hours=$(get hours); out=$(get out); logf=$(get log); started=$(g
 now=$(date +%s)
 end=$(awk -v s="$started" -v h="$hours" "BEGIN { printf \"%d\", s + (h + 1) * 3600 }")
 echo "Commit:   $(get commit)"
-echo "Profile:  $(get profile)"
+profile=$(get profile)
+echo "Profile:  ${profile:-gate}"
 echo "Started:  $(date -d "@$started")   ($(( (now - started) / 60 )) min ago)"
 echo "Expected: $(date -d "@$end")   (warm-up hour + $hours h; keep the host awake until then)"
 if [[ -d "/proc/$pid" ]]; then echo "Soak:     ALIVE (pid $pid)"; else echo "Soak:     not running"; fi
@@ -643,7 +644,7 @@ cmd_collect() {
   logf=$(sed -n 's/^log=//p' <<<"$run")
   pid=$(sed -n 's/^pid=//p' <<<"$run")
   commit=$(sed -n 's/^commit=//p' <<<"$run")
-  [[ $out =~ ^soak-(gate|long-life)-[0-9.]+h$ && $logf == "$out.log" ]] ||
+  [[ $out =~ ^soak-((gate|long-life)-)?[0-9.]+h$ && $logf == "$out.log" ]] ||
     die "unexpected run names '$out', '$logf'"
   [[ $pid =~ ^[0-9]+$ && $commit =~ ^[0-9a-f]{40}$ ]] || die "unexpected soak record: $run"
   if vm_ssh test -d "/proc/$pid"; then

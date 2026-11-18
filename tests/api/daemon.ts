@@ -101,6 +101,12 @@ export function overSocket(
 /** This checkout's CLI, which `pnpm test:api` builds. */
 const CLI = join(repo, "target/release/bazhen");
 
+/** How a process exited: its code, or the signal that ended it. */
+export interface ExitStatus {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
 /** Runs `bazhen <args>` with `env`, and resolves with how it exited and what it printed. */
 export function bazhen(
   args: readonly string[],
@@ -119,7 +125,7 @@ export function followEvents(daemon: Daemon) {
   let printed = "";
   child.stdout.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
   child.stderr.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
-  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+  const exited = new Promise<ExitStatus>((resolve) =>
     child.once("exit", (code, signal) => resolve({ code, signal })),
   );
   return { child, printed: () => printed, exited };
@@ -273,7 +279,7 @@ export class Daemon {
   readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
-  #exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
+  #exited: Promise<ExitStatus> | undefined;
   private output = "";
 
   private constructor(home: string, opts: DaemonOptions) {
@@ -544,7 +550,7 @@ export class Daemon {
   }
 
   /** How the daemon process this helper last started exits, once it has. */
-  get exited(): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  get exited(): Promise<ExitStatus> {
     if (this.#exited === undefined) throw new Error("no daemon was started");
     return this.#exited;
   }

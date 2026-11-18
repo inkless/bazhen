@@ -249,6 +249,13 @@ export function parseSoakArgs(args: readonly string[], now = new Date()): SoakAr
 }
 
 /**
+ * When a window that opened at `from` ends, recorded at `now`: never short of what was asked,
+ * unless the daemon died, which ends it there.
+ */
+export const windowEnd = (from: number, measureMs: number, now: number, died: boolean) =>
+  died ? now : Math.max(now, from + measureMs);
+
+/**
  * Whether `value` is a record of a run's: a kind and a time. The driver and the workers wrote
  * them, so the rest is theirs to vouch for.
  */
@@ -610,6 +617,8 @@ class Soak {
   private echo:
     | { process: ChildProcessWithoutNullStreams; lines: AsyncIterator<string> }
     | undefined;
+  /** Set as the run stops its daemon, whose exit from then on is no death. */
+  private stoppingDaemon = false;
   /** Settles true once a daemon nothing restarts has died. */
   private readonly died = Promise.withResolvers<boolean>();
 
@@ -692,7 +701,7 @@ class Soak {
    */
   private endOnDeath(daemon: Daemon): void {
     void daemon.exited.then(({ code, signal }) => {
-      if (this.stopping) return;
+      if (this.stoppingDaemon) return;
       this.daemonUp = false;
       const why = signal === null ? `it exited with ${String(code)}` : `it was killed by ${signal}`;
       this.record({ kind: "daemon", t: Date.now(), up: false, why });
@@ -947,10 +956,12 @@ class Soak {
     if (await unlessDied(sleepUntil(started + p.warmupMs))) return;
     const from = Date.now();
     this.record({ kind: "window", t: from, phase: "measure" });
-    // Timers never fire early, so the window is never short of what was asked.
     const died = await unlessDied(sleep(p.measureMs));
-    const end = died ? Date.now() : Math.max(Date.now(), from + p.measureMs);
-    this.record({ kind: "window", t: end, phase: "end" });
+    this.record({
+      kind: "window",
+      t: windowEnd(from, p.measureMs, Date.now(), died),
+      phase: "end",
+    });
   }
 
   /**
@@ -1351,6 +1362,7 @@ class Soak {
     }
     for (const name of this.terminals.keys()) this.record({ kind: "close", t: Date.now(), name });
     this.keepHolderLogs();
+    this.stoppingDaemon = true;
     await this.daemon?.stop().catch((e: unknown) => this.log(`stopping the daemon: ${String(e)}`));
     await this.model?.close();
   }

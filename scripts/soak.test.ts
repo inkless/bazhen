@@ -9,6 +9,7 @@ import {
   parseSoakArgs,
   profile,
   type Profile,
+  windowEnd,
   ptyMasters,
   outliving,
   screenOf,
@@ -40,16 +41,24 @@ describe("profile", () => {
   });
 
   it("runs the long life as the gate does, but never restarts the daemon and judges its one life", () => {
-    const gate = profile("gate", 72);
     const long = profile("long-life", 72);
-    const { restart: _, ...churn } = gate.judge.churnEveryMs;
-    expect(long).toEqual({
-      ...gate,
+    expect(long).toMatchObject({
       name: "long-life",
+      hours: 72,
+      warmupMs: HOUR,
+      measureMs: 72 * HOUR,
       restart: null,
-      judge: { ...gate.judge, daemon: { lives: "one" }, churnEveryMs: churn },
+      agentCycleEveryMs: 300_000,
+      idleChurnEveryMs: 60_000,
+      sampleEveryMs: 30_000,
+      load: { replay: 15, flood: 5, idle: 3, echo: 1 },
     });
-    expect(long.judge.churnEveryMs).not.toHaveProperty("restart");
+    expect(long.judge).toEqual({
+      ...GATE,
+      minMeasuredMs: 72 * HOUR,
+      daemon: { lives: "one" },
+      churnEveryMs: { agent: 300_000, idle: 60_000 },
+    });
   });
 
   it("runs the smoke's same load faster, leaving what only hours show unmeasured", () => {
@@ -95,6 +104,17 @@ describe("profile", () => {
   it("churns idle shells no faster than each can be checked twice before it closes", () => {
     const smoke = profile("smoke", 0.2);
     expect(smoke.idleChurnEveryMs * smoke.load.idle).toBeGreaterThan(30_000);
+  });
+});
+
+describe("windowEnd", () => {
+  it("ends the window no sooner than asked, however early it is recorded", () => {
+    expect(windowEnd(1_000, HOUR, 1_000 + HOUR - 1, false)).toBe(1_000 + HOUR);
+    expect(windowEnd(1_000, HOUR, 1_000 + HOUR + 7, false)).toBe(1_000 + HOUR + 7);
+  });
+
+  it("ends the window when the daemon died, short of what was asked", () => {
+    expect(windowEnd(1_000, HOUR, 1_000 + HOUR / 2, true)).toBe(1_000 + HOUR / 2);
   });
 });
 

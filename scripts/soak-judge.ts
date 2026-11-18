@@ -161,7 +161,8 @@ export interface JudgeOptions {
   readonly sampleEveryMs: number;
   /**
    * Echo's p99 during floods fails at this many milliseconds or more: over the window, and with
-   * one daemon life, in each of its hours too, since a heap that ages slows its later hours first.
+   * one daemon life, in each of its whole hours too, since a heap that ages slows its later hours
+   * first. A part hour left at the window's end is judged only within the window's p99.
    */
   readonly echoP99Ms: number;
   /** A holder's RSS slope fails at this many MiB an hour or more. */
@@ -598,10 +599,7 @@ function thin(points: readonly Point[], run: Run): string | undefined {
     : undefined;
 }
 
-/**
- * The slope of RSS `readings`, each a time and bytes, in MiB an hour: pooled, then fitted. `thin`
- * says why they can't carry one.
- */
+/** The slope of RSS `readings`, each a time and bytes, in MiB an hour; `thin` says why they can't carry one. */
 function rssSlope(readings: readonly Point[], run: Run): { perHour: number; thin?: string } {
   const poolMs = run.options.slopeWindowMs / POOLS_PER_SLOPE_WINDOW;
   const points = pooled(readings, poolMs).map(([t, rss]): Point => [t / HOUR, rss / MiB]);
@@ -764,7 +762,7 @@ const mib = (bytes: number) => (bytes / MiB).toFixed(1);
  * daemon living throughout, so its going down at any time, a sample it didn't answer in the
  * window, or a second pid there, is a fault, and the driver ends a run whose daemon died.
  */
-function daemonInOneLife(run: Run) {
+function daemonInOneLife(run: Run): Criterion {
   const { options } = run;
   const faults = ofKind(run.events, "daemon")
     .filter((d) => !d.up)
@@ -791,20 +789,23 @@ function daemonInOneLife(run: Run) {
   const pids = new Set(samples.flatMap((s) => (s.daemon === null ? [] : [s.daemon.pid])));
   if (pids.size > 1)
     faults.push(`the daemon ran as ${pids.size} processes: ${[...pids].join(", ")}`);
-  if (faults.length > 0) return result("daemon-memory", faults, "");
+  if (!slopeFits(run)) return result("daemon-memory", faults, "");
   const { perHour, thin: why } = rssSlope(readings, run);
   if (why !== undefined) {
-    return result("daemon-memory", [`too few daemon RSS readings: ${why}`], "");
+    faults.push(`too few daemon RSS readings: ${why}`);
+    return result("daemon-memory", faults, "");
+  }
+  if (atLeast(perHour, options.daemonSlope)) {
+    faults.push(`the daemon grew ${perHour.toFixed(2)} MiB/h in its one life`);
   }
   const rss = readings.map(([, bytes]) => bytes);
-  return result(
-    "daemon-memory",
-    atLeast(perHour, options.daemonSlope)
-      ? [`the daemon grew ${perHour.toFixed(2)} MiB/h in its one life`]
-      : [],
+  const measured =
     `one life, ${perHour.toFixed(2)} MiB/h; RSS ${mib(rss[0] ?? 0)} MiB at the window's start, ` +
-      `${mib(rss.at(-1) ?? 0)} at its end, ${mib(largest(rss))} at most`,
-  );
+    `${mib(rss.at(-1) ?? 0)} at its end, ${mib(largest(rss))} at most`;
+  // The baseline the run is for, reported beside whatever else failed.
+  return faults.length === 0
+    ? result("daemon-memory", [], measured)
+    : { name: "daemon-memory", status: "fail", detail: [...faults, measured].join("; ") };
 }
 
 const p99Of = (echoes: readonly Of<"echo">[]) =>
@@ -828,8 +829,8 @@ function echo(run: Run) {
     return unmeasured("echo", "no keystroke was timed during a flood");
   }
   const measured = `${flooded.length} keystrokes during floods, p99 ${p99} ms`;
-  if (run.options.daemon.lives === "many") return result("echo", faults, measured);
-  const hours = Math.floor((run.to - run.from) / HOUR);
+  const hours = hasWindow(run) ? Math.floor((run.to - run.from) / HOUR) : 0;
+  if (run.options.daemon.lives === "many" || hours === 0) return result("echo", faults, measured);
   const byHour = Map.groupBy(flooded, (e) => Math.floor((e.t - run.from) / HOUR));
   let worstHour = 0;
   for (let hour = 0; hour < hours; hour++) {
