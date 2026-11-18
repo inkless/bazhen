@@ -235,6 +235,19 @@ describe("raw signal calls in TypeScript", () => {
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2]);
   });
 
+  it("reads an alias, a division and a start's arguments after a long stretch of object keys", () => {
+    const keys = Array.from({ length: 20_000 }, (_, i) => `  k${i}: v${i},`);
+    const source = [
+      "const o = {",
+      ...keys,
+      "};",
+      "const p: NodeJS.Process = process;",
+      "p.abort();",
+      "n = a! / b; child.kill(); m = c / d;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([20_004, 20_005]);
+  });
+
   it("finds process._kill, and a re-export of process's kill", () => {
     const source = [
       "process._kill(pid, 9);",

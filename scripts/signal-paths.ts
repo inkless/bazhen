@@ -134,6 +134,9 @@ const tsName = (name: string) => String.raw`(?<![\w$])${name.replaceAll("$", "\\
 const wholeProcess = (names: readonly string[]) =>
   String.raw`(?:globalThis\s*\.\s*)?(?:${["process", ...names].map(tsName).join("|")})(?!\s*\.)`;
 
+// A variable's type, as far as a name and its unions: no further, so that each name is read once.
+const TYPE_ANNOTATION = String.raw`(?::\s*(?:typeof\s+)?[\w$.]+(?:\s*\|\s*[\w$.]+)*\s*)?`;
+
 /**
  * The names this file gives `process`, each where it is bound: a default or namespace import of
  * its module, an import of the name `default`, or a variable declared or assigned as it or as
@@ -152,7 +155,8 @@ function processAliases(code: string, kept: string): { name: string; index: numb
   for (let size = -1; size !== out.length;) {
     size = out.length;
     const bound = new RegExp(
-      String.raw`(?<![\w$.])([\w$]+)\s*(?::[^=;]*)?=\s*` + wholeProcess(out.map((a) => a.name)),
+      String.raw`(?<![\w$.])([\w$]+)\s*${TYPE_ANNOTATION}=\s*` +
+        wholeProcess(out.map((a) => a.name)),
       "g",
     );
     for (const m of code.matchAll(bound))
@@ -176,12 +180,13 @@ function processExports(code: string, names: readonly string[]) {
       "g",
     ),
   );
-  const listed = found(code, /\bexport\s*\{[^}]*\}(?!\s*from\b)/g).filter((m) =>
-    m.call
-      .replace(/^export\s*\{|\}$/g, "")
-      .split(",")
-      .some((spec) => names.includes(spec.trim().split(/\s+as\s+/)[0] ?? "")),
-  );
+  const listed = [...code.matchAll(/\bexport\s*\{([^}]*)\}(?!\s*from\b)/g)]
+    .filter((m) =>
+      (m[1] ?? "")
+        .split(",")
+        .some((spec) => names.includes(spec.trim().split(/\s+as\s+/)[0] ?? "")),
+    )
+    .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
   return [...declared, ...listed];
 }
 
@@ -249,6 +254,21 @@ function closingParen(code: string, open: number): number {
     else if (code[i] === ")" && --depth === 0) return i;
   }
   return code.length;
+}
+
+/** Each `(` in blanked code, by index, with the index of the `)` closing it or the code's end. */
+function parenPairs(code: string): Map<number, number> {
+  const pairs = new Map<number, number>();
+  const open: number[] = [];
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] === "(") open.push(i);
+    else if (code[i] === ")") {
+      const from = open.pop();
+      if (from !== undefined) pairs.set(from, i);
+    }
+  }
+  for (const from of open) pairs.set(from, code.length);
+  return pairs;
 }
 
 const OPENS = "([{";
@@ -515,16 +535,21 @@ const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
 // like one (`map.delete`). `<` is left out, as JSX's `</` closes a tag.
 const REGEX_AFTER =
   /(?:[=(,:[&|?{};+\-*%>~^]|(?<!\.\s*)\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
-const opensRegex = (out: string): boolean => {
-  const before = out.trimEnd();
-  if (before === "") return true;
+// How much of the code before a `/` is read, past its whitespace: only its end decides.
+const LOOKBEHIND = 64;
+/** Whether a `/` after `out`'s first `end` characters opens a regular expression. */
+const opensRegex = (out: string, end = out.length): boolean => {
+  let last = end;
+  while (last > 0 && /\s/.test(out.charAt(last - 1))) last--;
+  if (last === 0) return true;
+  const before = out.slice(Math.max(0, last - LOOKBEHIND), last);
   const run = /(?:!+|\++|-+)$/.exec(before)?.[0] ?? "";
   if (run === "") return REGEX_AFTER.test(before.slice(-16));
   // A `!`, `++` or `--` straight after a value is postfix, a non-null assertion or an increment,
   // which a `/` after it divides; formatted code puts no space before one. Tokens are read longest
   // first, so an odd run of `+` or `-` ends in a binary or unary one.
-  const rest = before.slice(0, -run.length);
-  const prefix = rest === "" || /\s$/.test(rest) || opensRegex(rest);
+  const rest = last - run.length;
+  const prefix = rest === 0 || /\s/.test(out.charAt(rest - 1)) || opensRegex(out, rest);
   return prefix || (!run.startsWith("!") && run.length % 2 === 1);
 };
 
@@ -605,6 +630,7 @@ export function tsCode(
     const next = source[i + 1];
     const start = i;
     const open = templates.at(-1);
+    const quoted = c === '"' || c === "'" ? quoteEnd(source, i) : -1;
     if (c === "/" && (next === "/" || next === "*")) {
       const end = next === "/" ? source.indexOf("\n", i) : source.indexOf("*/", i + 2) + 2;
       i = end < start + 2 ? source.length : end;
@@ -612,8 +638,8 @@ export function tsCode(
     } else if (c === "/" && opensRegex(out) && regexEnd(source, i) > 0) {
       i = regexEnd(source, i);
       out += "/" + text(source.slice(start + 1, i - 1)) + source[i - 1];
-    } else if ((c === '"' || c === "'") && quoteEnd(source, i) > 0) {
-      i = quoteEnd(source, i);
+    } else if (quoted > 0) {
+      i = quoted;
       const body = source.slice(start + 1, i - 1);
       literals.push({ index: start, body });
       out += c + text(body) + c;
@@ -1172,9 +1198,10 @@ function kills(
   literals: { index: number; body: string; cooked?: boolean | undefined }[],
   code: string,
 ) {
+  const closes = parenPairs(code);
   const started = [...code.matchAll(STARTS_A_PROGRAM)].map((m) => {
     const open = m.index + m[0].length - 1;
-    return [open, closingParen(code, open)] as const;
+    return [open, closes.get(open) ?? code.length] as const;
   });
   const literal = (index: number) => !started.some(([from, to]) => index > from && index < to);
   const out = literals
