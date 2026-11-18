@@ -342,8 +342,8 @@ describe("RoutedRuntime", () => {
     const a = await routed.create(spec(["sh", "-c", "exit 3"]));
     const b = await routed.create({ ...spec(["sh", "-c", "exit 4"]), runtime: "holder" });
     const heard: string[] = [];
-    const off = routed.onExit((ref, status) =>
-      heard.push(`${ref.runtime}:${JSON.stringify(status)}`),
+    const off = routed.onProcess((ref, exit) =>
+      heard.push(`${ref.runtime}:${JSON.stringify(exit)}`),
     );
     await Promise.resolve();
     off();

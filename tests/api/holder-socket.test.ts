@@ -8,7 +8,7 @@ import {
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
-/** Past the daemon's server watch tick, and several of its holder exit polls. */
+/** Past the daemon's server watch tick, and several of its holder process polls. */
 const WATCHED_MS = 6_000;
 
 let model: FakeModel;

@@ -280,9 +280,20 @@ const LIVE_NAME = "state NOT IN ('closed', 'failed')";
 /** How many observed messages a snapshot carries: the latest. */
 const OBSERVED_KEPT = 200;
 
-const AGENT_TERMINAL = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
-         t.state AS terminal_state, t.generation, t.runtime, t.locator, t.runtime_kind
+const AGENT_TERMINAL_COLUMNS = `SELECT a.id, a.state AS agent_state, t.id AS terminal_id,
+         t.state AS terminal_state, t.generation, t.runtime, t.locator, t.runtime_kind`;
+const AGENT_TERMINAL = `${AGENT_TERMINAL_COLUMNS}
   FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id`;
+
+/**
+ * The agent a terminal is the current terminal of. Read for every terminal on every process poll,
+ * so it goes through the terminal's own agent column, by primary key both ways: agent_sessions has
+ * no index on terminal_id. A terminal its agent has left behind, as a relaunch leaves one, finds
+ * none.
+ */
+export const AGENT_BY_TERMINAL = `${AGENT_TERMINAL_COLUMNS}
+  FROM terminals t JOIN agent_sessions a ON a.id = t.agent_session_id AND a.terminal_id = t.id
+  WHERE t.id = ?`;
 
 function agentTerminalFrom(row: Record<string, SQLOutputValue>): AgentTerminal | undefined {
   if (typeof row.id !== "string" || !isId("agent", row.id)) return undefined;
@@ -1405,8 +1416,10 @@ export class Store {
    * terminal's state and generation, and the runtime incarnation it is in.
    */
   agentTerminal(by: { agentId: string } | { terminalId: string }): AgentTerminal | undefined {
-    const [where, id] = "agentId" in by ? ["a.id", by.agentId] : ["t.id", by.terminalId];
-    const row = this.prepare(`${AGENT_TERMINAL} WHERE ${where} = ?`).get(id);
+    const row =
+      "agentId" in by
+        ? this.prepare(`${AGENT_TERMINAL} WHERE a.id = ?`).get(by.agentId)
+        : this.prepare(AGENT_BY_TERMINAL).get(by.terminalId);
     return row === undefined ? undefined : agentTerminalFrom(row);
   }
 

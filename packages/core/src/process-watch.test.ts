@@ -1,16 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExitStatus } from "@bazhen/protocol";
 import { newId } from "./ids.ts";
-import { ExitWatch, type DeadTerminal, type ExitWatchOptions } from "./exit-watch.ts";
+import { ProcessWatch, type ObservedProcess, type ProcessWatchOptions } from "./process-watch.ts";
 
-const deadWith = (status: ExitStatus): DeadTerminal => ({
+const observed = (exit: ExitStatus | null): ObservedProcess => ({
   ref: { terminalId: newId("term"), runtime: "fake", locator: { incarnation: "1" } },
-  status,
+  exit,
 });
-const dead = deadWith({ type: "signalled", signal: "SIGTERM" });
+const dead = observed({ type: "signalled", signal: "SIGTERM" });
+const live = observed(null);
 
-const watch = (opts: Partial<ExitWatchOptions>) =>
-  new ExitWatch({
+const watch = (opts: Partial<ProcessWatchOptions>) =>
+  new ProcessWatch({
     read: async () => [dead],
     intervalMs: 1000,
     onError: (err) => {
@@ -19,10 +20,12 @@ const watch = (opts: Partial<ExitWatchOptions>) =>
     ...opts,
   });
 
-/** Every report a watch makes over `ms`, as `<terminal>:<status type>`. */
-async function reportsOver(w: ExitWatch, ms: number): Promise<string[]> {
+/** Every report a watch makes over `ms`, as `<terminal>:<exit type, or running>`. */
+async function reportsOver(w: ProcessWatch, ms: number): Promise<string[]> {
   const seen: string[] = [];
-  const stop = w.subscribe((ref, status) => seen.push(`${ref.terminalId}:${status.type}`));
+  const stop = w.subscribe((ref, exit) =>
+    seen.push(`${ref.terminalId}:${exit?.type ?? "running"}`),
+  );
   await vi.advanceTimersByTimeAsync(ms);
   stop();
   return seen;
@@ -31,15 +34,20 @@ async function reportsOver(w: ExitWatch, ms: number): Promise<string[]> {
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
-describe("exit watch", () => {
+describe("process watch", () => {
   it("reports a dead terminal again on every tick, so a missed report is never lost", async () => {
     const seen = await reportsOver(watch({}), 2000);
     expect(seen).toEqual([`${dead.ref.terminalId}:signalled`, `${dead.ref.terminalId}:signalled`]);
   });
 
+  it("reports a live terminal on every tick too, as running", async () => {
+    const seen = await reportsOver(watch({ read: async () => [live, dead] }), 1000);
+    expect(seen).toEqual([`${live.ref.terminalId}:running`, `${dead.ref.terminalId}:signalled`]);
+  });
+
   it("reads nothing while inactive, and reports a death from then on the next active tick", async () => {
     let active = false;
-    const read = vi.fn<() => Promise<DeadTerminal[]>>(async () => [dead]);
+    const read = vi.fn<() => Promise<ObservedProcess[]>>(async () => [dead]);
     const w = watch({ read, active: () => active });
     const seen: string[] = [];
     const stop = w.subscribe((ref) => seen.push(ref.terminalId));
@@ -52,7 +60,7 @@ describe("exit watch", () => {
   });
 
   it("stops reading the runtime once the last listener leaves", async () => {
-    const read = vi.fn<() => Promise<DeadTerminal[]>>(async () => []);
+    const read = vi.fn<() => Promise<ObservedProcess[]>>(async () => []);
     const w = watch({ read });
     const stopFirst = w.subscribe(() => {});
     const stopSecond = w.subscribe(() => {});
@@ -91,7 +99,9 @@ describe("exit watch", () => {
 
   it("hands a failed read on and keeps polling", async () => {
     const errors: unknown[] = [];
-    const read = vi.fn<() => Promise<DeadTerminal[]>>(() => Promise.reject(new Error("read bug")));
+    const read = vi.fn<() => Promise<ObservedProcess[]>>(() =>
+      Promise.reject(new Error("read bug")),
+    );
     await reportsOver(watch({ read, onError: (err) => errors.push(err) }), 2000);
     expect([read.mock.calls.length, errors.length]).toEqual([2, 2]);
   });

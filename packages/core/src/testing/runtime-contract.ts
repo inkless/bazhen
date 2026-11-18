@@ -104,12 +104,24 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
 
 type SnapshotClient = Awaited<ReturnType<typeof snapshotClient>> & { readonly ref: RuntimeRef };
 
+/** Every report of `terminalId`'s process, live ones with a null exit, collected until the test ends. */
+function processesOf(runtime: RuntimeAdapter, terminalId: string) {
+  const seen: { generation: string | undefined; exit: unknown }[] = [];
+  onTestFinished(
+    runtime.onProcess((ref, exit) => {
+      if (ref.terminalId === terminalId) seen.push({ generation: ref.locator.generation, exit });
+    }),
+  );
+  return seen;
+}
+
 /** Exits reported for `terminalId`, collected until the test ends. */
 function exitsOf(runtime: RuntimeAdapter, terminalId: string) {
   const seen: { generation: string | undefined; status: unknown }[] = [];
   onTestFinished(
-    runtime.onExit((ref, status) => {
-      if (ref.terminalId === terminalId) seen.push({ generation: ref.locator.generation, status });
+    runtime.onProcess((ref, exit) => {
+      if (ref.terminalId === terminalId && exit !== null)
+        seen.push({ generation: ref.locator.generation, status: exit });
     }),
   );
   return seen;
@@ -396,6 +408,18 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
         .toBeOneOf(causes({ type: "signalled", signal: "SIGTERM" }));
     });
 
+    it("reports a running terminal's process at the generation it runs, with no exit", async () => {
+      const runtime = fresh();
+      const s = spec(exiting(1));
+      const ref = await runtime.create(s);
+      await deadOf(runtime, ref);
+      await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
+      const seen = processesOf(runtime, ref.terminalId);
+      await expect
+        .poll(() => seen.at(-1), { timeout: harness.waitMs })
+        .toEqual({ generation: "1", exit: null });
+    });
+
     it("respawns a dead terminal in place, as its next generation", async () => {
       const runtime = fresh();
       const s = spec(exiting(0));
@@ -606,7 +630,7 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await deadOf(runtime, ref);
       harness.unreadable(runtime);
       const seen: string[] = [];
-      onTestFinished(runtime.onExit((dead) => seen.push(dead.terminalId)));
+      onTestFinished(runtime.onProcess((reported) => seen.push(reported.terminalId)));
       await delay(300);
       expect(seen).toEqual([]);
     });

@@ -175,9 +175,33 @@ export class ShellLifecycle implements PromptListener {
     this.retypes.declined(terminalId);
   }
 
-  /** Closes shells whose process the environment reports ended; returns the stop function. */
+  /**
+   * Closes shells whose process the environment reports ended, and adopts a process started
+   * outside the daemon that it reports running; returns the stop function.
+   */
   watch(): () => void {
-    return this.deps.environment.onExit((ref) => void this.exited(ref));
+    return this.deps.environment.onProcess((ref, exit) => {
+      if (exit !== null) void this.exited(ref);
+      else this.running(ref);
+    });
+  }
+
+  /**
+   * Every live shell is reported on every check, so one at its recorded generation is only read
+   * here, and never waits for a turn on the queue.
+   */
+  private running(ref: RuntimeRef): void {
+    const { store, queue } = this.deps;
+    const found = store.shell(ref.terminalId);
+    if (found === undefined || !adopts(found, ref)) return;
+    void queue
+      .run(ref.terminalId, async () => {
+        const now = store.shell(ref.terminalId);
+        if (now !== undefined && adopts(now, ref)) recordAdopted(store, ref.terminalId, ref);
+      })
+      .catch((err: unknown) => {
+        this.log(`shell ${ref.terminalId}: could not adopt its new process: ${String(err)}`);
+      });
   }
 
   /**

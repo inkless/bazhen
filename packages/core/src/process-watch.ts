@@ -5,15 +5,16 @@ import type { ExitStatus } from "@bazhen/protocol";
 declare function setInterval(callback: () => void, ms: number): unknown;
 declare function clearInterval(timer: unknown): void;
 
-export interface DeadTerminal {
+/** A terminal's current process: how it ended once it has, null while it runs. */
+export interface ObservedProcess {
   readonly ref: RuntimeRef;
-  readonly status: ExitStatus;
+  readonly exit: ExitStatus | null;
 }
 
-type Listener = (ref: RuntimeRef, status: ExitStatus) => void;
+export type ProcessListener = (ref: RuntimeRef, exit: ExitStatus | null) => void;
 
-export interface ExitWatchOptions {
-  readonly read: () => Promise<readonly DeadTerminal[]>;
+export interface ProcessWatchOptions {
+  readonly read: () => Promise<readonly ObservedProcess[]>;
   readonly intervalMs: number;
   /** Whether a tick reads at all; without it, every tick does. */
   readonly active?: () => boolean;
@@ -22,20 +23,21 @@ export interface ExitWatchOptions {
 }
 
 /**
- * Polls for dead terminals while anyone listens and it is active, and reports every one on every tick, so a
- * listener that missed one, or a death the runtime only learns of by asking, is still told.
+ * Polls the terminals while anyone listens and it is active, and reports each one's process on
+ * every tick, so a listener that missed a report, or a change the runtime only learns of by asking,
+ * is still told.
  */
-export class ExitWatch {
-  private readonly opts: ExitWatchOptions;
-  private readonly listeners = new Set<Listener>();
+export class ProcessWatch {
+  private readonly opts: ProcessWatchOptions;
+  private readonly listeners = new Set<ProcessListener>();
   private timer: unknown;
   private reading = false;
 
-  constructor(opts: ExitWatchOptions) {
+  constructor(opts: ProcessWatchOptions) {
     this.opts = opts;
   }
 
-  subscribe(listener: Listener): () => void {
+  subscribe(listener: ProcessListener): () => void {
     this.listeners.add(listener);
     this.timer ??= setInterval(() => void this.tick(), this.opts.intervalMs);
     return () => {
@@ -51,8 +53,8 @@ export class ExitWatch {
     this.reading = true;
     try {
       if (this.opts.active?.() === false) return;
-      for (const { ref, status } of await this.opts.read())
-        for (const listener of this.listeners) this.call(listener, ref, status);
+      for (const { ref, exit } of await this.opts.read())
+        for (const listener of this.listeners) this.call(listener, ref, exit);
     } catch (err) {
       this.opts.onError(err);
     } finally {
@@ -60,9 +62,9 @@ export class ExitWatch {
     }
   }
 
-  private call(listener: Listener, ref: RuntimeRef, status: ExitStatus): void {
+  private call(listener: ProcessListener, ref: RuntimeRef, exit: ExitStatus | null): void {
     try {
-      listener(ref, status);
+      listener(ref, exit);
     } catch (err) {
       this.opts.onError(err);
     }

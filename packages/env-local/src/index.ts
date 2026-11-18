@@ -238,8 +238,8 @@ export class LocalEnvironment implements EnvironmentAdapter {
     return this.runtime.gone(refs.runtime);
   }
 
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    return this.runtime.onExit(cb);
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void {
+    return this.runtime.onProcess(cb);
   }
 
   /**

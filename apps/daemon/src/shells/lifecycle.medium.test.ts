@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EnvironmentAdapter, HarnessAdapter, RuntimeRef } from "@bazhen/core";
 import { FakeRuntime } from "@bazhen/core/testing";
 import { LocalEnvironment } from "@bazhen/env-local";
@@ -119,6 +119,7 @@ async function setup({ maxOpen = 100 } = {}) {
     runtime,
     home,
     agentId,
+    queue,
     shells,
     refOf,
     stateOf,
@@ -262,6 +263,41 @@ describe("closing a shell", () => {
       .slice(-3);
     expect(types).toEqual(["terminal.process_adopted", "terminal.closing", "terminal.closed"]);
     stop();
+  });
+
+  it("adopts a process started in a shell outside the daemon as soon as it is seen running", async () => {
+    const { store, shells, runtime, refOf, stateOf, open } = await setup();
+    const terminalId = await open();
+    const stop = shells.watch();
+    runtime.respawnOutside(refOf(terminalId));
+    await expect.poll(() => store.shell(terminalId)?.generation).toBe(1);
+    const last = store
+      .events(0)
+      .filter((e) => e.entityId === terminalId)
+      .at(-1)?.type;
+    expect([stateOf(terminalId), last, await carried(runtime, terminalId)]).toEqual([
+      "running",
+      "terminal.process_adopted",
+      true,
+    ]);
+    stop();
+  });
+
+  it("writes nothing, and takes no turn, for shells seen running at their own generation", async () => {
+    const { store, shells, runtime, queue, open } = await setup();
+    const opened = [await open("a"), await open("b")];
+    const append = vi.spyOn(store, "append");
+    const transaction = vi.spyOn(store, "transaction");
+    const turn = vi.spyOn(queue, "run");
+    const reported: [string, unknown][] = [];
+    const listen = runtime.onProcess((ref, exit) => reported.push([ref.terminalId, exit]));
+    const stop = shells.watch();
+    await new Promise((settled) => setTimeout(settled, 0));
+    stop();
+    listen();
+    const calls = [append, transaction, turn].map((spy) => spy.mock.calls.length);
+    const live = opened.map((terminalId) => [terminalId, null]);
+    expect([reported, calls]).toEqual([expect.arrayContaining(live), [0, 0, 0]]);
   });
 
   it("closes a shell at once when its shell exits, recorded closing before its session ends", async () => {

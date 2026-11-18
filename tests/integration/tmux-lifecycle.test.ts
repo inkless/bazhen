@@ -17,7 +17,7 @@ const runtime = new TmuxRuntime({
   server,
   pty: nodePtySpawner,
   env: filterEnv({ ...process.env, BZ_USER_VALUE: "kept" }).env,
-  exitPollMs: 50,
+  processPollMs: 50,
 });
 const spec = (argv: [string, ...string[]]): TerminalSpec => ({
   terminalId: newId("term"),

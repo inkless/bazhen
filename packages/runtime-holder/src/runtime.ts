@@ -2,7 +2,7 @@ import { readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   assertSameGeneration,
-  ExitWatch,
+  ProcessWatch,
   ScreenUnreadable,
   TerminalPredates,
   type ScreenText,
@@ -13,7 +13,6 @@ import {
   TerminalUnconfirmed,
   TerminalUnservable,
   type Compatibility,
-  type DeadTerminal,
   type Foreground,
   type ProcessSpec,
   type RuntimeAdapter,
@@ -71,7 +70,7 @@ import { Control, HolderStream } from "./runtime-stream.ts";
 import { decodeTags, encodeTags, unlinked } from "./tags.ts";
 import { TitleWatch } from "./title-watch.ts";
 
-const EXIT_POLL_MS = 1_000;
+const PROCESS_POLL_MS = 1_000;
 const TITLE_SYNC_MS = 5_000;
 /** How long a holder has to answer `hello` before it counts as one that can't be read. */
 const HELLO_MS = 2_000;
@@ -92,13 +91,13 @@ export interface HolderRuntimeOptions {
   readonly installDir?: string;
   /** The environment every new terminal starts from, already filtered (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
-  /** How often dead terminals are looked for while anyone listens. */
-  readonly exitPollMs?: number;
+  /** How often terminals' processes are read while anyone listens. */
+  readonly processPollMs?: number;
   /** How often, while titles are listened to, agents' holders are listed for any not watched. */
   readonly titleSyncMs?: number;
   /** How long a holder has to answer `hello`. */
   readonly helloMs?: number;
-  /** Where a failure no caller waits on goes: exit polling, or a holder that can't be read. */
+  /** Where a failure no caller waits on goes: process polling, or a holder that can't be read. */
   readonly onError?: (err: unknown) => void;
   /** Starts a holder: host-guard's `startHolder`, unless a test records what it starts. */
   readonly start?: (options: StartHolderOptions) => Promise<StartedHolder>;
@@ -187,7 +186,7 @@ export class HolderRuntime implements RuntimeAdapter {
   readonly kind = "holder";
   private readonly opts: HolderRuntimeOptions;
   private env: Readonly<Record<string, string>>;
-  private readonly exits: ExitWatch;
+  private readonly processes: ProcessWatch;
   private readonly titles: TitleWatch;
   private readonly controls = new Map<string, Control>();
   /** For each terminal, what settles once its last control connection has closed. */
@@ -198,9 +197,9 @@ export class HolderRuntime implements RuntimeAdapter {
   constructor(opts: HolderRuntimeOptions) {
     this.opts = opts;
     this.env = opts.env;
-    this.exits = new ExitWatch({
-      read: () => this.deadTerminals(),
-      intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+    this.processes = new ProcessWatch({
+      read: async () => (await this.listed()).entries,
+      intervalMs: opts.processPollMs ?? PROCESS_POLL_MS,
       onError: this.report,
     });
     this.titles = new TitleWatch({
@@ -472,7 +471,7 @@ export class HolderRuntime implements RuntimeAdapter {
 
   /**
    * What `inventory` reads, leaving out the sockets that couldn't be read, each reported once until
-   * it reads again: for readers that only act on what they find, as exit polling does.
+   * it reads again: for readers that only act on what they find, as process polling does.
    */
   private async listed(): Promise<{
     readonly entries: RuntimeInventoryEntry[];
@@ -832,8 +831,8 @@ export class HolderRuntime implements RuntimeAdapter {
     });
   }
 
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    return this.exits.subscribe(cb);
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void {
+    return this.processes.subscribe(cb);
   }
 
   /**
@@ -847,12 +846,6 @@ export class HolderRuntime implements RuntimeAdapter {
 
   attachCommand(ref: RuntimeRef): string {
     return shellCommand(["bazhen", "terminals", "attach", ref.terminalId]);
-  }
-
-  private async deadTerminals(): Promise<DeadTerminal[]> {
-    return (await this.listed()).entries.flatMap((e) =>
-      e.exit === null ? [] : [{ ref: e.ref, status: e.exit }],
-    );
   }
 }
 

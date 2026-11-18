@@ -233,8 +233,8 @@ export class RoutedRuntime implements RuntimeAdapter {
     return this.of(ref).signal(ref, signal);
   }
 
-  onExit(cb: (ref: RuntimeRef, status: ExitStatus) => void): () => void {
-    const unsubscribe = [...this.runtimes.values()].map((r) => r.onExit(cb));
+  onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void {
+    const unsubscribe = [...this.runtimes.values()].map((r) => r.onProcess(cb));
     return () => {
       for (const off of unsubscribe) off();
     };
