@@ -5,7 +5,7 @@ name: Holder soak
 # starts it, never on a push or a pull request. Its holders signal every process in their sessions
 # as they close, so it runs only on a runner marked disposable. A hosted job is cut off at 6 h:
 # with the gate's warm-up hour, the build and teardown, 4 measured hours is the most that fits.
-# The runs the flip to holders waits on are longer, on a host of their own (docs/standards/testing.md).
+# The 72 h run that removing tmux waits on is longer, on a host of its own (docs/standards/testing.md).
 on:
   workflow_dispatch:
     inputs:

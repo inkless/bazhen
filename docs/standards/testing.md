@@ -32,18 +32,18 @@ trailer naming each test it can't judge.
 Size is about what a test touches, and the file name declares it. The sizes follow _Software
 Engineering at Google_.
 
-| Size   | File                               | May touch                            | Runs in                                |
-| ------ | ---------------------------------- | ------------------------------------ | -------------------------------------- |
-| small  | `src/**/x.test.ts`                 | memory only, including `app.request` | `pnpm test`, in parallel, milliseconds |
-| small  | `scripts/*.test.ts`                | memory only                          | `pnpm test`                            |
-| medium | `src/**/x.medium.test.ts`          | temporary files, SQLite              | `pnpm test:medium`                     |
-| medium | `scripts/*.medium.test.ts`         | temporary files, git, subprocesses   | `pnpm test:medium`                     |
-| medium | `tests/integration/*.test.ts`      | a private tmux server, real PTYs     | `pnpm test:real integration`           |
-| medium | `tests/holder/*.test.ts`           | holders and real PTYs, no tmux       | `pnpm test:real holder`                |
-| medium | `tests/holder/containment.test.ts` | holders in real systemd scopes       | CI's containment job only              |
-| medium | `tests/cli/*.test.ts`              | the CLI as a process, a fake daemon  | `pnpm test:medium`                     |
-| large  | `tests/api/*.test.ts`              | the daemon as a process, tmux, CLIs  | `pnpm test:real api`                   |
-| large  | `tests/e2e/*.spec.ts`              | daemon, web client and browser       | `pnpm test:real e2e`                   |
+| Size   | File                               | May touch                                      | Runs in                                |
+| ------ | ---------------------------------- | ---------------------------------------------- | -------------------------------------- |
+| small  | `src/**/x.test.ts`                 | memory only, including `app.request`           | `pnpm test`, in parallel, milliseconds |
+| small  | `scripts/*.test.ts`                | memory only                                    | `pnpm test`                            |
+| medium | `src/**/x.medium.test.ts`          | temporary files, SQLite                        | `pnpm test:medium`                     |
+| medium | `scripts/*.medium.test.ts`         | temporary files, git, subprocesses             | `pnpm test:medium`                     |
+| medium | `tests/integration/*.test.ts`      | a private tmux server, real PTYs               | `pnpm test:real integration`           |
+| medium | `tests/holder/*.test.ts`           | holders and real PTYs, no tmux                 | `pnpm test:real holder`                |
+| medium | `tests/holder/containment.test.ts` | holders in real systemd scopes                 | CI's containment job only              |
+| medium | `tests/cli/*.test.ts`              | the CLI as a process, a fake daemon            | `pnpm test:medium`                     |
+| large  | `tests/api/*.test.ts`              | the daemon as a process, holders or tmux, CLIs | `pnpm test:real api`                   |
+| large  | `tests/e2e/*.spec.ts`              | daemon on tmux, web client and browser         | `pnpm test:real e2e`                   |
 
 `pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent, or
 signals a process it didn't start. The holder tests and the Rust tests that start a holder, close a
@@ -54,9 +54,12 @@ container (`pnpm test:real`, which builds it from the worktree without mounting 
 A disposable host carries a root-owned `/etc/bazhen-disposable-host`, and for real tmux is Linux;
 their setup refuses to start anywhere else. Never create that file on a machine you work on. Inside
 a container or CI they are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one
-worker each. Each run's containers have no network and get a CPU quota of half the machine
-(`BZ_TEST_CPUS` overrides it), because a suite that starts a busy process per core would otherwise
-take every core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
+worker each. An api test that reads its terminals through tmux starts its daemon with
+`runtime: "tmux"`, since the daemon makes holder terminals by default, and the helpers that read
+tmux refuse on any other daemon. The e2e suite's one daemon makes its terminals on tmux. Each
+run's containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS`
+overrides it), because a suite that starts a busy process per core would otherwise take every
+core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
 the slice's cap holds every run's containers together, and each gets a memory cap of half the
 machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its
 container. A probe container checks they land there first, which they do under rootless Podman,
@@ -262,8 +265,8 @@ known and each attach is checked whole.
 ## The holder soak
 
 The chaos suite proves each fault once, for seconds. The soak proves that hours of ordinary load
-and repeated faults leave no slow leak, no lost line and no dead terminal. It is what the flip to
-holders as the default runtime waits on.
+and repeated faults leave no slow leak, no lost line and no dead terminal. It is what removing tmux,
+the opt-in runtime, waits on.
 
 `scripts/soak.ts` runs a real daemon on holders under design §12.4's load: 25 terminals, as
 15 agent-stream replays, 5 floods, 3 idle shells, a shell that echoes, and a Claude Code agent on
@@ -294,10 +297,10 @@ It runs three ways:
   runners, marked disposable. That is at most 4 measured hours after the warm-up hour, since a
   hosted job is cut off at 6. It runs only when the owner starts it, never on a push, and an
   agent never dispatches it. The run's directory is uploaded as an artifact.
-- **The long runs**, 24 h before the flip and 72 h before tmux is removed, use
-  `pnpm soak --hours 24` (or 72) on a Linux host of their own. **That host is a VM, or a
-  machine used for nothing else, never the owner's daily machine:** the run's holders signal every
-  process in their sessions, and a wrong pid there ends work that matters.
+- **The long run**, 72 h before tmux is removed, uses `pnpm soak --hours 72` on a Linux host
+  of its own. **That host is a VM, or a machine used for nothing else, never the owner's daily
+  machine:** the run's holders signal every process in their sessions, and a wrong pid there ends
+  work that matters.
 
 ### Runbook: a long run on a VM
 

@@ -3,7 +3,8 @@
 Local-first environment for operating a fleet of 20+ concurrent development agents, with native
 coordinator, workstream-lead, and worker roles and fully interactive terminals.
 
-Early foundation: a local daemon that owns durable terminals on a private tmux server, and a web
+Early foundation: a local daemon that owns durable terminals, each held by a process of its own
+([docs/holder.md](docs/holder.md)) or, where configured, on a private tmux server, and a web
 client. Agents, tasks, and orchestration come later.
 
 ## Requirements
@@ -90,6 +91,9 @@ desktop = true # show what needs you on this machine's desktop while no dashboar
 
 [shells]
 retype_last_command = false # keep each shell's last line to type back; see docs/shell-integration.md
+
+[runtime]
+default = "holder" # or "tmux"; a terminal already open stays on the runtime it was made on
 
 [terminals]
 max_open = 100 # agents' and shells' terminals open at once
@@ -201,16 +205,17 @@ done about it now:
 
 macOS and Linux both follow XDG (`~/.config/bazhen`, `~/.local/share/bazhen`, …). The socket
 lives in `$XDG_RUNTIME_DIR/bazhen` on Linux and `$TMPDIR/bazhen` on macOS, mode 0700.
-`BAZHEN_HOME` relocates everything under one directory and gives it its own tmux server;
-`BAZHEN_BANK` relocates only the document bank. `BAZHEN_PORT` overrides the daemon's port.
-`BAZHEN_CLAUDE_PERMISSION_MODE` starts every Claude Code agent in that permission mode instead of
-the one your settings pick.
+`BAZHEN_HOME` relocates everything under one directory and gives it its own holders and tmux
+server; `BAZHEN_BANK` relocates only the document bank. `BAZHEN_PORT` overrides the daemon's
+port. `BAZHEN_CLAUDE_PERMISSION_MODE` starts every Claude Code agent in that permission mode
+instead of the one your settings pick.
 
-Bazhen only ever manages its own tmux server, by the socket `tmux.sock` in its runtime directory
-(`tmux -S`), never your default one or any server found by name. To look at it yourself:
-`tmux -S "$TMPDIR/bazhen/tmux.sock" ls` on macOS, `tmux -S "$XDG_RUNTIME_DIR/bazhen/tmux.sock" ls`
-on Linux, or `<BAZHEN_HOME>/run/tmux.sock` under a relocated home. A runtime directory whose
-socket path would be too long moves to `/tmp/bazhen-<uid>-<hash>`.
+For tmux terminals, Bazhen only ever manages its own tmux server, by the socket `tmux.sock` in
+its runtime directory (`tmux -S`), never your default one or any server found by name. To look at
+it yourself: `tmux -S "$TMPDIR/bazhen/tmux.sock" ls` on macOS,
+`tmux -S "$XDG_RUNTIME_DIR/bazhen/tmux.sock" ls` on Linux, or `<BAZHEN_HOME>/run/tmux.sock`
+under a relocated home. A runtime directory whose socket path would be too long moves to
+`/tmp/bazhen-<uid>-<hash>`.
 
 Every agent and shell Bazhen opens gets the daemon's socket as `BAZHEN_SOCKET`, and every
 `bazhen` verb run there but `start` reaches that daemon. It wins over `BAZHEN_HOME` without a
