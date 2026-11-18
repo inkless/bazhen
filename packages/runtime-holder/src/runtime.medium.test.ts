@@ -1147,6 +1147,24 @@ describe("HolderRuntime: streams", () => {
     attached.stream.close();
   });
 
+  it("tells a respawn before the next process's bytes, and nothing of a switch of screen, which they carry", async () => {
+    const { runtime, ref } = await attachable(0, (holder) =>
+      holder.send(
+        data(0, "old"),
+        { type: "alternate", body: { offset: 3, on: true } },
+        { type: "respawned", body: { generation: 1, childPid: FAKE_PID, childStart: FAKE_START } },
+        data(0, "new"),
+      ),
+    );
+    const { stream } = await runtime.attach(ref, null);
+    const seen: unknown[] = [];
+    stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
+    stream.onRespawn((generation) => seen.push(generation));
+    await expect.poll(() => seen).toEqual(["old", 1, "new"]);
+    expect("onAlternate" in stream).toBe(false);
+    stream.close();
+  });
+
   it("closes a stream that fell behind, and one whose holder hung up, saying which", async () => {
     const behind = await attachable(0, (holder) =>
       holder.send({ type: "gap", body: { from: 0, to: 9 } }),
@@ -1218,7 +1236,7 @@ describe("HolderRuntime: streams", () => {
     late.stream.close();
   });
 
-  it("takes alternate and a respawn sent before the attach's snapshot as what it shows", async () => {
+  it("takes a respawn sent before the attach's snapshot as what it shows, and says nothing of its screen", async () => {
     const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
     const { runtime, ref } = await attachable(0, (holder) => holder.send(data(0, "new")), 0, {
       beforeSnapshot: (holder) =>
@@ -1232,7 +1250,7 @@ describe("HolderRuntime: streams", () => {
     attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     attached.stream.onRespawn((generation) => seen.push(generation));
     await expect.poll(() => seen).toEqual(["new"]);
-    expect(attached.generation).toBe(1);
+    expect([attached.generation, "alternate" in attached]).toEqual([1, false]);
     attached.stream.close();
   });
 

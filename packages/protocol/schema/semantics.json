@@ -1,6 +1,6 @@
 {
-  "revision": 1,
-  "reason": "The protocol id replaces the negotiated protocol version.",
+  "revision": 2,
+  "reason": "A holder view gets no screen frame: its own bytes carry the switch, and a page that read the frame alone would route the wheel as if on the main screen.",
   "constants": {
     "HISTORY_LINES": 10000,
     "STREAM_FRAME_MAX_BYTES": 1048576,

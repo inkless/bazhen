@@ -59,6 +59,15 @@ describe("whether a view is on the alternate screen", () => {
     expect([during, onAlternateScreen(term, false)]).toEqual([true, false]);
   });
 
+  it("stays on the alternate screen until the view has parsed the bytes that leave it", async () => {
+    const term = await parsed("shell\r\n\x1b[?1049hvim");
+    const left = new Promise<void>((done) => term.write("\x1b[?1049l", done));
+    // Written, not yet parsed: the wheel must still go to the program, whose screen this is.
+    const pending = onAlternateScreen(term, false);
+    await left;
+    expect([pending, onAlternateScreen(term, false)]).toEqual([true, false]);
+  });
+
   it("takes the daemon's word where its bytes never switch", async () => {
     expect(onAlternateScreen(await parsed("tmux keeps this view on its normal screen"), true)).toBe(
       true,
