@@ -112,6 +112,27 @@
     }
   },
   {
+    "name": "example 7",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
+    }
+  },
+  {
     "name": "condition.(on=agent).until = \"starting\"",
     "wire": {
       "condition": {
@@ -661,6 +682,37 @@
         "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
       },
       "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 60000,
+      "resumed": true,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
     }
   }
 ]

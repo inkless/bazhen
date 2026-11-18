@@ -17,7 +17,7 @@ import { HolderUnservable } from "../commands.ts";
 import { AttentionClosed } from "../mailbox/approvals.ts";
 import { AgentGone } from "../mailbox/mailbox.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
-import { WaitRefused } from "../waits/waits.ts";
+import { TooManyWaits, WaitRefused } from "../waits/waits.ts";
 import { ShellBusy, UnknownShell } from "../shells/lifecycle.ts";
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
@@ -84,6 +84,8 @@ const tasks: TaskCommands = {
 const waited: [Caller, Viewer][] = [];
 /** A reply wait on this message is refused, as by an agent that didn't send it. */
 const othersMessage = newId("msg");
+/** A shell the caller already holds as many waits on as it may. */
+const crowded = newId("term");
 /** The viewer and advisory device each notice dismissal reached the handler with. */
 const seenDismissals: [Viewer, string | undefined][] = [];
 
@@ -209,6 +211,9 @@ const deps: AppDeps = {
     }
     if (condition.on === "reply" && condition.messageId === othersMessage) {
       throw new WaitRefused("only the agent that sent it may wait for its reply");
+    }
+    if (condition.on === "shell" && condition.shellId === crowded) {
+      throw new TooManyWaits("you already hold 64 waits");
     }
     return { verdict: "met", said: "worker-1 is idle" };
   },
@@ -792,18 +797,19 @@ describe("HTTP task routes", () => {
     ]);
   });
 
-  it("refuses a wait on what isn't there, by anyone but a reply's sender, or malformed", async () => {
+  it("refuses a wait on what isn't there, by anyone but a reply's sender, past the caller's most, or malformed", async () => {
     const statuses = await Promise.all(
       [
         { on: "agent", agentId: target, until: "idle" },
         { on: "reply", messageId: othersMessage },
+        { on: "shell", shellId: crowded, until: "ended" },
         { on: "agent", agentId: newId("agent"), until: "done" },
         { on: "task", taskId: newId("task"), until: "idle" },
       ].map(
         async (condition) => (await postTo(app, "/v1/waits", { condition, timeoutMs: 1 })).status,
       ),
     );
-    expect(statuses).toEqual([404, 403, 400, 400]);
+    expect(statuses).toEqual([404, 403, 429, 400, 400]);
   });
 
   it("answers a wait on mail it never queued as not found, and one held too long as invalid", async () => {

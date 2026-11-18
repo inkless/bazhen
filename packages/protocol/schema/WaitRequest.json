@@ -134,6 +134,9 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 600000
+    },
+    "resumed": {
+      "type": "boolean"
     }
   },
   "required": [

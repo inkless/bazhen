@@ -108,7 +108,7 @@ import { defaultRuntimeRefusal } from "./terminals/runtimes.ts";
 import { nodePtySpawner } from "./pty/node-pty.ts";
 import { listeningOf } from "./mailbox/listening.ts";
 import { waitForMail } from "./mailbox/wait.ts";
-import { waitFor } from "./waits/waits.ts";
+import { SharedViews, WaitLimit, waitFor } from "./waits/waits.ts";
 import { Store, UnsafeDatabase, type SnapshotView } from "./store/store.ts";
 
 const APP_VERSION = "0.1.0";
@@ -515,6 +515,8 @@ for (const a of store.snapshot(snapshotView).agents) {
 }
 const stateFor = (viewer: Viewer) =>
   store.snapshot({ ...snapshotView, noticeActions: (n) => notices.actions(n, viewer) });
+const waitViews = new SharedViews(() => store.latestEventId(), stateFor);
+const waitLimit = new WaitLimit();
 const commands = {
   appVersion: APP_VERSION,
   protocolId: PROTOCOL_ID,
@@ -545,7 +547,7 @@ const commands = {
   tasks,
   waitMessages: (req, signal) => waitForMail(store, req, signal),
   wait: (caller, req, viewer, signal) =>
-    waitFor({ store, view: () => stateFor(viewer) }, caller, req, signal),
+    waitFor({ store, view: () => waitViews.of(viewer), limit: waitLimit }, caller, req, signal),
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({
   ...commands,

@@ -19,6 +19,68 @@ import { realAfter, until, type After, type Judged } from "./until.ts";
 /** A wait the caller may not make: a reply to a message it didn't send. */
 export class WaitRefused extends Error {}
 
+/** How many waits one caller may hold at once; each holds a listener and a snapshot per commit. */
+export const WAITS_PER_CALLER = 64;
+
+/** A wait refused because its caller already holds `WAITS_PER_CALLER`. */
+export class TooManyWaits extends Error {}
+
+/** The waits each caller holds, by agent id, or the human's under the empty key. */
+export class WaitLimit {
+  readonly #held = new Map<string, number>();
+  readonly #most: number;
+
+  constructor(most = WAITS_PER_CALLER) {
+    this.#most = most;
+  }
+
+  /** Counts one more of `caller`'s waits until the returned release is called. */
+  enter(caller: Caller): () => void {
+    const key = caller ?? "";
+    const held = this.#held.get(key) ?? 0;
+    if (held >= this.#most) {
+      throw new TooManyWaits(
+        `${caller ?? "you"} already ${caller === null ? "hold" : "holds"} ${held} waits, as many as one caller may; let one end first`,
+      );
+    }
+    this.#held.set(key, held + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (this.#held.get(key) ?? 1) - 1;
+      if (left === 0) this.#held.delete(key);
+      else this.#held.set(key, left);
+    };
+  }
+}
+
+/**
+ * One `/v1/state` snapshot per viewer per commit, however many waits judge through it: a commit
+ * wakes every wait, and each would otherwise build its own.
+ */
+export class SharedViews<V> {
+  readonly #made = new Map<V, { readonly at: number; readonly view: StateSnapshot }>();
+  readonly #latest: () => number;
+  readonly #make: (viewer: V) => StateSnapshot;
+
+  /** `latest` is the latest event's id, which moves on each commit; `make` builds a snapshot. */
+  constructor(latest: () => number, make: (viewer: V) => StateSnapshot) {
+    this.#latest = latest;
+    this.#make = make;
+  }
+
+  /** What `viewer`'s `/v1/state` shows as of the latest event. */
+  of(viewer: V): StateSnapshot {
+    const at = this.#latest();
+    const kept = this.#made.get(viewer);
+    if (kept?.at === at) return kept.view;
+    const view = this.#make(viewer);
+    this.#made.set(viewer, { at, view });
+    return view;
+  }
+}
+
 export interface WaitDeps {
   readonly store: Pick<Store, "onCommit" | "replyTo" | "turnAfterMail">;
   /**
@@ -26,6 +88,8 @@ export interface WaitDeps {
    * no one more than they can already read.
    */
   readonly view: () => StateSnapshot;
+  /** The waits each caller holds; none counted when absent. */
+  readonly limit?: WaitLimit;
 }
 
 type Judge = (view: StateSnapshot, first: boolean) => Judged<WaitResponse>;
@@ -189,16 +253,21 @@ export async function waitFor(
     }
   }
   const judge = judgeOf(deps.store, condition);
-  let first = true;
-  return until(
-    deps.store,
-    () => {
-      const judged = judge(deps.view(), first);
-      first = false;
-      return judged;
-    },
-    req.timeoutMs,
-    signal,
-    after,
-  );
+  const release = deps.limit?.enter(caller);
+  let first = req.resumed !== true;
+  try {
+    return await until(
+      deps.store,
+      () => {
+        const judged = judge(deps.view(), first);
+        first = false;
+        return judged;
+      },
+      req.timeoutMs,
+      signal,
+      after,
+    );
+  } finally {
+    release?.();
+  }
 }

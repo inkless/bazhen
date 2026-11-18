@@ -273,16 +273,20 @@ A wait blocks until what it waits for happens, then exits once, so an agent can 
 background and act when it ends, rather than polling `agents list` or sleeping. The daemon judges
 the wait when it arrives and again after every change it records, so nothing that happens between
 asking and listening is missed. An agent is `idle` once its harness reports a turn ended after
-every message sent to it arrived: an agent just sent work isn't idle until it has taken it up.
-`ready` is `running`, its harness up. `--reply` prints who replied and the reply's id, not its
-text, which arrives as mail; only the agent that sent a message may wait for its reply. Each wait
-exits 0 when it happened, 1 when it can't now (the agent ended otherwise, or the task was
-cancelled), 4 when a `--reply` message bounced, 5 when `--timeout` (60 s unless given, at least
+every message sent to it arrived: an agent just sent work isn't idle until it has taken it up,
+whether as a new turn or folded into the one it is running. `ready` is `running`, its harness up.
 
-1. ran out first, and 3 when no daemon is running. While the daemon is away it tries again until
-   it is back or the timeout runs out. `--json` prints the daemon's whole answer. A caller may wait on
-   any agent, shell or task it can read in `/v1/state`, and is told nothing more than that shows.
-   `bazhen shells wait <shell> <state>|ended` waits on a shell the same way.
+`--reply` prints who replied and the reply's id, not its text, which arrives as mail. A reply is
+the first message the agent sends back after yours reached it: one it wrote before then crossed
+yours. Only the agent that sent a message may wait for its reply.
+
+Each wait exits 0 when it happened; 1 when it can't now, as when the agent ended otherwise or the
+task was cancelled; 4 when a `--reply` message bounced; 5 when `--timeout` ran out first (60 s
+unless given, and at least 1 s), counting the time to find the name and to send; and 3 when no
+daemon is running. While the daemon is away it tries again until it is back or the timeout runs
+out. `--json` prints the daemon's whole answer. A caller may wait on any agent, shell or task it
+can read in `/v1/state`, and is told nothing more than that shows, and may hold up to 64 waits at
+once. `bazhen shells wait <shell> <state>|ended` waits on a shell the same way.
 
 Roles are configuration. Bazhen ships four, coordinator, lead, worker and reviewer, each a
 Markdown file whose front matter says which roles it may hand on (`grants`), whether a task has

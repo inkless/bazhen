@@ -248,8 +248,16 @@ export class FakeDaemon {
       return;
     }
     const answer = this.#routes.get(route);
-    const reply = answer?.(received) ?? { status: 404, type: "text/plain", body: "404 Not Found" };
-    if (reply instanceof Promise) void reply.then((r) => this.#send(res, r));
+    const reply =
+      typeof answer === "function"
+        ? answer(received)
+        : { status: 404, type: "text/plain", body: "404 Not Found" };
+    if (reply instanceof Promise)
+      reply.then(
+        (r) => this.#send(res, r),
+        (cause: unknown) =>
+          this.#send(res, json(500, { error: "internal", message: String(cause) })),
+      );
     else this.#send(res, reply);
   }
 

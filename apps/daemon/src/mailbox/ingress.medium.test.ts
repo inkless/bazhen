@@ -89,6 +89,16 @@ async function daemon(
   await new Promise<void>((resolve) => server?.listen(socket, resolve));
   const state = (id: string) => store.snapshot(testView).messages.find((m) => m.id === id)?.state;
   const activity = () => store.latestActivity(agentId);
+  /** Whether the agent's latest activity is a native idle recorded after its last mail settled. */
+  const idleAfterMail = () => {
+    const turn = store.turnAfterMail(agentId);
+    return (
+      turn.activity?.source === "native" &&
+      turn.activity.value === "idle" &&
+      turn.inFlight === 0 &&
+      (turn.activityAt ?? 0) > (turn.lastSettled ?? 0)
+    );
+  };
   const usage = () => store.snapshot(testView).agents[0]?.usage;
   const lifecycle = () => store.snapshot(testView).agents[0]?.state;
   const compactions = () =>
@@ -107,6 +117,7 @@ async function daemon(
     mailbox,
     state,
     activity,
+    idleAfterMail,
     usage,
     failures,
     lifecycle,
@@ -276,6 +287,29 @@ describe.each([
       },
     ]);
     await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("settles mail folded into a turn before the idle the turn's Stop reports", async () => {
+    const { socket, agentId, mailbox, state, idleAfterMail } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    await run(client, "PostToolUse", env, postToolUse());
+    await expect.poll(() => state(messageId)).toBe("emitted");
+    await run(client, "Stop", env, stop());
+    expect([state(messageId), idleAfterMail()]).toEqual(["delivered", true]);
+  });
+
+  it("settles folded mail before the idle, when the waiter beside the Stop ends the turn", async () => {
+    const { socket, agentId, mailbox, state, idleAfterMail } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    await run(client, "PostToolUse", env, postToolUse());
+    await expect.poll(() => state(messageId)).toBe("emitted");
+    const beside = run(client, "wait", env, stop());
+    await expect.poll(() => state(messageId)).toBe("delivered");
+    await expect.poll(idleAfterMail).toBe(true);
+    mailbox.send(agentId, { idempotencyKey: "m2", body: "release the waiter" });
+    await beside;
   });
 
   it("records the agent's own SendMessage while folding mail, and none another session sent", async () => {

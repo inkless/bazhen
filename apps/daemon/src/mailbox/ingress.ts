@@ -102,8 +102,12 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
     const observe = () => {
       if (deps.binding.inSession(agentId, origin)) deps.activity.observe(agentId, origin, read);
     };
-    // A waiter's SessionStart may move the binding first, so it is observed once it has.
-    if (read.kind !== "wait") observe();
+    // A waiter's SessionStart may move the binding first, so it is observed once it has. A turn's
+    // end settles the mail it took before its activity is recorded, so the idle it reports comes
+    // after every message that turn carried, mail folded into it included.
+    const endsTurn =
+      read.kind === "wait" || read.kind === "turnEnded" || read.kind === "turnFailed";
+    if (!endsTurn) observe();
     // Subagents and other sessions may still raise approvals, but never take or confirm mail.
     const own = async () => {
       const owned = await deps.binding.owns(agentId, origin, {
@@ -126,12 +130,12 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
         if (read.sessionStarted && read.compacted)
           deps.compacted(agentId, { sessionId: origin.sessionId, pid });
         if (read.sessionStarted && !read.compacted) deps.activity.sessionStarted(agentId);
-        observe();
         // The waiter runs beside each Stop and StopFailure report, so either ends the turn.
         if (read.turnEnd?.failed === true) {
           deps.mailbox.turnFailed(agentId, read.turnEnd.promptId);
           deps.turns.failed(agentId, read.turnEnd.error);
         } else if (read.turnEnd) deps.mailbox.turnEnded(agentId, read.turnEnd.promptId);
+        observe();
         return framed(await deps.mailbox.wait(agentId, c.req.raw.signal));
       case "permission":
         return framed(
@@ -150,6 +154,7 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
         break;
       case "turnEnded":
         if (await own()) deps.mailbox.turnEnded(agentId, read.promptId);
+        observe();
         deps.approvals.turnEnded(agentId);
         break;
       case "turnFailed":
@@ -157,6 +162,7 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
           deps.mailbox.turnFailed(agentId, read.promptId);
           deps.turns.failed(agentId, read.error);
         }
+        observe();
         deps.approvals.turnEnded(agentId);
         break;
       case "toolStarted":

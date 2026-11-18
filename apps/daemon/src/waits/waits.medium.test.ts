@@ -9,7 +9,14 @@ import { UnknownShell } from "../shells/lifecycle.ts";
 import { Store, UnknownAgent } from "../store/store.ts";
 import { UnknownTask } from "../tasks/tasks.ts";
 import { handTimer, register, settled, testView } from "../testing/fixtures.ts";
-import { WaitRefused, waitFor, type WaitDeps } from "./waits.ts";
+import {
+  SharedViews,
+  TooManyWaits,
+  WaitLimit,
+  WaitRefused,
+  waitFor,
+  type WaitDeps,
+} from "./waits.ts";
 
 const stores: Store[] = [];
 afterEach(() => {
@@ -201,6 +208,17 @@ describe("a wait for an agent to be idle", () => {
     ]);
   });
 
+  it("isn't held back by a message that bounced while the agent sat idle", async () => {
+    const { store, environmentId } = fresh();
+    const agentId = launch(store, environmentId);
+    reportIdle(store, agentId);
+    const lost = mail(store, agentId);
+    system(store, "mailbox.undeliverable", lost, { reason: "gave_up" });
+    expect((await now(store, { on: "agent", agentId, until: "idle" })).said).toBe(
+      `${agentId} is idle`,
+    );
+  });
+
   it("doesn't take an idle Bazhen inferred for one its harness reported", async () => {
     const { store, environmentId } = fresh();
     const agentId = launch(store, environmentId);
@@ -298,13 +316,15 @@ describe("a wait for a task to be done", () => {
 });
 
 describe("a wait for a reply", () => {
-  it("is met by mail the recipient sent back, and not by anyone else's", async () => {
+  it("is met by mail the recipient sent back once it had the message, and by no one else's", async () => {
     const { store, environmentId } = fresh();
     const sender = launch(store, environmentId);
     const recipient = launch(store, environmentId);
     const other = launch(store, environmentId);
     const sent = mail(store, recipient, sender);
     const { answer } = waiting(store, { on: "reply", messageId: sent }, sender);
+    mail(store, sender, recipient);
+    see(store, sent);
     mail(store, sender, other);
     mail(store, sender);
     await settled();
@@ -379,5 +399,70 @@ describe("who may wait on what", () => {
     const got = await ask(shown);
     expect(got.agent).toEqual(view().agents[0]);
     await expect(ask(hidden)).rejects.toBeInstanceOf(UnknownAgent);
+  });
+});
+
+describe("a wait resumed", () => {
+  it("judges a target gone since the caller last waited as gone, not unknown", async () => {
+    const { store } = fresh();
+    const shellId = newId("term");
+    const resumed = (until: "ended" | "running") =>
+      waitFor(
+        deps(store),
+        null,
+        { condition: { on: "shell", shellId, until }, timeoutMs: 0, resumed: true },
+        new AbortController().signal,
+      );
+    const first = now(store, { on: "shell", shellId, until: "ended" });
+    await expect(first).rejects.toThrow(UnknownShell);
+    expect([(await resumed("ended")).verdict, (await resumed("running")).verdict]).toEqual([
+      "met",
+      "never",
+    ]);
+  });
+});
+
+describe("the waits a caller holds", () => {
+  it("are held to the most one caller may hold at once, and an ended one makes room", async () => {
+    const { store, environmentId } = fresh();
+    const agentId = launch(store, environmentId);
+    const limit = new WaitLimit(1);
+    const wait = (caller: Caller, until: "ended" | "ready", signal: AbortSignal) =>
+      waitFor(
+        { ...deps(store), limit },
+        caller,
+        { condition: { on: "agent", agentId, until }, timeoutMs: 60_000 },
+        signal,
+        handTimer().after,
+      );
+    const stop = new AbortController();
+    const held = wait(agentId, "ended", stop.signal);
+    const refused = wait(agentId, "ready", new AbortController().signal);
+    const human = await wait(null, "ready", new AbortController().signal);
+    await expect(refused).rejects.toThrow(TooManyWaits);
+    stop.abort();
+    await held;
+    const again = await wait(agentId, "ready", new AbortController().signal);
+    expect([human.verdict, again.verdict]).toEqual(["met", "met"]);
+  });
+});
+
+describe("the snapshots waits judge through", () => {
+  it("are made once per viewer per commit, however many waits read them", () => {
+    const { store, environmentId } = fresh();
+    const made: string[] = [];
+    const views = new SharedViews(
+      () => store.latestEventId(),
+      (viewer: string) => {
+        made.push(viewer);
+        return store.snapshot(testView);
+      },
+    );
+    views.of("owner");
+    views.of("owner");
+    views.of("device");
+    launch(store, environmentId, false);
+    views.of("owner");
+    expect(made).toEqual(["owner", "device", "owner"]);
   });
 });

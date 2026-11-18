@@ -15,7 +15,7 @@ use bazhen_protocol::waits::{
 };
 
 use crate::args::Parsed;
-use crate::call::{CALL, Daemon, Failed};
+use crate::call::{Daemon, Failed};
 use crate::events::{self, FIRST_RETRY};
 use crate::fmt::printable;
 use crate::lifecycle::{self, answer, pretty};
@@ -25,8 +25,56 @@ use crate::tasks::{Step, Stop, need, usage};
 use crate::{AGENTS_USAGE, Exit, SHELLS_USAGE, TASKS_USAGE};
 
 const DEFAULT_WAIT: Duration = Duration::from_secs(60);
-/// How long past a call's own timeout its answer may take to arrive.
+/// How long before the deadline the daemon is asked to answer, so its answer arrives in time: at
+/// most this, and a quarter of a short wait.
 const GRACE: Duration = Duration::from_secs(1);
+
+/// When a wait of `timeout` started now ends, whatever else the command does first.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Deadline {
+    timeout: Duration,
+    at: Instant,
+}
+
+impl Deadline {
+    pub(crate) fn start(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            at: Instant::now() + timeout,
+        }
+    }
+
+    pub(crate) fn timeout(self) -> Duration {
+        self.timeout
+    }
+
+    fn left(self) -> Duration {
+        self.at.saturating_duration_since(Instant::now())
+    }
+
+    fn passed(self) -> bool {
+        self.left().is_zero()
+    }
+
+    /// What is left of the time the daemon has to answer in.
+    fn left_to_ask(self) -> Duration {
+        self.left().saturating_sub(GRACE.min(self.timeout / 4))
+    }
+
+    /// What is left, capped at `most`: one call may take no longer than the wait has.
+    pub(crate) fn within(self, most: Duration) -> Duration {
+        most.min(self.left())
+    }
+}
+
+/// The daemon answered no call before the wait ran out, though one took the call.
+fn unanswered(deadline: Deadline, out: &mut Out) -> Exit {
+    out.err(&format!(
+        "the daemon didn't answer the wait within {} s",
+        deadline.timeout.as_secs()
+    ));
+    Exit::TimedOut
+}
 
 /// What a wait is on, as the command line names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +141,7 @@ fn wait(p: &Parsed, noun: Noun, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
     }
     let given = need(p.word(1), &format!("the {}", noun_word(noun)))?;
     let until = need(p.word(2), "what to wait for")?;
-    let timeout = timeout(p)?;
+    let deadline = Deadline::start(timeout(p)?);
     let json = p.has("json");
     let condition = match noun {
         Noun::Agent => {
@@ -103,7 +151,9 @@ fn wait(p: &Parsed, noun: Noun, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
                     words(AgentCondition::ALL.map(AgentCondition::as_str))
                 ));
             };
-            let state: StateSnapshot = daemon.get("/v1/state", CALL.min(timeout))?;
+            let Some(state) = read_state(daemon, deadline)? else {
+                return Ok(unanswered(deadline, out));
+            };
             let agent_id = lifecycle::find(&state, given)?.id.clone();
             WaitCondition::Agent { agent_id, until }
         }
@@ -114,7 +164,9 @@ fn wait(p: &Parsed, noun: Noun, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
                     words(ShellCondition::ALL.map(ShellCondition::as_str))
                 ));
             };
-            let state: StateSnapshot = daemon.get("/v1/state", CALL.min(timeout))?;
+            let Some(state) = read_state(daemon, deadline)? else {
+                return Ok(unanswered(deadline, out));
+            };
             let shell_id = shells::shell_named(&state, given)?.id.clone();
             WaitCondition::Shell { shell_id, until }
         }
@@ -132,7 +184,16 @@ fn wait(p: &Parsed, noun: Noun, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
         }
     };
     // Names were read from a daemon that answered; a task's wait is its first call.
-    hold(daemon, &condition, timeout, noun != Noun::Task, json, out)
+    hold(daemon, &condition, deadline, noun != Noun::Task, json, out)
+}
+
+/// The daemon's state, to find a name in; none when it took the call but answered too late.
+fn read_state(daemon: &Daemon, deadline: Deadline) -> Step<Option<StateSnapshot>> {
+    match daemon.get("/v1/state", deadline.left()) {
+        Ok(state) => Ok(Some(state)),
+        Err(Failed::NotRunning) if deadline.passed() => Ok(None),
+        Err(failed) => Err(failed.into()),
+    }
 }
 
 fn noun_word(noun: Noun) -> &'static str {
@@ -151,41 +212,40 @@ fn words<const N: usize>(all: [&str; N]) -> String {
     }
 }
 
-/// Waits up to `timeout` for the reply to `message_id`, sent by this caller.
+/// Waits until `deadline` for the reply to `message_id`, sent by this caller.
 pub(crate) fn reply(
     daemon: &Daemon,
     message_id: MessageId,
-    timeout: Duration,
+    deadline: Deadline,
     json: bool,
     out: &mut Out,
 ) -> Step<Exit> {
     hold(
         daemon,
         &WaitCondition::Reply { message_id },
-        timeout,
+        deadline,
         true,
         json,
         out,
     )
 }
 
-/// Asks the daemon to judge `condition` until it answers otherwise than pending, or `timeout`
-/// runs out, then says where it stands and exits as it does. A daemon gone away is tried again
-/// once one answered (`answered`); before that, it is not running.
+/// Asks the daemon to judge `condition` until it answers otherwise than pending, or `deadline`
+/// passes, then says where it stands and exits as it does. A daemon gone away is tried again
+/// once one answered (`answered`); before that, it is not running. One that takes a call and
+/// answers too late ran out the wait.
 fn hold(
     daemon: &Daemon,
     condition: &WaitCondition,
-    timeout: Duration,
+    deadline: Deadline,
     mut answered: bool,
     json: bool,
     out: &mut Out,
 ) -> Step<Exit> {
-    let deadline = Instant::now() + timeout;
     let mut retry = FIRST_RETRY;
     let mut latest: Option<WaitResponse> = None;
     loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        let ms = u64::try_from(left.as_millis())
+        let ms = u64::try_from(deadline.left_to_ask().as_millis())
             .unwrap_or(u64::MAX)
             .min(MESSAGE_WAIT_MAX_MS);
         if ms == 0 {
@@ -194,32 +254,26 @@ fn hold(
         let request = WaitRequest {
             condition: condition.clone(),
             timeout_ms: ms,
+            resumed: latest.is_some().then_some(true),
         };
-        match daemon.post::<WaitResponse>("/v1/waits", &request, Duration::from_millis(ms) + GRACE)
-        {
+        match daemon.post::<WaitResponse>("/v1/waits", &request, deadline.left()) {
             Ok(r) if r.verdict == WaitVerdict::Pending => {
                 answered = true;
                 retry = FIRST_RETRY;
                 latest = Some(r);
             }
-            Ok(r) => return say(&r, timeout, json, out),
-            Err(Failed::NotRunning) if answered => {
-                let left = deadline.saturating_duration_since(Instant::now());
-                thread::sleep(retry.min(left));
+            Ok(r) => return say(&r, deadline.timeout, json, out),
+            Err(Failed::NotRunning) if answered || deadline.passed() => {
+                answered = true;
+                thread::sleep(retry.min(deadline.left()));
                 retry = events::next(retry);
             }
             Err(failed) => return Err(failed.into()),
         }
     }
     match latest {
-        Some(r) => say(&r, timeout, json, out),
-        None if answered => {
-            out.err(&format!(
-                "the daemon didn't answer the wait within {} s",
-                timeout.as_secs()
-            ));
-            Ok(Exit::TimedOut)
-        }
+        Some(r) => say(&r, deadline.timeout, json, out),
+        None if answered => Ok(unanswered(deadline, out)),
         None => Err(Stop::Call(Failed::NotRunning)),
     }
 }

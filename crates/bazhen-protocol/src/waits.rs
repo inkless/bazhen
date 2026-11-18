@@ -150,6 +150,10 @@ pub enum WaitCondition {
 pub struct WaitRequest {
     pub condition: WaitCondition,
     pub timeout_ms: u64,
+    /// The caller waited on this condition before, and the daemon answered: a target gone from
+    /// the state since then is judged gone, rather than refused as unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

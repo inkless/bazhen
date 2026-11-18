@@ -37,6 +37,11 @@ export const WAIT_MAX_MS = MESSAGE_WAIT_MAX_MS;
 export const WaitRequest = z.object({
   condition: WaitCondition,
   timeoutMs: z.number().int().nonnegative().max(WAIT_MAX_MS),
+  /**
+   * The caller has waited on this condition before, and the daemon answered: a target gone from
+   * `/v1/state` since then is judged gone, as it is mid-call, rather than refused as unknown.
+   */
+  resumed: z.boolean().optional(),
 });
 export type WaitRequest = z.infer<typeof WaitRequest>;
 

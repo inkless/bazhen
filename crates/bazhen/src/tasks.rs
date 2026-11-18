@@ -450,8 +450,9 @@ impl Verb<'_> {
                 "give --wait or --reply, not both: a reply comes after the message arrives",
             );
         }
-        let timeout = waits::timeout(self.p)?;
-        if self.me()?.is_none() {
+        let deadline = waits::Deadline::start(waits::timeout(self.p)?);
+        let caller: CallerResponse = self.daemon.get("/v1/caller", deadline.within(CALL))?;
+        if caller.agent_id.is_none() {
             return Err(Stop::NotHere(
                 "agents send --reply runs inside an agent Bazhen launched: only an agent can be \
                  replied to"
@@ -467,14 +468,14 @@ impl Verb<'_> {
                 idempotency_key: key()?,
                 body,
             },
-            CALL,
+            deadline.within(CALL),
         )?;
         out.err(&format!(
             "sent {} to {agent}\nwaiting up to {} s for a reply",
             r.message_id,
-            timeout.as_secs()
+            deadline.timeout().as_secs()
         ));
-        let exit = waits::reply(self.daemon, r.message_id, timeout, self.has("json"), out)?;
+        let exit = waits::reply(self.daemon, r.message_id, deadline, self.has("json"), out)?;
         Ok(Answer { text: None, exit })
     }
 

@@ -1848,7 +1848,7 @@ const reportIdle = (store: Store, agentId: string) =>
   });
 
 describe("mail as a wait reads it", () => {
-  it("finds the first mail the recipient sent back after a message, and none before it", () => {
+  it("finds the first mail the recipient sent back once the message reached it, and none before", () => {
     const store = Store.open(dbPath());
     const env = withEnvironment(store);
     const { agentId: a } = launch(store, env);
@@ -1856,14 +1856,17 @@ describe("mail as a wait reads it", () => {
     const { agentId: c } = launch(store, env);
     queueMail(store, a, b);
     const sent = queueMail(store, b, a);
+    // Written before the message reached b, it crossed it.
+    queueMail(store, a, b);
     const before = store.replyTo(sent)?.replyId;
+    moveMail(store, sent, "mailbox.offered");
     queueMail(store, a, c);
     queueMail(store, a);
     const reply = queueMail(store, a, b);
     queueMail(store, a, b);
     expect([before, store.replyTo(sent)]).toEqual([
       null,
-      { from: a, to: b, state: "queued", replyId: reply },
+      { from: a, to: b, state: "offered", replyId: reply },
     ]);
     expect([store.replyTo(queueMail(store, b))?.from, store.replyTo(newId("msg"))]).toEqual([
       null,
@@ -1935,14 +1938,30 @@ describe("mail as a wait reads it", () => {
       ).run(id, to, state, at, at);
       return { id, at: Number(at) };
     };
-    const sent = queuedBefore(b, a, "seen");
+    /** An event the daemon before this schema recorded for message `id`, by its id. */
+    const moved = (id: string, type: string) =>
+      Number(
+        db
+          .prepare(
+            `INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+             SELECT host_id, ts, ?, 'message', ?, 'system', '{}' FROM events
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .run(type, id).lastInsertRowid,
+      );
+    const sent = queuedBefore(b, a, "delivered");
+    const seen = moved(sent.id, "mailbox.seen");
+    const delivered = moved(sent.id, "mailbox.delivered");
+    db.prepare("UPDATE mailbox SET updated_event_id = ? WHERE id = ?").run(delivered, sent.id);
     const reply = queuedBefore(a, b, "queued");
+    queuedBefore(a, b, "undeliverable");
     db.close();
     const upgraded = Store.open(path);
-    expect([upgraded.replyTo(sent.id)?.replyId, upgraded.turnAfterMail(b).lastSettled]).toEqual([
-      reply.id,
-      sent.at,
-    ]);
+    expect([
+      upgraded.replyTo(sent.id)?.replyId,
+      upgraded.turnAfterMail(b).lastSettled,
+      upgraded.turnAfterMail(a).lastSettled,
+    ]).toEqual([reply.id, seen, null]);
     upgraded.close();
   });
 });

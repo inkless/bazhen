@@ -50,7 +50,8 @@ pub enum Exit {
     /// `agents send --wait`, `tasks send --wait`: the message was still on its way when the wait
     /// ran out.
     Queued,
-    /// `agents wait`, `shells wait`: the agent or shell wasn't in the state when the wait ran out.
+    /// `agents wait`, `shells wait`, `tasks wait` and `agents send --reply`: what was waited for
+    /// hadn't happened when the wait ran out.
     TimedOut,
     /// The status of the daemon's own start-up, as it exited.
     Code(u8),

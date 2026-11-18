@@ -86,7 +86,7 @@ import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../sh
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
-import { WaitRefused } from "../waits/waits.ts";
+import { TooManyWaits, WaitRefused } from "../waits/waits.ts";
 import { UnknownRole } from "../roles/roles.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
@@ -480,6 +480,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       return fail(c, 400, "invalid_request", err.message);
     }
     if (err instanceof WaitRefused) return fail(c, 403, "forbidden", err.message);
+    if (err instanceof TooManyWaits) return fail(c, 429, "rate_limited", err.message);
     if (err instanceof TaskRefused) {
       return err.code === "forbidden"
         ? fail(c, 403, "forbidden", err.message)

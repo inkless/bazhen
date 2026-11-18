@@ -844,6 +844,11 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       { condition: { on: "shell", shellId: TERM, until: "running" }, timeoutMs: 1 },
       { condition: { on: "task", taskId: TASK, until: "done" }, timeoutMs: 60_000 },
       { condition: { on: "reply", messageId: MSG }, timeoutMs: 60_000 },
+      {
+        condition: { on: "shell", shellId: TERM, until: "ended" },
+        timeoutMs: 60_000,
+        resumed: true,
+      },
     ],
   },
   WaitResponse: {

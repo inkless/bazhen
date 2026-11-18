@@ -47,7 +47,9 @@ describe("bazhen agents wait, shells wait and tasks wait", () => {
         },
       ],
     ]);
-    expect(asked()[0]?.timeoutMs).toBeGreaterThan(29_000);
+    // The daemon is asked to answer a second early, so its answer arrives within the 30 s.
+    expect(asked()[0]?.timeoutMs).toBeGreaterThan(28_500);
+    expect(asked()[0]?.timeoutMs).toBeLessThanOrEqual(29_000);
   });
 
   it("holds no one call longer than the daemon takes, however long the timeout", async () => {
@@ -63,7 +65,11 @@ describe("bazhen agents wait, shells wait and tasks wait", () => {
       { verdict: "met", said: "reviewer is ready" },
     );
     const ran = await s.bazhen(["agents", "wait", "reviewer", "ready"]);
-    expect([ran.code, ran.stdout, asked().length]).toEqual([0, "reviewer is ready\n", 2]);
+    expect([ran.code, ran.stdout, asked().map((r) => r.resumed)]).toEqual([
+      0,
+      "reviewer is ready\n",
+      [undefined, true],
+    ]);
   });
 
   it("exits 1 when it can't be met now, saying what the daemon said", async () => {
@@ -94,7 +100,23 @@ describe("bazhen agents wait, shells wait and tasks wait", () => {
     s.daemon.hang(WAITS);
     const started = Date.now();
     const ran = await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "1"]);
-    expect([ran.code, Date.now() - started < 4000]).toEqual([5, true]);
+    expect([ran.code, ran.stderr, Date.now() - started < 1800]).toEqual([
+      5,
+      "the daemon didn't answer the wait within 1 s\n",
+      true,
+    ]);
+  });
+
+  it("counts finding the name in its timeout, and exits 5 when the daemon never says", async () => {
+    s.daemon.hang("GET /v1/state");
+    const started = Date.now();
+    const ran = await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "1"]);
+    expect([ran.code, ran.stderr, Date.now() - started < 1800, asked()]).toEqual([
+      5,
+      "the daemon didn't answer the wait within 1 s\n",
+      true,
+      [],
+    ]);
   });
 
   it("asks again once the daemon is back, though it went away mid-wait", async () => {

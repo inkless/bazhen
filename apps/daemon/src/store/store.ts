@@ -87,7 +87,6 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
   return rows.flatMap((r) => (typeof r.id === "string" && isId(prefix, r.id) ? [r.id] : []));
 }
 
-/** A key reused for a different request: answering with the first one would be a lie. */
 /** A message, and the first one its recipient sent back to its sender after it. */
 export interface ReplyRead {
   /** Null when the human sent it. */
@@ -102,6 +101,7 @@ export interface TurnAfterMail {
   readonly activity: Activity | undefined;
   readonly activityAt: number | null;
   readonly inFlight: number;
+  /** The last message that reached it; one that bounced never did, so no turn need follow it. */
   readonly lastSettled: number | null;
 }
 
@@ -444,6 +444,7 @@ export function shellCommands(state: TerminalState, linked: boolean): ShellComma
   ];
 }
 
+/** A key reused for a different request: answering with the first one would be a lie. */
 export class IdempotencyConflict extends Error {
   readonly key: string;
 
@@ -745,22 +746,27 @@ export class Store {
 
   /**
    * A message's sender and recipient, its state, and the first message the recipient queued back
-   * to the sender after it, if any; undefined for a message this daemon never queued.
+   * to the sender after the message reached it, if any; undefined for a message this daemon never
+   * queued.
    */
   replyTo(messageId: string): ReplyRead | undefined {
     const sent = this.prepare(
-      `SELECT agent_session_id AS "to", from_agent_id AS "from", state, created_event_id AS at
-       FROM mailbox WHERE id = ?`,
+      `SELECT m.agent_session_id AS "to", m.from_agent_id AS "from", m.state,
+         (SELECT min(e.id) FROM events e WHERE e.entity_type = 'message' AND e.entity_id = m.id
+           AND e.type IN
+           ('mailbox.offered', 'mailbox.accepted', 'mailbox.seen', 'mailbox.delivered')) AS reached
+       FROM mailbox m WHERE m.id = ?`,
     ).get(messageId);
     if (sent === undefined) return undefined;
     const from = typeof sent.from === "string" ? sent.from : null;
+    // Mail its recipient wrote before the message reached it crossed it, and answers something else.
     const reply =
-      from === null
+      from === null || typeof sent.reached !== "number"
         ? undefined
         : this.prepare(
             `SELECT id FROM mailbox WHERE from_agent_id = ? AND agent_session_id = ?
                AND created_event_id > ? ORDER BY created_event_id LIMIT 1`,
-          ).get(String(sent.to), from, Number(sent.at));
+          ).get(String(sent.to), from, sent.reached);
     return {
       from,
       to: String(sent.to),
@@ -779,7 +785,7 @@ export class Store {
     ).get(agentId);
     const mail = this.prepare(
       `SELECT count(*) FILTER (WHERE state NOT IN ('seen', 'delivered', 'undeliverable')) AS moving,
-         max(settled_event_id) AS settled
+         max(settled_event_id) FILTER (WHERE state <> 'undeliverable') AS settled
        FROM mailbox WHERE agent_session_id = ?`,
     ).get(agentId);
     return {
