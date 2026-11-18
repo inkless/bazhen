@@ -587,19 +587,46 @@ mod tests {
         session::list()
     }
 
+    /// Reads `master` until its terminal has written `armed`.
+    fn wait_armed(master: BorrowedFd<'_>) {
+        let give_up = Instant::now() + DEADLINE;
+        let mut output = Vec::new();
+        let mut chunk = [0u8; 256];
+        while !output.windows(5).any(|seen| seen == b"armed") {
+            let left = give_up.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "the shell never armed its trap");
+            let mut fds = [PollFd::from_borrowed_fd(master, PollFlags::IN)];
+            readiness(poll(&mut fds, Some(&Timespec::try_from(left).unwrap()))).unwrap();
+            match rustix::io::read(master, &mut chunk) {
+                Ok(n) => output.extend_from_slice(chunk.get(..n).unwrap_or_default()),
+                Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => {}
+                Err(e) => panic!("reading the terminal: {e}"),
+            }
+        }
+    }
+
     #[test]
     #[ignore = "signals processes; runs in pnpm test:real rust"]
     fn a_step_lists_the_processes_once_for_every_session_it_ends() {
         bazhen_test_signal::require_sandbox().unwrap();
-        let ignores_the_hangup = ["sh", "-c", "trap '' HUP; exec sleep 30"];
+        // A hangup that lands before the trap is set ends the shell, and the ending of a session
+        // whose leader has exited looks every `SWEEP_EVERY`, listing each time.
+        let ignores_the_hangup = ["sh", "-c", "trap '' HUP; echo armed; exec sleep 30"];
         let mut holder = holder(&ignores_the_hangup);
         holder.list = counted;
         let mut ptys = Vec::new();
+        let mut olds = Vec::new();
         for _ in 0..2 {
             let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
-            let old = pty::spawn(slave, &spec(&ignores_the_hangup), &holder.reaper).unwrap();
-            holder.retire(old);
+            olds.push(pty::spawn(slave, &spec(&ignores_the_hangup), &holder.reaper).unwrap());
             ptys.push(pty);
+        }
+        wait_armed(holder.pty.master());
+        for pty in &ptys {
+            wait_armed(pty.master());
+        }
+        for old in olds {
+            holder.retire(old);
         }
         let now = Instant::now();
         holder.close(now);
