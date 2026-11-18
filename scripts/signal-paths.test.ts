@@ -227,6 +227,48 @@ describe("raw signal calls in TypeScript", () => {
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3]);
   });
 
+  it("finds process re-exported whole, or exported under a name of this file's", () => {
+    const source = [
+      'export * from "node:process";',
+      'export * as nsp from "process";',
+      'export { default } from "node:process";',
+      'export { pid, default as dp } from "process";',
+      "export const p3 = process;",
+      "export let p4 = globalThis.process;",
+      "const p5 = process;",
+      "export { p5 };",
+      "export { p5 as p6, other };",
+      "export default process;",
+      "export = globalThis.process;",
+      "export default p5;",
+      'export * from "./mine.ts";',
+      'export type * from "node:process";',
+      'export { pid as id } from "node:process";',
+      "export const p7 = process.pid;",
+      "export default process.env;",
+      "export { other };",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([
+      1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12,
+    ]);
+  });
+
+  it("reads process imported by the name default, or beside named imports, as an alias", () => {
+    const source = [
+      'import { default as p1 } from "node:process";',
+      'import p2, { pid } from "process";',
+      'import p3, * as p4 from "node:process";',
+      "p1.abort();",
+      "p2._kill(1, 9);",
+      "p3.abort();",
+      'p4["abort"]();',
+      "const p5 = p1;",
+      "p5.abort();",
+      "pid.abort;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4, 5, 6, 7, 9]);
+  });
+
   it("finds process.abort however it is reached", () => {
     const source = [
       "process.abort();",

@@ -114,6 +114,75 @@ const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:_?kill|abort)["'`]\s
 const TS_KILL_BOUND = /\{[^}]*\b(?:_kill|abort)\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
   /\b(?:import|export)\s*(?:type\s+)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+const PROCESS_SOURCE = String.raw`\s*["'](?:node:)?process["']`;
+// `process` re-exported whole, or as its module's default: either hands another file its kill.
+const PROCESS_REEXPORT = new RegExp(
+  String.raw`\bexport\s*(?:\*(?:\s*as\s+[\w$]+)?|\{[^}]*\bdefault\b[^}]*\})\s*from` +
+    PROCESS_SOURCE,
+  "g",
+);
+// A value import of `process`'s module: a default, a namespace, or named imports, `default` among
+// them, or a default beside either of the others.
+const PROCESS_IMPORT = new RegExp(
+  String.raw`\bimport\s+(?:([\w$]+)\s*,\s*)?(?:\*\s+as\s+([\w$]+)|([\w$]+)|\{([^}]*)\})\s+from` +
+    PROCESS_SOURCE,
+  "g",
+);
+/** A pattern matching the name `name` alone, not inside a longer one. */
+const tsName = (name: string) => String.raw`(?<![\w$])${name.replaceAll("$", "\\$")}(?![\w$])`;
+/** `process`, or one of `names`, as a whole value rather than a member's receiver. */
+const wholeProcess = (names: readonly string[]) =>
+  String.raw`(?:globalThis\s*\.\s*)?(?:${["process", ...names].map(tsName).join("|")})(?!\s*\.)`;
+
+/**
+ * The names this file gives `process`, each where it is bound: a default or namespace import of
+ * its module, an import of the name `default`, or a constant bound to it or to another of these.
+ */
+function processAliases(code: string, kept: string): { name: string; index: number }[] {
+  const out: { name: string; index: number }[] = [];
+  for (const m of kept.matchAll(PROCESS_IMPORT)) {
+    const defaults = (m[4] ?? "").split(",").flatMap((spec) => {
+      const [imported, local] = spec.trim().split(/\s+as\s+/);
+      return imported === "default" && local !== undefined ? [local] : [];
+    });
+    for (const name of [m[1], m[2], m[3], ...defaults])
+      if (name !== undefined) out.push({ name, index: m.index });
+  }
+  for (let size = -1; size !== out.length;) {
+    size = out.length;
+    const bound = new RegExp(
+      String.raw`\b(?:const|let|var)\s+([\w$]+)\s*=\s*` + wholeProcess(out.map((a) => a.name)),
+      "g",
+    );
+    for (const m of code.matchAll(bound))
+      if (m[1] !== undefined && !out.some((a) => a.name === m[1]))
+        out.push({ name: m[1], index: m.index });
+  }
+  return out;
+}
+
+/**
+ * Each export of `process` or of a name this file gives it: another file can call its kill under
+ * a name of its own, as a Rust `pub use` of a signal module lets it.
+ */
+function processExports(code: string, names: readonly string[]) {
+  const whole = wholeProcess(names);
+  const declared = found(
+    code,
+    new RegExp(
+      String.raw`\bexport\s*(?:default\s+|=\s*|(?:const|let|var)\s+[\w$]+\s*=\s*)` + whole,
+      "g",
+    ),
+  );
+  const listed = found(code, /\bexport\s*\{[^}]*\}(?!\s*from\b)/g).filter((m) =>
+    m.call
+      .replace(/^export\s*\{|\}$/g, "")
+      .split(",")
+      .some((spec) => names.includes(spec.trim().split(/\s+as\s+/)[0] ?? "")),
+  );
+  return [...declared, ...listed];
+}
+
 // A member named kill on anything: a ChildProcess's, a node-pty IPty's, process's. Text can't tell
 // them apart, so each is a signal, and an API whose kill sends none is named for what it does.
 const TS_MEMBER_KILL = /(?:[\w$]+\s*)?\??\.\s*kill\b/g;
@@ -1260,20 +1329,19 @@ function signalsIn(
     ["import", "export"].includes(code.slice(m.index, m.index + 6)),
   );
   const computed = found(kept, TS_KILL_COMPUTED).filter(inCode);
-  // What else names `process`: a default or namespace import of it, or a constant bound to it.
-  const aliases = [
-    ...kept.matchAll(/\bimport\s+(?:\*\s+as\s+)?(\w+)\s+from\s*["'](?:node:)?process["']/g),
-    ...code.matchAll(
-      /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:globalThis\s*\.\s*)?process\b(?!\s*\.)/g,
-    ),
-  ].flatMap((m) => (m[1] === undefined || !inCode(m) ? [] : [m[1]]));
-  const viaAlias = aliases.flatMap((alias) => [
-    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*(?:_?kill|abort)\\b`, "g")),
+  const aliases = processAliases(code, kept).filter(({ index }) => inCode({ index }));
+  const names = aliases.map(({ name }) => name);
+  const viaAlias = names.flatMap((alias) => [
+    ...found(code, new RegExp(`${tsName(alias)}\\s*\\??\\.\\s*(?:_?kill|abort)\\b`, "g")),
     ...found(
       kept,
-      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:_?kill|abort)["'\`]\\s*\\]`, "g"),
+      new RegExp(`${tsName(alias)}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:_?kill|abort)["'\`]\\s*\\]`, "g"),
     ).filter(inCode),
   ]);
+  const exported = [
+    ...found(kept, PROCESS_REEXPORT).filter((m) => code.slice(m.index, m.index + 6) === "export"),
+    ...processExports(code, names),
+  ];
   const memberComputed = [...kept.matchAll(TS_MEMBER_KILL_COMPUTED)]
     .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
     .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
@@ -1286,6 +1354,7 @@ function signalsIn(
     ...imports,
     ...computed,
     ...viaAlias,
+    ...exported,
     ...found(code, TS_MEMBER_KILL),
     ...memberComputed,
     ...found(code, TS_MEMBER_KILL_BOUND),
