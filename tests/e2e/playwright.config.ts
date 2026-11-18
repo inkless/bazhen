@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +54,14 @@ delete process.env["TMUX_PANE"];
 const work = join(process.env["BZ_E2E_HOME"], "work");
 mkdirSync(work, { recursive: true });
 process.env["BZ_E2E_WORK"] = realpathSync(work);
+// The keys and shell-programs specs read their terminals through the daemon's tmux server, the
+// dashboard spec reads tmux's attach command, and one daemon serves every spec, so it makes its
+// terminals on tmux.
+mkdirSync(join(process.env["BZ_E2E_HOME"], "config"), { recursive: true });
+writeFileSync(
+  join(process.env["BZ_E2E_HOME"], "config", "config.toml"),
+  '[runtime]\ndefault = "tmux"\n',
+);
 const claudeBin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
 
 const daemonPort = Number(process.env["BZ_E2E_DAEMON_PORT"]);
