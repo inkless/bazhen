@@ -13,10 +13,10 @@ import {
 import {
   newId,
   ProcessState,
+  RuntimeUnreachable,
   ScreenUnreadable,
   StaleIncarnation,
   TerminalPredates,
-  TerminalUnconfirmed,
   TerminalUnservable,
   type RuntimeRef,
   type TerminalId,
@@ -674,12 +674,12 @@ describe("HolderRuntime: closing", () => {
     expect(existsSync(socket)).toBe(false);
   });
 
-  it("calls a terminal whose holder can't be read unconfirmed, not stale", async () => {
+  it("calls a terminal whose holder can't be read unreachable, neither stale nor unconfirmed", async () => {
     const root = privateRoot();
     const { runtime, terminals } = startingFakes(root);
     const ref = await runtime.create(spec());
     chmodSync(terminals.get(ref.terminalId)!.server.path, 0o000);
-    await expect(runtime.close(ref)).rejects.toBeInstanceOf(TerminalUnconfirmed);
+    await expect(runtime.close(ref)).rejects.toBeInstanceOf(RuntimeUnreachable);
   });
 
   it("calls a terminal gone only when no holder answers and the recorded one isn't running", async () => {

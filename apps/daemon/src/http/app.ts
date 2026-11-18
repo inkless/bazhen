@@ -66,6 +66,7 @@ import {
   NoTerminal,
   NotResumable,
   ProcessState,
+  RuntimeUnreachable,
   ScreenUnreadable,
   StaleIncarnation,
   TerminalPredates,
@@ -250,7 +251,11 @@ function screenFailure(c: Context, terminalId: string, err: unknown) {
   if (err instanceof StaleIncarnation) {
     return fail(c, 404, "not_found", `no running terminal ${terminalId}`);
   }
-  if (err instanceof ScreenUnreadable || err instanceof TerminalUnconfirmed) {
+  if (
+    err instanceof ScreenUnreadable ||
+    err instanceof TerminalUnconfirmed ||
+    err instanceof RuntimeUnreachable
+  ) {
     return fail(c, 503, "unavailable", err.message);
   }
   return undefined;

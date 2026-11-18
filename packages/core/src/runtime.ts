@@ -155,6 +155,20 @@ export class TerminalUnconfirmed extends Error {
 }
 
 /**
+ * What runs the terminal is there but can't be reached just now: it refuses this user's
+ * connections, or doesn't answer in time. Nothing is known of the terminal, so asking again may
+ * work, and it is neither ended nor unconfirmed.
+ */
+export class RuntimeUnreachable extends Error {
+  readonly terminalId: TerminalId;
+
+  constructor(terminalId: TerminalId, cause: unknown) {
+    super(`terminal ${terminalId}: what runs it can't be reached`, { cause });
+    this.terminalId = terminalId;
+  }
+}
+
+/**
  * What runs the terminal answers, but in no protocol this build speaks, so it can be neither
  * served nor ended from here: it runs until its own process is ended (design §4.7).
  */

@@ -7,6 +7,7 @@ import {
   TerminalPredates,
   type ScreenText,
   ProcessState,
+  RuntimeUnreachable,
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
@@ -269,8 +270,9 @@ export class HolderRuntime implements RuntimeAdapter {
 
   /**
    * A connection to the holder `ref` was made on, past `hello`. A holder that isn't there is
-   * `StaleIncarnation("gone")` once it is provably gone, and `TerminalUnconfirmed` until then; a
-   * different holder at its socket is `server-replaced`.
+   * `StaleIncarnation("gone")` once it is provably gone, and `TerminalUnconfirmed` until then; one
+   * whose socket refuses us or doesn't answer is `RuntimeUnreachable`; a different holder at its
+   * socket is `server-replaced`.
    */
   private async holderOf(
     ref: RuntimeRef,
@@ -288,6 +290,7 @@ export class HolderRuntime implements RuntimeAdapter {
         const pid = recordedHolder(ref)?.pid ?? null;
         throw new TerminalUnservable(ref.terminalId, reached.protocol, pid);
       }
+      if (reached.is === "unreadable") throw new RuntimeUnreachable(ref.terminalId, error);
       throw new TerminalUnconfirmed(ref.terminalId, error);
     }
     const { hello } = client;

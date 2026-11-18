@@ -779,12 +779,14 @@ export class Daemon {
            WHERE a.id = ?`,
         )
         .get(agentId);
-      return row?.runtime === "holder"
-        ? join(this.home, "run", "holders", `${String(row.id)}.sock`)
-        : undefined;
+      return row?.runtime === "holder" ? this.holderSocket(String(row.id)) : undefined;
     } finally {
       db.close();
     }
+  }
+
+  private holderSocket(terminalId: string): string {
+    return join(this.home, "run", "holders", `${terminalId}.sock`);
   }
 
   /** The agent's lifecycle state, as the daemon's state shows it now. */
@@ -1034,6 +1036,17 @@ export class Daemon {
    */
   blockTmux(): () => void {
     const socket = this.tmux("display-message", "-p", "#{socket_path}").trim();
+    const mode = statSync(socket).mode;
+    chmodSync(socket, 0);
+    return () => chmodSync(socket, mode);
+  }
+
+  /**
+   * Makes the holder running `terminalId` unreachable, as a socket it may not connect to would,
+   * until the returned function puts it back. The holder and its terminal keep running.
+   */
+  blockHolder(terminalId: string): () => void {
+    const socket = this.holderSocket(terminalId);
     const mode = statSync(socket).mode;
     chmodSync(socket, 0);
     return () => chmodSync(socket, mode);

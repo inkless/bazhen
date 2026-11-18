@@ -4,6 +4,7 @@ import {
   HarnessRefused,
   newId,
   RoutedRuntime,
+  RuntimeUnreachable,
   ScreenUnreadable,
   StaleIncarnation,
   TerminalPredates,
@@ -699,6 +700,12 @@ describe("the screen route", () => {
       503,
       "unavailable",
       new ScreenUnreadable(term, "no engine"),
+    ],
+    [
+      "one whose holder refuses the daemon's connections",
+      503,
+      "unavailable",
+      new RuntimeUnreachable(term, null),
     ],
   ];
   it.each(refusals)("answers %s as %i", async (_, status, error, thrown) => {
