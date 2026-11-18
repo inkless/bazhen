@@ -3,7 +3,7 @@ import { pairDevice, Refused } from "./api.ts";
 import { Button } from "./ui/Button.tsx";
 
 const MESSAGES: Partial<Record<NonNullable<Refused["code"]>, string>> = {
-  pairing_failed: "That code is wrong or has expired. Run bazhen pair again for a new one.",
+  pairing_failed: "That code is wrong or has expired. Run bazhen devices pair again for a new one.",
   rate_limited: "Too many tries; wait a minute.",
 };
 
@@ -36,7 +36,7 @@ export function Pairing({ onPaired }: { onPaired: () => void }) {
     >
       <h2 id="pairing-title">Pair this browser</h2>
       <p>
-        Run <code>bazhen pair</code> in a terminal and enter the code
+        Run <code>bazhen devices pair</code> in a terminal and enter the code
       </p>
       <label>
         Code{" "}

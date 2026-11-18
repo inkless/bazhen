@@ -293,7 +293,7 @@ describe("a Codex agent", () => {
   });
 
   it("tells a command the agent runs which agent it is, at the daemon that launched it", async () => {
-    const output = await ranAllowed("../cli/bazhen whoami", "whoami");
+    const output = await ranAllowed("../cli/bazhen agents whoami", "whoami");
     expect(output).toContain(asker.agentId);
     expect(output).toContain("whoami=0");
   });
@@ -451,7 +451,7 @@ describe("a Codex agent", () => {
     );
     try {
       await switched("/new");
-      const output = await ranAllowed(`${PROBE}; ../cli/bazhen whoami`, "pnew", launched);
+      const output = await ranAllowed(`${PROBE}; ../cli/bazhen agents whoami`, "pnew", launched);
       expect({
         before: before.includes("p=leaked/u"),
         policy: output.includes("p=u/kept"),
@@ -465,7 +465,7 @@ describe("a Codex agent", () => {
 
   it("gives a thread a /fork starts the daemon's socket", async () => {
     await switched("/fork");
-    const output = await ranAllowed("../cli/bazhen whoami", "pfork", launched);
+    const output = await ranAllowed("../cli/bazhen agents whoami", "pfork", launched);
     expect(output).toContain(launched.agentId);
     expect(output).toContain("pfork=0");
   });
@@ -533,7 +533,7 @@ describe("a Codex agent", () => {
       const agent = await daemon.launch("codex-on-leaked", "codex");
       await waitUntil(() => daemon.screen(agent.agentId).includes(BANNER.codex), "Codex's TUI");
       const output = await ranAllowed(
-        "env | grep ^BAZHEN_AGENT; ../cli/bazhen whoami",
+        "env | grep ^BAZHEN_AGENT; ../cli/bazhen agents whoami",
         "leak",
         agent,
       );

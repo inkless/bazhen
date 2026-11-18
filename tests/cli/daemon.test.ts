@@ -328,7 +328,7 @@ describe("bazhen doctor", () => {
         "external origins: https://box.tail.ts.net, http://192.168.1.5:7900, http://localhost:7901 (from config)",
         "  warning: plain HTTP to another host (http://192.168.1.5:7900); anyone on the network can read the traffic, device tokens included",
         "web app: served from /repo/apps/web/dist",
-        'pairing: required on every origin (web.pairing = "always"); `bazhen pair`',
+        'pairing: required on every origin (web.pairing = "always"); `bazhen devices pair`',
       ]);
     });
 
@@ -695,14 +695,14 @@ describe("bazhen env refresh", () => {
   });
 });
 
-describe("bazhen pair", () => {
+describe("bazhen devices pair", () => {
   it("shows a code to enter, until when it works, and where to open", async () => {
     s.daemon.answer("POST /v1/pairing/codes", PairingCodeResponse, {
       code: "ABCD2345",
       expiresAt: "2026-11-16T12:05:00.000Z",
       origins: ["https://box.tail.ts.net"],
     });
-    const ran = await s.bazhen(["pair"]);
+    const ran = await s.bazhen(["devices", "pair"]);
     const out = lines(ran.stdout);
     expect([ran.code, out[0], out.slice(2)]).toEqual([
       0,
@@ -723,7 +723,7 @@ describe("bazhen pair", () => {
         expiresAt: "2029-02-11T00:00:00.000Z",
       },
     });
-    const out = lines((await s.bazhen(["pair"])).stdout);
+    const out = lines((await s.bazhen(["devices", "pair"])).stdout);
     expect(out.slice(2, 5)).toEqual([
       "  on the LAN, open https://my-mac.local:7942",
       "  before trusting its certificate, check that its SHA-256 is",
@@ -781,7 +781,7 @@ describe("bazhen devices", () => {
       .answer("GET /v1/devices", DevicesResponse, { devices: [] })
       .answer("GET /v1/state", StateSnapshot, snapshot());
     expect((await s.bazhen(["devices"])).stdout).toBe(
-      "no paired devices; pair one with `bazhen pair`\n",
+      "no paired devices; pair one with `bazhen devices pair`\n",
     );
   });
 
@@ -839,7 +839,7 @@ describe("bazhen devices", () => {
     expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n")[0]])).toEqual([
       [2, "", "usage: bazhen devices revoke <id>"],
       [2, "", "usage: bazhen devices dismiss <id>"],
-      [2, "", expect.stringContaining("usage: bazhen")],
+      [2, "", "devices has no verb forget"],
     ]);
     expect(s.daemon.received).toEqual([]);
   });

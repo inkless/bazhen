@@ -1,4 +1,4 @@
-//! The person's own terminal while `bazhen attach` holds it: raw, its size, and wake-ups when the
+//! The person's own terminal while `bazhen terminals attach` holds it: raw, its size, and wake-ups when the
 //! size changes or the process is asked to stop.
 
 use std::io::{self, ErrorKind, Read as _, Write as _};

@@ -52,7 +52,7 @@ const onThread = (id: string, name: string, on: string): Agent => {
   return { ...a, externalRef: { environmentId: a.environmentId, kind: "codex-thread", id: on } };
 };
 const whoamiOn = async (thread: string) => {
-  const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: thread });
+  const ran = await s.bazhen(["agents", "whoami"], { CODEX_THREAD_ID: thread });
   return [ran.code, ran.stdout.split("\n")[0], ran.stderr];
 };
 const refused = [2, "", expect.stringContaining("inside an agent")];
@@ -205,7 +205,7 @@ describe("bazhen agents", () => {
   it("prints an empty fleet as an empty JSON list, and takes --json on agents only", async () => {
     s.daemon.answer("GET /v1/state", StateSnapshot, snapshot());
     const empty = await s.bazhen(["agents", "--json"]);
-    const elsewhere = await s.bazhen(["task", "list", "--json"]);
+    const elsewhere = await s.bazhen(["tasks", "list", "--json"]);
     expect([empty.stdout, elsewhere.code, elsewhere.stdout, elsewhere.stderr]).toEqual([
       "[]\n",
       2,
@@ -215,7 +215,7 @@ describe("bazhen agents", () => {
   });
 });
 
-describe("bazhen whoami", () => {
+describe("bazhen agents whoami", () => {
   const asAgent = { BAZHEN_AGENT_ID: AGENT };
 
   it("says who the agent is, who launched it, and whom it reports to on each task", async () => {
@@ -229,7 +229,7 @@ describe("bazhen whoami", () => {
         agents: [agent(AGENT, "BZ-127", { launchedBy: OTHER }), agent(OTHER, "coordinator-1")],
       }),
     );
-    const ran = await s.bazhen(["whoami"], asAgent);
+    const ran = await s.bazhen(["agents", "whoami"], asAgent);
     expect(ran.stdout.split("\n")).toEqual([
       `BZ-127  ${AGENT}`,
       "codex  running  bazhen  /work",
@@ -250,7 +250,7 @@ describe("bazhen whoami", () => {
         agents: [agent(AGENT, "BZ-127"), agent(OTHER, "coordinator-1")],
       }),
     );
-    expect((await s.bazhen(["whoami"], asAgent)).stdout).toContain(
+    expect((await s.bazhen(["agents", "whoami"], asAgent)).stdout).toContain(
       "as worker, reporting to coordinator-1",
     );
   });
@@ -265,7 +265,7 @@ describe("bazhen whoami", () => {
         agents: [agent(AGENT, "BZ-127")],
       }),
     );
-    const ran = await s.bazhen(["whoami"], asAgent);
+    const ran = await s.bazhen(["agents", "whoami"], asAgent);
     expect(ran.stdout).toContain("launched by the human\n");
     expect(ran.stdout).toContain("as worker, reporting to the human");
   });
@@ -278,7 +278,7 @@ describe("bazhen whoami", () => {
         StateSnapshot,
         snapshot({ agents: [agent(AGENT, "BZ-127", { role: "reviewer" })] }),
       );
-    const ran = await s.bazhen(["whoami"], asAgent);
+    const ran = await s.bazhen(["agents", "whoami"], asAgent);
     expect(ran.stdout.split("\n")[2]).toBe("launched by the human, as a reviewer");
   });
 
@@ -286,7 +286,7 @@ describe("bazhen whoami", () => {
     s.daemon
       .takes(AGENT)
       .answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
-    expect((await s.bazhen(["whoami"], asAgent)).stdout).toMatch(/\nno tasks\n$/);
+    expect((await s.bazhen(["agents", "whoami"], asAgent)).stdout).toMatch(/\nno tasks\n$/);
   });
 
   it("names the agent the daemon takes a Codex command for, whichever agent its environment names", async () => {
@@ -298,7 +298,10 @@ describe("bazhen whoami", () => {
     const shown = [];
     for (const taken of [AGENT, OTHER]) {
       s.daemon.takes(taken);
-      const ran = await s.bazhen(["whoami"], { CODEX_THREAD_ID: THREAD, BAZHEN_AGENT_ID: OTHER });
+      const ran = await s.bazhen(["agents", "whoami"], {
+        CODEX_THREAD_ID: THREAD,
+        BAZHEN_AGENT_ID: OTHER,
+      });
       shown.push(ran.stdout.split("\n")[0]);
     }
     expect(shown).toEqual([`BZ-127  ${AGENT}`, `starter-1  ${OTHER}`]);
@@ -308,7 +311,7 @@ describe("bazhen whoami", () => {
     s.daemon
       .takes(AGENT)
       .answer("GET /v1/state", StateSnapshot, snapshot({ agents: [agent(AGENT, "BZ-127")] }));
-    const ran = await s.bazhen(["whoami"]);
+    const ran = await s.bazhen(["agents", "whoami"]);
     expect([ran.code, ran.stdout.split("\n")[0], s.daemon.routes()]).toEqual([
       0,
       `BZ-127  ${AGENT}`,
@@ -318,8 +321,8 @@ describe("bazhen whoami", () => {
 
   it("names no agent when no daemon answers, whatever its environment names", async () => {
     await s.daemon.close();
-    const bare = await s.bazhen(["whoami"]);
-    const named = await s.bazhen(["whoami"], asAgent);
+    const bare = await s.bazhen(["agents", "whoami"]);
+    const named = await s.bazhen(["agents", "whoami"], asAgent);
     expect([bare, named].map((r) => [r.code, r.stdout, r.stderr])).toEqual([
       [3, "", "bazhen is not running; start it with `bazhen start`\n"],
       [3, "", "bazhen is not running; start it with `bazhen start`\n"],
@@ -358,10 +361,10 @@ describe("bazhen whoami", () => {
 
   it("wants to run inside an agent the daemon knows", async () => {
     s.daemon.takes(null).answer("GET /v1/state", StateSnapshot, snapshot());
-    const outside = await s.bazhen(["whoami"]);
+    const outside = await s.bazhen(["agents", "whoami"]);
     const asked = s.daemon.routes();
     s.daemon.takes(AGENT);
-    const unknown = await s.bazhen(["whoami"], asAgent);
+    const unknown = await s.bazhen(["agents", "whoami"], asAgent);
     expect([outside.code, outside.stdout, outside.stderr]).toEqual([
       2,
       "",

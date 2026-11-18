@@ -291,7 +291,7 @@ fn web_lines(web: &Web) -> Vec<String> {
     };
     if pairing.required {
         out.push(format!(
-            "pairing: required on every origin (web.pairing = \"{mode}\"); `bazhen pair`"
+            "pairing: required on every origin (web.pairing = \"{mode}\"); `bazhen devices pair`"
         ));
         return out;
     }

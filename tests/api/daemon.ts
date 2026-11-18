@@ -112,9 +112,9 @@ export function bazhen(
   });
 }
 
-/** `bazhen events --follow` against `daemon`, left running: what it printed, and how it ended. */
+/** `bazhen events follow` against `daemon`, left running: what it printed, and how it ended. */
 export function followEvents(daemon: Daemon) {
-  const child = spawn(CLI, ["events", "--follow"], { env: daemon.env });
+  const child = spawn(CLI, ["events", "follow"], { env: daemon.env });
   let printed = "";
   child.stdout.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
   child.stderr.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
@@ -515,7 +515,7 @@ export class Daemon {
 
   /**
    * The cookie of the browser this daemon's requests and streams come from, paired through
-   * `bazhen pair`'s route on first use. The device outlives a restart, as a browser's does.
+   * `bazhen devices pair`'s route on first use. The device outlives a restart, as a browser's does.
    */
   async cookie(): Promise<string> {
     this.device ??= this.pairBrowser();
@@ -591,7 +591,7 @@ export class Daemon {
     });
   }
 
-  /** Opens a view of a terminal over the daemon's socket, as `bazhen attach` does. */
+  /** Opens a view of a terminal over the daemon's socket, as `bazhen terminals attach` does. */
   async socketView(terminalId: string, mode: "observe" | "interactive"): Promise<View> {
     const ws = new WebSocket(`ws+unix://${this.socket}:/v1/terminals/${terminalId}/stream`);
     const view = new View(ws);
@@ -1405,13 +1405,13 @@ export class View {
 export const DETACH = "\x1c\x1c";
 
 /**
- * `bazhen attach <target>` in a terminal of its own, which util-linux's `script` gives it, sized
+ * `bazhen terminals attach <target>` in a terminal of its own, which util-linux's `script` gives it, sized
  * as a person's would be: what it shows, keys to type into it, and how it exits.
  */
 export function attachInScript(daemon: Daemon, target: string) {
   const child = spawn(
     "script",
-    ["-qfec", `stty cols 100 rows 30 && exec bazhen attach ${target}`, "/dev/null"],
+    ["-qfec", `stty cols 100 rows 30 && exec bazhen terminals attach ${target}`, "/dev/null"],
     { env: daemon.env, stdio: ["pipe", "pipe", "inherit"] },
   );
   let shown = "";

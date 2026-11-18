@@ -35,7 +35,7 @@ describe("peer mail", () => {
 
   it("names its sender by name and id, and says to reply to the id, which a rename leaves", () => {
     expect(peerMail(from, "hi").split("\n")[0]).toBe(
-      `From BZ-127 (${id}, codex, /work). If it needs an answer: bazhen send ${id} "<answer>"`,
+      `From BZ-127 (${id}, codex, /work). If it needs an answer: bazhen agents send ${id} "<answer>"`,
     );
   });
 });

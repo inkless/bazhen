@@ -16,7 +16,7 @@ afterEach(async () => {
 
 const TERM = "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const NOT_A_TERMINAL =
-  "bazhen attach takes over a terminal: run it in one, not from a pipe or a script";
+  "bazhen terminals attach takes over a terminal: run it in one, not from a pipe or a script";
 
 /** A fake holder of TERM beside the scene's daemon socket, as the daemon's holders are. */
 async function holding(): Promise<FakeHolder> {
@@ -26,18 +26,18 @@ async function holding(): Promise<FakeHolder> {
   return holder;
 }
 
-describe("bazhen attach --direct", () => {
+describe("bazhen terminals attach --direct", () => {
   it("wants a terminal before it says a word to the holder, so a pipe never holds its input", async () => {
     await s.daemon.close();
     const fake = await holding();
-    const ran = await s.bazhen(["attach", TERM, "--direct"]);
+    const ran = await s.bazhen(["terminals", "attach", TERM, "--direct"]);
     expect([ran.code, ran.stderr.trim(), fake.hellos]).toEqual([1, NOT_A_TERMINAL, []]);
   });
 
   it("goes straight to the holder of a terminal id when no daemon is there, without --direct", async () => {
     await s.daemon.close();
     const fake = await holding();
-    const ran = await s.bazhen(["attach", TERM]);
+    const ran = await s.bazhen(["terminals", "attach", TERM]);
     expect([ran.code, ran.stderr.trim().split("\n"), fake.hellos]).toEqual([
       1,
       ["bazhen is not running: attaching straight to the terminal's holder", NOT_A_TERMINAL],
@@ -48,18 +48,18 @@ describe("bazhen attach --direct", () => {
   it("won't go around a daemon that listens but doesn't answer, saying --direct can view", async () => {
     s.daemon.hang("GET /v1/health");
     const fake = await holding();
-    const ran = await s.bazhen(["attach", TERM]);
+    const ran = await s.bazhen(["terminals", "attach", TERM]);
     expect([ran.code, ran.stderr.trim(), fake.hellos]).toEqual([
       3,
       "the daemon doesn't answer, but may be running (something listens on its socket), so " +
-        `attach won't go around it: \`bazhen attach --direct ${TERM}\` can view the terminal`,
+        `attach won't go around it: \`bazhen terminals attach --direct ${TERM}\` can view the terminal`,
       [],
     ]);
   });
 
   it("says the daemon isn't running for a name, which only it can resolve", async () => {
     await s.daemon.close();
-    const ran = await s.bazhen(["attach", "worker"]);
+    const ran = await s.bazhen(["terminals", "attach", "worker"]);
     expect([ran.code, ran.stderr.trim()]).toEqual([
       3,
       "bazhen is not running; start it with `bazhen start`",
@@ -67,10 +67,10 @@ describe("bazhen attach --direct", () => {
   });
 
   it("takes a terminal id only", async () => {
-    const ran = await s.bazhen(["attach", "worker", "--direct"]);
+    const ran = await s.bazhen(["terminals", "attach", "worker", "--direct"]);
     expect([ran.code, ran.stderr.trim()]).toEqual([
       2,
-      "bazhen attach --direct takes a terminal id: names are the daemon's to resolve",
+      "bazhen terminals attach --direct takes a terminal id: names are the daemon's to resolve",
     ]);
   });
 });

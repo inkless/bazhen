@@ -16,7 +16,7 @@ report it, by reading the code path or running a command, and drop what you can'
 
 Report findings ranked by severity, most severe first. Give each its file and line, what goes
 wrong and in what case, and what would fix it. Say plainly when you found nothing that should
-block the change. Report with bazhen task done <task> --note, or with bazhen send to whoever
+block the change. Report with bazhen tasks done <task> --note, or with bazhen agents send to whoever
 asked when the review was a message rather than a task.
 
 Change nothing: no edits, commits or pushes, and no comments posted anywhere outside Bazhen.

@@ -382,7 +382,7 @@ export interface Scene {
     env?: Record<string, string>,
     input?: string,
   ) => Promise<Ran>;
-  /** Starts `bazhen <args>` in `dir` and leaves it running, as `events --follow` runs. */
+  /** Starts `bazhen <args>` in `dir` and leaves it running, as `events follow` runs. */
   readonly start: (args: readonly string[]) => Running;
   /** As `bazhen`, with only `env` and the scene's PATH: no BAZHEN_HOME. */
   readonly bare: (args: readonly string[], env: Record<string, string>) => Promise<Ran>;
@@ -505,7 +505,7 @@ function run(
   });
 }
 
-/** A holder's socket as `bazhen attach --direct` finds it: what it was asked, and its end. */
+/** A holder's socket as `bazhen terminals attach --direct` finds it: what it was asked, and its end. */
 export interface FakeHolder {
   /** Each `hello` the holder was sent, in order. */
   readonly hellos: HolderHelloRequest[];

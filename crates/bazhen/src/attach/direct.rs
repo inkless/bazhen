@@ -1,4 +1,4 @@
-//! `bazhen attach --direct`: straight to a terminal's holder, over its own socket, for when the
+//! `bazhen terminals attach --direct`: straight to a terminal's holder, over its own socket, for when the
 //! daemon is down or broken. It types only while the daemon is surely not there, and lets go of
 //! the terminal's input as soon as one is: the holder frees its one writer slot only when the
 //! connection holding it hangs up, so a direct attach left open while the daemon runs would keep

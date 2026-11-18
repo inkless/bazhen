@@ -34,7 +34,7 @@ use crate::socket::{self, RECHECK_EVERY, Socket};
 use crate::start::{child_start, process_problem};
 use crate::start_time::{self, StartTimeError};
 
-/// The most connections served at once. The daemon holds one; `bazhen attach --direct` and
+/// The most connections served at once. The daemon holds one; `bazhen terminals attach --direct` and
 /// `doctor` add a few.
 pub const MAX_CONNECTIONS: usize = 16;
 /// How long the holder stops accepting after an accept fails for a reason that won't pass by

@@ -220,7 +220,7 @@ function refusal(status: number, text: string): Refused {
   }
 }
 
-/** Trades a code `bazhen pair` printed for this browser's device cookie, which the daemon sets. */
+/** Trades a code `bazhen devices pair` printed for this browser's device cookie, which the daemon sets. */
 export async function pairDevice(code: string, name: string): Promise<PairResponse> {
   const res = await fetch("/v1/pairing", {
     method: "POST",

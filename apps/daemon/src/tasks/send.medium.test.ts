@@ -26,7 +26,7 @@ describe("Tasks send", () => {
     const cwd = store.agentLaunch(lead)?.launch.cwd;
     const name = store.agentLaunch(lead)?.name;
     expect(inbox(store, worker)).toEqual([
-      `From ${name} (${lead}, claude-code, ${cwd}). If it needs an answer: bazhen send ${lead} "<answer>"\n\nIs the build green?`,
+      `From ${name} (${lead}, claude-code, ${cwd}). If it needs an answer: bazhen agents send ${lead} "<answer>"\n\nIs the build green?`,
     ]);
     expect(senders(store)).toEqual([lead]);
   });

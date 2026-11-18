@@ -138,7 +138,7 @@ pub(crate) fn list_roles(r: &RolesResponse) -> String {
     lines.join("\n")
 }
 
-/// Why `whoami` couldn't say: the daemon knows no such agent.
+/// Why `agents whoami` couldn't say: the daemon knows no such agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NoSuchAgent(pub(crate) String);
 

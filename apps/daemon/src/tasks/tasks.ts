@@ -535,7 +535,7 @@ export class Tasks {
     return this.delegateTo(caller, req, req.agentId, { caller, ...request });
   }
 
-  /** `delegate` to a new agent, started for the subtask as `req.launch` asks. */
+  /** `tasks delegate` to a new agent, started for the subtask as `req.launch` asks. */
   async launchAndDelegate(caller: Caller, req: DelegateTaskRequest): Promise<CreateTaskResponse> {
     const { idempotencyKey, ...request } = req;
     const asked = { caller, ...request };

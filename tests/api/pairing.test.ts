@@ -11,9 +11,9 @@ describe("pairing a browser through the CLI", () => {
     await daemon?.stop();
   });
 
-  /** The code `bazhen pair` printed, without its dash. */
+  /** The code `bazhen devices pair` printed, without its dash. */
   const pairCode = async () => {
-    const printed = await bazhen(["pair"], daemon.env);
+    const printed = await bazhen(["devices", "pair"], daemon.env);
     const code = /pairing code: ([A-Z2-7]{4})-([A-Z2-7]{4})/.exec(printed.out);
     expect([printed.code, printed.out]).toEqual([0, expect.stringContaining("works once, until")]);
     return `${code?.[1]}${code?.[2]}`;
@@ -58,7 +58,10 @@ describe("pairing a browser through the CLI", () => {
   });
 
   it("refuses to issue a code to a caller that says it is an agent", async () => {
-    const asAgent = await bazhen(["pair"], { ...daemon.env, BAZHEN_AGENT_ID: "agent_x" });
+    const asAgent = await bazhen(["devices", "pair"], {
+      ...daemon.env,
+      BAZHEN_AGENT_ID: "agent_x",
+    });
     expect([asAgent.code, asAgent.out]).toEqual([1, expect.stringContaining("can't pair")]);
   });
 });

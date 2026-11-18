@@ -15,7 +15,7 @@ use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, printable};
 use crate::out::Out;
 use crate::tasks::{Step, Stop, agent_ref, key, need, new_name, start_dir, usage};
-use crate::{Exit, LIFECYCLE_USAGE};
+use crate::{AGENTS_USAGE, Exit};
 
 /// The options each verb takes beside `--json`; `--home` and `--port` are every verb's.
 fn options(verb: &str) -> &'static [&'static str] {
@@ -29,7 +29,7 @@ fn options(verb: &str) -> &'static [&'static str] {
 
 /// Runs the lifecycle verb the command line names, and says how it went.
 pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    answer(verb(p, daemon), LIFECYCLE_USAGE, out)
+    answer(verb(p, daemon), AGENTS_USAGE, out)
 }
 
 /// Prints what a verb answered, or why it stopped, with `usage_text` under a usage mistake.
@@ -150,11 +150,11 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
         .given()
         .find(|o| !own.contains(o) && !["json", "home", "port"].contains(o))
     {
-        return usage(format!("{name} takes no --{other}"));
+        return usage(format!("agents {name} takes no --{other}"));
     }
     let words = if name == "signal" { 3 } else { 2 };
     if let Some(extra) = p.word(words) {
-        return usage(format!("{name} takes no {extra}"));
+        return usage(format!("agents {name} takes no {extra}"));
     }
     if name == "launch" {
         return launch(p, daemon);

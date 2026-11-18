@@ -17,7 +17,7 @@ async function openShell(daemon: Daemon, key: string): Promise<string> {
 }
 
 const runtimeOf = (command: string | null) =>
-  command === null ? "none" : command.startsWith("bazhen attach") ? "holder" : "tmux";
+  command === null ? "none" : command.startsWith("bazhen terminals attach") ? "holder" : "tmux";
 
 /** Each terminal's state and the runtime its attach command names, by TerminalId. */
 async function terminals(daemon: Daemon): Promise<Record<string, string>> {

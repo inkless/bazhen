@@ -57,7 +57,7 @@ const stopReading = (run: Running, daemon: FakeDaemon = s.daemon) => {
 };
 const streams = () => s.daemon.routes().filter((r) => r.startsWith("GET /v1/events"));
 
-describe("bazhen events --follow", () => {
+describe("bazhen events follow", () => {
   it("prints each event a line, from the state's cursor", async () => {
     states(snapshot({ epoch: "e1", eventId: 7 }));
     s.daemon.events(
@@ -66,7 +66,7 @@ describe("bazhen events --follow", () => {
         { type: "event", event: event(9, "terminal.renamed", SH1) },
       ),
     );
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await run.printed(line(9, "terminal.renamed", SH1));
     expect(await stopReading(run)).toEqual({
       code: 0,
@@ -80,7 +80,7 @@ describe("bazhen events --follow", () => {
     states(snapshot({ epoch: "e1", eventId: 7 }));
     const sent = { ...event(3), payload: { name: "x" }, causationId: 2, correlationId: "c" };
     s.daemon.events(sends({ type: "event", event: sent }));
-    const run = s.start(["events", "--follow", "--json", "--after", "2"]);
+    const run = s.start(["events", "follow", "--json", "--after", "2"]);
     await run.printed("\n");
     expect(await stopReading(run)).toEqual({
       code: 0,
@@ -93,7 +93,7 @@ describe("bazhen events --follow", () => {
   it("ends, exiting 0, once no one reads what it prints, as under head", async () => {
     states(snapshot());
     s.daemon.events(sends({ type: "event", event: event(2) }));
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await run.printed(line(2));
     run.stopReading();
     s.daemon.opened[0]?.send({ type: "event", event: event(3) });
@@ -103,7 +103,7 @@ describe("bazhen events --follow", () => {
   it("says events were missed after a reset, and follows on from the state read again", async () => {
     states(snapshot({ epoch: "e1", eventId: 7 }), snapshot({ epoch: "e2", eventId: 20 }));
     s.daemon.events(resets("foreign"), sends({ type: "event", event: event(21) }));
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await run.printed(line(21));
     expect(await stopReading(run)).toEqual({
       code: 0,
@@ -119,7 +119,7 @@ describe("bazhen events --follow", () => {
   it("prints a reset as a line of its own with --json", async () => {
     states(snapshot(), snapshot({ eventId: 30 }));
     s.daemon.events(resets("stale"));
-    const run = s.start(["events", "--follow", "--json"]);
+    const run = s.start(["events", "follow", "--json"]);
     await run.printed("\n");
     await expect(stopReading(run)).resolves.toMatchObject({
       code: 0,
@@ -137,7 +137,7 @@ describe("bazhen events --follow", () => {
       },
       sends({ type: "event", event: event(9) }),
     );
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await run.printed(line(9));
     expect(await stopReading(run)).toEqual({ code: 0, stdout: line(8) + line(9), stderr: "" });
     expect(streams()).toEqual([
@@ -149,7 +149,7 @@ describe("bazhen events --follow", () => {
   it("says once that the daemon went away, and follows on once it is back", async () => {
     states(snapshot({ epoch: "e1", eventId: 7 }));
     const opened = new Promise<void>((resolve) => s.daemon.events(() => resolve()));
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await opened;
     await s.daemon.close();
     await run.printed("trying again");
@@ -173,7 +173,7 @@ describe("bazhen events --follow", () => {
   it("prints the events that came in the same write as the stream's answer", async () => {
     states(snapshot({ epoch: "e1", eventId: 7 }));
     s.daemon.eventsWithTheAnswer(JSON.stringify({ type: "event", event: event(8) }));
-    const run = s.start(["events", "--follow"]);
+    const run = s.start(["events", "follow"]);
     await run.printed(line(8));
     expect(await stopReading(run)).toEqual({ code: 0, stdout: line(8), stderr: "" });
   });
@@ -184,7 +184,7 @@ describe("bazhen events --follow", () => {
       JSON.stringify({ type: "event", event: event(8) }),
       JSON.stringify({ type: "hello" }),
     );
-    const ran = await s.bazhen(["events", "--follow"]);
+    const ran = await s.bazhen(["events", "follow"]);
     expect([ran.code, ran.stdout, ran.stderr.split(":")[0]]).toEqual([
       1,
       line(8),
@@ -195,42 +195,42 @@ describe("bazhen events --follow", () => {
   it("prints the daemon's refusal of the stream, and exits 1", async () => {
     states(snapshot());
     s.daemon.refuseEvents(403, { error: "forbidden", message: "agents can't follow events" });
-    const ran = await s.bazhen(["events", "--follow"]);
+    const ran = await s.bazhen(["events", "follow"]);
     expect(ran).toEqual({ code: 1, stdout: "", stderr: "agents can't follow events\n" });
   });
 
   it("exits 3 when no daemon answers", async () => {
     await s.daemon.close();
-    expect(await s.bazhen(["events", "--follow"])).toEqual({
+    expect(await s.bazhen(["events", "follow"])).toEqual({
       code: 3,
       stdout: "",
       stderr: NOT_RUNNING,
     });
   });
 
-  it("refuses no --follow, an --after not an id, and another's option, sending nothing", async () => {
+  it("refuses no follow, an --after not an id, and another's option, sending nothing", async () => {
     const ran = await Promise.all(
       [
         ["events"],
-        ["events", "--follow", "--after", "x"],
-        ["events", "--follow", "--all"],
-        ["events", "--follow", "now"],
+        ["events", "follow", "--after", "x"],
+        ["events", "follow", "--all"],
+        ["events", "follow", "now"],
       ].map((args) => s.bazhen(args)),
     );
     expect(ran.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
-      [2, "events takes --follow: the daemon keeps no history to list"],
+      [2, "events needs a verb"],
       [2, "--after is an event's id, not x"],
-      [2, "events takes no --all"],
-      [2, "events takes no now"],
+      [2, "events follow takes no --all"],
+      [2, "events follow takes no now"],
     ]);
     expect(s.daemon.received).toEqual([]);
   });
 });
 
-describe("bazhen wait", () => {
+describe("bazhen agents wait and shells wait", () => {
   it("exits 0 at once for an agent already in the state, opening no stream", async () => {
     states(snapshot({ agents: [reviewer("running")] }));
-    expect(await s.bazhen(["wait", "reviewer", "running"])).toEqual({
+    expect(await s.bazhen(["agents", "wait", "reviewer", "running"])).toEqual({
       code: 0,
       stdout: `reviewer (${AGENT}) is running\n`,
       stderr: "",
@@ -248,7 +248,7 @@ describe("bazhen wait", () => {
       stream.send({ type: "event", event: event(2, "agent.created") });
       setTimeout(() => stream.send({ type: "event", event: event(3) }), 50);
     });
-    expect(await s.bazhen(["wait", AGENT, "running"])).toEqual({
+    expect(await s.bazhen(["agents", "wait", AGENT, "running"])).toEqual({
       code: 0,
       stdout: `reviewer (${AGENT}) is running\n`,
       stderr: "",
@@ -261,7 +261,7 @@ describe("bazhen wait", () => {
       snapshot({ agents: [reviewer("running")] }),
     );
     s.daemon.events(resets("stale"));
-    expect((await s.bazhen(["wait", "reviewer", "running"])).code).toBe(0);
+    expect((await s.bazhen(["agents", "wait", "reviewer", "running"])).code).toBe(0);
   });
 
   it("exits 1 once the agent ends otherwise, saying what it became", async () => {
@@ -270,7 +270,7 @@ describe("bazhen wait", () => {
       snapshot({ agents: [reviewer("closed")] }),
     );
     s.daemon.events(sends({ type: "event", event: event(2, "agent.closed") }));
-    expect(await s.bazhen(["wait", "reviewer", "running"])).toEqual({
+    expect(await s.bazhen(["agents", "wait", "reviewer", "running"])).toEqual({
       code: 1,
       stdout: "",
       stderr: `reviewer (${AGENT}) is closed, and can't be running now\n`,
@@ -280,7 +280,7 @@ describe("bazhen wait", () => {
   it("exits 5 when the timeout runs out first, saying where it stands", async () => {
     states(snapshot({ agents: [reviewer("starting")] }));
     s.daemon.events();
-    expect(await s.bazhen(["wait", "reviewer", "running", "--timeout", "1"])).toEqual({
+    expect(await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "1"])).toEqual({
       code: 5,
       stdout: "",
       stderr: `reviewer (${AGENT}) is starting still, after 1 s\n`,
@@ -299,7 +299,7 @@ describe("bazhen wait", () => {
       stream.send({ type: "event", event: event(2) });
     });
     const started = Date.now();
-    const ran = await s.bazhen(["wait", "reviewer", "running", "--timeout", "1"]);
+    const ran = await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "1"]);
     expect([ran.code, Date.now() - started < 4000]).toEqual([5, true]);
   });
 
@@ -307,14 +307,14 @@ describe("bazhen wait", () => {
     states(snapshot({ agents: [reviewer("starting")] }));
     s.daemon.hangEvents();
     const started = Date.now();
-    const ran = await s.bazhen(["wait", "reviewer", "running", "--timeout", "1"]);
+    const ran = await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "1"]);
     expect([ran.code, Date.now() - started < 4000]).toEqual([5, true]);
   });
 
   it("judges again once the daemon is back, though no event says what changed", async () => {
     states(snapshot({ agents: [reviewer("starting")] }));
     const opened = new Promise<void>((resolve) => s.daemon.events(() => resolve()));
-    const run = s.start(["wait", "reviewer", "running", "--timeout", "10"]);
+    const run = s.start(["agents", "wait", "reviewer", "running", "--timeout", "10"]);
     await opened;
     await s.daemon.close();
     const back = await FakeDaemon.listen(s.socket);
@@ -343,7 +343,7 @@ describe("bazhen wait", () => {
         stream.send({ type: "event", event: event(3, "terminal.ready", TERM) });
       }, 200);
     });
-    const ran = await s.bazhen(["wait", "reviewer", "running", "--timeout", "5"]);
+    const ran = await s.bazhen(["agents", "wait", "reviewer", "running", "--timeout", "5"]);
     expect([ran.code, s.daemon.calls("GET /v1/state").length]).toEqual([0, 2]);
   });
 
@@ -351,19 +351,21 @@ describe("bazhen wait", () => {
     const build = shell(SH1, { name: "build", state: "closed" });
     states(snapshot({ shells: [shell(SH1, { name: "build" })] }), snapshot({ shells: [build] }));
     s.daemon.events(sends({ type: "event", event: event(2, "terminal.closed", SH1) }));
-    const ran = await s.bazhen(["wait", "BUILD", "ended", "--json"]);
+    const ran = await s.bazhen(["shells", "wait", "BUILD", "ended", "--json"]);
     expect([ran.code, JSON.parse(ran.stdout)]).toEqual([0, build]);
   });
 
-  it("refuses a state its kind hasn't, a target the daemon hasn't, and a bad timeout", async () => {
+  it("refuses a state its kind hasn't, a target the daemon hasn't of its kind, and a bad timeout", async () => {
     states(snapshot({ agents: [reviewer("starting")], shells: [shell(SH1)] }));
     const ran = await Promise.all(
       [
-        ["wait", "reviewer", "creating"],
-        ["wait", SH1, "starting"],
-        ["wait", "nobody", "running"],
-        ["wait", "reviewer", "running", "--timeout", "soon"],
-        ["wait", "reviewer"],
+        ["agents", "wait", "reviewer", "creating"],
+        ["shells", "wait", SH1, "starting"],
+        ["agents", "wait", "nobody", "running"],
+        ["agents", "wait", SH1, "running"],
+        ["shells", "wait", "reviewer", "running"],
+        ["agents", "wait", "reviewer", "running", "--timeout", "soon"],
+        ["agents", "wait", "reviewer"],
       ].map((args) => s.bazhen(args)),
     );
     expect(ran.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
@@ -375,25 +377,27 @@ describe("bazhen wait", () => {
         2,
         "a shell's state is creating, running, exited, unknown, lost, closing, closed, failed, or ended; not starting",
       ],
-      [1, "the daemon has no agent or open shell nobody"],
+      [1, "the daemon has no agent nobody"],
+      [1, `the daemon has no agent ${SH1}`],
+      [1, "the daemon has no open shell reviewer"],
       [2, "--timeout is whole seconds, not soon"],
       [2, "missing the state"],
     ]);
     expect(streams()).toEqual([]);
   });
 
-  it("refuses a state no agent or shell has, and no timeout, before asking the daemon", async () => {
+  it("refuses a state no agent has, and no timeout, before asking the daemon", async () => {
     await s.daemon.close();
     const ran = await Promise.all(
       [
-        ["wait", "reviewer", "bogus"],
-        ["wait", "reviewer", "running", "--timeout", "0"],
+        ["agents", "wait", "reviewer", "bogus"],
+        ["agents", "wait", "reviewer", "running", "--timeout", "0"],
       ].map((args) => s.bazhen(args)),
     );
     expect(ran.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
       [
         2,
-        "the state is an agent's (starting, running, exited, unknown, lost, closing, closed, failed), a shell's (creating, running, exited, unknown, lost, closing, closed, failed), or ended; not bogus",
+        "an agent's state is starting, running, exited, unknown, lost, closing, closed, failed, or ended; not bogus",
       ],
       [2, "--timeout is at least 1 s"],
     ]);
@@ -401,6 +405,6 @@ describe("bazhen wait", () => {
 
   it("exits 3 when no daemon answers", async () => {
     await s.daemon.close();
-    expect((await s.bazhen(["wait", "reviewer", "running"])).code).toBe(3);
+    expect((await s.bazhen(["agents", "wait", "reviewer", "running"])).code).toBe(3);
   });
 });
