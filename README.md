@@ -11,8 +11,8 @@ client. Agents, tasks, and orchestration come later.
 
 - Node.js 24 or newer (development uses the version `.nvmrc` pins)
 - pnpm 12 (pinned through `packageManager`)
-- tmux 3.x; 3.5 or later avoids a crash Bazhen can only work around before it
-  ([docs/tmux.md](docs/tmux.md))
+- tmux 3.x, only for terminals on tmux (`runtime.default = "tmux"`); 3.5 or later avoids a crash
+  Bazhen can only work around before it ([docs/tmux.md](docs/tmux.md))
 - Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
   once per machine the cargo tools `pnpm check` and `pnpm test:falsify` run:
   `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2 cargo-mutants@27.1.0`
@@ -102,6 +102,10 @@ memory_max = "50%" # each holder terminal's memory, where it can be contained; s
 total_memory_max = "80%" # every holder terminal's together: at least 64M, a whole 1-100%, or "infinity"
 swap_max = "0" # each holder terminal's swap: bytes, "0" for none, or "infinity"
 ```
+
+A runtime that isn't the default and has no terminal open on it isn't read: `bazhen status` and
+`bazhen doctor` show it as `unused`, and it can't fail doctor. Without tmux installed, a holder
+daemon runs as usual.
 
 Each line of history costs memory in every view of a terminal, and in the daemon's copy of each
 tmux terminal: at 100,000 lines of 200 columns, a full history is roughly 240 MB per view.
