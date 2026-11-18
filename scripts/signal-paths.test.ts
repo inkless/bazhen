@@ -180,7 +180,7 @@ describe("raw signal calls in TypeScript", () => {
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it("still reads a / after a prefix !, a lone + or -, or a keyword as a regular expression", () => {
+  it("tells a regular expression after a prefix !, a lone + or - or a keyword from a division after a postfix one", () => {
     const source = [
       "if (!/'/.test(s)) child.kill();",
       "return !/'/.test(s) && child.kill();",
@@ -188,8 +188,9 @@ describe("raw signal calls in TypeScript", () => {
       "const c = -/'/.lastIndex; child.kill();",
       "const d = i++ + /'/.source; child.kill();",
       "const e = typeof /'/; child.kill();",
+      "if (!/'/.test(s)) n = i++ / 2; child.kill(); m = j / 3;",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(calls("a.ts", "const a = !/process.kill(1)/.test(s);")).toEqual([]);
   });
 
@@ -205,7 +206,7 @@ describe("raw signal calls in TypeScript", () => {
     expect(rawSignalCalls("a.tsx", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it("still reads a quote closed on its line, or continued past it, as a string", () => {
+  it("reads a quote closed on its line, or continued past it, as a string, and one left open as code", () => {
     const source = [
       'const a = "it\'s child.kill()"; child.kill();',
       "const b = 'say \"child.kill()\"'; child.kill();",
@@ -213,8 +214,9 @@ describe("raw signal calls in TypeScript", () => {
       "child.kill()'; child.kill();",
       "const d = 'one \\\r\nchild.kill()'; child.kill();",
       "const e = '\\'child.kill()'; child.kill();",
+      "const f = 'open; child.kill();",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 4, 6, 7]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 4, 6, 7, 8]);
   });
 
   it("finds process._kill, and a re-export of process's kill", () => {
