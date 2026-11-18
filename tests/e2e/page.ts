@@ -10,7 +10,7 @@ import {
 import { TmuxServer } from "@bazhen/host-guard";
 import { answerPatched } from "../support/state-route.ts";
 import { giveTranscript } from "../support/transcript.ts";
-import { daemonHome as homeOf, isRuntime, type Runtime } from "./daemons.ts";
+import { homeOf, isRuntime, type Runtime } from "./daemons.ts";
 
 /** The runtime the running test's daemon makes its terminals on: its project's name. */
 export function runtime(): Runtime {
@@ -159,7 +159,7 @@ export function generationOf(page: Page, agentId: string): Promise<unknown> {
  * The attach command the page should show for the agent: tmux's, attaching its session, or a
  * holder's, `bazhen terminals attach` with the id of the agent's terminal.
  */
-export async function attachCommandFor(page: Page, agentId: string): Promise<RegExp> {
+export async function attachCommandFor(page: Page, agentId: string): Promise<RegExp | string> {
   if (runtime() === "tmux") return / attach-session -t /;
   const terminalId = await page.evaluate(async (id) => {
     const state: unknown = await (await fetch("/v1/state")).json();
@@ -169,7 +169,7 @@ export async function attachCommandFor(page: Page, agentId: string): Promise<Reg
       : undefined;
     return String(Reflect.get(Object(agent), "terminalId"));
   }, agentId);
-  return new RegExp(`^bazhen terminals attach ${terminalId}$`);
+  return `bazhen terminals attach ${terminalId}`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,6 @@ import { storageState } from "./pairing.ts";
 
 requireDisposableHost();
 
-// One daemon per runtime, each with its own home, ports and dev proxy, and a project of specs.
 // Free ports and a per-run directory, so parallel worktrees can run e2e at once. Playwright
 // re-evaluates this file in its workers; they inherit the values through the environment
 // instead of choosing new ones.
@@ -99,6 +98,14 @@ const clean = (env: Record<string, string>, command: string) =>
   `env -i ${Object.entries(env)
     .map(([k, v]) => `${k}='${v.replaceAll("'", "'\\''")}'`)
     .join(" ")} ${command}`;
+
+// Playwright matches each name anywhere under the test directory, so a misspelt one would match
+// nothing and drop its spec from the holder project without a word.
+const missing = RUNTIME_AGNOSTIC_SPECS.filter(
+  (spec) => !existsSync(new URL(spec, import.meta.url)),
+);
+if (missing.length > 0)
+  throw new Error(`RUNTIME_AGNOSTIC_SPECS names no such spec: ${missing.join(", ")}`);
 
 const daemons = e2eDaemons();
 

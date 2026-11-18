@@ -1,4 +1,8 @@
+import { existsSync } from "node:fs";
+import { request } from "node:http";
+import { createConnection } from "node:net";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 /** The runtimes the run starts a daemon on, one Playwright project each, named for it. */
 export const RUNTIMES = ["tmux", "holder"] as const;
@@ -31,7 +35,7 @@ export function runRoot(): string {
   return root;
 }
 
-export const daemonHome = (runtime: Runtime) => join(runRoot(), runtime);
+export const homeOf = (runtime: Runtime) => join(runRoot(), runtime);
 
 export const portVariable = (runtime: Runtime, kind: "DAEMON" | "WEB") =>
   `BZ_E2E_${runtime.toUpperCase()}_${kind}_PORT`;
@@ -44,9 +48,9 @@ function port(runtime: Runtime, kind: "DAEMON" | "WEB"): number {
 }
 
 /** The daemon of `runtime`, as the config chose its home and ports for the run. */
-export const e2eDaemon = (runtime: Runtime): E2eDaemon => ({
+const e2eDaemon = (runtime: Runtime): E2eDaemon => ({
   runtime,
-  home: daemonHome(runtime),
+  home: homeOf(runtime),
   daemonPort: port(runtime, "DAEMON"),
   webPort: port(runtime, "WEB"),
 });
@@ -54,3 +58,61 @@ export const e2eDaemon = (runtime: Runtime): E2eDaemon => ({
 export const e2eDaemons = () => RUNTIMES.map(e2eDaemon);
 
 export const webOrigin = (daemon: E2eDaemon) => `http://127.0.0.1:${daemon.webPort}`;
+
+const socketOf = (home: string) => join(home, "run", "bazhen.sock");
+
+/** One request to the daemon at `home` over its socket, as the CLI makes it; answers the JSON body. */
+export function socketCall(
+  home: string,
+  method: string,
+  path: string,
+  body?: object,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        socketPath: socketOf(home),
+        method,
+        path,
+        headers: { "content-type": "application/json" },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (d: Buffer) => (text += d.toString()));
+        res.on("end", () => {
+          if ((res.statusCode ?? 0) >= 400) reject(new Error(`${path}: ${res.statusCode} ${text}`));
+          else resolve(JSON.parse(text));
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+}
+
+/** Whether anything accepts a connection on the daemon's socket under `home`. */
+function answers(home: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const connection = createConnection(socketOf(home));
+    connection.once("connect", () => {
+      connection.destroy();
+      resolve(true);
+    });
+    connection.once("error", () => resolve(false));
+  });
+}
+
+/**
+ * Stops the daemon at `home` as `bazhen stop` does, over its socket, and resolves once it
+ * no longer answers. Playwright runs global teardown before it stops its web servers, and a daemon
+ * left running would go on writing into the home teardown removes.
+ */
+export async function stopDaemon(home: string): Promise<void> {
+  if (!existsSync(socketOf(home)) || !(await answers(home))) return;
+  await socketCall(home, "POST", "/v1/daemon/stop");
+  for (let waited = 0; waited < 5_000; waited += 100) {
+    if (!(await answers(home))) return;
+    await delay(100);
+  }
+  throw new Error(`the daemon at ${home} still answers 5 s after it was asked to stop`);
+}

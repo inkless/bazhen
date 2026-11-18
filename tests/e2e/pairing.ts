@@ -1,35 +1,11 @@
-import { request } from "node:http";
 import { join } from "node:path";
+import { socketCall } from "./daemons.ts";
 
 /**
  * Where a project's browser keeps the device cookie the global setup paired it with, with the
  * daemon at `home`: in that home, which teardown removes.
  */
 export const storageState = (home: string) => join(home, "browser.json");
-
-/** One request to the daemon at `home` over its socket, as the CLI makes it; answers the JSON body. */
-function socketCall(home: string, method: string, path: string, body?: object): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const req = request(
-      {
-        socketPath: join(home, "run", "bazhen.sock"),
-        method,
-        path,
-        headers: { "content-type": "application/json" },
-      },
-      (res) => {
-        let text = "";
-        res.on("data", (d: Buffer) => (text += d.toString()));
-        res.on("end", () => {
-          if ((res.statusCode ?? 0) >= 400) reject(new Error(`${path}: ${res.statusCode} ${text}`));
-          else resolve(JSON.parse(text));
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
-  });
-}
 
 /**
  * A fresh pairing code, asked of the daemon at `home` over its socket, as `bazhen devices pair`
