@@ -760,6 +760,10 @@ const NOT_DECODERS: Record<string, string> = {
     "reads the holder's own counts; no bytes from a peer",
   "crates/bazhen-holder/src/server.rs::paste":
     "answers a paste FrameDecoder::next_frame decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/server.rs::screen":
+    "answers a screen request FrameDecoder::next_frame decoded, which the proto crate's frame target fuzzes",
+  "crates/bazhen-holder/src/server.rs::screen_text":
+    "renders the engine's own grid as text for a decoded request's count; parses nothing",
   "crates/bazhen-holder/src/holder.rs::Holder::paste":
     "queues a decoded paste's checked text for the child; parses nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::hold": "keeps a decoded request; reads no bytes",
