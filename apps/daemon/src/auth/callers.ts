@@ -209,7 +209,15 @@ function remove(path: string): void {
 export type Identity =
   | { readonly kind: "human" }
   | { readonly kind: "agent"; readonly agentId: AgentSessionId }
-  | { readonly kind: "refused"; readonly reason: string };
+  | {
+      readonly kind: "refused";
+      readonly reason: string;
+      /** Set when the caller wasn't read in time, so the same call may yet be answered. */
+      readonly retry?: true;
+    };
+
+/** Why a caller whose process wasn't read in time is refused. */
+export const LATE_REASON = "the caller's process wasn't read in time; try again";
 
 /**
  * Who a caller is, from the token and agent id it presents (foundation-design §9.1). A token
@@ -229,9 +237,18 @@ export function identify(
   presented: Presented,
   peer: PeerReading = { kind: "outside" },
 ): Identity {
-  if (peer.kind === "refused") return refused(peer.reason);
-  if (peer.kind === "codex") return asCodex(credentials, presented, peer.via);
-  if (peer.kind === "agent") return asPeer(credentials, presented, peer.agentId);
+  switch (peer.kind) {
+    case "refused":
+      return refused(peer.reason);
+    case "late":
+      return { kind: "refused", reason: LATE_REASON, retry: true };
+    case "codex":
+      return asCodex(credentials, presented, peer.via);
+    case "agent":
+      return asPeer(credentials, presented, peer.agentId);
+    case "outside":
+      break;
+  }
   const { token, said } = presented;
   if (token !== undefined) {
     const agentId = credentials.agentOf(token);
@@ -390,6 +407,12 @@ const forbidden = (c: Context, message: string) => {
   return c.json(body, 403);
 };
 
+/** Answers a caller refused only until it is read in time, which may call again. */
+export const unavailable = (c: Context, message: string) => {
+  const body: ErrorResponse = { error: "unavailable", message };
+  return c.json(body, 503);
+};
+
 /**
  * Identifies every socket request once, before any route sees it (foundation-design §9.1): a
  * credential that doesn't hold is refused on every route, an agent is refused every route but
@@ -410,6 +433,7 @@ export function guardCallers(
       presentedBy((name) => c.req.header(name)),
       reading,
     );
+    if (who.kind === "refused" && who.retry === true) return unavailable(c, who.reason);
     if (who.kind === "refused") c.set("refusal", who.reason);
     else c.set("caller", who.kind === "agent" ? who.agentId : null);
     return next();

@@ -15,15 +15,20 @@ import {
   peerReading,
   readPeer,
   type PeerChain,
+  type PeerRead,
   type PeerReading,
   type TerminalPids,
 } from "./peer.ts";
 
 let server: Server | undefined;
+/** Servers `connections` opened beside `server`. */
+const listeners: Server[] = [];
 let dir = "";
 afterEach(() => {
   server?.close();
+  for (const listener of listeners.splice(0)) listener.close();
   rmSync(dir, { recursive: true, force: true });
+  dir = "";
 });
 
 const agent = newId("agent");
@@ -64,6 +69,10 @@ function post(socket: string, path = "/v1/daemon/stop", body = "", via?: Agent) 
   });
 }
 
+/** The chain `read` names, if it read one. */
+const chainOf = (read: PeerRead | undefined): PeerChain | undefined =>
+  read?.kind === "read" ? read.chain : undefined;
+
 /** A script at a path of its own, as a binary `readPeer` runs. */
 function script(name: string, body: string): string {
   const path = join(dir, name);
@@ -74,13 +83,14 @@ function script(name: string, body: string): string {
 
 describe("bazhen-peer, on the socket", () => {
   it("names the process that connected, its session and its parent first among its ancestors", async () => {
-    const seen: (PeerChain | undefined)[] = [];
+    const seen: PeerRead[] = [];
     const socket = await guarded(async (connection) => {
       seen.push(await readPeer(PEER_SOURCE, connection));
       return { kind: "outside" };
     });
     await post(socket);
-    expect([seen[0]?.pid, seen[0]?.ancestors[0]]).toEqual([process.pid, process.ppid]);
+    const chain = chainOf(seen[0]);
+    expect([chain?.pid, chain?.ancestors[0]]).toEqual([process.pid, process.ppid]);
   });
 
   it("takes a caller outside every agent's process, presenting nothing, as the human", async () => {
@@ -240,19 +250,31 @@ describe("bazhen-peer, on the socket", () => {
   });
 });
 
-/** The daemon's end of a connection this process makes to a socket of its own. */
-const connection = () =>
-  new Promise<Socket>((resolve) => {
-    dir = mkdtempSync("/tmp/bz-peer-");
-    const socket = join(dir, "s.sock");
-    server = createServer();
-    server.on("connection", resolve);
-    server.listen(socket, () =>
-      request({ socketPath: socket })
-        .on("error", () => {})
-        .end(),
-    );
+/** The daemon's ends of `count` connections this process makes to a socket of its own. */
+const connections = (count: number) =>
+  new Promise<Socket[]>((resolve) => {
+    dir ||= mkdtempSync("/tmp/bz-peer-");
+    const socket = join(dir, `s${listeners.length}.sock`);
+    const accepted: Socket[] = [];
+    const held = createServer();
+    listeners.push(held);
+    held.on("connection", (conn) => {
+      if (accepted.push(conn) === count) resolve(accepted);
+    });
+    held.listen(socket, () => {
+      for (let i = 0; i < count; i += 1)
+        request({ socketPath: socket, agent: false })
+          .on("error", () => {})
+          .end();
+    });
   });
+
+/** The daemon's end of a connection this process makes to a socket of its own. */
+const connection = async () => {
+  const [conn] = await connections(1);
+  if (conn === undefined) throw new Error("no connection");
+  return conn;
+};
 
 describe("readPeer, after the body is read", () => {
   it("leaves the connection serving a later call on it, as the hook routes read their body first", async () => {
@@ -280,18 +302,80 @@ describe("readPeer, after the body is read", () => {
 });
 
 describe("readPeer", () => {
-  it("names nobody when the reader exits otherwise than cleanly, can't start, or takes too long", async () => {
+  it("says why it read nobody when the reader refuses, exits otherwise than cleanly, or can't start", async () => {
     const conn = await connection();
-    const slow = script("slow", "sleep 1");
+    const nonsense = script("nonsense", "echo nonsense");
+    const replaced = await connection();
+    noteAccepted(replaced, 0);
     const readings = [
       await readPeer("/bin/false", conn),
+      await readPeer(nonsense, conn),
       await readPeer(join(dir, "absent"), conn),
-      await readPeer(slow, conn, 100),
+      await readPeer(PEER_SOURCE, replaced),
     ];
     conn.destroy();
-    expect(readings).toEqual([undefined, undefined, undefined]);
+    replaced.destroy();
+    expect(readings).toEqual([
+      { kind: "unread", why: "the reader exited 1" },
+      { kind: "unread", why: "the reader printed no peer" },
+      { kind: "unread", why: expect.stringMatching(/^the reader can't start: .*ENOENT/) },
+      {
+        kind: "unread",
+        why: expect.stringMatching(/started at \d+, after the connection was accepted at 0$/),
+      },
+    ]);
+  });
+
+  it("keeps the first line of what the reader said, and at most 512 bytes of it", async () => {
+    const conn = await connection();
+    const panicked = script(
+      "panicked",
+      "printf 'thread main panicked at src/main.rs:9:5:\\nboom\\nnote: run with RUST_BACKTRACE=1\\n' >&2; exit 101",
+    );
+    const long = script(
+      "long",
+      "i=0; while [ $i -lt 400 ]; do printf '\\303\\251' >&2; i=$((i+1)); done; exit 1",
+    );
+    const readings = [await readPeer(panicked, conn), await readPeer(long, conn)];
+    conn.destroy();
+    expect(readings).toEqual([
+      { kind: "unread", why: "thread main panicked at src/main.rs:9:5:" },
+      { kind: "unread", why: "\u00e9".repeat(256) },
+    ]);
+  });
+
+  it("reads a reader still running at its deadline as late, not as nobody", async () => {
+    const conn = await connection();
+    const reading = await readPeer(script("slow", "sleep 1"), conn, 100);
+    conn.destroy();
+    expect(reading).toEqual({ kind: "late" });
+  });
+
+  it("hears a reader that finished while the daemon's loop was stalled past the deadline", async () => {
+    const conn = await connection();
+    const reading = readPeer(PEER_SOURCE, conn, 100);
+    stall(1000);
+    const read = await reading;
+    conn.destroy();
+    expect(read).toEqual({ kind: "read", chain: expect.objectContaining({ pid: process.pid }) });
+  });
+
+  it("reads every one of more callers than it reads at once, through repeated stalls", async () => {
+    const conns = await connections(24);
+    const readings = Promise.all(conns.map((conn) => readPeer(PEER_SOURCE, conn, 100)));
+    const stalls = setInterval(() => stall(1000), 20);
+    const read = await readings.finally(() => clearInterval(stalls));
+    for (const conn of conns) conn.destroy();
+    expect(read).toEqual(
+      conns.map(() => ({ kind: "read", chain: expect.objectContaining({ pid: process.pid }) })),
+    );
   });
 });
+
+/** Blocks this process's loop for `ms`, as a busy daemon's is. */
+function stall(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 /** A process listening on a socket of its own, its argv as `argv0` and `args` give it. */
 async function listening(argv0: string, ...args: string[]) {

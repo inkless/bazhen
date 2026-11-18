@@ -57,14 +57,26 @@ async function turn<T>(read: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * A reading of a socket's peer: who it is; nobody, and why; or late, when the reader was still
+ * running at its deadline, which says nothing about the caller but that it wasn't read in time.
+ */
+export type PeerRead =
+  | { readonly kind: "read"; readonly chain: PeerChain }
+  | { readonly kind: "unread"; readonly why: string }
+  | { readonly kind: "late" };
+
+/** The most bytes of the reader's stderr kept; its reason is the first line of them. */
+const MAX_WHY = 512;
+
+/**
  * Who is at the other end of `connection`, as `bazhen-peer` at `binary` reads it with the
- * connection as its standard input; undefined when it can't say for sure, whatever the reason.
+ * connection as its standard input.
  */
 export function readPeer(
   binary: string,
   connection: Socket,
   timeoutMs = READ_MS,
-): Promise<PeerChain | undefined> {
+): Promise<PeerRead> {
   const since = Math.ceil((accepted.get(connection) ?? Date.now()) / 1000);
   return turn(
     () =>
@@ -73,18 +85,44 @@ export function readPeer(
         // Node stops reading a socket it hands a child as stdio, and only a read of the request
         // body starts it again: a route that read its body first would hear nothing more on the
         // connection.
-        const done = (chain: PeerChain | undefined) => {
-          clearTimeout(late);
+        const done = (read: PeerRead) => {
+          clearTimeout(deadline);
           if (!connection.destroyed) connection.resume();
-          resolve(chain);
+          resolve(read);
         };
-        const late = setTimeout(() => done(undefined), timeoutMs);
-        const child = spawn(binary, [String(since)], { stdio: [connection, "pipe", "ignore"] });
+        const child = spawn(binary, [String(since)], { stdio: [connection, "pipe", "pipe"] });
+        // The deadline judges the reader, not this loop: after a stall the timer runs before the
+        // exit that came during it is read, so the exit gets one turn to land first.
+        const deadline = setTimeout(
+          () =>
+            setImmediate(() => {
+              if (child.exitCode === null && child.signalCode === null) done({ kind: "late" });
+            }),
+          timeoutMs,
+        );
         let out = "";
+        let err = Buffer.alloc(0);
         child.stdout?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => (out += chunk));
-        child.on("error", () => done(undefined));
-        child.on("close", (code) => done(code === 0 ? parsePeer(out) : undefined));
+        child.stderr?.on("data", (chunk: Buffer) => {
+          if (err.length < MAX_WHY) err = Buffer.concat([err, chunk]).subarray(0, MAX_WHY);
+        });
+        child.on("error", (e) =>
+          done({ kind: "unread", why: `the reader can't start: ${e.message}` }),
+        );
+        child.on("close", (code, signal) => {
+          const chain = code === 0 ? parsePeer(out) : undefined;
+          if (chain !== undefined) return done({ kind: "read", chain });
+          // One line: a reader that panicked says more than a reason, and its first line is why.
+          const [said = ""] = err.toString("utf8").trim().split("\n", 1);
+          const why =
+            said !== ""
+              ? said
+              : code === 0
+                ? "the reader printed no peer"
+                : `the reader ${signal === null ? `exited ${code}` : `was ended by ${signal}`}`;
+          done({ kind: "unread", why });
+        });
       }),
   );
 }
@@ -110,7 +148,8 @@ export type PeerReading =
   | { readonly kind: "agent"; readonly agentId: AgentSessionId }
   | CodexReading
   | { readonly kind: "outside" }
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "late" };
 
 /**
  * Whose process `chain` is (foundation-design §9.1): an agent's, when the agent's root process is
@@ -146,7 +185,8 @@ export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReadin
 
 /**
  * The socket's peer reading, as the daemon runs it: a connection whose process `binary` can't
- * read for sure, gone, replaced or past a process it can't see, is refused, never the human's.
+ * read for sure, gone, replaced or past a process it can't see, is refused, never the human's;
+ * one it hasn't read in time is late, and never the human's either.
  */
 export function peerReading(
   binary: string,
@@ -154,10 +194,14 @@ export function peerReading(
   timeoutMs = READ_MS,
 ): (connection: Socket) => Promise<PeerReading> {
   return async (connection) => {
-    const chain = await readPeer(binary, connection, timeoutMs);
-    return chain === undefined
-      ? { kind: "refused", reason: "the caller's process can't be read for sure" }
-      : readingOf(chain, terminals());
+    const read = await readPeer(binary, connection, timeoutMs);
+    if (read.kind === "late") return read;
+    if (read.kind === "unread")
+      return {
+        kind: "refused",
+        reason: `the caller's process can't be read for sure: ${read.why}`,
+      };
+    return readingOf(read.chain, terminals());
   };
 }
 
@@ -178,9 +222,9 @@ export async function codexServerMarked(
   });
   if (connection === undefined) return "unread";
   try {
-    const chain = await readPeer(binary, connection, timeoutMs);
-    if (chain === undefined) return "unread";
-    return chain.codexServer === chain.pid ? "marked" : "unmarked";
+    const read = await readPeer(binary, connection, timeoutMs);
+    if (read.kind !== "read") return "unread";
+    return read.chain.codexServer === read.chain.pid ? "marked" : "unmarked";
   } finally {
     connection.destroy();
   }
