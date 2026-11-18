@@ -21,12 +21,22 @@ export interface DaemonOptions {
  * Playwright's test, closing the agents each test opened once it ends, and when its worker stops,
  * every agent still open on its daemon: those a `beforeAll` opened, and all of its project's
  * before the next project starts.
+ *
+ * Its page's routes stop before the test's context closes. The page goes on reading as a test
+ * ends, and a route still awaiting `route.fetch` then fails with the context's close, charged to
+ * whichever test the worker is running by then. A route that fails while the test runs still
+ * fails it.
  */
 export const test = playwrightTest.extend<
   { closesItsAgents: void },
   DaemonOptions & { closesAgentsLeft: void }
 >({
   home: ["", { scope: "worker", option: true }],
+  page: async ({ page }, use) => {
+    await use(page);
+    // Playwright refuses to unroute a page that is closed, and a test may close its own.
+    if (!page.isClosed()) await page.unrouteAll({ behavior: "ignoreErrors" });
+  },
   closesAgentsLeft: [
     async ({ home }, use) => {
       await use();
