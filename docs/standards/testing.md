@@ -399,8 +399,10 @@ A test owns everything it touches and leaves nothing behind.
   `cluster` and `worker_threads`.
 - **Signals.** A signal to a wrong pid ends someone else's work, and one to -1 every process the
   user owns. Raw signal calls (`process.kill`, `process._kill` or `process.abort` however it is
-  reached: directly, by a default or namespace import or a re-export, through a constant bound to
-  `process`, or computed, in code or in a template's `${…}`; a member
+  reached: directly, by a default or namespace import or a re-export, through a variable declared or
+  assigned as `process`, or computed, in code or in a template's `${…}`; `process` itself passed on, by
+  `export *` of its module, a re-export of its default, or an export of it or of a name bound to
+  it; a member
   named `kill` on anything, as text can't tell a `ChildProcess` or a node-pty terminal from
   another object; a `timeout`, `killSignal` or `signal` option to a `child_process` start, which
   Node enforces with a kill, and any options to one that aren't written out in the call, as a
@@ -436,11 +438,15 @@ A test owns everything it touches and leaves nothing behind.
   start's timeout are allowed only at the calls `ALLOWED_SIGNALS` names, each with its reason and
   how many times it appears. Another signal in the same file still counts, and so does a copy of an
   allowed call, an entry whose call has gone, and any option but `timeout` at an allowed start. A
-  file listed only for its fixtures, text that names kills and runs none, has every kill on a
-  command line allowed, a real one included, so review is what keeps one out; any other signal in
-  it still counts. The
+  file listed only for its fixtures, text that names kills and runs none, has the kills on its
+  command lines allowed, but not one passed to a call named like a start (`spawn…`, `exec…`,
+  `fork`, `run…`, `output`), nor `child_process` loaded by `require`, `import()` or a re-export,
+  nor a `child_process` start called in the fixture's text, which could run a kill it holds; any
+  other signal in it still counts. The
   check is defence in depth: it reads text, so the
-  chokepoints' own refusals are what stop a stray signal. On a command line it is a best-effort
+  chokepoints' own refusals are what stop a stray signal. In TypeScript a quote that closes no
+  string on its line, or that sits between two letters or digits, is read as code, so an
+  apostrophe in JSX text hides nothing past its line. On a command line it is a best-effort
   heuristic that fails closed where it reads one. It takes a literal's own escapes, then reads
   words as the shell does: a quoted or escaped part joins the text it touches (`k''ill` is
   `kill`), `$'…'` means what its escapes spell, and a backslash-newline continues the line. It
@@ -457,13 +463,18 @@ A test owns everything it touches and leaves nothing behind.
   not on its list, or a kill program more than four arguments after one; operands `xargs`
   appends; `eval`, whose arguments join into a line the check never reads whole; process
   substitution, `<(…)`; an apostrophe in a heredoc body, which reads as a quote; a literal's
-  `\x` and `\u` escapes; in TypeScript, `{ default as p }`, `Reflect.get`, `require` and dynamic
+  `\x` and `\u` escapes; in TypeScript, `Reflect.get`, `require` and dynamic
   imports of `process`; `require()` of `child_process`, a start renamed by destructuring
   (`const { spawn: s } = cp`) or re-exported, and a start's options built in a variable or
   spread rather than written at the call; `kill` destructured in a parameter (`({ kill }) =>`);
   node-pty's `destroy()`, which also signals its child by pid unless that terminal's `kill` was
-  replaced first, as `apps/daemon/src/pty/node-pty.ts` does; a `/` read as division or a regular
-  expression where only the syntax tree can tell; other unusual Rust `use` forms; and a method that signals by pid, which
+  replaced first, as `apps/daemon/src/pty/node-pty.ts` does; in TypeScript, an identifier spelled
+  with a `\u` escape (the lint rule reads it) and a computed key built from parts
+  (`process['ki' + 'll']`); JSX text that quotes code on one line (`<p>'{x}'</p>`), or whose
+  quotes pair across lines so that a later pair holds code; code oxfmt wouldn't leave, such as a
+  quote straight after a word (`return'x'`), a space before a postfix `!`, `++` or `--`, or none
+  before a prefix one; a `/` read as division or a regular expression where only the syntax tree
+  can tell; other unusual Rust `use` forms; and a method that signals by pid, which
   `deny.toml` keeps out only by banning the crates known so far to have one (`rust.md` § Signals).
   It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
   import its items by name. A Rust test that may signal processes it didn't start is

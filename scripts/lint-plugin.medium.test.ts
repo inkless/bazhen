@@ -240,3 +240,36 @@ describe("the host-guard rule's reach", () => {
     ).toEqual([5, 5, 6, 8, 11, 12]);
   });
 });
+
+describe("the signal-guard rule on process passed on whole", () => {
+  it("flags process re-exported or exported under a name of this file's, and an alias by default", () => {
+    expect(
+      flagged(
+        [
+          'export * from "node:process";',
+          'export * as nsp from "process";',
+          'export { default } from "node:process";',
+          'export { pid, default as dp } from "process";',
+          'import { default as p1 } from "node:process";',
+          'import p2, { pid as id } from "process";',
+          "p1.abort();",
+          "p2._kill(1, 9);",
+          "export const p3 = process;",
+          "export let p4 = globalThis.process;",
+          "export { p1 };",
+          "export { p2 as p6, other };",
+          "export default p1;",
+          "const other = 1;",
+          'export * from "./mine.ts";',
+          'export type * from "node:process";',
+          'export { pid as pd } from "node:process";',
+          "export const p7 = process.pid;",
+          "export { other as o };",
+          "void id;",
+        ].join("\n"),
+      ),
+    ).toEqual([1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13]);
+    expect(flagged("export = process;")).toEqual([1]);
+    expect(flagged("export default globalThis.process;")).toEqual([1]);
+  });
+});

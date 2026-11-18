@@ -113,7 +113,83 @@ const TS_KILL = /\bprocess\s*\??\.\s*(?:_?kill|abort)\b/g;
 const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:_?kill|abort)["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\b(?:_kill|abort)\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
-  /\b(?:import|export)\s*(?:type\s+)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+  /\b(?:import|export)\s*(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+const PROCESS_SOURCE = String.raw`\s*["'](?:node:)?process["']`;
+// `process` re-exported whole, or as its module's default: either hands another file its kill.
+const PROCESS_REEXPORT = new RegExp(
+  String.raw`\bexport\s*(?:\*(?:\s*as\s+[\w$]+)?|\{[^}]*\bdefault\b[^}]*\})\s*from` +
+    PROCESS_SOURCE,
+  "g",
+);
+// A value import of `process`'s module: a default, a namespace, or named imports, `default` among
+// them, or a default beside either of the others.
+const PROCESS_IMPORT = new RegExp(
+  String.raw`\bimport\s+(?:([\w$]+)\s*,\s*)?(?:\*\s+as\s+([\w$]+)|([\w$]+)|\{([^}]*)\})\s+from` +
+    PROCESS_SOURCE,
+  "g",
+);
+/** A pattern matching the name `name` alone, not inside a longer one. */
+const tsName = (name: string) => String.raw`(?<![\w$])${name.replaceAll("$", "\\$")}(?![\w$])`;
+/** `process`, or one of `names`, as a whole value rather than a member's receiver. */
+const wholeProcess = (names: readonly string[]) =>
+  String.raw`(?:globalThis\s*\.\s*)?(?:${["process", ...names].map(tsName).join("|")})(?!\s*\.)`;
+
+// A variable's type, as far as a name and its unions: no further, so that each name is read once.
+const TYPE_ANNOTATION = String.raw`(?::\s*(?:typeof\s+)?[\w$.]+(?:\s*\|\s*[\w$.]+)*\s*)?`;
+
+/**
+ * The names this file gives `process`, each where it is bound: a default or namespace import of
+ * its module, an import of the name `default`, or a variable declared or assigned as it or as
+ * another of these.
+ */
+function processAliases(code: string, kept: string): { name: string; index: number }[] {
+  const out: { name: string; index: number }[] = [];
+  for (const m of kept.matchAll(PROCESS_IMPORT)) {
+    const defaults = (m[4] ?? "").split(",").flatMap((spec) => {
+      const [imported, local] = spec.trim().split(/\s+as\s+/);
+      return imported === "default" && local !== undefined ? [local] : [];
+    });
+    for (const name of [m[1], m[2], m[3], ...defaults])
+      if (name !== undefined) out.push({ name, index: m.index });
+  }
+  for (let size = -1; size !== out.length;) {
+    size = out.length;
+    const bound = new RegExp(
+      String.raw`(?<![\w$.])([\w$]+)\s*${TYPE_ANNOTATION}=\s*` +
+        wholeProcess(out.map((a) => a.name)),
+      "g",
+    );
+    for (const m of code.matchAll(bound))
+      if (m[1] !== undefined && !out.some((a) => a.name === m[1]))
+        out.push({ name: m[1], index: m.index });
+  }
+  return out;
+}
+
+/**
+ * Each export of `process` or of a name this file gives it: another file can call its kill under
+ * a name of its own, as a Rust `pub use` of a signal module lets it.
+ */
+function processExports(code: string, names: readonly string[]) {
+  const whole = wholeProcess(names);
+  const declared = found(
+    code,
+    new RegExp(
+      String.raw`\bexport\s*(?:default\s*|=\s*|(?:const|let|var)\s+[\w$]+\s*=\s*)(?:\(\s*)*` +
+        whole,
+      "g",
+    ),
+  );
+  const listed = [...code.matchAll(/\bexport\s*\{([^}]*)\}(?!\s*from\b)/g)]
+    .filter((m) =>
+      (m[1] ?? "")
+        .split(",")
+        .some((spec) => names.includes(spec.trim().split(/\s+as\s+/)[0] ?? "")),
+    )
+    .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
+  return [...declared, ...listed];
+}
+
 // A member named kill on anything: a ChildProcess's, a node-pty IPty's, process's. Text can't tell
 // them apart, so each is a signal, and an API whose kill sends none is named for what it does.
 const TS_MEMBER_KILL = /(?:[\w$]+\s*)?\??\.\s*kill\b/g;
@@ -178,6 +254,21 @@ function closingParen(code: string, open: number): number {
     else if (code[i] === ")" && --depth === 0) return i;
   }
   return code.length;
+}
+
+/** Each `(` in blanked code, by index, with the index of the `)` closing it or the code's end. */
+function parenPairs(code: string): Map<number, number> {
+  const pairs = new Map<number, number>();
+  const open: number[] = [];
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] === "(") open.push(i);
+    else if (code[i] === ")") {
+      const from = open.pop();
+      if (from !== undefined) pairs.set(from, i);
+    }
+  }
+  for (const from of open) pairs.set(from, code.length);
+  return pairs;
 }
 
 const OPENS = "([{";
@@ -429,7 +520,10 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
     .filter((m) => code[m.index] === kept[m.index] && !imported(m.index))
     .map((m) => ({
       ...unfollowed(m.index, "child_process named outside an import"),
-      literal: true,
+      // Loaded, by `require`, `import()` or a re-export, it is no fixture's text.
+      literal: !/\b(?:(?:require|import)\s*\(|from)\s*$/.test(
+        code.slice(Math.max(0, m.index - 40), m.index),
+      ),
     }));
   return [...references, ...loads];
 }
@@ -437,13 +531,26 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
 const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
 
 // After these, a `/` opens a regular expression rather than dividing: an operator, an opening
-// bracket, a statement's end, or a keyword that takes an expression. `<` is left out, as JSX's
-// `</` closes a tag.
+// bracket, a statement's end, or a keyword that takes an expression, though not a member named
+// like one (`map.delete`). `<` is left out, as JSX's `</` closes a tag.
 const REGEX_AFTER =
-  /(?:[=(,:[!&|?{};+\-*%>~^]|\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
-const opensRegex = (out: string) => {
-  const before = out.trimEnd();
-  return before === "" || REGEX_AFTER.test(before.slice(-16));
+  /(?:[=(,:[&|?{};+\-*%>~^]|(?<!\.\s*)\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
+// How much of the code before a `/` is read, past its whitespace: only its end decides.
+const LOOKBEHIND = 64;
+/** Whether a `/` after `out`'s first `end` characters opens a regular expression. */
+const opensRegex = (out: string, end = out.length): boolean => {
+  let last = end;
+  while (last > 0 && /\s/.test(out.charAt(last - 1))) last--;
+  if (last === 0) return true;
+  const before = out.slice(Math.max(0, last - LOOKBEHIND), last);
+  const run = /(?:!+|\++|-+)$/.exec(before)?.[0] ?? "";
+  if (run === "") return REGEX_AFTER.test(before.slice(-16));
+  // A `!`, `++` or `--` straight after a value is postfix, a non-null assertion or an increment,
+  // which a `/` after it divides; formatted code puts no space before one. Tokens are read longest
+  // first, so an odd run of `+` or `-` ends in a binary or unary one.
+  const rest = last - run.length;
+  const prefix = rest === 0 || /\s/.test(out.charAt(rest - 1)) || opensRegex(out, rest);
+  return prefix || (!run.startsWith("!") && run.length % 2 === 1);
 };
 
 /** The end of a regular expression literal opening at `at`, past its flags, or -1 if none does. */
@@ -464,13 +571,32 @@ function regexEnd(source: string, at: number): number {
   return -1;
 }
 
+const WORD = /[\p{L}\p{N}]/u;
+
+/**
+ * The index past the quote that closes a string opening at `at`, or -1 where none does. A string
+ * can't run past its line unless a backslash continues it, and a quote between two letters or
+ * digits is an apostrophe, as in JSX text: formatted code puts none there.
+ */
+function quoteEnd(source: string, at: number): number {
+  if (WORD.test(source[at - 1] ?? "") && WORD.test(source[at + 1] ?? "")) return -1;
+  for (let i = at + 1; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") i += source.startsWith("\r\n", i + 1) ? 2 : 1;
+    else if (c === source[at]) return i + 1;
+    else if (c === "\n" || c === "\r") return -1;
+  }
+  return -1;
+}
+
 /**
  * TypeScript with comments blanked, and with every string, template text and regular expression
  * literal's contents blanked unless `keepStrings`, character for character, so an index in one is
  * an index in the other and in the source. A template's substitutions, `${…}`, are code, read as
  * any other. A `/` opens a regular expression where the code before it can't be a value it
- * divides; JSX's `</` never does. The lint rule, which reads the syntax tree, is the check that
- * needs no such reading.
+ * divides; JSX's `</` never does. A quote that closes no string on its line is read as code, so
+ * one in JSX text hides nothing past its line. The lint rule, which reads the syntax tree, is the
+ * check that needs no such reading.
  */
 export function tsCode(
   source: string,
@@ -504,6 +630,7 @@ export function tsCode(
     const next = source[i + 1];
     const start = i;
     const open = templates.at(-1);
+    const quoted = c === '"' || c === "'" ? quoteEnd(source, i) : -1;
     if (c === "/" && (next === "/" || next === "*")) {
       const end = next === "/" ? source.indexOf("\n", i) : source.indexOf("*/", i + 2) + 2;
       i = end < start + 2 ? source.length : end;
@@ -511,13 +638,11 @@ export function tsCode(
     } else if (c === "/" && opensRegex(out) && regexEnd(source, i) > 0) {
       i = regexEnd(source, i);
       out += "/" + text(source.slice(start + 1, i - 1)) + source[i - 1];
-    } else if (c === '"' || c === "'") {
-      i++;
-      while (i < source.length && source[i] !== c) i += source[i] === "\\" ? 2 : 1;
-      i = Math.min(i + 1, source.length);
+    } else if (quoted > 0) {
+      i = quoted;
       const body = source.slice(start + 1, i - 1);
       literals.push({ index: start, body });
-      out += c + text(body) + (i - start > 1 ? c : "");
+      out += c + text(body) + c;
     } else if (c === "`") {
       out += c;
       i++;
@@ -546,10 +671,12 @@ const found = (code: string, pattern: RegExp) =>
   }));
 
 const KILL_PROGRAM = /^(?:\S*\/)?(?:kill|pkill|killall|killall5|skill)$/;
-// What runs a program named by the literal that follows: Rust's Command, and Node's and
-// host-guard's process starts.
-const STARTS_PROGRAM =
-  /(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))\s*\(\s*\[?\s*$/;
+// What starts a program: Rust's Command, and Node's and host-guard's process starts.
+const PROGRAM_START = String.raw`(?:Command\s*::\s*new|\b(?:spawn\w*|exec\w*|fork|runBounded|runIn\w*|output|run))`;
+// What runs a program named by the literal that follows.
+const STARTS_PROGRAM = new RegExp(String.raw`${PROGRAM_START}\s*\(\s*\[?\s*$`);
+// A call of anything named like a process start, a member's included.
+const STARTS_A_PROGRAM = new RegExp(PROGRAM_START + CALLED, "g");
 // Programs that run the program their arguments name, so `["env", "kill", ...]` is a kill.
 const LAUNCHER =
   /^(?:\S*\/)?(?:env|sudo|doas|timeout|setsid|nohup|nice|ionice|xargs|stdbuf|chrt|taskset|flock|unshare|chroot|runuser|su|busybox|toybox|exec|command|builtin)$/;
@@ -1063,11 +1190,20 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
   ],
 };
 
-/** The literals that start a kill: a program sending one, or a shell or systemctl doing so. */
+/**
+ * The literals that start a kill: a program sending one, or a shell or systemctl doing so. One
+ * passed to a start is run here, so it is no fixture's text, though its file's are.
+ */
 function kills(
   literals: { index: number; body: string; cooked?: boolean | undefined }[],
   code: string,
 ) {
+  const closes = parenPairs(code);
+  const started = [...code.matchAll(STARTS_A_PROGRAM)].map((m) => {
+    const open = m.index + m[0].length - 1;
+    return [open, closes.get(open) ?? code.length] as const;
+  });
+  const literal = (index: number) => !started.some(([from, to]) => index > from && index < to);
   const out = literals
     .filter(
       (l) =>
@@ -1079,14 +1215,14 @@ function kills(
       index: l.index,
       line: lineAt(code, l.index),
       call: `a kill by "${l.body}"`,
-      literal: true,
+      literal: literal(l.index),
     }));
   // A program and its arguments as literals in a row: systemctl's or loginctl's kill verbs,
   // fuser -k, or a launcher handed a kill program.
   literals.forEach((l, n) => {
     const next = literals.slice(n + 1, n + 5).map((a) => a.body);
     const hit = (call: string) =>
-      out.push({ index: l.index, line: lineAt(code, l.index), call, literal: true });
+      out.push({ index: l.index, line: lineAt(code, l.index), call, literal: literal(l.index) });
     if (SYSTEMCTL.test(l.body) && next.includes("kill")) hit("systemctl kill");
     if (LOGINCTL.test(l.body) && next.some((a) => LOGINCTL_KILL.test(a))) hit("loginctl kill");
     if (FUSER.test(l.body) && next.some((a) => FUSER_KILL.test(a))) hit("fuser -k");
@@ -1220,24 +1356,24 @@ function signalsIn(
     ["import", "export"].includes(code.slice(m.index, m.index + 6)),
   );
   const computed = found(kept, TS_KILL_COMPUTED).filter(inCode);
-  // What else names `process`: a default or namespace import of it, or a constant bound to it.
-  const aliases = [
-    ...kept.matchAll(/\bimport\s+(?:\*\s+as\s+)?(\w+)\s+from\s*["'](?:node:)?process["']/g),
-    ...code.matchAll(
-      /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:globalThis\s*\.\s*)?process\b(?!\s*\.)/g,
-    ),
-  ].flatMap((m) => (m[1] === undefined || !inCode(m) ? [] : [m[1]]));
-  const viaAlias = aliases.flatMap((alias) => [
-    ...found(code, new RegExp(`\\b${alias}\\s*\\??\\.\\s*(?:_?kill|abort)\\b`, "g")),
+  const aliases = processAliases(code, kept).filter(({ index }) => inCode({ index }));
+  const names = aliases.map(({ name }) => name);
+  const viaAlias = names.flatMap((alias) => [
+    ...found(code, new RegExp(`${tsName(alias)}\\s*\\??\\.\\s*(?:_?kill|abort)\\b`, "g")),
     ...found(
       kept,
-      new RegExp(`\\b${alias}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:_?kill|abort)["'\`]\\s*\\]`, "g"),
+      new RegExp(`${tsName(alias)}\\s*\\??\\.?\\s*\\[\\s*["'\`](?:_?kill|abort)["'\`]\\s*\\]`, "g"),
     ).filter(inCode),
   ]);
+  const exported = [
+    ...found(kept, PROCESS_REEXPORT).filter((m) => code.slice(m.index, m.index + 6) === "export"),
+    ...processExports(code, names),
+  ];
   const memberComputed = [...kept.matchAll(TS_MEMBER_KILL_COMPUTED)]
     .filter((m) => inCode(m) && !NOT_RECEIVERS.has(m[1] ?? ""))
     .map((m) => ({ index: m.index, line: lineAt(code, m.index), call: m[0] }));
   const starts = startBindings(code, kept);
+  const allowed = allowedIn(file, kept);
   const seen = new Set<number>();
   const signals = [
     ...found(code, TS_KILL),
@@ -1245,6 +1381,7 @@ function signalsIn(
     ...imports,
     ...computed,
     ...viaAlias,
+    ...exported,
     ...found(code, TS_MEMBER_KILL),
     ...memberComputed,
     ...found(code, TS_MEMBER_KILL_BOUND),
@@ -1252,8 +1389,24 @@ function signalsIn(
     ...startOptions(code, starts),
     ...unfollowedStarts(code, kept, starts),
     ...kills(literals, code),
+    ...fixtureStarts(code, starts, allowed),
   ].filter((m) => !seen.has(m.index) && seen.add(m.index));
-  return { signals, allowed: allowedIn(file, kept) };
+  return { signals, allowed };
+}
+
+/**
+ * Each start called in a fixture's text. A fixture runs nothing, and a start called there may run
+ * a kill the fixture's literals hold, through a variable the scan doesn't follow.
+ */
+function fixtureStarts(code: string, starts: StartBindings, allowed: ReturnType<typeof allowedIn>) {
+  const fixtures = allowed.flatMap(({ entry, spans }) => (entry.fixture === true ? spans : []));
+  return [...code.matchAll(startCalls(starts))]
+    .filter((m) => fixtures.some(([from, to]) => m.index >= from && m.index < to))
+    .map((m): Signal => ({
+      index: m.index,
+      line: lineAt(code, m.index),
+      call: `${m[1] ?? m[2] ?? "a start"} called in fixture text`,
+    }));
 }
 
 /**

@@ -160,6 +160,8 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
     const loaders = new Set(["require"]);
     const declarators: { name: string; init: Node }[] = [];
     const calls: Node[] = [];
+    /** What this file exports, each with the value it exports, read once every alias is known. */
+    const exports: { node: Node; value: unknown }[] = [];
     /** The variables a start or a module whole is bound to, with the starts that module has. */
     const bound: { variable: Variable; starters?: ReadonlySet<string> }[] = [];
     const seen = new Set<Variable>();
@@ -321,7 +323,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           if (PROCESS.has(source)) {
             if (spec.type === "ImportSpecifier" && SENDS.has(imported ?? "")) {
               if (reports.signals) context.report({ node: spec, message: KILL });
-            } else if (spec.type !== "ImportSpecifier") {
+            } else if (!named) {
               processes.add(local);
             }
           }
@@ -344,14 +346,24 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
       ExportAllDeclaration(node: Node) {
         const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
         if (node["exportKind"] !== "type" && startsOf(source) !== undefined) unfollowed(node);
+        if (reports.signals && node["exportKind"] !== "type" && PROCESS.has(source))
+          context.report({ node, message: KILL });
+      },
+      ExportDefaultDeclaration(node: Node) {
+        exports.push({ node, value: node["declaration"] });
+      },
+      TSExportAssignment(node: Node) {
+        exports.push({ node, value: node["expression"] });
       },
       ExportNamedDeclaration(node: Node) {
         const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
         const starters = startsOf(source);
         for (const spec of nodes(node["specifiers"])) {
           const local = nameOf(spec["local"]) ?? "";
-          if (reports.signals && PROCESS.has(source) && SENDS.has(local))
+          if (reports.signals && PROCESS.has(source) && (SENDS.has(local) || local === "default"))
             context.report({ node: spec, message: KILL });
+          if (!isNode(node["source"]) && node["exportKind"] !== "type")
+            exports.push({ node: spec, value: spec["local"] });
           if (
             starters !== undefined &&
             node["exportKind"] !== "type" &&
@@ -372,6 +384,7 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
             constants.set(name, init);
           declarators.push({ name, init });
           if (isProcess(init)) processes.add(name);
+          if (isExported(node)) exports.push({ node, value: init });
         }
         if (id.type === "ObjectPattern" && isProcess(init)) {
           const keys = nodes(id["properties"]).map((p) => nameOf(p["key"]));
@@ -402,6 +415,9 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
           if (loads(node["callee"]) && namesModule(args[0])) unfollowed(node);
         }
         if (reports.tmux) followReferences();
+        // Exported, process is reached in files that don't bind it, where no kill on it is read.
+        for (const { node, value } of exports)
+          if (reports.signals && isProcess(value)) context.report({ node, message: KILL });
       },
     };
   },

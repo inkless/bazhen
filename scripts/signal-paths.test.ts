@@ -168,6 +168,86 @@ describe("raw signal calls in TypeScript", () => {
     expect(calls("a.ts", 'const re = /process.kill("x")/; const s = "child.kill()";')).toEqual([]);
   });
 
+  it("reads a / after a postfix !, ++ or --, or a member named like a keyword, as division", () => {
+    const source = [
+      "const a = n! / 2; child.kill(); const b = m / 3;",
+      "const c = i++ / 2; child.kill(); const d = m / 3;",
+      "const e = i-- / 2; child.kill(); const f = m / 3;",
+      "const g = list[0]!! / 2; child.kill(); const h = m / 3;",
+      "const k = x.in / 2; child.kill(); const l = m / 3;",
+      "const o = map ?. delete / 2; child.kill(); const q = m / 3;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("tells a regular expression after a prefix !, a lone + or - or a keyword from a division after a postfix one", () => {
+    const source = [
+      "if (!/'/.test(s)) child.kill();",
+      "return !/'/.test(s) && child.kill();",
+      "const a = b + +/'/.source; child.kill();",
+      "const c = -/'/.lastIndex; child.kill();",
+      "const d = i++ + /'/.source; child.kill();",
+      "const e = typeof /'/; child.kill();",
+      "if (!/'/.test(s)) n = i++ / 2; child.kill(); m = j / 3;",
+      "if (ok) !/'/.test(s); child.kill(); const t = 'x';",
+      "x = ++/'/.lastIndex; child.kill(); 'y';",
+      "x = --/'/.lastIndex; child.kill(); 'y';",
+      "if (a) !/\\/\\//.test(s) || child.kill();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
+    expect(calls("a.ts", "const a = !/process.kill(1)/.test(s);")).toEqual([]);
+  });
+
+  it("ends a quote at its line, so an apostrophe in JSX text hides no code", () => {
+    const source = [
+      "const a = <p>Don't stop</p>; child.kill();",
+      "child.kill();",
+      "const b = <p>it's here, and 'quoted'</p>; child.kill();",
+      "const c = <p>' opens</p>; child.kill();",
+      'const d = <p>" opens</p>; child.kill();',
+      "const e = 'x';",
+    ].join("\n");
+    expect(rawSignalCalls("a.tsx", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("reads a quote closed on its line, or continued past it, as a string, and one left open as code", () => {
+    const source = [
+      'const a = "it\'s child.kill()"; child.kill();',
+      "const b = 'say \"child.kill()\"'; child.kill();",
+      "const c = 'one \\",
+      "child.kill()'; child.kill();",
+      "const d = 'one \\\r\nchild.kill()'; child.kill();",
+      "const e = '\\'child.kill()'; child.kill();",
+      "const f = 'open; child.kill();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 4, 6, 7, 8]);
+  });
+
+  it("finds kill or abort imported beside process's default", () => {
+    const source = [
+      "import P, { kill } from 'node:process';",
+      'import Q, { pid, abort as a } from "process";',
+      'import R, { pid as id } from "process";',
+      "kill(1, 9);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2]);
+  });
+
+  it("reads an alias, a division and a start's arguments after a long stretch of object keys", () => {
+    const keys = Array.from({ length: 20_000 }, (_, i) => `  k${i}: v${i},`);
+    const source = [
+      "const o = {",
+      ...keys,
+      "};",
+      "const p: NodeJS.Process = process;",
+      "p.abort();",
+      "n = a! / b; child.kill(); m = c / d;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([20_004, 20_005]);
+  });
+
   it("finds process._kill, and a re-export of process's kill", () => {
     const source = [
       "process._kill(pid, 9);",
@@ -176,6 +256,56 @@ describe("raw signal calls in TypeScript", () => {
       'export { kill } from "./mine.ts";',
     ].join("\n");
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3]);
+  });
+
+  it("finds process re-exported whole, or exported under a name of this file's", () => {
+    const source = [
+      'export * from "node:process";',
+      'export * as nsp from "process";',
+      'export { default } from "node:process";',
+      'export { pid, default as dp } from "process";',
+      "export const p3 = process;",
+      "export let p4 = globalThis.process;",
+      "const p5 = process;",
+      "export { p5 };",
+      "export { p5 as p6, other };",
+      "export default process;",
+      "export = globalThis.process;",
+      "export default p5;",
+      'export * from "./mine.ts";',
+      'export type * from "node:process";',
+      'export { pid as id } from "node:process";',
+      "export const p7 = process.pid;",
+      "export default process.env;",
+      "export { other };",
+      "export default (process);",
+      "export default ( p5 );",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([
+      1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 19, 20,
+    ]);
+  });
+
+  it("reads process imported by the name default, or beside named imports, as an alias", () => {
+    const source = [
+      'import { default as p1 } from "node:process";',
+      'import p2, { pid } from "process";',
+      'import p3, * as p4 from "node:process";',
+      "p1.abort();",
+      "p2._kill(1, 9);",
+      "p3.abort();",
+      'p4["abort"]();',
+      "const p5 = p1;",
+      "p5.abort();",
+      "pid.abort;",
+      "const p6: NodeJS.Process = process;",
+      "p6.abort();",
+      "let p7;",
+      "p7 = globalThis.process;",
+      "p7.abort();",
+      "p7 == process; p7 === process;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4, 5, 6, 7, 9, 12, 15]);
   });
 
   it("finds process.abort however it is reached", () => {
@@ -935,7 +1065,38 @@ describe("kills by a process started to send them", () => {
       "process.kill(pid);",
     ].join("\n");
     for (const file of ["scripts/signal-paths.test.ts", "scripts/signal-paths.ts"])
-      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 2, 4]);
+      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 2, 2, 4]);
+  });
+
+  it("finds a kill a fixture file runs, or child_process it loads, as no fixture", () => {
+    const source = [
+      'execSync("kill -9 -1");',
+      'spawnSync("sh", ["-c", "kill -9 -1"]);',
+      'x.run("pkill node");',
+      'const cp = require("child_process");',
+      'const p = await import("node:child_process");',
+      'export { exec } from "child_process";',
+      'const s = "kill -9 -1"; execSync(s);',
+      'const t = "kill -9 -1";',
+      "const u = `kill -9 ${pid}`;",
+      'const v = ["child_process"];',
+      'expect(calls("a.ts", \'execSync("kill -9 -1")\')).toEqual([]);',
+    ].join("\n");
+    for (const file of ["scripts/signal-paths.test.ts", "scripts/signal-paths.ts"])
+      expect(rawSignalCalls(file, source).map((c) => c.line)).toEqual([1, 1, 2, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("finds a start called inside a fixture's span, and lets one outside it be", () => {
+    const fixture = [
+      'execFileSync("oxlint", []);',
+      "const FIXTURE = [",
+      "  'child.kill();',",
+      '  execSync("true"),',
+      '].join("\\n");',
+    ].join("\n");
+    expect(
+      rawSignalCalls("scripts/lint-plugin.medium.test.ts", fixture).map((c) => c.line),
+    ).toEqual([4]);
   });
 
   it("allows a start's timeout, and no other option at that call", () => {
