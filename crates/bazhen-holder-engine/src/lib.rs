@@ -16,6 +16,7 @@ mod osc;
 mod replies;
 mod seam;
 mod snapshot;
+mod text;
 
 #[cfg(test)]
 mod differential;
