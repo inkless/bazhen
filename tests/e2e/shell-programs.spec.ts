@@ -1,6 +1,15 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { HISTORY_LINES } from "@bazhen/protocol";
-import { atBottom, daemonTmux, onAlternateScreen, screen, status, viewportTop } from "./page.ts";
+import {
+  atBottom,
+  daemonTmux,
+  expect,
+  onAlternateScreen,
+  screen,
+  status,
+  test,
+  viewportTop,
+} from "./page.ts";
 
 // What a person runs in a shell terminal, end to end: the page, the daemon and real tmux, with
 // each program as the distribution ships it. Full-screen programs draw on the alternate screen,

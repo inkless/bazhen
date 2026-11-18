@@ -1,5 +1,4 @@
-import { expect, test } from "@playwright/test";
-import { daemonHome } from "./page.ts";
+import { daemonHome, expect, test } from "./page.ts";
 import { dismissNotices, issueCode } from "./pairing.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });

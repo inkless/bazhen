@@ -1,14 +1,16 @@
 import { hostname } from "node:os";
 import { basename } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
   attachCommandFor,
+  expect,
   generationOf,
   givePageAgentTranscript,
   kill,
   launch,
   patchState,
   screen,
+  test,
   uniqueName,
 } from "./page.ts";
 

@@ -1,16 +1,53 @@
 import { join } from "node:path";
 import {
+  test as playwrightTest,
   expect,
   type Browser,
   type BrowserContextOptions,
   type Locator,
   type Page,
-  test,
 } from "@playwright/test";
 import { TmuxServer } from "@bazhen/host-guard";
 import { answerPatched } from "../support/state-route.ts";
 import { giveTranscript } from "../support/transcript.ts";
-import { homeOf, isRuntime, type Runtime } from "./daemons.ts";
+import { closableAgents, closeAgents, homeOf, isRuntime, type Runtime } from "./daemons.ts";
+
+/** The options each project gives its tests: `home`, its daemon's. */
+export interface DaemonOptions {
+  readonly home: string;
+}
+
+/**
+ * Playwright's test, closing the agents each test opened once it ends, and when its worker stops,
+ * every agent still open on its daemon: those a `beforeAll` opened, and all of its project's
+ * before the next project starts.
+ */
+export const test = playwrightTest.extend<
+  { closesItsAgents: void },
+  DaemonOptions & { closesAgentsLeft: void }
+>({
+  home: ["", { scope: "worker", option: true }],
+  closesAgentsLeft: [
+    async ({ home }, use) => {
+      await use();
+      await closeAgents(home, await closableAgents(home));
+    },
+    { scope: "worker", auto: true, timeout: 120_000 },
+  ],
+  closesItsAgents: [
+    async ({ home }, use) => {
+      const before = new Set((await closableAgents(home)).map(({ id }) => id));
+      await use();
+      await closeAgents(
+        home,
+        (await closableAgents(home)).filter(({ id }) => !before.has(id)),
+      );
+    },
+    { auto: true, timeout: 30_000 },
+  ],
+});
+
+export { expect };
 
 /** The runtime the running test's daemon makes its terminals on: its project's name. */
 export function runtime(): Runtime {

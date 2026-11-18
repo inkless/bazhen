@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { patchState, screen } from "./page.ts";
+import type { Page } from "@playwright/test";
+import { expect, patchState, screen, test } from "./page.ts";
 
 // The page goes on reading its state as a test ends, and a route still fetching then would fail
 // the test after its assertions passed.

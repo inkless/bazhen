@@ -15,6 +15,7 @@ import {
   webOrigin,
   type E2eDaemon,
 } from "./daemons.ts";
+import type { DaemonOptions } from "./page.ts";
 import { storageState } from "./pairing.ts";
 
 requireDisposableHost();
@@ -109,7 +110,7 @@ if (missing.length > 0)
 
 const daemons = e2eDaemons();
 
-export default defineConfig({
+export default defineConfig<object, DaemonOptions>({
   testDir: ".",
   testMatch: "*.spec.ts",
   workers: 1,
@@ -124,6 +125,7 @@ export default defineConfig({
       ...devices["Desktop Chrome"],
       baseURL: webOrigin(daemon),
       storageState: storageState(daemon.home),
+      home: daemon.home,
     },
   })),
   webServer: daemons.flatMap((daemon) => {

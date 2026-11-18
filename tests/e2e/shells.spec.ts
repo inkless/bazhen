@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
-import { launch, patchState, screen, status } from "./page.ts";
+import type { Locator, Page } from "@playwright/test";
+import { expect, launch, patchState, screen, status, test } from "./page.ts";
 
 const workspace = (page: Page) => page.getByRole("article", { name: "agent" });
 const dock = (page: Page) => workspace(page).getByRole("region", { name: "shells" });

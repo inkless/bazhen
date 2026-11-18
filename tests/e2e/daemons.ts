@@ -92,6 +92,43 @@ export function socketCall(
   });
 }
 
+/** An agent the daemon would take a close for now, at the generation it has for it. */
+export interface ClosableAgent {
+  readonly id: string;
+  readonly generation: unknown;
+}
+
+/** The agents the daemon at `home` would take a close for now. */
+export async function closableAgents(home: string): Promise<ClosableAgent[]> {
+  const agents: unknown = Reflect.get(Object(await socketCall(home, "GET", "/v1/state")), "agents");
+  return (Array.isArray(agents) ? agents : []).flatMap((agent: unknown) => {
+    const commands: unknown = Reflect.get(Object(agent), "commands");
+    if (!Array.isArray(commands) || !commands.includes("close")) return [];
+    const id = String(Reflect.get(Object(agent), "id"));
+    return [{ id, generation: Reflect.get(Object(agent), "generation") }];
+  });
+}
+
+/**
+ * Closes `agents` on the daemon at `home`, with their linked shells whatever runs in those, and
+ * throws once all have been tried if any close was refused. Each is a real Claude Code, and a run
+ * that left them open would end at its memory cap.
+ */
+export async function closeAgents(home: string, agents: readonly ClosableAgent[]): Promise<void> {
+  const failed = (
+    await Promise.allSettled(
+      agents.map(({ id, generation }) =>
+        socketCall(home, "POST", `/v1/agents/${id}/close`, {
+          idempotencyKey: crypto.randomUUID(),
+          generation,
+          confirmBusy: true,
+        }),
+      ),
+    )
+  ).flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
+  if (failed.length > 0) throw new AggregateError(failed, `${failed.length} agent(s) didn't close`);
+}
+
 /** Whether anything accepts a connection on the daemon's socket under `home`. */
 function answers(home: string): Promise<boolean> {
   return new Promise((resolve) => {

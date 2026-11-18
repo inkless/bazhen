@@ -1,22 +1,17 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  expect,
-  test,
-  type Browser,
-  type BrowserContextOptions,
-  type CDPSession,
-  type Page,
-} from "@playwright/test";
+import type { Browser, BrowserContextOptions, CDPSession, Page } from "@playwright/test";
 import { readKeyLog } from "../support/key-log.ts";
 import {
   daemonTmux,
+  expect,
   gliding,
   onAlternateScreen,
   openSecondView,
   screen,
-  viewportTop,
   status,
+  test,
+  viewportTop,
 } from "./page.ts";
 
 // The page's terminal against the real daemon and tmux. Each test launches an agent from the page,
