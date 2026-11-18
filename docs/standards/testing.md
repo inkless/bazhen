@@ -399,8 +399,8 @@ A test owns everything it touches and leaves nothing behind.
   `cluster` and `worker_threads`.
 - **Signals.** A signal to a wrong pid ends someone else's work, and one to -1 every process the
   user owns. Raw signal calls (`process.kill`, `process._kill` or `process.abort` however it is
-  reached: directly, by a default or namespace import or a re-export, through a constant bound to
-  `process`, or computed, in code or in a template's `${…}`; `process` itself passed on, by
+  reached: directly, by a default or namespace import or a re-export, through a variable declared or
+  assigned as `process`, or computed, in code or in a template's `${…}`; `process` itself passed on, by
   `export *` of its module, a re-export of its default, or an export of it or of a name bound to
   it; a member
   named `kill` on anything, as text can't tell a `ChildProcess` or a node-pty terminal from
@@ -468,9 +468,13 @@ A test owns everything it touches and leaves nothing behind.
   (`const { spawn: s } = cp`) or re-exported, and a start's options built in a variable or
   spread rather than written at the call; `kill` destructured in a parameter (`({ kill }) =>`);
   node-pty's `destroy()`, which also signals its child by pid unless that terminal's `kill` was
-  replaced first, as `apps/daemon/src/pty/node-pty.ts` does; JSX text that quotes code on one
-  line (`<p>'{x}'</p>`), whose quotes read as a string's; a `/` read as division or a regular
-  expression where only the syntax tree can tell; other unusual Rust `use` forms; and a method that signals by pid, which
+  replaced first, as `apps/daemon/src/pty/node-pty.ts` does; in TypeScript, an identifier spelled
+  with a `\u` escape (the lint rule reads it) and a computed key built from parts
+  (`process['ki' + 'll']`); JSX text that quotes code on one line (`<p>'{x}'</p>`), or whose
+  quotes pair across lines so that a later pair holds code; code oxfmt wouldn't leave, such as a
+  quote straight after a word (`return'x'`), a space before a postfix `!`, `++` or `--`, or none
+  before a prefix one; a `/` read as division or a regular expression where only the syntax tree
+  can tell; other unusual Rust `use` forms; and a method that signals by pid, which
   `deny.toml` keeps out only by banning the crates known so far to have one (`rust.md` § Signals).
   It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
   import its items by name. A Rust test that may signal processes it didn't start is

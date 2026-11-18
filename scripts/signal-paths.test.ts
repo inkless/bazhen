@@ -189,8 +189,14 @@ describe("raw signal calls in TypeScript", () => {
       "const d = i++ + /'/.source; child.kill();",
       "const e = typeof /'/; child.kill();",
       "if (!/'/.test(s)) n = i++ / 2; child.kill(); m = j / 3;",
+      "if (ok) !/'/.test(s); child.kill(); const t = 'x';",
+      "x = ++/'/.lastIndex; child.kill(); 'y';",
+      "x = --/'/.lastIndex; child.kill(); 'y';",
+      "if (a) !/\\/\\//.test(s) || child.kill();",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
     expect(calls("a.ts", "const a = !/process.kill(1)/.test(s);")).toEqual([]);
   });
 
@@ -217,6 +223,16 @@ describe("raw signal calls in TypeScript", () => {
       "const f = 'open; child.kill();",
     ].join("\n");
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 4, 6, 7, 8]);
+  });
+
+  it("finds kill or abort imported beside process's default", () => {
+    const source = [
+      "import P, { kill } from 'node:process';",
+      'import Q, { pid, abort as a } from "process";',
+      'import R, { pid as id } from "process";',
+      "kill(1, 9);",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2]);
   });
 
   it("finds process._kill, and a re-export of process's kill", () => {
@@ -249,9 +265,11 @@ describe("raw signal calls in TypeScript", () => {
       "export const p7 = process.pid;",
       "export default process.env;",
       "export { other };",
+      "export default (process);",
+      "export default ( p5 );",
     ].join("\n");
     expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([
-      1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12,
+      1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 19, 20,
     ]);
   });
 
@@ -267,8 +285,14 @@ describe("raw signal calls in TypeScript", () => {
       "const p5 = p1;",
       "p5.abort();",
       "pid.abort;",
+      "const p6: NodeJS.Process = process;",
+      "p6.abort();",
+      "let p7;",
+      "p7 = globalThis.process;",
+      "p7.abort();",
+      "p7 == process; p7 === process;",
     ].join("\n");
-    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4, 5, 6, 7, 9]);
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([4, 5, 6, 7, 9, 12, 15]);
   });
 
   it("finds process.abort however it is reached", () => {

@@ -113,7 +113,7 @@ const TS_KILL = /\bprocess\s*\??\.\s*(?:_?kill|abort)\b/g;
 const TS_KILL_COMPUTED = /\bprocess\s*\??\.?\s*\[\s*["'`](?:_?kill|abort)["'`]\s*\]/g;
 const TS_KILL_BOUND = /\{[^}]*\b(?:_kill|abort)\b[^}]*\}\s*=\s*(?:globalThis\s*\.\s*)?process\b/g;
 const TS_KILL_IMPORT =
-  /\b(?:import|export)\s*(?:type\s+)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
+  /\b(?:import|export)\s*(?:type\s+)?(?:[\w$]+\s*,\s*)?\{[^}]*\b(?:_?kill|abort)\b[^}]*\}\s*from\s*["'](?:node:)?process["']/g;
 const PROCESS_SOURCE = String.raw`\s*["'](?:node:)?process["']`;
 // `process` re-exported whole, or as its module's default: either hands another file its kill.
 const PROCESS_REEXPORT = new RegExp(
@@ -136,7 +136,8 @@ const wholeProcess = (names: readonly string[]) =>
 
 /**
  * The names this file gives `process`, each where it is bound: a default or namespace import of
- * its module, an import of the name `default`, or a constant bound to it or to another of these.
+ * its module, an import of the name `default`, or a variable declared or assigned as it or as
+ * another of these.
  */
 function processAliases(code: string, kept: string): { name: string; index: number }[] {
   const out: { name: string; index: number }[] = [];
@@ -151,7 +152,7 @@ function processAliases(code: string, kept: string): { name: string; index: numb
   for (let size = -1; size !== out.length;) {
     size = out.length;
     const bound = new RegExp(
-      String.raw`\b(?:const|let|var)\s+([\w$]+)\s*=\s*` + wholeProcess(out.map((a) => a.name)),
+      String.raw`(?<![\w$.])([\w$]+)\s*(?::[^=;]*)?=\s*` + wholeProcess(out.map((a) => a.name)),
       "g",
     );
     for (const m of code.matchAll(bound))
@@ -170,7 +171,8 @@ function processExports(code: string, names: readonly string[]) {
   const declared = found(
     code,
     new RegExp(
-      String.raw`\bexport\s*(?:default\s+|=\s*|(?:const|let|var)\s+[\w$]+\s*=\s*)` + whole,
+      String.raw`\bexport\s*(?:default\s*|=\s*|(?:const|let|var)\s+[\w$]+\s*=\s*)(?:\(\s*)*` +
+        whole,
       "g",
     ),
   );
@@ -516,13 +518,14 @@ const REGEX_AFTER =
 const opensRegex = (out: string): boolean => {
   const before = out.trimEnd();
   if (before === "") return true;
-  // A `!` after a value is TypeScript's non-null assertion, which a `/` after it divides; after
-  // anything else it is a not.
-  if (before.endsWith("!")) return opensRegex(before.replace(/!+$/, ""));
-  // Tokens are read longest first, so an even run of `+` or `-` ends in `++` or `--`, after which
-  // a regular expression can't follow.
-  const run = /(?:\++|-+)$/.exec(before)?.[0].length ?? 1;
-  return run % 2 === 1 && REGEX_AFTER.test(before.slice(-16));
+  const run = /(?:!+|\++|-+)$/.exec(before)?.[0] ?? "";
+  if (run === "") return REGEX_AFTER.test(before.slice(-16));
+  // A `!`, `++` or `--` straight after a value is postfix, a non-null assertion or an increment,
+  // which a `/` after it divides; formatted code puts no space before one. Tokens are read longest
+  // first, so an odd run of `+` or `-` ends in a binary or unary one.
+  const rest = before.slice(0, -run.length);
+  const prefix = rest === "" || /\s$/.test(rest) || opensRegex(rest);
+  return prefix || (!run.startsWith("!") && run.length % 2 === 1);
 };
 
 /** The end of a regular expression literal opening at `at`, past its flags, or -1 if none does. */
