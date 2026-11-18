@@ -96,9 +96,10 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
   /** Input from a view that wasn't the driver was dropped, never queued. */
   z.object({ type: z.literal("input_dropped") }),
   /**
-   * Whether the program is on its alternate screen. A view can't tell for itself: the daemon's
-   * client keeps it on its normal screen, where it has scrollback (§5.9). Sent after the snapshot
-   * and whenever it changes.
+   * Whether the program is on its alternate screen, for a terminal whose runtime keeps its views
+   * on their normal screen, where they have scrollback, as tmux does (§5.9): sent after the
+   * snapshot and whenever it changes. A holder's views are never sent one, since their bytes carry
+   * each switch.
    */
   z.object({ type: z.literal("screen"), alternate: z.boolean() }),
   /** The terminal closed. */

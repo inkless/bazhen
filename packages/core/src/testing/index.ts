@@ -8,6 +8,7 @@ export {
   type SnapshotHold,
 } from "./fake-runtime.ts";
 export {
+  historyContract,
   runtimeContract,
   snapshotContract,
   type ContractHarness,

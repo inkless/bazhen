@@ -9,7 +9,7 @@ import type {
   RuntimeHealth,
   RuntimeInventoryEntry,
   RuntimeRef,
-  RuntimeStream,
+  HistoryStream,
   StreamEnd,
   Size,
   TerminalId,
@@ -571,7 +571,7 @@ export class TmuxRuntime implements RuntimeAdapter {
       screen.dispose();
       for (const h of closeHandlers) h("ended");
     });
-    const stream: RuntimeStream = {
+    const stream: HistoryStream = {
       size: { cols, rows },
       onData: (cb) => proc.onData(cb),
       onClose: (cb) => {

@@ -65,6 +65,14 @@ const running = async (runtime: RuntimeAdapter, ref: RuntimeRef) => {
   return { ref: entry?.ref, dead: entry === undefined || entry.exit !== null };
 };
 
+/** A client attached with a redraw, closed when the test ends. */
+async function historyClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
+  const attached = await runtime.attach(ref, null);
+  onTestFinished(() => attached.stream.close());
+  assert(attached.kind === "history", `attached with ${attached.kind}`);
+  return attached;
+}
+
 /** A client attached on a snapshot, with the output its stream has carried since. */
 async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
   const attached = await runtime.attach(ref, null);
@@ -307,23 +315,6 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       await expect.poll(() => seen, { timeout: harness.waitMs }).toContain("ping-你好");
     });
 
-    it("pushes each switch to or from the alternate screen, once", async () => {
-      const runtime = fresh();
-      const ref = await runtime.create(spec(["cat"]));
-      const { stream, alternate } = await runtime.attach(ref, null);
-      onTestFinished(() => stream.close());
-      const pushed: boolean[] = [];
-      stream.onAlternate((on) => pushed.push(on));
-      stream.write(encode("\x1b[?1049h\r"));
-      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
-      stream.write(encode("still there\r"));
-      await delay(300);
-      expect(pushed).toEqual([true]);
-      stream.write(encode("\x1b[?1049l\r"));
-      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true, false]);
-      expect(alternate).toBe(false);
-    });
-
     it("reads the title its program set last", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(["cat"]));
@@ -449,24 +440,6 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       const { stream, historyLines } = await runtime.attach(next, null);
       onTestFinished(() => stream.close());
       expect(historyLines).toBe(7);
-    });
-
-    it("respawns a terminal left on its alternate screen onto its main screen", async () => {
-      const runtime = fresh();
-      const s = spec(["cat"]);
-      const ref = await runtime.create(s);
-      const { stream } = await runtime.attach(ref, null);
-      onTestFinished(() => stream.close());
-      const pushed: boolean[] = [];
-      stream.onAlternate((on) => pushed.push(on));
-      stream.write(encode("\x1b[?1049h\r"));
-      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
-      await runtime.signal(ref, "SIGTERM");
-      await deadOf(runtime, ref);
-      const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
-      const after = await runtime.attach(next, null);
-      onTestFinished(() => after.stream.close());
-      expect(after.alternate).toBe(false);
     });
 
     it("reports a respawned terminal's next exit under its new generation", async () => {
@@ -637,6 +610,63 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
   });
 }
 
+/**
+ * What a runtime whose client redraws promises beyond the runtime contract: its bytes never switch
+ * to the alternate screen, so it says when the program does.
+ */
+export function historyContract(name: string, harness: ContractHarness): void {
+  const fresh = () => {
+    const made = harness.make();
+    onTestFinished(() => made.dispose());
+    return made.runtime;
+  };
+
+  const spec = (argv: readonly [string, ...string[]]): TerminalSpec => ({
+    terminalId: newId("term"),
+    tags: { kind: "agent", agentId: newId("agent") },
+    argv,
+    cwd: harness.cwd,
+    env: {},
+    size: { cols: 80, rows: 24 },
+    generation: 0,
+    historyLines: 10_000,
+  });
+
+  describe(`${name}: the history attach contract`, () => {
+    it("pushes each switch to or from the alternate screen, once", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      const { stream, alternate } = await historyClient(runtime, ref);
+      const pushed: boolean[] = [];
+      stream.onAlternate((on) => pushed.push(on));
+      stream.write(encode("\x1b[?1049h\r"));
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
+      stream.write(encode("still there\r"));
+      await delay(300);
+      expect(pushed).toEqual([true]);
+      stream.write(encode("\x1b[?1049l\r"));
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true, false]);
+      expect(alternate).toBe(false);
+    });
+
+    it("respawns a terminal left on its alternate screen onto its main screen", async () => {
+      const runtime = fresh();
+      const s = spec(["cat"]);
+      const ref = await runtime.create(s);
+      const { stream } = await historyClient(runtime, ref);
+      const pushed: boolean[] = [];
+      stream.onAlternate((on) => pushed.push(on));
+      stream.write(encode("\x1b[?1049h\r"));
+      await expect.poll(() => pushed, { timeout: harness.waitMs }).toEqual([true]);
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => exitOf(runtime, ref), { timeout: harness.waitMs }).not.toBeNull();
+      const next = await runtime.respawn(ref, { ...s, generation: 1, argv: sleeping });
+      const after = await historyClient(runtime, next);
+      expect(after.alternate).toBe(false);
+    });
+  });
+}
+
 /** What a runtime that attaches on a snapshot promises beyond the runtime contract. */
 /** What a terminal that replays VT bytes, as a view does, ends up showing and answering. */
 export interface Replayed {
@@ -732,8 +762,7 @@ export function snapshotContract(name: string, harness: SnapshotHarness): void {
       const late = await snapshotClient(runtime, next);
       const shown = await harness.replay(late.vt, s.size);
       const blank = await harness.replay(new Uint8Array(), s.size);
-      expect([late.alternate, shown.buffer, shown.modes, shown.colours, shown.lines]).toEqual([
-        false,
+      expect([shown.buffer, shown.modes, shown.colours, shown.lines]).toEqual([
         "normal",
         blank.modes,
         blank.colours,

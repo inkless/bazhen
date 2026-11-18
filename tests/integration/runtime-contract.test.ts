@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
 import { filterEnv, type RuntimeAdapter } from "@bazhen/core";
-import { runtimeContract } from "@bazhen/core/testing";
+import { historyContract, runtimeContract, type ContractHarness } from "@bazhen/core/testing";
 import { isAlive, type ConfiguredTmuxServer } from "@bazhen/host-guard";
 import { TmuxRuntime } from "@bazhen/runtime-tmux";
 import { nodePtySpawner } from "@bazhen/daemon/pty";
@@ -30,7 +30,7 @@ function serverOf(runtime: RuntimeAdapter): ConfiguredTmuxServer {
   return server;
 }
 
-runtimeContract("TmuxRuntime", {
+const harness: ContractHarness = {
   make: () => {
     const server = testServer(`contract-${++made}`);
     const runtime = runtimeOn(server);
@@ -73,4 +73,7 @@ runtimeContract("TmuxRuntime", {
   cwd: mkdtempSync(join(tmpdir(), "bz-contract-")),
   // A loaded CI runner can take a second or more to reap a pane's process.
   waitMs: 10_000,
-});
+};
+
+runtimeContract("TmuxRuntime", harness);
+historyContract("TmuxRuntime", harness);
