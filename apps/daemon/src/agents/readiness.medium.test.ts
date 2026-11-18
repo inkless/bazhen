@@ -128,10 +128,13 @@ describe("launch readiness", () => {
   });
 
   it("times a start from when its terminal came up, across a restart", async () => {
-    const later = Date.now() + 10 * DEADLINE_MS;
+    let later = 0;
     const s = await starting(() => later);
+    // Read once the terminal is up, so however long that took, the start is long past its
+    // deadline. Its 0 ms timer runs as 1 ms, so it lands in `pause(1)`'s timer list ahead of
+    // it and fires first; a start timed from now would wait the whole deadline.
+    later = Date.now() + 10 * DEADLINE_MS;
     s.follow();
-    // Long past its deadline by the clock, so it fires on the first turn of the loop.
     await pause(1);
     expect(stuck(s.store)).toEqual(["open:"]);
   });
