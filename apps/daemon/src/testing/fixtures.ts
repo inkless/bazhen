@@ -343,6 +343,7 @@ async function codexAgents(
   runtime: "tmux" | "holder",
   starting: boolean,
   threads: readonly (string | null)[],
+  launched: { readonly compactWindowTokens?: number } = {},
 ) {
   const path = tempDb();
   const store = Store.open(path);
@@ -376,7 +377,7 @@ async function codexAgents(
         tokens: untokened,
         prompts: testPrompts(),
       },
-      { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~" },
+      { idempotencyKey: `codex-${String(threadId)}`, harness: "codex", cwd: "~", ...launched },
     );
     if (!starting) ready(store, agentId, "codex_title");
     agents.set(threadId, agentId);
@@ -390,9 +391,12 @@ async function codexAgents(
   return { store, path, agentOn };
 }
 
-/** A store with one running Codex agent, bound to `threadId`. */
-export async function withCodexAgent(threadId = "thr-1") {
-  const { store, agentOn } = await withCodexAgents(threadId);
+/** A store with one running Codex agent, bound to `threadId`, launched with `launched`. */
+export async function withCodexAgent(
+  threadId = "thr-1",
+  launched: { readonly compactWindowTokens?: number } = {},
+) {
+  const { store, agentOn } = await codexAgents("tmux", false, [threadId], launched);
   return { store, agentId: agentOn(threadId) };
 }
 
