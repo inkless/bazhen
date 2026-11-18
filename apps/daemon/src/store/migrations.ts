@@ -29,6 +29,7 @@ import terminalRuntimeKind from "./migrations/2026-11-15-terminal-runtime-kind.t
 import terminalRestartProtocol from "./migrations/2026-11-15-terminal-restart-protocol.ts";
 import agentTokens from "./migrations/2026-11-16-agent-tokens.ts";
 import agentRoles from "./migrations/2026-11-16-agent-roles.ts";
+import agentCompactWindow from "./migrations/2026-11-18-agent-compact-window.ts";
 
 export interface Migration {
   /** `YYYY-MM-DD-slug`, the day it was written, and its file's name in `migrations/`. */
@@ -78,6 +79,7 @@ export const MIGRATIONS: readonly Migration[] = [
   terminalRestartProtocol,
   agentTokens,
   agentRoles,
+  agentCompactWindow,
 ];
 
 /**

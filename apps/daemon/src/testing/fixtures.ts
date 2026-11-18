@@ -179,7 +179,10 @@ export const ready = (store: Store, agentId: string, sign: Sign = "claude_hook")
  */
 export async function withAgent(
   environment: (store: Store) => EnvironmentAdapter = (store) => fakeEnvironment(store),
-  { starting = false }: { readonly starting?: boolean } = {},
+  {
+    starting = false,
+    compactWindowTokens,
+  }: { readonly starting?: boolean; readonly compactWindowTokens?: number } = {},
 ) {
   const path = tempDb();
   const store = Store.open(path);
@@ -195,7 +198,12 @@ export async function withAgent(
       tokens: untokened,
       prompts: testPrompts(),
     },
-    { idempotencyKey: "launch", harness: "claude-code", cwd: "~" },
+    {
+      idempotencyKey: "launch",
+      harness: "claude-code",
+      cwd: "~",
+      ...(compactWindowTokens === undefined ? {} : { compactWindowTokens }),
+    },
   );
   const { agentId, terminalId } = launched;
   if (!isId("agent", agentId) || terminalId === null || !isId("term", terminalId)) {

@@ -1246,13 +1246,15 @@ export class Store {
         role: string | null;
         /** The hash of the prompt its last start gave it, when a start recorded one. */
         promptHash: string | null;
+        /** The compaction window every start gives it; null for the harness's own. */
+        compactWindowTokens: number | null;
         externalRef: ExternalRef | null;
         transcript: string | null;
       }
     | undefined {
     const row = this.prepare(
-      `SELECT harness, project, cwd, coalesce(name, '') AS name, role, prompt_hash, external_ref,
-              transcript
+      `SELECT harness, project, cwd, coalesce(name, '') AS name, role, prompt_hash, compact_window,
+              external_ref, transcript
        FROM agent_sessions WHERE id = ?`,
     ).get(agentId);
     if (row === undefined) return undefined;
@@ -1266,6 +1268,7 @@ export class Store {
       name: String(row.name),
       role: typeof row.role === "string" ? row.role : null,
       promptHash: typeof row.prompt_hash === "string" ? row.prompt_hash : null,
+      compactWindowTokens: typeof row.compact_window === "number" ? row.compact_window : null,
       externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
       transcript: typeof row.transcript === "string" ? row.transcript : null,
     };

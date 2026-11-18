@@ -6,7 +6,12 @@ import { hostname, networkInterfaces } from "node:os";
 import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
-import { CodexHarness, DAEMON_START_ARGS, threadConfig } from "@bazhen/harness-codex";
+import {
+  CodexHarness,
+  compactConfig,
+  DAEMON_START_ARGS,
+  threadConfig,
+} from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
 import { protocolId } from "@bazhen/protocol/id";
@@ -333,7 +338,14 @@ const codex = new CodexChannel({
   codexHome,
   startDaemon: () => codexCommand(DAEMON_START_ARGS),
   boundThreads: () => store.codexThreads(),
-  threadConfig: threadConfig(paths.socket),
+  threadConfig: (threadId) => {
+    const agentId = store.codexAgent(threadId);
+    const launched = agentId === undefined ? undefined : store.agentLaunch(agentId);
+    return {
+      ...threadConfig(paths.socket),
+      ...compactConfig(launched?.compactWindowTokens),
+    };
+  },
   listener: allOf(
     codexApprovals(
       approvals,

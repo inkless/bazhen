@@ -70,6 +70,12 @@ export function threadConfig(socket: string): Readonly<Record<string, string>> {
   };
 }
 
+/** What a thread is given so it compacts at `tokens`; nothing, to leave Codex's own setting. */
+export const compactConfig = (
+  tokens: number | null | undefined,
+): Readonly<Record<string, number>> =>
+  typeof tokens === "number" ? { model_auto_compact_token_limit: tokens } : {};
+
 /**
  * `value` as a TOML basic string. Codex reads a `-c` value as TOML and, when that fails, takes the
  * raw text with spaces and quotes trimmed from its ends, so a path left unescaped reaches the
@@ -86,9 +92,15 @@ export function tomlString(value: string): string {
   return `"${escaped}"`;
 }
 
-/** `config` as `-c key=value` flags, as a TUI sends them with each thread it loads. */
-const configFlags = (config: Readonly<Record<string, string>>) =>
-  Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${tomlString(value)}`]);
+/**
+ * `config` as `-c key=value` flags, as a TUI sends them with each thread it loads. A number is
+ * written bare: Codex refuses a string where its config takes an integer.
+ */
+const configFlags = (config: Readonly<Record<string, string | number>>) =>
+  Object.entries(config).flatMap(([key, value]) => [
+    "-c",
+    `${key}=${typeof value === "number" ? value : tomlString(value)}`,
+  ]);
 
 /**
  * Codex, reached through its app-server (foundation-design §5.8). Bazhen starts the agent's
@@ -101,13 +113,25 @@ export class CodexHarness implements HarnessAdapter {
   private readonly channel: HarnessChannelPort;
   /** The same server, as the TUI reaches it with `--remote`. */
   private readonly remote: string;
-  /** What each thread is started or resumed with: this daemon's socket, when there is one. */
-  private readonly config: { readonly config?: Readonly<Record<string, string>> };
+  /** What every thread is started or resumed with: this daemon's socket, when there is one. */
+  private readonly socketConfig: Readonly<Record<string, string>>;
 
   constructor(channel: HarnessChannelPort, remote: string, socket?: string) {
     this.channel = channel;
     this.remote = remote;
-    this.config = socket === undefined ? {} : { config: threadConfig(socket) };
+    this.socketConfig = socket === undefined ? {} : threadConfig(socket);
+  }
+
+  /** What one start of the agent gives the threads it loads. */
+  private config({
+    compactWindowTokens,
+  }: LaunchOptions): Readonly<Record<string, string | number>> {
+    return { ...this.socketConfig, ...compactConfig(compactWindowTokens) };
+  }
+
+  /** `config` as a thread request's field, left out when there is none. */
+  private static field(config: Readonly<Record<string, string | number>>) {
+    return Object.keys(config).length === 0 ? {} : { config };
   }
 
   async launchSpec(
@@ -116,7 +140,7 @@ export class CodexHarness implements HarnessAdapter {
   ): Promise<HarnessLaunch> {
     const started = await this.channel.request("thread/start", {
       cwd: request.cwd,
-      ...this.config,
+      ...CodexHarness.field(this.config(options)),
     });
     const threadId = ThreadStarted.parse(started).thread.id;
     // The thread keeps the item, so the instructions outlive a resume of it, as a launch flag would not.
@@ -137,7 +161,7 @@ export class CodexHarness implements HarnessAdapter {
     const resumed = await this.channel.request("thread/resume", {
       threadId: session.id,
       excludeTurns: true,
-      ...this.config,
+      ...CodexHarness.field(this.config(options)),
     });
     // The agent stays on its own thread; a server that answered with another would rebind it.
     const threadId = ThreadStarted.parse(resumed).thread.id;
@@ -149,7 +173,8 @@ export class CodexHarness implements HarnessAdapter {
     return this.tui(threadId, options);
   }
 
-  private tui(threadId: string, { theme }: LaunchOptions): HarnessLaunch {
+  private tui(threadId: string, options: LaunchOptions): HarnessLaunch {
+    const { theme } = options;
     return {
       argv: [
         "codex",
@@ -163,7 +188,7 @@ export class CodexHarness implements HarnessAdapter {
         // The TUI keeps its terminal's title set to the thread it shows, through /new and /resume.
         "-c",
         'tui.terminal_title=["thread-id"]',
-        ...configFlags(this.config.config ?? {}),
+        ...configFlags(this.config(options)),
         ...configFlags(theme === undefined ? {} : { "tui.theme": SYNTAX_THEME[theme] }),
       ],
       env: {},

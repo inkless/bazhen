@@ -118,7 +118,7 @@ export class ClaudeCodeHarness implements HarnessAdapter {
     session: string[],
     id: string,
     request: AgentLaunchRequest,
-    { theme, instructions, instructionsFile, name }: LaunchOptions,
+    { theme, instructions, instructionsFile, name, compactWindowTokens }: LaunchOptions,
   ): HarnessLaunch {
     const choice = this.opts.statusLine?.(request.cwd) ?? { wrap: null };
     const statusLine =
@@ -130,6 +130,9 @@ export class ClaudeCodeHarness implements HarnessAdapter {
         "claude",
         ...session,
         ...(name === undefined ? [] : ["-n", name]),
+        ...(compactWindowTokens === undefined
+          ? []
+          : ["--autocompact", String(compactWindowTokens)]),
         "--settings",
         JSON.stringify({
           ...hooks(this.opts.hookCommand),

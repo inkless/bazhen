@@ -49,6 +49,9 @@ const flag = (argv: readonly string[]) => argv[argv.indexOf("--append-system-pro
 /** The name a launch gives Claude Code's session. */
 const named = (argv: readonly string[]) => argv[argv.indexOf("-n") + 1];
 
+/** The compaction window a launch gives Claude Code. */
+const compactWindow = (argv: readonly string[]) => argv[argv.indexOf("--autocompact") + 1];
+
 describe("Claude Code harness", () => {
   it("launches with a session id it chose, and reports that session as the agent's", async () => {
     const launch = await claude(() => "6f1c0b2e-0000-4000-8000-000000000001").launchSpec(
@@ -122,6 +125,23 @@ describe("Claude Code harness", () => {
     const launched = await harness.launchSpec(request, options);
     const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s" }, options);
     expect([named(launched.argv), named(resumed.argv)]).toEqual(["BZ-127", "BZ-127"]);
+  });
+
+  it("compacts at the window the agent was launched with, on a resume too, and at its own otherwise", async () => {
+    const harness = new ClaudeCodeHarness({
+      newSessionId: () => "s",
+      hookCommand: "bazhen-hook",
+      holdsConversation: () => false,
+    });
+    const options = { compactWindowTokens: 300_000 };
+    const launched = await harness.launchSpec(request, options);
+    const resumed = await harness.resumeSpec(request, { kind: "claude-session", id: "s" }, options);
+    const unset = await harness.launchSpec(request, {});
+    expect([
+      compactWindow(launched.argv),
+      compactWindow(resumed.argv),
+      unset.argv.includes("--autocompact"),
+    ]).toEqual(["300000", "300000", false]);
   });
 
   it("gives every launch its own session", async () => {

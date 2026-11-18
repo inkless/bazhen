@@ -36,6 +36,8 @@ export interface LaunchOptions {
    * session by one. A rename reaches the harness only at its next start.
    */
   readonly name?: string;
+  /** How many tokens of context the harness compacts at; absent, its own setting stands. */
+  readonly compactWindowTokens?: number;
 }
 
 /**
