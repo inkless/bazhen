@@ -122,6 +122,8 @@ describe("the command line", () => {
       s.bazhen(["tasks", "frobnicate"]),
       s.bazhen(["agents", "frobnicate"]),
       s.bazhen(["inbox"]),
+      s.bazhen(["events", "frobnicate"]),
+      s.bazhen(["terminals"]),
     ]);
     expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n").slice(0, 3)])).toEqual([
       [2, "", ["tasks has no verb frobnicate", "usage:", "  bazhen tasks [list] [--all]"]],
@@ -131,8 +133,52 @@ describe("the command line", () => {
         "",
         ["inbox needs a verb", "usage:", "  bazhen inbox escalate <question> [--task <task>]"],
       ],
+      [
+        2,
+        "",
+        [
+          "events has no verb frobnicate",
+          "usage:",
+          "  bazhen events follow [--after <event>] [--json]",
+        ],
+      ],
+      [
+        2,
+        "",
+        [
+          "terminals needs a verb",
+          "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
+          "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal",
+        ],
+      ],
     ]);
-    expect(runs.map((r) => r.stderr.includes("bazhen shells"))).toEqual([false, false, false]);
+    expect(runs.map((r) => r.stderr.includes("bazhen shells"))).toEqual(runs.map(() => false));
+    expect(s.daemon.received).toEqual([]);
+  });
+
+  it("refuses a word after a verb that takes none, before stopping or starting anything", async () => {
+    const runs = await Promise.all(
+      [
+        ["stop", "agents"],
+        ["start", "now"],
+        ["status", "x"],
+        ["doctor", "x"],
+        ["env", "refresh", "x"],
+        ["devices", "pair", "x"],
+        ["devices", "list", "x"],
+        ["devices", "revoke", DEV, "x"],
+      ].map((argv) => s.bazhen(argv)),
+    );
+    expect(runs.map((r) => [r.code, r.stdout, r.stderr.split("\n")[0]])).toEqual([
+      [2, "", "stop takes no agents"],
+      [2, "", "start takes no now"],
+      [2, "", "status takes no x"],
+      [2, "", "doctor takes no x"],
+      [2, "", "env refresh takes no x"],
+      [2, "", "devices pair takes no x"],
+      [2, "", "devices list takes no x"],
+      [2, "", `devices revoke ${DEV} takes no x`],
+    ]);
     expect(s.daemon.received).toEqual([]);
   });
 
@@ -271,6 +317,24 @@ const CONFLICT = (socket: string, home: string) =>
   `--home ${home} names another daemon than BAZHEN_SOCKET ${socket}; run with BAZHEN_SOCKET= to use --home\n`;
 
 describe("the daemon any verb reaches", () => {
+  it("is never looked for on a command line that names no command, so it is a usage error first", async () => {
+    const elsewhere = { BAZHEN_SOCKET: join(s.root, "elsewhere", "bazhen.sock") };
+    const home = ["--home", s.home];
+    const status = await s.bazhen(["status", ...home], elsewhere);
+    const runs = await Promise.all(
+      [["send", OTHER, "hi"], ["events"], ["events", "frobnicate"], ["agents", "frobnicate"]].map(
+        (argv) => s.bazhen([...argv, ...home], elsewhere),
+      ),
+    );
+    expect(status).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: CONFLICT(elsewhere.BAZHEN_SOCKET, s.home),
+    });
+    expect(runs.map((r) => [r.code, r.stdout])).toEqual(runs.map(() => [2, ""]));
+    expect(s.daemon.received).toEqual([]);
+  });
+
   it("is the caller's for every verb but start, never the home's", async () => {
     const theirs = await callers();
     try {

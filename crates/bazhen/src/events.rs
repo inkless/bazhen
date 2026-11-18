@@ -72,9 +72,6 @@ fn only(p: &Parsed, verb: &str, own: &[&str], words: usize) -> Step<()> {
 }
 
 fn events(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
-    if p.word(1) != Some("follow") {
-        return usage("events takes follow: the daemon keeps no history to list");
-    }
     only(p, "events follow", &["after"], 2)?;
     let after = p
         .value("after")

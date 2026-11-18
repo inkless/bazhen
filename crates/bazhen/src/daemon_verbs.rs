@@ -20,7 +20,7 @@ use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, local, printable, uuid};
 use crate::out::Out;
-use crate::{Exit, doctor, usage};
+use crate::{Exit, doctor};
 
 /// How long a stopped daemon may take to stop answering.
 const STOPPED_WITHIN: Duration = Duration::from_secs(5);
@@ -141,11 +141,7 @@ pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
 }
 
 /// Gives agents started from now on this shell's environment.
-pub(crate) fn env_refresh(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    if p.word(1) != Some("refresh") {
-        out.err(&usage());
-        return Ok(Exit::Usage);
-    }
+pub(crate) fn env_refresh(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     let env = std::env::vars_os()
         .map(|(k, v)| {
             (
@@ -271,7 +267,7 @@ pub(crate) fn devices(
             out.line(&format!("revoked {id}; its open views are closed"));
             Ok(Exit::Done)
         }
-        None | Some("list") => {
+        _ => {
             let r: DevicesResponse = daemon.get("/v1/devices", CALL)?;
             let pending = open_pairings(daemon)?;
             if r.devices.is_empty() {
@@ -298,10 +294,6 @@ pub(crate) fn devices(
                 ));
             }
             Ok(Exit::Done)
-        }
-        Some(_) => {
-            out.err(&usage());
-            Ok(Exit::Usage)
         }
     }
 }

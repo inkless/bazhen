@@ -218,7 +218,7 @@ describe("bazhen events follow", () => {
       ].map((args) => s.bazhen(args)),
     );
     expect(ran.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
-      [2, "events takes follow: the daemon keeps no history to list"],
+      [2, "events needs a verb"],
       [2, "--after is an event's id, not x"],
       [2, "events follow takes no --all"],
       [2, "events follow takes no now"],

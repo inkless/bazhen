@@ -20,17 +20,17 @@ client. Agents, tasks, and orchestration come later.
 
 ## Commands
 
-| Command                          | Does                                                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                    |
-| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts |
-| `pnpm bazhen <verb>`             | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `pair`, `devices [revoke <id>]`                            |
-| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests, clippy, cargo-deny, nextest                    |
-| `pnpm test`                      | Small tests                                                                                                             |
-| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                     |
-| `pnpm test:falsify`              | Run the branch's new tests against the base's source, Rust ones against mutants of the change; CI runs it on PRs        |
-| `pnpm build`                     | Compile packages to `dist/`, build the web bundle, which the daemon serves at `http://127.0.0.1:7900`, and the holder   |
-| `pnpm format`                    | Rewrite files with oxfmt and rustfmt                                                                                    |
+| Command                          | Does                                                                                                                                     |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile` | Install exactly what the lockfile records, and the git hooks (husky)                                                                     |
+| `pnpm dev`                       | Start the daemon (`http://127.0.0.1:7900`) and the web dev server (`http://127.0.0.1:7901`); no vite keyboard shortcuts                  |
+| `pnpm bazhen <noun> <verb>`      | The CLI: `start`, `stop`, `status`, `doctor`, `env refresh`, `devices [list \| pair \| revoke <id> \| dismiss <id>]`, and the rest below |
+| `pnpm check`                     | Standards check, lint, format check, type-check, small and medium tests, clippy, cargo-deny, nextest                                     |
+| `pnpm test`                      | Small tests                                                                                                                              |
+| `pnpm test:real [suite…]`        | The tests that run real tmux, in a throwaway Linux container: integration, api, e2e                                                      |
+| `pnpm test:falsify`              | Run the branch's new tests against the base's source, Rust ones against mutants of the change; CI runs it on PRs                         |
+| `pnpm build`                     | Compile packages to `dist/`, build the web bundle, which the daemon serves at `http://127.0.0.1:7900`, and the holder                    |
+| `pnpm format`                    | Rewrite files with oxfmt and rustfmt                                                                                                     |
 
 Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/](docs/standards/).
 

@@ -126,9 +126,12 @@ events follow prints each event as it happens, after the event --after names if 
 Ctrl-C, which may wait up to 5 s for a call to the daemon to end; when the daemon goes away it
 tries again until it is back.";
 
-const DAEMON_USAGE: &str = concat!(
-    "usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]\n",
-    "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]\n",
+const DAEMON_USAGE: &str =
+    "usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]";
+
+const DEVICES_USAGE: &str = "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]";
+
+pub(crate) const TERMINALS_USAGE: &str = concat!(
     "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]\n",
     "  Ctrl-\\ Ctrl-\\ detaches; a second kill ends it at once, after which `reset` repairs the terminal\n",
     "  --direct types only while no daemon is there, and lets go of the input once one is back",
@@ -138,6 +141,8 @@ const DAEMON_USAGE: &str = concat!(
 pub(crate) fn usage() -> String {
     [
         DAEMON_USAGE,
+        DEVICES_USAGE,
+        TERMINALS_USAGE,
         AGENTS_USAGE,
         TASKS_USAGE,
         INBOX_USAGE,
@@ -149,14 +154,15 @@ pub(crate) fn usage() -> String {
 }
 
 /// Each namespace, with the usage a verb it doesn't have is answered with.
-const NAMESPACES: [(&str, &str); 8] = [
+const NAMESPACES: [(&str, &str); 9] = [
     ("agents", AGENTS_USAGE),
     ("tasks", TASKS_USAGE),
     ("inbox", INBOX_USAGE),
     ("roles", ROLES_USAGE),
     ("shells", SHELLS_USAGE),
-    ("devices", DAEMON_USAGE),
-    ("terminals", DAEMON_USAGE),
+    ("events", EVENTS_USAGE),
+    ("devices", DEVICES_USAGE),
+    ("terminals", TERMINALS_USAGE),
     ("env", DAEMON_USAGE),
 ];
 
@@ -208,13 +214,30 @@ fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
         ("roles", None | Some("list")) => (Fleet(ROLES_USAGE), 0),
         ("shells", None | Some("list" | "open" | "close")) => (Shells, 0),
         ("shells", Some("wait")) => (Wait(events::Kind::Shell), 1),
-        ("events", _) => (Follow, 0),
+        ("events", Some("follow")) => (Follow, 0),
         ("terminals", Some("attach")) => (Attach, 1),
         ("devices", Some("pair")) => (Pair, 0),
         ("devices", None | Some("list" | "revoke" | "dismiss")) => (Devices, 0),
         ("env", Some("refresh")) => (EnvRefresh, 0),
         _ => return None,
     })
+}
+
+/// The most words `handler` takes, with what it is called and the usage a word past them gets,
+/// for the handlers that don't count their own.
+fn most_words(handler: Handler, p: &args::Parsed) -> Option<(usize, &'static str)> {
+    use Handler::{Devices, Doctor, EnvRefresh, Pair, Start, Status, Stop};
+    match handler {
+        Start | Stop | Status | Doctor => Some((1, DAEMON_USAGE)),
+        EnvRefresh => Some((2, DAEMON_USAGE)),
+        Pair => Some((2, DEVICES_USAGE)),
+        Devices => match p.word(1) {
+            None => None,
+            Some("revoke" | "dismiss") => Some((3, DEVICES_USAGE)),
+            Some(_) => Some((2, DEVICES_USAGE)),
+        },
+        _ => None,
+    }
 }
 
 /// What a command line that names no command is told: its namespace's usage when it names one.
@@ -249,6 +272,16 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         out.err(&unknown(&p));
         return Exit::Usage;
     };
+    if let Some((most, text)) = most_words(handler, &p)
+        && let Some(extra) = p.word(most)
+    {
+        let verb = (0..most)
+            .filter_map(|n| p.word(n))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.err(&format!("{verb} takes no {extra}\n{text}"));
+        return Exit::Usage;
+    }
     // `start` hands `--home` to the daemon it starts and reaches no socket.
     let inputs = inputs(p.value("home"), !matches!(handler, Handler::Start));
     let socket = match paths::socket(&inputs, paths::same_socket) {
@@ -278,7 +311,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         Handler::Doctor => daemon_verbs::doctor(&daemon, out),
         Handler::Pair => daemon_verbs::pair(&daemon, out),
         Handler::Devices => daemon_verbs::devices(&v, &daemon, now_ms, out),
-        Handler::EnvRefresh => daemon_verbs::env_refresh(&v, &daemon, out),
+        Handler::EnvRefresh => daemon_verbs::env_refresh(&daemon, out),
     };
     match result {
         Ok(exit) => exit,

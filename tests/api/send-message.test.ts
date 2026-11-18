@@ -112,7 +112,7 @@ describe("an agent that unsets its environment", () => {
       timeout: 120_000,
     },
     async () => {
-      // `pair` finds the daemon by its home, which agents aren't given; this test's daemon isn't
+      // `devices pair` finds the daemon by its home, which agents aren't given; this test's daemon isn't
       // at the default one.
       const command = `env -u BAZHEN_AGENT_ID -u BAZHEN_AGENT_AUTH_FILE BAZHEN_HOME=${daemon.home} bazhen devices pair > unset-pair.txt 2>&1`;
       await mail("unset", `[[fake:bash:${command}]]`);

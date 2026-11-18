@@ -20,14 +20,9 @@ pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Fa
 fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
     let sub = p.word(1).unwrap_or("list");
     let (own, words): (&[&str], usize) = match sub {
-        "list" => (&["all"], 2),
         "open" => (&["dir"], 3),
         "close" => (&["confirm-busy", "force"], 3),
-        other => {
-            return usage(format!(
-                "shells takes list, open, close or wait, not {other}"
-            ));
-        }
+        _ => (&["all"], 2),
     };
     if let Some(other) = p
         .given()

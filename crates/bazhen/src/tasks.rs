@@ -312,8 +312,7 @@ impl Verb<'_> {
             "escalate" => self.escalate(),
             "send" => self.send(out),
             "delegate" => self.delegate(),
-            "tasks" => self.task(out),
-            other => usage(format!("unknown verb {other}")),
+            _ => self.task(out),
         }
     }
 
@@ -608,11 +607,6 @@ impl Verb<'_> {
 
     fn task(&self, out: &mut Out) -> Step<Answer> {
         match self.word(1) {
-            None | Some("list") => {
-                let me = if self.has("all") { None } else { self.me()? };
-                let s = self.state()?;
-                Ok(list_tasks(&s, me.as_deref()).into())
-            }
             Some("show") => {
                 let id = need(self.word(2), "the task")?;
                 let d: TaskDetail = self.daemon.get(&format!("/v1/tasks/{id}"), CALL)?;
@@ -665,7 +659,11 @@ impl Verb<'_> {
             }
             Some("note") => self.note(),
             Some("send") => self.task_send(out),
-            Some(other) => usage(format!("unknown tasks verb {other}")),
+            _ => {
+                let me = if self.has("all") { None } else { self.me()? };
+                let s = self.state()?;
+                Ok(list_tasks(&s, me.as_deref()).into())
+            }
         }
     }
 

@@ -24,7 +24,7 @@ use self::link::Outcome;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
-use crate::{Exit, usage};
+use crate::{Exit, TERMINALS_USAGE};
 
 const NOT_A_TERMINAL: &str =
     "bazhen terminals attach takes over a terminal: run it in one, not from a pipe or a script";
@@ -61,8 +61,7 @@ pub(crate) fn run(
     let (Some(target), None, true) = (p.word(1), p.word(2), stray.is_empty()) else {
         out.err(&format!(
             "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and \
-             --home\n{}",
-            usage()
+             --home\n{TERMINALS_USAGE}"
         ));
         return Ok(Exit::Usage);
     };
