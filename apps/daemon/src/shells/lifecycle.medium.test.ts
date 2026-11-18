@@ -243,6 +243,27 @@ describe("closing a shell", () => {
     );
   });
 
+  it("closes a shell when a process started in it outside the daemon exits, adopting it first", async () => {
+    const { store, shells, runtime, refOf, stateOf, open } = await setup();
+    const terminalId = await open();
+    const recorded = refOf(terminalId);
+    runtime.exitProcess(recorded);
+    const replaced = await runtime.respawn(recorded, {
+      ...runtime.specOf(recorded),
+      generation: 1,
+    });
+    const stop = shells.watch();
+    runtime.exitProcess(replaced);
+    await expect.poll(() => stateOf(terminalId)).toBe("closed");
+    const types = store
+      .events(0)
+      .filter((e) => e.entityId === terminalId)
+      .map((e) => e.type)
+      .slice(-3);
+    expect(types).toEqual(["terminal.process_adopted", "terminal.closing", "terminal.closed"]);
+    stop();
+  });
+
   it("closes a shell at once when its shell exits, recorded closing before its session ends", async () => {
     const { shells, runtime, refOf, stateOf, open, atClose } = await setup();
     const terminalId = await open();

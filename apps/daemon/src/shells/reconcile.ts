@@ -1,7 +1,7 @@
 import type { EnvironmentAdapter, ShellInventoryEntry } from "@bazhen/core";
 import { runtimePayload, type ShellTerminal, type Store } from "../store/store.ts";
 import { byRuntime, unrouted } from "../terminals/runtimes.ts";
-import type { ShellLifecycle } from "./lifecycle.ts";
+import { adopts, recordAdopted, type ShellLifecycle } from "./lifecycle.ts";
 
 /**
  * After a restart, matches the environment's shells against the store's (foundation-design §7.1,
@@ -76,9 +76,13 @@ async function settle(
     return;
   }
   if (found !== undefined) {
-    if (found.dead) await shells.closeExited(shell);
+    if (found.dead) {
+      await shells.closeExited(shell);
+      return;
+    }
+    if (adopts(shell, found.ref)) recordAdopted(store, shell.terminalId, found.ref);
     // A shell kept as standalone whose session kept its agent's tag: the store is what links it.
-    else if (found.linkedAgentId !== undefined && shell.linkedAgentId === null)
+    if (found.linkedAgentId !== undefined && shell.linkedAgentId === null)
       await environment.unlinkShell(found.ref);
     return;
   }

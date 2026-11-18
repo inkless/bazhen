@@ -1,4 +1,5 @@
 import {
+  laterGeneration,
   newId,
   NoTerminal,
   ProcessState,
@@ -90,6 +91,24 @@ const FOREGROUND_POLL_MS = 100;
 
 /** Shell states in which a dead pane is still to be ended and recorded closed. */
 const ENDING: ReadonlySet<string> = new Set(["running", "closing"]);
+
+/**
+ * Whether a running shell's terminal runs `ref` as a process started outside the daemon: a later
+ * generation of the same holder or server than its record names, so the recorded shell has ended.
+ */
+export function adopts(found: ShellTerminal, ref: RuntimeRef): boolean {
+  return found.state === "running" && found.runtime !== null && laterGeneration(found.runtime, ref);
+}
+
+/** Records `ref`, a process started outside the daemon, as the shell's own. */
+export function recordAdopted(store: Store, terminalId: string, ref: RuntimeRef): number {
+  return store.append({
+    type: "terminal.process_adopted",
+    entityId: terminalId,
+    actor: "system",
+    payload: { runtimeRef: runtimePayload(ref) },
+  });
+}
 
 export interface ShellDeps {
   readonly store: Store;
@@ -468,14 +487,19 @@ export class ShellLifecycle implements PromptListener {
 
   /**
    * A shell that exits closes at once, with no warning (§4.8). Its pane stays dead until then, so
-   * an exit while the daemon was down is still seen, and closed, rather than taken for a loss.
+   * an exit while the daemon was down is still seen, and closed, rather than taken for a loss. An
+   * exit at a later generation is of a process started outside the daemon, adopted as it closes.
    */
   private exited(ref: RuntimeRef): Promise<void> {
     const incarnation = `${ref.terminalId}:${ref.locator.generation ?? ""}`;
     return this.deps.queue
       .run(ref.terminalId, async () => {
-        const found = this.deps.store.shell(ref.terminalId);
+        let found = this.deps.store.shell(ref.terminalId);
         if (found === undefined || !ENDING.has(found.state)) return;
+        if (adopts(found, ref)) {
+          recordAdopted(this.deps.store, ref.terminalId, ref);
+          found = { ...found, runtime: ref, generation: Number(ref.locator.generation) };
+        }
         if (ref.locator.generation !== String(found.generation)) return;
         await this.closeExited(found);
         this.unended.delete(incarnation);

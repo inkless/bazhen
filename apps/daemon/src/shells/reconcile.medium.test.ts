@@ -64,6 +64,22 @@ describe("reconciling shells after a restart", () => {
     expect((await runtime.inventory()).map((e) => e.ref.terminalId)).not.toContain(terminalId);
   });
 
+  it("adopts a process started in a shell's terminal while the daemon was down", async () => {
+    const { store, runtime, restart, open, refOf } = setup();
+    const terminalId = await open();
+    const recorded = refOf(terminalId);
+    runtime.exitProcess(recorded);
+    await runtime.respawn(recorded, { ...runtime.specOf(recorded), generation: 1 });
+    await restart();
+    const adopted = store.events(0).filter((e) => e.type === "terminal.process_adopted");
+    expect([
+      store.shell(terminalId)?.state,
+      store.shell(terminalId)?.generation,
+      refOf(terminalId).locator.generation,
+      adopted.map((e) => e.actor),
+    ]).toEqual(["running", 1, "1", ["system"]]);
+  });
+
   it("leaves a running shell running", async () => {
     const { restart, open, stateOf } = setup();
     const terminalId = await open();
