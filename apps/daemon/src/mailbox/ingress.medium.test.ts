@@ -608,6 +608,22 @@ describe("hook ingress, on a caller it can't read in time", () => {
     ]);
   });
 
+  it("says a waiter it can't read in time is late and will ask again, not dropped", async () => {
+    const { socket, agentId, logged } = await daemon(false, async () => ({ kind: "late" }));
+    const status = await post(socket, "/v1/hooks", {
+      payload: JSON.parse(sessionStart(CLAUDE_SESSION)),
+      protocolVersion: "1.0",
+      agentId,
+      event: "wait",
+      pid: process.pid,
+      ppid: process.ppid,
+    });
+    expect([status, logged]).toEqual([
+      503,
+      [`bazhen: 2026-11-17T00:00:00.000Z late, the waiter retries: agent ${agentId}`],
+    ]);
+  });
+
   it("gives up, as the script waiter, after five readings in a row that come late, waiting longer before each", async () => {
     let readings = 0;
     const { socket, agentId } = await daemon(false, async () => {

@@ -92,7 +92,10 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
       await peerOf(c),
     );
     if (who.kind === "refused" && who.retry === true) {
-      dropped(hook.data.agentId, who.reason);
+      // Only the waiter asks again; any other hook takes the 503 as its answer and is dropped.
+      if (event === "wait")
+        log(`bazhen: ${now().toISOString()} late, the waiter retries: agent ${hook.data.agentId}`);
+      else dropped(hook.data.agentId, who.reason);
       return unavailable(c, who.reason);
     }
     if (who.kind === "refused") return dropped(hook.data.agentId, `refused, ${who.reason}`);

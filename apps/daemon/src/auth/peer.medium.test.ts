@@ -326,6 +326,24 @@ describe("readPeer", () => {
     ]);
   });
 
+  it("keeps the first line of what the reader said, and at most 512 bytes of it", async () => {
+    const conn = await connection();
+    const panicked = script(
+      "panicked",
+      "printf 'thread main panicked at src/main.rs:9:5:\\nboom\\nnote: run with RUST_BACKTRACE=1\\n' >&2; exit 101",
+    );
+    const long = script(
+      "long",
+      "i=0; while [ $i -lt 400 ]; do printf '\\303\\251' >&2; i=$((i+1)); done; exit 1",
+    );
+    const readings = [await readPeer(panicked, conn), await readPeer(long, conn)];
+    conn.destroy();
+    expect(readings).toEqual([
+      { kind: "unread", why: "thread main panicked at src/main.rs:9:5:" },
+      { kind: "unread", why: "\u00e9".repeat(256) },
+    ]);
+  });
+
   it("reads a reader still running at its deadline as late, not as nobody", async () => {
     const conn = await connection();
     const reading = await readPeer(script("slow", "sleep 1"), conn, 100);

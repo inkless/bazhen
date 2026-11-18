@@ -65,7 +65,7 @@ export type PeerRead =
   | { readonly kind: "unread"; readonly why: string }
   | { readonly kind: "late" };
 
-/** The most of the reader's stderr kept as its reason, which is one short line. */
+/** The most bytes of the reader's stderr kept; its reason is the first line of them. */
 const MAX_WHY = 512;
 
 /**
@@ -101,12 +101,11 @@ export function readPeer(
           timeoutMs,
         );
         let out = "";
-        let err = "";
+        let err = Buffer.alloc(0);
         child.stdout?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => (out += chunk));
-        child.stderr?.setEncoding("utf8");
-        child.stderr?.on("data", (chunk: string) => {
-          if (err.length < MAX_WHY) err += chunk;
+        child.stderr?.on("data", (chunk: Buffer) => {
+          if (err.length < MAX_WHY) err = Buffer.concat([err, chunk]).subarray(0, MAX_WHY);
         });
         child.on("error", (e) =>
           done({ kind: "unread", why: `the reader can't start: ${e.message}` }),
@@ -114,7 +113,8 @@ export function readPeer(
         child.on("close", (code, signal) => {
           const chain = code === 0 ? parsePeer(out) : undefined;
           if (chain !== undefined) return done({ kind: "read", chain });
-          const said = err.slice(0, MAX_WHY).trim();
+          // One line: a reader that panicked says more than a reason, and its first line is why.
+          const [said = ""] = err.toString("utf8").trim().split("\n", 1);
           const why =
             said !== ""
               ? said
