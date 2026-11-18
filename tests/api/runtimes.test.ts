@@ -117,7 +117,7 @@ describe("a holder daemon on a machine without tmux", () => {
       await runtimeStates(daemon),
       doctor.code,
       doctor.out.split("\n").filter((l) => l.startsWith("tmux")),
-    ]).toEqual([["tmux: unused", "holder: healthy"], 0, ["tmux: unused"]]);
+    ]).toEqual([["tmux: unused", "holder: not-running"], 0, ["tmux: unused"]]);
   });
 
   it("runs no tmux while a holder shell runs, beyond asking its version at start", async () => {
