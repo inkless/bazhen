@@ -966,8 +966,32 @@ const HOUR_TWO = MEASURE + HOUR;
 /** What a run recorded in its warm-up, before it recorded its window. */
 const inWarmUp = (e: SoakEvent) => e.t < MEASURE && e.kind !== "window";
 const notWindowEnd = (e: SoakEvent) => e.kind !== "window" || e.phase === "measure";
-const inFirstHalfHourUnwindowed = (e: SoakEvent) =>
-  e.kind !== "window" && e.t <= MEASURE + 30 * MIN;
+const beforeHourAndHalf = (e: SoakEvent) => e.kind !== "window" && e.t <= MEASURE + 90 * MIN;
+
+/**
+ * A run of samples alone: an hour's warm-up, then `hours` measured, the one daemon's RSS in MiB
+ * at each hour into the window as `rss` gives it.
+ */
+function daemonOver(hours: number, rss: (hour: number) => number): SoakEvent[] {
+  const events: SoakEvent[] = [
+    { kind: "window", t: HOUR, phase: "measure" },
+    { kind: "window", t: HOUR + hours * HOUR, phase: "end" },
+  ];
+  for (let t = 0; t <= HOUR + hours * HOUR; t += 30 * SEC) {
+    events.push({
+      kind: "sample",
+      t,
+      settled: false,
+      daemon: { pid: DAEMON_PID, rss: rss((t - HOUR) / HOUR) * MiB, fds: 36, ageMs: t },
+      holders: HOLDERS,
+      terminals: TERMINALS,
+      ptys: 5,
+    });
+  }
+  return events;
+}
+const lateLeak = (hour: number) => 200 + Math.max(0, hour - 18) * 4;
+const earlyGrowth = (hour: number) => 200 + Math.min(Math.max(0, hour), 6) * 4;
 const notEchoInHourOne = (e: SoakEvent) => e.kind !== "echo" || e.t < MEASURE || e.t >= HOUR_TWO;
 
 describe("judge, with one daemon life", () => {
@@ -1020,7 +1044,10 @@ describe("judge, with one daemon life", () => {
       oneLifeRun(),
       withDaemon((d) => ({ rss: 100 * MiB + (d.ageMs / HOUR) * 6 * MiB })),
     );
-    expect(criterion(growing, "daemon-memory")?.status).toBe("fail");
+    expect(criterion(growing, "daemon-memory")).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/^the daemon grew 6\.00 MiB\/h in its one life; /),
+    });
   });
 
   it("fails a daemon that died, on daemon-memory alone, saying when and how", () => {
@@ -1068,24 +1095,18 @@ describe("judge, with one daemon life", () => {
     });
   });
 
-  it("judges the echo of a run cut short with no window end, as an unbounded window can't be split into hours", () => {
-    const cutShort = oneLifeRun().filter(notWindowEnd);
-    expect(criterion(cutShort, "echo")).toMatchObject({
-      status: "pass",
-      detail: expect.not.stringContaining("hour"),
-    });
-  });
-
-  it("judges no hour of a window shorter than one, and says nothing of one", () => {
-    const halfHour = oneLifeRun()
-      .filter(inFirstHalfHourUnwindowed)
+  it("judges whole hours only, leaving a part hour at the window's end to the window's p99", () => {
+    const hourAndHalf = oneLifeRun()
+      .filter(beforeHourAndHalf)
       .concat(
         { kind: "window", t: MEASURE, phase: "measure" },
-        { kind: "window", t: MEASURE + 30 * MIN, phase: "end" },
+        { kind: "window", t: MEASURE + 90 * MIN, phase: "end" },
+        floodEchoesFrom(MEASURE + MIN, 6, 300),
+        floodEchoesFrom(HOUR_TWO + MIN, 30, 2),
       );
-    expect(criterion(halfHour, "echo")).toMatchObject({
+    expect(criterion(hourAndHalf, "echo")).toMatchObject({
       status: "pass",
-      detail: expect.not.stringContaining("hour"),
+      detail: expect.stringMatching(/; worst hour's p99 6 ms$/),
     });
   });
 
@@ -1119,28 +1140,40 @@ describe("judge, with one daemon life", () => {
       status: "fail",
       detail: "no keystroke was timed during a flood in hour 1",
     });
+    const cutShort = oneLifeRun().filter(notEchoInHourOne).filter(notWindowEnd);
+    expect(criterion(cutShort, "echo")?.status).toBe("pass");
   });
 
   it("judges three days of the one daemon's samples", () => {
-    const days = 72 * HOUR;
-    const events: SoakEvent[] = [
-      { kind: "window", t: HOUR, phase: "measure" },
-      { kind: "window", t: HOUR + days, phase: "end" },
-    ];
-    for (let t = 0; t <= HOUR + days; t += 30 * SEC) {
-      events.push({
-        kind: "sample",
-        t,
-        settled: false,
-        daemon: { pid: DAEMON_PID, rss: 200 * MiB, fds: 36, ageMs: t },
-        holders: HOLDERS,
-        terminals: TERMINALS,
-        ptys: 5,
-      });
-    }
-    expect(criterion(events, "daemon-memory", { ...ONE_LIFE, minMeasuredMs: days })).toMatchObject({
+    const days = daemonOver(72, () => 200);
+    expect(
+      criterion(days, "daemon-memory", { ...ONE_LIFE, minMeasuredMs: 72 * HOUR }),
+    ).toMatchObject({
       status: "pass",
-      detail: expect.stringMatching(/^one life, 0\.00 MiB\/h/),
+      detail: expect.stringMatching(/^one life, 0\.00 MiB\/h, 0\.00 over the last 6 h; /),
+    });
+  });
+
+  it.each([
+    [
+      "flat for 18 h, then growing 4 MiB an hour",
+      lateLeak,
+      "fail",
+      "the daemon grew 4.00 MiB/h over the last 6 h",
+    ],
+    [
+      "growing 4 MiB an hour for 6 h, then flat",
+      earlyGrowth,
+      "pass",
+      "one life, 0.00 MiB/h, 0.00 over the last 6 h",
+    ],
+  ])("judges a day's daemon %s by its last 6 h too", (_, rss, status, detail) => {
+    const day = daemonOver(24, rss);
+    expect(
+      criterion(day, "daemon-memory", { ...ONE_LIFE, minMeasuredMs: 24 * HOUR }),
+    ).toMatchObject({
+      status,
+      detail: expect.stringContaining(detail),
     });
   });
 });

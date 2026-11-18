@@ -210,6 +210,11 @@ const MIN_CHECKED_MS = 30_000;
 const WRITE_LAG_MS = 1_000;
 /** The fewest daemon lives whose baselines are fitted for growth across lives. */
 const MIN_LIVES = 3;
+/**
+ * The end of a one-life window whose slope is judged again on its own: over a day, a leak that
+ * starts late moves the whole window's robust slope hardly at all.
+ */
+const TAIL_MS = 6 * HOUR;
 /** What a float may be off by and still sit on a bar: 1 MiB/h fitted is not 0.9999999. */
 const EPSILON = 1e-9;
 
@@ -590,20 +595,26 @@ function probes({ events, options }: Run) {
  * Why `points`, in hours, can't carry a slope over the window: too few of them, or spanning too
  * little of it. Undefined when they can.
  */
-function thin(points: readonly Point[], run: Run): string | undefined {
+function thin(points: readonly Point[], window: number): string | undefined {
   if (points.length < MIN_SLOPE_POINTS) return `${points.length} points`;
   const span = ((points.at(-1)?.[0] ?? 0) - (points[0]?.[0] ?? 0)) * HOUR;
-  const window = run.to - run.from;
   return span < SLOPE_COVERAGE * window
     ? `points over ${(span / HOUR).toFixed(2)} h of ${(window / HOUR).toFixed(2)}`
     : undefined;
 }
 
-/** The slope of RSS `readings`, each a time and bytes, in MiB an hour; `thin` says why they can't carry one. */
-function rssSlope(readings: readonly Point[], run: Run): { perHour: number; thin?: string } {
+/**
+ * The slope of RSS `readings`, each a time and bytes, in MiB an hour, over a span `window` long;
+ * `thin` says why they can't carry one.
+ */
+function rssSlope(
+  readings: readonly Point[],
+  run: Run,
+  window = run.to - run.from,
+): { perHour: number; thin?: string } {
   const poolMs = run.options.slopeWindowMs / POOLS_PER_SLOPE_WINDOW;
   const points = pooled(readings, poolMs).map(([t, rss]): Point => [t / HOUR, rss / MiB]);
-  const why = thin(points, run);
+  const why = thin(points, window);
   return { perHour: theilSen(points), ...(why !== undefined && { thin: why }) };
 }
 
@@ -741,7 +752,7 @@ function daemonAcrossLives(run: Run, ageMs: number) {
     if (readable && !atAge.has(d.pid)) atAge.set(d.pid, [s.t / HOUR, d.rss / MiB]);
   }
   const points = [...atAge.values()];
-  const why = thin(points, run);
+  const why = thin(points, run.to - run.from);
   if (why !== undefined) {
     return result("daemon-memory", [`too few daemon lives read at their age: ${why}`], "");
   }
@@ -798,9 +809,25 @@ function daemonInOneLife(run: Run): Criterion {
   if (atLeast(perHour, options.daemonSlope)) {
     faults.push(`the daemon grew ${perHour.toFixed(2)} MiB/h in its one life`);
   }
+  let slopes = `${perHour.toFixed(2)} MiB/h`;
+  if (run.to - run.from > TAIL_MS) {
+    const tailFrom = run.to - TAIL_MS;
+    const tail = rssSlope(
+      readings.filter(([t]) => t >= tailFrom),
+      run,
+      TAIL_MS,
+    );
+    const hours = TAIL_MS / HOUR;
+    if (tail.thin !== undefined) {
+      faults.push(`too few daemon RSS readings in the last ${hours} h: ${tail.thin}`);
+    } else if (atLeast(tail.perHour, options.daemonSlope)) {
+      faults.push(`the daemon grew ${tail.perHour.toFixed(2)} MiB/h over the last ${hours} h`);
+    }
+    slopes += `, ${tail.perHour.toFixed(2)} over the last ${hours} h`;
+  }
   const rss = readings.map(([, bytes]) => bytes);
   const measured =
-    `one life, ${perHour.toFixed(2)} MiB/h; RSS ${mib(rss[0] ?? 0)} MiB at the window's start, ` +
+    `one life, ${slopes}; RSS ${mib(rss[0] ?? 0)} MiB at the window's start, ` +
     `${mib(rss.at(-1) ?? 0)} at its end, ${mib(largest(rss))} at most`;
   // The baseline the run is for, reported beside whatever else failed.
   return faults.length === 0

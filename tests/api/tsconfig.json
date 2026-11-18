@@ -11,6 +11,7 @@
     "fixtures/*.ts",
     "../support/agent-env.ts",
     "../support/holder-close.ts",
+    "../support/log-tail.ts",
     "../support/transcript.ts",
     "../support/key-*.ts"
   ],

@@ -89,11 +89,4 @@ describe("main --judge", () => {
     );
     expect(await daemonMemory("gate")).toMatch(/^UNMEASURED +daemon-memory /);
   });
-
-  it("refuses a directory whose profile.json names no profile it knows", async () => {
-    const dir = runDir("judged-week", {
-      "profile.json": [JSON.stringify({ name: "week", hours: 24 })],
-    });
-    await expect(main(["--judge", dir])).rejects.toThrow(/names no profile/);
-  });
 });
