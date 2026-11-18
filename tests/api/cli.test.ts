@@ -207,6 +207,25 @@ describe("bazhen doctor", () => {
     expect(out).not.toContain("sentinel-value-never-shown");
   });
 
+  it("says tmux is unused while no terminal is on it, and nothing of its dead-pane crash", async () => {
+    const { code, out } = await bazhen(["doctor"], daemon.env);
+    expect([
+      code,
+      out.split("\n").filter((l) => l.startsWith("tmux")),
+      out.includes("  warning: tmux before 3.5 crashes"),
+    ]).toEqual([0, ["tmux: unused"], false]);
+  });
+});
+
+describe("bazhen doctor on tmux", () => {
+  let daemon: Daemon;
+  beforeAll(async () => {
+    daemon = await Daemon.startWithCli("", {}, "tmux");
+  });
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
   it("warns of the dead-pane crash on a tmux before 3.5, and only there", async () => {
     const { code, out } = await bazhen(["doctor"], daemon.env);
     expect(code).toBe(0);
