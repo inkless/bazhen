@@ -1,7 +1,9 @@
+import type { HarnessActivity, LimitStop } from "@bazhen/core";
 import { activityOf, type Hook, type HookOrigin } from "@bazhen/harness-claude-code";
 import type { Activity } from "@bazhen/protocol";
 
-type Doing = Pick<Activity, "value" | "detail">;
+type Doing = HarnessActivity;
+type Recorder = (agentId: string, activity: Activity, limit?: LimitStop) => void;
 
 /** What a busy agent's idle main turn reads as while a subagent of its still works. */
 const SUBAGENT_RUNNING: Doing = { value: "working", detail: "subagent running" };
@@ -20,7 +22,7 @@ const SUBAGENT_RUNNING: Doing = { value: "working", detail: "subagent running" }
 export const RESTARTED = "daemon restarted";
 
 export class ActivityTracker {
-  private readonly record: (agentId: string, activity: Activity) => void;
+  private readonly record: Recorder;
   private readonly main = new Map<string, Doing>();
   /** Per agent, each open subagent by its id, and whether it waits on a permission. */
   private readonly subagents = new Map<string, Map<string, Doing>>();
@@ -31,7 +33,8 @@ export class ActivityTracker {
    */
   private readonly unvouched = new Set<string>();
 
-  constructor(record: (agentId: string, activity: Activity) => void) {
+  /** `record` gets, beside the activity, whether the account's limit may have stopped the turn. */
+  constructor(record: Recorder) {
     this.record = record;
   }
 
@@ -53,12 +56,12 @@ export class ActivityTracker {
     else return;
     const now = this.effective(agentId);
     if (now === undefined) return;
-    this.record(agentId, {
-      ...now,
-      source: "native",
-      confidence: 1,
-      observedAt: new Date().toISOString(),
-    });
+    const { limit, ...signal } = now;
+    this.record(
+      agentId,
+      { ...signal, source: "native", confidence: 1, observedAt: new Date().toISOString() },
+      limit,
+    );
   }
 
   /**

@@ -43,6 +43,10 @@ const userInput = {
   threadId: "thr-1",
   item: { type: "userMessage", content: [{ type: "text", text: "go on" }] },
 };
+const failedWith = (codexErrorInfo: unknown) => ({
+  threadId: "thr-1",
+  turn: { id: "t1", status: "failed", error: { message: "m", codexErrorInfo } },
+});
 const agentReply = { threadId: "thr-1", item: { type: "agentMessage", id: "i1" } };
 
 describe("Codex activity signals", () => {
@@ -155,6 +159,48 @@ describe("Codex activity signals", () => {
     listener.notification?.("turn/completed", turnEnded("failed"));
     listener.notification?.("turn/started", turnStarted);
     expect(turns).toEqual(["failed agt-1", "started agt-1"]);
+  });
+
+  it("tells the inbox and the activity which error a turn failed with, and whether it may be the account's limit", () => {
+    const failed: [string, string | null][] = [];
+    const recorded: [Activity["value"], string | undefined, string | undefined][] = [];
+    const listener = codexSignals({
+      agentOf: () => "agt-1",
+      record: (_, signal, limit) => recorded.push([signal.value, signal.detail, limit]),
+      resume: async () => undefined,
+      turns: {
+        started: () => undefined,
+        failed: (agentId, error) => failed.push([agentId, error]),
+      },
+    });
+    listener.notification?.("turn/completed", failedWith("usageLimitExceeded"));
+    listener.notification?.("turn/completed", failedWith("serverOverloaded"));
+    expect([failed, recorded]).toEqual([
+      [
+        ["agt-1", "usageLimitExceeded"],
+        ["agt-1", "serverOverloaded"],
+      ],
+      [
+        ["failed", "usageLimitExceeded", "quota"],
+        ["failed", "serverOverloaded", undefined],
+      ],
+    ]);
+  });
+
+  it("hands on each rate-limit update's windows, which belong to the account and no one thread", () => {
+    const updates: unknown[] = [];
+    const listener = codexSignals({
+      agentOf: () => undefined,
+      record: () => undefined,
+      resume: async () => undefined,
+      limits: (limits) => updates.push(limits),
+    });
+    listener.notification?.("account/rateLimits/updated", {
+      rateLimits: { limitId: "codex", primary: { usedPercent: 100, resetsAt: 1_795_006_800 } },
+    });
+    expect(updates).toEqual([
+      [{ window: "codex.primary", usedPercent: 100, resetsAt: "2026-11-18T13:00:00.000Z" }],
+    ]);
   });
 
   it("keeps a failed turn failed through the idle status that follows it", () => {

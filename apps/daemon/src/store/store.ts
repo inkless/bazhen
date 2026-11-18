@@ -1146,6 +1146,12 @@ export class Store {
     return this.prepare(sql).get(agentId, hook.pid, hook.sessionId) !== undefined;
   }
 
+  /** The usage an agent's harness last reported in this process, if any. */
+  usage(agentId: string): Usage | undefined {
+    const row = this.prepare("SELECT usage FROM agent_sessions WHERE id = ?").get(agentId);
+    return typeof row?.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
+  }
+
   /** What an agent's harness last reported it doing in this process, if anything. */
   latestActivity(agentId: string): Activity | undefined {
     const row = this.prepare("SELECT activity FROM activity_latest WHERE agent_session_id = ?").get(
@@ -2245,7 +2251,10 @@ const REPORTING: ReadonlySet<AgentState> = new Set(["starting", "running", "unkn
 
 /** Two signals that say the same thing, whenever each was observed and however sure. */
 const sameActivity = (a: Activity, b: Activity) =>
-  a.value === b.value && a.source === b.source && a.detail === b.detail;
+  a.value === b.value &&
+  a.source === b.source &&
+  a.detail === b.detail &&
+  a.resetsAt === b.resetsAt;
 
 const activityOf = (column: SQLOutputValue | undefined): Activity =>
   Activity.parse(JSON.parse(String(column)));

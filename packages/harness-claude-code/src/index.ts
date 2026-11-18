@@ -2,12 +2,14 @@ import {
   mailLabel,
   quoteLabels,
   type AgentLaunchRequest,
+  type HarnessActivity,
   type HarnessAdapter,
   type HarnessLaunch,
+  isoOfUnixSeconds,
   type LaunchOptions,
   whole,
 } from "@bazhen/core";
-import type { Activity, ApprovalDecision, ExternalRef, Usage } from "@bazhen/protocol";
+import type { ApprovalDecision, ExternalRef, Usage, UsageLimit } from "@bazhen/protocol";
 
 export interface ClaudeCodeOptions {
   readonly newSessionId: () => string;
@@ -394,18 +396,46 @@ function usageOf(payload: unknown): Usage {
     ...(typeof size === "number" && Number.isInteger(size) && size > 0
       ? { contextWindowTokens: size }
       : {}),
+    ...limitsOf(field(payload, "rate_limits")),
   };
 }
 
-const failure = (error: string | null): Pick<Activity, "value" | "detail"> =>
-  error === null ? { value: "failed" } : { value: "failed", detail: error };
+/**
+ * Each usage limit a status line's `rate_limits` gives with its share used, by Claude Code's name
+ * for its window, such as `five_hour`: its reset is Unix seconds. A list there is a group of
+ * limits, not one, and is left out.
+ */
+function limitsOf(rateLimits: unknown): Pick<Usage, "limits"> {
+  if (typeof rateLimits !== "object" || rateLimits === null) return {};
+  const limits: UsageLimit[] = [];
+  for (const [window, limit] of Object.entries(rateLimits)) {
+    const used = field(limit, "used_percentage");
+    if (Array.isArray(limit) || window.length > 60 || typeof used !== "number" || !(used >= 0)) {
+      continue;
+    }
+    const resetsAt = isoOfUnixSeconds(field(limit, "resets_at"));
+    limits.push({ window, usedPercent: used, ...(resetsAt === null ? {} : { resetsAt }) });
+  }
+  return limits.length === 0 ? {} : { limits: limits.slice(0, 20) };
+}
+
+/**
+ * An API error that ends the turn. Claude Code reports a subscription's usage limit and an API
+ * key's passing 429 alike as `rate_limit`, so that one may be the account's limit.
+ */
+const failure = (error: string | null): HarnessActivity => {
+  if (error === null) return { value: "failed" };
+  return error === "rate_limit"
+    ? { value: "failed", detail: error, limit: "rate" }
+    : { value: "failed", detail: error };
+};
 
 /**
  * What a hook says the agent is doing (foundation-design §4.6), or null for one that says
  * nothing: a prompt or a tool call means working, a permission request needs the human, a turn's
  * end leaves it idle, and an API error that ends the turn is a failure.
  */
-export function activityOf(hook: Hook): Pick<Activity, "value" | "detail"> | null {
+export function activityOf(hook: Hook): HarnessActivity | null {
   switch (hook.kind) {
     case "promptStarted":
     case "toolStarted":

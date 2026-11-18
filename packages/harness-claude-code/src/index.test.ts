@@ -301,6 +301,60 @@ describe("Claude Code hooks", () => {
     ]);
   });
 
+  it("reads each usage limit's share used and its reset from a status line's input", () => {
+    const fiveHour = { used_percentage: 100, resets_at: 1_795_006_800 };
+    const spend = { used_percentage: 104.5, resets_at: 1_795_525_200 };
+    expect(
+      readHook("statusline", {
+        rate_limits: {
+          five_hour: fiveHour,
+          seven_day: { used_percentage: 41 },
+          spend_limit: spend,
+        },
+      }),
+    ).toEqual({
+      kind: "statusline",
+      usage: {
+        limits: [
+          { window: "five_hour", usedPercent: 100, resetsAt: "2026-11-18T13:00:00.000Z" },
+          { window: "seven_day", usedPercent: 41 },
+          { window: "spend_limit", usedPercent: 104.5, resetsAt: "2026-11-24T13:00:00.000Z" },
+        ],
+      },
+    });
+  });
+
+  it("leaves out a usage limit it can't read, and every limit when the status line gives none", () => {
+    expect([
+      readHook("statusline", {
+        rate_limits: {
+          five_hour: { used_percentage: "full", resets_at: 1_795_006_800 },
+          seven_day: { used_percentage: -1 },
+          model_scoped: [{ used_percentage: 3 }],
+          spend_limit: { used_percentage: 7, resets_at: "soon" },
+        },
+      }),
+      readHook("statusline", { rate_limits: null }),
+    ]).toEqual([
+      { kind: "statusline", usage: { limits: [{ window: "spend_limit", usedPercent: 7 }] } },
+      { kind: "statusline", usage: {} },
+    ]);
+  });
+
+  it("marks a rate limit's end of turn as one the account's limit may have stopped, and no other error", () => {
+    expect([
+      activityAt("StopFailure", { error: "rate_limit" }),
+      activityAt("wait", { hook_event_name: "StopFailure", error: "rate_limit" }),
+      activityAt("StopFailure", { error: "billing_error" }),
+      activityAt("StopFailure", { error: "server_error" }),
+    ]).toEqual([
+      { value: "failed", detail: "rate_limit", limit: "rate" },
+      { value: "failed", detail: "rate_limit", limit: "rate" },
+      { value: "failed", detail: "billing_error" },
+      { value: "failed", detail: "server_error" },
+    ]);
+  });
+
   it("reads a subagent's start and stop, by its id", () => {
     expect([
       readHook("SubagentStart", { agent_id: "x" }),

@@ -1114,6 +1114,12 @@ const activity = (
   more: { detail?: string; confidence?: number } = {},
 ) => ({ value, source: "native" as const, confidence: more.confidence ?? 1, observedAt, ...more });
 
+const limited = (observedAt: string, resetsAt: string) => ({
+  ...activity("working", observedAt, { detail: "rate_limit" }),
+  value: "limited" as const,
+  resetsAt,
+});
+
 const activityEvents = (store: Store) => store.events(0).filter((e) => e.type === "agent.activity");
 
 describe("Store activity signals", () => {
@@ -1145,6 +1151,20 @@ describe("Store activity signals", () => {
     expect(again).toBeNull();
     expect(changed).toBeTypeOf("number");
     expect(activityEvents(store)).toHaveLength(2);
+  });
+
+  it("records a limited signal again when the time its limit resets changes", async () => {
+    const { store, agentId } = await withAgent();
+    const first = store.recordActivity(
+      agentId,
+      limited("2026-11-12T10:00:00.000Z", "2026-11-12T15:00:00.000Z"),
+    );
+    const later = store.recordActivity(
+      agentId,
+      limited("2026-11-12T10:00:05.000Z", "2026-11-18T15:00:00.000Z"),
+    );
+    expect([first === null, later === null]).toEqual([false, false]);
+    expect(store.latestActivity(agentId)?.resetsAt).toBe("2026-11-18T15:00:00.000Z");
   });
 
   it("drops a signal observed before the latest, which arrived late", async () => {
@@ -1245,6 +1265,21 @@ describe("Store usage", () => {
     const grown = store.recordUsage(agentId, { ...usage, contextUsedPercent: 4 });
     expect([first, again, grown].map((id) => id === null)).toEqual([false, true, false]);
     expect(store.snapshot(testView).agents[0]?.usage).toEqual({ ...usage, contextUsedPercent: 4 });
+  });
+
+  it("reads back the usage its harness last reported, and none before it reports any", async () => {
+    const { store, agentId } = await withAgent();
+    const before = store.usage(agentId);
+    const limits = [
+      { window: "five_hour", usedPercent: 100, resetsAt: "2026-11-18T13:00:00.000Z" },
+    ];
+    store.recordUsage(agentId, { model: "Opus" });
+    store.recordUsage(agentId, { model: "Opus", limits });
+    expect([before, store.usage(agentId), store.usage(newId("agent"))]).toEqual([
+      undefined,
+      { model: "Opus", limits },
+      undefined,
+    ]);
   });
 
   it("records no usage for an agent whose process has exited, and refuses one it never ran", async () => {
