@@ -68,7 +68,7 @@ jobs:
         env:
           HOURS: ${{ inputs.hours }}
         run: pnpm soak --hours "$HOURS" --out soak-run
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: soak-${{ matrix.os }}
