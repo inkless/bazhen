@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { HealthResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { closeHolderAt, holderSockets } from "../support/holder-close.ts";
-import { Daemon } from "./daemon.ts";
+import { bazhen, Daemon } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
 let model: FakeModel;
@@ -19,6 +19,12 @@ async function openShell(daemon: Daemon, key: string): Promise<string> {
 
 const runtimeOf = (command: string | null) =>
   command === null ? "none" : command.startsWith("bazhen terminals attach") ? "holder" : "tmux";
+
+/** Each runtime the daemon reports, as `<kind>: <state>`. */
+async function runtimeStates(daemon: Daemon): Promise<string[]> {
+  const { runtimes } = HealthResponse.parse((await daemon.request("/v1/health")).body);
+  return runtimes.map((r) => `${r.kind}: ${r.state}`);
+}
 
 /** Each terminal's state and the runtime its attach command names, by TerminalId. */
 async function terminals(daemon: Daemon): Promise<Record<string, string>> {
@@ -68,6 +74,10 @@ describe("a daemon running terminals on both runtimes", () => {
     );
   });
 
+  it("reads tmux while a terminal is open on it, though holders are the default", async () => {
+    expect(await runtimeStates(daemon)).toEqual(["tmux: healthy", "holder: healthy"]);
+  });
+
   it("finds each one on its own runtime after a crash", async () => {
     await daemon.crash();
     await daemon.restart();
@@ -88,5 +98,35 @@ describe("a daemon running terminals on both runtimes", () => {
       [holderShell]: "running on holder",
       [holderAgent]: "lost on none",
     });
+  });
+});
+
+describe("a holder daemon on a machine without tmux", () => {
+  let daemon: Daemon;
+
+  beforeAll(async () => {
+    daemon = await Daemon.start({ runtime: "holder", withoutTmux: true });
+  }, 60_000);
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("reports tmux unused, and passes doctor", async () => {
+    const doctor = await bazhen(["doctor"], daemon.env);
+    expect([
+      await runtimeStates(daemon),
+      doctor.code,
+      doctor.out.split("\n").filter((l) => l.startsWith("tmux")),
+    ]).toEqual([["tmux: unused", "holder: healthy"], 0, ["tmux: unused"]]);
+  });
+
+  it("runs no tmux while a holder shell runs, beyond asking its version at start", async () => {
+    const shell = await openShell(daemon, "no-tmux-shell");
+    await expect
+      .poll(async () => (await terminals(daemon))[shell], { timeout: 30_000 })
+      .toBe("running on holder");
+    // Past several of tmux's exit polls and the shells' foreground reads.
+    await new Promise((r) => setTimeout(r, 3_000));
+    expect(daemon.tmuxRan().filter((args) => !args.endsWith(" -V"))).toEqual([]);
   });
 });

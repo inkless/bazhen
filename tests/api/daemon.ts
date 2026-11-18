@@ -136,6 +136,16 @@ function cliOnPath(home: string): string {
   return dir;
 }
 
+/** A directory under `home` holding a `tmux` that runs nothing, and records each command line. */
+function absentTmux(home: string): string {
+  const dir = join(home, "no-tmux");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "ran"), "");
+  writeFileSync(join(dir, "tmux"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${dir}/ran'\nexit 127\n`);
+  chmodSync(join(dir, "tmux"), 0o755);
+  return dir;
+}
+
 /** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
 export function homeEnv(home: string): Record<string, string> {
   return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
@@ -233,6 +243,11 @@ export interface DaemonOptions {
    * for, since a TUI in debug mode says so on its screen.
    */
   readonly claudeDebugLog?: boolean;
+  /**
+   * Puts a `tmux` first on its PATH that fails as a missing one would and records every command
+   * it was given, for `tmuxRan`, as on a machine without tmux.
+   */
+  readonly withoutTmux?: boolean;
 }
 
 export type RuntimeKind = "tmux" | "holder";
@@ -269,9 +284,11 @@ export class Daemon {
     if (opts.config !== undefined || opts.runtime !== undefined)
       this.writeConfig(opts.config ?? "");
 
+    const first =
+      opts.withoutTmux === true ? [cliOnPath(home), absentTmux(home)] : [cliOnPath(home)];
     this.env = {
       ...homeEnv(home),
-      PATH: `${cliOnPath(home)}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
+      PATH: `${first.join(":")}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
       ...(opts.claudeDebugLog === true && { DEBUG: "1" }),
       ...opts.env,
@@ -306,6 +323,13 @@ export class Daemon {
       throw new Error(`bazhen start failed:\n${started.out}`);
     }
     return daemon;
+  }
+
+  /** Each command line a daemon started `withoutTmux` gave tmux, in order. */
+  tmuxRan(): string[] {
+    return readFileSync(join(this.home, "no-tmux", "ran"), "utf8")
+      .split("\n")
+      .filter(Boolean);
   }
 
   /** Writes a role file of the user's, which the daemon reads at its next use of the roles. */
