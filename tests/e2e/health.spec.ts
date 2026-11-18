@@ -1,7 +1,7 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import { answerPatched } from "../support/state-route.ts";
 import { RUNTIMES } from "./daemons.ts";
-import { expect, launch, runtime, test } from "./page.ts";
+import { expect, launch, runtime, screen, status, test } from "./page.ts";
 
 /** What the header says of the runtime named `kind`. */
 const stateOf = (page: Page, kind: string) =>
@@ -152,16 +152,37 @@ test("a device's pinned theme is set before the app's script runs", async ({ pag
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
-test("the page still loads, in the system's theme, when site data is blocked", async ({ page }) => {
-  // As Safari does with all cookies blocked: reading localStorage throws.
+/** As Safari does with all cookies blocked: reaching either of the page's storages throws. */
+async function blockSiteData(page: Page) {
   await page.addInitScript({
-    content: `Object.defineProperty(window, "localStorage", {
-      get() { throw new DOMException("blocked", "SecurityError"); },
-    });`,
+    content: `for (const name of ["localStorage", "sessionStorage"])
+      Object.defineProperty(window, name, {
+        get() { throw new DOMException("blocked", "SecurityError"); },
+      });`,
   });
+}
+
+test("the page still loads and connects, in the system's theme, when site data is blocked", async ({
+  page,
+}) => {
+  await blockSiteData(page);
   await page.goto("/");
+  // The heading shows before the daemon answers, so only what the answer shows proves the page
+  // survived it.
+  await expect(page.getByRole("term").filter({ hasText: "Protocol" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Bazhen" })).toBeVisible();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
+});
+
+test("launches an agent and types into its terminal when site data is blocked", async ({
+  page,
+}) => {
+  await blockSiteData(page);
+  await launch(page);
+  await page.getByRole("region", { name: "terminal" }).locator(".xterm-screen").click();
+  await expect(status(page)).toHaveText("Driving");
+  await page.keyboard.type("typed with storage blocked");
+  await expect.poll(() => screen(page)).toContain("typed with storage blocked");
 });
 
 test("the theme switch pins this device's theme, and back to the system's", async ({ page }) => {

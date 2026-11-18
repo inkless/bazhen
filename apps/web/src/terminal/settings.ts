@@ -1,4 +1,5 @@
 import { parseJson } from "@bazhen/protocol";
+import type { DeviceStorage } from "../storage.ts";
 import { APPLE_KEY_MAP, DEFAULT_KEY_MAP, parseKeyMap, type KeyMap } from "./keymap.ts";
 
 /** Where a device keeps its own terminal settings; nothing is synced by the daemon. */
@@ -21,10 +22,13 @@ export interface TerminalSettings {
 }
 
 /** This device's settings; `apple` for an Apple platform, which gets its defaults too. */
-export function loadSettings(storage: Pick<Storage, "getItem">, apple = false): TerminalSettings {
+export function loadSettings(
+  storage: Pick<DeviceStorage, "read">,
+  apple = false,
+): TerminalSettings {
   const defaults = apple ? APPLE_KEY_MAP : DEFAULT_KEY_MAP;
-  const optionIsMeta = storage.getItem(SETTINGS_KEYS.optionIsMeta) === "true";
-  const stored = storage.getItem(SETTINGS_KEYS.keyMap);
+  const optionIsMeta = storage.read(SETTINGS_KEYS.optionIsMeta) === "true";
+  const stored = storage.read(SETTINGS_KEYS.keyMap);
   if (stored === null) return { keyMap: defaults, optionIsMeta, problem: null };
   const parsed = parseKeyMap(parseJson(stored), defaults);
   return parsed.ok

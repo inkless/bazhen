@@ -3,7 +3,7 @@ import { DEFAULT_KEY_MAP } from "./keymap.ts";
 import { loadSettings, SETTINGS_KEYS } from "./settings.ts";
 
 const storage = (entries: Record<string, string>) => ({
-  getItem: (key: string) => entries[key] ?? null,
+  read: (key: string) => entries[key] ?? null,
 });
 
 describe("a device's terminal settings", () => {

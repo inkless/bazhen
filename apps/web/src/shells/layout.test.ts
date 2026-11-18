@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { deviceStorageOf } from "../storage.ts";
 import { DOCK_KEY, layoutStore, parseLayout } from "./layout.ts";
 
 /** Storage held in a map, as the browser's would be. */
@@ -6,10 +7,11 @@ function memory() {
   const items = new Map<string, string>();
   return {
     items,
-    storage: () => ({
-      getItem: (key: string) => items.get(key) ?? null,
-      setItem: (key: string, value: string) => void items.set(key, value),
-    }),
+    storage: deviceStorageOf(() => ({
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => void items.set(key, value),
+      removeItem: (key) => void items.delete(key),
+    })),
   };
 }
 
@@ -42,9 +44,11 @@ describe("the dock's layout on this device", () => {
   });
 
   it("still changes for this page when storage refuses it", () => {
-    const store = layoutStore(() => {
-      throw new Error("site data blocked");
-    });
+    const store = layoutStore(
+      deviceStorageOf(() => {
+        throw new DOMException("site data is blocked", "SecurityError");
+      }),
+    );
     store.write({ position: "right", hidden: true });
     expect(store.read()).toEqual({ position: "right", hidden: true });
   });

@@ -3,6 +3,7 @@ import { Button } from "../ui/Button.tsx";
 import { ToggleButton } from "../ui/ToggleButton.tsx";
 import { Toolbar } from "../ui/Toolbar.tsx";
 import { useMediaQuery } from "../shells/layout.ts";
+import { deviceStorage } from "../storage.ts";
 import { keyBar, wantsKeyBar, type BarKey } from "./bar-keys.ts";
 
 /** `"hidden"` when this device's user hid the bar; nothing is synced by the daemon. */
@@ -40,10 +41,9 @@ export function KeyBar() {
   const store = keyBar();
   const present = useSyncExternalStore(store.subscribe, () => store.target() !== undefined);
   const ctrl = useSyncExternalStore(store.subscribe, store.ctrl);
-  const [hidden, setHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === "hidden");
+  const [hidden, setHidden] = useState(() => deviceStorage.read(HIDDEN_KEY) === "hidden");
   const hide = (next: boolean) => {
-    if (next) localStorage.setItem(HIDDEN_KEY, "hidden");
-    else localStorage.removeItem(HIDDEN_KEY);
+    deviceStorage.write(HIDDEN_KEY, next ? "hidden" : null);
     setHidden(next);
   };
   useCtrlReleased(wanted && present && !hidden);

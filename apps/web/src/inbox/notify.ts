@@ -1,6 +1,7 @@
 import type { Attention, StateSnapshot } from "@bazhen/protocol";
 import { KINDS } from "./model.ts";
 import { agentLabelOf } from "../fleet/model.ts";
+import { deviceStorage } from "../storage.ts";
 
 /**
  * The items opened since the last snapshot, and the ids now open. The first snapshot a page
@@ -40,8 +41,8 @@ const browser: NotifyDeps = {
     return typeof Notification === "undefined" ? "unsupported" : Notification.permission;
   },
   request: () => Notification.requestPermission(),
-  stored: () => localStorage.getItem(KEY),
-  store: (value) => localStorage.setItem(KEY, value),
+  stored: () => deviceStorage.read(KEY),
+  store: (value) => deviceStorage.write(KEY, value),
   hidden: () => document.visibilityState === "hidden",
   show: (title, body, tag, onClick) => {
     // Android Chrome has no Notification constructor (it throws "Illegal constructor"); that

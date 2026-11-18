@@ -29,6 +29,13 @@ const FIXTURES: Record<string, string> = {
     'import t from "@playwright/test";\nimport { default as u } from "@playwright/test";\n' +
     "export { t, u };\n",
   "tests/e2e/page.ts": 'export { test } from "@playwright/test";\n',
+  "apps/web/src/z.ts":
+    'export const a = localStorage.getItem("k");\n' +
+    "export const b = window.sessionStorage;\n" +
+    'export const c = globalThis["localStorage"];\n' +
+    "export const { localStorage: d } = window;\n" +
+    "export const e = (localStorage: { k: string }) => localStorage.k;\n",
+  "apps/web/src/storage.ts": "export const storage = () => window.localStorage ?? localStorage;\n",
   "tests/e2e/h.spec.ts":
     'export { TmuxServer } from "@bazhen/host-guard";\n' +
     'export { sessionName } from "@bazhen/runtime-tmux";\n' +
@@ -123,6 +130,12 @@ describe("the generated oxlint config, run by oxlint", () => {
       "packages/core/src/c.test.ts": ["eslint(no-restricted-imports)", "import(no-nodejs-modules)"],
       "apps/web/src/d.tsx": ["eslint(no-restricted-imports)"],
       "apps/web/src/ui/e.tsx": [],
+      // Storage only through the web app's storage module; a name of the code's own is no use of it.
+      "apps/web/src/z.ts": [
+        "eslint(no-restricted-globals)",
+        ...Array(3).fill("eslint(no-restricted-properties)"),
+      ],
+      "apps/web/src/storage.ts": [],
       "tests/e2e/h.spec.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
       // Playwright's `test` comes only through the module that stops each page's routes.
       "tests/e2e/u.spec.ts": ["eslint(no-restricted-imports)"],

@@ -22,6 +22,7 @@ import { PAGE_PROTOCOL, checkBuild } from "../api.ts";
 import { scrollbackFor, startSnapshot, wheelAction, type TerminalKind } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
+import { deviceStorage } from "../storage.ts";
 import { attachTakeover } from "./takeover.ts";
 import { terminalTheme } from "./theme.ts";
 import { LiveStatus } from "../ui/LiveStatus.tsx";
@@ -85,7 +86,7 @@ function connect(
   scheme: TuiTheme,
   onReport: (report: Report) => void,
 ) {
-  const settings = loadSettings(localStorage, isApple(navigator.userAgent));
+  const settings = loadSettings(deviceStorage, isApple(navigator.userAgent));
   const page = pageTheme();
   const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
