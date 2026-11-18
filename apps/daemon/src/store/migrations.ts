@@ -30,6 +30,7 @@ import terminalRestartProtocol from "./migrations/2026-11-15-terminal-restart-pr
 import agentTokens from "./migrations/2026-11-16-agent-tokens.ts";
 import agentRoles from "./migrations/2026-11-16-agent-roles.ts";
 import agentCompactWindow from "./migrations/2026-11-18-agent-compact-window.ts";
+import mailboxSenderAndSettled from "./migrations/2026-11-18-mailbox-sender-and-settled.ts";
 
 export interface Migration {
   /** `YYYY-MM-DD-slug`, the day it was written, and its file's name in `migrations/`. */
@@ -80,6 +81,7 @@ export const MIGRATIONS: readonly Migration[] = [
   agentTokens,
   agentRoles,
   agentCompactWindow,
+  mailboxSenderAndSettled,
 ];
 
 /**

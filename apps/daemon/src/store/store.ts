@@ -48,7 +48,7 @@ import {
   type AttentionAction,
   type NeedsRestart,
   type NoticeAction,
-  type MailboxState,
+  MailboxState,
   type ResetReason,
   type EventPayload,
   type EventType,
@@ -88,6 +88,23 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
 }
 
 /** A key reused for a different request: answering with the first one would be a lie. */
+/** A message, and the first one its recipient sent back to its sender after it. */
+export interface ReplyRead {
+  /** Null when the human sent it. */
+  readonly from: string | null;
+  readonly to: string;
+  readonly state: MailboxState;
+  readonly replyId: string | null;
+}
+
+/** What an agent's latest turn says, against the mail it has been sent; ids are event ids. */
+export interface TurnAfterMail {
+  readonly activity: Activity | undefined;
+  readonly activityAt: number | null;
+  readonly inFlight: number;
+  readonly lastSettled: number | null;
+}
+
 export interface OpenAttention {
   readonly id: AttentionId;
   readonly agentId: string;
@@ -724,6 +741,53 @@ export class Store {
     )
       .all(...ids)
       .map((r) => Message.parse(r));
+  }
+
+  /**
+   * A message's sender and recipient, its state, and the first message the recipient queued back
+   * to the sender after it, if any; undefined for a message this daemon never queued.
+   */
+  replyTo(messageId: string): ReplyRead | undefined {
+    const sent = this.prepare(
+      `SELECT agent_session_id AS "to", from_agent_id AS "from", state, created_event_id AS at
+       FROM mailbox WHERE id = ?`,
+    ).get(messageId);
+    if (sent === undefined) return undefined;
+    const from = typeof sent.from === "string" ? sent.from : null;
+    const reply =
+      from === null
+        ? undefined
+        : this.prepare(
+            `SELECT id FROM mailbox WHERE from_agent_id = ? AND agent_session_id = ?
+               AND created_event_id > ? ORDER BY created_event_id LIMIT 1`,
+          ).get(String(sent.to), from, Number(sent.at));
+    return {
+      from,
+      to: String(sent.to),
+      state: MailboxState.parse(sent.state),
+      replyId: typeof reply?.id === "string" ? reply.id : null,
+    };
+  }
+
+  /**
+   * An agent's latest activity with the event that reported it, how many messages to it are
+   * still on their way, and the last event that settled one.
+   */
+  turnAfterMail(agentId: string): TurnAfterMail {
+    const activity = this.prepare(
+      "SELECT activity, updated_event_id AS at FROM activity_latest WHERE agent_session_id = ?",
+    ).get(agentId);
+    const mail = this.prepare(
+      `SELECT count(*) FILTER (WHERE state NOT IN ('seen', 'delivered', 'undeliverable')) AS moving,
+         max(settled_event_id) AS settled
+       FROM mailbox WHERE agent_session_id = ?`,
+    ).get(agentId);
+    return {
+      activity: activity === undefined ? undefined : activityOf(activity.activity),
+      activityAt: typeof activity?.at === "number" ? activity.at : null,
+      inFlight: typeof mail?.moving === "number" ? mail.moving : 0,
+      lastSettled: typeof mail?.settled === "number" ? mail.settled : null,
+    };
   }
 
   /** An agent's messages in the given states, oldest first, with when each was first offered. */
