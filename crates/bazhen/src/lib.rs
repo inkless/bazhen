@@ -21,6 +21,7 @@ pub mod reply;
 mod sha256;
 mod shells;
 mod tasks;
+mod waits;
 
 /// The holder's frames, for the fuzz targets to name what a direct attachment sends.
 pub use bazhen_holder_proto;
@@ -174,7 +175,7 @@ enum Handler {
     Fleet(&'static str),
     Lifecycle,
     Shells,
-    Wait(events::Kind),
+    Wait(waits::Noun),
     Follow,
     Attach,
     Start,
@@ -201,7 +202,7 @@ fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
         ("agents", None | Some("list")) => (Fleet(AGENTS_USAGE), 0),
         ("agents", Some("whoami" | "rename" | "send")) => (Fleet(AGENTS_USAGE), 1),
         ("agents", Some("launch" | "close" | "respawn" | "relaunch" | "signal")) => (Lifecycle, 1),
-        ("agents", Some("wait")) => (Wait(events::Kind::Agent), 1),
+        ("agents", Some("wait")) => (Wait(waits::Noun::Agent), 1),
         (
             "tasks",
             None
@@ -211,10 +212,11 @@ fn route(p: &args::Parsed) -> Option<(Handler, usize)> {
             ),
         ) => (Fleet(TASKS_USAGE), 0),
         ("tasks", Some("delegate")) => (Fleet(TASKS_USAGE), 1),
+        ("tasks", Some("wait")) => (Wait(waits::Noun::Task), 1),
         ("inbox", Some("escalate")) => (Fleet(INBOX_USAGE), 1),
         ("roles", None | Some("list")) => (Fleet(ROLES_USAGE), 0),
         ("shells", None | Some("list" | "open" | "close")) => (Shells, 0),
-        ("shells", Some("wait")) => (Wait(events::Kind::Shell), 1),
+        ("shells", Some("wait")) => (Wait(waits::Noun::Shell), 1),
         ("events", Some("follow")) => (Follow, 0),
         ("terminals", Some("attach")) => (Attach, 1),
         ("devices", Some("pair")) => (Pair, 0),
@@ -303,7 +305,7 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
         Handler::Fleet(usage_text) => tasks::run(&v, &daemon, now_ms, usage_text, out),
         Handler::Lifecycle => lifecycle::run(&v, &daemon, out),
         Handler::Shells => shells::run(&v, &daemon, out),
-        Handler::Wait(kind) => events::run_wait(&v, kind, &daemon, out),
+        Handler::Wait(noun) => waits::run(&v, noun, &daemon, out),
         Handler::Follow => events::run_follow(&v, &daemon, out),
         Handler::Attach => attach::run(&v, Path::new(&daemon.socket()), &daemon, out),
         Handler::Start => Ok(daemon_verbs::start(&v, out)),

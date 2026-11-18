@@ -25,6 +25,7 @@ import {
   StateSnapshot,
   StopResponse,
   WaitMessagesResponse,
+  WaitResponse,
 } from "@bazhen/protocol";
 import { FakeDaemon, type Scene, checkoutWith, scene } from "./cli.ts";
 import {
@@ -354,7 +355,8 @@ describe("the daemon any verb reaches", () => {
           removed: {},
           refused: [],
           unchanged: [],
-        });
+        })
+        .answer("POST /v1/waits", WaitResponse, { verdict: "met", said: "a is running" });
       const verbs = [
         ["tasks", "list", "--all"],
         ["status"],
@@ -376,6 +378,7 @@ describe("the daemon any verb reaches", () => {
           "POST /v1/pairing/codes",
           "GET /v1/devices",
           "POST /v1/daemon/env",
+          "POST /v1/waits",
         ]),
       );
     } finally {

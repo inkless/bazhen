@@ -33,6 +33,7 @@ use crate::fmt::{encode_uri_component, uuid};
 use crate::out::Out;
 use crate::paths::normalize;
 use crate::printers::{active_for, fleet, list_agents, list_roles, list_tasks, show_task, whoami};
+use crate::waits;
 
 /// Why a task verb stopped before it was done.
 #[derive(Debug)]
@@ -60,16 +61,16 @@ pub(crate) fn usage<T>(message: impl Into<String>) -> Step<T> {
     Err(Stop::Usage(message.into()))
 }
 
-/// What a verb prints, and how it exits.
+/// What a verb prints, none when it printed its own already, and how it exits.
 struct Answer {
-    text: String,
+    text: Option<String>,
     exit: Exit,
 }
 
 impl From<String> for Answer {
     fn from(text: String) -> Self {
         Self {
-            text,
+            text: Some(text),
             exit: Exit::Done,
         }
     }
@@ -77,7 +78,7 @@ impl From<String> for Answer {
 
 /// The options `agents send` and `tasks send` take beside their text; `--home` and `--port` are
 /// every verb's.
-const SEND_OPTIONS: [&str; 5] = ["file", "wait", "timeout", "home", "port"];
+const SEND_OPTIONS: [&str; 6] = ["file", "wait", "reply", "timeout", "home", "port"];
 const NOTE_OPTIONS: [&str; 3] = ["handoff", "home", "port"];
 const DEFAULT_WAIT_S: u64 = 60;
 
@@ -93,7 +94,9 @@ pub(crate) fn run(
     let verb = Verb { p, daemon, now_ms };
     match verb.run(out) {
         Ok(answer) => {
-            out.line(&answer.text);
+            if let Some(text) = &answer.text {
+                out.line(text);
+            }
             Ok(answer.exit)
         }
         Err(Stop::Usage(message)) => {
@@ -260,8 +263,13 @@ impl Verb<'_> {
         }
         for (option, allowed, owner) in [
             ("wait", sends, "agents send and tasks send"),
+            ("reply", name == "send", "agents send"),
             ("timeout", sends, "agents send and tasks send"),
-            ("json", name == "agents", "agents list"),
+            (
+                "json",
+                name == "agents" || (name == "send" && self.has("reply")),
+                "agents list and agents send --reply",
+            ),
             ("force", false, "agents close and shells close"),
             ("confirm-busy", false, "agents close and shells close"),
             ("fresh", false, "agents relaunch"),
@@ -403,6 +411,9 @@ impl Verb<'_> {
         }
         let agent = agent_ref(self.word(1), "the agent to send to")?;
         let body = self.body(&self.p.words_from(2))?;
+        if self.has("reply") {
+            return self.send_for_reply(&agent, body, out);
+        }
         let wait = self.wait_ms()?;
         let request = SendMessageRequest {
             idempotency_key: key()?,
@@ -429,6 +440,42 @@ impl Verb<'_> {
                 )
             }
         }
+    }
+
+    /// Sends, then waits for the agent's reply. Only an agent can be replied to, so the human is
+    /// refused before anything is sent.
+    fn send_for_reply(&self, agent: &AgentRef, body: String, out: &mut Out) -> Step<Answer> {
+        if self.has("wait") {
+            return usage(
+                "give --wait or --reply, not both: a reply comes after the message arrives",
+            );
+        }
+        let timeout = waits::timeout(self.p)?;
+        if self.me()?.is_none() {
+            return Err(Stop::NotHere(
+                "agents send --reply runs inside an agent Bazhen launched: only an agent can be \
+                 replied to"
+                    .to_owned(),
+            ));
+        }
+        let r: SendMessageResponse = self.daemon.post(
+            &format!(
+                "/v1/agents/{}/messages",
+                encode_uri_component(agent.as_str())
+            ),
+            &SendMessageRequest {
+                idempotency_key: key()?,
+                body,
+            },
+            CALL,
+        )?;
+        out.err(&format!(
+            "sent {} to {agent}\nwaiting up to {} s for a reply",
+            r.message_id,
+            timeout.as_secs()
+        ));
+        let exit = waits::reply(self.daemon, r.message_id, timeout, self.has("json"), out)?;
+        Ok(Answer { text: None, exit })
     }
 
     fn task_send(&self, out: &mut Out) -> Step<Answer> {
@@ -473,13 +520,13 @@ impl Verb<'_> {
                 Exit::Bounced
             };
             return Ok(Answer {
-                text: lines.join("\n"),
+                text: Some(lines.join("\n")),
                 exit,
             });
         };
         if r.sent.is_empty() {
             return Ok(Answer {
-                text: skipped.join("\n"),
+                text: Some(skipped.join("\n")),
                 exit: Exit::Bounced,
             });
         }
@@ -532,7 +579,7 @@ impl Verb<'_> {
         let mut exits: Vec<Exit> = skipped.iter().map(|_| Exit::Bounced).collect();
         exits.extend(r.messages.iter().map(|m| exit_for(m.state)));
         Ok(Answer {
-            text: lines.join("\n"),
+            text: Some(lines.join("\n")),
             exit: worst(&exits),
         })
     }

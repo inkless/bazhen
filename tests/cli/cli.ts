@@ -41,6 +41,7 @@ import {
   SignalAgentRequest,
   UnassignTaskRequest,
   WaitMessagesRequest,
+  WaitRequest,
   encodeHolderReply,
   HOLDER_PROTOCOL_VERSION,
   holderRequestDecoder,
@@ -117,6 +118,7 @@ const REQUESTS: readonly (readonly [RegExp, Check])[] = [
   [/^POST \/v1\/shells\/[^/]+\/close$/, CloseShellRequest],
   [/^POST \/v1\/escalations$/, EscalateRequest],
   [/^POST \/v1\/messages\/wait$/, WaitMessagesRequest],
+  [/^POST \/v1\/waits$/, WaitRequest],
   [/^POST \/v1\/daemon\/env$/, EnvRefreshRequest],
   [/^POST \/v1\/notices\/[^/]+\/dismiss$/, DismissNoticeRequest],
 ];
@@ -159,7 +161,7 @@ function textFrame(text: string): Buffer {
 
 export class FakeDaemon {
   readonly received: Received[] = [];
-  readonly #routes = new Map<string, (r: Received) => Reply>();
+  readonly #routes = new Map<string, (r: Received) => Reply | Promise<Reply>>();
   readonly #server: Server;
   readonly #hung: ServerResponse[] = [];
   readonly #sockets = new WebSocketServer({ noServer: true });
@@ -246,10 +248,9 @@ export class FakeDaemon {
       return;
     }
     const answer = this.#routes.get(route);
-    this.#send(
-      res,
-      answer?.(received) ?? { status: 404, type: "text/plain", body: "404 Not Found" },
-    );
+    const reply = answer?.(received) ?? { status: 404, type: "text/plain", body: "404 Not Found" };
+    if (reply instanceof Promise) void reply.then((r) => this.#send(res, r));
+    else this.#send(res, reply);
   }
 
   #send(res: ServerResponse, reply: Reply): void {
@@ -269,6 +270,12 @@ export class FakeDaemon {
   /** Answers `route` with what `make` makes of each request, checked against the schema. */
   answerWith<T>(route: string, schema: Schema<T>, make: (r: Received) => T): this {
     this.#routes.set(route, (r) => json(200, schema.parse(make(r))));
+    return this;
+  }
+
+  /** Answers `route` with what `make` comes to, as a daemon holding a call answers late. */
+  answerLater<T>(route: string, schema: Schema<T>, make: (r: Received) => Promise<T>): this {
+    this.#routes.set(route, async (r) => json(200, schema.parse(await make(r))));
     return this;
   }
 
