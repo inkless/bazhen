@@ -425,7 +425,8 @@ await restarts.sweep().catch((err: unknown) => {
   console.warn("terminals on holders this build can't fully serve weren't read:", err);
 });
 // After both reconciles, whose health checks have a server whose socket was deleted recreate it.
-// A daemon with no use for tmux doesn't configure it, so a machine without tmux starts quietly.
+// A daemon with no use for tmux doesn't configure it, so a machine without tmux starts quietly. It
+// never needs to later: new terminals go to the default runtime, which isn't tmux here.
 if (runtime.reads("tmux"))
   await tmux.applyServerSettings().catch((err: unknown) => {
     console.warn("tmux server settings were not applied:", err);

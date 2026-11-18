@@ -74,10 +74,6 @@ describe("a daemon running terminals on both runtimes", () => {
     );
   });
 
-  it("reads tmux while a terminal is open on it, though holders are the default", async () => {
-    expect(await runtimeStates(daemon)).toEqual(["tmux: healthy", "holder: healthy"]);
-  });
-
   it("finds each one on its own runtime after a crash", async () => {
     await daemon.crash();
     await daemon.restart();
@@ -98,6 +94,18 @@ describe("a daemon running terminals on both runtimes", () => {
       [holderShell]: "running on holder",
       [holderAgent]: "lost on none",
     });
+  });
+
+  it("reads tmux while a terminal is open on it, though holders are the default, and not after", async () => {
+    const whileOpen = await runtimeStates(daemon);
+    const closed = await daemon.request(`/v1/shells/${onTmux}/close`, {
+      method: "POST",
+      body: { idempotencyKey: "close-tmux-shell", generation: 0 },
+    });
+    expect([whileOpen, closed.status]).toEqual([["tmux: healthy", "holder: healthy"], 200]);
+    await expect
+      .poll(() => runtimeStates(daemon), { timeout: 15_000 })
+      .toEqual(["tmux: unused", "holder: healthy"]);
   });
 });
 
@@ -125,8 +133,19 @@ describe("a holder daemon on a machine without tmux", () => {
     await expect
       .poll(async () => (await terminals(daemon))[shell], { timeout: 30_000 })
       .toBe("running on holder");
-    // Past several of tmux's exit polls and the shells' foreground reads.
-    await new Promise((r) => setTimeout(r, 3_000));
-    expect(daemon.tmuxRan().filter((args) => !args.endsWith(" -V"))).toEqual([]);
+    const view = await daemon.view(shell, "interactive");
+    await view.drive();
+    view.type("sleep 300\r");
+    // The shell's foreground is read through every runtime that is read, so once it says sleep
+    // the foregrounds have been read at least once with tmux unused, and its exit polls have run.
+    await expect
+      .poll(
+        async () =>
+          (await snapshot(daemon)).shells.find((s) => s.id === shell)?.foreground?.command,
+        { timeout: 15_000 },
+      )
+      .toBe("sleep");
+    view.close();
+    expect(daemon.tmuxRan()).toEqual([expect.stringMatching(/ -V$/)]);
   });
 });
