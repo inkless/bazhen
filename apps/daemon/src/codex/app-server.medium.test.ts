@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeFakeServers, tempCodexHome as home, fakeServer } from "../testing/fake-app-server.ts";
 import { AppServer, AppServerError, WrongCodexHome } from "./app-server.ts";
@@ -72,5 +74,32 @@ describe("app-server connection", () => {
       ["serverRequest/resolved", { requestId: 5 }],
     ]);
     server.close();
+  });
+});
+
+/** How a Node process run with `args` ended: its exit code, and what it printed. */
+const runNode = (args: string[]) =>
+  new Promise<{ code: number | null; out: string; err: string }>((done) => {
+    execFile(process.execPath, args, { encoding: "utf8" }, (error, out, err) =>
+      done({ code: error === null ? 0 : Number(error.code), out, err }),
+    );
+  });
+
+describe("an app-server that accepts the connection and never answers it", () => {
+  it("is refused when the open times out, and its socket's error ends nothing", async () => {
+    const { codexHome, socket } = home();
+    // In a process of its own, since an unheard socket error ends the process it happens in.
+    const caller = `
+      import { createServer } from "node:net";
+      import { AppServer } from ${JSON.stringify(fileURLToPath(new URL("app-server.ts", import.meta.url)))};
+      const [socket, codexHome] = process.argv.slice(1);
+      const held = [];
+      createServer((c) => held.push(c)).listen(socket, async () => {
+        await AppServer.connect(socket, codexHome, 50).catch(() => console.log("refused"));
+        setTimeout(() => { console.log("lived"); process.exit(0); }, 200);
+      });
+    `;
+    const ran = await runNode(["--input-type=module", "-e", caller, socket, codexHome]);
+    expect(ran).toMatchObject({ code: 0, out: "refused\nlived\n" });
   });
 });
