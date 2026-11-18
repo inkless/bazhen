@@ -43,7 +43,8 @@ case "$*" in
 esac`,
   ssh: `for last; do :; done
 case "$last" in
-  "bash -c "*) exit 0 ;;
+  "true ") exit 0 ;;
+  "bash -c "*) printf '%s\n' "$last" >> "$RAN"; exit 0 ;;
   *soak-run*) printf '%s\\n' "$STUB_RUN" ;;
   *) exit 1 ;;
 esac`,
@@ -63,7 +64,12 @@ for (const tool of FAILING) {
 
 const TOKEN = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const GOOD_RUN = `pid=4242\nhours=24\nout=soak-24h\nlog=soak-24h.log\nstarted=1\ncommit=${COMMIT}`;
+const runRecord = (profile: string) =>
+  `pid=4242\nprofile=${profile}\nhours=24\nout=soak-${profile}-24h\n` +
+  `log=soak-${profile}-24h.log\nstarted=1\ncommit=${COMMIT}`;
+const GOOD_RUN = runRecord("gate");
+/** A run's record as a VM started before profiles had one holds it: its names carry no profile. */
+const RECORD_WITHOUT_PROFILE = `pid=4242\nhours=72\nout=soak-72h\nlog=soak-72h.log\nstarted=1\ncommit=${COMMIT}`;
 
 interface Setup {
   /** The instance token on the host, if any. */
@@ -86,6 +92,7 @@ function run(args: string[], setup: Setup = {}) {
   const home = join(dir, `home-${(runs += 1)}`);
   const calls = join(home, "calls");
   const deleted = join(home, "deleted");
+  const ran = join(home, "ran");
   mkdirSync(join(home, ".ssh"), { recursive: true });
   writeFileSync(join(home, ".ssh", "bazhen-soak"), "");
   if (setup.token !== undefined) {
@@ -103,6 +110,7 @@ function run(args: string[], setup: Setup = {}) {
       USER: "soak",
       CALLS: calls,
       DELETED: deleted,
+      RAN: ran,
       STUB_VOLUMES: (setup.volumes ?? []).join(" "),
       STUB_DOMAIN: setup.domain === true ? "1" : "",
       STUB_DESC: setup.desc ?? "",
@@ -117,6 +125,8 @@ function run(args: string[], setup: Setup = {}) {
     calls: existsSync(calls) ? readFileSync(calls, "utf8").split("\n").filter(Boolean) : [],
     deleted: existsSync(deleted) ? readFileSync(deleted, "utf8").split("\n").filter(Boolean) : [],
     collected: existsSync(join(home, "bazhen-soak-results")),
+    /** Each script run in the VM, with its arguments. */
+    ran: existsSync(ran) ? readFileSync(ran, "utf8").split("\n").filter(Boolean) : [],
   };
 }
 
@@ -130,8 +140,9 @@ const BASE_VOLUME = "noble-0123456789ab.qcow2";
 const BAD_HOURS = ["0", "0.0", "-1", "abc", "24h", "1e3", "1."];
 const BAD_COMMITS = ["main", "abc", "ABC1234", "abc1234; true", "a".repeat(41)];
 const BAD_RECORDS = [
-  { what: "a run directory outside the soak's", run: GOOD_RUN.replaceAll("soak-24h", "../x") },
-  { what: "a log not the run's", run: GOOD_RUN.replace("log=soak-24h.log", "log=../.bashrc") },
+  { what: "a run directory outside the soak's", run: GOOD_RUN.replaceAll("soak-gate-24h", "../x") },
+  { what: "a log not the run's", run: GOOD_RUN.replace("log=soak-gate-24h.log", "log=../.bashrc") },
+  { what: "a profile it doesn't run", run: runRecord("smoke") },
   { what: "a commit not a full hex sha", run: GOOD_RUN.replace(COMMIT, "../../tmp") },
   { what: "a pid not a number", run: GOOD_RUN.replace("pid=4242", "pid=1;x") },
 ];
@@ -176,6 +187,24 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
     });
   });
 
+  it.each(["smoke", "week", "gate;true"])("refuses --profile %j", (profile) => {
+    expect(run(["start", "--profile", profile])).toMatchObject({
+      ...refused("--profile takes gate or long-life"),
+      calls: [],
+    });
+  });
+
+  it.each([
+    [[], "gate"],
+    [["--profile", "long-life"], "long-life"],
+  ])("start %j starts the %s soak in the VM, named for its profile", (args, profile) => {
+    const result = run(["start", ...args, "--hours", "48"], ours);
+    expect(result.status).toBe(0);
+    const start = result.ran.find((remote) => remote.includes("pnpm soak"));
+    expect(start).toMatch(new RegExp(` ${profile} 48 $`));
+    expect(start).toContain('pnpm soak --profile "$profile" --hours "$hours"');
+  });
+
   it.each(BAD_COMMITS)("refuses --commit %j", (commit) => {
     expect(run(["create", "--commit", commit])).toMatchObject({
       ...refused("--commit takes a hex sha"),
@@ -214,8 +243,12 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
     expect(result.calls).not.toContain("scp");
   });
 
-  it("collect copies a well-formed run record's files", () => {
-    expect(run(["collect"], { ...ours, run: GOOD_RUN })).toMatchObject({
+  it.each([
+    ["gate", runRecord("gate")],
+    ["long-life", runRecord("long-life")],
+    ["profile-less", RECORD_WITHOUT_PROFILE],
+  ])("collect copies a well-formed %s run record's files", (_, soakRun) => {
+    expect(run(["collect"], { ...ours, run: soakRun })).toMatchObject({
       collected: true,
       calls: expect.arrayContaining(["scp"]),
     });

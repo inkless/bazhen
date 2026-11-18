@@ -42,6 +42,7 @@ import { protocolId } from "@bazhen/protocol/id";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { closeHoldersUnder } from "../support/holder-close.ts";
 import { giveTranscript } from "../support/transcript.ts";
+import { LogTail } from "../support/log-tail.ts";
 import { replay } from "./fixtures/browser.ts";
 
 const run = promisify(execFile);
@@ -51,6 +52,8 @@ export const BANNER = { "claude-code": "Claude Code", codex: "OpenAI Codex" } as
 
 /** How much of each agent's debug log `explanation` shows: its hook lines, and its last lines. */
 const EXPLAINED_HOOK_LINES = 200;
+/** How much of the daemon's log is kept: a soak's one daemon may write for days. */
+const LOG_KEPT = 4 * 1024 * 1024;
 const EXPLAINED_TAIL_LINES = 60;
 
 /** The size the daemon gives every agent's terminal. */
@@ -101,6 +104,12 @@ export function overSocket(
 /** This checkout's CLI, which `pnpm test:api` builds. */
 const CLI = join(repo, "target/release/bazhen");
 
+/** How a process exited: its code, or the signal that ended it. */
+export interface ExitStatus {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
 /** Runs `bazhen <args>` with `env`, and resolves with how it exited and what it printed. */
 export function bazhen(
   args: readonly string[],
@@ -119,7 +128,7 @@ export function followEvents(daemon: Daemon) {
   let printed = "";
   child.stdout.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
   child.stderr.on("data", (chunk: Buffer) => (printed += chunk.toString("utf8")));
-  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+  const exited = new Promise<ExitStatus>((resolve) =>
     child.once("exit", (code, signal) => resolve({ code, signal })),
   );
   return { child, printed: () => printed, exited };
@@ -273,7 +282,8 @@ export class Daemon {
   readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
-  private output = "";
+  #exited: Promise<ExitStatus> | undefined;
+  #log = new LogTail(LOG_KEPT);
 
   private constructor(home: string, opts: DaemonOptions) {
     this.home = home;
@@ -389,7 +399,7 @@ export class Daemon {
 
   /** What the daemon has printed since it last started. */
   log(): string {
-    return this.output;
+    return this.#log.text();
   }
 
   /**
@@ -416,7 +426,7 @@ export class Daemon {
    * on, the daemon's log says why it dropped it.
    */
   explanation(): string {
-    const parts = [`---- the daemon's log\n${this.output}`];
+    const parts = [`---- the daemon's log\n${this.#log.text()}`];
     const debug = join(this.home, "claude", "debug");
     for (const [agentId, session] of this.claudeSessions()) {
       const file = join(debug, `${session}.txt`);
@@ -542,6 +552,12 @@ export class Daemon {
       : child.pid;
   }
 
+  /** How the daemon process this helper last started exits, once it has. */
+  get exited(): Promise<ExitStatus> {
+    if (this.#exited === undefined) throw new Error("no daemon was started");
+    return this.#exited;
+  }
+
   /** The daemon's Unix socket, beside its tmux server. */
   get socket(): string {
     return join(this.home, "run", "bazhen.sock");
@@ -554,9 +570,13 @@ export class Daemon {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.process = child;
-    this.output = "";
-    child.stdout.on("data", (d: Buffer) => (this.output += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (this.output += d.toString()));
+    this.#exited = new Promise((resolve) =>
+      child.once("exit", (code, signal) => resolve({ code, signal })),
+    );
+    const log = new LogTail(LOG_KEPT);
+    this.#log = log;
+    child.stdout.on("data", (d: Buffer) => log.append(d.toString()));
+    child.stderr.on("data", (d: Buffer) => log.append(d.toString()));
     for (let i = 0; i < 100 && child.exitCode === null; i++) {
       // An unpaired caller is answered 401, which is answer enough that the daemon is up.
       if (
@@ -574,7 +594,7 @@ export class Daemon {
       await new Promise((r) => setTimeout(r, 100));
     }
     await this.stop();
-    throw new Error(`the daemon did not start:\n${this.output}`);
+    throw new Error(`the daemon did not start:\n${this.#log.text()}`);
   }
 
   /**

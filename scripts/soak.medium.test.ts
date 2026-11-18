@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { readRun } from "./soak.ts";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { main, readRun } from "./soak.ts";
 
 const root = mkdtempSync(join(tmpdir(), "bz-soak-run-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -58,5 +58,35 @@ describe("readRun", () => {
     await expect(readRun(dir)).rejects.toThrow(
       `${join(dir, "events.jsonl")}:1 is an attach whose markers aren't runs`,
     );
+  });
+});
+
+/** What judging `dir` again prints for daemon-memory, its profile.json naming `name`. */
+async function daemonMemory(name: string): Promise<string | undefined> {
+  const dir = runDir(`judged-${name}`, {
+    "profile.json": [JSON.stringify({ name, hours: 24, faults: [] })],
+    "events.jsonl": [
+      JSON.stringify({ kind: "daemon", t: 0, up: false, why: "it was killed by SIGKILL" }),
+    ],
+  });
+  const printed: string[] = [];
+  const log = vi.spyOn(console, "log").mockImplementation((line: string) => printed.push(line));
+  try {
+    expect(await main(["--judge", dir])).toBe(1);
+  } finally {
+    log.mockRestore();
+  }
+  return printed
+    .join("\n")
+    .split("\n")
+    .find((line) => line.includes("daemon-memory"));
+}
+
+describe("main --judge", () => {
+  it("judges a long-life run's one daemon, which died, by the profile its directory names", async () => {
+    expect(await daemonMemory("long-life")).toMatch(
+      /^FAIL +daemon-memory +the daemon went down at 1970-01-01T00:00:00.000Z: it was killed by SIGKILL$/,
+    );
+    expect(await daemonMemory("gate")).toMatch(/^UNMEASURED +daemon-memory /);
   });
 });

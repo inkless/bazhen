@@ -96,7 +96,8 @@ export type SoakEvent =
     }
   /** The driver is about to close a terminal: its holder and program may end from here on. */
   | { readonly kind: "close"; readonly t: number; readonly name: string }
-  | { readonly kind: "daemon"; readonly t: number; readonly up: boolean }
+  /** The daemon went down or came back up; `why` says why a daemon no one killed went down. */
+  | { readonly kind: "daemon"; readonly t: number; readonly up: boolean; readonly why?: string }
   /** The marker numbers one attach saw, in its snapshot and then in its stream, as runs. */
   | {
       readonly kind: "attach";
@@ -142,6 +143,13 @@ export type SoakEvent =
   | { readonly kind: "hup"; readonly t: number; readonly name: string }
   | { readonly kind: "exit"; readonly t: number; readonly name: string; readonly why: string };
 
+/** How many daemon processes a run has, which decides how its memory is read. */
+export type DaemonLives =
+  /** Killed and restarted as churn: each life's RSS is read at `ageMs`, so lives compare. */
+  | { readonly lives: "many"; readonly ageMs: number }
+  /** One process throughout: its RSS is fitted over the window, and going down is a fault. */
+  | { readonly lives: "one" };
+
 export interface JudgeOptions {
   /** The shortest measured window that counts: the gate's whole duration. */
   readonly minMeasuredMs: number;
@@ -151,14 +159,17 @@ export interface JudgeOptions {
   readonly probeEveryMs: number;
   /** How often the driver samples, which bounds how far past its age a daemon is read. */
   readonly sampleEveryMs: number;
-  /** Echo's p99 during floods fails at this many milliseconds or more. */
+  /**
+   * Echo's p99 during floods fails at this many milliseconds or more: over the window, and with
+   * one daemon life, in each of its whole hours too, since a heap that ages slows its later hours
+   * first. A part hour left at the window's end is judged only within the window's p99.
+   */
   readonly echoP99Ms: number;
   /** A holder's RSS slope fails at this many MiB an hour or more. */
   readonly holderSlope: number;
-  /** The daemon's RSS slope across lives fails at this many MiB an hour or more. */
+  /** The daemon's RSS slope, across lives or within its one, fails at this many MiB an hour or more. */
   readonly daemonSlope: number;
-  /** The age at which each daemon life's RSS is read, so lives compare like with like. */
-  readonly daemonAgeMs: number;
+  readonly daemon: DaemonLives;
   /** The shortest window a slope is judged over: over minutes, noise is all a slope shows. */
   readonly slopeWindowMs: number;
   /**
@@ -199,6 +210,11 @@ const MIN_CHECKED_MS = 30_000;
 const WRITE_LAG_MS = 1_000;
 /** The fewest daemon lives whose baselines are fitted for growth across lives. */
 const MIN_LIVES = 3;
+/**
+ * The end of a one-life window whose slope is judged again on its own: over a day, a leak that
+ * starts late moves the whole window's robust slope hardly at all.
+ */
+const TAIL_MS = 6 * HOUR;
 /** What a float may be off by and still sit on a bar: 1 MiB/h fitted is not 0.9999999. */
 const EPSILON = 1e-9;
 
@@ -211,7 +227,7 @@ export const GATE: JudgeOptions = {
   echoP99Ms: 25,
   holderSlope: 0.5,
   daemonSlope: 1,
-  daemonAgeMs: 9 * 60_000,
+  daemon: { lives: "many", ageMs: 9 * 60_000 },
   slopeWindowMs: HOUR,
   startingMs: 2 * 60_000,
   churnEveryMs: { restart: 10 * 60_000, agent: 5 * 60_000, idle: 60_000 },
@@ -550,14 +566,21 @@ function downSpans(events: readonly Of<"daemon">[]): Point[] {
 const worst = (list: readonly Of<"probe">[]) =>
   list.length === 0 ? "none" : `${largest(list.map((p) => p.ms ?? Infinity))} ms`;
 
+/**
+ * Every probe answered in time. With a daemon restarted as churn, some must have been taken while
+ * it was down, since a holder must answer without it; with one daemon life there is no such time.
+ */
 function probes({ events, options }: Run) {
   const all = ofKind(events, "probe");
   if (all.length === 0) return result("probes", ["no probe was recorded"], "");
-  const spans = downSpans(ofKind(events, "daemon"));
-  const down = all.filter((p) => spans.some(([from, to]) => p.t >= from && p.t <= to));
   const faults = all
     .filter((p) => p.ms === null || p.ms > options.probeMs)
     .map((p) => `${p.name} at ${p.t}: ${p.ms === null ? "no reply" : `${p.ms} ms`}`);
+  if (options.daemon.lives === "one") {
+    return result("probes", faults, `${all.length} probes, worst ${worst(all)}`);
+  }
+  const spans = downSpans(ofKind(events, "daemon"));
+  const down = all.filter((p) => spans.some(([from, to]) => p.t >= from && p.t <= to));
   if (faults.length === 0 && down.length === 0) {
     return unmeasured("probes", "no probe was taken while the daemon was down");
   }
@@ -572,13 +595,27 @@ function probes({ events, options }: Run) {
  * Why `points`, in hours, can't carry a slope over the window: too few of them, or spanning too
  * little of it. Undefined when they can.
  */
-function thin(points: readonly Point[], run: Run): string | undefined {
+function thin(points: readonly Point[], window: number): string | undefined {
   if (points.length < MIN_SLOPE_POINTS) return `${points.length} points`;
   const span = ((points.at(-1)?.[0] ?? 0) - (points[0]?.[0] ?? 0)) * HOUR;
-  const window = run.to - run.from;
   return span < SLOPE_COVERAGE * window
     ? `points over ${(span / HOUR).toFixed(2)} h of ${(window / HOUR).toFixed(2)}`
     : undefined;
+}
+
+/**
+ * The slope of RSS `readings`, each a time and bytes, in MiB an hour, over a span `window` long;
+ * `thin` says why they can't carry one.
+ */
+function rssSlope(
+  readings: readonly Point[],
+  run: Run,
+  window = run.to - run.from,
+): { perHour: number; thin?: string } {
+  const poolMs = run.options.slopeWindowMs / POOLS_PER_SLOPE_WINDOW;
+  const points = pooled(readings, poolMs).map(([t, rss]): Point => [t / HOUR, rss / MiB]);
+  const why = thin(points, window);
+  return { perHour: theilSen(points), ...(why !== undefined && { thin: why }) };
 }
 
 function holderSlopes(run: Run) {
@@ -593,15 +630,12 @@ function holderSlopes(run: Run) {
   );
   const faults: string[] = [];
   if (kept.length === 0) faults.push("no holder was read at both ends of the window");
-  const poolMs = options.slopeWindowMs / POOLS_PER_SLOPE_WINDOW;
   for (const holder of kept) {
     const readings = samples.flatMap((s): Point[] => {
       const rss = s.holders.find((h) => h.name === holder.name && h.pid === holder.pid)?.rss;
       return rss === null || rss === undefined ? [] : [[s.t, rss]];
     });
-    const points = pooled(readings, poolMs).map(([t, rss]): Point => [t / HOUR, rss / MiB]);
-    const why = thin(points, run);
-    const perHour = theilSen(points);
+    const { perHour, thin: why } = rssSlope(readings, run);
     if (why !== undefined) faults.push(`${holder.name}'s holder had too few RSS readings: ${why}`);
     else if (atLeast(perHour, options.holderSlope)) {
       faults.push(`${holder.name}'s holder grew ${perHour.toFixed(2)} MiB/h`);
@@ -692,12 +726,17 @@ function counts(run: Run) {
   return result("counts", faults, `${compared} settled counts, each at its life's baseline`);
 }
 
+function daemonMemory(run: Run) {
+  const { daemon } = run.options;
+  return daemon.lives === "one" ? daemonInOneLife(run) : daemonAcrossLives(run, daemon.ageMs);
+}
+
 /**
  * The daemon's RSS read once in each life that began in the window, at the same age, so lives
  * compare like with like: a life already running when the window opened was started at no age
  * the window saw, and one read well past the age has grown for longer.
  */
-function daemonSlope(run: Run) {
+function daemonAcrossLives(run: Run, ageMs: number) {
   const { options } = run;
   if (!slopeFits(run)) {
     return unmeasured("daemon-memory", "the measured window is shorter than a slope needs");
@@ -708,12 +747,12 @@ function daemonSlope(run: Run) {
     const readable =
       d !== null &&
       s.t - d.ageMs >= run.from &&
-      d.ageMs >= options.daemonAgeMs &&
-      d.ageMs <= options.daemonAgeMs + options.sampleEveryMs;
+      d.ageMs >= ageMs &&
+      d.ageMs <= ageMs + options.sampleEveryMs;
     if (readable && !atAge.has(d.pid)) atAge.set(d.pid, [s.t / HOUR, d.rss / MiB]);
   }
   const points = [...atAge.values()];
-  const why = thin(points, run);
+  const why = thin(points, run.to - run.from);
   if (why !== undefined) {
     return result("daemon-memory", [`too few daemon lives read at their age: ${why}`], "");
   }
@@ -727,17 +766,86 @@ function daemonSlope(run: Run) {
   );
 }
 
+const mib = (bytes: number) => (bytes / MiB).toFixed(1);
+
+/**
+ * The one daemon's RSS over the whole window, fitted as a holder's is. The run is premised on that
+ * daemon living throughout, so its going down at any time, a sample it didn't answer in the
+ * window, or a second pid there, is a fault, and the driver ends a run whose daemon died.
+ */
+function daemonInOneLife(run: Run): Criterion {
+  const { options } = run;
+  const faults = ofKind(run.events, "daemon")
+    .filter((d) => !d.up)
+    .map(
+      (d) =>
+        `the daemon went down at ${new Date(d.t).toISOString()}` +
+        (d.why === undefined ? "" : `: ${d.why}`),
+    );
+  if (faults.length === 0 && !slopeFits(run)) {
+    return unmeasured("daemon-memory", "the measured window is shorter than a slope needs");
+  }
+  const samples = inWindow(run.samples, run);
+  const unanswered = samples.filter((s) => s.daemon === null);
+  const [firstUnanswered] = unanswered;
+  if (firstUnanswered !== undefined) {
+    faults.push(
+      `the daemon went unread in ${unanswered.length} of the window's ${samples.length} ` +
+        `samples, first at ${new Date(firstUnanswered.t).toISOString()}`,
+    );
+  }
+  const readings = samples.flatMap((s): Point[] =>
+    s.daemon === null ? [] : [[s.t, s.daemon.rss]],
+  );
+  const pids = new Set(samples.flatMap((s) => (s.daemon === null ? [] : [s.daemon.pid])));
+  if (pids.size > 1)
+    faults.push(`the daemon ran as ${pids.size} processes: ${[...pids].join(", ")}`);
+  if (!slopeFits(run)) return result("daemon-memory", faults, "");
+  const { perHour, thin: why } = rssSlope(readings, run);
+  if (why !== undefined) {
+    faults.push(`too few daemon RSS readings: ${why}`);
+    return result("daemon-memory", faults, "");
+  }
+  if (atLeast(perHour, options.daemonSlope)) {
+    faults.push(`the daemon grew ${perHour.toFixed(2)} MiB/h in its one life`);
+  }
+  let slopes = `${perHour.toFixed(2)} MiB/h`;
+  if (run.to - run.from > TAIL_MS) {
+    const tailFrom = run.to - TAIL_MS;
+    const tail = rssSlope(
+      readings.filter(([t]) => t >= tailFrom),
+      run,
+      TAIL_MS,
+    );
+    const hours = TAIL_MS / HOUR;
+    if (tail.thin !== undefined) {
+      faults.push(`too few daemon RSS readings in the last ${hours} h: ${tail.thin}`);
+    } else if (atLeast(tail.perHour, options.daemonSlope)) {
+      faults.push(`the daemon grew ${tail.perHour.toFixed(2)} MiB/h over the last ${hours} h`);
+    }
+    slopes += `, ${tail.perHour.toFixed(2)} over the last ${hours} h`;
+  }
+  const rss = readings.map(([, bytes]) => bytes);
+  const measured =
+    `one life, ${slopes}; RSS ${mib(rss[0] ?? 0)} MiB at the window's start, ` +
+    `${mib(rss.at(-1) ?? 0)} at its end, ${mib(largest(rss))} at most`;
+  // The baseline the run is for, reported beside whatever else failed.
+  return faults.length === 0
+    ? result("daemon-memory", [], measured)
+    : { name: "daemon-memory", status: "fail", detail: [...faults, measured].join("; ") };
+}
+
+const p99Of = (echoes: readonly Of<"echo">[]) =>
+  percentile(
+    echoes.map((e) => e.ms ?? Infinity),
+    99,
+  );
+
 function echo(run: Run) {
   const found = ofKind(run.events, "echo");
   const lost = found.filter((e) => e.ms === null).length;
   const flooded = inWindow(found, run).filter((e) => e.flooding);
-  const p99 =
-    flooded.length === 0
-      ? 0
-      : percentile(
-          flooded.map((e) => e.ms ?? Infinity),
-          99,
-        );
+  const p99 = flooded.length === 0 ? 0 : p99Of(flooded);
   const faults = [
     ...(lost > 0 ? [`${lost} keystrokes never echoed`] : []),
     ...(flooded.length > 0 && atLeast(p99, run.options.echoP99Ms)
@@ -747,7 +855,24 @@ function echo(run: Run) {
   if (faults.length === 0 && flooded.length === 0) {
     return unmeasured("echo", "no keystroke was timed during a flood");
   }
-  return result("echo", faults, `${flooded.length} keystrokes during floods, p99 ${p99} ms`);
+  const measured = `${flooded.length} keystrokes during floods, p99 ${p99} ms`;
+  const hours = hasWindow(run) ? Math.floor((run.to - run.from) / HOUR) : 0;
+  if (run.options.daemon.lives === "many" || hours === 0) return result("echo", faults, measured);
+  const byHour = Map.groupBy(flooded, (e) => Math.floor((e.t - run.from) / HOUR));
+  let worstHour = 0;
+  for (let hour = 0; hour < hours; hour++) {
+    const echoes = byHour.get(hour) ?? [];
+    if (echoes.length === 0) {
+      faults.push(`no keystroke was timed during a flood in hour ${hour + 1}`);
+      continue;
+    }
+    const hourly = p99Of(echoes);
+    worstHour = Math.max(worstHour, hourly);
+    if (atLeast(hourly, run.options.echoP99Ms)) {
+      faults.push(`echo p99 ${hourly} ms during floods in hour ${hour + 1}`);
+    }
+  }
+  return result("echo", faults, `${measured}; worst hour's p99 ${worstHour} ms`);
 }
 
 /**
@@ -810,7 +935,7 @@ export function judge(events: readonly SoakEvent[], options: JudgeOptions = GATE
     holderSlopes(run),
     engineBudget(run),
     counts(run),
-    daemonSlope(run),
+    daemonMemory(run),
     echo(run),
     churn(run),
     engine(run),

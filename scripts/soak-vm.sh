@@ -51,7 +51,10 @@ usage: pnpm soak:vm <command> [options]
   setup                     install KVM and libvirt on this host (sudo, asks first; once)
   create [--commit SHA]     make the VM, then provision it at SHA (default: main on GitHub)
   provision [--commit SHA]  re-run the in-VM provisioning of a VM no soak has started on
-  start [--hours N]         mark the VM disposable and start an N-hour soak in it (default 24)
+  start [--profile P] [--hours N]
+                            mark the VM disposable and start an N-hour soak in it: P is gate
+                            (default) or long-life, the gate's without daemon restarts; N is 24
+                            by default
   status                    whether the soak is alive, when it ends, and its log's tail
   collect [--to DIR]        copy the run's directory and log to this host
   destroy                   power off and delete the VM and its disks (asks first)
@@ -540,18 +543,18 @@ REMOTE
 )
 
 cmd_start() {
-  local hours="$1"
+  local profile="$1" hours="$2"
   host_prereqs
   vm_exists || die "no VM $VM; run: pnpm soak:vm create"
   init_ssh
   wait_ssh
-  log "Marking the VM disposable and starting a $hours h soak (after an hour's warm-up)"
-  vm_run "$START" "$hours"
+  log "Marking the VM disposable and starting a $hours h $profile soak (after an hour's warm-up)"
+  vm_run "$START" "$profile" "$hours"
   awake_reminder "$hours"
 }
 
 START=$(cat <<'REMOTE'
-hours="$1"
+profile="$1"; hours="$2"
 [[ -s "$HOME/soak-commit" ]] || refuse "the VM is not provisioned; run: pnpm soak:vm provision"
 if [[ -f "$HOME/soak-run" ]]; then
   pid=$(sed -n "s/^pid=//p" "$HOME/soak-run")
@@ -564,11 +567,13 @@ fi
 sudo touch /etc/bazhen-disposable-host
 . "$HOME/.cargo/env"
 cd "$HOME/bazhen"
-name="soak-${hours}h"
-setsid nohup pnpm soak --hours "$hours" --out "$HOME/$name" > "$HOME/$name.log" 2>&1 < /dev/null &
+name="soak-${profile}-${hours}h"
+setsid nohup pnpm soak --profile "$profile" --hours "$hours" --out "$HOME/$name" \
+  > "$HOME/$name.log" 2>&1 < /dev/null &
 pid=$!
 cat > "$HOME/soak-run" <<EOF
 pid=$pid
+profile=$profile
 hours=$hours
 out=$name
 log=$name.log
@@ -579,7 +584,7 @@ sleep 5
 if [[ ! -d "/proc/$pid" ]]; then
   echo "The soak exited at once; its log:" >&2; tail -n 40 "$HOME/$name.log" >&2; exit 1
 fi
-echo "Started pid $pid: pnpm soak --hours $hours --out ~/$name (log ~/$name.log)"
+echo "Started pid $pid: pnpm soak --profile $profile --hours $hours --out ~/$name (log ~/$name.log)"
 echo "Commit under test: $(cat "$HOME/soak-commit")"
 REMOTE
 )
@@ -612,6 +617,8 @@ pid=$(get pid); hours=$(get hours); out=$(get out); logf=$(get log); started=$(g
 now=$(date +%s)
 end=$(awk -v s="$started" -v h="$hours" "BEGIN { printf \"%d\", s + (h + 1) * 3600 }")
 echo "Commit:   $(get commit)"
+profile=$(get profile)
+echo "Profile:  ${profile:-gate}"
 echo "Started:  $(date -d "@$started")   ($(( (now - started) / 60 )) min ago)"
 echo "Expected: $(date -d "@$end")   (warm-up hour + $hours h; keep the host awake until then)"
 if [[ -d "/proc/$pid" ]]; then echo "Soak:     ALIVE (pid $pid)"; else echo "Soak:     not running"; fi
@@ -637,7 +644,8 @@ cmd_collect() {
   logf=$(sed -n 's/^log=//p' <<<"$run")
   pid=$(sed -n 's/^pid=//p' <<<"$run")
   commit=$(sed -n 's/^commit=//p' <<<"$run")
-  [[ $out =~ ^soak-[0-9.]+h$ && $logf == "$out.log" ]] || die "unexpected run names '$out', '$logf'"
+  [[ $out =~ ^soak-((gate|long-life)-)?[0-9.]+h$ && $logf == "$out.log" ]] ||
+    die "unexpected run names '$out', '$logf'"
   [[ $pid =~ ^[0-9]+$ && $commit =~ ^[0-9a-f]{40}$ ]] || die "unexpected soak record: $run"
   if vm_ssh test -d "/proc/$pid"; then
     warn "the soak is still running; this copies a partial snapshot"
@@ -729,11 +737,15 @@ main() {
     cmd_ssh "$@"
     return
   fi
-  local commit="" hours=24 to=""
+  local commit="" profile=gate hours=24 to=""
   while [[ $# -gt 0 ]]; do
     case "$cmd:$1" in
       create:--commit | provision:--commit)
         commit="${2:?--commit needs a sha}"
+        shift 2
+        ;;
+      start:--profile)
+        profile="${2:?--profile needs a name}"
         shift 2
         ;;
       start:--hours)
@@ -748,6 +760,8 @@ main() {
     esac
   done
   [[ -z $commit || $commit =~ ^[0-9a-f]{7,40}$ ]] || die "--commit takes a hex sha, not '$commit'"
+  [[ $profile == gate || $profile == long-life ]] ||
+    die "--profile takes gate or long-life, not '$profile' (smoke runs in pnpm test:real soak)"
   if ! [[ $hours =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v h="$hours" 'BEGIN { exit !(h > 0) }'; then
     die "--hours takes a positive number, not '$hours'"
   fi
@@ -755,7 +769,7 @@ main() {
     setup) cmd_setup ;;
     create) cmd_create "$commit" ;;
     provision) cmd_provision "$commit" ;;
-    start) cmd_start "$hours" ;;
+    start) cmd_start "$profile" "$hours" ;;
     status) cmd_status ;;
     collect) cmd_collect "$to" ;;
     destroy) cmd_destroy ;;

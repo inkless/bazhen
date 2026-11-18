@@ -1,7 +1,8 @@
-// `pnpm soak [--profile gate|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
+// `pnpm soak [--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
 // a real daemon on holders, under design §12.4's load and churn, for hours, then the verdict of
 // scripts/soak-judge.ts on what it recorded. `pnpm soak --judge <dir>` judges a finished run's
-// directory again.
+// directory again. The long-life profile is the gate's without the daemon's restarts, so the one
+// daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
 //
 // The load is 25 terminals: shells running scripts/soak-worker.ts (agent-stream replays, floods,
 // idle shells and one that echoes) and a Claude Code agent on the fake model. The churn kills the
@@ -78,14 +79,20 @@ const SIZE = SOAK_SIZE;
 const WORKER = fileURLToPath(new URL("soak-worker.ts", import.meta.url));
 const ECHO = fileURLToPath(new URL("soak-echo.ts", import.meta.url));
 
+export const PROFILES = ["gate", "long-life", "smoke"] as const;
+export type ProfileName = (typeof PROFILES)[number];
+const isProfile = (name: unknown): name is ProfileName => PROFILES.some((p) => p === name);
+
 export interface Profile {
-  readonly name: "gate" | "smoke";
+  readonly name: ProfileName;
   readonly hours: number;
   readonly warmupMs: number;
   readonly measureMs: number;
-  readonly restartEveryMs: number;
-  /** How long the daemon stays down at each restart: workers probe their holders meanwhile. */
-  readonly downMs: number;
+  /**
+   * How often the daemon is killed and restarted, and how long it stays down each time, while
+   * workers probe their holders; null for a daemon that lives the whole run.
+   */
+  readonly restart: { readonly everyMs: number; readonly downMs: number } | null;
   readonly rotateEveryMs: number;
   /** How long an attach reads the stream after its snapshot. */
   readonly attachHoldMs: number;
@@ -117,20 +124,29 @@ const MODES: readonly Mode[] = ["replay", "flood", "idle", "echo"];
 const LOAD: Readonly<Record<Mode, number>> = { replay: 15, flood: 5, idle: 3, echo: 1 };
 
 /**
- * The gate's profile, §12.4's rates over a warm-up hour and `hours` measured; or the smoke run's,
- * the same load with the churn compressed, over minutes, judged with what only hours can show
- * left unmeasured.
+ * The gate's profile, §12.4's rates over a warm-up hour and `hours` measured; the long-life one,
+ * the gate's with the daemon never restarted; or the smoke run's, the same load with the churn
+ * compressed, over minutes, judged with what only hours can show left unmeasured.
  */
-export function profile(name: "gate" | "smoke", hours: number): Profile {
+export function profile(name: ProfileName, hours: number): Profile {
   const measureMs = Math.round(hours * HOUR);
+  if (name === "long-life") {
+    const gate = profile("gate", hours);
+    const { restart: _, ...churn } = gate.judge.churnEveryMs;
+    return {
+      ...gate,
+      name,
+      restart: null,
+      judge: { ...gate.judge, daemon: { lives: "one" }, churnEveryMs: churn },
+    };
+  }
   if (name === "gate") {
     return {
       name,
       hours,
       warmupMs: HOUR,
       measureMs,
-      restartEveryMs: 10 * MIN,
-      downMs: 5 * SEC,
+      restart: { everyMs: 10 * MIN, downMs: 5 * SEC },
       rotateEveryMs: 5 * SEC,
       attachHoldMs: 3 * SEC,
       idleChurnEveryMs: MIN,
@@ -159,8 +175,7 @@ export function profile(name: "gate" | "smoke", hours: number): Profile {
     hours,
     warmupMs: 2 * MIN,
     measureMs,
-    restartEveryMs: 3 * MIN,
-    downMs: 5 * SEC,
+    restart: { everyMs: 3 * MIN, downMs: 5 * SEC },
     rotateEveryMs: 5 * SEC,
     attachHoldMs: 3 * SEC,
     idleChurnEveryMs: 30 * SEC,
@@ -201,7 +216,7 @@ export type SoakArgs =
     };
 
 const USAGE =
-  "usage: pnpm soak [--profile gate|smoke] [--hours n] [--out dir] " +
+  `usage: pnpm soak [--profile ${PROFILES.join("|")}] [--hours n] [--out dir] ` +
   "[--fault close-holder|slow-probe]… | pnpm soak --judge <dir>";
 
 /** The command line's run, or the directory to judge again. */
@@ -220,8 +235,8 @@ export function parseSoakArgs(args: readonly string[], now = new Date()): SoakAr
   if (positionals.length > 0) throw new Error(USAGE);
   if (values.judge !== undefined) return { judge: values.judge };
   const name = values.profile;
-  if (name !== "gate" && name !== "smoke") throw new Error(`no profile ${name}; ${USAGE}`);
-  const hours = Number(values.hours ?? (name === "gate" ? 24 : 0.2));
+  if (!isProfile(name)) throw new Error(`no profile ${name}; ${USAGE}`);
+  const hours = Number(values.hours ?? (name === "smoke" ? 0.2 : 24));
   if (!Number.isFinite(hours) || hours <= 0) throw new Error(`--hours takes a positive number`);
   const unknown = values.fault.filter((f) => !isFault(f));
   if (unknown.length > 0) throw new Error(`no fault ${unknown.join(", ")}; ${USAGE}`);
@@ -232,6 +247,13 @@ export function parseSoakArgs(args: readonly string[], now = new Date()): SoakAr
     faults: values.fault.filter(isFault),
   };
 }
+
+/**
+ * When a window that opened at `from` ends, recorded at `now`: never short of what was asked,
+ * unless the daemon died, which ends it there.
+ */
+export const windowEnd = (from: number, measureMs: number, now: number, died: boolean) =>
+  died ? now : Math.max(now, from + measureMs);
 
 /**
  * Whether `value` is a record of a run's: a kind and a time. The driver and the workers wrote
@@ -595,6 +617,10 @@ class Soak {
   private echo:
     | { process: ChildProcessWithoutNullStreams; lines: AsyncIterator<string> }
     | undefined;
+  /** Set as the run stops its daemon, whose exit from then on is no death. */
+  private stoppingDaemon = false;
+  /** Settles true once a daemon nothing restarts has died. */
+  private readonly died = Promise.withResolvers<boolean>();
 
   private readonly profile: Profile;
   private readonly out: string;
@@ -660,12 +686,28 @@ class Soak {
       config: '[runtime]\ndefault = "holder"\n',
     });
     this.daemonUp = true;
+    if (this.profile.restart === null) this.endOnDeath(this.daemon);
     for (const mode of MODES) {
       for (let i = 0; i < this.profile.load[mode]; i++) await this.openWorker(mode);
     }
     await this.openAgent();
     await this.view();
     await this.startEcho();
+  }
+
+  /**
+   * Records the death of a daemon nothing restarts, and when, and ends the run: what came after
+   * would judge a daemon that is gone.
+   */
+  private endOnDeath(daemon: Daemon): void {
+    void daemon.exited.then(({ code, signal }) => {
+      if (this.stoppingDaemon) return;
+      this.daemonUp = false;
+      const why = signal === null ? `it exited with ${String(code)}` : `it was killed by ${signal}`;
+      this.record({ kind: "daemon", t: Date.now(), up: false, why });
+      this.log(`the daemon died: ${why}; ending the run`);
+      this.died.resolve(true);
+    });
   }
 
   /** The keystroke timer, a process of its own driving the echo shell's view. */
@@ -866,7 +908,9 @@ class Soak {
     const started = Date.now();
     const every = (ms: number, kind: string, lane: Lane, task: () => Promise<Outcome>) =>
       this.timers.push(setInterval(() => this.enqueue(kind, lane, task), ms));
-    every(p.restartEveryMs, "restart", "both", () => this.restart());
+    const { restart } = p;
+    if (restart !== null)
+      every(restart.everyMs, "restart", "both", () => this.restart(restart.downMs));
     every(p.rotateEveryMs, "rotate", "views", () => this.rotate());
     every(p.seamEveryMs, "seam", "views", () => this.seam());
     every(p.idleChurnEveryMs, "idle", "terminals", () => this.churnIdle());
@@ -907,12 +951,17 @@ class Soak {
         ),
       );
     }
-    await sleepUntil(started + p.warmupMs);
+    const unlessDied = (wait: Promise<unknown>) =>
+      Promise.race([wait.then(() => false), this.died.promise]);
+    if (await unlessDied(sleepUntil(started + p.warmupMs))) return;
     const from = Date.now();
     this.record({ kind: "window", t: from, phase: "measure" });
-    // Timers never fire early, so the window is never short of what was asked.
-    await sleep(p.measureMs);
-    this.record({ kind: "window", t: Math.max(Date.now(), from + p.measureMs), phase: "end" });
+    const died = await unlessDied(sleep(p.measureMs));
+    this.record({
+      kind: "window",
+      t: windowEnd(from, p.measureMs, Date.now(), died),
+      phase: "end",
+    });
   }
 
   /**
@@ -974,14 +1023,14 @@ class Soak {
     held.catch((error: unknown) => this.log(`${kind} failed: ${String(error)}`));
   }
 
-  private async restart(): Promise<void> {
+  private async restart(downMs: number): Promise<void> {
     const daemon = this.live;
     await this.steerEcho("paused", "pause");
     await this.unview();
     this.daemonUp = false;
     this.record({ kind: "daemon", t: Date.now(), up: false });
     await daemon.crash();
-    await sleep(this.profile.downMs);
+    await sleep(downMs);
     this.daemonStartedAt = Date.now();
     await daemon.restart();
     this.record({ kind: "daemon", t: Date.now(), up: true });
@@ -1313,6 +1362,7 @@ class Soak {
     }
     for (const name of this.terminals.keys()) this.record({ kind: "close", t: Date.now(), name });
     this.keepHolderLogs();
+    this.stoppingDaemon = true;
     await this.daemon?.stop().catch((e: unknown) => this.log(`stopping the daemon: ${String(e)}`));
     await this.model?.close();
   }
@@ -1328,7 +1378,7 @@ export async function main(
     const saved: unknown = JSON.parse(readFileSync(join(parsed.judge, "profile.json"), "utf8"));
     const named = typeof saved === "object" && saved !== null && "name" in saved ? saved.name : "";
     const hours = typeof saved === "object" && saved !== null && "hours" in saved ? saved.hours : 0;
-    if ((named !== "gate" && named !== "smoke") || typeof hours !== "number") {
+    if (!isProfile(named) || typeof hours !== "number") {
       throw new Error(`${parsed.judge}/profile.json names no profile`);
     }
     const verdict = judge(await readRun(parsed.judge), profile(named, hours).judge);
