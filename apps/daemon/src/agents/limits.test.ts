@@ -151,17 +151,6 @@ describe("Limits", () => {
     s.report(stop);
     expect(s.recorded).toEqual([stop]);
   });
-});
-
-describe("mergeLimits", () => {
-  it("replaces the windows an update names and keeps those it leaves out", () => {
-    const primary = { window: "codex.primary", usedPercent: 10 };
-    const secondary = { window: "codex.secondary", usedPercent: 40, resetsAt: LATER };
-    expect([
-      mergeLimits(undefined, [primary]),
-      mergeLimits([primary, secondary], [{ ...primary, usedPercent: 100, resetsAt: SOON }]),
-    ]).toEqual([[primary], [{ ...primary, usedPercent: 100, resetsAt: SOON }, secondary]]);
-  });
 
   it("weighs a stop again only for a reading soon after it, not one of the account hours on", () => {
     const s = setup();
@@ -184,15 +173,36 @@ describe("mergeLimits", () => {
     s.meter([{ window: "five_hour", usedPercent: 100, resetsAt: SOON }]);
     expect(s.recorded).toEqual([]);
   });
+});
 
-  it("keeps no more windows than usage holds, however many one update names", () => {
+describe("mergeLimits", () => {
+  it("replaces the windows an update names and keeps those it leaves out", () => {
+    const primary = { window: "codex.primary", usedPercent: 10 };
+    const secondary = { window: "codex.secondary", usedPercent: 40, resetsAt: LATER };
+    expect([
+      mergeLimits(undefined, [primary]),
+      mergeLimits([primary, secondary], [{ ...primary, usedPercent: 100, resetsAt: SOON }]),
+    ]).toEqual([[primary], [{ ...primary, usedPercent: 100, resetsAt: SOON }, secondary]]);
+  });
+
+  it("keeps no more windows than usage holds, the first an update names when it alone names more", () => {
     const update = Array.from({ length: USAGE_LIMITS_MAX + 5 }, (_, i) => ({
       window: `w${i}`,
       usedPercent: i,
     }));
-    expect(mergeLimits([{ window: "old", usedPercent: 1 }], update).map((l) => l.window)).toEqual(
+    const held = [{ window: `w${USAGE_LIMITS_MAX + 4}`, usedPercent: 1 }];
+    expect(mergeLimits(held, update).map((l) => l.window)).toEqual(
       update.slice(0, USAGE_LIMITS_MAX).map((l) => l.window),
     );
+  });
+
+  it("holds a window an update names twice once, as it last names it", () => {
+    const first = { window: "codex.primary", usedPercent: 10 };
+    const again = { window: "codex.primary", usedPercent: 12, resetsAt: SOON };
+    expect([mergeLimits(undefined, [first, again]), mergeLimits([first], [first, again])]).toEqual([
+      [again],
+      [again],
+    ]);
   });
 
   it("keeps no more windows than usage holds, dropping first the oldest the update didn't name", () => {

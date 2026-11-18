@@ -36,9 +36,9 @@ export interface LimitsOptions {
  * it again, and one the harness has renamed is never named again.
  *
  * The meter can be read after the stop it explains, so the agent's latest stop is weighed again
- * at each change of its usage, for `LATE_READING_MS`, until the agent reports anything else. Weighed again, it records
- * only a window used up: a later reading that shows none, as another turn's on the same account
- * may, says nothing of what stopped this one.
+ * at each change of its usage, for `LATE_READING_MS`, until the agent reports anything else.
+ * Weighed again, it records only a window used up: a later reading that shows none, as another
+ * turn's on the same account may, says nothing of what stopped this one.
  */
 export class Limits {
   private readonly opts: LimitsOptions;
@@ -123,17 +123,18 @@ const limited = (activity: Activity, resetsAt: string | null): Activity => ({
 
 /**
  * The usage limits held, with those an update names replaced and those it leaves out kept. Past
- * the most usage holds, those it leaves out go first, the one first seen first; an update that
- * alone names more keeps the first it names.
+ * the most usage holds, those it leaves out go first, the one first seen first. An update that
+ * alone names as many keeps only the first it names, in its order.
  */
 export function mergeLimits(
   held: readonly UsageLimit[] | undefined,
   update: readonly UsageLimit[],
 ): UsageLimit[] {
   const named = new Map(update.map((l) => [l.window, l]));
+  if (named.size >= USAGE_LIMITS_MAX) return [...named.values()].slice(0, USAGE_LIMITS_MAX);
   const kept = (held ?? []).map((l) => named.get(l.window) ?? l);
   const known = new Set(kept.map((l) => l.window));
   const merged = [...kept, ...[...named.values()].filter((l) => !known.has(l.window))];
   let over = merged.length - USAGE_LIMITS_MAX;
-  return merged.filter((l) => named.has(l.window) || over-- <= 0).slice(0, USAGE_LIMITS_MAX);
+  return merged.filter((l) => named.has(l.window) || over-- <= 0);
 }
