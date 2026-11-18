@@ -294,7 +294,8 @@ again.
 The gate's restarts mean each daemon life lasts 10 minutes, so its daemon-memory criterion shows
 only that nothing grows across restarts. The **long-life profile** (`pnpm soak --profile
 long-life`) is the gate's without them: one daemon for the whole run. Its daemon-memory criterion
-fits that daemon's RSS over the window against the same bar, and fails if the daemon went down,
+fits that daemon's RSS over the window, and again over its last 6 hours, against the same bar: a
+leak that starts late barely moves a day's robust slope. It also fails if the daemon went down,
 went unread or changed pid. Its echo criterion also holds each measured hour to the bar, since a
 heap that ages slows its later hours first. A daemon that dies ends the run there, with the death
 recorded; the churn steps it failed and the short window fail churn and duration beside it.
