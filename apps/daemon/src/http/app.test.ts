@@ -673,29 +673,29 @@ describe("the screen route", () => {
     ]);
   });
 
-  const refusals: [string, Error, number, string][] = [
-    ["one its runtime no longer has", new StaleIncarnation(term, "gone"), 404, "not_found"],
-    ["one on tmux", new UnsupportedRuntime("on tmux"), 422, "unsupported"],
+  const refusals: [string, number, string, Error][] = [
+    ["one its runtime no longer has", 404, "not_found", new StaleIncarnation(term, "gone")],
+    ["one on tmux", 422, "unsupported", new UnsupportedRuntime("on tmux")],
     [
       "one on a holder older than screen reads",
-      new TerminalPredates(term, "screen reads"),
       409,
       "needs_restart",
+      new TerminalPredates(term, "screen reads"),
     ],
     [
       "one on a holder this build can't speak to",
-      new TerminalUnservable(term, ["9.0"], null),
       409,
       "needs_restart",
+      new TerminalUnservable(term, ["9.0"], null),
     ],
     [
       "one whose screen its holder can't read",
-      new ScreenUnreadable(term, "no engine"),
       503,
       "unavailable",
+      new ScreenUnreadable(term, "no engine"),
     ],
   ];
-  it.each(refusals)("answers %s as %i", async (_, thrown, status, error) => {
+  it.each(refusals)("answers %s as %i", async (_, status, error, thrown) => {
     reading(async () => {
       throw thrown;
     });
