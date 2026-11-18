@@ -257,16 +257,18 @@ describe("HTTP app", () => {
       body: JSON.stringify({ ...asked, brackets: true }),
     });
     const prompts = await Promise.all(
-      [app, socket].map(async (on) => {
-        const res = await on.request(`/v1/shells/${launched.terminalId}/prompt`, {
-          method: "POST",
-          headers: { host, "content-type": "application/json" },
-          body: JSON.stringify({ token: "t", brackets: true }),
-        });
-        return res.status;
-      }),
+      [app, socket].flatMap((on) =>
+        ["prompt", "decline"].map(async (report) => {
+          const res = await on.request(`/v1/shells/${launched.terminalId}/${report}`, {
+            method: "POST",
+            headers: { host, "content-type": "application/json" },
+            body: JSON.stringify({ token: "t", brackets: true }),
+          });
+          return res.status;
+        }),
+      ),
     );
-    expect([restarted.status, restarts, prompts]).toEqual([200, [asked], [404, 404]]);
+    expect([restarted.status, restarts, prompts]).toEqual([200, [asked], [404, 404, 404, 404]]);
   });
 
   it("reports runtime health and versions", async () => {

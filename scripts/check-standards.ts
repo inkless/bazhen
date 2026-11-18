@@ -1053,6 +1053,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads at most MAX_LINE + 1 bytes of stdin for the copy to send, parsing none of them",
   "crates/bazhen-hook/src/shell_report.rs::send_line":
     "reads stdin for report_body, which shell_report fuzzes",
+  "crates/bazhen-hook/src/shell_report.rs::send_prompt":
+    "posts a body prompt_body wrote, and reads nothing of the reply",
   "crates/bazhen-hook/src/statusline.rs::run":
     "reads stdin to hand the user's command and report, parsing none of it",
   "crates/bazhen-peer/src/main.rs::main":

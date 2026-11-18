@@ -340,6 +340,7 @@ export const AGENT_OPEN: readonly (readonly [method: string, path: string])[] = 
   ["POST", "/v1/messages/wait"],
   ["POST", "/v1/shells/:id/report"],
   ["POST", "/v1/shells/:id/prompt"],
+  ["POST", "/v1/shells/:id/decline"],
 ];
 
 /**

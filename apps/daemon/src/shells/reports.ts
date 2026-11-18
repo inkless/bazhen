@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { ShellPrompt, ShellReport } from "@bazhen/protocol";
+import type { ShellDecline, ShellPrompt, ShellReport } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
 
 /** What became of a report: kept, older than the kept line, or not the shell's own. */
@@ -22,6 +22,14 @@ export function newShellToken(random: (size: number) => Buffer = randomBytes): {
   return { token, hash: hashOf(token) };
 }
 
+/** Where a shell's first-prompt report goes once its token has vouched for it. */
+export interface PromptListener {
+  /** The shell's editor is reading, and reads a marked paste where `brackets` says so. */
+  prompted(terminalId: string, brackets: boolean): void;
+  /** The shell won't take a line typed back. */
+  declined(terminalId: string): void;
+}
+
 /**
  * Takes what shells' integrations report over the socket. A report counts only with the token
  * the shell was started with, so another shell, or an agent, which has the socket too, can't set
@@ -29,16 +37,16 @@ export function newShellToken(random: (size: number) => Buffer = randomBytes): {
  */
 export class ShellReports {
   private readonly store: Store;
-  private readonly prompted: (terminalId: string, brackets: boolean) => void;
+  private readonly prompts: PromptListener;
   private readonly nowMicros: () => number;
 
   constructor(
     store: Store,
-    prompted: (terminalId: string, brackets: boolean) => void,
+    prompts: PromptListener,
     nowMicros: () => number = () => Date.now() * 1000,
   ) {
     this.store = store;
-    this.prompted = prompted;
+    this.prompts = prompts;
     this.nowMicros = nowMicros;
   }
 
@@ -53,7 +61,14 @@ export class ShellReports {
   /** The shell reached its first prompt: whether the report was the shell's own. */
   prompt(terminalId: string, report: ShellPrompt): boolean {
     if (!this.owns(terminalId, report.token)) return false;
-    this.prompted(terminalId, report.brackets === true);
+    this.prompts.prompted(terminalId, report.brackets === true);
+    return true;
+  }
+
+  /** The shell won't take a line typed back: whether the report was the shell's own. */
+  decline(terminalId: string, report: ShellDecline): boolean {
+    if (!this.owns(terminalId, report.token)) return false;
+    this.prompts.declined(terminalId);
     return true;
   }
 

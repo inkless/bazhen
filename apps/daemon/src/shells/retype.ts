@@ -34,9 +34,10 @@ interface Pending {
 
 /**
  * The lines restarts are to type into their new shells, held in memory only, never written
- * anywhere, until the new shell reports its first prompt. Each is typed once at most, and dropped
- * if no prompt comes in time: the shell's integration didn't load. A log names the shell, never
- * the line.
+ * anywhere, until the new shell reports its first prompt. Each is typed once at most; dropped at
+ * once if the shell's integration says at that prompt that it won't take one; and dropped if no
+ * prompt comes in time: the shell's integration didn't load. A log names the shell, never the
+ * line.
  */
 export class PendingRetypes {
   private readonly deps: RetypeDeps;
@@ -73,6 +74,18 @@ export class PendingRetypes {
     if (held === undefined || held.brackets !== null) return;
     held.brackets = brackets;
     if (held.ref !== null) this.type(terminalId, held);
+  }
+
+  /**
+   * The shell reached its first prompt and said it won't take a line typed back, as a fish too new
+   * for the check before a paste: its line is dropped now, not once its time to report runs out.
+   * Like a prompt, only its first report counts.
+   */
+  declined(terminalId: string): void {
+    const held = this.pending.get(terminalId);
+    if (held === undefined || held.brackets !== null) return;
+    this.drop(terminalId);
+    this.skipped(terminalId, "the shell's integration said it can't take a line typed back");
   }
 
   /** Forgets the shell's line, as for one that failed to open. */

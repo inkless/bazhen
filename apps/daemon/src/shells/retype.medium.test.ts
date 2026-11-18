@@ -16,6 +16,8 @@ import { PendingRetypes, RETYPE_WITHIN_MS, type After } from "./retype.ts";
 
 const INTEGRATION = { hook: "/state/hook/bazhen-hook", dir: "/state/shell-integration" };
 const LINE = `echo "$HOME" 'a  b' TOKEN=s3cret`;
+/** What the daemon logs for a shell whose integration said it won't take a line typed back. */
+const DECLINED = "the shell's integration said it can't take a line typed back";
 
 /** A clock that runs what is scheduled on it only as a test lets time pass. */
 function testClock() {
@@ -96,9 +98,7 @@ async function lostShell({
     });
   const opener = lifecycle(true);
   const shells = restartedReporting ? opener : lifecycle(false);
-  const reports = new ShellReports(store, (terminalId, brackets) =>
-    shells.prompted(terminalId, brackets),
-  );
+  const reports = new ShellReports(store, shells);
   const refOf = (terminalId: string): RuntimeRef => {
     const ref = store.shell(terminalId)?.runtime;
     if (ref == null) throw new Error(`shell ${terminalId} has no terminal`);
@@ -121,6 +121,8 @@ async function lostShell({
   /** The new shell's integration reports its first prompt with `token`, its own by default. */
   const prompt = (id: string, token = tokenOf(id), brackets?: boolean) =>
     reports.prompt(id, { token, ...(brackets !== undefined && { brackets }) });
+  /** The new shell's integration says, with `token`, that it won't take a line typed back. */
+  const decline = (id: string, token = tokenOf(id)) => reports.decline(id, { token });
   const retypeable = (id: string, shellsReport = true) =>
     store.snapshot({ ...testView, shellsReport }).shells.find((s) => s.id === id)?.retypeable;
   return {
@@ -137,6 +139,7 @@ async function lostShell({
     tokenOf,
     restart,
     prompt,
+    decline,
     retypeable,
     refOf,
     failOpens: (fail: boolean) => (opensFail = fail),
@@ -259,6 +262,53 @@ describe("restarting a lost shell with its last line typed back", () => {
     ]);
   });
 
+  it("reads a prompt report with no word on retyping as one to type into, as before", async () => {
+    const plain = await lostShell();
+    const marked = await lostShell();
+    const a = await plain.restart();
+    const b = await marked.restart();
+    plain.reports.prompt(a.terminalId, { token: plain.tokenOf(a.terminalId) });
+    marked.reports.prompt(b.terminalId, { token: marked.tokenOf(b.terminalId), brackets: true });
+    await expect
+      .poll(() => [plain.pasted, marked.pasted, plain.logs, marked.logs])
+      .toEqual([[{ text: LINE, brackets: false }], [{ text: LINE, brackets: true }], [], []]);
+  });
+
+  it("drops the line as soon as the new shell says it won't take one, and logs that without the line", async () => {
+    const { restart, decline, prompt, pasted, logs, clock } = await lostShell();
+    const { terminalId } = await restart();
+    expect(decline(terminalId)).toBe(true);
+    const at = [...logs];
+    prompt(terminalId);
+    await clock.pass(RETYPE_WITHIN_MS);
+    expect([at, pasted, logs]).toEqual([
+      [`shell ${terminalId}: last command not retyped: ${DECLINED}`],
+      [],
+      [`shell ${terminalId}: last command not retyped: ${DECLINED}`],
+    ]);
+  });
+
+  it("keeps the line for a word that it won't take one that isn't the new shell's own", async () => {
+    const {
+      restart,
+      decline,
+      prompt,
+      pasted,
+      logs,
+      terminalId: lost,
+      lostToken,
+    } = await lostShell();
+    const { terminalId } = await restart();
+    const refused = [
+      decline(terminalId, "forged"),
+      decline(terminalId, lostToken),
+      decline(lost, lostToken),
+    ];
+    prompt(terminalId);
+    await expect.poll(() => pasted).toEqual([{ text: LINE, brackets: false }]);
+    expect([refused, logs]).toEqual([[false, false, false], []]);
+  });
+
   it("refuses to retype a shell with no line kept, or with the integration off, and stays lost", async () => {
     const none = await lostShell({ line: null });
     const off = await lostShell({ restartedReporting: false });
@@ -343,6 +393,30 @@ describe("the lines held for restarted shells", () => {
     retypes.prompted(id, false);
     retypes.opened(id, ref);
     expect(marked).toEqual([true]);
+  });
+
+  it("drops a line its shell won't take before the shell's start returns, and types nothing", () => {
+    const { retypes, pasted, logs } = held();
+    retypes.hold(id, "make");
+    retypes.declined(id);
+    retypes.opened(id, ref);
+    retypes.prompted(id, false);
+    expect([pasted, logs]).toEqual([[], [`shell ${id}: last command not retyped: ${DECLINED}`]]);
+  });
+
+  it("goes by its shell's first report, so a word that it won't take a line after a prompt changes nothing", () => {
+    const { retypes, pasted, logs } = held();
+    retypes.hold(id, "make");
+    retypes.prompted(id, false);
+    retypes.declined(id);
+    retypes.opened(id, ref);
+    expect([pasted, logs]).toEqual([["make"], []]);
+  });
+
+  it("logs nothing for a shell with no line held that says it won't take one", () => {
+    const { retypes, logs } = held();
+    retypes.declined(id);
+    expect(logs).toEqual([]);
   });
 
   it.each(["make\n", "make\r", "make\u001b[D"])("never types a line holding a key: %j", (line) => {

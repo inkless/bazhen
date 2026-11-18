@@ -191,6 +191,15 @@ export const ShellPrompt = z.object({
 });
 export type ShellPrompt = z.infer<typeof ShellPrompt>;
 
+/**
+ * What a shell's integration reports over the daemon's socket instead of `ShellPrompt`, once, at
+ * the first prompt of a shell that won't take a line typed back: a line held for it is dropped
+ * at once. It has a route of its own, so a daemon that predates it answers 404 rather than read
+ * it as a prompt. Only a shell's own integration says so: no request from a client carries it.
+ */
+export const ShellDecline = z.object({ token: ShellReport.shape.token });
+export type ShellDecline = z.infer<typeof ShellDecline>;
+
 export const RenameShellRequest = z.object({
   idempotencyKey: IdempotencyKey,
   name: ShellName.nullable(),

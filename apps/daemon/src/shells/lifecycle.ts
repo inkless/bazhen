@@ -34,7 +34,7 @@ import {
   TerminalReplaced,
 } from "../commands.ts";
 import type { AgentQueue } from "../agents/queue.ts";
-import { newShellToken } from "./reports.ts";
+import { newShellToken, type PromptListener } from "./reports.ts";
 import { PendingRetypes, afterTimeout, type After } from "./retype.ts";
 import {
   LINKABLE,
@@ -118,7 +118,7 @@ export interface ShellDeps {
  * and close shells, confirming a busy close included: the browser, the CLI and any process
  * holding BAZHEN_SOCKET, agents among them, as with agents' own commands (§9.4).
  */
-export class ShellLifecycle {
+export class ShellLifecycle implements PromptListener {
   private readonly deps: ShellDeps;
   /**
    * Exited shells whose session couldn't be ended, by terminal and generation. The poller reports
@@ -143,6 +143,11 @@ export class ShellLifecycle {
    */
   prompted(terminalId: string, brackets: boolean): void {
     this.retypes.prompted(terminalId, brackets);
+  }
+
+  /** A shell's integration said, with the shell's own token, that it won't take a line back. */
+  declined(terminalId: string): void {
+    this.retypes.declined(terminalId);
   }
 
   /** Closes shells whose process the environment reports ended; returns the stop function. */
