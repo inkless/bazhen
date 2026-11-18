@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { deviceStorageOf } from "../storage.ts";
 import {
   loadTheme,
   parseTheme,
@@ -8,10 +9,7 @@ import {
   type ThemeHost,
 } from "./theme.ts";
 
-const holding = (value: string | null) => () => ({ getItem: () => value });
-const blocked = () => {
-  throw new Error("SecurityError: site data is blocked");
-};
+const holding = (value: string | null) => ({ read: () => value, write: () => {} });
 
 describe("the stored theme", () => {
   test("is the device's choice when it names a theme", () => {
@@ -23,27 +21,20 @@ describe("the stored theme", () => {
     expect(loadTheme(holding(null))).toBe("system");
     expect(parseTheme("Dark")).toBe("system");
   });
-
-  test("follows the system when storage can't even be reached", () => {
-    expect(loadTheme(blocked)).toBe("system");
-  });
 });
 
 describe("saving the theme", () => {
   test("stores a pinned theme and forgets it for the system's", () => {
-    const store = new Map<string, string>();
-    const storage = () => ({
-      setItem: (k: string, v: string) => void store.set(k, v),
-      removeItem: (k: string) => void store.delete(k),
-    });
+    const writes: [string, string | null][] = [];
+    const storage = {
+      write: (key: string, value: string | null) => void writes.push([key, value]),
+    };
     saveTheme("dark", storage);
-    expect(store.get(THEME_KEY)).toBe("dark");
     saveTheme("system", storage);
-    expect(store.has(THEME_KEY)).toBe(false);
-  });
-
-  test("doesn't throw when storage is blocked", () => {
-    expect(() => saveTheme("dark", blocked)).not.toThrow();
+    expect(writes).toEqual([
+      [THEME_KEY, "dark"],
+      [THEME_KEY, null],
+    ]);
   });
 });
 
@@ -54,11 +45,11 @@ function fakePage(systemDark: boolean, stored: string | null = null) {
   const storageListeners: ((e: { key: string | null; newValue: string | null }) => void)[] = [];
   const root: { dataset: Record<string, string> } = { dataset: {} };
   const host: ThemeHost = {
-    storage: () => ({
+    storage: deviceStorageOf(() => ({
       getItem: (k) => items.get(k) ?? null,
       setItem: (k, v) => void items.set(k, v),
       removeItem: (k) => void items.delete(k),
-    }),
+    })),
     root,
     matchMedia: (query) => {
       const listeners: (() => void)[] = [];

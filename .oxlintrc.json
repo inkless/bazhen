@@ -4431,6 +4431,44 @@
       "rules": {
         "bazhen/stdio-guard": "off"
       }
+    },
+    {
+      "files": [
+        "apps/web/src/**"
+      ],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "localStorage",
+            "message": "Reach storage only through deviceStorage in apps/web/src/storage.ts: with site data blocked, even reading it throws, and a throw while rendering takes the whole page down."
+          },
+          {
+            "name": "sessionStorage",
+            "message": "Reach storage only through deviceStorage in apps/web/src/storage.ts: with site data blocked, even reading it throws, and a throw while rendering takes the whole page down."
+          }
+        ],
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "localStorage",
+            "message": "Reach storage only through deviceStorage in apps/web/src/storage.ts: with site data blocked, even reading it throws, and a throw while rendering takes the whole page down."
+          },
+          {
+            "property": "sessionStorage",
+            "message": "Reach storage only through deviceStorage in apps/web/src/storage.ts: with site data blocked, even reading it throws, and a throw while rendering takes the whole page down."
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/web/src/storage.ts"
+      ],
+      "rules": {
+        "no-restricted-globals": "off",
+        "no-restricted-properties": "off"
+      }
     }
   ],
   "ignorePatterns": [

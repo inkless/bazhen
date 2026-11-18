@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { config } from "./lint-config.ts";
+import { config, DEVICE_STORAGE } from "./lint-config.ts";
 
 const overrideFor = (glob: string) => {
   const found = config.overrides.find((o) => o.files[0] === glob);
@@ -82,5 +82,16 @@ describe("the guards' exemptions", () => {
   it("lets all of host-guard run tmux, but only its signal module send a signal", () => {
     expect(offFor("bazhen/host-guard")).toEqual(["packages/host-guard/src/**"]);
     expect(offFor("bazhen/signal-guard")).toEqual(["packages/host-guard/src/signal.ts"]);
+  });
+});
+
+describe("the web app's storage ban", () => {
+  it("covers all of apps/web/src, and lifts only for its storage module", () => {
+    const banning = config.overrides.filter((o) => Array.isArray(o.rules["no-restricted-globals"]));
+    const lifting = config.overrides.filter((o) => o.rules["no-restricted-properties"] === "off");
+    expect([banning.flatMap((o) => o.files), lifting.flatMap((o) => o.files)]).toEqual([
+      ["apps/web/src/**"],
+      [DEVICE_STORAGE],
+    ]);
   });
 });

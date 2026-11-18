@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { deviceStorage, type DeviceStorage } from "../storage.ts";
 import type { Scheme } from "./token-sheet.ts";
 
 export const THEMES = ["system", "light", "dark"] as const;
@@ -10,26 +11,12 @@ export const THEME_KEY = "bazhen.theme";
 export const parseTheme = (stored: string | null): Theme =>
   THEMES.find((t) => t === stored) ?? "system";
 
-/**
- * The device's stored theme. Storage throws when site data is blocked, even on access, so it is
- * reached through `storage` and a failure reads as "system".
- */
-export function loadTheme(storage: () => Pick<Storage, "getItem">): Theme {
-  try {
-    return parseTheme(storage().getItem(THEME_KEY));
-  } catch {
-    return "system";
-  }
-}
+/** The device's stored theme. */
+export const loadTheme = (storage: Pick<DeviceStorage, "read">): Theme =>
+  parseTheme(storage.read(THEME_KEY));
 
-/** Stores the choice where it can; with storage blocked it lasts until the page reloads. */
-export function saveTheme(theme: Theme, storage: () => Pick<Storage, "setItem" | "removeItem">) {
-  try {
-    if (theme === "system") storage().removeItem(THEME_KEY);
-    else storage().setItem(THEME_KEY, theme);
-  } catch {
-    // Nothing to keep it in; the page still shows it.
-  }
+export function saveTheme(theme: Theme, storage: Pick<DeviceStorage, "write">) {
+  storage.write(THEME_KEY, theme === "system" ? null : theme);
 }
 
 /** "system" leaves the choice to `prefers-color-scheme`, through tokens.css's `color-scheme`. */
@@ -43,7 +30,7 @@ export function applyTheme(
 
 /** What a theme store reads from the page; the browser's own in the app, fakes in tests. */
 export interface ThemeHost {
-  readonly storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  readonly storage: DeviceStorage;
   readonly root: Pick<HTMLElement, "dataset">;
   readonly matchMedia: (query: string) => {
     readonly matches: boolean;
@@ -116,7 +103,7 @@ let shared: ThemeStore | undefined;
 /** The page's one store, made on first use, so a module import touches no browser API. */
 export const pageTheme = (): ThemeStore =>
   (shared ??= themeStore({
-    storage: () => localStorage,
+    storage: deviceStorage,
     root: document.documentElement,
     matchMedia: (query) => matchMedia(query),
     events: window,

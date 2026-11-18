@@ -268,9 +268,18 @@ export type Override = {
     "bazhen/signal-guard"?: "off";
     "bazhen/stdio-guard"?: "error" | "off";
     "bazhen/ws-loads-statically"?: "error" | "off";
+    "no-restricted-globals"?: ["error", ...{ name: string; message: string }[]] | "off";
+    "no-restricted-properties"?: ["error", ...{ property: string; message: string }[]] | "off";
   };
 };
 type Restriction = ["error", { patterns: Pattern[] }];
+
+const STORAGES = ["localStorage", "sessionStorage"];
+/** The one module in the web app that reaches the browser's storage. */
+export const DEVICE_STORAGE = "apps/web/src/storage.ts";
+const STORAGE_MESSAGE =
+  `Reach storage only through deviceStorage in ${DEVICE_STORAGE}: with site data blocked, ` +
+  "even reading it throws, and a throw while rendering takes the whole page down.";
 
 function packagePatterns(name: string, message: string, allowTypeImports: boolean): Pattern {
   const dir = PACKAGE_DIR[name];
@@ -484,6 +493,24 @@ function overrides(): Override[] {
     {
       files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
       rules: { "bazhen/stdio-guard": "off" },
+    },
+    // Bare, and as a property of anything: window, globalThis, self, or destructured.
+    {
+      files: ["apps/web/src/**"],
+      rules: {
+        "no-restricted-globals": [
+          "error",
+          ...STORAGES.map((name) => ({ name, message: STORAGE_MESSAGE })),
+        ],
+        "no-restricted-properties": [
+          "error",
+          ...STORAGES.map((property) => ({ property, message: STORAGE_MESSAGE })),
+        ],
+      },
+    },
+    {
+      files: [DEVICE_STORAGE],
+      rules: { "no-restricted-globals": "off", "no-restricted-properties": "off" },
     },
   ];
 }

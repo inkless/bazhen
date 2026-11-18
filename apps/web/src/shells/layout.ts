@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { deviceStorage, type DeviceStorage } from "../storage.ts";
 
 /** Where an agent's shell dock sits and whether it shows, kept per device. */
 export interface DockLayout {
@@ -24,20 +25,12 @@ export function parseLayout(stored: string | null): DockLayout {
   }
 }
 
-/**
- * The dock layout store, read and written through `storage`. Storage throws when site data is
- * blocked, so a failure reads as the default and a change lasts until the page reloads.
- */
-export function layoutStore(storage: () => Pick<Storage, "getItem" | "setItem">) {
+/** The dock layout store, read and written through `storage`. */
+export function layoutStore(storage: DeviceStorage) {
   const listeners = new Set<() => void>();
   let current: DockLayout | undefined;
   const read = (): DockLayout => {
-    if (current !== undefined) return current;
-    try {
-      current = parseLayout(storage().getItem(DOCK_KEY));
-    } catch {
-      current = DEFAULT;
-    }
+    current ??= parseLayout(storage.read(DOCK_KEY));
     return current;
   };
   return {
@@ -48,11 +41,7 @@ export function layoutStore(storage: () => Pick<Storage, "getItem" | "setItem">)
     },
     write: (next: DockLayout) => {
       current = next;
-      try {
-        storage().setItem(DOCK_KEY, JSON.stringify(next));
-      } catch {
-        // Nowhere to keep it; the page still shows it.
-      }
+      storage.write(DOCK_KEY, JSON.stringify(next));
       for (const listener of listeners) listener();
     },
   };
@@ -61,7 +50,7 @@ export function layoutStore(storage: () => Pick<Storage, "getItem" | "setItem">)
 let shared: ReturnType<typeof layoutStore> | undefined;
 
 /** This page's dock layout, in the browser's local storage. */
-export const dockLayout = () => (shared ??= layoutStore(() => localStorage));
+export const dockLayout = () => (shared ??= layoutStore(deviceStorage));
 
 /**
  * Where the app shows one thing at a time, as app.css lays it out: too narrow, or too short, for

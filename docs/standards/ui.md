@@ -12,6 +12,7 @@ consistent with the rest and cheap to re-theme.
 | Interactive targets are at least `--size-hit-min`                                            | review                                                  |
 | A keystroke's path does no work beyond sending it; work over 50 ms yields                    | review                                                  |
 | The page stays ready for a strict CSP: no `eval`, no HTML strings, no remote script          | review                                                  |
+| The page reaches storage only through `deviceStorage` (`apps/web/src/storage.ts`)            | `pnpm lint` (`scripts/lint-config.ts`)                  |
 
 ## Tokens
 
@@ -220,6 +221,12 @@ Why: these cost nothing now, and a strict policy can be turned on later without 
 
 `light-dark()` sets the floor: Safari 17.5, Chrome 123, Firefox 120. That covers a phone on the
 LAN on a current OS.
+
+With site data blocked, as Safari does with all cookies blocked, merely reading `localStorage`
+throws, and a throw while rendering takes the whole page down. So the page keeps a device's
+settings only through `deviceStorage` (`apps/web/src/storage.ts`): a read that fails finds
+nothing, and a write that fails lasts until the page reloads. `index.html`'s theme script, which
+runs before any module, guards its own read.
 
 On a Linux, Windows or ChromeOS desktop a browser tab keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Shift+W
 and Ctrl+Tab: the page never sees them, so nothing it does can pass them to a terminal. An
