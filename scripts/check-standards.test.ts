@@ -3407,6 +3407,9 @@ describe("suppressionFailures", () => {
       `<!--\n  ${d}\n-->`,
       `a;\n--> ${d}`,
       `a;\n  -->${d}`,
+      `a;\n/* a */ --> ${d}`,
+      `a;\n/*\n*/ --> ${d}`,
+      `a;\n\u00a0\v--> ${d}`,
     ]) {
       expect(suppressionFailures("a.cjs", `${shape}\nconst b = 2;\n`)).toHaveLength(1);
     }
@@ -3444,6 +3447,7 @@ describe("suppressionFailures", () => {
     expect(suppressionFailures("a.ts", "const u = 'http://example.com/a';\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "/* Why\n   the rule is on. */\n")).toEqual([]);
     expect(suppressionFailures("a.html", "<!-- Why -->\n<p>a --> b</p>\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "while (n --> 0) f(n);\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "// Why\r\n// the rule is on.\r\n")).toEqual([]);
   });
 });

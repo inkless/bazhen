@@ -3797,9 +3797,10 @@ const SUPPRESSION_FILES = /\.(?:[cm]?[jt]sx?|html)$/;
 
 /**
  * What a directive looks like at the start of a comment's line. The tools differ in what they
- * obey (tsc reads `@ts-` pragmas on any line of a block comment and `@ts-nocheck` in any case;
- * oxlint and oxfmt read the start of a comment, in the case they spell), so one pattern matches
- * the union: case-insensitive, on every line, as a deliberate over-match.
+ * obey: tsc reads `@ts-ignore` and `@ts-expect-error` on a block comment's last line and
+ * `@ts-nocheck` only in a line comment, in any case; oxlint and oxfmt read the start of a comment,
+ * in the case they spell. One pattern matches all of it, case-insensitive and on every line, as
+ * a deliberate over-match.
  */
 const DIRECTIVE =
   /^(@ts-(?:ignore|expect-error|nocheck)|(?:oxlint|eslint)-(?:disable|enable)[\w-]*|biome-ignore[\w-]*|oxfmt-ignore|prettier-ignore)/i;
@@ -3809,13 +3810,14 @@ const NOT_LINE_END = "[^\\n\\r\\u2028\\u2029]*";
 
 /**
  * Every place a comment may start, each read to its end, even one a string's slashes hide: a
- * line or block comment, an HTML comment, and the `-->` a script reads as a line comment.
+ * line or block comment, an HTML comment, and a `-->`, which a script reads as a line comment
+ * wherever only whitespace and comments come before it on the line.
  */
 const COMMENT = new RegExp(
   "(?=(//" +
     NOT_LINE_END +
     "|/\\*[\\s\\S]*?(?:\\*/|$)|<!--[\\s\\S]*?(?:-->|$)" +
-    "|(?<=(?:^|[\\n\\r\\u2028\\u2029])[ \\t]*)-->" +
+    "|-->" +
     NOT_LINE_END +
     "))",
   "g",
