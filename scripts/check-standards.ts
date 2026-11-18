@@ -3795,25 +3795,44 @@ export function checkMigrations(): void {
 
 const SUPPRESSION_FILES = /\.(?:[cm]?[jt]sx?|html)$/;
 
-/** A comment opener, then straight away a directive a linter, formatter or type checker obeys. */
-const SUPPRESSION =
-  /(?:\/\/+|\/\*+|\*)\s*(@ts-(?:ignore|expect-error|nocheck)\b|(?:oxlint|eslint)-(?:disable|enable)\b[\w-]*|biome-ignore\b|oxfmt-ignore\b)/;
+/**
+ * What a tool obeys at the start of a comment's line: tsc reads `@ts-` pragmas case-insensitively
+ * and, in a block comment, on any line; the linters and formatters read theirs at the start.
+ */
+const DIRECTIVE =
+  /^(@ts-(?:ignore|expect-error|nocheck)|(?:oxlint|eslint)-(?:disable|enable)[\w-]*|biome-ignore|oxfmt-ignore|prettier-ignore)(?![\w-])/i;
+
+/** Every place a comment may start, each read to its end, even one a string's slashes hide. */
+const COMMENT = /(?=(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)))/g;
 
 /**
  * Every comment that switches a check off for the code beside it. A failing check is fixed in the
- * code, so no directive is allowed, in source, tests or a page's inline script. It reads lines,
- * not syntax, so a directive inside a string fails too: split the string.
+ * code, so no directive is allowed, in source, tests or a page's inline script.
+ *
+ * It looks for comments without parsing, so no comment can hide a directive from it, and the
+ * price is that a string holding `//` or `/*` followed by a directive fails too: split the
+ * string. Files git ignores, generated output among them, aren't scanned.
  */
 export function suppressionFailures(path: string, source: string): string[] {
-  return source.split("\n").flatMap((text, i) => {
-    const directive = SUPPRESSION.exec(text)?.[1];
-    return directive === undefined
-      ? []
-      : [
-          `${path}:${i + 1}: \`${directive}\` switches a check off. Fix the code the check ` +
-            "reports; if the check is wrong, change the check and say why in the commit.",
-        ];
-  });
+  const lines = new Set<number>();
+  const directives = new Map<number, string>();
+  let line = 1;
+  let seen = 0;
+  for (const match of source.matchAll(COMMENT)) {
+    line += newlinesIn(source.slice(seen, match.index)).length;
+    seen = match.index;
+    for (const [i, text] of (match[1] ?? "").split("\n").entries()) {
+      const directive = DIRECTIVE.exec(text.replace(/^[\s/*]+/, ""))?.[1];
+      if (directive === undefined) continue;
+      lines.add(line + i);
+      directives.set(line + i, directive);
+    }
+  }
+  return [...lines].map(
+    (at) =>
+      `${path}:${at}: \`${directives.get(at)}\` switches a check off. Fix the code the check ` +
+      "reports; if the check is wrong, change the check and say why in the commit.",
+  );
 }
 
 function checkSuppressions(): void {

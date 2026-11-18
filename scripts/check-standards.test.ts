@@ -3350,6 +3350,9 @@ describe("suppressionFailures", () => {
     "@ts-nocheck",
     "biome-ignore lint: reason",
     "oxfmt-ignore",
+    "prettier-ignore",
+    "@TS-NOCHECK",
+    "ESLint-Disable",
   ];
 
   it.each(directives)("flags %s in a line comment, a block comment and a doc comment", (d) => {
@@ -3371,6 +3374,29 @@ describe("suppressionFailures", () => {
     expect(suppressionFailures("a.ts", at("/*", "eslint-disable*/ foo();"))).toHaveLength(1);
   });
 
+  it("flags a directive on a later line of a block comment, with or without a leading star", () => {
+    const shapes = [
+      "/*\n  eslint-disable\n*/",
+      "/*\n\toxlint-disable\n*/",
+      "/*\noxlint-disable-next-line */",
+      "/*\n  @ts-ignore */",
+      "/* why\n   @ts-expect-error */",
+      "/**\n * Why.\n *\n * @ts-ignore\n */",
+    ];
+    for (const shape of shapes) {
+      expect(suppressionFailures("a.ts", `${shape}\nconst b = 2;\n`)).toHaveLength(1);
+    }
+    expect(suppressionFailures("a.ts", `a;\n/*\n\n  eslint-disable\n*/\n`)).toEqual([
+      expect.stringContaining("a.ts:4"),
+    ]);
+  });
+
+  it("flags a directive a string's slashes would hide from a reader of syntax", () => {
+    const hidden = at("const u = 'http://x'; /* ", "oxlint-disable */");
+    expect(suppressionFailures("a.ts", hidden)).toHaveLength(1);
+    expect(suppressionFailures("a.ts", at("const r = /'/; //", " @ts-ignore"))).toHaveLength(1);
+  });
+
   it("flags every directive, one failure each", () => {
     const source = `${line("@ts-ignore")}${line("oxlint-disable")}`;
     expect(suppressionFailures("a.ts", source)).toHaveLength(2);
@@ -3389,5 +3415,7 @@ describe("suppressionFailures", () => {
       suppressionFailures("a.ts", "// A directive such as oxlint-disable is banned.\n"),
     ).toEqual([]);
     expect(suppressionFailures("a.ts", "const w = a * b;\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "const u = 'http://example.com/a';\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "/* Why\n   the rule is on. */\n")).toEqual([]);
   });
 });
