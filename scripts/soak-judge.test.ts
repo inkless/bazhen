@@ -1,9 +1,11 @@
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   GATE,
   type HolderSample,
   type JudgeOptions,
   judge,
+  markerRuns,
   percentile,
   report,
   type SoakEvent,
@@ -74,7 +76,13 @@ const TERMINALS = HOLDERS.map((h) => ({ name: h.name, load: h.load, state: "runn
 /** An attach at `t` that saw markers moving on a minute's worth since the last. */
 function attachAt(t: number, name: string): SoakEvent {
   const n = (t / MIN) * 10;
-  return { kind: "attach", t, name, snapshot: [n + 1, n + 2, n + 3], stream: [n + 4, n + 5] };
+  return {
+    kind: "attach",
+    t,
+    name,
+    snapshot: markerRuns([n + 1, n + 2, n + 3]),
+    stream: markerRuns([n + 4, n + 5]),
+  };
 }
 
 /** A worker's record, half a minute after an attach, of the markers that attach saw written. */
@@ -236,7 +244,14 @@ const withHolderless = (s: Sample): Sample =>
     : { ...s, terminals: [...s.terminals, { name: "a2", load: "agent", state: "running" }] };
 /** r1's attaches seeing the same markers every time. */
 const stuckMarkers = (e: SoakEvent): SoakEvent =>
-  e.kind === "attach" && e.name === "r1" ? { ...e, snapshot: [1, 2, 3], stream: [4, 5] } : e;
+  e.kind === "attach" && e.name === "r1"
+    ? { ...e, snapshot: markerRuns([1, 2, 3]), stream: markerRuns([4, 5]) }
+    : e;
+/** f1's attaches each seeing a million markers and more, in order, as a flood's do. */
+const flood = (e: SoakEvent): SoakEvent =>
+  e.kind === "attach" && e.name === "f1"
+    ? { ...e, snapshot: [[1, 900_000]], stream: [[900_001, 1_000_000 + e.t]] }
+    : e;
 /** A worker opened at the hour, its holder, state and probes as a clean run's, attached or not. */
 function withLateWorker(events: readonly SoakEvent[], attached: boolean): SoakEvent[] {
   const late = { name: "i2", load: "idle" } as const;
@@ -410,7 +425,13 @@ describe("judge", () => {
       "output-loss",
       (events) => [
         ...events,
-        { kind: "attach", t: HOUR, name: "r1", snapshot: [1, 2, 3], stream: [5, 6] },
+        {
+          kind: "attach",
+          t: HOUR,
+          name: "r1",
+          snapshot: markerRuns([1, 2, 3]),
+          stream: markerRuns([5, 6]),
+        },
       ],
     ],
     [
@@ -418,7 +439,13 @@ describe("judge", () => {
       "output-loss",
       (events) => [
         ...events,
-        { kind: "attach", t: HOUR, name: "r1", snapshot: [1, 2, 3], stream: [3, 4] },
+        {
+          kind: "attach",
+          t: HOUR,
+          name: "r1",
+          snapshot: markerRuns([1, 2, 3]),
+          stream: markerRuns([3, 4]),
+        },
       ],
     ],
     [
@@ -426,7 +453,13 @@ describe("judge", () => {
       "output-loss",
       (events) => [
         ...events,
-        { kind: "attach", t: HOUR, name: "r1", snapshot: [1, 3], stream: [] },
+        {
+          kind: "attach",
+          t: HOUR,
+          name: "r1",
+          snapshot: markerRuns([1, 3]),
+          stream: markerRuns([]),
+        },
       ],
     ],
     [
@@ -459,7 +492,9 @@ describe("judge", () => {
       "attaches that saw fewer than two markers",
       "output-loss",
       (events) =>
-        events.map((e) => (e.kind === "attach" ? { ...e, snapshot: [], stream: [7] } : e)),
+        events.map((e) =>
+          e.kind === "attach" ? { ...e, snapshot: markerRuns([]), stream: markerRuns([7]) } : e,
+        ),
     ],
     [
       "a seam whose cells differ",
@@ -860,6 +895,42 @@ describe("judge", () => {
       (c) => c.name === "probes",
     );
     expect(probes?.status).toBe("pass");
+  });
+
+  it("passes a flood's attach of a million markers in order, recorded as one run", () => {
+    const loss = judge(cleanRun().map(flood), OPTIONS).criteria.find(
+      (c) => c.name === "output-loss",
+    );
+    expect(loss?.status).toBe("pass");
+  });
+});
+
+/** The numbers `runs` stand for, in order. */
+const expand = (runs: readonly (readonly [number, number])[]) =>
+  runs.flatMap(([first, last]) => Array.from({ length: last - first + 1 }, (_, i) => first + i));
+
+/** Whether `numbers`' runs expand back to them, and no two of them could be one. */
+function roundTrips(numbers: readonly number[]): boolean {
+  const runs = markerRuns(numbers);
+  const joinable = runs.some(([, last], i) => runs[i + 1]?.[0] === last + 1);
+  return JSON.stringify(expand(runs)) === JSON.stringify(numbers) && !joinable;
+}
+
+describe("markerRuns", () => {
+  it("joins consecutive numbers, and starts a run at each repeat, step back or gap", () => {
+    expect(markerRuns([1, 2, 3, 3, 4, 2, 7, 8, 9])).toEqual([
+      [1, 3],
+      [3, 4],
+      [2, 2],
+      [7, 9],
+    ]);
+    expect(markerRuns([5])).toEqual([[5, 5]]);
+    expect(markerRuns([])).toEqual([]);
+  });
+
+  it("expands back to exactly the numbers it was given, in runs that can't be joined", () => {
+    const numbers = fc.array(fc.integer({ min: 0, max: 40 }), { maxLength: 60 });
+    expect(() => fc.assert(fc.property(numbers, roundTrips))).not.toThrow();
   });
 });
 

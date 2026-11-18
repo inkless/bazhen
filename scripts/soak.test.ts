@@ -133,8 +133,8 @@ describe("attachMarkers", () => {
     const snapshot = pty(`${marker("r1", 40)}${marker("r1", 41)}#soak r1 4`);
     const stream = pty(`2\r\n${marker("r1", 43)}`);
     expect(await attachMarkers("r1", bytes(snapshot), bytes(stream), SIZE)).toEqual({
-      snapshot: [40, 41],
-      stream: [42, 43],
+      snapshot: [[40, 41]],
+      stream: [[42, 43]],
     });
   });
 
@@ -142,15 +142,15 @@ describe("attachMarkers", () => {
     const snapshot = pty(`${marker("f2", 7)}${marker("f2", 8)}`).slice(0, -2);
     const stream = `\r\n${pty(marker("f2", 9))}`;
     expect(await attachMarkers("f2", bytes(snapshot), bytes(stream), SIZE)).toEqual({
-      snapshot: [7],
-      stream: [8, 9],
+      snapshot: [[7, 7]],
+      stream: [[8, 9]],
     });
   });
 
   it("reads markers the snapshot drew past its visible screen", async () => {
     const snapshot = pty(Array.from({ length: 9 }, (_, i) => marker("f1", i + 1)).join(""));
     const seen = await attachMarkers("f1", bytes(snapshot), bytes(""), SIZE);
-    expect(seen.snapshot).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(seen.snapshot).toEqual([[1, 9]]);
   });
 });
 

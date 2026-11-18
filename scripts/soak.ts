@@ -27,6 +27,7 @@ import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:c
 import {
   appendFileSync,
   copyFileSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   openSync,
@@ -59,6 +60,8 @@ import {
   type JudgeOptions,
   judge,
   type Load,
+  type MarkerRun,
+  markerRuns,
   report,
   type SoakEvent,
   type TerminalSample,
@@ -254,8 +257,23 @@ function asEvent(line: string): SoakEvent | undefined {
   }
 }
 
-/** Every record of a run's directory: the driver's, the echo timer's and each worker's. */
-export function readRun(dir: string): SoakEvent[] {
+const isMarkerRuns = (value: unknown) =>
+  Array.isArray(value) &&
+  value.every(
+    (run: unknown) =>
+      Array.isArray(run) &&
+      run.length === 2 &&
+      typeof run[0] === "number" &&
+      typeof run[1] === "number" &&
+      run[0] <= run[1],
+  );
+
+/**
+ * Every record of a run's directory, the driver's, the echo timer's and each worker's, read a line
+ * at a time, so a run is held as its records and never also as its text. An attach whose markers
+ * aren't runs would be judged wrong, not torn, so it stops the read.
+ */
+export async function readRun(dir: string): Promise<SoakEvent[]> {
   const workers = join(dir, "workers");
   const files = [
     join(dir, "events.jsonl"),
@@ -266,13 +284,26 @@ export function readRun(dir: string): SoakEvent[] {
           .map((f) => join(workers, f))
       : []),
   ];
-  return files.flatMap((file) =>
-    existsSync(file)
-      ? readFileSync(file, "utf8")
-          .split("\n")
-          .flatMap((line) => asEvent(line) ?? [])
-      : [],
-  );
+  const events: SoakEvent[] = [];
+  for (const file of files.filter((f) => existsSync(f))) {
+    let number = 0;
+    for await (const line of createInterface({
+      input: createReadStream(file),
+      crlfDelay: Infinity,
+    })) {
+      number++;
+      const event = asEvent(line);
+      if (event === undefined) continue;
+      if (
+        event.kind === "attach" &&
+        !(isMarkerRuns(event.snapshot) && isMarkerRuns(event.stream))
+      ) {
+        throw new Error(`${file}:${number} is an attach whose markers aren't runs`);
+      }
+      events.push(event);
+    }
+  }
+  return events;
 }
 
 /** A terminal like a browser's, with `bytes` written to it. */
@@ -331,11 +362,11 @@ export async function attachMarkers(
   snapshot: Uint8Array,
   stream: Uint8Array,
   size: { cols: number; rows: number },
-): Promise<{ snapshot: number[]; stream: number[] }> {
+): Promise<{ snapshot: MarkerRun[]; stream: MarkerRun[] }> {
   const { above, line } = await splitAtCursor(snapshot, size);
   return {
-    snapshot: markersIn(above, name),
-    stream: markersIn(line + Buffer.from(stream).toString("utf8"), name),
+    snapshot: markerRuns(markersIn(above, name)),
+    stream: markerRuns(markersIn(line + Buffer.from(stream).toString("utf8"), name)),
   };
 }
 
@@ -611,7 +642,7 @@ class Soak {
     } finally {
       await this.end();
     }
-    const verdict = judge(readRun(this.out), this.profile.judge);
+    const verdict = judge(await readRun(this.out), this.profile.judge);
     writeFileSync(join(this.out, "verdict.json"), `${JSON.stringify(verdict, null, 2)}\n`);
     const text = report(verdict);
     writeFileSync(join(this.out, "verdict.txt"), `${text}\n`);
@@ -1299,7 +1330,7 @@ export async function main(
     if ((named !== "gate" && named !== "smoke") || typeof hours !== "number") {
       throw new Error(`${parsed.judge}/profile.json names no profile`);
     }
-    const verdict = judge(readRun(parsed.judge), profile(named, hours).judge);
+    const verdict = judge(await readRun(parsed.judge), profile(named, hours).judge);
     console.log(report(verdict));
     return verdict.pass ? 0 : 1;
   }
