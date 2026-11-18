@@ -13,6 +13,21 @@ export const HEARTBEAT_MS = 15_000;
  */
 export const DRAIN_PATIENCE = 8;
 
+/** How often a route pings its peers, and `ViewHeartbeat`'s patience with one draining output. */
+export interface Heartbeat {
+  readonly ms: number;
+  readonly patience: number;
+}
+
+/**
+ * How long ws waits for a peer to answer the daemon's close before it destroys the socket, and
+ * with it the output still queued, which ends with the frame saying why the stream is over. One
+ * beat past the longest `keepAlive` keeps a peer that has stopped answering, so the heartbeat
+ * ends a silent peer, closing or not, and this only backstops one that keeps sending but never
+ * finishes the close.
+ */
+export const closeTimeoutFor = (every: Heartbeat) => (every.patience + 2) * every.ms;
+
 /**
  * Whether a view is still there, judged once per beat. A view that answered neither the last
  * ping nor sent anything since is gone, unless output was queued for it since: then a ping waits
@@ -50,11 +65,7 @@ export class ViewHeartbeat {
  * Pings `ws` every `ms` and ends it, after calling `gone`, once `ViewHeartbeat` judges it gone. A
  * pong or any message counts as an answer.
  */
-export function keepAlive(
-  ws: WebSocket,
-  every: { readonly ms: number; readonly patience: number },
-  gone?: () => void,
-): void {
+export function keepAlive(ws: WebSocket, every: Heartbeat, gone?: () => void): void {
   const heart = new ViewHeartbeat(every.patience);
   const beat = setInterval(() => {
     if (heart.beat(ws.bufferedAmount) === "ping") return ws.ping();

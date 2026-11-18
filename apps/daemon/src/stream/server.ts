@@ -8,7 +8,13 @@ import {
 } from "@bazhen/protocol";
 import { failureDetail } from "../commands.ts";
 import { heardWebSockets } from "../http/connections.ts";
-import { DRAIN_PATIENCE, HEARTBEAT_MS, keepAlive } from "../http/heartbeat.ts";
+import {
+  closeTimeoutFor,
+  DRAIN_PATIENCE,
+  HEARTBEAT_MS,
+  keepAlive,
+  type Heartbeat,
+} from "../http/heartbeat.ts";
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
 
@@ -25,16 +31,23 @@ export interface StreamDeps {
 
 /** The terminal stream's WebSocket endpoint (foundation-design §5.3). */
 export function streamRoute(deps: StreamDeps): UpgradeRoute {
-  const wss = heardWebSockets(STREAM_FRAME_MAX_BYTES);
+  const every = {
+    ms: deps.heartbeatMs ?? HEARTBEAT_MS,
+    patience: deps.drainPatience ?? DRAIN_PATIENCE,
+  };
+  const wss = heardWebSockets(STREAM_FRAME_MAX_BYTES, closeTimeoutFor(every));
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
     upgrade: (req, socket, head, _url, [, terminalId = ""], device) =>
-      wss.handleUpgrade(req, socket, head, (ws) => serve(deps, ws, terminalId, device?.name)),
+      wss.handleUpgrade(req, socket, head, (ws) =>
+        serve(deps, every, ws, terminalId, device?.name),
+      ),
   };
 }
 
 function serve(
   deps: StreamDeps,
+  every: Heartbeat,
   ws: WebSocket,
   terminalId: string,
   deviceName: string | undefined,
@@ -48,10 +61,6 @@ function serve(
   // Set as soon as a hello arrives, so a second one while the first joins starts nothing.
   let joining = false;
   let leaving: LeaveReason | undefined;
-  const every = {
-    ms: deps.heartbeatMs ?? HEARTBEAT_MS,
-    patience: deps.drainPatience ?? DRAIN_PATIENCE,
-  };
   keepAlive(ws, every, () => (leaving = "timed_out"));
   ws.on("close", () => {
     leaving ??= "client_closed";

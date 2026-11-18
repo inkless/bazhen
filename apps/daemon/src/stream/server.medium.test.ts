@@ -1,9 +1,11 @@
 import type { Server } from "node:http";
 import { connect, createServer } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { newId } from "@bazhen/core";
 import { DeviceAuth } from "../auth/devices.ts";
+import { DRAIN_PATIENCE, HEARTBEAT_MS } from "../http/heartbeat.ts";
 import { Store } from "../store/store.ts";
 import { loopbackPairing, serveUpgrades, tempDb } from "../testing/fixtures.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type Viewer } from "./hub.ts";
@@ -13,6 +15,7 @@ let server: Server | undefined;
 afterEach(() => {
   server?.close();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const terminalId = newId("term");
@@ -37,8 +40,16 @@ async function endpoint() {
   return { url: `ws://${served.host}/v1/terminals/${terminalId}/stream`, joins: () => joins };
 }
 
-/** A stream endpoint, pinging every 100 ms, whose views join at once and record how they left. */
-async function beating(drainPatience = 1) {
+/**
+ * A stream endpoint, pinging every 100 ms unless `heartbeat` says otherwise, whose views join at
+ * once and record how they left.
+ */
+async function beating(
+  heartbeat: Pick<StreamDeps, "heartbeatMs" | "drainPatience"> = {
+    heartbeatMs: 100,
+    drainPatience: 1,
+  },
+) {
   const left: (LeaveReason | undefined)[] = [];
   const viewers: Viewer[] = [];
   const attachment = {
@@ -60,8 +71,7 @@ async function beating(drainPatience = 1) {
       protocolId: PROTOCOL,
       hub,
       runtimeRef: (id) => ({ terminalId, runtime: "fake", locator: { id } }),
-      heartbeatMs: 100,
-      drainPatience,
+      ...heartbeat,
     }),
   ]);
   server = served.server;
@@ -99,6 +109,40 @@ async function slowLink(host: string): Promise<string> {
   if (listening === null || typeof listening === "string") throw new Error("no port");
   return `127.0.0.1:${listening.port}`;
 }
+
+/**
+ * A view at the daemon's own heartbeat that stops reading, is sent more output than the kernel
+ * holds for it, and is then dismissed as the hub dismisses a view that fell behind. Fakes the
+ * timers, so the heartbeat and ws's close timer run only as far as `vi.advanceTimersByTimeAsync`
+ * takes them; socket I/O stays real.
+ */
+async function dismissedWhileStalled() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  const { url, viewer, left } = await beating({
+    heartbeatMs: HEARTBEAT_MS,
+    drainPatience: DRAIN_PATIENCE,
+  });
+  const ws = new WebSocket(url);
+  await opened(ws);
+  ws.send(JSON.stringify(hello));
+  await expect.poll(viewer).toBeDefined();
+  const view = viewer();
+  if (view === undefined) throw new Error("the view never joined");
+  ws.pause();
+  const texts: unknown[] = [];
+  ws.on("message", (data: Buffer, binary: boolean) => {
+    if (!binary) texts.push(JSON.parse(data.toString()));
+  });
+  const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+  view.send(Buffer.alloc(64 << 20));
+  view.notify({ type: "ended", reason: "evicted_slow" });
+  view.close();
+  return { ws, view, texts, closed, left };
+}
+
+/** Whether `closed` settles within `ms` of real time. */
+const settles = (closed: Promise<void>, ms: number) =>
+  Promise.race([closed.then(() => true), sleep(ms).then(() => false)]);
 
 const opened = (ws: WebSocket) => new Promise((resolve) => ws.once("open", resolve));
 
@@ -317,7 +361,7 @@ describe("stream endpoint", () => {
   });
 
   it("keeps a view whose pongs wait behind its output on a slow link, until it falls silent", async () => {
-    const { host, left, viewer } = await beating(50);
+    const { host, left, viewer } = await beating({ heartbeatMs: 100, drainPatience: 50 });
     const link = await slowLink(host);
     const ws = new WebSocket(`ws://${link}/v1/terminals/${terminalId}/stream`, {
       autoPong: false,
@@ -368,5 +412,27 @@ describe("stream endpoint", () => {
     viewer()?.close();
     const running = () => started.filter((timer) => !stopped.includes(timer));
     await expect.poll(() => [started.length, running()]).toEqual([2, []]);
+  });
+
+  it("tells a dismissed view why, though it reads nothing for as long as the heartbeat waits", async () => {
+    const { ws, view, texts, closed } = await dismissedWhileStalled();
+    // Longer than ws's default close timeout of 30 s, and short of the heartbeat's allowance.
+    await vi.advanceTimersByTimeAsync(DRAIN_PATIENCE * HEARTBEAT_MS);
+    const queued = view.unsent();
+    ws.resume();
+    await expect
+      .poll(() => texts.at(-1), {
+        timeout: 2_000,
+        message: "the view's socket closed before it was told why its stream ended",
+      })
+      .toEqual({ type: "ended", reason: "evicted_slow" });
+    expect([queued > 0, await settles(closed, 1_000)]).toEqual([true, true]);
+  });
+
+  it("drops a dismissed view that reads nothing for longer than the heartbeat waits", async () => {
+    const { ws, texts, closed, left } = await dismissedWhileStalled();
+    await vi.advanceTimersByTimeAsync((DRAIN_PATIENCE + 1) * HEARTBEAT_MS);
+    ws.resume();
+    expect([await settles(closed, 1_000), texts, left]).toEqual([true, [], ["timed_out"]]);
   });
 });
