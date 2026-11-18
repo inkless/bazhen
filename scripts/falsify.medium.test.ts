@@ -694,6 +694,44 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
+  it("judges a test added to a .tsx test file git renamed to .ts, whose base JSX fakes its call", () => {
+    const tsx = "packages/a/src/w.test.tsx";
+    const ts = "packages/a/src/w.test.ts";
+    const shared = lines(
+      "const a = v + 1;",
+      "const b = v + 2;",
+      "const c = v + 3;",
+      "const d = v + 4;",
+      "const e = v + 5;",
+      "const f = v + 6;",
+      "const g = v + 7;",
+      "const h = v + 8;",
+    );
+    git(fx.linked, "reset", "--quiet", "--hard", fx.base);
+    write(
+      fx.linked,
+      tsx,
+      `${IMPORTS}${shared}it("renders", () => {\n  render(<p>it("caps", () => {})</p>, <b>x</b>);\n});\n`,
+    );
+    git(fx.linked, "add", tsx);
+    git(fx.linked, "commit", "--quiet", "-m", "test: base");
+    fx.base = git(fx.linked, "rev-parse", "HEAD").trim();
+    git(fx.linked, "mv", tsx, ts);
+    write(fx.linked, ts, `${IMPORTS}${shared}it("renders", () => {});\nit("caps", () => {});\n`);
+    write(fx.linked, SOURCE, "export const v = 2;\n");
+    git(fx.linked, "add", SOURCE, ts);
+    git(fx.linked, "commit", "--quiet", "-m", "feat: v2");
+    expect(git(fx.linked, "diff", "--name-status", "-M", fx.base)).toMatch(
+      /^R\d+\t.*w\.test\.tsx\t.*w\.test\.ts$/m,
+    );
+    expect(againstBase({ STUB_STATUS: "passed", STUB_TEST: ts })).toEqual({
+      status: 1,
+      output: expect.stringContaining(
+        `falsify: ${ts}: falsify reads tests only from .ts, .mts and .cts files, and its base copy is ${tsx}, so its new tests count`,
+      ),
+    });
+  });
+
   it("judges only the test a branch adds, not an unchanged one the diff reads as removed and added", () => {
     const moved = lines('it("v", () => {', "  expect(v).toBe(1);", "});");
     const block = lines(

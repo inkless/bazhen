@@ -51,7 +51,8 @@ const result = (title: string, status: string, failureMessages: string[] = []): 
   failureMessages,
 });
 
-const changed = (base: string | undefined, head: string) => changedTests(base, head, FILE).titles;
+const changed = (base: string | undefined, head: string) =>
+  changedTests({ file: FILE, base, head }).titles;
 
 const UNPARSED = `<unparsed test in ${FILE}>`;
 
@@ -109,17 +110,38 @@ describe("changedTests", () => {
   it("marks a .tsx file as unparsed, since its JSX can't be read, and says why", () => {
     const tsx = "packages/a/src/view.test.tsx";
     const head = 'it("renders", () => {\n  render(<p>Don\'t</p>);\n});\n';
-    expect(changedTests(head, head, tsx)).toEqual({
+    expect(changedTests({ file: tsx, base: head, head })).toEqual({
       titles: [`<unparsed test in ${tsx}>`],
-      unreadable: "falsify can't read JSX",
+      unreadable: "falsify reads tests only from .ts, .mts and .cts files",
     });
+  });
+
+  it("marks a .ts file git renamed from one that isn't TypeScript as unparsed, since its base's JSX can fake a test call", () => {
+    const base = lines(
+      'it("renders", () => {',
+      '  render(<p>it("adds a", () => {})</p>, <b>x</b>);',
+      "});",
+    );
+    const head = lines('it("renders", () => {});', 'it("adds a", () => {});');
+    const pairedWith = (counterpart: string) =>
+      changedTests({ file: FILE, base, head, counterpart });
+    const others = ["x.test.tsx", "x.test.jsx", "x.test.TS", "x.mdx"].map(
+      (p) => `packages/core/src/${p}`,
+    );
+    expect([pairedWith("packages/core/src/x.test.mts"), ...others.map(pairedWith)]).toEqual([
+      { titles: [] },
+      ...others.map((counterpart) => ({
+        titles: [UNPARSED],
+        unreadable: `falsify reads tests only from .ts, .mts and .cts files, and its base copy is ${counterpart}`,
+      })),
+    ]);
   });
 
   it("marks a file either side of which can't be read as unparsed, and says why", () => {
     const good = 'it("a", () => {});\n';
     expect([
-      changedTests('it("a", () => {;\n', good, FILE),
-      changedTests(good, 'it("a, () => {});\n', FILE),
+      changedTests({ file: FILE, base: 'it("a", () => {;\n', head: good }),
+      changedTests({ file: FILE, base: good, head: 'it("a, () => {});\n' }),
     ]).toEqual([
       { titles: [UNPARSED], unreadable: "the base's copy has brackets left open at its end" },
       { titles: [UNPARSED], unreadable: expect.stringMatching(/^HEAD's copy has an unterminated/) },
@@ -1166,6 +1188,30 @@ describe("renameRefusal, when git renamed a file", () => {
     const from = { ...end("adds one", BASE_TESTS, BASE_TESTS), counterpart: renamedFile };
     const to = end("adds one", undefined, movedTo("adds one"), OTHER);
     expect(renameRefusal(from, to)).toBe(`HEAD still has a test "adds one" in ${renamedFile}`);
+  });
+
+  it("refuses a move whose file isn't TypeScript on any side, since falsify can't read its tests", () => {
+    const [oldTsx, oldJsx] = [`${FILE}x`, FILE.replace(/\.ts$/, ".jsx")];
+    const newJsx = OTHER.replace(/\.ts$/, ".jsx");
+    const from = end("adds one", BASE_TESTS, LEFT);
+    const to = end("adds one", undefined, movedTo("adds one"), OTHER);
+    expect([
+      renameRefusal(from, to),
+      renameRefusal({ ...from, file: oldTsx }, to),
+      renameRefusal({ ...from, counterpart: oldTsx }, to),
+      renameRefusal({ ...from, file: oldJsx }, to),
+      renameRefusal({ ...from, counterpart: oldJsx }, to),
+      renameRefusal(from, { ...to, counterpart: newJsx }),
+      renameRefusal(from, { ...to, file: newJsx }),
+    ]).toEqual([
+      undefined,
+      `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+    ]);
   });
 });
 

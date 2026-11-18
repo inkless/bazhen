@@ -119,6 +119,11 @@ export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
 export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
+// Falsify reads a file for tests only when its path is plain TypeScript. A rename git detects pairs
+// files by content whatever their extension, and JSX, MDX and the like, read as TypeScript, could
+// hide or fake a test call.
+const readsAsTypeScript = (path: string) => /\.[cm]?ts$/.test(path);
+const ONLY_TYPESCRIPT = "falsify reads tests only from .ts, .mts and .cts files";
 const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 // What can change the set of Rust tests, or what a Rust binary does: a crate's files, or the
 // workspace's manifest and lockfile.
@@ -308,15 +313,20 @@ const countedBy = (t: TestCall) => (t.title === undefined ? `\0${t.titleTokens}`
  * its title, isn't new. A test whose title can't be read (interpolated, a variable) counts by its
  * title's tokens, and each new one adds an `<unparsed test in FILE>` marker, which classifies as
  * INVALID and so forces a Control trailer. So does a side that can't be read at all, with why,
- * and a .tsx file: its JSX could read as regexes and strings that hide a test call.
+ * and a file whose path on either side isn't plain TypeScript. `file` is the path at HEAD and
+ * `counterpart` the one git pairs it with at the base, as `ends.new` gives them.
  */
-export function changedTests(
-  base: string | undefined,
-  head: string,
-  file: string,
-): { titles: string[]; unreadable?: string } {
-  if (file.endsWith(".tsx")) {
-    return { titles: [unparsedIn(file)], unreadable: "falsify can't read JSX" };
+export function changedTests({ file, base, head = "", counterpart = file }: FileSides): {
+  titles: string[];
+  unreadable?: string;
+} {
+  const unread = [file, counterpart].find((p) => !readsAsTypeScript(p));
+  if (unread !== undefined) {
+    return {
+      titles: [unparsedIn(file)],
+      unreadable:
+        unread === file ? ONLY_TYPESCRIPT : `${ONLY_TYPESCRIPT}, and its base copy is ${unread}`,
+    };
   }
   const before = base === undefined ? [] : testCalls(base);
   if (typeof before === "string") {
@@ -394,13 +404,13 @@ function testsIn(source: string): TestBlock[] | string {
 
 /**
  * The test files a test can have moved out of, or been renamed in, by their paths at the base:
- * those the branch changed, deleted or renamed. Not one whose path on either side is .tsx: falsify
- * can't read its tests, so JSX could hide the one a trailer says is gone.
+ * those the branch changed, deleted or renamed. Not one whose path on either side isn't plain
+ * TypeScript: falsify can't read its tests, so JSX could hide the one a trailer says is gone.
  */
 export function leavableTestFiles(changes: Change[]): string[] {
   return changes.flatMap((c) => {
     const paths = [c.oldPath || c.path, c.path];
-    return c.status !== "A" && paths.every((p) => TEST_FILE.test(p) && !p.endsWith(".tsx"))
+    return c.status !== "A" && paths.every((p) => TEST_FILE.test(p) && readsAsTypeScript(p))
       ? [paths[0] ?? ""]
       : [];
   });
@@ -424,11 +434,14 @@ export type RenameEnd = FileSides & { title: string };
  * at HEAD; `to` the new file at HEAD and the file git pairs it with at the base. It is a rename
  * only when the old title is one test in the old file at the base and none in it at HEAD, the new
  * title one in the new file at HEAD and none in it at the base, and the test's block is the base's
- * with only its title changed.
+ * with only its title changed. A file whose path on either side isn't plain TypeScript is never
+ * read.
  */
 export function renameRefusal(from: RenameEnd, to: RenameEnd): string | undefined {
   const oldAtHead = from.counterpart ?? from.file;
   const newAtBase = to.counterpart ?? to.file;
+  const unread = [from.file, oldAtHead, newAtBase, to.file].find((p) => !readsAsTypeScript(p));
+  if (unread !== undefined) return `${unread}: ${ONLY_TYPESCRIPT}`;
   const read: TestBlock[][] = [];
   for (const [text, copy] of [
     [from.base, `the base's copy of ${from.file}`],
@@ -1902,8 +1915,7 @@ async function main(args: string[]): Promise<number> {
     },
   };
   const found = tests.flatMap((t) => {
-    const { base: before, head: after } = ends.new(t.path);
-    const { titles, unreadable } = changedTests(before, after ?? "", t.path);
+    const { titles, unreadable } = changedTests(ends.new(t.path));
     if (unreadable !== undefined) {
       console.log(
         `falsify: ${t.path}: ${unreadable}, so its new tests count as one whose title couldn't be read`,
