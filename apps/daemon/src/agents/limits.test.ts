@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LimitStop } from "@bazhen/core";
-import type { Activity, Usage, UsageLimit } from "@bazhen/protocol";
+import { USAGE_LIMITS_MAX, type Activity, type Usage, type UsageLimit } from "@bazhen/protocol";
 import { Limits, mergeLimits } from "./limits.ts";
 
 const NOW = new Date("2026-11-18T12:00:00.000Z");
@@ -16,6 +16,7 @@ const at = (observedAt: string, value: Activity["value"], detail?: string): Acti
   ...(detail === undefined ? {} : { detail }),
 });
 const stop = at("2026-11-18T11:59:00.000Z", "failed", "rate_limit");
+const quota = at(stop.observedAt, "failed", "usageLimitExceeded");
 
 /** A Limits over a store of agents' usage, starting with agent `a`'s, and what it records. */
 function setup(limits?: UsageLimit[]) {
@@ -68,14 +69,48 @@ describe("Limits", () => {
 
   it("reads a usage limit the harness names as limited, with no reset while no window gives one", () => {
     const s = setup();
-    const quota = at(stop.observedAt, "failed", "usageLimitExceeded");
     s.report(quota, "quota");
-    s.meter([{ window: "codex.primary", usedPercent: 100 }]);
     s.meter([{ window: "codex.primary", usedPercent: 100, resetsAt: SOON }]);
     expect(s.recorded.map((a) => [a.value, a.resetsAt])).toEqual([
       ["limited", undefined],
-      ["limited", undefined],
       ["limited", SOON],
+    ]);
+  });
+
+  it("leaves a limited stop as it stands when a later reading shows no window used up", () => {
+    const s = setup([{ window: "codex.primary", usedPercent: 100, resetsAt: SOON }]);
+    s.report(quota, "quota");
+    s.meter([{ window: "codex.primary", usedPercent: 2, resetsAt: LATER }]);
+    expect(s.recorded).toEqual([{ ...quota, value: "limited", resetsAt: SOON }]);
+  });
+
+  it("counts no window at its limit that gives no reset, as one left stale would", () => {
+    const s = setup([{ window: "primary", usedPercent: 100 }]);
+    s.report(stop, "rate");
+    expect(s.recorded).toEqual([stop]);
+  });
+
+  it("forgets an agent's stop once its process has gone, and no other agent's", () => {
+    const s = setup();
+    const reactors: ((e: { type: string; entityId: string }) => void)[] = [];
+    s.gate.follow((reactor) => {
+      reactors.push(reactor);
+      return () => undefined;
+    });
+    const used = [{ window: "five_hour", usedPercent: 100, resetsAt: SOON }];
+    s.gate.record("b", stop, "rate");
+    for (const type of ["agent.exited", "agent.lost", "agent.closing"]) {
+      s.gate.record(type, stop, "rate");
+      for (const react of reactors) react({ type, entityId: type });
+      s.gate.recordUsage(type, { limits: used });
+    }
+    s.gate.recordUsage("b", { limits: used });
+    expect(s.recorded.map((a) => a.value)).toEqual([
+      "failed",
+      "failed",
+      "failed",
+      "failed",
+      "limited",
     ]);
   });
 
@@ -89,9 +124,9 @@ describe("Limits", () => {
 
   it("weighs a stop again only when the usage changed", () => {
     const s = setup();
-    s.report(at(stop.observedAt, "failed", "usageLimitExceeded"), "quota");
-    s.meter([{ window: "codex.primary", usedPercent: 100 }]);
-    s.meter([{ window: "codex.primary", usedPercent: 100 }]);
+    s.report(quota, "quota");
+    s.meter([{ window: "codex.primary", usedPercent: 100, resetsAt: SOON }]);
+    s.meter([{ window: "codex.primary", usedPercent: 100, resetsAt: SOON }]);
     expect(s.recorded).toHaveLength(2);
   });
 
@@ -124,5 +159,22 @@ describe("mergeLimits", () => {
       mergeLimits(undefined, [primary]),
       mergeLimits([primary, secondary], [{ ...primary, usedPercent: 100, resetsAt: SOON }]),
     ]).toEqual([[primary], [{ ...primary, usedPercent: 100, resetsAt: SOON }, secondary]]);
+  });
+
+  it("keeps no more windows than usage holds, dropping first the oldest the update didn't name", () => {
+    const held = Array.from({ length: USAGE_LIMITS_MAX }, (_, i) => ({
+      window: `w${i}`,
+      usedPercent: i,
+    }));
+    const merged = mergeLimits(held, [
+      { window: "new", usedPercent: 1 },
+      { ...held[5]!, usedPercent: 99 },
+    ]);
+    expect([
+      merged.length,
+      merged[0]?.window,
+      merged.at(-1)?.window,
+      merged.find((l) => l.window === "w5")?.usedPercent,
+    ]).toEqual([USAGE_LIMITS_MAX, "w1", "new", 99]);
   });
 });

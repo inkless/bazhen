@@ -1058,9 +1058,9 @@ export class Store {
 
   /**
    * Records what an agent's harness reports it doing. Nothing is recorded, and null returned,
-   * for a signal that repeats the latest one (the same value, source and detail: a new observed
-   * time or confidence alone is no change, so a stream of tool calls appends one event, and the
-   * standing signal's age shows how long it has held), or for one observed before the latest,
+   * for a signal that repeats the latest one (the same value, source, detail and reset: a new
+   * observed time or confidence alone is no change, so a stream of tool calls appends one event,
+   * and the standing signal's age shows how long it has held), or for one observed before the latest,
    * which arrived late, or for an agent whose process has gone (exited, closed, lost): a
    * harness's last report can land a moment after that, and is about a process no longer there.
    * An agent this daemon never ran is refused.

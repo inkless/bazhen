@@ -327,6 +327,7 @@ const limits = new Limits({
   recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
   record: (agentId, a) => void store.recordActivity(agentId, a),
 });
+limits.follow((reactor) => store.react(reactor));
 // Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).
 const codexThreads = new CodexThreads({
   store,

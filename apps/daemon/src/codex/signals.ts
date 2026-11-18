@@ -178,7 +178,14 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
         return ended === null ? undefined : signal(threadId, "idle");
       }
       const limits = readRateLimits(method, params);
-      if (limits !== null) return opts.limits?.(limits);
+      if (limits !== null) {
+        try {
+          opts.limits?.(limits);
+        } catch (err) {
+          log(`codex: could not record rate limits: ${String(err)}`);
+        }
+        return;
+      }
       const item = readItemStarted(method, params);
       if (item === null || !firstItem.delete(item.threadId) || item.userInput) return;
       // Nothing but the new server starts a turn on an interrupted thread with no input.

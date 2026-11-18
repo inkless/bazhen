@@ -203,6 +203,23 @@ describe("Codex activity signals", () => {
     ]);
   });
 
+  it("logs a rate-limit update the store refuses, and carries on", () => {
+    const logged: string[] = [];
+    const listener = codexSignals({
+      agentOf: () => undefined,
+      record: () => undefined,
+      resume: async () => undefined,
+      limits: () => {
+        throw new Error("disk full");
+      },
+      log: (m) => logged.push(m),
+    });
+    listener.notification?.("account/rateLimits/updated", {
+      rateLimits: { primary: { usedPercent: 1 } },
+    });
+    expect(logged).toEqual(["codex: could not record rate limits: Error: disk full"]);
+  });
+
   it("keeps a failed turn failed through the idle status that follows it", () => {
     const s = setup();
     s.notify("turn/started", turnStarted);

@@ -67,7 +67,11 @@ export const Activity = z.object({
     "idle",
     "done",
     "failed",
-    /** Stopped until the account's limit resets on its schedule; failed when that can't be shown. */
+    /**
+     * Stopped by the account's limit, which resets on its schedule; failed when that can't be
+     * shown. It holds until the agent's next activity, not until `resetsAt`: a reader compares
+     * that with now to say whether the reset has passed.
+     */
     "limited",
     "unknown",
   ]),
@@ -97,6 +101,9 @@ export const UsageLimit = z.object({
 });
 export type UsageLimit = z.infer<typeof UsageLimit>;
 
+/** The most usage limits an agent's usage holds. */
+export const USAGE_LIMITS_MAX = 20;
+
 /**
  * What an agent's harness says of the model it runs, how full that model's context is, and how
  * near its account is to each usage limit (foundation-design §11.2). Each part is absent until
@@ -108,7 +115,7 @@ export const Usage = z.object({
   contextUsedPercent: z.number().min(0).max(100).optional(),
   /** The context window's size, in tokens. */
   contextWindowTokens: z.number().int().positive().optional(),
-  limits: z.array(UsageLimit).max(20).optional(),
+  limits: z.array(UsageLimit).max(USAGE_LIMITS_MAX).optional(),
 });
 export type Usage = z.infer<typeof Usage>;
 

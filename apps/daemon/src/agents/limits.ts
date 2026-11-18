@@ -1,5 +1,10 @@
 import type { LimitStop } from "@bazhen/core";
-import type { Activity, Usage, UsageLimit } from "@bazhen/protocol";
+import { USAGE_LIMITS_MAX, type Activity, type Usage, type UsageLimit } from "@bazhen/protocol";
+
+/** The events that say an agent's process has gone, or is going. */
+const GONE: ReadonlySet<string> = new Set(["agent.exited", "agent.lost", "agent.closing"]);
+
+type Recorded = { readonly type: string; readonly entityId: string };
 
 export interface LimitsOptions {
   /** The usage the agent's harness last reported. */
@@ -18,8 +23,14 @@ export interface LimitsOptions {
  * that reports no meter. A `quota` stop is the account's usage limit by the harness's own word,
  * so it is limited with or without a window, and resets when that window does.
  *
+ * A window counts as used up only with a reset still to come. One that gives no reset, or whose
+ * reset has passed, may be stale: a merged window keeps its last reading until an update names
+ * it again, and one the harness has renamed is never named again.
+ *
  * The meter can be read after the stop it explains, so the agent's latest stop is weighed again
- * at each change of its usage until the agent reports anything else.
+ * at each change of its usage until the agent reports anything else. Weighed again, it records
+ * only a window used up: a later reading that shows none, as another turn's on the same account
+ * may, says nothing of what stopped this one.
  */
 export class Limits {
   private readonly opts: LimitsOptions;
@@ -37,7 +48,11 @@ export class Limits {
       this.stops.delete(agentId);
       return this.opts.record(agentId, activity);
     }
-    this.opts.record(agentId, this.weigh(agentId, activity, limit) ?? activity);
+    const resetsAt = this.resetOf(agentId);
+    this.opts.record(
+      agentId,
+      resetsAt === null && limit === "rate" ? activity : limited(activity, resetsAt),
+    );
     this.stops.set(agentId, { activity, limit });
   }
 
@@ -57,29 +72,43 @@ export class Limits {
     }
   }
 
-  private reweigh(agentId: string): void {
-    const stop = this.stops.get(agentId);
-    if (stop === undefined) return;
-    const observedAt = this.now().toISOString();
-    const limited = this.weigh(agentId, { ...stop.activity, observedAt }, stop.limit);
-    if (limited !== null) this.opts.record(agentId, limited);
+  /** Forgets an agent's stop once its process has gone, from the events `react` hands on. */
+  follow(react: (reactor: (event: Recorded) => void) => () => void): () => void {
+    return react((e) => {
+      if (GONE.has(e.type)) this.stops.delete(e.entityId);
+    });
   }
 
-  private weigh(agentId: string, activity: Activity, limit: LimitStop): Activity | null {
+  private reweigh(agentId: string): void {
+    const stop = this.stops.get(agentId);
+    const resetsAt = this.resetOf(agentId);
+    if (stop === undefined || resetsAt === null) return;
+    const observedAt = this.now().toISOString();
+    this.opts.record(agentId, limited({ ...stop.activity, observedAt }, resetsAt));
+  }
+
+  /** The latest reset of the agent's windows that are used up, or null when none is. */
+  private resetOf(agentId: string): string | null {
     const now = this.now().getTime();
-    const usedUp = (this.opts.usage(agentId)?.limits ?? []).filter(
-      (l) => l.usedPercent >= 100 && (l.resetsAt === undefined || Date.parse(l.resetsAt) > now),
+    const resets = (this.opts.usage(agentId)?.limits ?? []).flatMap((l) =>
+      l.usedPercent >= 100 && l.resetsAt !== undefined && Date.parse(l.resetsAt) > now
+        ? [l.resetsAt]
+        : [],
     );
-    if (usedUp.length === 0 && limit === "rate") return null;
-    const resetsAt = usedUp
-      .flatMap((l) => (l.resetsAt === undefined ? [] : [l.resetsAt]))
-      .toSorted();
-    const latest = resetsAt.at(-1);
-    return { ...activity, value: "limited", ...(latest !== undefined && { resetsAt: latest }) };
+    return resets.toSorted().at(-1) ?? null;
   }
 }
 
-/** The usage limits held, with those an update names replaced and those it leaves out kept. */
+const limited = (activity: Activity, resetsAt: string | null): Activity => ({
+  ...activity,
+  value: "limited",
+  ...(resetsAt !== null && { resetsAt }),
+});
+
+/**
+ * The usage limits held, with those an update names replaced and those it leaves out kept. Past
+ * the most usage holds, the oldest of those it leaves out go first.
+ */
 export function mergeLimits(
   held: readonly UsageLimit[] | undefined,
   update: readonly UsageLimit[],
@@ -87,5 +116,7 @@ export function mergeLimits(
   const named = new Map(update.map((l) => [l.window, l]));
   const kept = (held ?? []).map((l) => named.get(l.window) ?? l);
   const known = new Set(kept.map((l) => l.window));
-  return [...kept, ...update.filter((l) => !known.has(l.window))];
+  const merged = [...kept, ...update.filter((l) => !known.has(l.window))];
+  let over = merged.length - USAGE_LIMITS_MAX;
+  return merged.filter((l) => named.has(l.window) || over-- <= 0);
 }
