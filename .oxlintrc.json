@@ -2339,6 +2339,36 @@
     },
     {
       "files": [
+        "apps/daemon/src/http/connections.ts",
+        "apps/daemon/src/testing/**"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "apps/daemon/**/*.test.ts",
         "apps/daemon/**/*.test.tsx"
       ],
@@ -2400,36 +2430,6 @@
     {
       "files": [
         "apps/daemon/**/*.medium.test.ts"
-      ],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": [
-                  "@bazhen/web",
-                  "@bazhen/web/**",
-                  "**/apps/web/**",
-                  "**/web/src/**"
-                ],
-                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
-              },
-              {
-                "group": [
-                  "**/host-guard/src/**"
-                ],
-                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": [
-        "apps/daemon/src/http/connections.ts",
-        "apps/daemon/src/testing/**"
       ],
       "rules": {
         "no-restricted-imports": [

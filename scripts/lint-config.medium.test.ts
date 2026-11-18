@@ -59,6 +59,7 @@ const FIXTURES: Record<string, string> = {
   "apps/daemon/src/http/connections.ts": 'export { WebSocketServer } from "ws";\n',
   "apps/daemon/src/testing/v.ts": 'export { WebSocketServer } from "ws";\n',
   "apps/daemon/src/w.medium.test.ts": 'export { WebSocketServer } from "ws";\n',
+  "apps/daemon/src/testing/x.test.ts": 'export { readFileSync } from "node:fs";\n',
   "tests/holder/g.test.ts":
     'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
     'export { createRequire } from "node:module";\nexport { fork } from "cluster";\n' +
@@ -143,6 +144,8 @@ describe("the generated oxlint config, run by oxlint", () => {
       "apps/daemon/src/http/connections.ts": [],
       "apps/daemon/src/testing/v.ts": [],
       "apps/daemon/src/w.medium.test.ts": [],
+      // A small test there is still a small test.
+      "apps/daemon/src/testing/x.test.ts": ["eslint(no-restricted-imports)"],
     });
   });
 });

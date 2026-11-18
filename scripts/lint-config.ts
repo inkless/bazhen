@@ -392,6 +392,15 @@ function overrides(): Override[] {
         files: [`${area.dir}/**/*.ts`, `${area.dir}/**/*.tsx`],
         rules: { ...base, "no-restricted-imports": restrictions(area, false, false) },
       },
+      // Before the tests' overrides, so that a test among these files keeps the tests' bans.
+      ...(area.webSocketServersIn === undefined
+        ? []
+        : [
+            {
+              files: area.webSocketServersIn.map((f) => `${area.dir}/${f}`),
+              rules: { ...base, "no-restricted-imports": restrictions(area, false, false, true) },
+            },
+          ]),
       {
         files: [`${area.dir}/**/*.test.ts`, `${area.dir}/**/*.test.tsx`],
         rules: {
@@ -403,14 +412,6 @@ function overrides(): Override[] {
         files: [`${area.dir}/**/*.medium.test.ts`],
         rules: { ...base, "no-restricted-imports": restrictions(area, false, true) },
       },
-      ...(area.webSocketServersIn === undefined
-        ? []
-        : [
-            {
-              files: area.webSocketServersIn.map((f) => `${area.dir}/${f}`),
-              rules: { ...base, "no-restricted-imports": restrictions(area, false, false, true) },
-            },
-          ]),
     ];
   });
   // Everything no area covers, tests/support and the root's files among them, gets the ban on
