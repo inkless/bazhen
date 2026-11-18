@@ -126,7 +126,7 @@ const GENERATION = /^(0|[1-9]\d*)$/;
 /**
  * `found` is a later process of the terminal `recorded` names, run by the same holder or server:
  * one the daemon didn't issue when `recorded` is the latest it did. A generation that isn't a
- * whole number proves nothing.
+ * whole number the daemon can count, as it records one, proves nothing.
  */
 export function laterGeneration(recorded: RuntimeRef, found: RuntimeRef): boolean {
   const before = recorded.locator.generation ?? "";
@@ -137,6 +137,7 @@ export function laterGeneration(recorded: RuntimeRef, found: RuntimeRef): boolea
   for (const key of keys) {
     if (!PROCESS_KEYS.has(key) && recorded.locator[key] !== found.locator[key]) return false;
   }
+  if (!Number.isSafeInteger(Number(before)) || !Number.isSafeInteger(Number(after))) return false;
   return Number(after) > Number(before);
 }
 

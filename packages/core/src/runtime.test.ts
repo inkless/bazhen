@@ -62,6 +62,13 @@ describe("a terminal found at a generation the daemon didn't issue", () => {
     ]).toEqual([false, false, false, false]);
   });
 
+  it("is never concluded from a generation past the largest the daemon can count", () => {
+    expect([
+      laterGeneration(recorded, found({ generation: "9007199254740991" })),
+      laterGeneration(recorded, found({ generation: "9007199254740993" })),
+    ]).toEqual([true, false]);
+  });
+
   it("is a later pane process on tmux's locator too", () => {
     const pane: RuntimeRef = {
       terminalId: recorded.terminalId,

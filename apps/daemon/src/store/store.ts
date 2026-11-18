@@ -2009,7 +2009,7 @@ export class Store {
   startOf(agentId: string): { readonly eventId: number; readonly at: number } | undefined {
     const row = this.prepare(
       `SELECT id, ts FROM events WHERE entity_type = 'agent' AND entity_id = ?
-         AND type IN ('agent.running', 'agent.respawned', 'agent.relaunched')
+         AND type IN ('agent.running', 'agent.respawned', 'agent.relaunched', 'agent.process_adopted')
        ORDER BY id DESC LIMIT 1`,
     ).get(agentId);
     if (typeof row?.id !== "number" || typeof row.ts !== "string") return undefined;

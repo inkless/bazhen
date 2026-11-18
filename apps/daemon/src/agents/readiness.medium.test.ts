@@ -156,6 +156,36 @@ describe("launch readiness", () => {
     expect([lifecycle(s.store), s.up]).toEqual(["starting", [s.terminalId]]);
   });
 
+  it("times a process adopted from outside as a new start, and says when it is up", async () => {
+    const s = await starting();
+    s.follow();
+    s.readiness.ready(s.agentId, "claude_hook");
+    s.store.append({
+      entityId: s.agentId,
+      actor: "system",
+      type: "agent.process_adopted",
+      payload: { runtimeRef: { runtime: "tmux", locator: { generation: "1" } } },
+    });
+    await expect.poll(() => stuck(s.store)).toEqual(["open:"]);
+    expect([lifecycle(s.store), s.up]).toEqual(["starting", [s.terminalId]]);
+  });
+
+  it("times a process adopted while the daemon was down from its adoption, after a restart", async () => {
+    const s = await starting();
+    s.follow();
+    await expect.poll(() => stuck(s.store)).toEqual(["open:"]);
+    s.readiness.ready(s.agentId, "claude_hook");
+    stops.pop()?.();
+    s.store.append({
+      entityId: s.agentId,
+      actor: "system",
+      type: "agent.process_adopted",
+      payload: { runtimeRef: { runtime: "tmux", locator: { generation: "1" } } },
+    });
+    s.follow();
+    await expect.poll(() => stuck(s.store)).toEqual(["closed:answered_in_tui", "open:"]);
+  });
+
   it("says when no start will come in a reused terminal: a refused respawn, or a close", async () => {
     const s = await starting();
     s.follow();
