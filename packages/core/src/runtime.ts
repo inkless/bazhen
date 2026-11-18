@@ -394,7 +394,8 @@ export interface RuntimeAdapter {
   attach(ref: RuntimeRef, size: Size | null): Promise<Attached>;
   /**
    * Ends the terminal. A terminal the runtime positively no longer has counts as closed; one whose
-   * server may still run it is `TerminalUnconfirmed`.
+   * server may still run it is `TerminalUnconfirmed`; one whose server runs but can't be reached
+   * just now is `RuntimeUnreachable`.
    */
   close(ref: RuntimeRef): Promise<void>;
   /**
