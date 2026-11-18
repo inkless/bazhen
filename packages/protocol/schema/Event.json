@@ -252,6 +252,11 @@
             },
             "promptHash": {
               "type": "string"
+            },
+            "compactWindowTokens": {
+              "type": "integer",
+              "minimum": 100000,
+              "maximum": 10000000
             }
           },
           "required": [
@@ -1636,6 +1641,116 @@
               "maximum": 9007199254740991
             }
           }
+        }
+      },
+      "required": [
+        "id",
+        "ts",
+        "type",
+        "entityType",
+        "entityId",
+        "actor",
+        "causationId",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "agent.compacted"
+        },
+        "entityType": {
+          "type": "string",
+          "const": "agent"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "causationId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sign": {
+              "type": "string",
+              "enum": [
+                "claude_hook",
+                "codex_item"
+              ]
+            },
+            "before": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "contextUsedPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "contextWindowTokens": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "hook": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pid": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "sessionId",
+                "pid"
+              ]
+            }
+          },
+          "required": [
+            "sign"
+          ]
         }
       },
       "required": [

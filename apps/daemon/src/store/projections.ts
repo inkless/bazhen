@@ -115,6 +115,7 @@ export function project(db: Statements, e: Recorded): void {
         runtime,
         role,
         promptHash,
+        compactWindowTokens,
       } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
         `INSERT INTO agent_sessions
@@ -133,6 +134,12 @@ export function project(db: Statements, e: Recorded): void {
       }
       if (role !== undefined) {
         db.prepare("UPDATE agent_sessions SET role = ? WHERE id = ?").run(role, e.entityId);
+      }
+      if (compactWindowTokens !== undefined) {
+        db.prepare("UPDATE agent_sessions SET compact_window = ? WHERE id = ?").run(
+          compactWindowTokens,
+          e.entityId,
+        );
       }
       deliveredPrompt(db, e.entityId, promptHash);
       if (nameOrdinal !== undefined) {
@@ -268,6 +275,7 @@ export function project(db: Statements, e: Recorded): void {
       return update(db, "agent_sessions", "id", e.entityId, e.id, { name });
     }
     case "agent.signalled":
+    case "agent.compacted":
       EVENTS[e.type].payload.parse(e.payload);
       return;
     // The devices table carries the token's hash, which no event may, so the store writes it

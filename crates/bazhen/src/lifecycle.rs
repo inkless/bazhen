@@ -20,7 +20,7 @@ use crate::{AGENTS_USAGE, Exit};
 /// The options each verb takes beside `--json`; `--home` and `--port` are every verb's.
 fn options(verb: &str) -> &'static [&'static str] {
     match verb {
-        "launch" => &["dir", "name", "role"],
+        "launch" => &["dir", "name", "role", "compact-window"],
         "close" => &["confirm-busy", "force"],
         "relaunch" => &["fresh"],
         _ => &[],
@@ -199,6 +199,7 @@ fn launch(p: &Parsed, daemon: &Daemon) -> Step<String> {
             )
         })
         .transpose()?;
+    let compact_window_tokens = p.value("compact-window").map(compact_window).transpose()?;
     let r: LaunchAgentResponse = daemon.post(
         "/v1/agents",
         &LaunchAgentRequest {
@@ -209,6 +210,7 @@ fn launch(p: &Parsed, daemon: &Daemon) -> Step<String> {
             theme: None,
             name: name.clone(),
             role,
+            compact_window_tokens,
         },
         CALL,
     )?;
@@ -219,6 +221,29 @@ fn launch(p: &Parsed, daemon: &Daemon) -> Step<String> {
         Some(name) => format!("launched {} ({})", printable(name.as_str()), r.agent_id),
         None => format!("launched {}", r.agent_id),
     })
+}
+
+/// The fewest and most tokens a compaction window may be: Claude Code takes no fewer.
+const COMPACT_WINDOW: std::ops::RangeInclusive<u32> = 100_000..=10_000_000;
+
+/// `--compact-window`, whole tokens within `COMPACT_WINDOW`.
+fn compact_window(given: &str) -> Step<u32> {
+    given
+        .bytes()
+        .all(|b| b.is_ascii_digit())
+        .then(|| given.parse::<u32>().ok())
+        .flatten()
+        .filter(|n| COMPACT_WINDOW.contains(n))
+        .map_or_else(
+            || {
+                usage(format!(
+                    "--compact-window is whole tokens, {} to {}, not {given}",
+                    COMPACT_WINDOW.start(),
+                    COMPACT_WINDOW.end()
+                ))
+            },
+            Ok,
+        )
 }
 
 /// A close refused as `busy` names what runs; unless it `confirmed` that, say how to end it.

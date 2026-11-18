@@ -310,6 +310,7 @@ export class Lifecycle {
       readonly name: string;
       readonly role: string | null;
       readonly promptHash: string | null;
+      readonly compactWindowTokens: number | null;
     },
     theme: TuiTheme | undefined,
   ) {
@@ -319,7 +320,10 @@ export class Lifecycle {
       launched.role,
       launched.promptHash,
     );
-    return { options: startOptions(prompt, launched.name, theme), promptHash: prompt.hash };
+    return {
+      options: startOptions(prompt, launched.name, theme, launched.compactWindowTokens),
+      promptHash: prompt.hash,
+    };
   }
 
   /** Records the agent closed, and removes the prompt file its starts read. */

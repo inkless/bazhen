@@ -63,6 +63,11 @@ const DRAINING = {
   error: { code: -32600, message: "Server is draining", data: { reason: "serverShuttingDown" } },
 };
 
+/** Each thread's config, as `configs` holds it, and none for another. */
+const configFrom =
+  (configs: ReadonlyMap<string, Readonly<Record<string, string | number>>>) => (threadId: string) =>
+    configs.get(threadId) ?? {};
+
 describe("Codex channel", () => {
   it("starts Codex's own daemon when nothing listens, then connects to it", async () => {
     const { codexHome, socket } = home();
@@ -112,7 +117,7 @@ describe("Codex channel", () => {
     channel.close();
   });
 
-  it("gives each thread it resumes the config it was given, on connecting and when asked", async () => {
+  it("gives each thread it resumes the config it was given for it, on connecting and when asked", async () => {
     const { codexHome, socket } = home();
     const requests: [string, unknown][] = [];
     await fakeServer(socket, codexHome, (method, _connection, params) => {
@@ -120,12 +125,27 @@ describe("Codex channel", () => {
       return { result: "ok" };
     });
     const config = { "shell_environment_policy.set.BAZHEN_SOCKET": "/h/run/bazhen.sock" };
-    const channel = channelOn(codexHome, { boundThreads: () => ["thr-1"], threadConfig: config });
+    const windowed = { ...config, model_auto_compact_token_limit: 300_000 };
+    const configs = new Map([
+      ["thr-1", config],
+      ["thr-2", windowed],
+    ]);
+    const channel = channelOn(codexHome, {
+      boundThreads: () => ["thr-1"],
+      threadConfig: configFrom(configs),
+    });
     await channel.request("thread/start", {});
     await channel.resume("thr-2");
     expect(requests.filter(([method]) => method === "thread/resume")).toEqual([
       ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
-      ["thread/resume", { threadId: "thr-2", excludeTurns: true, config }],
+      [
+        "thread/resume",
+        {
+          threadId: "thr-2",
+          excludeTurns: true,
+          config: windowed,
+        },
+      ],
     ]);
     channel.close();
   });

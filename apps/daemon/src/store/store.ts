@@ -1007,6 +1007,47 @@ export class Store {
     });
   }
 
+  /**
+   * Records that an agent's harness compacted its context, with the usage last recorded before
+   * it. Returns the event id, or null for an agent whose process has gone. An agent this daemon
+   * never ran is refused.
+   */
+  recordCompaction(
+    agentId: string,
+    sign: EventPayload<"agent.compacted">["sign"],
+    hook?: EventPayload<"agent.compacted">["hook"],
+  ): number | null {
+    return this.transaction(() => {
+      const row = this.prepare("SELECT state, usage FROM agent_sessions WHERE id = ?").get(agentId);
+      if (row === undefined) throw new UnknownAgent(agentId);
+      if (!REPORTING.has(AgentState.parse(row.state))) return null;
+      if (hook !== undefined && this.compactionReported(agentId, hook)) return null;
+      // The status line reports apart from the hook, so a reading taken just after the compaction
+      // may land first, and `before` then holds the use after it.
+      const before = typeof row.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
+      return this.append({
+        type: "agent.compacted",
+        entityId: agentId,
+        actor: "system",
+        payload: { sign, ...(before && { before }), ...(hook && { hook }) },
+      });
+    });
+  }
+
+  /**
+   * Whether `hook` already reported a compaction of the agent. Any of its compactions, not only
+   * the last: two hooks that waited through a restart may send their reports again in either order.
+   */
+  private compactionReported(
+    agentId: string,
+    hook: NonNullable<EventPayload<"agent.compacted">["hook"]>,
+  ): boolean {
+    const sql = `SELECT 1 AS present FROM events WHERE entity_type = 'agent' AND entity_id = ?
+      AND type = 'agent.compacted' AND json_extract(payload, '$.hook.pid') = ?
+      AND json_extract(payload, '$.hook.sessionId') IS ? LIMIT 1`;
+    return this.prepare(sql).get(agentId, hook.pid, hook.sessionId) !== undefined;
+  }
+
   /** What an agent's harness last reported it doing in this process, if anything. */
   latestActivity(agentId: string): Activity | undefined {
     const row = this.prepare("SELECT activity FROM activity_latest WHERE agent_session_id = ?").get(
@@ -1226,13 +1267,15 @@ export class Store {
         role: string | null;
         /** The hash of the prompt its last start gave it, when a start recorded one. */
         promptHash: string | null;
+        /** The compaction window every start gives it; null for the harness's own. */
+        compactWindowTokens: number | null;
         externalRef: ExternalRef | null;
         transcript: string | null;
       }
     | undefined {
     const row = this.prepare(
-      `SELECT harness, project, cwd, coalesce(name, '') AS name, role, prompt_hash, external_ref,
-              transcript
+      `SELECT harness, project, cwd, coalesce(name, '') AS name, role, prompt_hash, compact_window,
+              external_ref, transcript
        FROM agent_sessions WHERE id = ?`,
     ).get(agentId);
     if (row === undefined) return undefined;
@@ -1246,6 +1289,7 @@ export class Store {
       name: String(row.name),
       role: typeof row.role === "string" ? row.role : null,
       promptHash: typeof row.prompt_hash === "string" ? row.prompt_hash : null,
+      compactWindowTokens: typeof row.compact_window === "number" ? row.compact_window : null,
       externalRef: typeof ref === "string" ? ExternalRef.parse(JSON.parse(ref)) : null,
       transcript: typeof row.transcript === "string" ? row.transcript : null,
     };

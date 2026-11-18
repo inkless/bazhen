@@ -78,6 +78,7 @@ async function daemon(
     binding,
     activity: new ActivityTracker((id, activity) => store.recordActivity(id, activity)),
     recordUsage: (id, usage) => store.recordUsage(id, usage),
+    compacted: (id, hook) => store.recordCompaction(id, "claude_hook", hook),
     observeSend: (id, toolUseId, sent) => observed.push({ id, toolUseId, sent }),
     log: (line) => logged.push(line),
     now: () => new Date("2026-11-17T00:00:00.000Z"),
@@ -90,6 +91,11 @@ async function daemon(
   const activity = () => store.latestActivity(agentId);
   const usage = () => store.snapshot(testView).agents[0]?.usage;
   const lifecycle = () => store.snapshot(testView).agents[0]?.state;
+  const compactions = () =>
+    store
+      .events(0)
+      .filter((e) => e.type === "agent.compacted")
+      .map((e) => e.payload);
   const failures = () =>
     store
       .snapshot(testView)
@@ -104,6 +110,7 @@ async function daemon(
     usage,
     failures,
     lifecycle,
+    compactions,
     observed,
     logged,
     tokens,
@@ -133,6 +140,14 @@ const sendMessage = (session: string) =>
     tool_name: "SendMessage",
     tool_input: { to: "BZ-127", message: "Rebased." },
     tool_response: { success: true },
+  });
+/** A SessionStart's payload for a compaction of the agent's session, or of a subagent's. */
+const compact = (more: Record<string, string> = {}) =>
+  JSON.stringify({
+    hook_event_name: "SessionStart",
+    session_id: CLAUDE_SESSION,
+    source: "compact",
+    ...more,
   });
 /** A SessionStart's payload, as /clear starts a new session. */
 const sessionStart = (session: string) =>
@@ -368,6 +383,61 @@ describe.each([
     await waiting;
   });
 
+  it("records a compaction of the agent's own session, with its use before, and none of a subagent's", async () => {
+    const { socket, agentId, mailbox, compactions } = await daemon();
+    const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
+    const window = { used_percentage: 91, context_window_size: 200_000 };
+    await run(
+      client,
+      "statusline",
+      env,
+      JSON.stringify({ session_id: CLAUDE_SESSION, context_window: window }),
+    );
+    await run(client, "wait", env, compact({ agent_id: "subagent-1" }));
+    const waiting = run(client, "wait", env, compact());
+    await expect.poll(() => compactions().length).toBe(1);
+    mailbox.send(agentId, { idempotencyKey: "m", body: "release the waiter" });
+    await waiting;
+    expect(compactions()).toEqual([
+      {
+        sign: "claude_hook",
+        before: { contextUsedPercent: 91, contextWindowTokens: 200_000 },
+        hook: { sessionId: CLAUDE_SESSION, pid: expect.any(Number) },
+      },
+    ]);
+  });
+
+  it("records a compaction once, however often its hook's client sends the report", async () => {
+    const { socket, agentId, mailbox, compactions } = await daemon();
+    const report = (pid: number) => ({
+      protocolVersion: "1.0",
+      agentId,
+      event: "wait",
+      pid,
+      ppid: process.pid,
+      payload: JSON.parse(compact()),
+    });
+    // The client sends the same report again once the daemon drops it, as across a restart.
+    const dropped = new AbortController();
+    const first = post(socket, "/v1/hooks", report(4242), {}, dropped.signal).catch(
+      () => "dropped",
+    );
+    await expect.poll(() => compactions().length).toBe(1);
+    dropped.abort();
+    await expect(first).resolves.toBe("dropped");
+    const again = post(socket, "/v1/hooks", report(4242));
+    mailbox.send(agentId, { idempotencyKey: "m1", body: "release the waiter" });
+    await again;
+    // The next compaction runs a new hook process.
+    const next = post(socket, "/v1/hooks", report(4243));
+    mailbox.send(agentId, { idempotencyKey: "m2", body: "release the waiter" });
+    await next;
+    expect(compactions()).toEqual([
+      { sign: "claude_hook", hook: { sessionId: CLAUDE_SESSION, pid: 4242 } },
+      { sign: "claude_hook", hook: { sessionId: CLAUDE_SESSION, pid: 4243 } },
+    ]);
+  });
+
   it("records the model and context use the agent's own status line reports", async () => {
     const { socket, agentId, usage } = await daemon();
     const env = { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket };
@@ -385,8 +455,17 @@ describe.each([
   });
 });
 
-/** One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended. */
-function post(socket: string, path: string, body: unknown, headers: Record<string, string> = {}) {
+/**
+ * One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended, and
+ * rejects if `signal` drops it first.
+ */
+function post(
+  socket: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+  signal?: AbortSignal,
+) {
   return new Promise<void>((resolve, reject) => {
     const req = request(
       {
@@ -394,6 +473,7 @@ function post(socket: string, path: string, body: unknown, headers: Record<strin
         method: "POST",
         path,
         headers: { "content-type": "application/json", ...headers },
+        ...(signal && { signal }),
       },
       (res) => res.resume().on("end", resolve),
     );

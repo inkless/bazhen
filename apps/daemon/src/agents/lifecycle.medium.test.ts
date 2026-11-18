@@ -82,6 +82,7 @@ async function running({
   maxOpen = 100,
   /** What a start tells every agent; the agent was launched with the daemon's own. */
   fleet = FLEET_INSTRUCTIONS,
+  compactWindowTokens = undefined as number | undefined,
 } = {}) {
   const closed: AgentRefs[] = [];
   const launches: AgentLaunch[] = [];
@@ -135,7 +136,7 @@ async function running({
         },
       };
     },
-    { starting },
+    { starting, ...(compactWindowTokens === undefined ? {} : { compactWindowTokens }) },
   );
   const budget = storeBudget(store, maxOpen);
   const promptDir = mkdtempSync(join(tmpdir(), "bz-prompts-"));
@@ -379,6 +380,13 @@ describe("agent lifecycle", () => {
     ]).toEqual([true, fleet, prompts.compose(null).hash]);
   });
 
+  it("gives a respawn the compaction window the agent was launched with", async () => {
+    const { lifecycle, agentId, exit, respawned } = await running({ compactWindowTokens: 400_000 });
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect(respawned[0]?.options.compactWindowTokens).toBe(400_000);
+  });
+
   it("removes the agent's prompt file when it closes", async () => {
     const { lifecycle, agentId, exit, promptDir } = await running();
     exit("0");
@@ -600,6 +608,20 @@ describe("relaunching a lost agent", () => {
       launches[1]?.resume?.id,
       replaced,
     ]).toEqual(["starting", false, 1, "light", "s-1", "s-1", [agentId]]);
+  });
+
+  it("gives a relaunch the compaction window the agent was launched with, and none to one without", async () => {
+    const windowed = await lost({ compactWindowTokens: 400_000 });
+    await windowed.lifecycle.relaunch(windowed.agentId, { idempotencyKey: "l", generation: 0 });
+    const plain = await lost();
+    await plain.lifecycle.relaunch(plain.agentId, { idempotencyKey: "l", generation: 0 });
+    expect([
+      windowed.launches.map((l) => l.options.compactWindowTokens),
+      plain.launches.map((l) => l.options.compactWindowTokens),
+    ]).toEqual([
+      [400_000, 400_000],
+      [undefined, undefined],
+    ]);
   });
 
   it("starts a relaunched agent's session under the name the agent has now", async () => {

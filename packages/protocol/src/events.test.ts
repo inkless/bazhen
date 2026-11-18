@@ -17,6 +17,16 @@ describe("event registry", () => {
     expect(failed.safeParse({ reason: "tmux said: token=abc" }).success).toBe(false);
   });
 
+  it("records a compaction by which harness signal said so, with the use before it if any", () => {
+    const compacted = EVENTS["agent.compacted"].payload;
+    expect([
+      compacted.safeParse({ sign: "codex_item" }).success,
+      compacted.safeParse({ sign: "claude_hook", before: { contextUsedPercent: 91 } }).success,
+      compacted.safeParse({ sign: "transcript" }).success,
+      compacted.safeParse({ sign: "claude_hook", before: { contextUsedPercent: 140 } }).success,
+    ]).toEqual([true, true, false, false]);
+  });
+
   it("names the entity each event is about", () => {
     expect([EVENTS["agent.launched"].entity, EVENTS["environment.registered"].entity]).toEqual([
       "agent",

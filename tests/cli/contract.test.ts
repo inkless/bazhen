@@ -68,7 +68,7 @@ describe("the command line", () => {
         "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
         "  bazhen agents [list] [--json]",
         "  bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]",
-        "  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--json]",
+        "  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--compact-window <tokens>] [--json]",
         "  bazhen agents signal <agent> INT|TERM|HUP|KILL [--json]",
         "  bazhen agents wait <agent> <state>|ended [--timeout <seconds>] [--json]",
         "  bazhen tasks create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]",

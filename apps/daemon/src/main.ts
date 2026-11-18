@@ -6,7 +6,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { getRequestListener, serve } from "@hono/node-server";
 import { LocalEnvironment } from "@bazhen/env-local";
 import { ClaudeCodeHarness } from "@bazhen/harness-claude-code";
-import { CodexHarness, DAEMON_START_ARGS, threadConfig } from "@bazhen/harness-codex";
+import { CodexHarness, DAEMON_START_ARGS } from "@bazhen/harness-codex";
 import { filterEnv, healthOfEach, RoutedRuntime, UnknownRuntime } from "@bazhen/core";
 import { TmuxServer, findNotifySend, hostPtyReader, probeContainment } from "@bazhen/host-guard";
 import { protocolId } from "@bazhen/protocol/id";
@@ -50,7 +50,7 @@ import {
 import { CodexMail } from "./codex/mail.ts";
 import { recordCodexVersion } from "./codex/version.ts";
 import { codexSignals } from "./codex/signals.ts";
-import { CodexThreads, paneTitleCommand } from "./codex/threads.ts";
+import { CodexThreads, paneTitleCommand, resumeConfig } from "./codex/threads.ts";
 import { retire } from "./events/retention.ts";
 import { eventRoute } from "./events/server.ts";
 import { TerminalHub } from "./stream/hub.ts";
@@ -333,7 +333,7 @@ const codex = new CodexChannel({
   codexHome,
   startDaemon: () => codexCommand(DAEMON_START_ARGS),
   boundThreads: () => store.codexThreads(),
-  threadConfig: threadConfig(paths.socket),
+  threadConfig: resumeConfig(store, paths.socket),
   listener: allOf(
     codexApprovals(
       approvals,
@@ -344,6 +344,7 @@ const codex = new CodexChannel({
     codexSignals({
       agentOf: (threadId) => store.codexAgent(threadId),
       record: (agentId, activity) => void store.recordActivity(agentId, activity),
+      compacted: (agentId) => void store.recordCompaction(agentId, "codex_item"),
       resume: (threadId) => codex.resume(threadId),
       turns: {
         started: (agentId) => inbox.turnStarted(agentId),
@@ -641,6 +642,8 @@ const socketListener = getRequestListener(
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
+      compacted: (agentId, reporter) =>
+        void store.recordCompaction(agentId, "claude_hook", reporter),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
     credentials: agentTokens,

@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { Activity, Usage, ExitStatus, ExternalRef, HarnessId, Signal } from "./agents.ts";
+import {
+  Activity,
+  CompactWindowTokens,
+  Usage,
+  ExitStatus,
+  ExternalRef,
+  HarnessId,
+  Signal,
+} from "./agents.ts";
 import { HolderVersions } from "./holder.ts";
 import { TuiTheme } from "./theme.ts";
 import { AttachmentMode, EnvironmentKind, Id } from "./ids.ts";
@@ -102,6 +110,8 @@ export const EVENTS = {
       role: Role.optional(),
       /** The SHA-256 of the system prompt its launch gives it. */
       promptHash: z.string().optional(),
+      /** The compaction window every start of it is given; absent, the harness's own. */
+      compactWindowTokens: CompactWindowTokens.optional(),
     }),
   },
   "agent.renamed": {
@@ -263,6 +273,24 @@ export const EVENTS = {
   "agent.activity": { entity: "agent", payload: Activity },
   /** The model the agent runs, or its context use, changed (§11.2). */
   "agent.usage": { entity: "agent", payload: Usage },
+  /**
+   * The agent's harness compacted its context: a Claude Code SessionStart for a compaction, or a
+   * Codex compaction item that completed. Its use after shows in the next `agent.usage`.
+   */
+  "agent.compacted": {
+    entity: "agent",
+    payload: z.object({
+      sign: z.enum(["claude_hook", "codex_item"]),
+      /** The model and context use last recorded before it; absent when none was. */
+      before: Usage.optional(),
+      /**
+       * The Claude Code hook that said so: its session and process. The hook client sends the
+       * same report again when the daemon drops it, as across a restart, and a report the same as
+       * the last compaction's is that one again, not a second compaction.
+       */
+      hook: z.object({ sessionId: z.string().nullable(), pid: z.number().int() }).optional(),
+    }),
+  },
   /** The agent's process ended; its terminal stays, with its last screen (§4.1, §4.5). */
   "agent.exited": { entity: "agent", payload: z.object({ exit: ExitStatus }) },
   /** A close was asked for. Recorded before the terminal is touched, so a view that loses its

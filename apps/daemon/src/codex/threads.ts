@@ -1,5 +1,12 @@
 import type { RuntimeRef, TerminalId } from "@bazhen/core";
-import { matching, readThreadList, readThreadStarted, titlePrefix } from "@bazhen/harness-codex";
+import {
+  compactConfig,
+  matching,
+  readThreadList,
+  readThreadStarted,
+  threadConfig,
+  titlePrefix,
+} from "@bazhen/harness-codex";
 import { ThreadHeld, type Store } from "../store/store.ts";
 import type { ChannelListener } from "./channel.ts";
 
@@ -474,4 +481,19 @@ export class CodexThreads {
       ...(detail !== undefined && { detail }),
     });
   }
+}
+
+/**
+ * What the daemon resumes `threadId` with: what every thread is started with for this daemon's
+ * `socket`, and the compaction window of the agent bound to it, so a resume keeps it.
+ */
+export function resumeConfig(
+  store: Store,
+  socket: string,
+): (threadId: string) => Readonly<Record<string, string | number>> {
+  return (threadId) => {
+    const agentId = store.codexAgent(threadId);
+    const launched = agentId === undefined ? undefined : store.agentLaunch(agentId);
+    return { ...threadConfig(socket), ...compactConfig(launched?.compactWindowTokens) };
+  };
 }

@@ -155,18 +155,21 @@ export function preparePrompt(
 
 /**
  * The options one start of an agent takes: its prompt, the theme a request names, which,
- * absent, leaves it to the harness, and its name as it stands now. Never stored.
+ * absent, leaves it to the harness, its name as it stands now, and the compaction window it was
+ * launched with. Never stored.
  */
 export const startOptions = (
   prompt: Prepared,
   name: string,
   theme: TuiTheme | undefined,
+  compactWindowTokens: number | null,
 ): LaunchOptions => ({
   instructions: prompt.text,
   instructionsFile: prompt.file,
   instructionsChanged: prompt.changed,
   ...(theme === undefined ? {} : { theme }),
   ...(name === "" ? {} : { name }),
+  ...(compactWindowTokens === null ? {} : { compactWindowTokens }),
 });
 
 /** What `record` returns, or, when it refuses, `undo` run first and then its refusal. */
@@ -248,6 +251,9 @@ export async function launchAgent(
             runtime,
             ...(req.role === undefined ? {} : { role: req.role }),
             promptHash: prompt.hash,
+            ...(req.compactWindowTokens === undefined
+              ? {}
+              : { compactWindowTokens: req.compactWindowTokens }),
           },
         });
       }, []),
@@ -255,7 +261,7 @@ export async function launchAgent(
   // Nothing else may settle the agent while its launch is in flight, so it takes its slot in the
   // same synchronous step as it is recorded: no await may come between the two.
   return queue.run(agentId, async () => {
-    const options = startOptions(prompt, name, req.theme);
+    const options = startOptions(prompt, name, req.theme, req.compactWindowTokens ?? null);
     // A token that can't be written fails the launch as the environment refusing it would.
     const launching = startWithToken(tokens, agentId, (tokenFile) =>
       environment.launch({

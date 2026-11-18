@@ -53,8 +53,8 @@ export interface CodexChannelOptions {
   readonly startDaemon: () => Promise<void>;
   /** The threads of the agents Bazhen runs, each resumed on every new connection. */
   readonly boundThreads: () => readonly string[];
-  /** What each thread is resumed with, as the harness starts it with (`threadConfig`). */
-  readonly threadConfig?: Readonly<Record<string, string>>;
+  /** What a thread is resumed with, as the harness starts it with (`threadConfig`). */
+  readonly threadConfig?: (threadId: string) => Readonly<Record<string, string | number>>;
   readonly listener?: ChannelListener;
   /** The version the server answered on, told on every new connection that names one. */
   readonly connectedTo?: (version: string) => void;
@@ -168,7 +168,7 @@ export class CodexChannel implements HarnessChannelPort {
   }
 
   private resumeParams(threadId: string) {
-    const config = this.opts.threadConfig;
+    const config = this.opts.threadConfig?.(threadId);
     return { threadId, excludeTurns: true, ...(config === undefined ? {} : { config }) };
   }
 

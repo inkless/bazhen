@@ -149,6 +149,15 @@ describe("launchAgent", () => {
     expect(store.snapshot(testView).agents.map((a) => a.theme)).toEqual(["light", "dark"]);
   });
 
+  it("starts the agent with the compaction window the request names, and keeps it for later starts", async () => {
+    const { store, deps, launches } = setup();
+    const { agentId } = await launchAgent(deps, { ...request, compactWindowTokens: 250_000 });
+    expect([
+      launches[0]?.options.compactWindowTokens,
+      store.agentLaunch(agentId)?.compactWindowTokens,
+    ]).toEqual([250_000, 250_000]);
+  });
+
   it("answers a repeated key from the first answer, though its directory has gone since", async () => {
     const { deps, launches, home } = setup();
     const first = await launchAgent(deps, request);

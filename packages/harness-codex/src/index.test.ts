@@ -9,6 +9,7 @@ import {
   messageText,
   queueArgs,
   readApproval,
+  readCompaction,
   readQuestion,
   questionResult,
   readResolved,
@@ -72,6 +73,30 @@ describe("Codex harness", () => {
       ["thread/start", { cwd: "/work", config }],
       ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
     ]);
+  });
+
+  it("gives the agent's thread the window it was launched with, as a number, on its start and each resume", async () => {
+    const { port, requests } = channel();
+    const harness = new CodexHarness(port, REMOTE);
+    const options = { compactWindowTokens: 300_000 };
+    await harness.launchSpec({ cwd: "/work" }, options);
+    await harness.resumeSpec(
+      { harness: "codex", project: "p", cwd: "/work" },
+      { kind: "codex-thread", id: "thr-1" },
+      options,
+    );
+    const config = { model_auto_compact_token_limit: 300_000 };
+    expect(requests.filter(([method]) => method !== "thread/inject_items")).toEqual([
+      ["thread/start", { cwd: "/work", config }],
+      ["thread/resume", { threadId: "thr-1", excludeTurns: true, config }],
+    ]);
+  });
+
+  it("gives the TUI the window as a TOML integer, for the threads it loads itself, and none unless asked", async () => {
+    const harness = new CodexHarness(channel().port, REMOTE, "/h/run/bazhen.sock");
+    const launched = await harness.launchSpec({ cwd: "/work" }, { compactWindowTokens: 300_000 });
+    const unset = await harness.launchSpec({ cwd: "/work" }, {});
+    expect([compactLimit(launched.argv), compactLimit(unset.argv)]).toEqual([[300_000], []]);
   });
 
   it("tells the agent's thread Bazhen's instructions once, in its first item, and not again on a resume", async () => {
@@ -208,6 +233,12 @@ const flagValues = (argv: readonly string[], table: string) =>
       const at = arg.indexOf("=");
       return Reflect.get(parse(`${arg.slice(0, at)} = ${arg.slice(at + 1)}`), table);
     });
+
+/** Each `-c` compaction limit in `argv`, read as Codex reads its TOML value. */
+const compactLimit = (argv: readonly string[]) =>
+  argv
+    .filter((arg, i) => argv[i - 1] === "-c" && arg.startsWith("model_auto_compact_token_limit="))
+    .map((arg) => parse(arg)["model_auto_compact_token_limit"]);
 
 describe("a TOML string", () => {
   it("reads back as the path it was made from, whatever the path holds", () => {
@@ -393,6 +424,24 @@ describe("Codex mail", () => {
       readUserMessage("item/started", input(quoting))?.messageId,
       readUserMessage("item/started", input(`fwd: ${messageText("msg_2", "x")}`))?.messageId,
     ]).toEqual(["msg_1", null]);
+  });
+});
+
+const item = (type: string) => ({
+  threadId: "thr-1",
+  turnId: "t-1",
+  item: { type, id: "i-1" },
+});
+
+describe("Codex compactions", () => {
+  it("reads the thread a completed compaction item is in, and no other item or notification", () => {
+    expect([
+      readCompaction("item/completed", item("contextCompaction")),
+      readCompaction("item/started", item("contextCompaction")),
+      readCompaction("item/completed", item("agentMessage")),
+      readCompaction("thread/compacted", { threadId: "thr-1", turnId: "t-1" }),
+      readCompaction("item/completed", { item: { type: "contextCompaction" } }),
+    ]).toEqual(["thr-1", null, null, null, null]);
   });
 });
 

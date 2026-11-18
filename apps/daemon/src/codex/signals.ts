@@ -1,4 +1,5 @@
 import {
+  readCompaction,
   readItemStarted,
   readThreadStatus,
   readTurn,
@@ -18,6 +19,8 @@ export interface CodexSignalsOptions {
     started(agentId: string): void;
     failed(agentId: string, error: string | null): void;
   };
+  /** Records that a bound thread's context was compacted. */
+  readonly compacted?: (agentId: string) => void;
   /** Resumes a thread that unloaded, which loads it again and subscribes to it. */
   readonly resume: (threadId: string) => Promise<void>;
   readonly now?: () => Date;
@@ -123,6 +126,12 @@ export function codexSignals(opts: CodexSignalsOptions): Partial<ChannelListener
 
   return {
     notification(method, params) {
+      const compacted = readCompaction(method, params);
+      if (compacted !== null) {
+        const agentId = opts.agentOf(compacted);
+        if (agentId !== undefined) opts.compacted?.(agentId);
+        return;
+      }
       const changed = readThreadStatus(method, params);
       if (changed !== null) {
         return changed.notLoaded

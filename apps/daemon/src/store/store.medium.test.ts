@@ -235,6 +235,9 @@ function shapeWithLast(migrations: readonly Migration[], last?: Migration) {
   return shapeOf(path);
 }
 
+/** The hook process `pid` of session s-1, as a compaction names it. */
+const hook = (pid: number) => ({ sessionId: "s-1", pid });
+
 describe("Store migrations", () => {
   it.each(Array.from({ length: NUMBERED_MIGRATIONS.length + 1 }, (_, v) => v))(
     "upgrades a database the numbering runner left at version %i to a fresh one's schema",
@@ -1231,6 +1234,58 @@ describe("Store usage", () => {
     });
     expect(store.recordUsage(agentId, { model: "Opus" })).toBeNull();
     expect(() => store.recordUsage(newId("agent"), { model: "Opus" })).toThrow(UnknownAgent);
+  });
+
+  it("records a compaction with the usage last recorded before it, or none", async () => {
+    const { store, agentId } = await withAgent();
+    const compactions = () =>
+      store
+        .events(0)
+        .filter((e) => e.type === "agent.compacted")
+        .map((e) => e.payload);
+    store.recordCompaction(agentId, "codex_item");
+    store.recordUsage(agentId, { model: "Opus", contextUsedPercent: 88 });
+    store.recordCompaction(agentId, "claude_hook");
+    expect(compactions()).toEqual([
+      { sign: "codex_item" },
+      { sign: "claude_hook", before: { model: "Opus", contextUsedPercent: 88 } },
+    ]);
+  });
+
+  it("records each hook's compaction once when two hooks report theirs again, the later first", async () => {
+    const { store, agentId } = await withAgent();
+    const recorded = [hook(41), hook(42), hook(42), hook(41)].map(
+      (h) => store.recordCompaction(agentId, "claude_hook", h) !== null,
+    );
+    const noSession = { sessionId: null, pid: 43 };
+    recorded.push(
+      store.recordCompaction(agentId, "claude_hook", noSession) !== null,
+      store.recordCompaction(agentId, "claude_hook", noSession) !== null,
+    );
+    expect(recorded).toEqual([true, true, false, false, true, false]);
+  });
+
+  it("records a hook's compaction once, however often the same hook reports it", async () => {
+    const { store, agentId } = await withAgent();
+    const recorded = [
+      store.recordCompaction(agentId, "claude_hook", hook(41)),
+      store.recordCompaction(agentId, "claude_hook", hook(41)),
+      store.recordCompaction(agentId, "claude_hook", hook(42)),
+      store.recordCompaction(agentId, "claude_hook", { sessionId: "s-2", pid: 42 }),
+    ];
+    expect(recorded.map((id) => id !== null)).toEqual([true, false, true, true]);
+  });
+
+  it("records no compaction for an agent whose process has exited, and refuses one it never ran", async () => {
+    const { store, agentId } = await withAgent();
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    expect(store.recordCompaction(agentId, "claude_hook")).toBeNull();
+    expect(() => store.recordCompaction(newId("agent"), "claude_hook")).toThrow(UnknownAgent);
   });
 
   it("forgets an agent's usage when its process is replaced or it is closed", async () => {
