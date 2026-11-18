@@ -157,19 +157,23 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
             return Exit::Failed;
         }
     };
+    let verb = p.word(0).unwrap_or_default();
+    // `start` hands `--home` to the daemon it starts, reaching no socket: nothing overrides it.
+    if let Some(home) = socket.overridden_home.filter(|_| verb != "start") {
+        out.err(&format!(
+            "bazhen: using BAZHEN_SOCKET {}, not --home {home}; run with BAZHEN_SOCKET= to use --home",
+            socket.path
+        ));
+    }
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|d| i64::try_from(d.as_millis()).ok())
         .unwrap_or(0);
-    let daemon = Daemon::at(&socket);
-    let result = match p.word(0).unwrap_or_default() {
+    let daemon = Daemon::at(&socket.path);
+    let result = match verb {
         "agents" | "whoami" | "roles" | "rename" | "task" | "delegate" | "escalate" | "send" => {
-            let task_socket = std::env::var("BAZHEN_SOCKET")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .unwrap_or(socket);
-            tasks::run(&p, &Daemon::at(task_socket), now_ms, out)
+            tasks::run(&p, &daemon, now_ms, out)
         }
         "launch" | "close" | "respawn" | "relaunch" | "signal" => lifecycle::run(&p, &daemon, out),
         "shells" => shells::run(&p, &daemon, out),
@@ -204,7 +208,8 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
     }
 }
 
-/// This process's inputs to the socket's place, with `--home` over `BAZHEN_HOME`.
+/// This process's inputs to the socket's place: `BAZHEN_SOCKET`, then `--home`, then
+/// `BAZHEN_HOME`.
 fn inputs(home_flag: Option<&str>) -> paths::Inputs {
     let var = |name: &str| std::env::var(name).ok();
     let tmp = ["TMPDIR", "TMP", "TEMP"]
@@ -222,6 +227,7 @@ fn inputs(home_flag: Option<&str>) -> paths::Inputs {
             },
         );
     paths::Inputs {
+        bazhen_socket: var("BAZHEN_SOCKET"),
         home_flag: home_flag.map(str::to_owned),
         bazhen_home: var("BAZHEN_HOME"),
         xdg_runtime_dir: var("XDG_RUNTIME_DIR"),
