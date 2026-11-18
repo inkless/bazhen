@@ -486,7 +486,7 @@ export class FakeRuntime implements RuntimeAdapter {
    */
   respawnOutside(ref: RuntimeRef): RuntimeRef {
     const t = this.terminalOf(ref);
-    t.pane = { ...this.pane(t.spec), generation: t.pane.generation + 1, exit: null };
+    t.pane = { ...this.pane(t.spec), id: t.pane.id, generation: t.pane.generation + 1, exit: null };
     t.title = "";
     if (this.attachKind === "snapshot") {
       for (const client of t.streams) client.respawned(t.pane.generation);
