@@ -3796,41 +3796,56 @@ export function checkMigrations(): void {
 const SUPPRESSION_FILES = /\.(?:[cm]?[jt]sx?|html)$/;
 
 /**
- * What a tool obeys at the start of a comment's line: tsc reads `@ts-` pragmas case-insensitively
- * and, in a block comment, on any line; the linters and formatters read theirs at the start.
+ * What a directive looks like at the start of a comment's line. The tools differ in what they
+ * obey (tsc reads `@ts-` pragmas on any line of a block comment and `@ts-nocheck` in any case;
+ * oxlint and oxfmt read the start of a comment, in the case they spell), so one pattern matches
+ * the union: case-insensitive, on every line, as a deliberate over-match.
  */
 const DIRECTIVE =
-  /^(@ts-(?:ignore|expect-error|nocheck)|(?:oxlint|eslint)-(?:disable|enable)[\w-]*|biome-ignore|oxfmt-ignore|prettier-ignore)(?![\w-])/i;
+  /^(@ts-(?:ignore|expect-error|nocheck)|(?:oxlint|eslint)-(?:disable|enable)[\w-]*|biome-ignore[\w-]*|oxfmt-ignore|prettier-ignore)/i;
 
-/** Every place a comment may start, each read to its end, even one a string's slashes hide. */
-const COMMENT = /(?=(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)))/g;
+const LINE_END = /\r\n?|[\n\u2028\u2029]/;
+const NOT_LINE_END = "[^\\n\\r\\u2028\\u2029]*";
+
+/**
+ * Every place a comment may start, each read to its end, even one a string's slashes hide: a
+ * line or block comment, an HTML comment, and the `-->` a script reads as a line comment.
+ */
+const COMMENT = new RegExp(
+  "(?=(//" +
+    NOT_LINE_END +
+    "|/\\*[\\s\\S]*?(?:\\*/|$)|<!--[\\s\\S]*?(?:-->|$)" +
+    "|(?<=(?:^|[\\n\\r\\u2028\\u2029])[ \\t]*)-->" +
+    NOT_LINE_END +
+    "))",
+  "g",
+);
+
+const linesIn = (text: string) => text.split(LINE_END);
 
 /**
  * Every comment that switches a check off for the code beside it. A failing check is fixed in the
  * code, so no directive is allowed, in source, tests or a page's inline script.
  *
  * It looks for comments without parsing, so no comment can hide a directive from it, and the
- * price is that a string holding `//` or `/*` followed by a directive fails too: split the
+ * price is that a string holding a comment's opener followed by a directive fails too: split the
  * string. Files git ignores, generated output among them, aren't scanned.
  */
 export function suppressionFailures(path: string, source: string): string[] {
-  const lines = new Set<number>();
-  const directives = new Map<number, string>();
+  const found = new Map<number, string>();
   let line = 1;
   let seen = 0;
   for (const match of source.matchAll(COMMENT)) {
-    line += newlinesIn(source.slice(seen, match.index)).length;
+    line += linesIn(source.slice(seen, match.index)).length - 1;
     seen = match.index;
-    for (const [i, text] of (match[1] ?? "").split("\n").entries()) {
-      const directive = DIRECTIVE.exec(text.replace(/^[\s/*]+/, ""))?.[1];
-      if (directive === undefined) continue;
-      lines.add(line + i);
-      directives.set(line + i, directive);
+    for (const [i, text] of linesIn(match[1] ?? "").entries()) {
+      const directive = DIRECTIVE.exec(text.replace(/^(?:<!--|[\s/*>-])+/, ""))?.[1];
+      if (directive !== undefined) found.set(line + i, directive);
     }
   }
-  return [...lines].map(
-    (at) =>
-      `${path}:${at}: \`${directives.get(at)}\` switches a check off. Fix the code the check ` +
+  return [...found].map(
+    ([at, directive]) =>
+      `${path}:${at}: \`${directive}\` switches a check off. Fix the code the check ` +
       "reports; if the check is wrong, change the check and say why in the commit.",
   );
 }

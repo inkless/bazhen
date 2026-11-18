@@ -3353,6 +3353,8 @@ describe("suppressionFailures", () => {
     "prettier-ignore",
     "@TS-NOCHECK",
     "ESLint-Disable",
+    "biome-ignore-all lint: reason",
+    "biome-ignore-start lint",
   ];
 
   it.each(directives)("flags %s in a line comment, a block comment and a doc comment", (d) => {
@@ -3397,6 +3399,30 @@ describe("suppressionFailures", () => {
     expect(suppressionFailures("a.ts", at("const r = /'/; //", " @ts-ignore"))).toHaveLength(1);
   });
 
+  it("flags a directive in an html comment, on its line or a later one", () => {
+    const d = "prettier-ignore";
+    for (const shape of [
+      `<!-- ${d} -->`,
+      `<!--${d}-->`,
+      `<!--\n  ${d}\n-->`,
+      `a;\n--> ${d}`,
+      `a;\n  -->${d}`,
+    ]) {
+      expect(suppressionFailures("a.cjs", `${shape}\nconst b = 2;\n`)).toHaveLength(1);
+    }
+  });
+
+  it("flags a directive on a line that ends with a carriage return or a unicode separator", () => {
+    const d = "oxlint-disable";
+    for (const end of ["\r", "\r\n", "\u2028", "\u2029"]) {
+      expect(suppressionFailures("a.ts", `/* why${end}${d} */`)).toHaveLength(1);
+      expect(suppressionFailures("a.ts", `// why${end}// ${d}`)).toHaveLength(1);
+      expect(suppressionFailures("a.ts", `a;${end}b;${end}/* ${end}${d} */`)).toEqual([
+        expect.stringContaining("a.ts:4"),
+      ]);
+    }
+  });
+
   it("flags every directive, one failure each", () => {
     const source = `${line("@ts-ignore")}${line("oxlint-disable")}`;
     expect(suppressionFailures("a.ts", source)).toHaveLength(2);
@@ -3417,5 +3443,7 @@ describe("suppressionFailures", () => {
     expect(suppressionFailures("a.ts", "const w = a * b;\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "const u = 'http://example.com/a';\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "/* Why\n   the rule is on. */\n")).toEqual([]);
+    expect(suppressionFailures("a.html", "<!-- Why -->\n<p>a --> b</p>\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "// Why\r\n// the rule is on.\r\n")).toEqual([]);
   });
 });
