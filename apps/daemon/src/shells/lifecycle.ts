@@ -26,6 +26,7 @@ import {
   type OpenShellRequest,
 } from "@bazhen/protocol";
 import { InvalidDirectory, resolveDirectory } from "../agents/cwd.ts";
+import { pastCount } from "../agents/lifecycle.ts";
 import {
   forceable,
   stillRunning,
@@ -97,7 +98,12 @@ const ENDING: ReadonlySet<string> = new Set(["running", "closing"]);
  * generation of the same holder or server than its record names, so the recorded shell has ended.
  */
 export function adopts(found: ShellTerminal, ref: RuntimeRef): boolean {
-  return found.state === "running" && found.runtime !== null && laterGeneration(found.runtime, ref);
+  return (
+    found.state === "running" &&
+    found.runtime !== null &&
+    laterGeneration(found.runtime, ref) &&
+    pastCount(found, ref)
+  );
 }
 
 /** Records `ref`, a process started outside the daemon, as the shell's own. */

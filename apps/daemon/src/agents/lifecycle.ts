@@ -95,7 +95,15 @@ function refuseTaken(store: Store, agentId: AgentSessionId, externalRef: Externa
 export function adopts(found: AgentTerminal, ref: RuntimeRef): boolean {
   if (!agent.accepts(found.state, "process.adopted")) return false;
   if (found.state === "starting" && found.terminalState !== "running") return false;
-  return found.runtime !== null && laterGeneration(found.runtime, ref);
+  return found.runtime !== null && laterGeneration(found.runtime, ref) && pastCount(found, ref);
+}
+
+/**
+ * Whether `ref`'s generation is past the one the store counts for the terminal, which an adoption
+ * must be: a record whose locator names another must not let one through that the store refuses.
+ */
+export function pastCount(found: { readonly generation: number | null }, ref: RuntimeRef): boolean {
+  return found.generation !== null && Number(ref.locator.generation) > found.generation;
 }
 
 /** Records `ref`, a process started outside the daemon, as the agent's own. */

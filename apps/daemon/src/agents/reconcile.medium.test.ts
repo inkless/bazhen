@@ -371,6 +371,26 @@ describe("reconcile", () => {
     expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["starting", 1]);
   });
 
+  it("adopts by the generation the store counts, when the process's record names another", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered);
+    exited(store, agentId);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { generation: "0" } } },
+    });
+    const found = (generation: string) =>
+      fakeEnvironment(store, undefined, () => [
+        { agentId, ref: atGeneration(terminalId, generation), dead: false },
+      ]);
+    await reconcile(store, found("1"));
+    const kept = agentOf(store)?.generation;
+    await reconcile(store, found("2"));
+    expect([kept, agentOf(store)?.generation, adoptions(store).length]).toEqual([1, 2, 1]);
+  });
+
   it("adopts only a generation later than the one recorded", async () => {
     const { store, agentId, terminalId } = await withAgent(numbered);
     const found = (generation: string) =>

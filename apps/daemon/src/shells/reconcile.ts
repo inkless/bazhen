@@ -76,11 +76,12 @@ async function settle(
     return;
   }
   if (found !== undefined) {
+    const adopted = adopts(shell, found.ref);
+    if (adopted) recordAdopted(store, shell.terminalId, found.ref);
     if (found.dead) {
-      await shells.closeExited(shell);
+      await shells.closeExited(adopted ? (store.shell(shell.terminalId) ?? shell) : shell);
       return;
     }
-    if (adopts(shell, found.ref)) recordAdopted(store, shell.terminalId, found.ref);
     // A shell kept as standalone whose session kept its agent's tag: the store is what links it.
     if (found.linkedAgentId !== undefined && shell.linkedAgentId === null)
       await environment.unlinkShell(found.ref);

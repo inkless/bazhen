@@ -37,6 +37,7 @@ import { TerminalLimit } from "../terminals/budget.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { renameAgent } from "./names.ts";
 import { AgentQueue } from "./queue.ts";
+import { reconcile } from "./reconcile.ts";
 import {
   AgentStateConflict,
   EnvironmentUnavailable,
@@ -161,6 +162,7 @@ async function running({
   const fail = (with_?: Error) => (failure = with_);
   return {
     store,
+    terminalId,
     budget,
     prompts,
     promptDir,
@@ -246,6 +248,21 @@ describe("agent lifecycle", () => {
     const { exit, agent } = await running({ starting: true });
     exit("1");
     expect([agent()?.state, agent()?.generation]).toEqual(["exited", 1]);
+  });
+
+  it("records the exit of a process adopted at boot that had already ended", async () => {
+    const { store, agentId, terminalId, exit, agent } = await running();
+    const ref = { terminalId, runtime: "tmux", locator: { generation: "1" } };
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: true }]),
+    );
+    const adopted = [agent()?.state, agent()?.generation];
+    exit("1");
+    expect([adopted, [agent()?.state, agent()?.generation]]).toEqual([
+      ["starting", 1],
+      ["exited", 1],
+    ]);
   });
 
   it("adopts a later process only once its own respawn is recorded", async () => {
