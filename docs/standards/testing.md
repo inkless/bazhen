@@ -165,11 +165,11 @@ Every new test must be shown to fail without the code it covers.
   became `async`, isn't new. A test whose body changes under its title is not read as new either,
   so a rewritten test gets its control by hand. A test whose title isn't a literal is counted by
   the expression that makes it, and a file either copy of which can't be read counts as having a
-  new test whose title couldn't be read. So does every changed `.tsx` test file: falsify can't
-  read JSX, which would otherwise read as regexes and strings that could hide a test call. Falsify
-  doesn't see a test called through another name (`const t = test.extend(…)`), a computed member
-  (`it["skip"]`), a ternary (`c ? it(…) : …`) or an empty last call (`it.each(rows)()`), so a test
-  written that way gets its control by hand.
+  new test whose title couldn't be read. So does every changed test file that is `.tsx` at the
+  base or at HEAD: falsify can't read JSX, which would otherwise read as regexes and strings that
+  could hide or fake a test call. Falsify doesn't see a test called through another name
+  (`const t = test.extend(…)`), a computed member (`it["skip"]`), a ternary (`c ? it(…) : …`) or
+  an empty last call (`it.each(rows)()`), so a test written that way gets its control by hand.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
@@ -206,7 +206,8 @@ Every new test must be shown to fail without the code it covers.
     copy left behind isn't a move;
   - no other trailer that holds names the same old test for another new test. A base test moves
     to one place at most, so a trailer per copy refuses every one of them;
-  - the new title is exactly one test in the new file at HEAD and none in it at the base;
+  - the new title is exactly one test in the new file at HEAD and none in it at the base, and the
+    new file is `.tsx` on neither side;
   - the test's call, from `it` or `test` to its closing parenthesis, is the base's token for
     token with only the title changed. Its quotes, layout, comments and trailing commas may
     change, so it can move into or out of a `describe`.

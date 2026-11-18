@@ -51,7 +51,8 @@ const result = (title: string, status: string, failureMessages: string[] = []): 
   failureMessages,
 });
 
-const changed = (base: string | undefined, head: string) => changedTests(base, head, FILE).titles;
+const changed = (base: string | undefined, head: string) =>
+  changedTests({ file: FILE, base, head }).titles;
 
 const UNPARSED = `<unparsed test in ${FILE}>`;
 
@@ -109,17 +110,34 @@ describe("changedTests", () => {
   it("marks a .tsx file as unparsed, since its JSX can't be read, and says why", () => {
     const tsx = "packages/a/src/view.test.tsx";
     const head = 'it("renders", () => {\n  render(<p>Don\'t</p>);\n});\n';
-    expect(changedTests(head, head, tsx)).toEqual({
+    expect(changedTests({ file: tsx, base: head, head })).toEqual({
       titles: [`<unparsed test in ${tsx}>`],
       unreadable: "falsify can't read JSX",
     });
   });
 
+  it("marks a .ts file git renamed from .tsx as unparsed, since its base's JSX can fake a test call", () => {
+    const tsx = "packages/core/src/x.test.tsx";
+    const base = lines(
+      'it("renders", () => {',
+      '  render(<p>it("adds a", () => {})</p>, <b>x</b>);',
+      "});",
+    );
+    const head = lines('it("renders", () => {});', 'it("adds a", () => {});');
+    expect([
+      changedTests({ file: FILE, base, head, counterpart: FILE }),
+      changedTests({ file: FILE, base, head, counterpart: tsx }),
+    ]).toEqual([
+      { titles: [] },
+      { titles: [UNPARSED], unreadable: `falsify can't read JSX, and its base copy is ${tsx}` },
+    ]);
+  });
+
   it("marks a file either side of which can't be read as unparsed, and says why", () => {
     const good = 'it("a", () => {});\n';
     expect([
-      changedTests('it("a", () => {;\n', good, FILE),
-      changedTests(good, 'it("a, () => {});\n', FILE),
+      changedTests({ file: FILE, base: 'it("a", () => {;\n', head: good }),
+      changedTests({ file: FILE, base: good, head: 'it("a, () => {});\n' }),
     ]).toEqual([
       { titles: [UNPARSED], unreadable: "the base's copy has brackets left open at its end" },
       { titles: [UNPARSED], unreadable: expect.stringMatching(/^HEAD's copy has an unterminated/) },
@@ -1166,6 +1184,25 @@ describe("renameRefusal, when git renamed a file", () => {
     const from = { ...end("adds one", BASE_TESTS, BASE_TESTS), counterpart: renamedFile };
     const to = end("adds one", undefined, movedTo("adds one"), OTHER);
     expect(renameRefusal(from, to)).toBe(`HEAD still has a test "adds one" in ${renamedFile}`);
+  });
+
+  it("refuses a move whose file is .tsx on any side, since falsify can't read its tests", () => {
+    const [oldTsx, newTsx] = [`${FILE}x`, `${OTHER}x`];
+    const from = end("adds one", BASE_TESTS, LEFT);
+    const to = end("adds one", undefined, movedTo("adds one"), OTHER);
+    expect([
+      renameRefusal(from, to),
+      renameRefusal({ ...from, file: oldTsx }, to),
+      renameRefusal({ ...from, counterpart: oldTsx }, to),
+      renameRefusal(from, { ...to, counterpart: newTsx }),
+      renameRefusal(from, { ...to, file: newTsx }),
+    ]).toEqual([
+      undefined,
+      `${oldTsx} is .tsx, whose tests falsify can't read`,
+      `${oldTsx} is .tsx, whose tests falsify can't read`,
+      `${newTsx} is .tsx, whose tests falsify can't read`,
+      `${newTsx} is .tsx, whose tests falsify can't read`,
+    ]);
   });
 });
 
