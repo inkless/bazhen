@@ -9,11 +9,14 @@ let sender: LaunchAgentResponse;
 let peer: LaunchAgentResponse;
 beforeAll(async () => {
   model = await startFakeModel();
-  daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
+  daemon = await Daemon.start({ modelUrl: model.url });
   sender = await daemon.launch("sender");
   peer = await daemon.launch("peer");
   for (const { agentId } of [sender, peer])
-    await waitUntil(() => daemon.screen(agentId).includes("Claude Code"), "Claude Code's TUI");
+    await waitUntil(
+      async () => (await daemon.screen(agentId)).includes("Claude Code"),
+      "Claude Code's TUI",
+    );
 });
 afterAll(async () => {
   await daemon?.stop();

@@ -10,12 +10,12 @@ let daemon: Daemon;
 let terminalId = "";
 let log = "";
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
   log = join(daemon.work, "keys.log");
   const program = await daemon.program([process.execPath, probe, log]);
   terminalId = program.terminalId;
   await waitUntil(
-    () => daemon.screen(program.agentId).includes("key-probe ready"),
+    async () => (await daemon.screen(program.agentId)).includes("key-probe ready"),
     "the key probe",
   );
 });
@@ -47,7 +47,7 @@ async function driver(): Promise<View> {
 }
 
 describe("keys through the terminal stream", () => {
-  it("delivers a lone Esc at once, because the daemon answers tmux's terminal queries", async () => {
+  it("delivers a lone Esc at once, not held back as the start of a sequence", async () => {
     const view = await driver();
     const sent = Date.now();
     view.type("\x1b");
@@ -103,9 +103,6 @@ describe("keys through the terminal stream", () => {
 
   it("delivers the driver's focus reports to the program", async () => {
     const view = await driver();
-    // tmux counts the pane as focused while any client is, and every client starts focused: until
-    // the last test's client has gone, the driver's focus out and back in change nothing.
-    await expect.poll(() => daemon.clientsOf(terminalId), { timeout: 10_000 }).toHaveLength(1);
     const since = Date.now();
     view.type("\x1b[O");
     view.type("\x1b[I");

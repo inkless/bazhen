@@ -26,7 +26,7 @@ async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResp
   const daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
   const agent = await daemon.launch("agent", "claude-code");
   await waitUntil(
-    () => daemon.screen(agent.agentId).includes(BANNER["claude-code"]),
+    async () => (await daemon.screen(agent.agentId)).includes(BANNER["claude-code"]),
     "the agent's banner",
     30_000,
   );
@@ -120,7 +120,7 @@ describe("a running daemon whose tmux server dies", () => {
       after?.externalRef?.id === lost?.externalRef?.id,
     ]).toEqual([false, 409, 200, "running", false]);
     await waitUntil(
-      () => daemon.screen(agent.agentId).includes(BANNER["claude-code"]),
+      async () => (await daemon.screen(agent.agentId)).includes(BANNER["claude-code"]),
       "the fresh session's banner",
       30_000,
     );
@@ -148,7 +148,7 @@ describe("an agent lost with its tmux server, relaunched", () => {
     // The model's reply on screen: a session with no turn yet has no conversation to resume, and
     // an idle signal can arrive before the typed prompt has started one.
     await waitUntil(
-      () => daemon.screen(agent.agentId).includes("● ok"),
+      async () => (await daemon.screen(agent.agentId)).includes("● ok"),
       "the model's reply",
       30_000,
     );

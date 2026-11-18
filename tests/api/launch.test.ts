@@ -61,7 +61,10 @@ describe("launching an agent", () => {
     const { agentId } = LaunchAgentResponse.parse((await launch("hook link")).body);
     await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toMatch(/Claude Code/);
     const link = join(daemon.home, "state", "hook", "bazhen-hook");
-    expect([daemon.agentCommand(agentId).join(" "), daemon.tmux("show-hooks", "-gw")]).toEqual([
+    expect([
+      (await daemon.agentCommand(agentId)).join(" "),
+      daemon.tmux("show-hooks", "-gw"),
+    ]).toEqual([
       expect.stringContaining(`'${link}'`),
       expect.stringContaining(`'${link}' 'pane-title'`),
     ]);

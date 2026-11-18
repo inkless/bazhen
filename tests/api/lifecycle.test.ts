@@ -58,7 +58,7 @@ describe("an agent's lifecycle after launch", () => {
       200, 2,
     ]);
     expect(again.body).toEqual(first.body);
-    expect([(await agentOf(agentId))?.state, daemon.hasTerminal(agentId)]).toEqual([
+    expect([(await agentOf(agentId))?.state, await daemon.hasTerminal(agentId)]).toEqual([
       "closed",
       false,
     ]);
@@ -91,7 +91,7 @@ describe("an agent's lifecycle after launch", () => {
 
   it("respawns an exited agent under the same id, at the next generation, on its session", async () => {
     const { agentId } = await daemon.program(["sleep", "300"]);
-    const before = daemon.panePid(agentId);
+    const before = await daemon.agentPid(agentId);
     const session = (await agentOf(agentId))?.externalRef;
     await daemon.giveTranscript(agentId, String(session?.id));
     await daemon.signalAgent(agentId, "SIGKILL");
@@ -103,7 +103,7 @@ describe("an agent's lifecycle after launch", () => {
       generation: 1,
       externalRef: session,
     });
-    const after = daemon.panePid(agentId);
+    const after = await daemon.agentPid(agentId);
     expect([after !== before, isAlive(after)]).toEqual([true, true]);
   });
 
@@ -122,7 +122,7 @@ describe("an agent's lifecycle after launch", () => {
 
   it("leaves an agent exited and closable when its terminal vanished before a respawn", async () => {
     const agentId = await exitedAgent();
-    daemon.endTerminal(agentId);
+    await daemon.endTerminal(agentId);
     const refused = await respawn(agentId, "respawn-gone");
     const state = (await agentOf(agentId))?.state;
     const closed = await close(agentId, "close-after-reject");

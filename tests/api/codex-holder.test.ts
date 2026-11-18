@@ -52,7 +52,7 @@ beforeAll(async () => {
   daemon = await Daemon.start({ responsesUrl: model.url });
   launched = await daemon.launch("codex-on-holder", "codex");
   await waitUntil(
-    async () => (await daemon.shows(launched.agentId)).includes(BANNER.codex),
+    async () => (await daemon.screen(launched.agentId)).includes(BANNER.codex),
     "Codex's TUI on its holder",
     30_000,
   );

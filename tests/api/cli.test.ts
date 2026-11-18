@@ -153,7 +153,7 @@ describe("bazhen stop", () => {
   it("stops the daemon and leaves its agents running in tmux", async () => {
     const { agentId } = await daemon.launch("kept");
     expect((await bazhen(["stop"], daemon.env)).code).toBe(0);
-    expect(daemon.hasTerminal(agentId)).toBe(true);
+    expect(await daemon.hasTerminal(agentId)).toBe(true);
   });
 });
 
@@ -179,7 +179,7 @@ describe("bazhen start's environment", () => {
   it("keeps a parent session's variables from agents, and passes what the config re-allows", async () => {
     const { agentId } = await daemon.launch("env");
     await expect.poll(() => daemon.hasTerminal(agentId)).toBe(true);
-    const env = daemon.agentEnv(agentId);
+    const env = await daemon.agentEnv(agentId);
     expect(env["CLAUDECODE"]).toBeUndefined();
     expect(env["ITERM_PROFILE"]).toBe("kept-by-config");
   });
@@ -253,11 +253,11 @@ describe('agents.shell = "login"', () => {
     // It is the fixture's `/bin/sh -c` for a moment before then, so wait out the handover, for
     // longer than the default 1 s: a loaded runner can be slow to get from the exec to the TUI.
     await expect
-      .poll(() => daemon.agentCommand(agentId)[0], { timeout: 10_000 })
+      .poll(async () => (await daemon.agentCommand(agentId))[0], { timeout: 10_000 })
       .not.toMatch(/(^|\/)(sh|bash|zsh|fish|login-shell\.sh)$/);
-    const env = daemon.agentEnv(agentId);
+    const env = await daemon.agentEnv(agentId);
     expect([env["BZ_LOGIN_SHELL_ARGS"], env["FROM_RC"]]).toEqual(["-l -i -c", "1"]);
-    expect(daemon.agentCommand(agentId)).toContain("--settings");
+    expect(await daemon.agentCommand(agentId)).toContain("--settings");
   });
 });
 
@@ -289,7 +289,7 @@ describe("bazhen env refresh", () => {
 
     const second = await daemon.launch("after");
     await expect.poll(() => daemon.hasTerminal(second.agentId)).toBe(true);
-    const env = daemon.agentEnv(second.agentId);
+    const env = await daemon.agentEnv(second.agentId);
     expect([env["BZ_FRESH"], env["BZ_STALE"], env["BZ_MULTI"], env["CLAUDECODE"]]).toEqual([
       fresh,
       undefined,
@@ -297,7 +297,7 @@ describe("bazhen env refresh", () => {
       undefined,
     ]);
     // The agent already running keeps what it started with.
-    expect(daemon.agentEnv(first.agentId)["BZ_STALE"]).toBe("from-start");
+    expect((await daemon.agentEnv(first.agentId))["BZ_STALE"]).toBe("from-start");
   });
 
   it("says in doctor that the capture came from a refresh", async () => {

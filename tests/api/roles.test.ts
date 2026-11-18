@@ -12,7 +12,6 @@ let codex: LaunchAgentResponse;
 beforeAll(async () => {
   [messages, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
   daemon = await Daemon.start({
-    runtime: "tmux",
     modelUrl: messages.url,
     responsesUrl: responses.url,
   });
@@ -32,7 +31,7 @@ const agent = async (agentId: string) => (await state()).agents.find((a) => a.id
 /** A turn, once the agent's TUI is up, so the model is sent its system prompt. */
 async function turn(launched: LaunchAgentResponse, harness: keyof typeof BANNER, text: string) {
   await waitUntil(
-    () => daemon.screen(launched.agentId).includes(BANNER[harness]),
+    async () => (await daemon.screen(launched.agentId)).includes(BANNER[harness]),
     `${harness}'s TUI`,
     30_000,
   );
