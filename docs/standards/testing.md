@@ -189,27 +189,37 @@ Every new test must be shown to fail without the code it covers.
   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
   § Tests). Never bypass a hook with `--no-verify`.
 
-- **Renamed tests.** A test given a truer title and nothing else isn't new. Read by title, it
-  looks new, and passing on the base it would come out SURVIVED, which no control clears. Say
-  so in a commit message on the branch, one line per test, with the titles as the source
-  spells them: `Renamed: <old title> -> <new title>`. Falsify prints the test as RENAMED and
-  leaves it out, but only when all of these hold, in the one test file (its old path, if git
-  sees the file as renamed):
-  - the old title is exactly one test at the base and none at HEAD;
-  - the new title is exactly one test at HEAD and none at the base;
+- **Renamed and moved tests.** A test given a truer title, or moved to another test file, and
+  nothing else isn't new. Read by title in its file, it looks new, and passing on the base it
+  would come out SURVIVED, which no control clears, or INVALID, which needs one. Say so in a
+  commit message on the branch, one line per test, naming each side as a `Control:` does, by its
+  file and its title as the source spells it, with no `describe` names:
+  `Renamed: <old file> › <old title> -> <new file> › <new title>`. The old file is its path at
+  the base, the new file its path at HEAD; for a rename in place, both are the same file, and in
+  a file git sees as renamed, they are its two paths. Falsify prints the test as RENAMED and
+  leaves it out, but only when all of these hold:
+  - the old title is exactly one test in the old file at the base and none in it at HEAD, so a
+    copy left behind isn't a move;
+  - the new title is exactly one test in the new file at HEAD and none in it at the base;
   - the test's call, from `it` or `test` to its closing parenthesis, is the base's token for
     token with only the title changed. Its quotes, layout, comments and trailing commas may
-    change, so it can move into or out of a `describe`. That move puts it under the
-    `describe`'s hooks, which falsify doesn't compare, so the reviewer checks them.
+    change, so it can move into or out of a `describe`.
+
+  Falsify compares only that call. A test moved into a `describe` runs under its hooks, and one
+  moved to another file runs under that file's imports, helpers and hooks, so the same tokens can
+  name different things. The reviewer checks that they still mean what they did
+  (`review.md` § Tests).
 
   Any other change to the test (its body, its options, `it` to `it.skip`, or a different test
   under the old title's trailer) is judged as new, as it would be without the trailer. So is a
-  test in a file either copy of which can't be read. A trailer that doesn't apply is printed with
-  the rule it broke. A SURVIVED test that is a lost base test under a new title is printed with
-  the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
-  `describe`, which never made a test look new. Rust tests take no `Renamed:` trailer: a renamed
-  one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the base's
-  falsify reads no `Renamed:` trailer, so a renamed test there also needs a real control.
+  test in a file any copy of which can't be read. A trailer that doesn't apply is printed with
+  the rule it broke, and one naming no file, `Renamed: <old title> -> <new title>`, says so. A
+  SURVIVED or INVALID test that is a lost base test, moved or under a new title, is printed with
+  the trailer it needs, in place of the control an INVALID test would otherwise ask for. A
+  renamed `describe` never made a test look new. Rust tests take no `Renamed:` trailer: a renamed
+  one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the
+  base's falsify reads the trailer as the base spells it, so a renamed or moved test there may
+  also need a real control.
 
 Two lessons from the scaffold's controls:
 

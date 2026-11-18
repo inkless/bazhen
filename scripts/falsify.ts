@@ -49,11 +49,14 @@
 // them or the formatter lays them out. A test that moved, or whose body changed under its title,
 // isn't new.
 //
-// A test renamed and otherwise unchanged isn't new, and a commit trailer on the branch says so:
-// `Renamed: <old title> -> <new title>`. It is left out only when it holds: the old title is one
-// test in the file at the base and none at HEAD, the new title one at HEAD and none at the base,
-// and the test's call is the base's token for token but for the title, comments and layout aside.
-// Any other change, to its body, options or call, leaves it judged as new.
+// A test renamed or moved to another test file, and otherwise unchanged, isn't new, and a commit
+// trailer on the branch says so: `Renamed: <old file> › <old title> -> <new file> › <new title>`,
+// the old file as the base has it and the new as HEAD has it. It is left out only when it holds:
+// the old title is one test in the old file at the base and none in it at HEAD, the new title one
+// in the new file at HEAD and none in it at the base, and the test's call is the base's token for
+// token but for the title, comments and layout aside. Any other change, to its body, options or
+// call, leaves it judged as new. A judged test that is a lost base test so moved or renamed is
+// printed with the trailer it needs.
 //
 // The worktree's dependencies are installed, and built, as the checkout's are, so a test fails
 // there only on the base's source. Under each test that failed, the first line of what failed it.
@@ -335,25 +338,46 @@ export function changedTests(
 
 const RENAMED_TRAILER = /^Renamed: (.+)$/gm;
 const ARROW = " -> ";
+const IN_FILE = " › ";
+const RENAMED_FORM = "<old file> › <old title> -> <new file> › <new title>";
+const MOVED_OR_RENAMED =
+  "Some are a test the base has, moved to another file or under a new title. If that is all " +
+  "they are, say so in a commit message on the branch:";
 
-export type RenameTrailer = { trailer: string; from: string; to: string };
+export type TestRef = { file: string; title: string };
+export type RenameReading = { from: TestRef; to: TestRef };
+export type RenameTrailer = { trailer: string; readings: RenameReading[] };
+
+/** `<file> › <title>`, split at its first `›`, since a path holds none and a title may. */
+function testRef(side: string): TestRef | undefined {
+  const at = side.indexOf(IN_FILE);
+  const title = side.slice(at + IN_FILE.length);
+  return at <= 0 || title === "" ? undefined : { file: side.slice(0, at), title };
+}
 
 /**
- * Each `Renamed: <old> -> <new>` trailer in the branch's messages, split at each of its arrows in
- * turn, since a title could hold one. Only a reading the rename check accepts applies.
+ * Each `Renamed: <old file> › <old title> -> <new file> › <new title>` trailer in the branch's
+ * messages, once, with each reading of it: split at each of its arrows in turn, since a title
+ * could hold one. Only a reading the rename check accepts applies. A trailer with no reading
+ * names no file on one side.
  */
 export function renameTrailers(messages: string): RenameTrailer[] {
-  return [...messages.matchAll(RENAMED_TRAILER)].flatMap(([, line = ""]) => {
-    const trailer = line.trimEnd();
-    const pairs: RenameTrailer[] = [];
+  const lines = new Set(
+    [...messages.matchAll(RENAMED_TRAILER)].map(([, line = ""]) => line.trimEnd()),
+  );
+  return [...lines].map((trailer) => {
+    const readings: RenameReading[] = [];
     for (let at = trailer.indexOf(ARROW); at !== -1; at = trailer.indexOf(ARROW, at + 1)) {
-      const from = trailer.slice(0, at);
-      const to = trailer.slice(at + ARROW.length);
-      if (from !== "" && to !== "") pairs.push({ trailer, from, to });
+      const from = testRef(trailer.slice(0, at));
+      const to = testRef(trailer.slice(at + ARROW.length));
+      if (from !== undefined && to !== undefined) readings.push({ from, to });
     }
-    return pairs;
+    return { trailer, readings };
   });
 }
+
+export const renamedLine = ({ from, to }: RenameReading): string =>
+  `Renamed: ${from.file} › ${from.title} -> ${to.file} › ${to.title}`;
 
 type TestBlock = { title: string; body: string };
 
@@ -367,81 +391,126 @@ function testsIn(source: string): TestBlock[] | string {
     : calls.flatMap(({ title, body }) => (title === undefined ? [] : [{ title, body }]));
 }
 
+/** A test file's text at the base and at HEAD, undefined where that side has no such file. */
+export type FileSides = { file: string; base: string | undefined; head: string | undefined };
+export type RenameEnd = FileSides & { title: string };
+
 /**
- * Why a test titled `to` in a test file at HEAD isn't the base's test `from` under a new title,
- * or undefined when it is. `base` and `head` are the file's text on each side, undefined where
- * that side has no such file. It is a rename only when each title names exactly one test, on its
- * own side alone, and the test's block is the base's with only its title changed.
+ * Why the test `to` isn't the base's test `from`, moved to another file or given a new title,
+ * or undefined when it is. `from` carries the old file at the base and the file git pairs it with
+ * at HEAD; `to` the new file at HEAD and the file git pairs it with at the base. It is a rename
+ * only when the old title is one test in the old file at the base and none in it at HEAD, the new
+ * title one in the new file at HEAD and none in it at the base, and the test's block is the base's
+ * with only its title changed.
  */
-export function renameRefusal(
-  base: string | undefined,
-  head: string | undefined,
-  from: string,
-  to: string,
-): string | undefined {
-  const before = testsIn(base ?? "");
-  const after = testsIn(head ?? "");
-  if (typeof before === "string") return `the base's copy of the file has ${before}`;
-  if (typeof after === "string") return `HEAD's copy of the file has ${after}`;
-  const old = titled(before, from);
+export function renameRefusal(from: RenameEnd, to: RenameEnd): string | undefined {
+  const read: TestBlock[][] = [];
+  for (const [text, copy] of [
+    [from.base, `the base's copy of ${from.file}`],
+    [from.head, `HEAD's copy of ${from.file}`],
+    [to.base, `the base's copy of ${to.file}`],
+    [to.head, `HEAD's copy of ${to.file}`],
+  ] as const) {
+    const tests = testsIn(text ?? "");
+    if (typeof tests === "string") return `${copy} has ${tests}`;
+    read.push(tests);
+  }
+  const [oldBefore = [], oldAfter = [], newBefore = [], newAfter = []] = read;
+  const old = titled(oldBefore, from.title);
   if (old.length !== 1) {
     return old.length === 0
-      ? `the base has no test "${from}"`
-      : `the base has ${old.length} tests "${from}"`;
+      ? `the base has no test "${from.title}" in ${from.file}`
+      : `the base has ${old.length} tests "${from.title}" in ${from.file}`;
   }
-  if (titled(after, from).length > 0) return `HEAD still has a test "${from}"`;
-  if (titled(before, to).length > 0) return `the base already has a test "${to}"`;
-  const now = titled(after, to);
+  if (titled(oldAfter, from.title).length > 0) {
+    return `HEAD still has a test "${from.title}" in ${from.file}`;
+  }
+  if (titled(newBefore, to.title).length > 0) {
+    return `the base already has a test "${to.title}" in ${to.file}`;
+  }
+  const now = titled(newAfter, to.title);
   if (now.length !== 1) {
-    return now.length === 0 ? `HEAD has no test "${to}"` : `HEAD has ${now.length} tests "${to}"`;
+    return now.length === 0
+      ? `HEAD has no test "${to.title}" in ${to.file}`
+      : `HEAD has ${now.length} tests "${to.title}" in ${to.file}`;
   }
   return old[0]?.body === now[0]?.body
     ? undefined
-    : `"${to}" isn't "${from}" with only its title changed`;
+    : `"${to.title}" isn't "${from.title}" with only its title changed`;
 }
 
 /**
- * The title of the one test the base has and HEAD lost that the test `title` renames, by the
- * rule `renameRefusal` applies, or undefined.
+ * The one test of the base's in `olds`, the test files a move or rename could have left, that the
+ * test `to` is, moved or under a new title, by the rule `renameRefusal` applies, or undefined.
  */
-export function renamedFrom(
-  base: string | undefined,
-  head: string | undefined,
-  title: string,
-): string | undefined {
-  const before = testsIn(base ?? "");
-  const froms = new Set(typeof before === "string" ? [] : before.map((t) => t.title));
-  const renamed = [...froms].filter((from) => renameRefusal(base, head, from, title) === undefined);
-  return renamed.length === 1 ? renamed[0] : undefined;
+export function renamedFrom(to: RenameEnd, olds: FileSides[]): TestRef | undefined {
+  const now = testsIn(to.head ?? "");
+  const body = typeof now === "string" ? undefined : titled(now, to.title)[0]?.body;
+  if (body === undefined) return undefined;
+  const found = olds.flatMap((old) => {
+    const before = testsIn(old.base ?? "");
+    if (typeof before === "string") return [];
+    return before
+      .filter((t) => t.body === body && renameRefusal({ ...old, title: t.title }, to) === undefined)
+      .map((t) => ({ file: old.file, title: t.title }));
+  });
+  return found.length === 1 ? found[0] : undefined;
 }
 
-type Target = { file: string; title: string };
-type Sides = (file: string) => { base: string | undefined; head: string | undefined };
+/**
+ * The path a file has on the other side of the branch, at HEAD for a base path and at the base for
+ * a HEAD path. Only a rename git reports gives it another path.
+ */
+export function counterparts(changes: Change[]): {
+  atHead: (path: string) => string;
+  atBase: (path: string) => string;
+} {
+  const renames = changes.flatMap((c) =>
+    c.status === "R" && c.oldPath ? [[c.oldPath, c.path]] : [],
+  );
+  const toHead = new Map(renames.map(([old = "", now = ""]) => [old, now]));
+  const toBase = new Map(renames.map(([old = "", now = ""]) => [now, old]));
+  return { atHead: (p) => toHead.get(p) ?? p, atBase: (p) => toBase.get(p) ?? p };
+}
+
+/** A test file's texts: `old` from its path at the base, `new` from its path at HEAD. */
+type Ends = { old: (file: string) => FileSides; new: (file: string) => FileSides };
 
 /**
- * The new tests left to judge once those a `Renamed:` trailer shows are the base's under a new
- * title are left out, each of those printed. A trailer that applies to no test is printed with why,
- * and its test is judged.
+ * The new tests left to judge once those a `Renamed:` trailer shows are a base test, moved or
+ * under a new title, are left out, each of those printed. A trailer that applies to no test is
+ * printed with why, and its test is judged.
  */
-function leaveOutRenames(found: Target[], trailers: RenameTrailer[], sides: Sides): Target[] {
+function leaveOutRenames(found: TestRef[], trailers: RenameTrailer[], ends: Ends): TestRef[] {
   const applied = new Set<string>();
   const refusals = new Map<string, string>();
   const targets = found.filter((t) => {
-    const { base, head } = sides(t.file);
-    for (const r of trailers.filter((trailer) => trailer.to === t.title)) {
-      const why = renameRefusal(base, head, r.from, r.to);
-      if (why === undefined) {
-        applied.add(r.trailer);
-        console.log(`falsify: RENAMED ${t.file} › ${t.title} (was "${r.from}"), not judged`);
-        return false;
+    for (const { trailer, readings } of trailers) {
+      for (const { from } of readings.filter(
+        (r) => r.to.file === t.file && r.to.title === t.title,
+      )) {
+        const why = renameRefusal(
+          { ...ends.old(from.file), title: from.title },
+          { ...ends.new(t.file), title: t.title },
+        );
+        if (why === undefined) {
+          applied.add(trailer);
+          console.log(
+            `falsify: RENAMED ${t.file} › ${t.title} (was ${from.file} › ${from.title}), not judged`,
+          );
+          return false;
+        }
+        if (!refusals.has(trailer)) refusals.set(trailer, why);
       }
-      if (!refusals.has(r.trailer)) refusals.set(r.trailer, `${t.file}: ${why}`);
     }
     return true;
   });
-  for (const trailer of new Set(trailers.map((r) => r.trailer))) {
+  for (const { trailer, readings } of trailers) {
     if (applied.has(trailer)) continue;
-    const why = refusals.get(trailer) ?? "the branch adds no test of that name";
+    const why =
+      readings.length === 0
+        ? `it names no file: write it as ${RENAMED_FORM}`
+        : (refusals.get(trailer) ?? "the branch adds no test of that name");
     console.log(`falsify: Renamed: ${trailer} doesn't apply (${why}), so its test is judged`);
   }
   return targets;
@@ -1752,19 +1821,19 @@ async function main(args: string[]): Promise<number> {
 
   const changes = parseNameStatus(git(["diff", "--name-status", "-z", "-M", ...range]));
   const tests = changes.filter((c) => c.status !== "D" && TEST_FILE.test(c.path));
-  const basePaths = new Map(
-    tests.map((t) => [t.path, t.status === "R" && t.oldPath ? t.oldPath : t.path]),
-  );
-  const read = new Map<string, ReturnType<Sides>>();
-  const sides: Sides = (file) => {
-    const known = read.get(file);
-    if (known !== undefined) return known;
-    const both = { base: fileAt(base, basePaths.get(file) ?? file), head: fileAt(head, file) };
-    read.set(file, both);
-    return both;
+  const { atHead: headPath, atBase: basePath } = counterparts(changes);
+  const texts = new Map<string, string | undefined>();
+  const textAt = (rev: string, path: string) => {
+    const at = `${rev}:${path}`;
+    if (!texts.has(at)) texts.set(at, fileAt(rev, path));
+    return texts.get(at);
+  };
+  const ends: Ends = {
+    old: (file) => ({ file, base: textAt(base, file), head: textAt(head, headPath(file)) }),
+    new: (file) => ({ file, base: textAt(base, basePath(file)), head: textAt(head, file) }),
   };
   const found = tests.flatMap((t) => {
-    const { base: before, head: after } = sides(t.path);
+    const { base: before, head: after } = ends.new(t.path);
     const { titles, unreadable } = changedTests(before, after ?? "", t.path);
     if (unreadable !== undefined) {
       console.log(
@@ -1773,7 +1842,15 @@ async function main(args: string[]): Promise<number> {
     }
     return titles.map((title) => ({ file: t.path, title }));
   });
-  const targets = leaveOutRenames(found, renameTrailers(messages), sides);
+  const targets = leaveOutRenames(found, renameTrailers(messages), ends);
+  // A test moved out of a file, or renamed in it, leaves that file changed, deleted or renamed.
+  const leavable = changes
+    .filter((c) => c.status !== "A" && TEST_FILE.test(c.oldPath || c.path))
+    .map((c) => ends.old(c.oldPath || c.path));
+  const renameOf = (t: TestRef) => {
+    const from = renamedFrom({ ...ends.new(t.file), title: t.title }, leavable);
+    return from === undefined ? undefined : renamedLine({ from, to: t });
+  };
   const headFiles = new Set(
     git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", head]).split("\0"),
   );
@@ -2065,16 +2142,9 @@ async function main(args: string[]): Promise<number> {
       "\nThese tests pass without the change, so they cannot detect it. Make each one assert the " +
         "behaviour the change introduces (bz-write-unit-test).",
     );
-    const renames = survived.flatMap((r) => {
-      const { base: before, head: after } = sides(r.file);
-      const from = renamedFrom(before, after, r.title);
-      return from === undefined ? [] : [`  Renamed: ${from} -> ${r.title}`];
-    });
+    const renames = survived.flatMap((r) => renameOf(r) ?? []);
     if (renames.length > 0) {
-      console.error(
-        "Some are a test the base has under a new title. If that is all they are, say so in a " +
-          `commit message on the branch:\n${renames.join("\n")}`,
-      );
+      console.error(`${MOVED_OR_RENAMED}\n${renames.map((line) => `  ${line}`).join("\n")}`);
     }
     return 1;
   }
@@ -2106,12 +2176,20 @@ async function main(args: string[]): Promise<number> {
             "source change, binaries the base doesn't build, unparsed titles, load errors, " +
             "timeouts, or runs that left no report).",
     );
-    console.error(
-      "Each needs a control of its own. Break the code by hand, confirm the test fails on its " +
-        "assertion, and record it in a commit message on the branch, naming the test by its " +
-        "file and title:\n" +
-        uncontrolled.map((t) => `  ${controlLine(t)}`).join("\n"),
-    );
+    const hints = uncontrolled.map((test) => ({ test, renamed: renameOf(test) }));
+    const controls = hints.flatMap(({ test, renamed }) => (renamed === undefined ? [test] : []));
+    const moved = hints.flatMap(({ renamed }) => renamed ?? []);
+    if (controls.length > 0) {
+      console.error(
+        "Each needs a control of its own. Break the code by hand, confirm the test fails on its " +
+          "assertion, and record it in a commit message on the branch, naming the test by its " +
+          "file and title:\n" +
+          controls.map((t) => `  ${controlLine(t)}`).join("\n"),
+      );
+    }
+    if (moved.length > 0) {
+      console.error(`${MOVED_OR_RENAMED}\n${moved.map((line) => `  ${line}`).join("\n")}`);
+    }
   }
   return uncontrolledRust.length > 0 || uncontrolled.length > 0 ? 1 : 0;
 }

@@ -15,7 +15,10 @@ already checked (listed at the end).
    the falsify result, or the `Control:` trailer naming the test, says the same, and that the
    break the trailer records would fail that test on its assertion. Is each test the
    smallest size that can fail for the right reason (`testing.md` § Sizes)? Does each test
-   falsify prints as RENAMED have a new title that says what its unchanged body does?
+   falsify prints as RENAMED have a new title that says what its unchanged body does? For one
+   that moved to another file or into a `describe`, do the names its body uses still mean what
+   they did, through the new file's imports and helpers and the hooks it now runs under?
+   Falsify compares only the test's call.
 5. **Errors.** Are expected failures typed? Is anything swallowed? Are third-party errors
    wrapped at the seam?
 6. **Names and comments.** Do names say what things are? Does every comment explain a _why_ the

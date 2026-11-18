@@ -16,6 +16,7 @@ import {
   workspaceBins,
   workspaceExports,
   changedTests,
+  counterparts,
   noOutputReason,
   timeoutFrom,
   parseArgs,
@@ -910,8 +911,18 @@ const RENAMED = renamedTo("adds one to v");
 
 const CHANGED = '"adds one to v" isn\'t "adds one" with only its title changed';
 
+const OTHER = "packages/core/src/y.test.ts";
+
+/** A test titled `title`, in `file`, whose file is `base` at the base and `head` at HEAD. */
+const end = (title: string, base: string | undefined, head: string | undefined, file = FILE) => ({
+  file,
+  title,
+  base,
+  head,
+});
+
 const refusal = (base: string | undefined, head: string) =>
-  renameRefusal(base, head, "adds one", "adds one to v");
+  renameRefusal(end("adds one", base, head), end("adds one to v", base, head));
 
 /** The source with the first test's closing line cut. */
 const cut = (source: string) => source.replace('});\n\nit("keeps v"', '\nit("keeps v"');
@@ -921,27 +932,76 @@ const cut = (source: string) => source.replace('});\n\nit("keeps v"', '\nit("kee
 const miscounted = (...body: string[]) => {
   const base = lines('it("renders", () => {', ...body, "});", "", 'it("keeps", () => {});');
   const head = base.replace('"renders"', '"renders it"').replace("toBe(1)", "toBe(2)");
-  return renameRefusal(base, head, "renders", "renders it");
+  return renameRefusal(end("renders", base, head), end("renders it", base, head));
 };
 
 /** A copy of the base's first test under `title`, after the rest. */
 const withCopy = (source: string, title: string) =>
   source + lines(`it("${title}", () => {`, "  expect(v + 1).toBe(2);", "});");
 
+/** The base's test file without its first test, as it is once that test moves out. */
+const LEFT = BASE_TESTS.replace(/it\("adds one"[\s\S]*?\n\}\);\n\n/, "");
+
+/** Another test file holding the base's first test, under `title`. */
+const movedTo = (title: string) =>
+  lines(
+    'import { expect, it } from "vitest";',
+    'import { v } from "./x.ts";',
+    "",
+    `it("${title}", () => {`,
+    "  expect(v + 1).toBe(2);",
+    "});",
+  );
+
+const ref = (file: string, title: string) => ({ file, title });
+
+type Move = { oldHead?: string | undefined; newBase?: string; newHead?: string };
+
+/** Whether the base's first test, moved out of FILE to OTHER as `title`, is refused, and why. */
+const moveRefusal = (title: string, move: Move = {}) =>
+  renameRefusal(
+    end("adds one", BASE_TESTS, "oldHead" in move ? move.oldHead : LEFT),
+    end(title, move.newBase, move.newHead ?? movedTo(title), OTHER),
+  );
+
 describe("renameTrailers", () => {
-  it("reads each Renamed line, at every arrow a title could split at", () => {
+  it("reads each Renamed line, at every arrow and first › each side could split at", () => {
     const messages = lines(
       "test: rename",
       "",
-      "Renamed: adds one -> adds one to v",
+      `Renamed: ${FILE} › adds one -> ${OTHER} › adds one to v`,
       "Control: x -> y",
-      "Renamed: a -> b -> c",
-      "  Renamed: indented -> ignored",
+      `Renamed: ${FILE} › a › b -> c -> ${OTHER} › d`,
+      "  Renamed: a.test.ts › indented -> a.test.ts › ignored",
     );
     expect(renameTrailers(messages)).toEqual([
-      { trailer: "adds one -> adds one to v", from: "adds one", to: "adds one to v" },
-      { trailer: "a -> b -> c", from: "a", to: "b -> c" },
-      { trailer: "a -> b -> c", from: "a -> b", to: "c" },
+      {
+        trailer: `${FILE} › adds one -> ${OTHER} › adds one to v`,
+        readings: [{ from: ref(FILE, "adds one"), to: ref(OTHER, "adds one to v") }],
+      },
+      {
+        trailer: `${FILE} › a › b -> c -> ${OTHER} › d`,
+        readings: [
+          { from: ref(FILE, "a › b"), to: ref(`c -> ${OTHER}`, "d") },
+          { from: ref(FILE, "a › b -> c"), to: ref(OTHER, "d") },
+        ],
+      },
+    ]);
+  });
+
+  it("reads no rename from a line that names no file on a side", () => {
+    expect(
+      renameTrailers(
+        lines(
+          "Renamed: adds one -> adds one to v",
+          `Renamed: ${FILE} › adds one -> adds one to v`,
+          `Renamed: ${FILE} ›  -> ${FILE} › adds one to v`,
+        ),
+      ),
+    ).toEqual([
+      { trailer: "adds one -> adds one to v", readings: [] },
+      { trailer: `${FILE} › adds one -> adds one to v`, readings: [] },
+      { trailer: `${FILE} ›  -> ${FILE} › adds one to v`, readings: [] },
     ]);
   });
 });
@@ -964,7 +1024,10 @@ describe("renameRefusal", () => {
     expect([
       refusal(BASE_TESTS, RENAMED),
       refusal(BASE_TESTS, moved),
-      renameRefusal(BASE_TESTS, oneLine, "keeps v", "keeps v as it was"),
+      renameRefusal(
+        end("keeps v", BASE_TESTS, oneLine),
+        end("keeps v as it was", BASE_TESTS, oneLine),
+      ),
     ]).toEqual([undefined, undefined, undefined]);
   });
 
@@ -983,21 +1046,21 @@ describe("renameRefusal", () => {
 
   it("judges as new a different test that a trailer claims renames a deleted one", () => {
     const head = BASE_TESTS.replace('it("adds one"', 'it("doubles v"').replace("v + 1", "v * 2");
-    expect(renameRefusal(BASE_TESTS, head, "adds one", "doubles v")).toBe(
-      '"doubles v" isn\'t "adds one" with only its title changed',
-    );
+    expect(
+      renameRefusal(end("adds one", BASE_TESTS, head), end("doubles v", BASE_TESTS, head)),
+    ).toBe('"doubles v" isn\'t "adds one" with only its title changed');
   });
 
   it("judges as new a test whose old title HEAD still has", () => {
     expect(refusal(BASE_TESTS, withCopy(RENAMED, "adds one"))).toBe(
-      'HEAD still has a test "adds one"',
+      `HEAD still has a test "adds one" in ${FILE}`,
     );
   });
 
   it("judges as new a test whose new title the base already has", () => {
     const base = withCopy(BASE_TESTS, "adds one to v");
     expect(refusal(base, renamedTo("adds one to v", base))).toBe(
-      'the base already has a test "adds one to v"',
+      `the base already has a test "adds one to v" in ${FILE}`,
     );
   });
 
@@ -1007,22 +1070,23 @@ describe("renameRefusal", () => {
       refusal(BASE_TESTS, withCopy(RENAMED, "adds one to v")),
       refusal(undefined, RENAMED),
     ]).toEqual([
-      'the base has 2 tests "adds one"',
-      'HEAD has 2 tests "adds one to v"',
-      'the base has no test "adds one"',
+      `the base has 2 tests "adds one" in ${FILE}`,
+      `HEAD has 2 tests "adds one to v" in ${FILE}`,
+      `the base has no test "adds one" in ${FILE}`,
     ]);
   });
 
   it("judges as new a test in a file whose brackets don't balance, or whose template never closes", () => {
     const open = lines('it("renders", () => {', "  expect(render()).toBe(`{", "});");
+    const reopened = open.replace('"renders"', '"renders it"');
     expect([
       refusal(cut(BASE_TESTS), cut(RENAMED)),
       refusal(BASE_TESTS, cut(RENAMED)),
-      renameRefusal(open, open.replace('"renders"', '"renders it"'), "renders", "renders it"),
+      renameRefusal(end("renders", open, reopened), end("renders it", open, reopened)),
     ]).toEqual([
-      "the base's copy of the file has brackets left open at its end",
-      "HEAD's copy of the file has brackets left open at its end",
-      expect.stringMatching(/^the base's copy of the file has an unterminated literal/),
+      `the base's copy of ${FILE} has brackets left open at its end`,
+      `HEAD's copy of ${FILE} has brackets left open at its end`,
+      expect.stringMatching(new RegExp(`^the base's copy of ${FILE} has an unterminated literal`)),
     ]);
   });
 
@@ -1049,14 +1113,84 @@ describe("renameRefusal", () => {
       ),
     ]).toEqual([rendersChanged, rendersChanged, rendersChanged]);
   });
+
+  it("accepts a test moved to another file, under its title or a new one, out of a file kept or deleted", () => {
+    expect([
+      moveRefusal("adds one"),
+      moveRefusal("adds one to v"),
+      moveRefusal("adds one", { oldHead: undefined }),
+      moveRefusal("adds one", { newBase: lines('it("other", () => {});') }),
+    ]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("judges as new a test moved to another file whose body changed", () => {
+    expect(
+      moveRefusal("adds one", { newHead: movedTo("adds one").replace("v + 1", "1 + v") }),
+    ).toBe('"adds one" isn\'t "adds one" with only its title changed');
+  });
+
+  it("judges as new a copy of a test the old file keeps", () => {
+    expect(moveRefusal("adds one", { oldHead: BASE_TESTS })).toBe(
+      `HEAD still has a test "adds one" in ${FILE}`,
+    );
+  });
+
+  it("judges as new a move into a file the base already has the title in, or out of one the base lacks", () => {
+    expect([
+      moveRefusal("adds one", { newBase: movedTo("adds one") }),
+      renameRefusal(
+        end("adds one", undefined, LEFT),
+        end("adds one", undefined, movedTo("adds one"), OTHER),
+      ),
+    ]).toEqual([
+      `the base already has a test "adds one" in ${OTHER}`,
+      `the base has no test "adds one" in ${FILE}`,
+    ]);
+  });
 });
+
+/** The test files a move or rename could have left: FILE, as `head` at HEAD, and OTHER. */
+const olds = (head: string | undefined) => [
+  { file: OTHER, base: undefined, head: movedTo("adds one") },
+  { file: FILE, base: BASE_TESTS, head },
+];
+
+/** The base test the first test renamed to "adds one to v" in `head` is, if it is one. */
+const renamedIn = (head: string) => renamedFrom(end("adds one to v", BASE_TESTS, head), olds(head));
 
 describe("renamedFrom", () => {
   it("names the lost base test a new test renames, and nothing for a new test", () => {
     expect([
-      renamedFrom(BASE_TESTS, RENAMED, "adds one to v"),
-      renamedFrom(BASE_TESTS, RENAMED.replace("toBe(2)", "toBe(3)"), "adds one to v"),
-      renamedFrom(BASE_TESTS, withCopy(RENAMED, "adds one"), "adds one to v"),
-    ]).toEqual(["adds one", undefined, undefined]);
+      renamedIn(RENAMED),
+      renamedIn(RENAMED.replace("toBe(2)", "toBe(3)")),
+      renamedIn(withCopy(RENAMED, "adds one")),
+    ]).toEqual([{ file: FILE, title: "adds one" }, undefined, undefined]);
+  });
+
+  it("names the lost base test in another file that a new test moves, and nothing for a copy", () => {
+    const moved = end("adds one", undefined, movedTo("adds one"), OTHER);
+    expect([renamedFrom(moved, olds(LEFT)), renamedFrom(moved, olds(BASE_TESTS))]).toEqual([
+      { file: FILE, title: "adds one" },
+      undefined,
+    ]);
+  });
+
+  it("names nothing when two lost base tests could each be the one moved", () => {
+    const twin = { file: "packages/core/src/z.test.ts", base: BASE_TESTS, head: LEFT };
+    const moved = end("adds one", undefined, movedTo("adds one"), OTHER);
+    expect(renamedFrom(moved, [...olds(LEFT), twin])).toBeUndefined();
+  });
+});
+
+describe("counterparts", () => {
+  it("pairs a renamed file's paths, and leaves any other file's as they are", () => {
+    const changes = parseNameStatus(["R087", "a.test.ts", "b.test.ts", "M", "c.ts", ""].join("\0"));
+    const { atHead, atBase } = counterparts(changes);
+    expect([atHead("a.test.ts"), atBase("b.test.ts"), atHead("c.ts"), atBase("c.ts")]).toEqual([
+      "b.test.ts",
+      "a.test.ts",
+      "c.ts",
+      "c.ts",
+    ]);
   });
 });
