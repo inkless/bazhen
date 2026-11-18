@@ -11,8 +11,9 @@ export const PEER_SOURCE = fileURLToPath(
 export const PEER_COMMAND = "bazhen-peer";
 
 /**
- * A socket peer as `bazhen-peer` names it: its pid, its session, the nearest Codex app-server
- * among it and its ancestors, and its ancestors to the root.
+ * A socket peer as `bazhen-peer` names it: its pid, its session (0 for one led from outside the
+ * daemon's PID namespace, which no terminal's process leads), the nearest Codex app-server among
+ * it and its ancestors, and its ancestors to the root.
  */
 export interface PeerChain {
   readonly pid: number;

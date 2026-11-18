@@ -6,7 +6,8 @@
 //! Every answer is whole or refused. A walk that stops at a process it can't read might have
 //! passed an agent's terminal, and a peer that has gone, or whose pid another process now holds,
 //! isn't the one the kernel named at accept: either would read as no agent's, so neither is
-//! answered.
+//! answered. Nor is a peer the kernel can't name, outside the daemon's PID namespace, as a host
+//! process calling a daemon in a container is.
 //!
 //! It also names the Codex app-server above the caller, if there is one. Codex runs an agent's tool
 //! commands in that server, which is in no terminal, so without it the daemon would take them for
@@ -25,29 +26,26 @@ use rustix::process::{Pid, geteuid};
 /// Past any real process tree's depth: a walk this long is a cycle, and is refused.
 pub const MAX_ANCESTORS: usize = 256;
 
-/// The process at the other end of a connection, the session it is in, the nearest Codex
-/// app-server among it and its ancestors, and every ancestor it has, nearest first, through init or
-/// the first process of its PID namespace.
+/// The process at the other end of a connection, the session it is in (`None` for one led from
+/// outside the daemon's PID namespace, which no terminal the daemon runs can lead), the nearest
+/// Codex app-server among it and its ancestors, and every ancestor it has, nearest first, through
+/// init or the first process of its PID namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Peer {
     pub pid: Pid,
-    pub session: Pid,
+    pub session: Option<Pid>,
     pub codex_server: Option<Pid>,
     pub ancestors: Vec<Pid>,
 }
 
-/// One line of decimals: the pid, the session, the Codex app-server or 0, then each ancestor. The
+/// One line of decimals: the pid, the session or 0, the Codex app-server or 0, then each ancestor. The
 /// app-server comes before the ancestors, so a reader that expects no such field reads one of them
 /// as it, which refuses the call rather than passing it as the human's.
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let session = self.session.map_or(0, Pid::as_raw_pid);
         let codex_server = self.codex_server.map_or(0, Pid::as_raw_pid);
-        write!(
-            f,
-            "{} {} {codex_server}",
-            self.pid.as_raw_pid(),
-            self.session.as_raw_pid()
-        )?;
+        write!(f, "{} {session} {codex_server}", self.pid.as_raw_pid())?;
         for ancestor in &self.ancestors {
             write!(f, " {}", ancestor.as_raw_pid())?;
         }
@@ -272,7 +270,7 @@ mod tests {
         let peer = of(ours.as_fd(), now()).unwrap();
         assert_eq!(
             (peer.pid, peer.session, peer.ancestors.first().copied()),
-            (getpid(), getsid(None).unwrap(), getppid()),
+            (getpid(), Some(getsid(None).unwrap()), getppid()),
         );
     }
 
@@ -290,7 +288,7 @@ mod tests {
     fn prints_one_line_of_the_pid_the_session_no_codex_server_and_each_ancestor() {
         let peer = Peer {
             pid: pid(50),
-            session: pid(45),
+            session: Some(pid(45)),
             codex_server: None,
             ancestors: vec![pid(40), pid(1)],
         };
@@ -298,10 +296,21 @@ mod tests {
     }
 
     #[test]
+    fn prints_0_for_a_session_led_from_outside_the_namespace() {
+        let peer = Peer {
+            pid: pid(50),
+            session: None,
+            codex_server: Some(pid(40)),
+            ancestors: vec![pid(40), pid(1)],
+        };
+        assert_eq!(peer.to_string(), "50 0 40 40 1");
+    }
+
+    #[test]
     fn prints_the_codex_server_before_the_ancestors() {
         let peer = Peer {
             pid: pid(50),
-            session: pid(50),
+            session: Some(pid(50)),
             codex_server: Some(pid(40)),
             ancestors: vec![pid(40), pid(1)],
         };
