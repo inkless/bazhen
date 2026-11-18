@@ -449,17 +449,23 @@ const loadsChildProcess = (arg: unknown) => {
  * import, a member of child_process imported whole, or a `const` aliasing or promisifying it,
  * which is followed in turn. Any other use is an error, since what it reaches can't be read:
  * `.call`, `.apply`, `(0, spawn)`, an object, a conditional, an argument, an export, a promisify
- * called on the spot. So is child_process loaded other than by a static import, and a `heard`
- * that isn't host-guard's.
+ * called on the spot, a `ChildProcess` made by hand. So is child_process loaded other than by a
+ * static import, and a `heard` that isn't host-guard's own binding, though named like it.
  */
 const stdioGuard = {
   create(context: Context) {
-    /** The names host-guard's `heard` is bound to here, and host-guard's namespaces. */
-    const heards = new Set<string>();
-    const hostGuards = new Set<string>();
-    /** Variables bound to a start, and to child_process whole. */
+    /** Variables bound to host-guard's `heard`, and to host-guard whole. */
+    const heards: Variable[] = [];
+    const hostGuards: Variable[] = [];
+    /** Variables bound to a start, to child_process whole, and to its `ChildProcess`. */
     const starts: Variable[] = [];
     const modules: Variable[] = [];
+    const classes: Variable[] = [];
+    /** Each identifier that reads one of `variables`: a name shadowing it reads its own. */
+    const readers = (variables: Variable[]) =>
+      new Set(variables.flatMap((v) => v.references.map((r) => r.identifier)));
+    let heardReads = new Set<Node>();
+    let hostGuardReads = new Set<Node>();
     const seen = new Set<Variable>();
     const bind = (node: Node, into: Variable[]) => {
       for (const variable of context.sourceCode.getDeclaredVariables(node))
@@ -470,11 +476,13 @@ const stdioGuard = {
     const offersHeard = (source: string) =>
       isHostGuard(source) ||
       (source === "./child.ts" && /packages\/host-guard\/src\/[^/]+$/.test(context.filename ?? ""));
+    /** Whether a callee is host-guard's `heard` itself, by its binding, not its name. */
     const isHeardCallee = (callee: unknown) =>
       isNode(callee) &&
-      ((callee.type === "Identifier" && heards.has(String(callee["name"]))) ||
+      ((callee.type === "Identifier" && heardReads.has(callee)) ||
         (callee.type === "MemberExpression" &&
-          hostGuards.has(nameOf(callee["object"]) ?? "") &&
+          isNode(callee["object"]) &&
+          hostGuardReads.has(callee["object"]) &&
           memberName(callee) === "heard"));
     /** Judges one place a start is reached, `node` being the name or member that reaches it. */
     const judge = (node: Node) => {
@@ -500,16 +508,16 @@ const stdioGuard = {
         if (node["importKind"] === "type") return;
         for (const spec of nodes(node["specifiers"])) {
           if (spec["importKind"] === "type") continue;
-          const local = nameOf(spec["local"]) ?? "";
           const imported = nameOf(spec["imported"]);
           const named = spec.type === "ImportSpecifier" && imported !== "default";
           if (offersHeard(source)) {
-            if (named && imported === "heard") heards.add(local);
-            else if (!named) hostGuards.add(local);
+            if (named && imported === "heard") bind(spec, heards);
+            else if (!named) bind(spec, hostGuards);
           }
           if (!CHILD_PROCESS.has(source)) continue;
           if (!named) bind(spec, modules);
           else if (ASYNC_STARTS.has(imported ?? "")) bind(spec, starts);
+          else if (imported === "ChildProcess") bind(spec, classes);
         }
       },
       ImportExpression(node: Node) {
@@ -529,6 +537,11 @@ const stdioGuard = {
         if (node["exportKind"] !== "type" && loadsChildProcess(node["source"])) report(node);
       },
       "Program:exit"() {
+        heardReads = readers(heards);
+        hostGuardReads = readers(hostGuards);
+        // A ChildProcess made by hand starts a process by its `spawn`, which can't be followed.
+        for (const { identifier: id } of classes.flatMap((v) => v.references))
+          if (!isTypeOf(id)) report(id);
         for (const variable of modules) {
           for (const { identifier: id } of variable.references) {
             if (isTypeOf(id)) continue;
@@ -536,7 +549,8 @@ const stdioGuard = {
             const member =
               parent?.type === "MemberExpression" && parent["object"] === id ? parent : undefined;
             const name = member === undefined ? undefined : memberName(member);
-            if (member === undefined || name === undefined || name === "default") report(id);
+            const unread = name === undefined || name === "default" || name === "ChildProcess";
+            if (member === undefined || unread) report(id);
             else if (ASYNC_STARTS.has(name)) judge(member);
           }
         }

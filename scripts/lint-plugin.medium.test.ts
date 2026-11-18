@@ -334,11 +334,11 @@ describe("the stdio-guard rule", () => {
     ).toEqual([8, 9, 10, 11, 12, 13, 14, 21, 22]);
   });
 
-  it("flags each use of a start it can't follow to a heard call, and a heard that isn't host-guard's", () => {
+  it("flags each use of a start it can't follow to a heard call, and a heard that isn't host-guard's binding", () => {
     expect(
       unheard(
         [
-          'import { spawn, execFile } from "node:child_process";',
+          'import { spawn, execFile, ChildProcess } from "node:child_process";',
           'import * as cp from "node:child_process";',
           'import { promisify } from "node:util";',
           'import { heard } from "./child.ts";',
@@ -365,8 +365,15 @@ describe("the stdio-guard rule", () => {
           "void [o, pick, s2, r, heard];",
           "const t = require(`node:child_process`);",
           "void t;",
+          'function f(heard: (c: unknown) => unknown) { heard(spawn("ps", [])); }',
+          'function g() { const heard = (c: unknown) => c; heard(cp.spawn("ps", [])); }',
+          'function h(hg: { heard: (c: unknown) => unknown }) { hg.heard(spawn("ps", [])); }',
+          "new ChildProcess();",
+          "new cp.ChildProcess();",
+          "declare const kept: ChildProcess;",
+          "void [f, g, h, kept];",
         ].join("\n"),
       ),
-    ).toEqual([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 26]);
+    ).toEqual([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 26, 28, 29, 30, 31, 32]);
   });
 });
