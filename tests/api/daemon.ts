@@ -47,6 +47,7 @@ import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.t
 import { closeHolderAt, closeHoldersUnder, leftBehind } from "../support/holder-close.ts";
 import { giveTranscript } from "../support/transcript.ts";
 import { LogTail } from "../support/log-tail.ts";
+import { programsOnPath, runAsNextAgent } from "../support/programs.ts";
 import { replay } from "./fixtures/browser.ts";
 
 const run = promisify(execFile);
@@ -148,30 +149,6 @@ function cliOnPath(home: string): string {
   symlinkSync(CLI, join(dir, "bazhen"));
   return dir;
 }
-
-/**
- * A directory under `home` holding a `claude` that runs the program `Daemon.program` queued, as
- * the agent's own process, or else the real Claude Code. The queued script is claimed by a rename,
- * which only one launch can win, under the id of the agent that won it.
- */
-function programsOnPath(home: string): string {
-  const dir = join(home, "programs");
-  mkdirSync(dir, { recursive: true });
-  const shim = join(dir, "claude");
-  writeFileSync(
-    shim,
-    `#!/bin/sh\n` +
-      `if mv ${shellWord(`${dir}/next`)} ${shellWord(dir)}"/taken-$BAZHEN_AGENT_ID" 2>/dev/null; then\n` +
-      `  exec /bin/sh ${shellWord(dir)}"/taken-$BAZHEN_AGENT_ID"\n` +
-      `fi\n` +
-      `exec ${shellWord(join(bin, "claude"))} "$@"\n`,
-  );
-  chmodSync(shim, 0o755);
-  return dir;
-}
-
-/** `arg` quoted for sh, as one word. */
-const shellWord = (arg: string) => `'${arg.replaceAll("'", `'\\''`)}'`;
 
 /** A directory under `home` holding a `tmux` that runs nothing, and records each command line. */
 function absentTmux(home: string): string {
@@ -334,7 +311,7 @@ export class Daemon {
 
     const first = [
       cliOnPath(home),
-      programsOnPath(home),
+      programsOnPath(home, join(bin, "claude")),
       ...(opts.withoutTmux === true ? [absentTmux(home)] : []),
     ];
     this.env = {
@@ -1156,23 +1133,18 @@ export class Daemon {
    * one the daemon knows and streams, and `argv` is the process it records.
    */
   async program(argv: readonly string[]): Promise<{ agentId: string; terminalId: string }> {
-    const dir = join(this.home, "programs");
-    const next = join(dir, "next");
-    writeFileSync(next, `exec ${argv.map(shellWord).join(" ")}\n`);
-    let ids: { agentId: string; terminalId: string };
-    try {
-      const launched = await this.launch(`program-${++programs}`);
-      ids = { agentId: launched.agentId, terminalId: String(launched.terminalId) };
-      await waitUntil(() => !existsSync(next), "a launch to take the program");
-    } catch (error) {
-      // Left queued, it would run in place of the next Claude Code this daemon launches.
-      rmSync(next, { force: true });
-      throw error;
-    }
-    if (!existsSync(join(dir, `taken-${ids.agentId}`))) {
-      throw new Error(`another launch took the program meant for ${ids.agentId}`);
-    }
-    return ids;
+    let terminalId = "";
+    const agentId = await runAsNextAgent(
+      this.home,
+      argv,
+      async () => {
+        const launched = await this.launch(`program-${++programs}`);
+        terminalId = String(launched.terminalId);
+        return launched.agentId;
+      },
+      waitUntil,
+    );
+    return { agentId, terminalId };
   }
 
   /**

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 import { agentHomes, loginEnv } from "../support/agent-env.ts";
+import { programsOnPath } from "../support/programs.ts";
 import { requireDisposableHost } from "../support/disposable-host.ts";
 import {
   e2eDaemons,
@@ -85,7 +86,8 @@ function daemonEnv({ runtime, home, daemonPort, webPort }: E2eDaemon): Record<st
     BAZHEN_WEB_PORT: String(webPort),
     // With no external origin, "auto" asks no browser to pair; the suite pairs, as a phone would.
     BAZHEN_PAIRING: "always",
-    PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
+    // A `claude` that runs a program a spec queued as the next agent, or else Claude Code.
+    PATH: `${programsOnPath(home, join(claudeBin, "claude"))}:${claudeBin}:${process.env["PATH"] ?? ""}`,
     ...agentHomes(home, String(process.env["BZ_E2E_WORK"])),
   };
 }
@@ -120,7 +122,10 @@ export default defineConfig<object, DaemonOptions>({
   // Each project is named for its runtime, which is how a spec finds its daemon.
   projects: daemons.map((daemon) => ({
     name: daemon.runtime,
-    ...(daemon.runtime === "tmux" ? {} : { testMatch: RUNTIME_AGNOSTIC_SPECS }),
+    // A *.holder.spec.ts reads what only a holder's view shows: its bytes, as the program wrote them.
+    ...(daemon.runtime === "tmux"
+      ? { testIgnore: "*.holder.spec.ts" }
+      : { testMatch: [...RUNTIME_AGNOSTIC_SPECS, "*.holder.spec.ts"] }),
     use: {
       ...devices["Desktop Chrome"],
       baseURL: webOrigin(daemon),
