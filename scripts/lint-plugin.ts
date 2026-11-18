@@ -9,7 +9,8 @@
 // to a tool that isn't tmux; rename the argument or move the call into host-guard. A start it
 // can't read the argv of is an error too: one imported from child_process or host-guard used
 // other than as a call (`Reflect.apply`, a seam object, an export), and either module loaded other
-// than by a static import (`require`, `import()`, a re-export).
+// than by a static import (`require`, `import()`, a re-export). `stdio-guard`: in product source,
+// each async child_process start is wrapped in host-guard's `heard()` where it is made.
 
 import { CHILD_PROCESS_MODULES, CHILD_PROCESS_STARTS } from "./child-process.ts";
 
@@ -423,10 +424,86 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
   },
 });
 
+const UNHEARD =
+  "Wrap a child_process start in heard() from @bazhen/host-guard where it is made, so a stdio " +
+  "stream that breaks can't end this process (docs/standards/code.md).";
+/** The starts that return a child with streams: the sync ones return when the child has gone. */
+const ASYNC_STARTS = new Set(["spawn", "exec", "execFile", "fork"]);
+
+/**
+ * `stdio-guard`: each async child_process start, by its name, an import alias, a `promisify` of
+ * it, or a member of child_process imported whole, is called as the one argument of `heard(`.
+ * A child's stdio streams are sockets this process holds, and one that fails with no listener
+ * throws out of the event loop. A start reached other than by a call is `host-guard`'s to flag.
+ */
+const stdioGuard = {
+  create(context: Context) {
+    const starts = new Set<string>();
+    const modules = new Set<string>();
+    const declarators: { name: string; init: Node }[] = [];
+    const calls: Node[] = [];
+    /** Whether `node` names an async start: a bound name, or a member of child_process whole. */
+    const isStart = (node: unknown): boolean =>
+      isNode(node) &&
+      ((node.type === "Identifier" && starts.has(String(node["name"]))) ||
+        (node.type === "MemberExpression" &&
+          modules.has(nameOf(node["object"]) ?? "") &&
+          ASYNC_STARTS.has(memberName(node) ?? "")));
+    const isHeard = (call: Node) => {
+      const parent = parentOf(call);
+      return (
+        parent?.type === "CallExpression" &&
+        calleeName(parent["callee"]) === "heard" &&
+        nodes(parent["arguments"]).length === 1 &&
+        nodes(parent["arguments"])[0] === call
+      );
+    };
+    return {
+      ImportDeclaration(node: Node) {
+        const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
+        if (!CHILD_PROCESS.has(source) || node["importKind"] === "type") return;
+        for (const spec of nodes(node["specifiers"])) {
+          const local = nameOf(spec["local"]) ?? "";
+          const imported = nameOf(spec["imported"]);
+          if (spec.type !== "ImportSpecifier" || imported === "default") modules.add(local);
+          else if (spec["importKind"] !== "type" && ASYNC_STARTS.has(imported ?? ""))
+            starts.add(local);
+        }
+      },
+      VariableDeclarator(node: Node) {
+        const id = node["id"];
+        const init = node["init"];
+        if (isNode(id) && id.type === "Identifier" && isNode(init))
+          declarators.push({ name: String(id["name"]), init });
+      },
+      CallExpression(node: Node) {
+        calls.push(node);
+      },
+      "Program:exit"() {
+        for (let grew = true; grew;) {
+          grew = false;
+          for (const { name, init } of declarators) {
+            const start =
+              isStart(init) ||
+              (init.type === "CallExpression" &&
+                isPromisify(init["callee"]) &&
+                nodes(init["arguments"]).some(isStart));
+            if (start && !starts.has(name)) grew = Boolean(starts.add(name));
+          }
+        }
+        for (const call of calls)
+          if (isStart(call["callee"]) && !isHeard(call))
+            context.report({ node: call, message: UNHEARD });
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "bazhen" },
   rules: {
     "host-guard": guard({ tmux: true, signals: false }),
     "signal-guard": guard({ tmux: false, signals: true }),
+    "stdio-guard": stdioGuard,
   },
 };

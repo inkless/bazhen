@@ -273,3 +273,64 @@ describe("the signal-guard rule on process passed on whole", () => {
     expect(flagged("export default globalThis.process;")).toEqual([1]);
   });
 });
+
+/** The lines oxlint reports under `bazhen(stdio-guard)` in `source`, the rule on as in product. */
+function unheard(source: string): number[] {
+  const config = join(dir, "stdio-guard.json");
+  writeFileSync(
+    config,
+    JSON.stringify({
+      jsPlugins: [join(repo, "scripts/lint-plugin.ts")],
+      rules: { "bazhen/stdio-guard": "error" },
+    }),
+  );
+  const file = join(dir, "stdio.ts");
+  writeFileSync(file, source);
+  let out = "";
+  try {
+    execFileSync(join(repo, "node_modules/.bin/oxlint"), ["-c", config, "-f", "unix", file], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+  } catch (error) {
+    out = String(Reflect.get(Object(error), "stdout"));
+  }
+  return [...out.matchAll(/stdio\.ts:(\d+):\d+: .* \[\w+\/bazhen\(stdio-guard\)\]/g)]
+    .map((m) => Number(m[1]))
+    .toSorted((a, b) => a - b);
+}
+
+describe("the stdio-guard rule", () => {
+  it("flags each async start not wrapped in heard where it is made, by whatever name it is bound", () => {
+    expect(
+      unheard(
+        [
+          'import { execFile, spawn as sp, fork, execFileSync, type ChildProcess } from "node:child_process";',
+          'import * as cp from "child_process";',
+          'import cpd from "node:child_process";',
+          'import { promisify } from "node:util";',
+          'import { heard } from "@bazhen/host-guard";',
+          "const run = promisify(execFile);",
+          "const ef = cp.execFile;",
+          'execFile("ps", [], () => {});',
+          'sp("ps", []);',
+          'fork("x.js");',
+          'void run("ps", []);',
+          'ef("ps", [], () => {});',
+          'cp.spawn("ps", []);',
+          'cpd.exec("ps", () => {});',
+          'const c = heard(sp("ps", [])).unref();',
+          'heard(execFile("ps", [], () => {}));',
+          'void heard(run("ps", []));',
+          'heard(cp.spawn("ps", []));',
+          'execFileSync("ps", []);',
+          'cp.spawnSync("ps", []);',
+          'other(execFile("ps", [], () => {}));',
+          'heard(execFile("ps", [], () => {}), 1);',
+          "declare const other: (c: ChildProcess, n?: number) => void;",
+          "void c;",
+        ].join("\n"),
+      ),
+    ).toEqual([8, 9, 10, 11, 12, 13, 14, 21, 22]);
+  });
+});

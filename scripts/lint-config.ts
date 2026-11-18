@@ -251,6 +251,7 @@ export type Override = {
     "no-restricted-imports"?: Restriction;
     "bazhen/host-guard"?: "off";
     "bazhen/signal-guard"?: "off";
+    "bazhen/stdio-guard"?: "error" | "off";
   };
 };
 type Restriction = ["error", { patterns: Pattern[] }];
@@ -389,6 +390,12 @@ function overrides(): Override[] {
     ...areas,
     { files: ["packages/host-guard/src/**"], rules: { "bazhen/host-guard": "off" } },
     { files: ["packages/host-guard/src/signal.ts"], rules: { "bazhen/signal-guard": "off" } },
+    // Product source only: a test's or a script's child ends with the run it belongs to.
+    { files: ["apps/*/src/**", "packages/*/src/**"], rules: { "bazhen/stdio-guard": "error" } },
+    {
+      files: ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"],
+      rules: { "bazhen/stdio-guard": "off" },
+    },
   ];
 }
 
@@ -416,6 +423,7 @@ export const config = {
     "react/react-in-jsx-scope": "off",
     "bazhen/host-guard": "error",
     "bazhen/signal-guard": "error",
+    "bazhen/stdio-guard": "off",
   },
   overrides: overrides(),
   ignorePatterns: ["dist/**", "spikes/**", "**/node_modules/**"],

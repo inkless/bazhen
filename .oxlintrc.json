@@ -39,7 +39,8 @@
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
     "bazhen/host-guard": "error",
-    "bazhen/signal-guard": "error"
+    "bazhen/signal-guard": "error",
+    "bazhen/stdio-guard": "off"
   },
   "overrides": [
     {
@@ -4255,6 +4256,25 @@
       ],
       "rules": {
         "bazhen/signal-guard": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/*/src/**",
+        "packages/*/src/**"
+      ],
+      "rules": {
+        "bazhen/stdio-guard": "error"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/testing/**"
+      ],
+      "rules": {
+        "bazhen/stdio-guard": "off"
       }
     }
   ],
