@@ -18,6 +18,11 @@
 //! waiting once the shell `--shell` names is gone. `--brackets` says the editor reads a paste
 //! marked with the bracketed-paste sequences whether or not it has asked for bracketed paste yet,
 //! so the daemon marks it itself.
+//!
+//! `bazhen-hook shell-prompt --no-retype`, run instead at a shell that won't take a line typed
+//! back, tells the daemon so at once, on a route of its own, so a line held for the shell is
+//! dropped then rather than once its time to report a prompt runs out. Nothing is to be typed, so
+//! its copy doesn't wait.
 
 use std::env;
 use std::fmt::Write as _;
@@ -79,32 +84,36 @@ fn detach(command: &str, args: &[String], stdin: Stdio) -> Option<std::process::
         .ok()
 }
 
-/// What `shell-prompt` was asked: whether to ask for the paste to be marked, and the shell's pid.
+/// What `shell-prompt` was asked to report.
 #[derive(Debug, PartialEq)]
-pub struct PromptArgs {
-    brackets: bool,
-    shell: Option<Pid>,
+pub enum PromptArgs {
+    /// The shell's editor is about to read: whether to ask for the paste to be marked, and the
+    /// shell's pid.
+    Reading { brackets: bool, shell: Option<Pid> },
+    /// The shell won't take a line typed back.
+    NoRetype,
 }
 
-/// `[--brackets] [--shell <pid>]`, in either order; anything else, or a pid of 1 or less, is
-/// refused.
+/// `--no-retype` alone, or `[--brackets] [--shell <pid>]` in either order; anything else, or a
+/// pid of 1 or less, is refused.
 pub fn prompt_args(args: &[String]) -> Option<PromptArgs> {
-    let mut parsed = PromptArgs {
-        brackets: false,
-        shell: None,
-    };
+    if matches!(args, [only] if only == "--no-retype") {
+        return Some(PromptArgs::NoRetype);
+    }
+    let mut brackets = false;
+    let mut shell = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--brackets" => parsed.brackets = true,
+            "--brackets" => brackets = true,
             "--shell" => {
                 let pid: i32 = args.next()?.parse().ok()?;
-                parsed.shell = Some(Pid::from_raw((pid > 1).then_some(pid)?)?);
+                shell = Some(Pid::from_raw((pid > 1).then_some(pid)?)?);
             }
             _ => return None,
         }
     }
-    Some(parsed)
+    Some(PromptArgs::Reading { brackets, shell })
 }
 
 pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
@@ -116,14 +125,25 @@ pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
     }
     let asked = prompt_args(args.get(1..)?)?;
     let (terminal, token, socket) = reporter()?;
-    let body = prompt_body(&token, asked.brackets)?;
+    let (brackets, shell) = match &asked {
+        PromptArgs::NoRetype => {
+            send_prompt(
+                socket,
+                prompt_path(&terminal, &asked),
+                prompt_body(&token, false)?,
+            );
+            return Some(0);
+        }
+        PromptArgs::Reading { brackets, shell } => (*brackets, *shell),
+    };
+    let body = prompt_body(&token, brackets)?;
     // Without a terminal to read, the editor can't be told ready: no report, and no line typed.
     let tty = File::open("/dev/tty").ok()?;
     let session = getsid(None).ok()?;
     let canonical = || {
         // A shell gone is one whose editor will never read: the wait ends, and its terminal with
         // it. A terminal its runtime closes as the shell exits ends the wait as well, as tmux does.
-        if let Some(shell) = asked.shell {
+        if let Some(shell) = shell {
             in_session(shell, session, |pid| getsid(Some(pid)).ok()).then_some(())?;
         }
         tcgetattr(&tty)
@@ -134,12 +154,25 @@ pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
         return Some(0);
     }
     drop(tty);
+    send_prompt(socket, prompt_path(&terminal, &asked), body);
+    Some(0)
+}
+
+/// Where a first-prompt report for `terminal` goes. A decline has a route of its own, so a daemon
+/// that predates it answers 404 rather than read it as a prompt and type the line.
+pub fn prompt_path(terminal: &str, asked: &PromptArgs) -> String {
+    match asked {
+        PromptArgs::Reading { .. } => format!("/v1/shells/{terminal}/prompt"),
+        PromptArgs::NoRetype => format!("/v1/shells/{terminal}/decline"),
+    }
+}
+
+/// Posts a first-prompt report to `path`, within `DEADLINE`.
+fn send_prompt(socket: String, path: String, body: Vec<u8>) {
     within(DEADLINE, move || {
-        let path = format!("/v1/shells/{terminal}/prompt");
         // Like a line's report, nothing the daemon answers changes what the shell does.
         let _ = post(&socket, &path, &body, DEADLINE);
     });
-    Some(0)
 }
 
 /// Whether `shell` is still a process in the terminal's session `session`, as `sid_of` reads a
@@ -350,6 +383,36 @@ mod tests {
     }
 
     #[test]
+    fn says_a_shell_wont_take_a_line_back_on_a_route_of_its_own() {
+        let reading = PromptArgs::Reading {
+            brackets: true,
+            shell: None,
+        };
+        assert_eq!(
+            [
+                prompt_path("term_1", &PromptArgs::NoRetype),
+                prompt_path("term_1", &reading)
+            ],
+            ["/v1/shells/term_1/decline", "/v1/shells/term_1/prompt"]
+        );
+    }
+
+    #[test]
+    fn takes_no_retype_only_alone() {
+        let args = |a: &[&str]| prompt_args(&a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(args(&["--no-retype"]), Some(PromptArgs::NoRetype));
+        for refused in [
+            &["--no-retype", "--brackets"][..],
+            &["--brackets", "--no-retype"],
+            &["--no-retype", "--shell", "4242"],
+            &["--shell", "4242", "--no-retype"],
+            &["--no-retype", "--no-retype"],
+        ] {
+            assert_eq!(args(refused), None, "{refused:?}");
+        }
+    }
+
+    #[test]
     fn reports_a_prompt_once_the_terminal_leaves_canonical_mode() {
         let mut looks = 0;
         let reading = editor_reading(
@@ -387,15 +450,15 @@ mod tests {
                 args(&["--shell", "4242"])
             ],
             [
-                Some(PromptArgs {
+                Some(PromptArgs::Reading {
                     brackets: false,
                     shell: None
                 }),
-                Some(PromptArgs {
+                Some(PromptArgs::Reading {
                     brackets: true,
                     shell
                 }),
-                Some(PromptArgs {
+                Some(PromptArgs::Reading {
                     brackets: false,
                     shell
                 }),
