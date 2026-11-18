@@ -5,6 +5,7 @@ import {
   MAX_CAP,
   MUTANTS_CONFIG,
   cappedScriptFailures,
+  tmuxPinFailures,
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
   DENY_CONFIG,
@@ -3290,6 +3291,41 @@ describe("tests that signal processes they didn't start", () => {
     expect(unmarked({ "crates/h/tests/x.rs": source })).toEqual([
       "crates/h/tests/x.rs:1",
       "crates/h/tests/x.rs:4",
+    ]);
+  });
+});
+
+const pins = (path: string, source: string) => tmuxPinFailures(path, source).length;
+
+describe("tmuxPinFailures", () => {
+  it("lets a *.tmux.test.ts pick tmux, and any api test pick holders", () => {
+    expect([
+      pins("tests/api/x.tmux.test.ts", 'Daemon.start({ runtime: "tmux" }); d.useRuntime("tmux");'),
+      pins("tests/api/x.test.ts", 'Daemon.start({ runtime: "holder" }); d.useRuntime("holder");'),
+      pins("tests/api/x.test.ts", 'Daemon.startWithCli("", {}, "holder"); Daemon.start();'),
+      pins("tests/api/x.test.ts", '// runtime: "tmux" in a comment\nDaemon.start();'),
+      pins("tests/api/daemon.ts", '`[runtime]\\ndefault = "${runtime}"`; useRuntime(runtime);'),
+      pins("tests/integration/x.test.ts", 'start({ runtime: "tmux" });'),
+    ]).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+
+  it("refuses tmux picked in a runtime-neutral api test, however it is picked", () => {
+    expect([
+      pins("tests/api/keys.test.ts", 'daemon = await Daemon.start({ runtime: "tmux" });'),
+      pins("tests/api/x.test.ts", 'await Daemon.startWithCli(\n  "",\n  {},\n  "tmux",\n);'),
+      pins("tests/api/x.test.ts", 'daemon.useRuntime("tmux");'),
+      pins("tests/api/x.test.ts", "Daemon.start({ modelUrl, runtime: kind });"),
+      pins("tests/api/x.test.ts", "const runtime = pick(); Daemon.start({ env, runtime });"),
+      pins("tests/api/x.test.ts", "Daemon.startWithCli(config, env, kind);"),
+      pins("tests/api/x.test.ts", 'Daemon.startWithCli("[runtime]\\ndefault = \\"tmux\\"", {});'),
+    ]).toEqual([1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  it("names the file and where the case belongs", () => {
+    expect(tmuxPinFailures("tests/api/k.test.ts", 'Daemon.start({ runtime: "tmux" });')).toEqual([
+      expect.stringMatching(
+        /^tests\/api\/k\.test\.ts: picks its runtime with "tmux".*\.tmux\.test\.ts/,
+      ),
     ]);
   });
 });

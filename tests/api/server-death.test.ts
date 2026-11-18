@@ -6,6 +6,7 @@ import {
   type LaunchAgentResponse,
 } from "@bazhen/protocol";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
+import { closeHolderAt } from "../support/holder-close.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
 let model: FakeModel;
@@ -23,7 +24,7 @@ const messageOf = async (daemon: Daemon, messageId: string) =>
 
 /** A daemon with one Claude Code agent up, running and showing its banner. */
 async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResponse }> {
-  const daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
+  const daemon = await Daemon.start({ modelUrl: model.url });
   const agent = await daemon.launch("agent", "claude-code");
   await waitUntil(
     async () => (await daemon.screen(agent.agentId)).includes(BANNER["claude-code"]),
@@ -34,11 +35,9 @@ async function withLiveAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResp
   return { daemon, agent };
 }
 
-/** The same, then the daemon killed with -9. */
-async function killedWithAgent(): Promise<{ daemon: Daemon; agent: LaunchAgentResponse }> {
-  const live = await withLiveAgent();
-  await live.daemon.crash();
-  return live;
+/** Ends the agent's terminal by its holder's own protocol, from outside the daemon. */
+async function endHolderOf(daemon: Daemon, agentId: string): Promise<void> {
+  await closeHolderAt(String(daemon.holderOf(agentId)));
 }
 
 beforeAll(async () => {
@@ -48,56 +47,15 @@ afterAll(async () => {
   await model?.close();
 });
 
-describe("a daemon started again after its tmux server died", () => {
-  let daemon: Daemon;
-  let agent: LaunchAgentResponse;
-  beforeAll(async () => {
-    ({ daemon, agent } = await killedWithAgent());
-    daemon.tmuxServer.killServer();
-    await daemon.restart();
-  });
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("marks the agent that ran on it lost", async () => {
-    expect(await stateOf(daemon, agent.agentId)).toBe("lost");
-  });
-});
-
-describe("a daemon started again after its tmux server's socket was deleted", () => {
-  let daemon: Daemon;
-  let agent: LaunchAgentResponse;
-  beforeAll(async () => {
-    ({ daemon, agent } = await killedWithAgent());
-    daemon.deleteTmuxSocket();
-    await daemon.restart();
-  });
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("keeps the agent running, and shows its terminal on the recreated socket", async () => {
-    expect(await stateOf(daemon, agent.agentId)).toBe("running");
-    const view = await daemon.view(String(agent.terminalId), "observe");
-    await expect.poll(() => view.text(), { timeout: 10_000 }).toContain(BANNER["claude-code"]);
-    view.close();
-  });
-});
-
-describe("a running daemon whose tmux server dies", () => {
+describe("a running daemon whose agent's holder ends", () => {
   let daemon: Daemon;
   let agent: LaunchAgentResponse;
   beforeAll(async () => {
     ({ daemon, agent } = await withLiveAgent());
-    daemon.tmuxServer.killServer();
+    await endHolderOf(daemon, agent.agentId);
   });
   afterAll(async () => {
     await daemon?.stop();
-  });
-
-  it("marks the agent that ran on it lost, without a restart", async () => {
-    await expect.poll(() => stateOf(daemon, agent.agentId), { timeout: 20_000 }).toBe("lost");
   });
 
   it("offers a lost agent that never had a turn only a fresh session, and starts one when asked", async () => {
@@ -139,7 +97,7 @@ describe("a running daemon whose tmux server dies", () => {
   });
 });
 
-describe("an agent lost with its tmux server, relaunched", () => {
+describe("an agent lost with its holder, relaunched", () => {
   let daemon: Daemon;
   let agent: LaunchAgentResponse;
   beforeAll(async () => {
@@ -152,7 +110,7 @@ describe("an agent lost with its tmux server, relaunched", () => {
       "the model's reply",
       30_000,
     );
-    daemon.tmuxServer.killServer();
+    await endHolderOf(daemon, agent.agentId);
     await waitUntil(
       async () => (await stateOf(daemon, agent.agentId)) === "lost",
       "the agent to be lost",
@@ -163,7 +121,7 @@ describe("an agent lost with its tmux server, relaunched", () => {
     await daemon?.stop();
   });
 
-  it("starts on a new terminal and server, on its session, with mail sent while it was lost", async () => {
+  it("starts on a new terminal, on its session, with mail sent while it was lost", async () => {
     const lost = await agentOf(daemon, agent.agentId);
     // Its hooks named the transcript, which its turn wrote.
     expect(lost?.resumable).toBe(true);
@@ -199,32 +157,12 @@ describe("an agent lost with its tmux server, relaunched", () => {
     ]);
     // What the lost process was last doing is gone with it; only the new one's can show.
     expect(signalsBefore(relaunched, asked)).toEqual([]);
-    // The resumed session shows the conversation it had before its server died.
+    // The resumed session shows the conversation it had before its terminal ended.
     await expect
       .poll(() => daemon.screen(agent.agentId), { timeout: 30_000 })
       .toContain("remember this line");
     await expect
       .poll(async () => (await messageOf(daemon, sent.messageId))?.state, { timeout: 60_000 })
       .toBe("delivered");
-  });
-});
-
-describe("a running daemon whose tmux server's socket is deleted", () => {
-  let daemon: Daemon;
-  let agent: LaunchAgentResponse;
-  beforeAll(async () => {
-    ({ daemon, agent } = await withLiveAgent());
-    daemon.deleteTmuxSocket();
-  });
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("keeps the agent running, and shows its terminal once the socket is back", async () => {
-    await expect.poll(() => daemon.tmuxSocketExists(), { timeout: 20_000 }).toBe(true);
-    const view = await daemon.view(String(agent.terminalId), "observe");
-    await expect.poll(() => view.text(), { timeout: 10_000 }).toContain(BANNER["claude-code"]);
-    view.close();
-    expect(await stateOf(daemon, agent.agentId)).toBe("running");
   });
 });

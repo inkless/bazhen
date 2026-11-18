@@ -15,6 +15,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Tests can't reach a real tmux server, and leave none running                       | integration setup and teardown              |
 | Test runs refuse to start when the machine is short of PTYs                        | integration, api and holder setup           |
 | Holder tests use only their run's home, reach no tmux, and leave no holder running | holder setup and teardown                   |
+| An api test picks tmux only in a `*.tmux.test.ts` file                             | `pnpm check` (`scripts/check-standards.ts`) |
 | A signal is sent only from a chokepoint that checks its target                     | `pnpm check` (`scripts/check-standards.ts`) |
 | A test that may signal processes it didn't start runs only in a sandbox            | `cargo-gate test-all`; `require_sandbox()`  |
 | Suites never synthesise CPU load on a shared machine                               | review; `--cpus` quota on each container    |
@@ -54,31 +55,31 @@ container (`pnpm test:real`, which builds it from the worktree without mounting 
 A disposable host carries a root-owned `/etc/bazhen-disposable-host`, and for real tmux is Linux;
 their setup refuses to start anywhere else. Never create that file on a machine you work on. Inside
 a container or CI they are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one
-worker each. An api test that reads its terminals through tmux starts its daemon with
-`runtime: "tmux"`, since the daemon makes holder terminals by default, and the helpers that read
-tmux refuse on any other daemon. The e2e suite starts a daemon per runtime, each a Playwright
-project named for it: every spec runs on the tmux daemon, and those `RUNTIME_AGNOSTIC_SPECS`
-(`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec that reads tmux reaches it
-through `daemonTmux()`, which refuses on the holder project. Every agent is a real Claude Code, so
-the `test` that `tests/e2e/page.ts` exports closes the agents a test opened when it ends, and every
-one left on its daemon when its worker stops, before the next project starts. Each run's containers
-have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it), because a
-suite that starts a busy process per core would otherwise take every core from the agents working on
-the same machine. They run in `bazhen-tests.slice`, so the slice's cap holds every run's containers
-together, and each gets a memory cap of half the machine, with no swap beyond it (`BZ_TEST_MEMORY`,
-in GiB, overrides it), so a runaway dies in its container. A probe container checks they land there
-first, which they do under rootless Podman, or rootless Docker with the systemd cgroup driver, under
-a user systemd. Where they can't, as under rootful Docker or Docker Desktop, the run refuses to
-start, except on a disposable host, which no other run shares: there each container gets a quarter
-of the machine. A run removes its containers, image and build context on every exit it sees, Ctrl-C,
-SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second signal abandons the
-cleanup. What a run killed outright or abandoned left, the next run on the same machine removes: it
-sweeps the stopped containers, images and contexts whose owning process is gone, and an image only
-once no container uses it.
-Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
-bounds it, and `docker builder prune` reclaims it on a machine of your own. Under Podman, where
-`docker` is the podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on
-a machine of your own.
+worker each. An api test runs on holders, the default, unless it is about tmux: a case that reads
+its terminals through tmux lives in a `*.tmux.test.ts` sibling and starts its daemon with
+`runtime: "tmux"`, and the helpers that read tmux refuse on any other daemon. The e2e suite starts a
+daemon per runtime, each a Playwright project named for it: every spec runs on the tmux daemon, and
+those `RUNTIME_AGNOSTIC_SPECS` (`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec
+that reads tmux reaches it through `daemonTmux()`, which refuses on the holder project. Every agent
+is a real Claude Code, so the `test` that `tests/e2e/page.ts` exports closes the agents a test
+opened when it ends, and every one left on its daemon when its worker stops, before the next project
+starts. Each run's containers have no network and get a CPU quota of half the machine
+(`BZ_TEST_CPUS` overrides it), because a suite that starts a busy process per core would otherwise
+take every core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
+the slice's cap holds every run's containers together, and each gets a memory cap of half the
+machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its
+container. A probe container checks they land there first, which they do under rootless Podman, or
+rootless Docker with the systemd cgroup driver, under a user systemd. Where they can't, as under
+rootful Docker or Docker Desktop, the run refuses to start, except on a disposable host, which no
+other run shares: there each container gets a quarter of the machine. A run removes its containers,
+image and build context on every exit it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each
+cleanup command 30 seconds; a second signal abandons the cleanup. What a run killed outright or
+abandoned left, the next run on the same machine removes: it sweeps the stopped containers, images
+and contexts whose owning process is gone, and an image only once no container uses it. Docker's
+build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection bounds it, and
+`docker builder prune` reclaims it on a machine of your own. Under Podman, where `docker` is the
+podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on a machine of your
+own.
 
 **Remove every scratch Docker image and container you build,** by its own tag or name, when you
 are done with it. Several agents share one Docker host, so never prune, and never remove an image

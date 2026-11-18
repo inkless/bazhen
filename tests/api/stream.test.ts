@@ -6,7 +6,7 @@ let daemon: Daemon;
 let agentId = "";
 let terminalId = "";
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
   const launched = LaunchAgentResponse.parse(
     (
       await daemon.request("/v1/agents", {
@@ -59,26 +59,13 @@ describe("the terminal stream", () => {
     const first = await daemon.view(terminalId, "interactive");
     await expect.poll(() => first.text(), { timeout: 10_000 }).toContain("Claude Code");
     const late = await daemon.view(terminalId, "observe");
-    // Seeded from the daemon's snapshot, through the one client, not from a later repaint.
+    // Seeded from the daemon's snapshot, not from a later repaint.
     expect(await late.snapshotText()).toContain("Claude Code");
-    // An earlier view's client may still be on its way out.
-    await expect
-      .poll(
-        () =>
-          daemon
-            .tmux("list-clients")
-            .split("\n")
-            .filter((line) => line.trim() !== ""),
-        {
-          timeout: 10_000,
-        },
-      )
-      .toHaveLength(1);
     first.close();
     late.close();
   });
 
-  it("keeps the client of a view closed on an Enter until the next view's client is in", async () => {
+  it("delivers a line typed just before its view closes", async () => {
     const program = await daemon.program([
       "sh",
       "-c",
@@ -88,30 +75,12 @@ describe("the terminal stream", () => {
       async () => (await daemon.screen(program.agentId)).includes("ready"),
       "the program",
     );
-    const session = String(daemon.paneFact(program.terminalId, "session_name"));
-    // tmux runs the hook as each client attaches, so this lists how many clients the session had
-    // at each attach, in tmux's own order.
-    daemon.tmux(
-      "set-hook",
-      "-t",
-      session,
-      "client-attached",
-      `set-option -aF -t '${session}' @attached '#{session_attached} '`,
-    );
-    const attachedCounts = () =>
-      daemon.tmux("show-options", "-v", "-t", session, "@attached").trim();
     const typed = await daemon.view(program.terminalId, "interactive");
     await typed.drive();
     typed.type("last words\r");
     typed.close();
     await typed.closed();
-    const next = await daemon.view(program.terminalId, "observe");
-    await expect.poll(attachedCounts, { timeout: 10_000 }).toBe("1 2");
     await expect.poll(() => daemon.screen(program.agentId)).toContain("got last words");
-    next.close();
-    await expect
-      .poll(() => daemon.tmux("list-clients", "-t", session).trim(), { timeout: 10_000 })
-      .toBe("");
   });
 
   it("refuses a stream opened from a page on another origin", async () => {

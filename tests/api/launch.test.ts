@@ -6,11 +6,12 @@ import {
   LaunchAgentResponse,
   StateSnapshot,
 } from "@bazhen/protocol";
-import { Daemon, overSocket } from "./daemon.ts";
+import { Daemon, HOST, overSocket } from "./daemon.ts";
+import { holderSockets } from "../support/holder-close.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
 });
 afterAll(async () => {
   // A daemon that never started has already cleaned up after itself.
@@ -48,26 +49,22 @@ describe("the directory an agent is launched in", () => {
 });
 
 describe("launching an agent", () => {
-  it("runs the real Claude Code TUI in Bazhen's tmux, tagged with the agent", async () => {
+  it("runs the real Claude Code TUI on a holder of its own, tagged with the agent", async () => {
     const { status, body } = await launch("first");
     expect(status).toBe(200);
-    const { agentId } = LaunchAgentResponse.parse(body);
-    const panes = daemon.tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id} #{pane_dead}");
-    expect(panes).toContain(`${agentId} 0`);
+    const { agentId, terminalId } = LaunchAgentResponse.parse(body);
+    expect([
+      daemon.holderOf(agentId),
+      (await daemon.holderTags(String(terminalId)))["agentId"],
+    ]).toEqual([expect.stringMatching(/\.sock$/), agentId]);
     await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toMatch(/Claude Code/);
   });
 
-  it("gives Claude Code and the tmux server the hook link a restart re-points, not the client", async () => {
+  it("gives Claude Code the hook link a restart re-points, not the client", async () => {
     const { agentId } = LaunchAgentResponse.parse((await launch("hook link")).body);
     await expect.poll(() => daemon.screen(agentId), { timeout: 20_000 }).toMatch(/Claude Code/);
     const link = join(daemon.home, "state", "hook", "bazhen-hook");
-    expect([
-      (await daemon.agentCommand(agentId)).join(" "),
-      daemon.tmux("show-hooks", "-gw"),
-    ]).toEqual([
-      expect.stringContaining(`'${link}'`),
-      expect.stringContaining(`'${link}' 'pane-title'`),
-    ]);
+    expect((await daemon.agentCommand(agentId)).join(" ")).toContain(`'${link}'`);
   });
 
   it("points the hook link at a copy installed under its build, which doctor names", async () => {
@@ -95,30 +92,20 @@ describe("launching an agent", () => {
     });
   });
 
-  it("names the host and a pasteable command that attaches to the agent's own session", async () => {
-    const { agentId } = LaunchAgentResponse.parse((await launch("attach")).body);
+  it("names the host and a pasteable command that attaches to the agent's own terminal", async () => {
+    const { agentId, terminalId } = LaunchAgentResponse.parse((await launch("attach")).body);
     const state = StateSnapshot.parse((await daemon.request("/v1/state")).body);
-    const [command = ""] = state.agents
-      .filter((a) => a.id === agentId)
-      .map((a) => String(a.attachCommand));
-    const socket = daemon.tmux("display-message", "-p", "#{socket_path}").trim();
-    const target = String(command.split(" attach-session -t ").at(-1)).replaceAll("'", "");
     expect([
       state.environments.map((e) => e.host),
-      command.startsWith("env -u TMUX tmux "),
-      command.includes(` -S ${socket} `),
-      daemon.tmux("display-message", "-p", "-t", target, "#{@bazhen_agent_id}").trim(),
-    ]).toEqual([[daemon.tmux("display-message", "-p", "#{host}").trim()], true, true, agentId]);
+      state.agents.find((a) => a.id === agentId)?.attachCommand,
+    ]).toEqual([[HOST], `bazhen terminals attach ${terminalId}`]);
   });
 
   it("launches once for a repeated key", async () => {
+    const before = holderSockets(daemon.home).length;
     const first = LaunchAgentResponse.parse((await launch("repeat")).body);
     const again = LaunchAgentResponse.parse((await launch("repeat")).body);
-    const tagged = daemon.tmux("list-panes", "-a", "-F", "#{@bazhen_agent_id}");
-    expect([again, tagged.split("\n").filter((l) => l === first.agentId).length]).toEqual([
-      first,
-      1,
-    ]);
+    expect([again, holderSockets(daemon.home).length - before]).toEqual([first, 1]);
   });
 
   it("refuses a launch from a page on another origin, and launches nothing", async () => {
