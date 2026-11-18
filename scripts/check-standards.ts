@@ -3793,6 +3793,35 @@ export function checkMigrations(): void {
   failures.push(...migrationHistoryFailures(changed, before, names));
 }
 
+const SUPPRESSION_FILES = /\.(?:[cm]?[jt]sx?|html)$/;
+
+/** A comment opener, then straight away a directive a linter, formatter or type checker obeys. */
+const SUPPRESSION =
+  /(?:\/\/+|\/\*+|\*)\s*(@ts-(?:ignore|expect-error|nocheck)\b|(?:oxlint|eslint)-(?:disable|enable)\b[\w-]*|biome-ignore\b|oxfmt-ignore\b)/;
+
+/**
+ * Every comment that switches a check off for the code beside it. A failing check is fixed in the
+ * code, so no directive is allowed, in source, tests or a page's inline script. It reads lines,
+ * not syntax, so a directive inside a string fails too: split the string.
+ */
+export function suppressionFailures(path: string, source: string): string[] {
+  return source.split("\n").flatMap((text, i) => {
+    const directive = SUPPRESSION.exec(text)?.[1];
+    return directive === undefined
+      ? []
+      : [
+          `${path}:${i + 1}: \`${directive}\` switches a check off. Fix the code the check ` +
+            "reports; if the check is wrong, change the check and say why in the commit.",
+        ];
+  });
+}
+
+function checkSuppressions(): void {
+  for (const file of repoFiles().filter((f) => SUPPRESSION_FILES.test(f))) {
+    failures.push(...suppressionFailures(file, readFileSync(join(root, file), "utf8")));
+  }
+}
+
 /** Every check `pnpm check` runs, in order. */
 export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkSiblingTests,
@@ -3804,6 +3833,7 @@ export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,
+  checkSuppressions,
 ];
 
 if (isMain(import.meta)) {

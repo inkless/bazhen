@@ -16,6 +16,7 @@ for something no check covers.
 | No `any`; switches over unions are exhaustive                                                             | `pnpm lint`                                                                                        |
 | No floating or misused promises                                                                           | `pnpm lint` (type-aware)                                                                           |
 | Lint warnings and unused suppressions fail                                                                | `pnpm lint` (`--deny-warnings`, `--report-unused-disable-directives-severity=error`)               |
+| No comment switches a check off (lint, type, format directives)                                           | `pnpm check` (`scripts/check-standards.ts`)                                                        |
 | Errors at seams are typed; nothing is swallowed                                                           | review                                                                                             |
 | Comments explain _why_, never _what_                                                                      | review                                                                                             |
 | Dependencies are pinned exactly, with a reason for any pre-release                                        | review                                                                                             |
