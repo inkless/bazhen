@@ -199,7 +199,8 @@ Every new test must be shown to fail without the code it covers.
   a file git sees as renamed, they are its two paths. Falsify prints the test as RENAMED and
   leaves it out, but only when all of these hold:
   - the old file is, exactly as written, the base path of a `*.test.ts` file the branch changed,
-    deleted or renamed: no other spelling of the path, no file outside the diff, no `.tsx`;
+    deleted or renamed: no other spelling of the path, no file outside the diff, and no file
+    that is `.tsx` at the base or at HEAD, since falsify can't read its tests;
   - the old title is exactly one test in the old file at the base and none in it at HEAD, so a
     copy left behind isn't a move;
   - no other trailer that holds names the same old test for another new test. A base test moves

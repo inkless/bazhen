@@ -12,6 +12,7 @@ import {
   depInfoSources,
   binariesOf,
   isRevertible,
+  leavableTestFiles,
   manifestNames,
   namedBinaries,
   workspaceBins,
@@ -1179,6 +1180,27 @@ const applied = (found: { file: string; title: string }[], ...messages: string[]
     (file) => ({ file, base: undefined, head: movedTo("adds one") }),
   );
 
+describe("leavableTestFiles", () => {
+  it("is each test file the branch changed, deleted or renamed, by its base path, while neither path is .tsx", () => {
+    const changes = parseNameStatus(
+      [
+        ["M", "b.test.ts"],
+        ["D", "c.test.ts"],
+        ["R090", "f.test.ts", "g.test.ts"],
+        ["R090", "a.test.ts", "a.test.tsx"],
+        ["R090", "h.test.tsx", "h.test.ts"],
+        ["M", "e.test.tsx"],
+        ["A", "d.test.ts"],
+        ["M", "x.ts"],
+        [""],
+      ]
+        .flat()
+        .join("\0"),
+    );
+    expect(leavableTestFiles(changes)).toEqual(["b.test.ts", "c.test.ts", "f.test.ts"]);
+  });
+});
+
 describe("appliedRenames", () => {
   it("leaves out a test one trailer moves, and refuses a trailer that applies to none", () => {
     const moved = `${FILE} › adds one -> ${OTHER} › adds one`;
@@ -1206,6 +1228,24 @@ describe("appliedRenames", () => {
       applied(
         [ref(OTHER, "adds one"), ref(THIRD, "adds one")],
         ...twice.map((t) => `Renamed: ${t}`),
+      ),
+    ).toEqual({ renamed: [], refused: new Map(twice.map((t) => [t, why])) });
+  });
+
+  it("refuses every trailer that renames one base test in place as two tests", () => {
+    const head = withCopy(RENAMED, "adds one twice");
+    const sides = { file: FILE, base: BASE_TESTS, head };
+    const twice = [
+      `${FILE} › adds one -> ${FILE} › adds one to v`,
+      `${FILE} › adds one -> ${FILE} › adds one twice`,
+    ];
+    const why = `${FILE} › adds one is named the old test of more than one test`;
+    expect(
+      appliedRenames(
+        [ref(FILE, "adds one to v"), ref(FILE, "adds one twice")],
+        renameTrailers(lines(...twice.map((t) => `Renamed: ${t}`))),
+        new Map([[FILE, sides]]),
+        () => sides,
       ),
     ).toEqual({ renamed: [], refused: new Map(twice.map((t) => [t, why])) });
   });

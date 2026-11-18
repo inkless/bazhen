@@ -50,14 +50,14 @@
 // isn't new.
 //
 // A test renamed or moved to another test file, and otherwise unchanged, isn't new, and a commit
-// trailer on the branch says so: `Renamed: <old file> › <old title> -> <new file> › <new title>`,
-// the old file as the base has it and the new as HEAD has it. It is left out only when it holds:
-// the old file is the base path of a .test.ts file the branch changed, the old title is one test
-// in it at the base and none in it at HEAD, no other trailer names that test the old test of
-// another, the new title is one test in the new file at HEAD and none in it at the base, and the
-// test's call is the base's token for token but for the title, comments and layout aside. Any other change, to its body, options or
-// call, leaves it judged as new. A judged test that is a lost base test so moved or renamed is
-// printed with the trailer it needs.
+// trailer on the branch says so, with the old file as the base has it and the new as HEAD has it:
+// `Renamed: <old file> › <old title> -> <new file> › <new title>`. It is left out only when it
+// holds: the old file is the base path of a .test.ts file the branch changed, the old title is
+// one test in it at the base and none in it at HEAD, no other trailer names that test the old
+// test of another, the new title is one test in the new file at HEAD and none in it at the base,
+// and the test's call is the base's token for token but for the title, comments and layout
+// aside. Any other change, to its body, options or call, leaves it judged as new. A judged test
+// that is a lost base test so moved or renamed is printed with the trailer it needs.
 //
 // The worktree's dependencies are installed, and built, as the checkout's are, so a test fails
 // there only on the base's source. Under each test that failed, the first line of what failed it.
@@ -393,6 +393,20 @@ function testsIn(source: string): TestBlock[] | string {
 }
 
 /**
+ * The test files a test can have moved out of, or been renamed in, by their paths at the base:
+ * those the branch changed, deleted or renamed. Not one whose path on either side is .tsx: falsify
+ * can't read its tests, so JSX could hide the one a trailer says is gone.
+ */
+export function leavableTestFiles(changes: Change[]): string[] {
+  return changes.flatMap((c) => {
+    const paths = [c.oldPath || c.path, c.path];
+    return c.status !== "A" && paths.every((p) => TEST_FILE.test(p) && !p.endsWith(".tsx"))
+      ? [paths[0] ?? ""]
+      : [];
+  });
+}
+
+/**
  * A test file's text at the base and at HEAD, undefined where that side has no such file.
  * `counterpart` is its path on the side `file` doesn't name, when git renamed it.
  */
@@ -488,10 +502,9 @@ const keyOf = (t: TestRef) => `${t.file}\0${t.title}`;
 
 /**
  * Which of the branch's new tests `found` the `Renamed:` trailers show are a base test, moved or
- * under a new title, and why each trailer that applies to none doesn't. `olds` holds the test files
- * a test can have left, the ones the branch changed, deleted or renamed, by their exact paths at the
- * base; `news` gives a new test's file. A base test named the old test of two tests is neither's,
- * so a trailer per copy can't leave out a copy.
+ * under a new title, and why each trailer that applies to none doesn't. `olds` holds the files of
+ * `leavableTestFiles`, by their exact paths at the base; `news` gives a new test's file. A base
+ * test named the old test of two tests is neither's, so a trailer per copy can't leave out a copy.
  */
 export function appliedRenames(
   found: TestRef[],
@@ -1898,16 +1911,7 @@ async function main(args: string[]): Promise<number> {
     }
     return titles.map((title) => ({ file: t.path, title }));
   });
-  // A test moved out of a file, or renamed in it, leaves that file changed, deleted or renamed. A
-  // .tsx file's tests can't be read, so none can have left one.
-  const olds = new Map(
-    changes
-      .map((c) => ({ status: c.status, path: c.oldPath || c.path }))
-      .filter(
-        ({ status, path }) => status !== "A" && TEST_FILE.test(path) && !path.endsWith(".tsx"),
-      )
-      .map(({ path }) => [path, ends.old(path)]),
-  );
+  const olds = new Map(leavableTestFiles(changes).map((path) => [path, ends.old(path)]));
   const targets = leaveOutRenames(found, renameTrailers(messages), olds, ends.new);
   const renameOf = (t: TestRef) => {
     const from = renamedFrom({ ...ends.new(t.file), title: t.title }, [...olds.values()]);

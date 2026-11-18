@@ -617,6 +617,36 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
+  it("judges both copies when two trailers move one base test into two files", () => {
+    moveTest(`${IMPORTS}it("caps", () => {});\n`);
+    write(fx.linked, THIRD, `${IMPORTS}it("caps", () => {});\n`);
+    git(fx.linked, "add", THIRD);
+    const toThird = `Renamed: ${TEST} › v -> ${THIRD} › caps`;
+    git(
+      fx.linked,
+      "commit",
+      "--quiet",
+      "--amend",
+      "-m",
+      "feat: v2",
+      "-m",
+      MOVED_RENAMED,
+      "-m",
+      toThird,
+    );
+    const twice = `${escape(TEST)} › v is named the old test of more than one test`;
+    expect(againstBase({ STUB_STATUS: "passed", STUB_EACH: "1" })).toEqual({
+      status: 1,
+      output: expect.stringMatching(
+        new RegExp(
+          `${escape(MOVED_RENAMED)} doesn't apply \\(${twice}\\)[\\s\\S]*` +
+            `${escape(toThird)} doesn't apply \\(${twice}\\)[\\s\\S]*` +
+            `SURVIVED ${escape(MOVED)} › caps[\\s\\S]*SURVIVED ${escape(THIRD)} › caps`,
+        ),
+      ),
+    });
+  });
+
   it("judges a test moved out of a file named by another spelling of its path", () => {
     const kept = lines(
       'it("keeps", () => {',
