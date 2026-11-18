@@ -29,17 +29,23 @@ pub(crate) fn getsid(pid: Option<Pid>) -> io::Result<RawPid> {
     }
 }
 
-/// The kernel's `getpgid`: the pid of the leader of `pid`'s process group, this process's for
-/// `None`, in this process's PID namespace, which is 0 when the leader is outside it.
-pub(crate) fn getpgid(pid: Option<Pid>) -> io::Result<RawPid> {
-    let raw = pid.map_or(0, Pid::as_raw_pid);
+/// The kernel's `getpgid`: the pid of the leader of `pid`'s process group in this process's PID
+/// namespace, which is 0 when the leader is outside it.
+pub(crate) fn getpgid(pid: Pid) -> io::Result<RawPid> {
     // SAFETY: getpgid takes a pid by value and reads or writes no memory of this process.
-    let group = unsafe { libc::getpgid(raw) };
+    let group = unsafe { libc::getpgid(pid.as_raw_pid()) };
     if group < 0 {
         Err(io::Error::last_os_error())
     } else {
         Ok(group)
     }
+}
+
+/// The kernel's `getpgrp`, which can't fail: the pid of the leader of this process's group in this
+/// process's PID namespace, which is 0 when the leader is outside it.
+pub(crate) fn getpgrp() -> RawPid {
+    // SAFETY: getpgrp takes nothing and reads or writes no memory of this process.
+    unsafe { libc::getpgrp() }
 }
 
 /// The effective uid of the process at the other end of a Unix socket, as it was when it
@@ -111,8 +117,8 @@ pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
 #[cfg(target_os = "macos")]
 pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<RawPid> {
     let mut pid: libc::pid_t = 0;
-    let mut len =
-        libc::socklen_t::try_from(std::mem::size_of::<libc::pid_t>()).map_err(io::Error::other)?;
+    let size = std::mem::size_of::<libc::pid_t>();
+    let mut len = libc::socklen_t::try_from(size).map_err(io::Error::other)?;
     // SAFETY: `socket` is an open fd for the whole call, and `pid` is writable for `len` bytes,
     // which the call writes no more than.
     let status = unsafe {
@@ -124,9 +130,13 @@ pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<RawPid> {
             &raw mut len,
         )
     };
-    if status == 0 {
-        Ok(pid)
-    } else {
-        Err(io::Error::last_os_error())
+    if status != 0 {
+        return Err(io::Error::last_os_error());
     }
+    if usize::try_from(len).ok() != Some(size) {
+        return Err(io::Error::other(format!(
+            "LOCAL_PEERPID answered {len} bytes, not a {size}-byte pid_t"
+        )));
+    }
+    Ok(pid)
 }

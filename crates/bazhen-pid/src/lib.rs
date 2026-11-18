@@ -16,7 +16,7 @@ mod sys;
 /// # Errors
 ///
 /// When `raw` isn't above 0.
-pub fn visible(raw: RawPid, what: &str) -> io::Result<Pid> {
+pub(crate) fn visible(raw: RawPid, what: &str) -> io::Result<Pid> {
     // Tested before `Pid::from_raw`, which asserts `raw >= 0` in a debug build rather than refusing.
     (raw > 0)
         .then_some(raw)
@@ -34,7 +34,7 @@ pub fn visible(raw: RawPid, what: &str) -> io::Result<Pid> {
 /// # Errors
 ///
 /// When `raw` is below 0.
-pub fn leader(raw: RawPid, what: &str) -> io::Result<Option<Pid>> {
+pub(crate) fn leader(raw: RawPid, what: &str) -> io::Result<Option<Pid>> {
     if raw == 0 {
         Ok(None)
     } else {
@@ -53,14 +53,22 @@ pub fn session(pid: Option<Pid>) -> io::Result<Option<Pid>> {
     leader(sys::getsid(pid)?, "a session's leader")
 }
 
-/// The process group `pid` is in, this process's for `None`, by its leader: `None` for a group led
-/// from outside this process's PID namespace.
+/// The process group `pid` is in, by its leader: `None` for a group led from outside this
+/// process's PID namespace.
 ///
 /// # Errors
 ///
 /// When `pid` has gone, or the kernel won't say.
-pub fn group(pid: Option<Pid>) -> io::Result<Option<Pid>> {
+pub fn group(pid: Pid) -> io::Result<Option<Pid>> {
     leader(sys::getpgid(pid)?, "a process group's leader")
+}
+
+/// This process's own group, by its leader: `None` for a group led from outside this process's PID
+/// namespace. It can't fail, unlike `group` asked of this process, which a seccomp profile can
+/// refuse, so a check that refuses this process's group always has it to refuse.
+pub fn own_group() -> Option<Pid> {
+    // getpgrp answers no error and nothing below 0, so only its 0 for a leader outside is none.
+    Pid::from_raw(sys::getpgrp().max(0))
 }
 
 /// The effective uid of the process at the other end of a Unix socket, as it was when it
@@ -139,14 +147,14 @@ mod tests {
     fn reads_this_process_s_group_as_the_kernel_gives_it() {
         let ours = getpgrp();
         assert_eq!(getpgid(None).unwrap(), ours);
-        assert_eq!(group(None).unwrap(), Some(ours));
-        assert_eq!(group(Some(getpid())).unwrap(), Some(ours));
+        assert_eq!(own_group(), Some(ours));
+        assert_eq!(group(getpid()).unwrap(), Some(ours));
     }
 
     #[test]
     fn reads_no_session_or_group_of_a_process_that_isn_t_there() {
         let absent = Pid::from_raw(i32::MAX).unwrap();
         assert!(session(Some(absent)).is_err());
-        assert!(group(Some(absent)).is_err());
+        assert!(group(absent).is_err());
     }
 }

@@ -46,8 +46,12 @@ pub(crate) fn vet(raw: i32) -> Result<(), Refused> {
     if raw <= 1 {
         return Err(Refused::NotOne(raw));
     }
-    let (group, session) = (bazhen_pid::group(None), bazhen_pid::session(None));
-    if names_the_holder(raw, getpid(), group, session) {
+    if names_the_holder(
+        raw,
+        getpid(),
+        bazhen_pid::own_group(),
+        bazhen_pid::session(None),
+    ) {
         return Err(Refused::Holder(raw));
     }
     if is_ancestor(raw) {
@@ -57,16 +61,16 @@ pub(crate) fn vet(raw: i32) -> Result<(), Refused> {
 }
 
 /// Whether `raw` numbers the holder, `own`, or its group or its session as `group` and `session`
-/// read them. One that can't be read leaves the others to refuse, and so does one led from outside
-/// this PID namespace, which no number here names; the session's own check on a member, which
-/// refuses whatever it can't read, still stands.
+/// read them. A group or session led from outside this PID namespace, which no number here names,
+/// leaves the others to refuse, and so does a session that can't be read; the session's own check
+/// on a member, which refuses whatever it can't read, still stands. The group is always read.
 fn names_the_holder(
     raw: i32,
     own: Pid,
-    group: io::Result<Option<Pid>>,
+    group: Option<Pid>,
     session: io::Result<Option<Pid>>,
 ) -> bool {
-    [Some(own), group.ok().flatten(), session.ok().flatten()]
+    [Some(own), group, session.ok().flatten()]
         .into_iter()
         .flatten()
         .any(|pid| pid.as_raw_pid() == raw)
@@ -274,14 +278,15 @@ mod tests {
         }
     }
 
-    /// `pid` as the guard reads a group or session that it names, or one that can't be read.
+    /// `pid` as the guard reads a session that it names, or one that can't be read.
     fn read_or_unreadable(pid: Option<Pid>) -> io::Result<Option<Pid>> {
         pid.map(Some)
             .ok_or_else(|| io::Error::other("can't be read"))
     }
 
-    /// A group or session led from outside this PID namespace leaves `vet` refusing every number it
-    /// refuses when that group or session can't be read: never fewer, so never more permissive.
+    /// A session led from outside this PID namespace leaves `vet` refusing every number it refuses
+    /// when the session can't be read: never fewer, so never more permissive. The holder's group,
+    /// which is always read, is refused whatever the session reads.
     #[test]
     fn a_group_or_session_led_from_outside_refuses_what_an_unreadable_one_does() {
         let own = Pid::from_raw(100).unwrap();
@@ -289,13 +294,9 @@ mod tests {
         for raw in [2, 100, 200, 300, 400] {
             for read_group in [group, None] {
                 for read_session in [session, None] {
-                    let outside = names_the_holder(raw, own, Ok(read_group), Ok(read_session));
-                    let unreadable = names_the_holder(
-                        raw,
-                        own,
-                        read_or_unreadable(read_group),
-                        read_or_unreadable(read_session),
-                    );
+                    let outside = names_the_holder(raw, own, read_group, Ok(read_session));
+                    let unreadable =
+                        names_the_holder(raw, own, read_group, read_or_unreadable(read_session));
                     assert_eq!(
                         outside, unreadable,
                         "{raw} with group {read_group:?}, session {read_session:?}"
@@ -303,10 +304,12 @@ mod tests {
                 }
             }
         }
-        assert!(names_the_holder(100, own, Ok(None), Ok(None)));
-        assert!(names_the_holder(200, own, Ok(group), Ok(None)));
-        assert!(names_the_holder(300, own, Ok(None), Ok(session)));
-        assert!(!names_the_holder(400, own, Ok(group), Ok(session)));
+        for read_session in [Ok(session), Ok(None), read_or_unreadable(None)] {
+            assert!(names_the_holder(200, own, group, read_session));
+        }
+        assert!(names_the_holder(100, own, None, Ok(None)));
+        assert!(names_the_holder(300, own, None, Ok(session)));
+        assert!(!names_the_holder(400, own, group, Ok(session)));
     }
 
     #[test]
