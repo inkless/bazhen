@@ -53,15 +53,16 @@ Each layer has one job:
   host-guard's product modules, and only its index is importable elsewhere. It depends on nothing
   of Bazhen's, so anything may use it. A child this process spawned and still holds is signalled
   through `signalOwnChild`, which sends through the child's own handle, so it reaches nothing once
-  the child is reaped. A start's `timeout` is
-  allowed only where `scripts/signal-paths.ts` lists it. A child's stdio streams are sockets this
-  process holds, and one that fails with no `error` listener ends it: a child that exits before
-  reading its stdin breaks the pipe whenever it likes. So each async start in product source is
-  wrapped in `heard()` where it is made, and its exit and callback say how it ended. The PTY seam
-  hangs up by closing the PTY, and the kernel hangs up whichever session holds the terminal then: node-pty reaps its child before
-  anyone hears it exit, so nothing signals that child by its pid. Rust sends through
-  `bazhen-test-signal` in tests and `crates/bazhen-holder/src/guard.rs` in the holder, which sends
-  only to the holder's own unreaped child's group or a process in the session that child leads
+  the child is reaped. A start's `timeout` is allowed only where `scripts/signal-paths.ts` lists it.
+  A child's stdio streams are sockets this process holds, and one that fails with no `error`
+  listener ends it: a child that exits before reading its stdin breaks the pipe whenever it likes.
+  So each async start in product source is wrapped in `heard()` where it is made, and its exit and
+  callback say how it ended. The daemon's servers hear each connection they accept and each
+  WebSocket they upgrade the same way (`apps/daemon/src/http/connections.ts`). The PTY seam hangs up
+  by closing the PTY, and the kernel hangs up whichever session holds the terminal then: node-pty
+  reaps its child before anyone hears it exit, so nothing signals that child by its pid. Rust sends
+  through `bazhen-test-signal` in tests and `crates/bazhen-holder/src/guard.rs` in the holder, which
+  sends only to the holder's own unreaped child's group or a process in the session that child leads
   (`testing.md` § Hermeticity).
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
