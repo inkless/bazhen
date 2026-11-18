@@ -205,6 +205,9 @@ export type FleetAgent = z.infer<typeof FleetAgent>;
 /** What `bazhen agents --json` prints: each agent not ended. */
 export const FleetAgents = z.array(FleetAgent);
 
+/** A compaction window, in tokens. */
+export const CompactWindowTokens = z.number().int().min(100_000).max(10_000_000);
+
 export const LaunchAgentRequest = z.object({
   idempotencyKey: IdempotencyKey,
   harness: HarnessId,
@@ -216,6 +219,11 @@ export const LaunchAgentRequest = z.object({
   name: AgentName.optional(),
   /** The role whose prompt it starts with; absent for none. */
   role: Role.optional(),
+  /**
+   * How many tokens its context may reach before the harness compacts it, on every start of the
+   * agent; absent, the harness's own setting stands. Claude Code takes no fewer than 100 000.
+   */
+  compactWindowTokens: CompactWindowTokens.optional(),
 });
 export type LaunchAgentRequest = z.infer<typeof LaunchAgentRequest>;
 

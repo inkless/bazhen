@@ -344,6 +344,7 @@ const codex = new CodexChannel({
     codexSignals({
       agentOf: (threadId) => store.codexAgent(threadId),
       record: (agentId, activity) => void store.recordActivity(agentId, activity),
+      compacted: (agentId) => void store.recordCompaction(agentId, "codex_item"),
       resume: (threadId) => codex.resume(threadId),
       turns: {
         started: (agentId) => inbox.turnStarted(agentId),
@@ -641,6 +642,7 @@ const socketListener = getRequestListener(
       binding: new SessionBinding(store, psTable),
       activity,
       recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
+      compacted: (agentId) => void store.recordCompaction(agentId, "claude_hook"),
       observeSend: (agentId, toolUseId, sent) => observeSend(store, agentId, toolUseId, sent),
     }),
     credentials: agentTokens,

@@ -9,6 +9,7 @@ import {
   messageText,
   queueArgs,
   readApproval,
+  readCompaction,
   readQuestion,
   questionResult,
   readResolved,
@@ -393,6 +394,24 @@ describe("Codex mail", () => {
       readUserMessage("item/started", input(quoting))?.messageId,
       readUserMessage("item/started", input(`fwd: ${messageText("msg_2", "x")}`))?.messageId,
     ]).toEqual(["msg_1", null]);
+  });
+});
+
+const item = (type: string) => ({
+  threadId: "thr-1",
+  turnId: "t-1",
+  item: { type, id: "i-1" },
+});
+
+describe("Codex compactions", () => {
+  it("reads the thread a completed compaction item is in, and no other item or notification", () => {
+    expect([
+      readCompaction("item/completed", item("contextCompaction")),
+      readCompaction("item/started", item("contextCompaction")),
+      readCompaction("item/completed", item("agentMessage")),
+      readCompaction("thread/compacted", { threadId: "thr-1", turnId: "t-1" }),
+      readCompaction("item/completed", { item: { type: "contextCompaction" } }),
+    ]).toEqual(["thr-1", null, null, null, null]);
   });
 });
 

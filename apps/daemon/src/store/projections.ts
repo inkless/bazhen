@@ -268,6 +268,7 @@ export function project(db: Statements, e: Recorded): void {
       return update(db, "agent_sessions", "id", e.entityId, e.id, { name });
     }
     case "agent.signalled":
+    case "agent.compacted":
       EVENTS[e.type].payload.parse(e.payload);
       return;
     // The devices table carries the token's hash, which no event may, so the store writes it

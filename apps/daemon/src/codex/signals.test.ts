@@ -4,6 +4,11 @@ import { AUTO_CONTINUED, codexSignals, INTERRUPTED } from "./signals.ts";
 
 const AT = new Date("2026-11-12T10:00:00.000Z");
 
+const compaction = (threadId: string) => ({
+  threadId,
+  item: { type: "contextCompaction", id: "i" },
+});
+
 /** The listener on thread `thr-1`, bound to `agt-1`, with what it records and resumes. */
 function setup(bound: Record<string, string> = { "thr-1": "agt-1" }, failingResumes = 0) {
   let failing = failingResumes;
@@ -120,6 +125,20 @@ describe("Codex activity signals", () => {
     s.listener.disconnected?.();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(s.resumed).toEqual(["thr-1"]);
+  });
+
+  it("records a compaction of a bound thread for its agent, and none of a thread no agent is on", () => {
+    const compacted: string[] = [];
+    const bound = new Map([["thr-1", "agt-1"]]);
+    const listener = codexSignals({
+      agentOf: (threadId) => bound.get(threadId),
+      record: () => undefined,
+      compacted: (agentId) => compacted.push(agentId),
+      resume: async () => undefined,
+    });
+    listener.notification?.("item/completed", compaction("thr-1"));
+    listener.notification?.("item/completed", compaction("thr-2"));
+    expect(compacted).toEqual(["agt-1"]);
   });
 
   it("tells the inbox a turn failed and when the next one starts, for the agent bound to it", () => {

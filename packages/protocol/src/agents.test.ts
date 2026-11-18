@@ -7,6 +7,8 @@ import {
 } from "./agents.ts";
 
 const launch = { idempotencyKey: "k-1", harness: "claude-code", cwd: "/work" };
+const window = (compactWindowTokens: unknown) =>
+  LaunchAgentRequest.safeParse({ ...launch, compactWindowTokens }).success;
 
 describe("LaunchAgentRequest", () => {
   it("accepts a launch with a key, a known harness and an absolute directory", () => {
@@ -37,6 +39,17 @@ describe("LaunchAgentRequest", () => {
       LaunchAgentRequest.safeParse({ ...launch, theme: "system" }).success,
       RespawnAgentRequest.safeParse({ ...respawn, theme: "Light" }).success,
     ]).toEqual([true, true, true, false, false]);
+  });
+
+  it("takes a compaction window of whole tokens from 100 000 to 10 000 000", () => {
+    expect([
+      window(100_000),
+      window(10_000_000),
+      window(99_999),
+      window(10_000_001),
+      window(300_000.5),
+      window("300000"),
+    ]).toEqual([true, true, false, false, false, false]);
   });
 });
 

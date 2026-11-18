@@ -1233,6 +1233,34 @@ describe("Store usage", () => {
     expect(() => store.recordUsage(newId("agent"), { model: "Opus" })).toThrow(UnknownAgent);
   });
 
+  it("records a compaction with the usage last recorded before it, or none", async () => {
+    const { store, agentId } = await withAgent();
+    const compactions = () =>
+      store
+        .events(0)
+        .filter((e) => e.type === "agent.compacted")
+        .map((e) => e.payload);
+    store.recordCompaction(agentId, "codex_item");
+    store.recordUsage(agentId, { model: "Opus", contextUsedPercent: 88 });
+    store.recordCompaction(agentId, "claude_hook");
+    expect(compactions()).toEqual([
+      { sign: "codex_item" },
+      { sign: "claude_hook", before: { model: "Opus", contextUsedPercent: 88 } },
+    ]);
+  });
+
+  it("records no compaction for an agent whose process has exited, and refuses one it never ran", async () => {
+    const { store, agentId } = await withAgent();
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    expect(store.recordCompaction(agentId, "claude_hook")).toBeNull();
+    expect(() => store.recordCompaction(newId("agent"), "claude_hook")).toThrow(UnknownAgent);
+  });
+
   it("forgets an agent's usage when its process is replaced or it is closed", async () => {
     const respawned = await withAgent();
     respawned.store.recordUsage(respawned.agentId, { model: "Opus" });

@@ -704,6 +704,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
         theme: "light",
         name: "reviewer",
         role: "worker",
+        compactWindowTokens: 300_000,
       },
     ],
   },

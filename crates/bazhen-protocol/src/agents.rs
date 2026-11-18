@@ -381,6 +381,9 @@ pub struct LaunchAgentRequest {
     pub name: Option<AgentName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
+    /// Tokens of context before the harness compacts it, from 100 000 to 10 000 000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_window_tokens: Option<u32>,
 }
 
 /// What a launch produced: the agent, its terminal once it has one, and the events recorded.

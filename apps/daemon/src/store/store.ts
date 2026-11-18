@@ -1007,6 +1007,26 @@ export class Store {
     });
   }
 
+  /**
+   * Records that an agent's harness compacted its context, with the usage last recorded before
+   * it. Returns the event id, or null for an agent whose process has gone. An agent this daemon
+   * never ran is refused.
+   */
+  recordCompaction(agentId: string, sign: EventPayload<"agent.compacted">["sign"]): number | null {
+    return this.transaction(() => {
+      const row = this.prepare("SELECT state, usage FROM agent_sessions WHERE id = ?").get(agentId);
+      if (row === undefined) throw new UnknownAgent(agentId);
+      if (!REPORTING.has(AgentState.parse(row.state))) return null;
+      const before = typeof row.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
+      return this.append({
+        type: "agent.compacted",
+        entityId: agentId,
+        actor: "system",
+        payload: { sign, ...(before && { before }) },
+      });
+    });
+  }
+
   /** What an agent's harness last reported it doing in this process, if anything. */
   latestActivity(agentId: string): Activity | undefined {
     const row = this.prepare("SELECT activity FROM activity_latest WHERE agent_session_id = ?").get(

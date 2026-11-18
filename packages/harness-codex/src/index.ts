@@ -462,7 +462,7 @@ export function readTurn(
   };
 }
 
-const ItemStarted = z.object({ threadId: z.string(), item: z.object({ type: z.string() }) });
+const ThreadItem = z.object({ threadId: z.string(), item: z.object({ type: z.string() }) });
 
 /** An item a turn started, and whether it is the user's input; null for any other notification. */
 export function readItemStarted(
@@ -470,10 +470,21 @@ export function readItemStarted(
   params: unknown,
 ): { readonly threadId: string; readonly userInput: boolean } | null {
   if (method !== "item/started") return null;
-  const p = ItemStarted.safeParse(params);
+  const p = ThreadItem.safeParse(params);
   return p.success
     ? { threadId: p.data.threadId, userInput: p.data.item.type === "userMessage" }
     : null;
+}
+
+/**
+ * The thread whose context a compaction item just finished compacting, from `item/completed`;
+ * null for any other item or notification. Codex's `thread/compacted` says the same, but Codex
+ * marks it deprecated in favour of the item.
+ */
+export function readCompaction(method: string, params: unknown): string | null {
+  if (method !== "item/completed") return null;
+  const p = ThreadItem.safeParse(params);
+  return p.success && p.data.item.type === "contextCompaction" ? p.data.threadId : null;
 }
 
 const StartedThread = z.object({
