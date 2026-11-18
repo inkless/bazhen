@@ -41,7 +41,7 @@ describe.each([
     let daemon: Daemon;
     let ids: { agentId: string; terminalId: string };
     beforeAll(async () => {
-      daemon = await Daemon.start({ runtime: "tmux", env });
+      daemon = await Daemon.start({ env });
       ids = await daemon.program(["sh", "-c", "echo on-the-socket; exec sleep 600"]);
     });
     afterAll(async () => {
@@ -76,26 +76,6 @@ describe.each([
       ]).toEqual(["open", [403, "an agent can't open a stream"]]);
     });
 
-    it("refuses a process Bazhen's runtime runs in no agent's or shell's terminal, by its process", async () => {
-      const route = `/v1/terminals/${ids.terminalId}/stream`;
-      const { agentId } = await daemon.program(["sleep", "300"]);
-      daemon.runInTerminal(agentId, [
-        process.execPath,
-        probe,
-        daemon.socket,
-        route,
-        probeOut(daemon),
-      ]);
-      await waitUntil(() => answered(daemon).includes("\r\n\r\n"), "the probe's answer");
-      expect(answered(daemon).split("\r\n\r\n")).toEqual([
-        expect.stringMatching(/^HTTP\/1\.1 403 Forbidden\r\n/),
-        JSON.stringify({
-          error: "forbidden",
-          message: "the caller runs under Bazhen's runtime, in no terminal",
-        }),
-      ]);
-    });
-
     it("leaves the loopback port's Host, Origin and pairing guard as they were", async () => {
       const overTcp = `${daemon.url.replace("http", "ws")}/v1/terminals/${ids.terminalId}/stream`;
       expect([
@@ -112,7 +92,7 @@ describe("a process an agent runs, asking for a terminal's stream on the socket"
   let daemon: Daemon;
   beforeAll(async () => {
     model = await startFakeModel();
-    daemon = await Daemon.start({ runtime: "tmux", modelUrl: model.url });
+    daemon = await Daemon.start({ modelUrl: model.url });
   });
   afterAll(async () => {
     await daemon?.stop();

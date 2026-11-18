@@ -3,6 +3,7 @@
 // daemon written in another language.
 
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { hostname } from "node:os";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -770,15 +771,6 @@ export class Daemon {
     return session;
   }
 
-  /** The tmux clients attached to the terminal's session, one line each. */
-  clientsOf(terminalId: string): string[] {
-    const session = this.session(terminalId);
-    if (session === undefined) return [];
-    return this.tmux("list-clients", "-t", session)
-      .split("\n")
-      .filter((line) => line.trim() !== "");
-  }
-
   /** A tmux format value of the terminal's pane, found by the tag Bazhen wrote on it. */
   paneFact(terminalId: string, format: string): string | undefined {
     const panes = this.tmux("list-panes", "-a", "-F", `#{@bazhen_terminal_id} #{${format}}`);
@@ -863,10 +855,16 @@ export class Daemon {
 
   /** The agent a shell terminal is linked to, by the tag Bazhen wrote on it; none if unlinked. */
   async linkedAgentOf(terminalId: string): Promise<string | undefined> {
-    const holder = this.holderAt(terminalId);
-    if (holder === undefined)
+    if (this.holderAt(terminalId) === undefined)
       return this.paneFact(terminalId, "@bazhen_linked_agent_id") || undefined;
-    return (await askHolder(holder)).hello.tags["linkedAgentId"];
+    return (await this.holderTags(terminalId))["linkedAgentId"];
+  }
+
+  /** The tags the terminal's holder carries, as the daemon set them. */
+  async holderTags(terminalId: string): Promise<Readonly<Record<string, string>>> {
+    const holder = this.holderAt(terminalId);
+    if (holder === undefined) throw new Error(`terminal ${terminalId} is on no holder`);
+    return (await askHolder(holder)).hello.tags;
   }
 
   /** The terminal's process: its holder's child, or its tmux pane's (Linux only for what reads it). */
@@ -890,9 +888,19 @@ export class Daemon {
     return readlinkSync(`/proc/${await this.terminalPid(terminalId)}/cwd`);
   }
 
-  /** The environment the terminal's process runs with (Linux only). */
+  /**
+   * The environment the terminal's process runs with (Linux only). A process in the middle of an
+   * exec, as the agent's `claude` shim is, briefly shows an empty one, which no terminal's process
+   * has once it runs: every runtime sets its TERM.
+   */
   async terminalEnv(terminalId: string): Promise<Record<string, string>> {
-    return processEnv(await this.terminalPid(terminalId));
+    const pid = await this.terminalPid(terminalId);
+    for (const start = Date.now(); Date.now() - start < 5_000;) {
+      const env = processEnv(pid);
+      if (Object.keys(env).length > 0) return env;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error(`process ${pid} of ${terminalId} shows no environment`);
   }
 
   /**
@@ -1315,6 +1323,25 @@ export class Daemon {
     }).length;
   }
 
+  /**
+   * Counts the sockets the terminal's holder has open, from /proc: the one it listens on and each
+   * connection to it. Asks the holder for its pid once, so a count makes no connection of its own.
+   */
+  async holderSocketCounter(terminalId: string): Promise<() => number> {
+    const holder = this.holderAt(terminalId);
+    if (holder === undefined) throw new Error(`terminal ${terminalId} is on no holder`);
+    const fds = `/proc/${(await askHolder(holder)).hello.holderPid}/fd`;
+    return () =>
+      readdirSync(fds).filter((fd) => {
+        try {
+          return readlinkSync(join(fds, fd)).startsWith("socket:");
+        } catch {
+          // Closed between the listing and the read.
+          return false;
+        }
+      }).length;
+  }
+
   /** Detaches every tmux client from the agent's terminal, as if the client's tmux link broke. */
   detachClients(agentId: string): void {
     this.tmux("detach-client", "-s", this.requireSession(this.requireTerminal(agentId)));
@@ -1463,6 +1490,9 @@ export async function holderLook(socket: string): Promise<HolderLook> {
     cursorRow: shown.screen[shown.cursor[1]] ?? "",
   };
 }
+
+/** The name of the machine the tests run on, as the daemon gives its local environment's host. */
+export const HOST = hostname();
 
 /**
  * A writer connection of its own to the holder at `socket`, for while no daemon holds the writer

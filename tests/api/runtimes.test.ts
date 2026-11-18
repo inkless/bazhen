@@ -1,112 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HealthResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { closeHolderAt, holderSockets } from "../support/holder-close.ts";
 import { bazhen, Daemon, replaceHolderChild, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
+import { openShell, runtimeStates, snapshot, terminals } from "./runtime-states.ts";
 
 let model: FakeModel;
-
-const snapshot = async (daemon: Daemon) =>
-  StateSnapshot.parse((await daemon.request("/v1/state")).body);
-
-async function openShell(daemon: Daemon, key: string): Promise<string> {
-  const opened = await daemon.request("/v1/shells", {
-    method: "POST",
-    body: { idempotencyKey: key, cwd: daemon.work },
-  });
-  return ShellCommandResponse.parse(opened.body).terminalId;
-}
-
-const runtimeOf = (command: string | null) =>
-  command === null ? "none" : command.startsWith("bazhen terminals attach") ? "holder" : "tmux";
-
-/** Each runtime the daemon reports, as `<kind>: <state>`. */
-async function runtimeStates(daemon: Daemon): Promise<string[]> {
-  const { runtimes } = HealthResponse.parse((await daemon.request("/v1/health")).body);
-  return runtimes.map((r) => `${r.kind}: ${r.state}`);
-}
-
-/** Each terminal's state and the runtime its attach command names, by TerminalId. */
-async function terminals(daemon: Daemon): Promise<Record<string, string>> {
-  const { agents, shells } = await snapshot(daemon);
-  return Object.fromEntries([
-    ...agents.map((a) => [String(a.terminalId), `${a.state} on ${runtimeOf(a.attachCommand)}`]),
-    ...shells.map((s) => [s.id, `${s.state} on ${runtimeOf(s.attachCommand)}`]),
-  ]);
-}
 
 beforeAll(async () => {
   model = await startFakeModel();
 });
 afterAll(async () => {
   await model?.close();
-});
-
-describe("a daemon running terminals on both runtimes", () => {
-  let daemon: Daemon;
-  let onTmux: string;
-  let holderShell: string;
-  let holderAgent: string;
-
-  beforeAll(async () => {
-    daemon = await Daemon.start({ modelUrl: model.url, runtime: "tmux" });
-    onTmux = await openShell(daemon, "tmux-shell");
-    await daemon.crash();
-    daemon.useRuntime("holder");
-    await daemon.restart();
-    holderShell = await openShell(daemon, "holder-shell");
-    const launched = await daemon.launch("holder-agent");
-    holderAgent = String(launched.terminalId);
-    await daemon.running(launched.agentId);
-  }, 120_000);
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("makes new terminals on the default, and keeps the old one where it was made", async () => {
-    expect(await terminals(daemon)).toEqual({
-      [onTmux]: "running on tmux",
-      [holderShell]: "running on holder",
-      [holderAgent]: "running on holder",
-    });
-    expect(holderSockets(daemon.home).toSorted()).toEqual(
-      [holderShell, holderAgent].map((id) => `${daemon.home}/run/holders/${id}.sock`).toSorted(),
-    );
-  });
-
-  it("finds each one on its own runtime after a crash", async () => {
-    await daemon.crash();
-    await daemon.restart();
-    expect(await terminals(daemon)).toEqual({
-      [onTmux]: "running on tmux",
-      [holderShell]: "running on holder",
-      [holderAgent]: "running on holder",
-    });
-  });
-
-  it("calls only the agent whose holder ended lost, while the daemon runs, and leaves the rest", async () => {
-    await closeHolderAt(`${daemon.home}/run/holders/${holderAgent}.sock`);
-    await expect
-      .poll(async () => (await terminals(daemon))[holderAgent], { timeout: 30_000 })
-      .toBe("lost on none");
-    expect(await terminals(daemon)).toEqual({
-      [onTmux]: "running on tmux",
-      [holderShell]: "running on holder",
-      [holderAgent]: "lost on none",
-    });
-  });
-
-  it("reads tmux while a terminal is open on it, though holders are the default, and not after", async () => {
-    const whileOpen = await runtimeStates(daemon);
-    const closed = await daemon.request(`/v1/shells/${onTmux}/close`, {
-      method: "POST",
-      body: { idempotencyKey: "close-tmux-shell", generation: 0 },
-    });
-    expect([whileOpen, closed.status]).toEqual([["tmux: healthy", "holder: healthy"], 200]);
-    await expect
-      .poll(() => runtimeStates(daemon), { timeout: 15_000 })
-      .toEqual(["tmux: unused", "holder: healthy"]);
-  });
 });
 
 describe("a holder daemon on a machine without tmux", () => {
@@ -198,5 +102,55 @@ describe("an agent whose holder ran a new process while the daemon was down", ()
     await expect.poll(agent, { timeout: 30_000 }).toEqual(["exited", 1]);
     expect(await command("respawn", { generation: 1 })).toMatchObject({ status: 200 });
     await expect.poll(async () => (await agent())[1], { timeout: 30_000 }).toBe(2);
+  });
+});
+
+describe("a daemon running terminals on several holders", () => {
+  let daemon: Daemon;
+  let shell: string;
+  let agent: string;
+
+  /** Whether the shell still runs what it is typed: a holder of its own, untouched by the rest. */
+  async function answers(key: string): Promise<void> {
+    const view = await daemon.view(shell, "interactive");
+    await view.drive();
+    view.type(`echo ${key}-$((6*7))\r`);
+    await expect
+      .poll(() => daemon.terminalScreen(shell), { timeout: 10_000 })
+      .toContain(`${key}-42`);
+    view.close();
+  }
+
+  beforeAll(async () => {
+    daemon = await Daemon.start({ modelUrl: model.url });
+    shell = await openShell(daemon, "shell");
+    const launched = await daemon.launch("agent");
+    agent = String(launched.terminalId);
+    await daemon.running(launched.agentId);
+  }, 120_000);
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("finds each terminal on its own holder after a crash", async () => {
+    await daemon.crash();
+    await daemon.restart();
+    expect([await terminals(daemon), holderSockets(daemon.home).toSorted()]).toEqual([
+      { [shell]: "running on holder", [agent]: "running on holder" },
+      [shell, agent].map((id) => `${daemon.home}/run/holders/${id}.sock`).toSorted(),
+    ]);
+    await answers("after-crash");
+  });
+
+  it("calls only the agent whose holder ended lost, and leaves the shell running", async () => {
+    await closeHolderAt(`${daemon.home}/run/holders/${agent}.sock`);
+    await expect
+      .poll(async () => (await terminals(daemon))[agent], { timeout: 30_000 })
+      .toBe("lost on none");
+    expect(await terminals(daemon)).toEqual({
+      [shell]: "running on holder",
+      [agent]: "lost on none",
+    });
+    await answers("after-end");
   });
 });

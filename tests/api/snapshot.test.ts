@@ -7,7 +7,7 @@ const size = { cols: 100, rows: 30 };
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -25,8 +25,8 @@ async function opened(
 }
 
 /**
- * Waits until `view` shows what tmux has on screen. tmux's client draws the screen a moment after
- * it attaches, and a view that opens sooner gets the screen as the daemon has it, still empty.
+ * Waits until `view` shows what the terminal has on screen: a view that opens before the program
+ * has drawn gets the screen as it stood, still empty.
  */
 async function drawn(view: View, agentId: string, at = size): Promise<void> {
   await expect
@@ -44,7 +44,7 @@ async function numbers(view: View): Promise<number[]> {
 }
 
 describe("what a view shows when it opens", () => {
-  it("shows all the history tmux holds above the screen, with the cursor where tmux has it", async () => {
+  it("shows all the history the terminal holds above the screen, with the cursor where it is", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",
       "-c",
@@ -62,8 +62,8 @@ describe("what a view shows when it opens", () => {
       captured(await daemon.screen(agentId, HISTORY_LINES)),
       await daemon.cursor(agentId),
     ]);
-    // tmux's whole history, not a part: it holds HISTORY_LINES, less any lines it moved back onto
-    // the screen as the view made the pane taller.
+    // The whole history, not a part: the terminal holds HISTORY_LINES, less any lines it moved back
+    // onto the screen as the view made it taller.
     expect(shown.lines.length - shown.screen.length).toBeGreaterThan(HISTORY_LINES - size.rows);
     first.close();
     late.close();
@@ -73,41 +73,43 @@ describe("what a view shows when it opens", () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",
       "-c",
-      `printf '%0${size.cols}d' 0; sleep 600`,
+      `sleep 2; printf '%0${size.cols}d' 0; sleep 600`,
     ]);
+    // Open before the program draws, so it reads the line as it is written, not from a snapshot.
+    const first = await opened(terminalId, "interactive");
     await waitUntil(
       async () => (await daemon.screen(agentId)).includes("0".repeat(size.cols)),
       "the line",
     );
-    const first = await opened(terminalId, "interactive");
     await drawn(first, agentId);
     const late = await opened(terminalId, "observe");
-    // tmux's own cursor waits to wrap past the last column; its client draws it on that column.
+    // The line filled the row, so the cursor waits to wrap: one past the last column, as tmux
+    // reports it too, until the next character lands on the row below.
     expect([
-      await daemon.cursor(agentId),
       (await replay(late.snapshot(), size)).cursor,
       (await replay(first.received(), size)).cursor,
     ]).toEqual([
       [size.cols, 0],
-      [size.cols - 1, 0],
-      [size.cols - 1, 0],
+      [size.cols, 0],
     ]);
     first.close();
     late.close();
   });
 
-  it("lays out rows holding emoji and wide characters exactly as tmux does", async () => {
+  it("lays out rows holding emoji and wide characters exactly as the terminal does", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",
       "-c",
-      "printf 'a😀b  c\\n日本語x\\nflag 🇯🇵 end\\n\\033[4;10Hmoved'; sleep 600",
+      "sleep 2; printf 'a😀b  c\\n日本語x\\nflag 🇯🇵 end\\n\\033[4;10Hmoved'; sleep 600",
     ]);
-    await waitUntil(async () => (await daemon.screen(agentId)).includes("moved"), "the output");
+    // Open before the program draws: what it shows is the output itself, read as a browser reads
+    // it, which the terminal's screen and a later view's snapshot must both match.
     const first = await opened(terminalId, "interactive");
+    await waitUntil(async () => (await daemon.screen(agentId)).includes("moved"), "the output");
     await drawn(first, agentId);
     const late = await opened(terminalId, "observe");
     expect((await replay(late.snapshot(), size)).screen).toEqual(
-      captured(await daemon.screen(agentId)),
+      (await replay(first.received(), size)).screen,
     );
     first.close();
     late.close();
@@ -137,7 +139,7 @@ describe("what a view shows when it opens", () => {
     late.close();
   });
 
-  it("keeps the mouse protocol tmux set for a view that opens later", async () => {
+  it("keeps the mouse protocol the program set for a view that opens later", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",
       "-c",

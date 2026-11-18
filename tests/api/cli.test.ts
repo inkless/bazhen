@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { signalOwnChild, tmuxVersion } from "@bazhen/host-guard";
+import { signalOwnChild } from "@bazhen/host-guard";
 import { StateSnapshot } from "@bazhen/protocol";
 import {
   Daemon,
@@ -144,13 +144,13 @@ describe("bazhen stop with no daemon", () => {
 describe("bazhen stop", () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.start({ runtime: "tmux" });
+    daemon = await Daemon.start();
   });
   afterAll(async () => {
     await daemon?.stop();
   });
 
-  it("stops the daemon and leaves its agents running in tmux", async () => {
+  it("stops the daemon and leaves its agents running", async () => {
     const { agentId } = await daemon.launch("kept");
     expect((await bazhen(["stop"], daemon.env)).code).toBe(0);
     expect(await daemon.hasTerminal(agentId)).toBe(true);
@@ -162,11 +162,10 @@ describe("bazhen start's environment", () => {
   beforeAll(async () => {
     // From inside a parent Claude Code session, with a name the denylist drops unless passed
     // (not TERM_PROGRAM, which tmux sets in every pane itself).
-    daemon = await Daemon.startWithCli(
-      '[agents.env]\npassthrough = ["ITERM_PROFILE"]\n',
-      { CLAUDECODE: "1", ITERM_PROFILE: "kept-by-config" },
-      "tmux",
-    );
+    daemon = await Daemon.startWithCli('[agents.env]\npassthrough = ["ITERM_PROFILE"]\n', {
+      CLAUDECODE: "1",
+      ITERM_PROFILE: "kept-by-config",
+    });
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -184,9 +183,6 @@ describe("bazhen start's environment", () => {
     expect(env["ITERM_PROFILE"]).toBe("kept-by-config");
   });
 });
-
-const [tmuxMajor, tmuxMinor] = tmuxVersion();
-const crashesOnDeadPaneFocus = tmuxMajor < 3 || (tmuxMajor === 3 && tmuxMinor < 5);
 
 describe("bazhen doctor", () => {
   let daemon: Daemon;
@@ -217,30 +213,10 @@ describe("bazhen doctor", () => {
   });
 });
 
-describe("bazhen doctor on tmux", () => {
-  let daemon: Daemon;
-  beforeAll(async () => {
-    daemon = await Daemon.startWithCli("", {}, "tmux");
-  });
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("warns of the dead-pane crash on a tmux before 3.5, and only there", async () => {
-    const { code, out } = await bazhen(["doctor"], daemon.env);
-    expect(code).toBe(0);
-    expect(out.includes("  warning: tmux before 3.5 crashes")).toBe(crashesOnDeadPaneFocus);
-  });
-});
-
 describe('agents.shell = "login"', () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.startWithCli(
-      '[agents]\nshell = "login"\n',
-      { SHELL: LOGIN_SHELL },
-      "tmux",
-    );
+    daemon = await Daemon.startWithCli('[agents]\nshell = "login"\n', { SHELL: LOGIN_SHELL });
   });
   afterAll(async () => {
     await daemon?.stop();
@@ -249,7 +225,7 @@ describe('agents.shell = "login"', () => {
   it("starts each agent through the user's login shell, which hands over to the TUI", async () => {
     const { agentId } = await daemon.launch("login");
     await expect.poll(() => daemon.hasTerminal(agentId)).toBe(true);
-    // The pane's process is the TUI itself, with its own arguments, not a shell left waiting on it.
+    // The terminal's process is the TUI itself, with its own arguments, not a shell left waiting on it.
     // It is the fixture's `/bin/sh -c` for a moment before then, so wait out the handover, for
     // longer than the default 1 s: a loaded runner can be slow to get from the exec to the TUI.
     await expect
@@ -264,13 +240,13 @@ describe('agents.shell = "login"', () => {
 describe("bazhen env refresh", () => {
   let daemon: Daemon;
   beforeAll(async () => {
-    daemon = await Daemon.startWithCli("", { BZ_STALE: "from-start" }, "tmux");
+    daemon = await Daemon.startWithCli("", { BZ_STALE: "from-start" });
   });
   afterAll(async () => {
     await daemon?.stop();
   });
 
-  // A value that would end the command, or run another, if tmux ever read it as code.
+  // A value that would end the command, or run another, if a runtime ever read it as code.
   const fresh = `it's "x" $HOME; run-shell 'id' #{pane_id} a\\b`;
 
   it("gives agents started afterwards the refreshing shell's environment, and no other", async () => {
@@ -284,7 +260,7 @@ describe("bazhen env refresh", () => {
       CLAUDECODE: "1",
     });
     expect(refreshed.code).toBe(0);
-    expect(refreshed.out).toContain("left as they were (tmux can't take them as data): BZ_MULTI");
+    expect(refreshed.out).not.toContain("left as they were");
     expect(refreshed.out).toContain(first.agentId);
 
     const second = await daemon.launch("after");
@@ -293,7 +269,7 @@ describe("bazhen env refresh", () => {
     expect([env["BZ_FRESH"], env["BZ_STALE"], env["BZ_MULTI"], env["CLAUDECODE"]]).toEqual([
       fresh,
       undefined,
-      undefined,
+      "one\ntwo",
       undefined,
     ]);
     // The agent already running keeps what it started with.

@@ -5,7 +5,7 @@ import { Daemon } from "./daemon.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
-  daemon = await Daemon.start({ runtime: "tmux" });
+  daemon = await Daemon.start();
 });
 afterAll(async () => {
   await daemon?.stop();
@@ -50,7 +50,7 @@ describe("an agent's lifecycle after launch", () => {
     ]);
   });
 
-  it("closes an agent, ending its tmux session, and answers a repeat the same way", async () => {
+  it("closes an agent, ending its terminal, and answers a repeat the same way", async () => {
     const { agentId } = await daemon.program(["sleep", "300"]);
     const first = await close(agentId, "close-once");
     const again = await close(agentId, "close-once");
@@ -72,21 +72,6 @@ describe("an agent's lifecycle after launch", () => {
     const { status, body } = await close(agentId, "stale-close", 0);
     expect({ status, body }).toMatchObject({ status: 409, body: { error: "stale_generation" } });
     expect((await agentOf(agentId))?.state).toBeOneOf(["starting", "running", "exited"]);
-  });
-
-  it("keeps an agent closing while tmux can't be reached, and closes it once it can", async () => {
-    const { agentId } = await daemon.program(["sleep", "300"]);
-    const unblock = daemon.blockTmux();
-    const refused = await close(agentId, "unreachable");
-    const whileUnreachable = (await agentOf(agentId))?.state;
-    unblock();
-    expect([refused.status, ErrorResponse.parse(refused.body).error, whileUnreachable]).toEqual([
-      503,
-      "unavailable",
-      "closing",
-    ]);
-    expect((await close(agentId, "unreachable")).status).toBe(200);
-    expect((await agentOf(agentId))?.state).toBe("closed");
   });
 
   it("respawns an exited agent under the same id, at the next generation, on its session", async () => {

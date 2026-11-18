@@ -3341,6 +3341,76 @@ function checkCappedScripts(): void {
   }
 }
 
+// An api test runs on holders, the default runtime, unless it is about tmux: those cases live in a
+// *.tmux.test.ts sibling, so a runtime-neutral case can't drift back onto tmux unseen.
+const API_TESTS = "tests/api/";
+const HOLDER = /^(["'`])holder\1$/;
+
+/** The top-level arguments of every call to `name` in `source`, each trimmed. */
+function callArguments(source: string, name: string): string[][] {
+  const calls: string[][] = [];
+  for (const match of source.matchAll(new RegExp(`(?<![\\w$])${name}\\s*\\(`, "g"))) {
+    const args: string[] = [];
+    let depth = 0;
+    let quote = "";
+    let arg = "";
+    for (let i = match.index + match[0].length; i < source.length; i++) {
+      const c = source[i] ?? "";
+      if (quote !== "") {
+        arg += c;
+        if (c === "\\") arg += source[++i] ?? "";
+        else if (c === quote) quote = "";
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      if ("([{".includes(c)) depth++;
+      if (")]}".includes(c)) {
+        if (depth === 0) break;
+        depth--;
+      }
+      if (c === "," && depth === 0) {
+        args.push(arg.trim());
+        arg = "";
+      } else arg += c;
+    }
+    if (arg.trim() !== "") args.push(arg.trim());
+    calls.push(args);
+  }
+  return calls;
+}
+
+/** Why an api test that isn't a *.tmux.test.ts would put its terminals on anything but holders. */
+export function tmuxPinFailures(path: string, source: string): string[] {
+  if (!path.startsWith(API_TESTS) || !path.endsWith(".test.ts") || path.endsWith(".tmux.test.ts"))
+    return [];
+  const code = stripComments(source);
+  const chosen = [
+    ...[...code.matchAll(/(?<![\w$.])runtime\s*:\s*([^,}\n]+)/g)].map((m) => m[1] ?? ""),
+    ...[...code.matchAll(/[{,]\s*runtime\s*(?=[,}])/g)].map(() => "runtime"),
+    ...callArguments(code, "useRuntime").map((args) => args[0] ?? ""),
+    ...callArguments(code, "startWithCli").flatMap((args) => args.slice(2, 3)),
+  ].map((value) => value.trim());
+  const out = chosen
+    .filter((value) => !HOLDER.test(value))
+    .map(
+      (value) =>
+        `${path}: picks its runtime with ${value}. An api test runs on holders, the default; a ` +
+        "case about tmux goes in a *.tmux.test.ts sibling (docs/standards/testing.md).",
+    );
+  if (/\[runtime\]|runtime\.default/.test(code))
+    out.push(
+      `${path}: sets runtime.default in its config. An api test runs on holders, the default; a ` +
+        "case about tmux goes in a *.tmux.test.ts sibling (docs/standards/testing.md).",
+    );
+  return out;
+}
+
+function checkTmuxPins(): void {
+  for (const path of repoFiles().filter((p) => p.startsWith(API_TESTS))) {
+    failures.push(...tmuxPinFailures(path, readFileSync(join(root, path), "utf8")));
+  }
+}
+
 // Skills live once in .agents/skills (Codex, pi, opencode); .claude/skills links to it.
 const SKILLS_DIR = ".agents/skills";
 const DESCRIPTION_MAX = 1024;
@@ -3731,6 +3801,7 @@ export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkWebTokens,
   checkRust,
   checkCappedScripts,
+  checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,
 ];
