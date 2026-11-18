@@ -9,7 +9,6 @@ import {
   ownerOf,
   parseArgs,
   pins,
-  tmuxBuildArgs,
   cpuBudget,
   memoryBudget,
   run,
@@ -114,16 +113,6 @@ describe("pnpm test:real", () => {
       NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
       CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
     });
-  });
-
-  it("builds the Dockerfile's tmux unless a version and its checksum are both named", () => {
-    expect(tmuxBuildArgs({})).toEqual({});
-    expect(tmuxBuildArgs({ BZ_TMUX_VERSION: "3.4", BZ_TMUX_SHA256: "ab" })).toEqual({
-      TMUX_VERSION: "3.4",
-      TMUX_SHA256: "ab",
-    });
-    expect(() => tmuxBuildArgs({ BZ_TMUX_VERSION: "3.4" })).toThrow("together");
-    expect(() => tmuxBuildArgs({ BZ_TMUX_SHA256: "ab" })).toThrow("together");
   });
 
   it("runs a suite's script, and falsify against the image's base, then the base's falsify", () => {

@@ -172,20 +172,6 @@ export function pins(read: (path: string) => string): Record<string, string> {
 }
 
 /**
- * The tmux the image builds, when `BZ_TMUX_VERSION` and `BZ_TMUX_SHA256` name another than the
- * Dockerfile's default: a release's version and the SHA-256 of its source tarball, together.
- */
-export function tmuxBuildArgs(env: Readonly<Record<string, string | undefined>>) {
-  const version = env["BZ_TMUX_VERSION"];
-  const sha256 = env["BZ_TMUX_SHA256"];
-  if (version === undefined && sha256 === undefined) return {};
-  if (!version || !sha256) {
-    throw new Error("BZ_TMUX_VERSION and BZ_TMUX_SHA256 are set together, or not at all");
-  }
-  return { TMUX_VERSION: version, TMUX_SHA256: sha256 };
-}
-
-/**
  * The CPUs a suite's container may use: half the machine, `BZ_TEST_CPUS` when set. A suite that
  * starts one busy process per core would otherwise take every core from the agents working on the
  * same machine, so the quota is what keeps a test run a guest rather than the owner.
@@ -815,7 +801,6 @@ const host: Host = {
       dir,
       buildArgs: {
         ...pins((p) => readFileSync(join(dir, p), "utf8")),
-        ...tmuxBuildArgs(process.env),
         BASE_REF,
       },
     };
