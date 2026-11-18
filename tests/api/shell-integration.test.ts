@@ -203,14 +203,14 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       async () => {
         const next = await retypedAfterReboot(daemon, TYPED);
         await expect
-          .poll(() => daemon.log(), { timeout: NOT_RETYPED_WITHIN_MS })
+          .poll(() => daemon.log(), { timeout: DECLINED_WITHIN_MS })
           .toContain(notRetyped(next));
         expect([lastLine(daemon, next)(), daemon.shellScreen(next).includes("a  b")]).toEqual([
           "[st=0]",
           false,
         ]);
       },
-      NOT_RETYPED_WITHIN_MS + 30_000,
+      DECLINED_WITHIN_MS + 60_000,
     );
   },
 );
@@ -291,13 +291,16 @@ const heldBack = (daemon: Daemon, terminalId: string) => () =>
   Daemon.promptWaiters(daemon.shellPid(terminalId)) === 1;
 
 /**
- * What the daemon logs for a restarted shell that reported no first prompt within the 30 s it
- * waits, as a shell the integration won't type into never does.
+ * What the daemon logs for a restarted shell whose integration said at its first prompt that it
+ * won't take a line typed back.
  */
 const notRetyped = (terminalId: string) =>
-  `shell ${terminalId}: last command not retyped: no prompt reported within 30 s`;
-/** Longer than the 30 s the daemon waits for a restarted shell's first prompt. */
-const NOT_RETYPED_WITHIN_MS = 40_000;
+  `shell ${terminalId}: last command not retyped: the shell's integration said it can't take a line typed back`;
+/**
+ * Well inside the 30 s the daemon holds a line for a shell that reports no prompt, so a line
+ * dropped only then fails the wait.
+ */
+const DECLINED_WITHIN_MS = 15_000;
 
 const lastLine = (daemon: Daemon, terminalId: string) => () =>
   daemon.shellScreen(terminalId).trimEnd().split("\n").at(-1);
@@ -319,27 +322,23 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
       shell?.cleanup();
     });
 
-    it(
-      "types nothing behind a line typed ahead as the shell starts, which what it runs would read",
-      async () => {
-        shell?.unmark();
-        const next = await retypedAfterReboot(daemon, "echo typed-back");
-        // Typed straight into the new terminal as its shell starts, well before its slow prompt is
-        // drawn, so it is read before anything pasted could be.
-        const session = String(daemon.paneFact(next, "session_name", "@bazhen_terminal_id"));
-        daemon.tmux("send-keys", "-t", session, "-l", "cat > typed-ahead.out");
-        daemon.tmux("send-keys", "-t", session, "Enter");
-        const running = () => daemon.paneFact(next, "pane_current_command", "@bazhen_terminal_id");
-        await expect.poll(running, { timeout: 20_000 }).toBe("cat");
-        await expect.poll(heldBack(daemon, next), { timeout: NOT_RETYPED_WITHIN_MS }).toBe(true);
-        daemon.tmux("send-keys", "-t", session, "C-d");
-        await expect
-          .poll(lastLine(daemon, next), { timeout: 20_000 })
-          .toMatch(/^\[st=0\]( echo typed-back)?$/);
-        expect(daemon.workFile("typed-ahead.out")).toBe("");
-      },
-      NOT_RETYPED_WITHIN_MS + 50_000,
-    );
+    it("types nothing behind a line typed ahead as the shell starts, which what it runs would read", async () => {
+      shell?.unmark();
+      const next = await retypedAfterReboot(daemon, "echo typed-back");
+      // Typed straight into the new terminal as its shell starts, well before its slow prompt is
+      // drawn, so it is read before anything pasted could be.
+      const session = String(daemon.paneFact(next, "session_name", "@bazhen_terminal_id"));
+      daemon.tmux("send-keys", "-t", session, "-l", "cat > typed-ahead.out");
+      daemon.tmux("send-keys", "-t", session, "Enter");
+      const running = () => daemon.paneFact(next, "pane_current_command", "@bazhen_terminal_id");
+      await expect.poll(running, { timeout: 20_000 }).toBe("cat");
+      await expect.poll(heldBack(daemon, next), { timeout: 20_000 }).toBe(true);
+      daemon.tmux("send-keys", "-t", session, "C-d");
+      await expect
+        .poll(lastLine(daemon, next), { timeout: 20_000 })
+        .toMatch(/^\[st=0\]( echo typed-back)?$/);
+      expect(daemon.workFile("typed-ahead.out")).toBe("");
+    }, 90_000);
 
     it.runIf(typesBack(kind))(
       "types the line once the editor reads, once, and as a paste rather than as keys",
@@ -358,12 +357,13 @@ describe.each<IntegratedShell>(["zsh", "bash", "fish"])(
         shell?.unmark();
         const next = await retypedAfterReboot(daemon, SLOW_TYPED, () => shell?.mark());
         await expect
-          .poll(() => daemon.log(), { timeout: NOT_RETYPED_WITHIN_MS })
+          .poll(() => daemon.log(), { timeout: DECLINED_WITHIN_MS })
           .toContain(notRetyped(next));
-        const screen = daemon.shellScreen(next);
-        expect([lastLine(daemon, next)(), screen.includes("X")]).toEqual(["[st=0]", false]);
+        // The shell says so as its first prompt starts, before the slow prompt is drawn.
+        await expect.poll(lastLine(daemon, next), { timeout: 20_000 }).toBe("[st=0]");
+        expect(daemon.shellScreen(next).includes("X")).toBe(false);
       },
-      NOT_RETYPED_WITHIN_MS + 30_000,
+      DECLINED_WITHIN_MS + 60_000,
     );
   },
 );

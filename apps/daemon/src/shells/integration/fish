@@ -24,11 +24,14 @@ if set -q BAZHEN_SHELL_TOKEN; and test -x "$BAZHEN_HOOK"; and not set -q __bazhe
     # 4.0, the versions tested. They take a paste marked with the bracketed-paste sequences as one
     # even before they ask for bracketed paste, which 4.0 does only once its prompts are drawn, so
     # the paste is marked by Bazhen. Later fish reads keys typed ahead into a queue of its own as
-    # it starts, where the check before a paste can't see them, so it reports nothing, and gets no
-    # line typed back.
+    # it starts, where the check before a paste can't see them, so it says it won't take a line
+    # typed back, and Bazhen drops the line at once.
     function __bazhen_prompt --on-event fish_prompt
         functions -e __bazhen_prompt
-        string match -qr '^(3\.7|4\.0)\.' -- $version; or return 0
-        $BAZHEN_HOOK shell-prompt --brackets --shell $fish_pid </dev/null >/dev/null 2>&1
+        if string match -qr '^(3\.7|4\.0)\.' -- $version
+            $BAZHEN_HOOK shell-prompt --brackets --shell $fish_pid </dev/null >/dev/null 2>&1
+        else
+            $BAZHEN_HOOK shell-prompt --no-retype </dev/null >/dev/null 2>&1
+        end
     end
 end

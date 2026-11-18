@@ -72,7 +72,9 @@ it is never Enter and can't end the paste early.
 The new shell must load the integration too, since it tells Bazhen when its line editor is
 reading. In fish, that is only fish 3.7 and 4.0, the versions tested: from 4.1, fish reads keys
 you typed while it started into a queue of its own, where Bazhen can't see them before it
-pastes, so a later fish gets no line typed back. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
+pastes, so a later fish gets no line typed back, nor does a fish older than 3.7. On any fish
+other than 3.7 and 4.0 its integration says so at its first prompt, and the daemon drops the line
+then and logs that it wasn't retyped. A prompt that takes more than 10 seconds to draw gets no line typed back. If no prompt is
 reported within 30 seconds, the line is dropped and the daemon logs that it wasn't retyped,
 naming the shell but not the line. Until then it is held only in the daemon's memory, so
 a daemon restart in between loses it.
@@ -103,7 +105,8 @@ The line is never a process argument, so `ps` never shows it.
   the shell's token, and whether the shell's editor takes the bracketed-paste sequences as a paste.
   Its copy waits in the background until the line editor has taken the terminal, up to 10 seconds
   and no longer than the shell lives, so a line is never typed back while the terminal would echo
-  it twice.
+  it twice. A fish that gets no line typed back runs `bazhen-hook shell-prompt --no-retype`
+  instead, which carries only the token and doesn't wait.
 
 ## Where it is kept, and for how long
 
