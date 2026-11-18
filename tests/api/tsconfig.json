@@ -10,6 +10,7 @@
     "*.ts",
     "fixtures/*.ts",
     "../support/agent-env.ts",
+    "../support/holder-close.ts",
     "../support/transcript.ts",
     "../support/key-*.ts"
   ],

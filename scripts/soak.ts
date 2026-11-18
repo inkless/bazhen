@@ -49,7 +49,8 @@ import headless from "@xterm/headless";
 import { inSignalSandbox, isAlive } from "@bazhen/host-guard";
 import { HISTORY_LINES, MAX_ROWS, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { connectHolder } from "@bazhen/runtime-holder";
-import { closeHolder, Daemon, holderSockets, type View } from "../tests/api/daemon.ts";
+import { Daemon, type View } from "../tests/api/daemon.ts";
+import { closeHolderAt, holderSockets } from "../tests/support/holder-close.ts";
 import { startFakeModel, type FakeModel } from "../tests/api/fake-model.ts";
 import { requireSignalSandbox } from "../tests/support/disposable-host.ts";
 import { ptysInUse } from "../tests/support/ptys.ts";
@@ -898,7 +899,7 @@ class Soak {
               const target = this.terminals.get("r2");
               if (target === undefined) return;
               this.log("fault: closing r2's holder behind the daemon's back");
-              await closeHolder(
+              await closeHolderAt(
                 join(this.live.home, "run", "holders", `${target.terminalId}.sock`),
               );
             }),

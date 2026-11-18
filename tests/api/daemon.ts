@@ -40,6 +40,7 @@ import {
 } from "@bazhen/protocol";
 import { protocolId } from "@bazhen/protocol/id";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
+import { closeHoldersUnder } from "../support/holder-close.ts";
 import { giveTranscript } from "../support/transcript.ts";
 import { replay } from "./fixtures/browser.ts";
 
@@ -1109,16 +1110,6 @@ export class Daemon {
     this.tmux("detach-client", "-s", this.requireSession(agentId));
   }
 
-  /** Ends every holder still answering under its home, each by its own protocol. */
-  private async closeHolders(): Promise<void> {
-    await Promise.all(
-      holderSockets(this.home).map((socket) =>
-        // A socket a holder that died left behind has nothing to close.
-        closeHolder(socket).catch(() => {}),
-      ),
-    );
-  }
-
   /** Stops the daemon, its tmux server, its holders and every file under its home. */
   async stop(): Promise<void> {
     await this.exit("SIGTERM");
@@ -1129,41 +1120,11 @@ export class Daemon {
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
     this.#tmuxServer.killServer();
-    await this.closeHolders();
+    await closeHoldersUnder(this.home);
     await codexStopped;
     // The agents' processes may still be writing their state as the server goes down.
     rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-}
-
-/**
- * The socket of each holder under `home`, as the daemon's holder runtime binds them. A holder runs
- * on after its daemon, as a terminal should.
- */
-export function holderSockets(home: string): string[] {
-  const dir = join(home, "run", "holders");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith(".sock"))
-    .map((name) => join(dir, name));
-}
-
-/**
- * Ends a terminal by its holder's own protocol, from outside the daemon, and resolves once the
- * holder hangs up: nothing is signalled. A holder answers one connection's requests in order, so
- * `close` is sent straight after `hello`, its replies unread.
- */
-export async function closeHolder(socket: string): Promise<void> {
-  const connection = createConnection(socket);
-  const ended = once(connection, "close");
-  connection.on("error", () => {});
-  connection.write(
-    encodeHolderRequest({ type: "hello", id: 1, body: { protocol: [HOLDER_PROTOCOL_VERSION] } }),
-  );
-  connection.write(encodeHolderRequest({ type: "close", id: 2 }));
-  connection.resume();
-  const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't close`)), 5_000);
-  await ended.finally(() => clearTimeout(timer));
 }
 
 /** What a holder's terminal shows, read over the holder's own protocol, as a client would. */
