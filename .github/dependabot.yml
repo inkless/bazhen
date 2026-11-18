@@ -1,0 +1,101 @@
+# Monthly and grouped because the main ruleset requires branches to be up to date: every merge
+# makes each open PR rebase and run the full CI again. So merge update PRs one at a time,
+# security first. npm and cargo majors are left to a person, who takes them one at a time.
+# A cargo group fails if it brings in a second version of a crate, which deny.toml refuses:
+# close it, or add the crate to `ignore`.
+# Not managed here, so bumped by hand: .nvmrc, packageManager, rust-toolchain.toml (pinned
+# with rust-version by scripts/check-standards.ts), the fuzz workflow's nightly, the cargo
+# tools' versions and the tmux version in tests/real/Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 4
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # A native pre-release pin: a person adopts the next beta or the stable release, as
+      # code.md § Dependencies asks of a pre-release.
+      - dependency-name: node-pty
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      # The real agent CLIs that tests/api and tests/e2e drive: released almost daily, and a
+      # break in one must not hold back the rest.
+      harness-clis:
+        patterns: ["@anthropic-ai/claude-code", "@openai/codex"]
+      xterm:
+        patterns: ["@xterm/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      npm-patch:
+        patterns: ["*"]
+        update-types: [patch]
+      # A foundational package's minor comes as its own PR: one foundational upgrade per commit.
+      npm-minor:
+        patterns: ["*"]
+        exclude-patterns:
+          - hono
+          - "@hono/node-server"
+          - ws
+          - zod
+          - typescript
+          - vite
+          - vitest
+        update-types: [minor]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      cargo-patch:
+        patterns: ["*"]
+        update-types: [patch]
+      # The signal, PTY, terminal and WebSocket crates come one PR each: for a 0.x crate a minor
+      # is a breaking release.
+      cargo-minor:
+        patterns: ["*"]
+        exclude-patterns:
+          - rustix
+          - libc
+          - signal-hook
+          - alacritty_terminal
+          - tungstenite
+        update-types: [minor]
+
+  # GitHub's own actions stay on a major tag, which GitHub moves to each release, so only their
+  # majors come here. Third-party actions are pinned to a commit, so every release of theirs does.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: ci
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      actions:
+        patterns: ["*"]
