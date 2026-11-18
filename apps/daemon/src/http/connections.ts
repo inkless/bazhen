@@ -32,11 +32,12 @@ export interface HeardWebSockets {
 /**
  * A server for WebSockets upgraded from the daemon's HTTP servers, each frames of which may be
  * `maxPayload` bytes at most, which hears each socket and terminates it on an error before its
- * route serves it. ws reports a frame it refuses (one too large, text that isn't UTF-8, an
+ * route serves it. A socket the daemon closes is destroyed if its peer hasn't answered within
+ * `closeTimeout` ms. ws reports a frame it refuses (one too large, text that isn't UTF-8, an
  * opcode it doesn't know) as an `error` on the socket, so a client can send one at will.
  */
-export function heardWebSockets(maxPayload: number): HeardWebSockets {
-  const wss = new WebSocketServer({ noServer: true, maxPayload });
+export function heardWebSockets(maxPayload: number, closeTimeout: number): HeardWebSockets {
+  const wss = new WebSocketServer({ noServer: true, maxPayload, closeTimeout });
   return {
     handleUpgrade: (req, socket, head, serve) =>
       wss.handleUpgrade(req, socket, head, (ws) => {

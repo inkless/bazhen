@@ -95,7 +95,7 @@ describe("a server whose connections are heard from the moment they are accepted
 
 describe("WebSockets served through heardWebSockets", () => {
   it("close a socket whose frame ws refuses, and end nothing else", async () => {
-    const ran = await sendTooLarge("heardWebSockets(1024)");
+    const ran = await sendTooLarge("heardWebSockets(1024, 30_000)");
     expect(ran).toMatchObject({ code: 0, out: "closed 1009\nlived\n" });
   });
 
