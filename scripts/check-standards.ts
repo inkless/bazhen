@@ -441,9 +441,7 @@ const UNSAFE_MODULES: Record<string, string> = {
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
-    "only a real signal. And libc's getsockopt(SO_PEERCRED) and getsid, since rustix's " +
-    "socket_peercred and getsid build a non-zero Pid from the kernel's answer, which is 0 for " +
-    "a process outside this one's PID namespace",
+    "only a real signal",
   "crates/bazhen-holder/src/pty.rs":
     "Command::pre_exec, to make the child a session leader on its PTY between fork and exec, and " +
     "libc's sigprocmask and signal there, to give it an empty signal mask and default " +
@@ -454,10 +452,15 @@ const UNSAFE_MODULES: Record<string, string> = {
     "libc's sysctl(KERN_PROC_PID), the one call that says when a macOS process started, a zombie " +
     "included, which ps reads too, sysctl(KERN_PROC_ALL), which lists every process, and " +
     "sysctl(KERN_PROCARGS2), which names a process's arguments; proc_pidinfo, which names " +
-    "another process's parent and user; and " +
-    "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process; " +
-    "rustix covers neither. rustix's kevent, which watches a process for its exit before a close " +
-    "signals it, is unsafe",
+    "another process's parent and user; rustix covers neither. rustix's kevent, which watches a " +
+    "process for its exit before a close signals it, is unsafe",
+  "crates/bazhen-pid/src/sys.rs":
+    "libc's getsid and getpgid, since rustix's getsid, getpgid and getpgrp build a non-zero Pid " +
+    "from the kernel's answer, which is 0 for a leader outside this process's PID namespace; " +
+    "libc's getsockopt(SO_PEERCRED) on Linux, since rustix's socket_peercred builds one from the " +
+    "0 the kernel answers for a peer outside it, and std's peer_cred is unstable; and on macOS " +
+    "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process, " +
+    "which rustix doesn't cover",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */

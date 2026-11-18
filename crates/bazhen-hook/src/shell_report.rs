@@ -34,7 +34,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rustix::process::{Pid, getsid};
+use rustix::process::Pid;
 use rustix::termios::{LocalModes, tcgetattr};
 
 use crate::{is_token, post};
@@ -139,12 +139,13 @@ pub(crate) fn run_prompt(args: impl Iterator<Item = String>) -> Option<i32> {
     let body = prompt_body(&token, brackets)?;
     // Without a terminal to read, the editor can't be told ready: no report, and no line typed.
     let tty = File::open("/dev/tty").ok()?;
-    let session = getsid(None).ok()?;
+    // A session led from outside this PID namespace names no number to find the shell in.
+    let session = bazhen_pid::session(None).ok()??;
     let canonical = || {
         // A shell gone is one whose editor will never read: the wait ends, and its terminal with
         // it. A terminal its runtime closes as the shell exits ends the wait as well, as tmux does.
         if let Some(shell) = shell {
-            in_session(shell, session, |pid| getsid(Some(pid)).ok()).then_some(())?;
+            in_session(shell, session, |pid| bazhen_pid::session(Some(pid)).ok()?).then_some(())?;
         }
         tcgetattr(&tty)
             .ok()

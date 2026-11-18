@@ -497,16 +497,17 @@ mod os {
 mod os {
     use std::io;
 
-    use rustix::process::{Pid, Signal, getsid};
+    use rustix::process::{Pid, Signal};
 
     use super::{Listed, Member};
 
-    /// A process whose session can't be read is left out: `visit` counts it outside.
+    /// A process whose session can't be read, or is led from outside this PID namespace, is left
+    /// out: `visit` counts it outside.
     pub(super) fn list() -> io::Result<Vec<Listed>> {
         Ok(crate::macos::pids()?
             .into_iter()
             .filter_map(|pid| {
-                let session = getsid(Some(pid)).ok()?;
+                let session = bazhen_pid::session(Some(pid)).ok().flatten()?;
                 Some(Listed {
                     pid,
                     session: Some(session.as_raw_pid()),

@@ -15,6 +15,7 @@ bazhen-client = { path = "crates/bazhen-client" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }
+bazhen-pid = { path = "crates/bazhen-pid" }
 bazhen-protocol = { path = "crates/bazhen-protocol" }
 bazhen-test-signal = { path = "crates/bazhen-test-signal" }
 clap = { version = "=4.6.7", default-features = false, features = [

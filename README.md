@@ -41,10 +41,12 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
   socket (Rust); `pnpm build` builds it at `target/release/bazhen`. `bazhen start` finds the
   checkout from the binary's resolved path, three levels up, so link to the binary rather than
   copy it, and keep it under the checkout: a `CARGO_TARGET_DIR` elsewhere breaks `start`
-- `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust, standard library only)
+- `crates/bazhen-hook` — `bazhen-hook`, the hook client harnesses run (Rust)
 - `crates/bazhen-holder-proto` — `holder/1`, what the daemon and a PTY holder say (Rust)
 - `crates/bazhen-holder` — `bazhen-holder`, the process that holds one terminal's PTY and child (Rust)
 - `crates/bazhen-holder-engine` — a terminal's screen and compact history, for the PTY holder (Rust)
+- `crates/bazhen-pid` — a process's session, group and socket peer as the kernel answers them,
+  never taking the 0 it gives for one outside this PID namespace for a pid (Rust)
 - `apps/web` — React + Vite client, with React Aria Components for its widgets (`docs/standards/ui.md`)
 - `packages/protocol` — shared types, schemas, and the protocol id clients compare with the daemon's
 - `packages/core` — domain model and state machines; no platform imports

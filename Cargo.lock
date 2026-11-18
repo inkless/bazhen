@@ -94,6 +94,7 @@ dependencies = [
  "bazhen-holder",
  "bazhen-holder-engine",
  "bazhen-holder-proto",
+ "bazhen-pid",
  "bazhen-test-signal",
  "libc",
  "proptest",
@@ -130,6 +131,7 @@ name = "bazhen-hook"
 version = "0.1.0"
 dependencies = [
  "bazhen-client",
+ "bazhen-pid",
  "bazhen-test-signal",
  "proptest",
  "rustix",
@@ -141,6 +143,15 @@ name = "bazhen-peer"
 version = "0.1.0"
 dependencies = [
  "bazhen-holder",
+ "bazhen-pid",
+ "rustix",
+]
+
+[[package]]
+name = "bazhen-pid"
+version = "0.1.0"
+dependencies = [
+ "libc",
  "rustix",
 ]
 

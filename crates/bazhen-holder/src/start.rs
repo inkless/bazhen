@@ -26,7 +26,7 @@ use std::time::Instant;
 use bazhen_holder_engine::HistoryRows;
 use bazhen_holder_proto::body::{self, Argv, Count, Env, NonEmpty, SpawnSpec, StartTime};
 use bazhen_holder_proto::{MAX_REQUEST_BYTES, SpawnSpecError, decode_spawn_spec};
-use rustix::process::{Pid, getpid, getsid, setsid};
+use rustix::process::{Pid, getpid, setsid};
 use thiserror::Error;
 
 use crate::child::Reaper;
@@ -306,10 +306,11 @@ pub(crate) fn process_problem(argv: &Argv, cwd: &NonEmpty, env: &Env) -> Option<
 }
 
 /// Makes the holder the leader of a session of its own, unless it already is one, so no signal
-/// to its spawner's session or group reaches it.
+/// to its spawner's session or group reaches it. A session led from outside this PID namespace, as
+/// a `docker exec` without a terminal starts one in, isn't its own either.
 fn become_session_leader() -> Result<(), StartError> {
     let me = getpid();
-    if getsid(None).is_ok_and(|session| session == me) {
+    if bazhen_pid::session(None).is_ok_and(|session| session == Some(me)) {
         return Ok(());
     }
     match setsid() {
