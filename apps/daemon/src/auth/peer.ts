@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import type { AgentSessionId } from "@bazhen/core";
+import { heard } from "@bazhen/host-guard";
 
 /** Where `pnpm build` leaves the peer reader, which the daemon installs before running it. */
 export const PEER_SOURCE = fileURLToPath(
@@ -90,7 +91,9 @@ export function readPeer(
           if (!connection.destroyed) connection.resume();
           resolve(read);
         };
-        const child = spawn(binary, [String(since)], { stdio: [connection, "pipe", "pipe"] });
+        const child = heard(
+          spawn(binary, [String(since)], { stdio: [connection, "pipe", "pipe"] }),
+        );
         // The deadline judges the reader, not this loop: after a stall the timer runs before the
         // exit that came during it is read, so the exit gets one turn to land first.
         const deadline = setTimeout(

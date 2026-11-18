@@ -7,6 +7,7 @@
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { constants } from "node:os";
+import { heard } from "./child.ts";
 
 const groups = new Set<number>();
 /** When each pane proof was made; a proof is used once, and only within a second of its check. */
@@ -252,7 +253,7 @@ export type GroupSpawnOptions = Omit<SpawnOptions, "timeout" | "killSignal" | "s
 
 /** Starts a child leading a process group of its own, which `signalGroup` may then reach. */
 export function spawnGroup(command: string, args: readonly string[], opts: GroupSpawnOptions) {
-  const child = spawn(command, args, { ...opts, detached: true });
+  const child = heard(spawn(command, args, { ...opts, detached: true }));
   if (child.pid !== undefined) groups.add(child.pid);
   return child;
 }

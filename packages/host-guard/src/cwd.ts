@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { readlink } from "node:fs/promises";
 import { promisify } from "node:util";
+import { heard } from "./child.ts";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -65,11 +66,13 @@ export async function processCwds(
   }
   const args = ["-a", "-d", "cwd", "-Fpn0", "-p", wanted.join(",")];
   try {
-    const { stdout } = await run("lsof", args, {
-      env: LSOF_ENV,
-      timeout: TIMEOUT_MS,
-      maxBuffer: MAX_BYTES,
-    });
+    const { stdout } = await heard(
+      run("lsof", args, {
+        env: LSOF_ENV,
+        timeout: TIMEOUT_MS,
+        maxBuffer: MAX_BYTES,
+      }),
+    );
     return parseLsofCwds(stdout);
   } catch (error) {
     // lsof exits 1 when any pid has no process, and still prints the others.

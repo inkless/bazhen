@@ -17,6 +17,7 @@ import {
   signalOwnChild,
   vouchHolderProcess,
 } from "./signal.ts";
+import { heard } from "./child.ts";
 import type { ScopeLaunch } from "./scope.ts";
 import { whole } from "./text.ts";
 import { type PsReading, readProcess, rootRefusal, START_SKEW_S } from "./tmux.ts";
@@ -272,7 +273,9 @@ export interface StartSeams {
 }
 
 const realSpawn: NonNullable<StartSeams["spawn"]> = (file, args, options) =>
-  spawnChild(file, args, { env: options.env, cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] });
+  heard(
+    spawnChild(file, args, { env: options.env, cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] }),
+  );
 
 /** What this process knows of each holder it started, by pid. */
 interface Own {
@@ -341,10 +344,14 @@ export async function startHolderWith(
   const read = seams.read ?? readProcess;
   const kill = seams.killHolder ?? killHolder;
   const [file, ...args] = holderArgv(binary, options.limits, options.scope);
-  const child = (seams.spawn ?? realSpawn)(file, args, {
-    env,
-    cwd: options.cwd ?? "/",
-  });
+  // A holder that exits before it reads its spec breaks the pipe, and a pipe can fail at any
+  // time after: its exit says why.
+  const child = heard(
+    (seams.spawn ?? realSpawn)(file, args, {
+      env,
+      cwd: options.cwd ?? "/",
+    }),
+  );
   let ending: { code: number } | { signal: string } | undefined;
   let mine: Own | undefined;
   const exited = new Promise<number | null>((done) =>
@@ -355,11 +362,6 @@ export async function startHolderWith(
     }),
   );
   const failed = new Promise<Error>((done) => child.once("error", done));
-  // A holder that exits before it reads its spec breaks the pipe, and a pipe can fail at any
-  // time after: its exit says why, and none of them may throw.
-  child.stdin?.on("error", () => {});
-  child.stdout?.on("error", () => {});
-  child.stderr?.on("error", () => {});
   const pid = child.pid;
   if (pid === undefined) throw new HolderStartFailed("unstarted", (await failed).message);
   let stderr = "";

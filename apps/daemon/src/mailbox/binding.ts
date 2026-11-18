@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import type { HookOrigin } from "@bazhen/harness-claude-code";
+import { heard } from "@bazhen/host-guard";
 import type { Store } from "../store/store.ts";
 
 /** How long a SessionStart waits for its agent's start to be recorded before it is judged. */
@@ -25,8 +26,10 @@ export interface ProcessTable {
 export const psTable: ProcessTable = {
   parent: (pid) =>
     new Promise((resolve) => {
-      execFile("ps", ["-o", "ppid=,comm=", "-p", String(pid)], { timeout: 2000 }, (err, out) =>
-        resolve(psAnswer(pid, err, out)),
+      heard(
+        execFile("ps", ["-o", "ppid=,comm=", "-p", String(pid)], { timeout: 2000 }, (err, out) =>
+          resolve(psAnswer(pid, err, out)),
+        ),
       );
     }),
 };

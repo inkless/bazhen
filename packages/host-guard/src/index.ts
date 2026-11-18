@@ -106,3 +106,4 @@ export {
   type ScopeLaunch,
   type TerminalCaps,
 } from "./scope.ts";
+export { heard } from "./child.ts";

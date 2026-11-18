@@ -6,6 +6,7 @@
 // the kernel kills, inside the scope, past its cap.
 
 import { execFile } from "node:child_process";
+import { heard } from "./child.ts";
 import { whole } from "./text.ts";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, readFileSync } from "node:fs";
@@ -56,10 +57,12 @@ export const runCommand = (
   timeout = STEP_TIMEOUT_MS,
 ): Promise<Ran> =>
   new Promise((done) => {
-    execFile(file, args, { env, timeout, encoding: "utf8" }, (error, stdout, stderr) => {
-      const code = error === null ? 0 : typeof error.code === "number" ? error.code : null;
-      done({ code, stdout, stderr: stderr || (error?.message ?? "") });
-    });
+    heard(
+      execFile(file, args, { env, timeout, encoding: "utf8" }, (error, stdout, stderr) => {
+        const code = error === null ? 0 : typeof error.code === "number" ? error.code : null;
+        done({ code, stdout, stderr: stderr || (error?.message ?? "") });
+      }),
+    );
   });
 
 /** The systemd a `systemd-run --version` names, or undefined. */

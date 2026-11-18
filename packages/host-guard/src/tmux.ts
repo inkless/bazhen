@@ -6,6 +6,7 @@ import { execFile, execFileSync, type StdioOptions } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { heard } from "./child.ts";
 import { isPid } from "./cwd.ts";
 import { signalServer, vouch, vouchServer, type PaneGroup } from "./signal.ts";
 
@@ -365,7 +366,7 @@ const PS_ENV = { LC_ALL: "C", TZ: "UTC", PATH: process.env["PATH"] ?? "/usr/bin:
 export async function readProcess(pid: number): Promise<PsReading> {
   const ps = async (column: "comm" | "args") => {
     const args = ["-ww", "-p", String(pid), "-o", `lstart=,${column}=`];
-    const { stdout } = await run("ps", args, { env: PS_ENV, timeout: TIMEOUT_MS });
+    const { stdout } = await heard(run("ps", args, { env: PS_ENV, timeout: TIMEOUT_MS }));
     return parsePsLine(stdout);
   };
   try {
@@ -423,11 +424,13 @@ async function psOf(
   const wanted = [...new Set(pids.filter(isPid))];
   if (wanted.length === 0) return { stdout: "" };
   const args = ["-ww", "-p", wanted.join(","), "-o", columns];
-  return run("ps", args, {
-    env: PS_ENV,
-    timeout: TIMEOUT_MS,
-    maxBuffer: maxBytes,
-  }).then(
+  return heard(
+    run("ps", args, {
+      env: PS_ENV,
+      timeout: TIMEOUT_MS,
+      maxBuffer: maxBytes,
+    }),
+  ).then(
     ({ stdout }) => ({ stdout }),
     (error: unknown) => ({ error }),
   );
@@ -556,20 +559,22 @@ export class TmuxServer {
   async run(args: readonly string[], opts: TmuxOptions = {}): Promise<string> {
     const [bin, ...argv] = this.argv(...args);
     return new Promise((done, fail) => {
-      const child = execFile(
-        bin,
-        argv,
-        {
-          env: opts.env,
-          timeout: opts.timeout ?? TIMEOUT_MS,
-          maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
-          encoding: "utf8",
-        },
-        (err, stdout, stderr) => {
-          const failed = settled(err, child, stdout, stderr);
-          if (failed === null) done(stdout);
-          else fail(failed);
-        },
+      const child = heard(
+        execFile(
+          bin,
+          argv,
+          {
+            env: opts.env,
+            timeout: opts.timeout ?? TIMEOUT_MS,
+            maxBuffer: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+            encoding: "utf8",
+          },
+          (err, stdout, stderr) => {
+            const failed = settled(err, child, stdout, stderr);
+            if (failed === null) done(stdout);
+            else fail(failed);
+          },
+        ),
       );
     });
   }
@@ -639,15 +644,17 @@ export class TmuxServer {
   private source(script: string, opts: TmuxOptions): Promise<string> {
     const [bin, ...argv] = this.argv("source-file", "-");
     return new Promise<string>((done, fail) => {
-      const child = execFile(
-        bin,
-        argv,
-        { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS, encoding: "utf8" },
-        (err, stdout, stderr) => {
-          const failed = settled(err, child, stdout, stderr);
-          if (failed === null) done(stdout);
-          else fail(failed);
-        },
+      const child = heard(
+        execFile(
+          bin,
+          argv,
+          { env: opts.env, timeout: opts.timeout ?? TIMEOUT_MS, encoding: "utf8" },
+          (err, stdout, stderr) => {
+            const failed = settled(err, child, stdout, stderr);
+            if (failed === null) done(stdout);
+            else fail(failed);
+          },
+        ),
       );
       child.stdin?.end(script);
     });
