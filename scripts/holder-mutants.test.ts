@@ -56,6 +56,7 @@ function stubbed(list: Effects["list"], run: Partial<MutantRun> = {}) {
     list,
     platform: "linux" as const,
     equivalents: [],
+    source: () => [],
     mutate,
     judge,
   };
@@ -147,6 +148,8 @@ describe("groupFilters", () => {
   });
 });
 
+const noSource = () => [];
+
 const loc = (file: string, mutant: string, where = "10:5") =>
   `crates/bazhen-holder/src/${file}:${where}: ${mutant}`;
 
@@ -193,13 +196,42 @@ describe("the classified equivalents", () => {
     expect(withoutEquivalents([...left, kept], [one])).toEqual([kept]);
   });
 
+  it("names an equivalent that now names more mutants than it was classed for", () => {
+    const names = ["10:5", "11:5", "12:5"].map((where) =>
+      loc("ring.rs", "replace Ring::end -> u64 with 0", where),
+    );
+    expect(equivalentFaults(names, [one], noSource)).toEqual([
+      `the equivalent ${one.re} names 3 mutants, not the 2 it was classed for`,
+    ]);
+  });
+
+  it("names a mutant whose line of source isn't the one it was classed on", () => {
+    const mac = loc("start_time.rs", "replace read -> u64 with Ok(0)", "3:5");
+    const pinned: Equivalent = {
+      re: "^crates/bazhen-holder/src/start_time\\.rs:\\d+:5: replace read",
+      count: 1,
+      why: "a reason",
+      on: "crate::macos::start_seconds(pid)",
+    };
+    expect(
+      equivalentFaults([mac], [pinned], () => ["", "", "    crate::macos::start_seconds(pid)"]),
+    ).toEqual([]);
+    expect(
+      equivalentFaults([mac], [pinned], () => ["", "", "    let raw = pid.as_raw();"]),
+    ).toEqual([`${mac} isn't on a line with crate::macos::start_seconds(pid)`]);
+  });
+
   it("names an equivalent that now names more or fewer mutants than it was classed for", () => {
     const names = [loc("ring.rs", "replace Ring::end -> u64 with 0")];
-    expect(equivalentFaults(names, [one])).toEqual([
+    expect(equivalentFaults(names, [one], noSource)).toEqual([
       `the equivalent ${one.re} names 1 mutants, not the 2 it was classed for`,
     ]);
     expect(
-      equivalentFaults([...names, loc("ring.rs", "replace Ring::end -> u64 with 1")], [one]),
+      equivalentFaults(
+        [...names, loc("ring.rs", "replace Ring::end -> u64 with 1")],
+        [one],
+        noSource,
+      ),
     ).toEqual([]);
   });
 });
@@ -453,6 +485,9 @@ describe("main", () => {
 
     expect(await main(["--group", "rest"], effects)).toBe(1);
     expect(effects.mutate).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("the classified equivalents no longer name what was classified"),
+    );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("names 0 mutants, not the 1"));
     error.mockRestore();
   });

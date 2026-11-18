@@ -50,11 +50,12 @@ export const MACOS_FILES: readonly string[] = ["macos.rs"];
 const LIFECYCLE_NAME_FILES = ["server.rs", "conn.rs"];
 
 /**
- * A survivor class BZ-206's sweep read and found to change nothing, left out of every group so a
+ * A survivor class the first sweep read and found to change nothing, left out of every group so a
  * re-sweep doesn't triage it again. It names the mutants by their function and mutation, not
  * their line, so an edit to the code around one doesn't move the exclusion onto another; where
  * one function holds two mutants of the same kind (`+`→`*` twice in `requeue_exited`), a column
- * tells them apart.
+ * tells them apart, and the source at that place is checked, so a pin the code has moved away from
+ * is refused rather than left on whatever now stands there.
  */
 export interface Equivalent {
   /** A regex, in the syntax both of JavaScript and of the Rust regex crate, on a mutant's name. */
@@ -63,6 +64,8 @@ export interface Equivalent {
   readonly count: number;
   /** Why none of them changes what the code does. */
   readonly why: string;
+  /** Text each mutant's line of source must contain. */
+  readonly on?: string;
 }
 
 const reOf = (file: string, mutant: string) => `^${SRC}/${file}:\\d+:\\d+: ${mutant}$`;
@@ -74,6 +77,7 @@ export const EQUIVALENTS: readonly Equivalent[] = [
   {
     re: reAtColumn("conn.rs", 30, "replace \\+ with \\* in Connection::requeue_exited"),
     count: 1,
+    on: ".map_or(0, |i| i + 1)",
     why: "`i * 1` starts the search at the `respawned` frame, which is never `exit`, so the same frame is found",
   },
   {
@@ -112,16 +116,19 @@ export const EQUIVALENTS: readonly Equivalent[] = [
   {
     re: reAtColumn("server.rs", 17, "replace != with == in foreground"),
     count: 1,
+    on: "if pgid != child &&",
     why: "`pgid != child` gives the same answer with a job in front; the mutant re-reads the child's own start, which can't differ while it is unreaped, and skips the re-read of another group, which differs only in a pid-reuse race",
   },
   {
     re: reAtColumn("start_time.rs", 68, "replace == with != in read"),
     count: 1,
+    on: "e.raw_os_error() == Some(libc::ESRCH)",
     why: "a gone process fails the open with `ENOENT`, already `Absent`; `ESRCH` comes only from an exit between the open and the read, and untestable without injecting the read",
   },
   {
     re: `^${SRC}/start_time\\.rs:60:5: replace read -> Result<u64, StartTimeError> with Ok\\([01]\\)$`,
     count: 2,
+    on: "crate::macos::start_seconds(pid)",
     why: "the macOS `read`, which Linux doesn't compile, so here the mutant changes nothing; `says_what_ps_says_…` kills it on `rust (macos)`",
   },
   {
@@ -215,17 +222,34 @@ export function withoutEquivalents(
 
 /**
  * Each of `equivalents` that names other than the number of mutants it says, of `all` the crate's
- * mutants: the code moved, and what it leaves out is no longer what was classified.
+ * mutants, or names one whose line of `source` isn't the one it was classified on: the code moved, and
+ * what it leaves out is no longer what was classified.
  */
 export function equivalentFaults(
   all: readonly string[],
   equivalents: readonly Equivalent[],
+  source: (file: string) => readonly string[],
 ): string[] {
   return equivalents.flatMap((e) => {
-    const found = all.filter((name) => new RegExp(e.re).test(name)).length;
-    return found === e.count
-      ? []
-      : [`the equivalent ${e.re} names ${found} mutants, not the ${e.count} it was classed for`];
+    const re = new RegExp(e.re);
+    const found = all.filter((name) => re.test(name));
+    const counted =
+      found.length === e.count
+        ? []
+        : [
+            `the equivalent ${e.re} names ${found.length} mutants, not the ${e.count} it was classed for`,
+          ];
+    const moved = found.flatMap((name) => {
+      const place = /^([^:]+):(\d+):/.exec(name);
+      if (place === null) return [`${name} has no file and line`];
+      const lines = source(place[1]!);
+      const line = Number(place[2]);
+      const here = lines[line - 1] ?? "";
+      return e.on === undefined || here.includes(e.on)
+        ? []
+        : [`${name} isn't on a line with ${e.on}`];
+    });
+    return [...counted, ...moved];
   });
 }
 
@@ -582,6 +606,8 @@ export interface Effects {
   readonly platform: NodeJS.Platform;
   /** The classified equivalents the run checks `all` against: the groups leave these out. */
   readonly equivalents: readonly Equivalent[];
+  /** The lines of a source file, by its path in the workspace. */
+  readonly source: (file: string) => readonly string[];
   readonly mutate: (
     filters: readonly string[],
     shard: string | undefined,
@@ -596,6 +622,7 @@ const REAL: Effects = {
   list: listMutants,
   platform: process.platform,
   equivalents: EQUIVALENTS,
+  source: (file) => readFileSync(file, "utf8").split("\n"),
   mutate: runCargoMutants,
   judge: judgeBySuite,
 };
@@ -618,7 +645,7 @@ export function selections(
 
 export async function main(
   args: readonly string[],
-  { sandboxed, list, platform, equivalents, mutate, judge }: Effects,
+  { sandboxed, list, platform, equivalents, source, mutate, judge }: Effects,
 ): Promise<number> {
   if (!sandboxed()) {
     console.error(
@@ -639,15 +666,19 @@ export async function main(
   }
   const listed = (g: Group) => groupFilters(g).flatMap(list);
   const all = list([]);
-  const faults = [
-    ...equivalentFaults(all, equivalents),
-    ...partitionFaults(withoutEquivalents(all, equivalents), {
-      signal: listed("signal"),
-      lifecycle: listed("lifecycle"),
-      rest: listed("rest"),
-      macos: listed("macos"),
-    }),
-  ];
+  const moved = equivalentFaults(all, equivalents, source);
+  if (moved.length > 0) {
+    console.error(
+      `holder-mutants: the classified equivalents no longer name what was classified:\n${moved.join("\n")}`,
+    );
+    return 1;
+  }
+  const faults = partitionFaults(withoutEquivalents(all, equivalents), {
+    signal: listed("signal"),
+    lifecycle: listed("lifecycle"),
+    rest: listed("rest"),
+    macos: listed("macos"),
+  });
   if (faults.length > 0) {
     console.error(`holder-mutants: the groups don't partition the mutants:\n${faults.join("\n")}`);
     return 1;
