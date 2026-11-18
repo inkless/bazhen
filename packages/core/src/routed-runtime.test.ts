@@ -212,6 +212,28 @@ describe("RoutedRuntime", () => {
       ]);
     });
 
+    it("isn't asked for foregrounds, which come from the runtimes read", async () => {
+      const tmux = new FakeRuntime({ kind: "tmux" });
+      const holder = new FakeRuntime({ kind: "holder" });
+      const asked: string[] = [];
+      for (const runtime of [tmux, holder]) {
+        const read = runtime.foregrounds.bind(runtime);
+        runtime.foregrounds = (terminalIds) => {
+          asked.push(runtime.kind);
+          return read(terminalIds);
+        };
+      }
+      const routed = new RoutedRuntime({
+        runtimes: [tmux, holder],
+        defaultKind: "holder",
+        inUse: () => false,
+        log: () => {},
+      });
+      const ref = await routed.create(spec());
+      await routed.foregrounds(new Set([ref.terminalId]));
+      expect(asked).toEqual(["holder"]);
+    });
+
     it("leaves the worst to the runtimes read", async () => {
       const tmux = new FakeRuntime({ kind: "tmux" });
       const holder = new FakeRuntime({ kind: "holder" });

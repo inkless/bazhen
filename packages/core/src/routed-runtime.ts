@@ -180,20 +180,23 @@ export class RoutedRuntime implements RuntimeAdapter {
   }
 
   /**
-   * Each runtime's foregrounds. One that can't be read leaves its terminals out, which the
-   * contract allows, so the rest are still seen; only when none can be read does this throw.
-   * A runtime's fault is said when it starts or changes, and its recovery once.
+   * The foregrounds of each runtime that is read: one with no terminal open on it has none to
+   * give. One that can't be read leaves its terminals out, which the contract allows, so the rest
+   * are still seen; only when none can be read does this throw. A runtime's fault is said when it
+   * starts or changes, and its recovery once.
    */
   async foregrounds(terminalIds: ReadonlySet<string>): Promise<TerminalForeground[]> {
     const read = await Promise.all(
-      this.kinds.map((kind) =>
-        this.only(kind)
-          .foregrounds(terminalIds)
-          .then(
-            (seen) => ({ kind, seen }),
-            (err: unknown) => ({ kind, seen: [], err }),
-          ),
-      ),
+      this.kinds
+        .filter((kind) => this.reads(kind))
+        .map((kind) =>
+          this.only(kind)
+            .foregrounds(terminalIds)
+            .then(
+              (seen) => ({ kind, seen }),
+              (err: unknown) => ({ kind, seen: [], err }),
+            ),
+        ),
     );
     const failed = read.filter((r) => "err" in r);
     if (failed.length === read.length) throw failed[0]?.err;
