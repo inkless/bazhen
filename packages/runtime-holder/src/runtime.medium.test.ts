@@ -13,6 +13,7 @@ import {
 import {
   newId,
   ProcessState,
+  RuntimeUnreachable,
   ScreenUnreadable,
   StaleIncarnation,
   TerminalPredates,
@@ -33,6 +34,7 @@ import {
 } from "@bazhen/host-guard";
 import { type HolderHelloReply, type HolderReply, HolderSpawnSpec } from "@bazhen/protocol";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import { HOLDER_MAX_UNSENT_BYTES } from "./client.ts";
 import { HolderRuntime, type HolderRuntimeOptions } from "./runtime.ts";
@@ -49,6 +51,8 @@ import {
 /** Above every system's pid limit, so even a broken guard reaches no process. */
 const FAKE_PID = 2 ** 22 + 1;
 const FAKE_START = 1_700_000_000;
+/** A `holderRuns` that takes the fake holder for one still running. */
+const holderRunning = async () => true;
 
 /** The most a pid can be here: Linux says; macOS's is fixed. */
 function pidLimit(): number {
@@ -674,12 +678,55 @@ describe("HolderRuntime: closing", () => {
     expect(existsSync(socket)).toBe(false);
   });
 
-  it("calls a terminal whose holder can't be read unconfirmed, not stale", async () => {
+  it("calls a terminal whose running holder can't be read unreachable, neither stale nor unconfirmed", async () => {
     const root = privateRoot();
+    const { runtime, terminals } = startingFakes(
+      root,
+      {},
+      undefined,
+      {},
+      { holderRuns: holderRunning },
+    );
+    const ref = await runtime.create(spec());
+    chmodSync(terminals.get(ref.terminalId)!.server.path, 0o000);
+    await expect(runtime.close(ref)).rejects.toBeInstanceOf(RuntimeUnreachable);
+  });
+
+  it("calls a terminal unreachable whose running holder doesn't say hello in time", async () => {
+    const root = privateRoot();
+    const { runtime, terminals } = startingFakes(
+      root,
+      {},
+      undefined,
+      {},
+      { holderRuns: holderRunning },
+    );
+    const ref = await runtime.create(spec());
+    const socket = terminals.get(ref.terminalId)!.server.path;
+    await terminals.get(ref.terminalId)!.server.close();
+    rmSync(socket, { force: true });
+    const accepted: Socket[] = [];
+    const silent = createServer((connection) => accepted.push(connection));
+    await new Promise<void>((listening) => silent.listen(socket, listening));
+    onTestFinished(() => {
+      for (const connection of accepted) connection.destroy();
+      silent.close();
+    });
+    await expect(runtime.close(ref)).rejects.toBeInstanceOf(RuntimeUnreachable);
+  });
+
+  it("calls a terminal unconfirmed whose socket can't be read once its holder has exited", async () => {
+    const root = privateRoot();
+    // The fakes name a pid above the system's limit, so `ps` finds no holder there.
     const { runtime, terminals } = startingFakes(root);
     const ref = await runtime.create(spec());
     chmodSync(terminals.get(ref.terminalId)!.server.path, 0o000);
-    await expect(runtime.close(ref)).rejects.toBeInstanceOf(TerminalUnconfirmed);
+    const refused: unknown = await runtime.close(ref).catch((error: unknown) => error);
+    expect([
+      refused instanceof TerminalUnconfirmed,
+      refused instanceof StaleIncarnation,
+      refused instanceof RuntimeUnreachable,
+    ]).toEqual([true, false, false]);
   });
 
   it("calls a terminal gone only when no holder answers and the recorded one isn't running", async () => {

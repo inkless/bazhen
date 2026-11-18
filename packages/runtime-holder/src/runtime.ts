@@ -7,6 +7,7 @@ import {
   TerminalPredates,
   type ScreenText,
   ProcessState,
+  RuntimeUnreachable,
   shellCommand,
   StaleIncarnation,
   TerminalUnconfirmed,
@@ -112,6 +113,8 @@ export interface HolderRuntimeOptions {
   readonly commands?: (
     pids: readonly number[],
   ) => Promise<ReadonlyMap<number, ProcessCommand> | "unreadable">;
+  /** Whether `holder` is still the process at its pid: host-guard's `vouchHolder`, unless a test says. */
+  readonly holderRuns?: (holder: HolderProcess) => Promise<boolean>;
 }
 
 /** A holder that answered, the build it runs and the protocol versions it speaks. */
@@ -269,8 +272,11 @@ export class HolderRuntime implements RuntimeAdapter {
 
   /**
    * A connection to the holder `ref` was made on, past `hello`. A holder that isn't there is
-   * `StaleIncarnation("gone")` once it is provably gone, and `TerminalUnconfirmed` until then; a
-   * different holder at its socket is `server-replaced`.
+   * `StaleIncarnation("gone")` once it is provably gone, and `TerminalUnconfirmed` until then. One
+   * whose socket refuses us or doesn't answer is `RuntimeUnreachable` while the holder `ref`
+   * recorded still runs, and `TerminalUnconfirmed` once it doesn't: a socket refuses a connection
+   * before anything listens on it, so a holder that died behind it reads the same. A different
+   * holder at its socket is `server-replaced`.
    */
   private async holderOf(
     ref: RuntimeRef,
@@ -287,6 +293,9 @@ export class HolderRuntime implements RuntimeAdapter {
       if (reached.is === "outdated") {
         const pid = recordedHolder(ref)?.pid ?? null;
         throw new TerminalUnservable(ref.terminalId, reached.protocol, pid);
+      }
+      if (reached.is === "unreadable" && (await this.recordedRuns(ref))) {
+        throw new RuntimeUnreachable(ref.terminalId, error);
       }
       throw new TerminalUnconfirmed(ref.terminalId, error);
     }
@@ -644,9 +653,15 @@ export class HolderRuntime implements RuntimeAdapter {
    */
   async gone(ref: RuntimeRef): Promise<boolean> {
     const reached = await this.reach(this.socketOf(ref.terminalId));
-    if (reached.is !== "none") return false;
+    return reached.is === "none" && !(await this.recordedRuns(ref));
+  }
+
+  /** Whether the holder `ref` recorded is still the process at its pid. */
+  private async recordedRuns(ref: RuntimeRef): Promise<boolean> {
     const holder = recordedHolder(ref);
-    return holder === null || (await vouchHolder(holder)) === null;
+    if (holder === null) return false;
+    const runs = this.opts.holderRuns ?? (async (h) => (await vouchHolder(h)) !== null);
+    return runs(holder);
   }
 
   async respawn(ref: RuntimeRef, spec: ProcessSpec): Promise<RuntimeRef> {

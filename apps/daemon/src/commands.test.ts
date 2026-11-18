@@ -3,6 +3,7 @@ import {
   HarnessRefused,
   newId,
   ProcessState,
+  RuntimeUnreachable,
   StaleIncarnation,
   TerminalUnconfirmed,
   TerminalUnservable,
@@ -35,10 +36,12 @@ describe("an environment's failure as a command's", () => {
     expect([
       as(new StaleIncarnation(terminalId, "gone")),
       as(new TerminalUnconfirmed(terminalId, null)),
+      as(new RuntimeUnreachable(terminalId, null)),
       as(new Error("tmux unreachable")),
     ]).toEqual([
       expect.any(TerminalReplaced),
       expect.any(ServerUnconfirmed),
+      expect.any(EnvironmentUnavailable),
       expect.any(EnvironmentUnavailable),
     ]);
   });
@@ -68,10 +71,11 @@ describe("an environment's failure as a command's", () => {
   it("lets force record past an unconfirmed server or an unreachable one, never a replaced pane", () => {
     expect([
       forceable(new TerminalUnconfirmed(terminalId, null)),
+      forceable(new RuntimeUnreachable(terminalId, null)),
       forceable(new Error("tmux unreachable")),
       forceable(new StaleIncarnation(terminalId, "pane-replaced")),
       forceable(new ProcessState(terminalId, "running")),
-    ]).toEqual([true, true, false, false]);
+    ]).toEqual([true, true, true, false, false]);
   });
 });
 

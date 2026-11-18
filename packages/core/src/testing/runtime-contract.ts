@@ -10,6 +10,7 @@ import { concat, decode, delay, encode } from "./platform.ts";
 import {
   ProcessState,
   StaleIncarnation,
+  TerminalUnconfirmed,
   type RuntimeAdapter,
   type RuntimeRef,
   type Size,
@@ -583,11 +584,19 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
       ]);
     });
 
-    it("refuses to close a terminal on a server it can't read, without calling it stale", async () => {
+    it("refuses to close a terminal on a server it can't read, calling it neither stale nor unconfirmed", async () => {
       const runtime = fresh();
       const ref = await runtime.create(spec(sleeping));
       harness.unreadable(runtime);
-      await expect(runtime.close(ref)).rejects.not.toBeInstanceOf(StaleIncarnation);
+      const refused: unknown = await runtime.close(ref).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect([
+        refused instanceof Error,
+        refused instanceof StaleIncarnation,
+        refused instanceof TerminalUnconfirmed,
+      ]).toEqual([true, false, false]);
       expect((await runtime.health()).state).toBe("unreachable");
     });
 

@@ -46,8 +46,8 @@ export class TerminalReplaced extends Error {
 export class ServerUnconfirmed extends Error {
   constructor(subject: string, cause: unknown) {
     super(
-      `${subject}'s terminal is not on the tmux server, but the server it ran on may still ` +
-        "be running it; close it with force to record it closed anyway",
+      `${subject}'s terminal is no longer where it ran, but what ran it may still be ` +
+        "running it; close it with force to record it closed anyway",
       { cause },
     );
   }
