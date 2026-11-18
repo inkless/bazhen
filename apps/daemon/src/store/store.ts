@@ -1,5 +1,4 @@
 import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
-import { isDeepStrictEqual } from "node:util";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import type { Listener } from "../mailbox/listening.ts";
 import type { TerminalPids } from "../auth/peer.ts";
@@ -1022,8 +1021,7 @@ export class Store {
       const row = this.prepare("SELECT state, usage FROM agent_sessions WHERE id = ?").get(agentId);
       if (row === undefined) throw new UnknownAgent(agentId);
       if (!REPORTING.has(AgentState.parse(row.state))) return null;
-      if (hook !== undefined && isDeepStrictEqual(this.lastCompaction(agentId)?.hook, hook))
-        return null;
+      if (hook !== undefined && this.compactionReported(agentId, hook)) return null;
       // The status line reports apart from the hook, so a reading taken just after the compaction
       // may land first, and `before` then holds the use after it.
       const before = typeof row.usage === "string" ? Usage.parse(JSON.parse(row.usage)) : undefined;
@@ -1036,15 +1034,18 @@ export class Store {
     });
   }
 
-  /** The agent's last recorded compaction, if any. */
-  private lastCompaction(agentId: string): EventPayload<"agent.compacted"> | undefined {
-    const row = this.prepare(
-      `SELECT payload FROM events WHERE entity_type = 'agent' AND entity_id = ?
-         AND type = 'agent.compacted' ORDER BY id DESC LIMIT 1`,
-    ).get(agentId);
-    return row === undefined
-      ? undefined
-      : EVENTS["agent.compacted"].payload.parse(JSON.parse(String(row.payload)));
+  /**
+   * Whether `hook` already reported a compaction of the agent. Any of its compactions, not only
+   * the last: two hooks that waited through a restart may send their reports again in either order.
+   */
+  private compactionReported(
+    agentId: string,
+    hook: NonNullable<EventPayload<"agent.compacted">["hook"]>,
+  ): boolean {
+    const sql = `SELECT 1 AS present FROM events WHERE entity_type = 'agent' AND entity_id = ?
+      AND type = 'agent.compacted' AND json_extract(payload, '$.hook.pid') = ?
+      AND json_extract(payload, '$.hook.sessionId') IS ? LIMIT 1`;
+    return this.prepare(sql).get(agentId, hook.pid, hook.sessionId) !== undefined;
   }
 
   /** What an agent's harness last reported it doing in this process, if anything. */

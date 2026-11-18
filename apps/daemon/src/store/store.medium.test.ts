@@ -1252,6 +1252,19 @@ describe("Store usage", () => {
     ]);
   });
 
+  it("records each hook's compaction once when two hooks report theirs again, the later first", async () => {
+    const { store, agentId } = await withAgent();
+    const recorded = [hook(41), hook(42), hook(42), hook(41)].map(
+      (h) => store.recordCompaction(agentId, "claude_hook", h) !== null,
+    );
+    const noSession = { sessionId: null, pid: 43 };
+    recorded.push(
+      store.recordCompaction(agentId, "claude_hook", noSession) !== null,
+      store.recordCompaction(agentId, "claude_hook", noSession) !== null,
+    );
+    expect(recorded).toEqual([true, true, false, false, true, false]);
+  });
+
   it("records a hook's compaction once, however often the same hook reports it", async () => {
     const { store, agentId } = await withAgent();
     const recorded = [
