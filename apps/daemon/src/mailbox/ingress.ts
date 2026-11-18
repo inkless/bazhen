@@ -12,7 +12,7 @@ import {
 } from "@bazhen/protocol";
 import { hookOrigin, readHook, type SentMessage } from "@bazhen/harness-claude-code";
 import { AGENT_TOKEN_HEADER } from "../auth/agent-token.ts";
-import { identify, type AgentCredentials } from "../auth/callers.ts";
+import { identify, unavailable, type AgentCredentials } from "../auth/callers.ts";
 import type { PeerReading } from "../auth/peer.ts";
 import type { ActivityTracker } from "./activity.ts";
 import type { Approvals } from "./approvals.ts";
@@ -91,6 +91,10 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
       { token: c.req.header(AGENT_TOKEN_HEADER), said: hook.data.agentId },
       await peerOf(c),
     );
+    if (who.kind === "refused" && who.retry === true) {
+      dropped(hook.data.agentId, who.reason);
+      return unavailable(c, who.reason);
+    }
     if (who.kind === "refused") return dropped(hook.data.agentId, `refused, ${who.reason}`);
     // A hook always names an agent, so it is never the human's.
     if (who.kind === "human" || !deps.knows(who.agentId))
@@ -196,6 +200,7 @@ export function hookApp(deps: IngressDeps): Hono<{ Bindings: HttpBindings }> {
       { token: c.req.header(AGENT_TOKEN_HEADER), said: ack.data.agentId },
       await peerOf(c),
     );
+    if (who.kind === "refused" && who.retry === true) return unavailable(c, who.reason);
     if (who.kind === "agent") deps.mailbox.ack(who.agentId, ack.data.offered);
     return c.json({});
   });

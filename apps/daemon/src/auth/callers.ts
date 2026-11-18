@@ -407,6 +407,12 @@ const forbidden = (c: Context, message: string) => {
   return c.json(body, 403);
 };
 
+/** Answers a caller refused only until it is read in time, which may call again. */
+export const unavailable = (c: Context, message: string) => {
+  const body: ErrorResponse = { error: "unavailable", message };
+  return c.json(body, 503);
+};
+
 /**
  * Identifies every socket request once, before any route sees it (foundation-design §9.1): a
  * credential that doesn't hold is refused on every route, an agent is refused every route but
@@ -427,6 +433,7 @@ export function guardCallers(
       presentedBy((name) => c.req.header(name)),
       reading,
     );
+    if (who.kind === "refused" && who.retry === true) return unavailable(c, who.reason);
     if (who.kind === "refused") c.set("refusal", who.reason);
     else c.set("caller", who.kind === "agent" ? who.agentId : null);
     return next();

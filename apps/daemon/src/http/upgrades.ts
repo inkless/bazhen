@@ -37,11 +37,15 @@ export function refuseUpgrade(socket: Duplex, status: string): void {
 
 /** Refuses an upgrade with 403 and the reason, as a forbidden request is answered. */
 function forbidUpgrade(socket: Duplex, message: string): void {
-  const body: ErrorResponse = { error: "forbidden", message };
+  answerUpgrade(socket, "403 Forbidden", { error: "forbidden", message });
+}
+
+/** Refuses an upgrade with `status` and `body`, as a request refused so is answered. */
+function answerUpgrade(socket: Duplex, status: string, body: ErrorResponse): void {
   const text = JSON.stringify(body);
   refuse(
     socket,
-    `HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n` +
+    `HTTP/1.1 ${status}\r\nContent-Type: application/json\r\n` +
       `Content-Length: ${Buffer.byteLength(text)}\r\nConnection: close\r\n\r\n${text}`,
   );
 }
@@ -120,6 +124,12 @@ export function socketUpgrades(
     }
     const who = identify(credentials, presented, reading);
     if (who.kind === "human") return route(routes, req, socket, head, null);
+    if (who.kind === "refused" && who.retry === true) {
+      return answerUpgrade(socket, "503 Service Unavailable", {
+        error: "unavailable",
+        message: who.reason,
+      });
+    }
     forbidUpgrade(socket, who.kind === "refused" ? who.reason : "an agent can't open a stream");
   });
 }

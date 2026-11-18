@@ -80,18 +80,33 @@ refused() {
   ' "$dir/head" 2>/dev/null
 }
 
+# The daemon's 503: it couldn't read the caller in time.
+late() {
+  head -n 1 "$dir/head" 2>/dev/null | grep -q '^HTTP/[0-9.]* 503 '
+}
+
 # A waiter retries until its deadline when the daemon can't be reached, drops the request, or cuts
-# a reply short, as it does across a restart; never on a reply it would refuse. Any other hook
-# gives up at once.
+# a reply short, as it does across a restart; never on a reply it would refuse. On a 503 it asks
+# again 1, 2, 4, 8 and 16 seconds later, then gives up, as the binary does. Any other hook gives
+# up at once.
 if [ "$1" = wait ]; then
   deadline=$(($(date +%s) + 82800))
-  until post /v1/hooks "$dir/request" $((deadline - $(date +%s))); do
-    # curl's own refusals of the reply: 8, a Content-Length that isn't one; 63, a body over
-    # MAX_BODY, or a length too large to read.
-    case $? in 8 | 63) exit 0 ;; esac
-    refused && exit 0
+  pause=1
+  while :; do
+    if post /v1/hooks "$dir/request" $((deadline - $(date +%s))); then
+      late || break
+      [ "$pause" -le 16 ] || exit 0
+      wait_for=$pause
+      pause=$((pause * 2))
+    else
+      # curl's own refusals of the reply: 8, a Content-Length that isn't one; 63, a body over
+      # MAX_BODY, or a length too large to read.
+      case $? in 8 | 63) exit 0 ;; esac
+      refused && exit 0
+      wait_for=1
+    fi
     [ "$(date +%s)" -lt $((deadline - 1)) ] || exit 0
-    sleep 1
+    sleep "$wait_for"
   done
 else
   # PostToolUse runs on every tool call, and a fold it misses waits for a wake.

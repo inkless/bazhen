@@ -279,6 +279,16 @@ describe("WebSocket upgrades on the daemon's socket", () => {
     ]);
   });
 
+  it("tells a caller whose process wasn't read in time to try again, whatever it presents", async () => {
+    const late = await servingOnSocket(async () => ({ kind: "late" }));
+    const bare = await refusalOf(new WebSocket(late("/echo/hi")));
+    const tokened = await refusalOf(
+      new WebSocket(late("/echo/hi"), { headers: { "bazhen-agent-token": TOKEN } }),
+    );
+    const retry = [503, "the caller's process wasn't read in time; try again"];
+    expect([bare, tokened]).toEqual([retry, retry]);
+  });
+
   it("refuses a caller outside every terminal whose token is no live agent's", async () => {
     const url = await servingOnSocket(async () => ({ kind: "outside" }));
     const ws = new WebSocket(url("/echo/hi"), {

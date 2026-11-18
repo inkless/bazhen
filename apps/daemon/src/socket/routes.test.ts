@@ -53,6 +53,9 @@ const pairing = {
   issue: () => ({ code: "ABCD2345", expiresAt: new Date("2026-11-12T00:05:00.000Z") }),
 };
 
+/** A response's status and JSON body. */
+const answered = async (res: Response) => [res.status, await res.json()];
+
 function app(
   refreshEnv = async (_env: Env) => refreshed,
   paneTitleChanged = (_pane: string) => {},
@@ -340,6 +343,27 @@ describe("socketApp", () => {
       (await call("/v1/pairing/codes", {})).status,
     ];
     expect([statuses, titled]).toEqual([[204, 403], ["%1"]]);
+  });
+
+  it("tells a caller whose process wasn't read in time to try again, on every route", async () => {
+    const daemon = app(undefined, undefined, undefined, undefined, undefined, async () => ({
+      kind: "late",
+    }));
+    const env = { incoming: { socket: {} } };
+    const answers = [
+      await answered(await daemon.request("/v1/state", {}, env)),
+      await answered(
+        await daemon.request("/v1/pairing/codes", { method: "POST", body: "{}" }, env),
+      ),
+    ];
+    const late = {
+      error: "unavailable",
+      message: "the caller's process wasn't read in time; try again",
+    };
+    expect(answers).toEqual([
+      [503, late],
+      [503, late],
+    ]);
   });
 
   it("refuses an approval answer from an agent that proves itself with its token", async () => {

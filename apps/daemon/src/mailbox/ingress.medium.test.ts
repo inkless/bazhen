@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
@@ -13,6 +21,7 @@ import {
   untokenedCredentials,
 } from "../testing/fixtures.ts";
 import { AgentTokens } from "../auth/callers.ts";
+import type { PeerReading } from "../auth/peer.ts";
 import { ActivityTracker } from "./activity.ts";
 import { Approvals } from "./approvals.ts";
 import { SessionBinding } from "./binding.ts";
@@ -164,6 +173,14 @@ const compact = (more: Record<string, string> = {}) =>
 const sessionStart = (session: string) =>
   JSON.stringify({ hook_event_name: "SessionStart", session_id: session, source: "clear" });
 
+const PATH = process.env["PATH"] ?? "";
+
+/** A peer that reads each of `readings` in turn, taking it off, then every caller as outside. */
+const inTurn =
+  (readings: PeerReading[]): NonNullable<IngressDeps["peer"]> =>
+  async () =>
+    readings.shift() ?? { kind: "outside" };
+
 function run(client: string, event: string, env: Record<string, string>, payload = stop()) {
   const child = spawn(client, [event], { env: { PATH: process.env["PATH"] ?? "", ...env } });
   let stdout = "";
@@ -187,6 +204,15 @@ describe.each([
     const result = await waiting;
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(`(${messageId}):\nhello ü`);
+    await expect.poll(() => state(messageId)).toBe("emitted");
+  });
+
+  it("asks again when the daemon couldn't read the waiter in time, and takes its mail", async () => {
+    const readings: PeerReading[] = [{ kind: "late" }];
+    const { socket, agentId, mailbox, state } = await daemon(false, inTurn(readings));
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const result = await run(client, "wait", { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: socket });
+    expect([result.code, readings]).toEqual([2, []]);
     await expect.poll(() => state(messageId)).toBe("emitted");
   });
 
@@ -490,8 +516,8 @@ describe.each([
 });
 
 /**
- * One POST to the ingress on `socket`, with `headers`; resolves once the reply has ended, and
- * rejects if `signal` drops it first.
+ * One POST to the ingress on `socket`, with `headers`; its status, once the reply has ended, or a
+ * rejection if `signal` drops it first.
  */
 function post(
   socket: string,
@@ -500,7 +526,7 @@ function post(
   headers: Record<string, string> = {},
   signal?: AbortSignal,
 ) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<number>((resolve, reject) => {
     const req = request(
       {
         socketPath: socket,
@@ -509,7 +535,7 @@ function post(
         headers: { "content-type": "application/json", ...headers },
         ...(signal && { signal }),
       },
-      (res) => res.resume().on("end", resolve),
+      (res) => res.resume().on("end", () => resolve(res.statusCode ?? 0)),
     );
     req.on("error", reject);
     req.end(JSON.stringify(body));
@@ -526,6 +552,67 @@ describe("hook ingress, on an ack", () => {
     const token = readFileSync(tokenFile, "utf8");
     await post(socket, "/v1/hooks/ack", { agentId, offered }, { "bazhen-agent-token": token });
     expect(state(messageId)).toBe("emitted");
+  });
+});
+
+describe("hook ingress, on a caller it can't read in time", () => {
+  it("tells an ack to try again, and leaves its mail offered", async () => {
+    const { socket, agentId, mailbox, state, tokenFile } = await daemon(true, async () => ({
+      kind: "late",
+    }));
+    const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
+    const { offered } = await mailbox.wait(agentId, new AbortController().signal);
+    const token = readFileSync(tokenFile, "utf8");
+    const status = await post(
+      socket,
+      "/v1/hooks/ack",
+      { agentId, offered },
+      { "bazhen-agent-token": token },
+    );
+    expect([status, state(messageId)]).toEqual([503, "offered"]);
+  });
+
+  it("tells a hook to try again, and says so", async () => {
+    const { socket, agentId, logged } = await daemon(false, async () => ({ kind: "late" }));
+    const status = await post(socket, "/v1/hooks", {
+      payload: JSON.parse(stop()),
+      protocolVersion: "1.0",
+      agentId,
+      event: "Stop",
+      pid: process.pid,
+      ppid: process.ppid,
+    });
+    expect([status, logged]).toEqual([
+      503,
+      [
+        `bazhen: 2026-11-17T00:00:00.000Z dropped the "Stop" hook for agent ${agentId}: ` +
+          "the caller's process wasn't read in time; try again",
+      ],
+    ]);
+  });
+
+  it("gives up, as the script waiter, after five readings in a row that come late, waiting longer before each", async () => {
+    let readings = 0;
+    const { socket, agentId } = await daemon(false, async () => {
+      readings += 1;
+      return { kind: "late" };
+    });
+    const stubs = join(dir, "bin");
+    const slept = join(dir, "slept");
+    mkdirSync(stubs);
+    writeFileSync(
+      join(stubs, "sleep"),
+      `#!/bin/sh
+printf '%s ' "$1" >>"${slept}"
+`,
+    );
+    chmodSync(join(stubs, "sleep"), 0o700);
+    const result = await run(HOOK_SCRIPT, "wait", {
+      BAZHEN_AGENT_ID: agentId,
+      BAZHEN_SOCKET: socket,
+      PATH: `${stubs}:${PATH}`,
+    });
+    expect([result.code, readings, readFileSync(slept, "utf8")]).toEqual([0, 6, "1 2 4 8 16 "]);
   });
 });
 

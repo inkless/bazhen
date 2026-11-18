@@ -706,6 +706,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
+  "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
   "crates/bazhen/src/attach/attachment.rs::Attachment::keys": "attach",
   "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",

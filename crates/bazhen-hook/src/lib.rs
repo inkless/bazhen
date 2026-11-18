@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 /// The client's framing, which `parse_reply` holds a reply to, for the fuzz targets to reach.
 pub use bazhen_client::framing;
 use bazhen_client::{Caller, Error, Limits, Method, agent_token, exchange};
-use framing::{content_length, header, headers, split_head};
+use framing::{content_length, header, headers, split_head, status};
 
 const PROTOCOL_VERSION: &str = "1.0";
 const REPLY_TYPE: &str = "application/vnd.bazhen.hook-reply";
@@ -81,9 +81,8 @@ fn run() -> Option<i32> {
         _ => HOOK_DEADLINE,
     };
     let reply = ask(
-        &socket,
-        &request,
-        token.as_deref(),
+        |left| post_as(&socket, "/v1/hooks", &request, left, token.as_deref()),
+        sleep,
         event == "wait",
         deadline,
     )?;
@@ -136,26 +135,45 @@ fn hook_ack(agent: &str, offered: &[String]) -> Vec<u8> {
     format!("{{\"agentId\":\"{agent}\",\"offered\":[\"{ids}\"]}}").into_bytes()
 }
 
+/// How long a waiter waits before asking again after each 503 in turn, which the daemon answers
+/// when it couldn't read the caller in time; past the last it gives up, so a daemon that never
+/// reads it in time can't keep it asking.
+const LATE_BACKOFF: [Duration; 5] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(16),
+];
+
 /// A waiter retries until its deadline when the daemon can't be reached or drops the request,
-/// as it does across a restart; any other hook gives up at once.
+/// as it does across a restart, and a few times, ever further apart, when it answers 503; any
+/// other hook gives up at once. `post` sends the request within the time it is given.
 fn ask(
-    socket: &str,
-    request: &[u8],
-    token: Option<&str>,
+    mut post: impl FnMut(Duration) -> Result<Vec<u8>, Error>,
+    mut sleep: impl FnMut(Duration),
     waiting: bool,
     within: Duration,
 ) -> Option<Reply> {
     let deadline = Instant::now() + within;
+    let mut late = LATE_BACKOFF.iter();
     loop {
         let left = deadline
             .checked_duration_since(Instant::now())
             .filter(|d| !d.is_zero())?;
-        match post_as(socket, "/v1/hooks", request, left, token) {
+        let pause = match post(left) {
+            Ok(response) if waiting && is_late(&response) => *late.next()?,
             Ok(response) => return parse_reply(&response),
-            Err(_) if waiting => sleep(Duration::from_secs(1)),
+            Err(_) if waiting => Duration::from_secs(1),
             Err(_) => return None,
-        }
+        };
+        sleep(pause);
     }
+}
+
+/// Whether `response` is the daemon's 503: it couldn't read the caller in time.
+pub fn is_late(response: &[u8]) -> bool {
+    split_head(response).and_then(|(head, _)| status(head)) == Some(503)
 }
 
 /// One HTTP/1.1 exchange; the whole response, or an error if it ended early.
@@ -216,6 +234,50 @@ pub fn parse_reply(response: &[u8]) -> Option<Reply> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn status(code: &str) -> Vec<u8> {
+        format!("HTTP/1.1 {code} X\r\nContent-Length: 0\r\n\r\n").into_bytes()
+    }
+
+    /// What `ask` makes of `answers` in turn, as a waiter or not: its reply, how many requests it
+    /// sent and how long it waited between them.
+    fn asked(answers: Vec<Vec<u8>>, waiting: bool) -> (Option<Reply>, usize, Vec<Duration>) {
+        let mut answers = answers.into_iter();
+        let mut sent = 0;
+        let mut slept = Vec::new();
+        let reply = ask(
+            |_| {
+                sent += 1;
+                answers.next().ok_or(Error::Truncated)
+            },
+            |pause| slept.push(pause),
+            waiting,
+            Duration::from_secs(60),
+        );
+        (reply, sent, slept)
+    }
+
+    #[test]
+    fn a_waiter_asks_again_after_a_503_and_takes_the_reply_that_follows() {
+        let reply = framed("2", "", "", b"");
+        let (got, sent, slept) = asked(vec![status("503"), reply.clone()], true);
+        assert_eq!(
+            (got, sent, slept),
+            (parse_reply(&reply), 2, vec![Duration::from_secs(1)])
+        );
+    }
+
+    #[test]
+    fn a_waiter_gives_up_after_five_503s_in_a_row_waiting_longer_before_each() {
+        let (got, sent, slept) = asked(vec![status("503"); 10], true);
+        assert_eq!((got, sent, slept), (None, 6, LATE_BACKOFF.to_vec()));
+    }
+
+    #[test]
+    fn any_other_hook_takes_a_503_as_its_answer_and_asks_once() {
+        let (got, sent, slept) = asked(vec![status("503"); 2], false);
+        assert_eq!((got, sent, slept), (None, 1, vec![]));
+    }
 
     fn response(headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
         let mut out = b"HTTP/1.1 200 OK\r\n".to_vec();
