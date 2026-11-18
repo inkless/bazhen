@@ -1,13 +1,24 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import { answerPatched } from "../support/state-route.ts";
-import { expect, launch, test } from "./page.ts";
+import { RUNTIMES } from "./daemons.ts";
+import { expect, launch, runtime, test } from "./page.ts";
+
+/** What the header says of the runtime named `kind`. */
+const stateOf = (page: Page, kind: string) =>
+  page
+    .getByRole("term")
+    .filter({ hasText: new RegExp(`^${kind}$`) })
+    .locator("xpath=following-sibling::dd[1]");
 
 test("the web client shows the daemon's live health through the dev proxy", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Bazhen" })).toBeVisible();
   await expect(page.getByRole("term").filter({ hasText: "Protocol" })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: /^[0-9a-f]{12}$/ })).toBeVisible();
-  await expect(page.getByRole("definition").filter({ hasText: /^healthy \(.+\)$/ })).toBeVisible();
+  // The daemon's own runtime is read, with its version; the other, with no terminal on it, isn't.
+  await expect(stateOf(page, runtime())).toHaveText(/^(healthy|not-running) \(.+\)$/);
+  for (const other of RUNTIMES.filter((r) => r !== runtime()))
+    await expect(stateOf(page, other)).toHaveText("unused");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
