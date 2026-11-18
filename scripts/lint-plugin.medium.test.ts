@@ -382,7 +382,7 @@ describe("the stdio-guard rule", () => {
 });
 
 describe("the ws-loads-statically rule", () => {
-  it("flags ws loaded other than by a static import, and nothing merely named ws", () => {
+  it("flags ws loaded other than by a static import, and neither a name nor a method given ws", () => {
     expect(
       reportedBy(
         "ws-loads-statically",
@@ -397,8 +397,15 @@ describe("the ws-loads-statically rule", () => {
           'export const c = createRequire(import.meta.url)("ws");',
           'import d = require("ws");',
           "export { d };",
+          'export const e = require.resolve("ws");',
+          'export const f = module.require("ws");',
+          'export const g = load("ws");',
+          "const load = createRequire(import.meta.url);",
+          'export const h = "wss://x".replace("ws", "http");',
+          'export const i = "http://x".replace("http", "ws");',
+          'export const j = ["ws", "wss"].includes("ws");',
         ].join("\n"),
       ),
-    ).toEqual([6, 7, 8, 9]);
+    ).toEqual([6, 7, 8, 9, 11, 12, 13]);
   });
 });

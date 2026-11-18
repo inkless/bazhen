@@ -459,12 +459,33 @@ const WS_LOADED =
 const wsLoadsStatically = {
   create(context: Context) {
     const report = (node: Node) => context.report({ node, message: WS_LOADED });
+    /** The names a `createRequire(…)` is bound to here, and the calls given "ws" to judge. */
+    const requires = new Set(["require"]);
+    const calls: Node[] = [];
+    /**
+     * Whether a callee loads a module: `require` or a name bound to `createRequire(…)`,
+     * `require.resolve` or `module.require`, or a call's result, as `createRequire(…)("ws")`. A
+     * method merely given "ws", as `url.replace("ws", "http")`, loads nothing.
+     */
+    const loads = (callee: unknown) =>
+      isNode(callee) &&
+      (callee.type === "CallExpression" ||
+        (callee.type === "Identifier" && requires.has(String(callee["name"]))) ||
+        (callee.type === "MemberExpression" &&
+          (requires.has(nameOf(callee["object"]) ?? "") || memberName(callee) === "require")));
     return {
       ImportExpression(node: Node) {
         if (loadsWs(node["source"])) report(node);
       },
+      VariableDeclarator(node: Node) {
+        const init = node["init"];
+        if (isNode(init) && isCreateRequire(init)) requires.add(nameOf(node["id"]) ?? "");
+      },
       CallExpression(node: Node) {
-        if (nodes(node["arguments"]).some(loadsWs)) report(node);
+        if (nodes(node["arguments"]).some(loadsWs)) calls.push(node);
+      },
+      "Program:exit"() {
+        for (const call of calls) if (loads(call["callee"])) report(call);
       },
       TSImportEqualsDeclaration(node: Node) {
         const reference = node["moduleReference"];
