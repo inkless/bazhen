@@ -6,6 +6,7 @@
 //   missed     neither did: a gap in the tests, or a mutant that changes nothing
 //   unviable   it didn't build
 //   timeout    the Rust tests ran out of time on it
+// It leaves out the mutants the first sweep classed equivalent (`EQUIVALENTS`), each with its reason.
 // It is a tool, not a check: a count of survivors is no gate (testing.md). Its table is for
 // someone to read, class each survivor and write the test that kills it. `--only` narrows a group
 // to the mutants a regex names, to see new tests kill them: each one caught is printed with the
@@ -47,6 +48,100 @@ const LIFECYCLE_FILES = ["socket.rs"];
 export const MACOS_FILES: readonly string[] = ["macos.rs"];
 /** The files whose lifecycle functions `LIFECYCLE_NAME` picks out. */
 const LIFECYCLE_NAME_FILES = ["server.rs", "conn.rs"];
+
+/**
+ * A survivor class the first sweep read and found to change nothing, left out of every group so a
+ * re-sweep doesn't triage it again. It names the mutants by their function and mutation, not
+ * their line, so an edit to the code around one doesn't move the exclusion onto another; where
+ * one function holds two mutants of the same kind (`+`→`*` twice in `requeue_exited`), a column
+ * tells them apart, and the source at that place is checked, so a pin the code has moved away from
+ * is refused rather than left on whatever now stands there.
+ */
+export interface Equivalent {
+  /** A regex, in the syntax both of JavaScript and of the Rust regex crate, on a mutant's name. */
+  readonly re: string;
+  /** How many mutants it names today: a different count means the code moved under it. */
+  readonly count: number;
+  /** Why none of them changes what the code does. */
+  readonly why: string;
+  /** Text each mutant's line of source must contain. */
+  readonly on?: string;
+}
+
+const reOf = (file: string, mutant: string) => `^${SRC}/${file}:\\d+:\\d+: ${mutant}$`;
+const reAtColumn = (file: string, column: number, mutant: string) =>
+  `^${SRC}/${file}:\\d+:${column}: ${mutant}$`;
+
+/** The classified equivalents. Anything that isn't one of these is a gap or a catch, not here. */
+export const EQUIVALENTS: readonly Equivalent[] = [
+  {
+    re: reAtColumn("conn.rs", 30, "replace \\+ with \\* in Connection::requeue_exited"),
+    count: 1,
+    on: ".map_or(0, |i| i + 1)",
+    why: "`i * 1` starts the search at the `respawned` frame, which is never `exit`, so the same frame is found",
+  },
+  {
+    re: reOf("holder.rs", "replace Output::take_replies -> Vec<u8> with vec!\\[[01]?\\]"),
+    count: 3,
+    why: "`vec![]` is `Vec::new()`; the default reaches only `Discard` and tests, and `Screen`, the only production output, overrides it",
+  },
+  {
+    re: reOf("holder.rs", "replace \\| with \\^ in Holder<O>::master_interest"),
+    count: 1,
+    why: "`IN` and `OUT` are disjoint bits, so `^` is `|`",
+  },
+  {
+    re: reOf("holder.rs", "replace \\|\\| with && in Holder<O>::flush_input"),
+    count: 1,
+    why: "`&&` returns only on an empty queue with the master closed; an empty queue writes nothing, and input is never queued once the master closes",
+  },
+  {
+    re: reOf("holder.rs", "replace < with <= in Holder<O>::read_master"),
+    count: 1,
+    why: "one more read in a turn, only when the turn's reads came to exactly the cap, which still holds to within a chunk",
+  },
+  {
+    re: reOf("input.rs", "replace < with <= in InputQueue::write_to"),
+    count: 1,
+    why: "at the cap the extra pass takes a chunk of `min(len, 0)` bytes, which is empty, and breaks",
+  },
+  {
+    re: reOf(
+      "log.rs",
+      "replace <impl Write for Line<'_, W>>::flush -> io::Result<\\(\\)> with Ok\\(\\(\\)\\)",
+    ),
+    count: 1,
+    why: "a `Line` holds a `BoundedLog`, whose `flush` is `Ok(())`: it writes each line whole as it comes",
+  },
+  {
+    re: reAtColumn("server.rs", 17, "replace != with == in foreground"),
+    count: 1,
+    on: "if pgid != child &&",
+    why: "`pgid != child` gives the same answer with a job in front; the mutant re-reads the child's own start, which can't differ while it is unreaped, and skips the re-read of another group, which differs only in a pid-reuse race",
+  },
+  {
+    re: reAtColumn("start_time.rs", 68, "replace == with != in read"),
+    count: 1,
+    on: "e.raw_os_error() == Some(libc::ESRCH)",
+    why: "a gone process fails the open with `ENOENT`, already `Absent`; `ESRCH` comes only from an exit between the open and the read, and untestable without injecting the read",
+  },
+  {
+    re: `^${SRC}/start_time\\.rs:60:5: replace read -> Result<u64, StartTimeError> with Ok\\([01]\\)$`,
+    count: 2,
+    on: "crate::macos::start_seconds(pid)",
+    why: "the macOS `read`, which Linux doesn't compile, so here the mutant changes nothing; `says_what_ps_says_…` kills it on `rust (macos)`",
+  },
+  {
+    re: reOf("macos.rs", "replace (?:\\+ with [-*]|/ with [%*]) in pids"),
+    count: 4,
+    why: "each changes only the slack over the sized length: less is `ENOMEM` on a race, which retries; more goes unused",
+  },
+  {
+    re: reOf("macos.rs", "replace == with != in pids"),
+    count: 1,
+    why: "the `ENOMEM` retry differs only when processes start between the two calls, or on another error; untestable without injecting the syscall",
+  },
+];
 
 interface GroupSpec {
   readonly files: readonly string[];
@@ -90,16 +185,19 @@ const isGroup = (name: string): name is Group => Object.hasOwn(GROUPS, name);
  */
 export function groupFilters(group: Group): string[][] {
   const spec = GROUPS[group];
+  const equivalents = EQUIVALENTS.flatMap((e) => ["--exclude-re", e.re]);
   const base = [
     ...spec.files.flatMap((f) => ["--file", `${SRC}/${f}`]),
     ...spec.excludeFiles.flatMap((f) => ["--exclude", `${SRC}/${f}`]),
     ...spec.excludeRe.flatMap((re) => ["--exclude-re", re]),
+    ...equivalents,
   ];
   if (spec.also === undefined) return [base];
   const byName = [
     ...LIFECYCLE_NAME_FILES.flatMap((f) => ["--file", `${SRC}/${f}`]),
     "--re",
     spec.also,
+    ...equivalents,
   ];
   return [base, byName];
 }
@@ -111,6 +209,48 @@ export function groupOf(name: string): Group {
   if ((LIFECYCLE_FILES as readonly string[]).includes(file)) return "lifecycle";
   if (MACOS_FILES.includes(file)) return "macos";
   return new RegExp(LIFECYCLE_NAME).test(name) ? "lifecycle" : "rest";
+}
+
+/** `names` without those `equivalents` leave out. */
+export function withoutEquivalents(
+  names: readonly string[],
+  equivalents: readonly Equivalent[],
+): string[] {
+  const res = equivalents.map((e) => new RegExp(e.re));
+  return names.filter((name) => !res.some((re) => re.test(name)));
+}
+
+/**
+ * Each of `equivalents` that names other than the number of mutants it says, of `all` the crate's
+ * mutants, or names one whose line of `source` isn't the one it was classified on: the code moved, and
+ * what it leaves out is no longer what was classified.
+ */
+export function equivalentFaults(
+  all: readonly string[],
+  equivalents: readonly Equivalent[],
+  source: (file: string) => readonly string[],
+): string[] {
+  return equivalents.flatMap((e) => {
+    const re = new RegExp(e.re);
+    const found = all.filter((name) => re.test(name));
+    const counted =
+      found.length === e.count
+        ? []
+        : [
+            `the equivalent ${e.re} names ${found.length} mutants, not the ${e.count} it was classed for`,
+          ];
+    const moved = found.flatMap((name) => {
+      const place = /^([^:]+):(\d+):/.exec(name);
+      if (place === null) return [`${name} has no file and line`];
+      const lines = source(place[1]!);
+      const line = Number(place[2]);
+      const here = lines[line - 1] ?? "";
+      return e.on === undefined || here.includes(e.on)
+        ? []
+        : [`${name} isn't on a line with ${e.on}`];
+    });
+    return [...counted, ...moved];
+  });
 }
 
 /** What went wrong with a partition of `all` into the groups' listings, or nothing. */
@@ -464,6 +604,10 @@ export interface Effects {
   readonly sandboxed: () => boolean;
   readonly list: (filters: readonly string[]) => string[];
   readonly platform: NodeJS.Platform;
+  /** The classified equivalents the run checks `all` against: the groups leave these out. */
+  readonly equivalents: readonly Equivalent[];
+  /** The lines of a source file, by its path in the workspace. */
+  readonly source: (file: string) => readonly string[];
   readonly mutate: (
     filters: readonly string[],
     shard: string | undefined,
@@ -477,6 +621,8 @@ const REAL: Effects = {
   sandboxed: inSignalSandbox,
   list: listMutants,
   platform: process.platform,
+  equivalents: EQUIVALENTS,
+  source: (file) => readFileSync(file, "utf8").split("\n"),
   mutate: runCargoMutants,
   judge: judgeBySuite,
 };
@@ -499,7 +645,7 @@ export function selections(
 
 export async function main(
   args: readonly string[],
-  { sandboxed, list, platform, mutate, judge }: Effects,
+  { sandboxed, list, platform, equivalents, source, mutate, judge }: Effects,
 ): Promise<number> {
   if (!sandboxed()) {
     console.error(
@@ -519,7 +665,15 @@ export async function main(
     return 1;
   }
   const listed = (g: Group) => groupFilters(g).flatMap(list);
-  const faults = partitionFaults(list([]), {
+  const all = list([]);
+  const moved = equivalentFaults(all, equivalents, source);
+  if (moved.length > 0) {
+    console.error(
+      `holder-mutants: the classified equivalents no longer name what was classified:\n${moved.join("\n")}`,
+    );
+    return 1;
+  }
+  const faults = partitionFaults(withoutEquivalents(all, equivalents), {
     signal: listed("signal"),
     lifecycle: listed("lifecycle"),
     rest: listed("rest"),

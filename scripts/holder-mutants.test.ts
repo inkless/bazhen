@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   type Effects,
+  EQUIVALENTS,
+  type Equivalent,
   GROUPS,
   type MutantRun,
+  equivalentFaults,
   failures,
   groupFilters,
   groupOf,
@@ -18,6 +21,7 @@ import {
   rustLiteral,
   selections,
   type Verdict,
+  withoutEquivalents,
 } from "./holder-mutants.ts";
 
 const at = (file: string, what: string) => `crates/bazhen-holder/src/${file}:10:5: ${what}`;
@@ -47,7 +51,15 @@ function stubbed(list: Effects["list"], run: Partial<MutantRun> = {}) {
     ...run,
   }));
   const judge = vi.fn<Effects["judge"]>(async () => true);
-  return { sandboxed: () => true, list, platform: "linux" as const, mutate, judge };
+  return {
+    sandboxed: () => true,
+    list,
+    platform: "linux" as const,
+    equivalents: [],
+    source: () => [],
+    mutate,
+    judge,
+  };
 }
 
 /**
@@ -106,10 +118,9 @@ describe("groupOf", () => {
 
 describe("groupFilters", () => {
   it("selects lifecycle as its files and, apart, its server functions by name", () => {
-    const [files, byName = []] = groupFilters("lifecycle");
-    expect(files).toEqual(["--file", "crates/bazhen-holder/src/socket.rs"]);
-    const pattern = byName.at(-1);
-    expect(byName.at(-2)).toBe("--re");
+    const [files = [], byName = []] = groupFilters("lifecycle");
+    expect(files.slice(0, 2)).toEqual(["--file", "crates/bazhen-holder/src/socket.rs"]);
+    const pattern = byName[byName.indexOf("--re") + 1];
     expect(
       new RegExp(String(pattern)).test(at("conn.rs", "replace Connection::flush with ()")),
     ).toBe(true);
@@ -134,6 +145,94 @@ describe("groupFilters", () => {
       expect.arrayContaining(["--exclude", "crates/bazhen-holder/src/socket.rs"]),
     );
     expect(rest).toContain("--exclude-re");
+  });
+});
+
+const noSource = () => [];
+
+const loc = (file: string, mutant: string, where = "10:5") =>
+  `crates/bazhen-holder/src/${file}:${where}: ${mutant}`;
+
+describe("the classified equivalents", () => {
+  const one: Equivalent = {
+    re: "^crates/bazhen-holder/src/ring\\.rs:\\d+:\\d+: replace Ring::end -> u64 with [01]$",
+    count: 2,
+    why: "a reason",
+  };
+
+  it("leaves out of every selection of every group each equivalent, and gives each a reason", () => {
+    const leftOut = (["signal", "lifecycle", "rest", "macos"] as const).flatMap((group) =>
+      groupFilters(group).map((filters) => EQUIVALENTS.every((e) => filters.includes(e.re))),
+    );
+    expect(leftOut.every(Boolean)).toBe(true);
+    expect(EQUIVALENTS.map((e) => e.why)).not.toContain("");
+    expect(Math.min(...EQUIVALENTS.map((e) => e.count))).toBeGreaterThan(0);
+  });
+
+  it("names a mutant by its function and mutation wherever the line is", () => {
+    const name = (line: number) =>
+      loc("holder.rs", "replace | with ^ in Holder<O>::master_interest", `${line}:27`);
+    const [master] = EQUIVALENTS.filter((e) => new RegExp(e.re).test(name(197)));
+    expect(new RegExp(master!.re).test(name(240))).toBe(true);
+    expect(
+      new RegExp(master!.re).test(
+        loc("holder.rs", "replace | with & in Holder<O>::master_interest"),
+      ),
+    ).toBe(false);
+  });
+
+  it("tells two mutants of one kind in a function apart by their column", () => {
+    const first = loc("conn.rs", "replace + with * in Connection::requeue_exited", "532:30");
+    const second = loc("conn.rs", "replace + with * in Connection::requeue_exited", "539:61");
+    expect(withoutEquivalents([first, second], EQUIVALENTS)).toEqual([second]);
+  });
+
+  it("takes out of a listing the mutants they name, and no other", () => {
+    const kept = loc("ring.rs", "replace Ring::end -> u64 with 2");
+    const left = [
+      loc("ring.rs", "replace Ring::end -> u64 with 0"),
+      loc("ring.rs", "replace Ring::end -> u64 with 1"),
+    ];
+    expect(withoutEquivalents([...left, kept], [one])).toEqual([kept]);
+  });
+
+  it("names an equivalent that now names more mutants than it was classed for", () => {
+    const names = ["10:5", "11:5", "12:5"].map((where) =>
+      loc("ring.rs", "replace Ring::end -> u64 with 0", where),
+    );
+    expect(equivalentFaults(names, [one], noSource)).toEqual([
+      `the equivalent ${one.re} names 3 mutants, not the 2 it was classed for`,
+    ]);
+  });
+
+  it("names a mutant whose line of source isn't the one it was classed on", () => {
+    const mac = loc("start_time.rs", "replace read -> u64 with Ok(0)", "3:5");
+    const pinned: Equivalent = {
+      re: "^crates/bazhen-holder/src/start_time\\.rs:\\d+:5: replace read",
+      count: 1,
+      why: "a reason",
+      on: "crate::macos::start_seconds(pid)",
+    };
+    expect(
+      equivalentFaults([mac], [pinned], () => ["", "", "    crate::macos::start_seconds(pid)"]),
+    ).toEqual([]);
+    expect(
+      equivalentFaults([mac], [pinned], () => ["", "", "    let raw = pid.as_raw();"]),
+    ).toEqual([`${mac} isn't on a line with crate::macos::start_seconds(pid)`]);
+  });
+
+  it("names an equivalent that now names more or fewer mutants than it was classed for", () => {
+    const names = [loc("ring.rs", "replace Ring::end -> u64 with 0")];
+    expect(equivalentFaults(names, [one], noSource)).toEqual([
+      `the equivalent ${one.re} names 1 mutants, not the 2 it was classed for`,
+    ]);
+    expect(
+      equivalentFaults(
+        [...names, loc("ring.rs", "replace Ring::end -> u64 with 1")],
+        [one],
+        noSource,
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -319,7 +418,7 @@ describe("narrowing a group to some of its mutants", () => {
     const [byName, ...others] = selections("lifecycle", /Connection::flush/, listingOf(listings));
     expect(others).toEqual([]);
     expect(byName).toEqual(narrowed(groupFilters("lifecycle")[1]!, [flush]));
-    expect(byName?.slice(0, 2)).toEqual(["--file", "crates/bazhen-holder/src/conn.rs"]);
+    expect(byName).toEqual(expect.arrayContaining(["--file", "crates/bazhen-holder/src/conn.rs"]));
   });
 
   it("leaves the group's selections as they are without --only", () => {
@@ -373,6 +472,23 @@ describe("main", () => {
     expect(effects.list).not.toHaveBeenCalled();
     expect(effects.mutate).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining("refusing to run here"));
+    error.mockRestore();
+  });
+
+  it("stops before mutating when an equivalent no longer names the mutants it was classed for", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const gone: Equivalent = { re: "^nothing$", count: 1, why: "a reason" };
+    const effects = {
+      ...stubbed(restCrate([at("ring.rs", "replace Ring::end -> u64 with 0")])),
+      equivalents: [gone],
+    };
+
+    expect(await main(["--group", "rest"], effects)).toBe(1);
+    expect(effects.mutate).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("the classified equivalents no longer name what was classified"),
+    );
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("names 0 mutants, not the 1"));
     error.mockRestore();
   });
 

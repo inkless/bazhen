@@ -234,6 +234,12 @@ script refuses it elsewhere, since every mutant of code that isn't compiled woul
 Groups go by file, so a `#[cfg(target_os = "macos")]` item in a file Linux also compiles stays in
 that file's group and reads as missed on Linux: such a survivor is classed by reading it against
 the tests CI's `rust (macos)` job runs.
+Survivors a sweep read and found to change nothing are listed in `EQUIVALENTS`
+(`scripts/holder-mutants.ts`), each with its reason, and every group leaves them out, so a
+re-sweep doesn't triage them again. Each is matched by function and mutation, not line, and the
+script refuses a run in which one names other than the mutants it was classed for, or one whose
+line of source isn't the one it was classed on, so code that moves can't leave one excluding a
+mutant nobody read.
 Every mutant cargo-mutants' Rust tests miss is judged again by `pnpm test:holder`, so one only the
 black-box suite catches isn't counted missed. A survivor gets a test that kills it, or a note
 saying why it changes nothing. `--only <regex>` narrows a group to the mutants whose names it
