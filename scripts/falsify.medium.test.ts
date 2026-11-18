@@ -727,7 +727,7 @@ describe("falsify on a branch in a linked worktree", () => {
     expect(againstBase({ STUB_STATUS: "passed", STUB_TEST: ts })).toEqual({
       status: 1,
       output: expect.stringContaining(
-        `falsify: ${ts}: falsify can't read JSX, and its base copy is ${tsx}, so its new tests count`,
+        `falsify: ${ts}: falsify reads tests only from .ts, .mts and .cts files, and its base copy is ${tsx}, so its new tests count`,
       ),
     });
   });

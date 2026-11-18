@@ -112,24 +112,28 @@ describe("changedTests", () => {
     const head = 'it("renders", () => {\n  render(<p>Don\'t</p>);\n});\n';
     expect(changedTests({ file: tsx, base: head, head })).toEqual({
       titles: [`<unparsed test in ${tsx}>`],
-      unreadable: "falsify can't read JSX",
+      unreadable: "falsify reads tests only from .ts, .mts and .cts files",
     });
   });
 
-  it("marks a .ts file git renamed from .tsx as unparsed, since its base's JSX can fake a test call", () => {
-    const tsx = "packages/core/src/x.test.tsx";
+  it("marks a .ts file git renamed from one that isn't TypeScript as unparsed, since its base's JSX can fake a test call", () => {
     const base = lines(
       'it("renders", () => {',
       '  render(<p>it("adds a", () => {})</p>, <b>x</b>);',
       "});",
     );
     const head = lines('it("renders", () => {});', 'it("adds a", () => {});');
-    expect([
-      changedTests({ file: FILE, base, head, counterpart: FILE }),
-      changedTests({ file: FILE, base, head, counterpart: tsx }),
-    ]).toEqual([
+    const pairedWith = (counterpart: string) =>
+      changedTests({ file: FILE, base, head, counterpart });
+    const others = ["x.test.tsx", "x.test.jsx", "x.test.TS", "x.mdx"].map(
+      (p) => `packages/core/src/${p}`,
+    );
+    expect([pairedWith("packages/core/src/x.test.mts"), ...others.map(pairedWith)]).toEqual([
       { titles: [] },
-      { titles: [UNPARSED], unreadable: `falsify can't read JSX, and its base copy is ${tsx}` },
+      ...others.map((counterpart) => ({
+        titles: [UNPARSED],
+        unreadable: `falsify reads tests only from .ts, .mts and .cts files, and its base copy is ${counterpart}`,
+      })),
     ]);
   });
 
@@ -1186,22 +1190,22 @@ describe("renameRefusal, when git renamed a file", () => {
     expect(renameRefusal(from, to)).toBe(`HEAD still has a test "adds one" in ${renamedFile}`);
   });
 
-  it("refuses a move whose file is .tsx on any side, since falsify can't read its tests", () => {
-    const [oldTsx, newTsx] = [`${FILE}x`, `${OTHER}x`];
+  it("refuses a move whose file isn't TypeScript on any side, since falsify can't read its tests", () => {
+    const [oldTsx, newJsx] = [`${FILE}x`, OTHER.replace(/\.ts$/, ".jsx")];
     const from = end("adds one", BASE_TESTS, LEFT);
     const to = end("adds one", undefined, movedTo("adds one"), OTHER);
     expect([
       renameRefusal(from, to),
       renameRefusal({ ...from, file: oldTsx }, to),
       renameRefusal({ ...from, counterpart: oldTsx }, to),
-      renameRefusal(from, { ...to, counterpart: newTsx }),
-      renameRefusal(from, { ...to, file: newTsx }),
+      renameRefusal(from, { ...to, counterpart: newJsx }),
+      renameRefusal(from, { ...to, file: newJsx }),
     ]).toEqual([
       undefined,
-      `${oldTsx} is .tsx, whose tests falsify can't read`,
-      `${oldTsx} is .tsx, whose tests falsify can't read`,
-      `${newTsx} is .tsx, whose tests falsify can't read`,
-      `${newTsx} is .tsx, whose tests falsify can't read`,
+      `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
     ]);
   });
 });
