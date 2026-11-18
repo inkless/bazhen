@@ -12,6 +12,30 @@
     "harnesses": [
       "claude-code",
       "codex"
+    ],
+    "agentConditions": [
+      "starting",
+      "running",
+      "exited",
+      "unknown",
+      "lost",
+      "closing",
+      "closed",
+      "failed",
+      "ended",
+      "ready",
+      "idle"
+    ],
+    "shellConditions": [
+      "creating",
+      "running",
+      "exited",
+      "unknown",
+      "lost",
+      "closing",
+      "closed",
+      "failed",
+      "ended"
     ]
   },
   "agentName": [

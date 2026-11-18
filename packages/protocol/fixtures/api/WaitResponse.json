@@ -1,0 +1,4683 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "restart",
+          "rename",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "restart",
+          "rename",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "example 6",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "example 7",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "name": null,
+        "foreground": null,
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "example 8",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "needsRestart": {
+          "holderPid": null
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "example 9",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+      }
+    }
+  },
+  {
+    "name": "example 10",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "example 11",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 replied",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        }
+      },
+      "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 replied",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  },
+  {
+    "name": "example 12",
+    "wire": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced"
+    },
+    "parsed": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced"
+    }
+  },
+  {
+    "name": "verdict = \"met\"",
+    "wire": {
+      "verdict": "met",
+      "said": "the message to worker-1 bounced"
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "the message to worker-1 bounced"
+    }
+  },
+  {
+    "name": "verdict = \"never\"",
+    "wire": {
+      "verdict": "never",
+      "said": "the message to worker-1 bounced"
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "the message to worker-1 bounced"
+    }
+  },
+  {
+    "name": "verdict = \"bounced\"",
+    "wire": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced"
+    },
+    "parsed": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced"
+    }
+  },
+  {
+    "name": "verdict = \"pending\"",
+    "wire": {
+      "verdict": "pending",
+      "said": "the message to worker-1 bounced"
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "the message to worker-1 bounced"
+    }
+  },
+  {
+    "name": "agent.harness = \"claude-code\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.harness = \"codex\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"starting\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "starting",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "starting",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"running\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "running",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "running",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"exited\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"unknown\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "unknown",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "unknown",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"lost\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "lost",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "lost",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"closing\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "closing",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "closing",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"closed\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "closed",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "closed",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.state = \"failed\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "failed",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "needsRestart": null
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "failed",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.externalRef.kind = \"claude-session\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.externalRef.kind = \"codex-thread\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.theme = \"light\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.theme = \"dark\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "dark",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "dark",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.themes[] = \"light\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "light"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "light"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.themes[] = \"dark\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "dark",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "dark",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"working\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "working",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"waiting_input\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "waiting_input",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "waiting_input",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"needs_approval\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "needs_approval",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "needs_approval",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"idle\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"done\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "done",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "done",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"failed\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "failed",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "failed",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.value = \"unknown\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "unknown",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "unknown",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.source = \"native\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "idle",
+          "source": "native",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "native",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.activity.source = \"heuristic\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "agent.commands[] = \"close\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "close",
+          "close",
+          "close"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "close",
+          "close",
+          "close"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.commands[] = \"respawn\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "respawn",
+          "respawn",
+          "respawn",
+          "respawn"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "respawn",
+          "respawn",
+          "respawn",
+          "respawn"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.commands[] = \"signal\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "signal",
+          "signal",
+          "signal",
+          "signal"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "signal",
+          "signal",
+          "signal",
+          "signal"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "agent.commands[] = \"relaunch\"",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "relaunch",
+          "relaunch",
+          "relaunch",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "relaunch",
+          "relaunch",
+          "relaunch",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"creating\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "creating",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "creating",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"running\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"exited\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "exited",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "exited",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"unknown\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "unknown",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "unknown",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"lost\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "lost",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "lost",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"closing\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closing",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closing",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"closed\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.state = \"failed\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "failed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "failed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.theme = \"light\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.theme = \"dark\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "dark",
+        "attachCommand": null,
+        "commands": []
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "dark",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "shell.commands[] = \"close\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "close",
+          "close",
+          "close"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "close",
+          "close",
+          "close"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "shell.commands[] = \"restart\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "restart",
+          "restart",
+          "restart",
+          "restart"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "restart",
+          "restart",
+          "restart",
+          "restart"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "shell.commands[] = \"rename\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "rename",
+          "rename",
+          "rename",
+          "rename"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "rename",
+          "rename",
+          "rename",
+          "rename"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "shell.commands[] = \"unlink\"",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "unlink",
+          "unlink",
+          "unlink",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "unlink",
+          "unlink",
+          "unlink",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "task.state = \"open\"",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "task.state = \"done\"",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "task.state = \"cancelled\"",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "cancelled",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "cancelled",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "role": "reviewer",
+        "promptChanged": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "BZ-127",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "state": "running",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "s-1"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 1
+        },
+        "theme": "light",
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "activity": {
+          "value": "working",
+          "source": "native",
+          "confidence": 0.75,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "detail": "running tests"
+        },
+        "usage": {
+          "model": "claude-opus-5-5",
+          "contextUsedPercent": 41.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "tmux -S /run/tmux.sock attach -t %1",
+        "commands": [
+          "close",
+          "respawn",
+          "signal",
+          "relaunch"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "listening": true,
+        "headline": {
+          "text": "Halfway.",
+          "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "at": "2026-11-16T12:00:00.000Z"
+        },
+        "needsRestart": {
+          "holderPid": 4242,
+          "served": true
+        },
+        "role": "reviewer",
+        "promptChanged": true
+      }
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "usage": {
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "attachCommand": null,
+        "launchedBy": null,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "role": null,
+        "promptChanged": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "heuristic",
+          "confidence": 1,
+          "observedAt": "2026-11-16T12:00:00.000Z"
+        },
+        "usage": {},
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "needsRestart": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 is idle",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "restart",
+          "rename",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "running",
+        "generation": 1,
+        "cwd": "/w",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "name": "build",
+        "foreground": {
+          "command": "make",
+          "since": "2026-11-16T12:00:00.000Z"
+        },
+        "theme": "dark",
+        "attachCommand": "tmux attach",
+        "commands": [
+          "close",
+          "restart",
+          "rename",
+          "unlink"
+        ],
+        "retypeable": true,
+        "needsRestart": {
+          "holderPid": 7,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "name": null,
+        "foreground": null,
+        "needsRestart": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": null
+      }
+    }
+  },
+  {
+    "name": "example 8, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "needsRestart": {
+          "holderPid": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "never",
+      "said": "logs is closed, and can't be running now",
+      "shell": {
+        "id": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "state": "closed",
+        "generation": 0,
+        "cwd": "/w",
+        "linkedAgentId": null,
+        "name": null,
+        "foreground": null,
+        "theme": "light",
+        "attachCommand": null,
+        "commands": [],
+        "retypeable": false,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        }
+      }
+    }
+  },
+  {
+    "name": "example 9, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "title": "t",
+        "state": "open",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+      }
+    }
+  },
+  {
+    "name": "example 10, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "pending",
+      "said": "t is open",
+      "task": {
+        "id": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "title": "t",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "example 11, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "met",
+      "said": "worker-1 replied",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "met",
+      "said": "worker-1 replied",
+      "agent": {
+        "id": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "",
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "p",
+        "cwd": "/w",
+        "state": "exited",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+    }
+  },
+  {
+    "name": "example 12, with a field no version defines in each of its objects",
+    "wire": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "verdict": "bounced",
+      "said": "the message to worker-1 bounced"
+    }
+  }
+]

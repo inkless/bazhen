@@ -1,0 +1,598 @@
+{
+  "$id": "WaitResponse",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "met",
+        "never",
+        "bounced",
+        "pending"
+      ]
+    },
+    "said": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "harness": {
+          "type": "string",
+          "enum": [
+            "claude-code",
+            "codex"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "starting",
+            "running",
+            "exited",
+            "unknown",
+            "lost",
+            "closing",
+            "closed",
+            "failed"
+          ]
+        },
+        "terminalId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalRef": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "environmentId": {
+                  "type": "string",
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "claude-session",
+                    "codex-thread"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "environmentId",
+                "kind",
+                "id"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "exited"
+                    },
+                    "code": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "signalled"
+                    },
+                    "signal": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "signal"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "theme": {
+          "default": "dark",
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "themes": {
+          "default": [
+            "dark"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ]
+          }
+        },
+        "activity": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "enum": [
+                "working",
+                "waiting_input",
+                "needs_approval",
+                "idle",
+                "done",
+                "failed",
+                "unknown"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "native",
+                "heuristic"
+              ]
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "observedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "value",
+            "source",
+            "confidence",
+            "observedAt"
+          ]
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "contextUsedPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "contextWindowTokens": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "attachCommand": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "close",
+              "respawn",
+              "signal",
+              "relaunch"
+            ]
+          }
+        },
+        "resumable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "canOpenShell": {
+          "default": false,
+          "type": "boolean"
+        },
+        "launchedBy": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "listening": {
+          "default": false,
+          "type": "boolean"
+        },
+        "headline": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string",
+                  "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "text",
+                "taskId",
+                "at"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "needsRestart": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "holderPid": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "served": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "holderPid"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "promptChanged": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "environmentId",
+        "harness",
+        "project",
+        "cwd",
+        "state",
+        "terminalId",
+        "generation",
+        "externalRef",
+        "exit"
+      ]
+    },
+    "shell": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "creating",
+            "running",
+            "exited",
+            "unknown",
+            "lost",
+            "closing",
+            "closed",
+            "failed"
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "linkedAgentId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "foreground": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "command",
+                "since"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "attachCommand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "close",
+              "restart",
+              "rename",
+              "unlink"
+            ]
+          }
+        },
+        "retypeable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "needsRestart": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "holderPid": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "served": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "holderPid"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "environmentId",
+        "state",
+        "generation",
+        "cwd",
+        "linkedAgentId",
+        "theme",
+        "attachCommand",
+        "commands"
+      ]
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done",
+            "cancelled"
+          ]
+        },
+        "ownerAgentId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentTaskId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "ownerAgentId",
+        "parentTaskId"
+      ]
+    },
+    "replyId": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    }
+  },
+  "required": [
+    "verdict",
+    "said"
+  ]
+}

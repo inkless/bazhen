@@ -36,6 +36,7 @@ use bazhen_protocol::tasks::{
 };
 use bazhen_protocol::text::{TASK_NOTE_MAX_BYTES, is_plain_remote, quote_note, task_note_text};
 use bazhen_protocol::time::timestamp_ms;
+use bazhen_protocol::waits::{AgentCondition, ShellCondition, WaitRequest, WaitResponse};
 use bazhen_protocol::wire;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -153,6 +154,8 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("UnassignTaskRequest", round_trips::<UnassignTaskRequest>),
     ("WaitMessagesRequest", round_trips::<WaitMessagesRequest>),
     ("WaitMessagesResponse", round_trips::<WaitMessagesResponse>),
+    ("WaitRequest", round_trips::<WaitRequest>),
+    ("WaitResponse", round_trips::<WaitResponse>),
 ];
 
 #[test]
@@ -331,4 +334,8 @@ fn the_constants_are_the_protocols() {
         .collect();
     settled.sort_unstable();
     assert_eq!(constants["settled"], serde_json::json!(settled));
+    let agent: Vec<&str> = AgentCondition::ALL.iter().map(|c| c.as_str()).collect();
+    assert_eq!(constants["agentConditions"], serde_json::json!(agent));
+    let shell: Vec<&str> = ShellCondition::ALL.iter().map(|c| c.as_str()).collect();
+    assert_eq!(constants["shellConditions"], serde_json::json!(shell));
 }

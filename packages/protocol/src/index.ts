@@ -20,6 +20,7 @@ export * from "./stream.ts";
 export * from "./theme.ts";
 export * from "./tasks.ts";
 export * from "./version.ts";
+export * from "./waits.ts";
 
 export const RuntimeHealthState = z.enum(["healthy", "unreachable", "not-running"]);
 export type RuntimeHealthState = z.infer<typeof RuntimeHealthState>;

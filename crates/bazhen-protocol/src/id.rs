@@ -3,4 +3,4 @@
 
 /// The SHA-256, in hex, of every file in packages/protocol/schema/, each `name\0content\0` in
 /// name order. A daemon that answers with another is another build, to restart.
-pub const PROTOCOL_ID: &str = "e8e11313bd6b0502c8c979b1b6ac24aac51b55b7335b4d6e442ddb40737b8f61";
+pub const PROTOCOL_ID: &str = "eb27827a94c0b86af3388a0cce3a572fa480a3a89aad3fd4b341770c7d06efbb";

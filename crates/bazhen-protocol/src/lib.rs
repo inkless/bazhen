@@ -19,4 +19,5 @@ pub mod stream;
 pub mod tasks;
 pub mod text;
 pub mod time;
+pub mod waits;
 pub mod wire;
