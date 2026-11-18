@@ -333,4 +333,40 @@ describe("the stdio-guard rule", () => {
       ),
     ).toEqual([8, 9, 10, 11, 12, 13, 14, 21, 22]);
   });
+
+  it("flags each use of a start it can't follow to a heard call, and a heard that isn't host-guard's", () => {
+    expect(
+      unheard(
+        [
+          'import { spawn, execFile } from "node:child_process";',
+          'import * as cp from "node:child_process";',
+          'import { promisify } from "node:util";',
+          'import { heard } from "./child.ts";',
+          'import * as hg from "@bazhen/host-guard";',
+          "declare const flag: boolean;",
+          'spawn.call(null, "ps", []);',
+          'spawn.apply(null, ["ps", []]);',
+          "const o = { start: spawn };",
+          '(0, spawn)("ps", []);',
+          'void promisify(execFile)("ps", []);',
+          "const pick = flag ? spawn : null;",
+          "const { spawn: s2 } = cp;",
+          'const r = require("node:child_process");',
+          'void import("child_process");',
+          'heard(spawn("ps", []));',
+          'hg.heard(spawn("ps", []));',
+          "const fake = (c: unknown) => c;",
+          'fake(spawn("ps", []));',
+          "export { execFile };",
+          'cp["spawn"]("ps", []);',
+          'const k = "spawn";',
+          'cp[k]("ps", []);',
+          'hg.heard(cp.spawn("ps", []));',
+          "void [o, pick, s2, r, heard];",
+          "const t = require(`node:child_process`);",
+          "void t;",
+        ].join("\n"),
+      ),
+    ).toEqual([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 26]);
+  });
 });

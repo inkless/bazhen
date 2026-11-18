@@ -28,6 +28,7 @@ interface Variable {
 }
 interface Context {
   report(problem: { node: Node; message: string }): void;
+  readonly filename?: string;
   readonly sourceCode: { getDeclaredVariables(node: Node): readonly Variable[] };
 }
 
@@ -431,69 +432,121 @@ const UNHEARD =
 const ASYNC_STARTS = new Set(["spawn", "exec", "execFile", "fork"]);
 
 /**
- * `stdio-guard`: each async child_process start, by its name, an import alias, a `promisify` of
- * it, or a member of child_process imported whole, is called as the one argument of `heard(`.
- * A child's stdio streams are sockets this process holds, and one that fails with no listener
- * throws out of the event loop. A start reached other than by a call is `host-guard`'s to flag.
+ * Whether an argument or source names child_process, as a string or a template with no
+ * substitutions: `require`, `import()` and the like. A name made at run time can't be read.
+ */
+const loadsChildProcess = (arg: unknown) => {
+  const quasis = isNode(arg) && arg.type === "TemplateLiteral" ? nodes(arg["quasis"]) : [];
+  const template =
+    quasis.length === 1 ? String(Reflect.get(Object(quasis[0]?.["value"]), "cooked")) : undefined;
+  return CHILD_PROCESS.has(template ?? nameOf(arg) ?? "");
+};
+
+/**
+ * `stdio-guard`: a child's stdio streams are sockets this process holds, and one that fails with
+ * no listener throws out of the event loop, so each async child_process start is called as the
+ * one argument of host-guard's `heard(`. The rule follows every reference to a start: by its
+ * import, a member of child_process imported whole, or a `const` aliasing or promisifying it,
+ * which is followed in turn. Any other use is an error, since what it reaches can't be read:
+ * `.call`, `.apply`, `(0, spawn)`, an object, a conditional, an argument, an export, a promisify
+ * called on the spot. So is child_process loaded other than by a static import, and a `heard`
+ * that isn't host-guard's.
  */
 const stdioGuard = {
   create(context: Context) {
-    const starts = new Set<string>();
-    const modules = new Set<string>();
-    const declarators: { name: string; init: Node }[] = [];
-    const calls: Node[] = [];
-    /** Whether `node` names an async start: a bound name, or a member of child_process whole. */
-    const isStart = (node: unknown): boolean =>
-      isNode(node) &&
-      ((node.type === "Identifier" && starts.has(String(node["name"]))) ||
-        (node.type === "MemberExpression" &&
-          modules.has(nameOf(node["object"]) ?? "") &&
-          ASYNC_STARTS.has(memberName(node) ?? "")));
-    const isHeard = (call: Node) => {
-      const parent = parentOf(call);
-      return (
-        parent?.type === "CallExpression" &&
-        calleeName(parent["callee"]) === "heard" &&
-        nodes(parent["arguments"]).length === 1 &&
-        nodes(parent["arguments"])[0] === call
-      );
+    /** The names host-guard's `heard` is bound to here, and host-guard's namespaces. */
+    const heards = new Set<string>();
+    const hostGuards = new Set<string>();
+    /** Variables bound to a start, and to child_process whole. */
+    const starts: Variable[] = [];
+    const modules: Variable[] = [];
+    const seen = new Set<Variable>();
+    const bind = (node: Node, into: Variable[]) => {
+      for (const variable of context.sourceCode.getDeclaredVariables(node))
+        if (!seen.has(variable) && seen.add(variable)) into.push(variable);
+    };
+    const report = (node: Node) => context.report({ node, message: UNHEARD });
+    /** host-guard by its package, or, inside host-guard, the module `heard` lives in. */
+    const offersHeard = (source: string) =>
+      isHostGuard(source) ||
+      (source === "./child.ts" && /packages\/host-guard\/src\/[^/]+$/.test(context.filename ?? ""));
+    const isHeardCallee = (callee: unknown) =>
+      isNode(callee) &&
+      ((callee.type === "Identifier" && heards.has(String(callee["name"]))) ||
+        (callee.type === "MemberExpression" &&
+          hostGuards.has(nameOf(callee["object"]) ?? "") &&
+          memberName(callee) === "heard"));
+    /** Judges one place a start is reached, `node` being the name or member that reaches it. */
+    const judge = (node: Node) => {
+      const parent = parentOf(node);
+      if (parent?.type === "CallExpression" && parent["callee"] === node) {
+        const outer = parentOf(parent);
+        const args = nodes(outer?.["arguments"]);
+        const heard =
+          outer?.type === "CallExpression" &&
+          isHeardCallee(outer["callee"]) &&
+          args.length === 1 &&
+          args[0] === parent;
+        if (!heard) report(parent);
+        return;
+      }
+      const declarator = aliasing(node);
+      if (declarator !== undefined && !isExported(declarator)) bind(declarator, starts);
+      else report(node);
     };
     return {
       ImportDeclaration(node: Node) {
         const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
-        if (!CHILD_PROCESS.has(source) || node["importKind"] === "type") return;
+        if (node["importKind"] === "type") return;
         for (const spec of nodes(node["specifiers"])) {
+          if (spec["importKind"] === "type") continue;
           const local = nameOf(spec["local"]) ?? "";
           const imported = nameOf(spec["imported"]);
-          if (spec.type !== "ImportSpecifier" || imported === "default") modules.add(local);
-          else if (spec["importKind"] !== "type" && ASYNC_STARTS.has(imported ?? ""))
-            starts.add(local);
+          const named = spec.type === "ImportSpecifier" && imported !== "default";
+          if (offersHeard(source)) {
+            if (named && imported === "heard") heards.add(local);
+            else if (!named) hostGuards.add(local);
+          }
+          if (!CHILD_PROCESS.has(source)) continue;
+          if (!named) bind(spec, modules);
+          else if (ASYNC_STARTS.has(imported ?? "")) bind(spec, starts);
         }
       },
-      VariableDeclarator(node: Node) {
-        const id = node["id"];
-        const init = node["init"];
-        if (isNode(id) && id.type === "Identifier" && isNode(init))
-          declarators.push({ name: String(id["name"]), init });
+      ImportExpression(node: Node) {
+        if (loadsChildProcess(node["source"])) report(node);
       },
       CallExpression(node: Node) {
-        calls.push(node);
+        if (nodes(node["arguments"]).some(loadsChildProcess)) report(node);
+      },
+      TSImportEqualsDeclaration(node: Node) {
+        const reference = node["moduleReference"];
+        if (isNode(reference) && loadsChildProcess(reference["expression"])) report(node);
+      },
+      ExportAllDeclaration(node: Node) {
+        if (loadsChildProcess(node["source"])) report(node);
+      },
+      ExportNamedDeclaration(node: Node) {
+        if (node["exportKind"] !== "type" && loadsChildProcess(node["source"])) report(node);
       },
       "Program:exit"() {
-        for (let grew = true; grew;) {
-          grew = false;
-          for (const { name, init } of declarators) {
-            const start =
-              isStart(init) ||
-              (init.type === "CallExpression" &&
-                isPromisify(init["callee"]) &&
-                nodes(init["arguments"]).some(isStart));
-            if (start && !starts.has(name)) grew = Boolean(starts.add(name));
+        for (const variable of modules) {
+          for (const { identifier: id } of variable.references) {
+            if (isTypeOf(id)) continue;
+            const parent = parentOf(id);
+            const member =
+              parent?.type === "MemberExpression" && parent["object"] === id ? parent : undefined;
+            const name = member === undefined ? undefined : memberName(member);
+            if (member === undefined || name === undefined || name === "default") report(id);
+            else if (ASYNC_STARTS.has(name)) judge(member);
           }
         }
-        for (const call of calls)
-          if (isStart(call["callee"]) && !isHeard(call))
-            context.report({ node: call, message: UNHEARD });
+        // Judging a reference may bind an alias, whose own references are judged in turn.
+        for (let i = 0; i < starts.length; i++) {
+          for (const reference of starts[i]?.references ?? []) {
+            if (reference.isWrite() && !reference.isRead()) continue;
+            if (!isTypeOf(reference.identifier)) judge(reference.identifier);
+          }
+        }
       },
     };
   },
