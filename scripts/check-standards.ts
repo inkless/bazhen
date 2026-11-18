@@ -3793,6 +3793,71 @@ export function checkMigrations(): void {
   failures.push(...migrationHistoryFailures(changed, before, names));
 }
 
+const SUPPRESSION_FILES = /\.(?:[cm]?[jt]sx?|html)$/;
+
+/**
+ * What a directive looks like at the start of a comment's line. The tools differ in what they
+ * obey: tsc reads `@ts-ignore` and `@ts-expect-error` on a block comment's last line and
+ * `@ts-nocheck` only in a line comment, in any case; oxlint and oxfmt read the start of a comment,
+ * in the case they spell. One pattern matches all of it, case-insensitive and on every line, as
+ * a deliberate over-match.
+ */
+const DIRECTIVE =
+  /^(@ts-(?:ignore|expect-error|nocheck)|(?:oxlint|eslint)-(?:disable|enable)[\w-]*|biome-ignore[\w-]*|oxfmt-ignore|prettier-ignore)/i;
+
+const LINE_END = /\r\n?|[\n\u2028\u2029]/;
+const NOT_LINE_END = "[^\\n\\r\\u2028\\u2029]*";
+
+/**
+ * Every place a comment may start, each read to its end, even one a string's slashes hide: a
+ * line or block comment, an HTML comment, and a `-->`, which a script reads as a line comment
+ * wherever only whitespace and comments come before it on the line.
+ */
+const COMMENT = new RegExp(
+  "(?=(//" +
+    NOT_LINE_END +
+    "|/\\*[\\s\\S]*?(?:\\*/|$)|<!--[\\s\\S]*?(?:-->|$)" +
+    "|-->" +
+    NOT_LINE_END +
+    "))",
+  "g",
+);
+
+const linesIn = (text: string) => text.split(LINE_END);
+
+/**
+ * Every comment that switches a check off for the code beside it. A failing check is fixed in the
+ * code, so no directive is allowed, in source, tests or a page's inline script.
+ *
+ * It looks for comments without parsing, so no comment can hide a directive from it, and the
+ * price is that a string holding a comment's opener followed by a directive fails too: split the
+ * string. Files git ignores, generated output among them, aren't scanned.
+ */
+export function suppressionFailures(path: string, source: string): string[] {
+  const found = new Map<number, string>();
+  let line = 1;
+  let seen = 0;
+  for (const match of source.matchAll(COMMENT)) {
+    line += linesIn(source.slice(seen, match.index)).length - 1;
+    seen = match.index;
+    for (const [i, text] of linesIn(match[1] ?? "").entries()) {
+      const directive = DIRECTIVE.exec(text.replace(/^(?:<!--|[\s/*>-])+/, ""))?.[1];
+      if (directive !== undefined) found.set(line + i, directive);
+    }
+  }
+  return [...found].map(
+    ([at, directive]) =>
+      `${path}:${at}: \`${directive}\` switches a check off. Fix the code the check ` +
+      "reports; if the check is wrong, change the check and say why in the commit.",
+  );
+}
+
+function checkSuppressions(): void {
+  for (const file of repoFiles().filter((f) => SUPPRESSION_FILES.test(f))) {
+    failures.push(...suppressionFailures(file, readFileSync(join(root, file), "utf8")));
+  }
+}
+
 /** Every check `pnpm check` runs, in order. */
 export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkSiblingTests,
@@ -3804,6 +3869,7 @@ export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,
+  checkSuppressions,
 ];
 
 if (isMain(import.meta)) {

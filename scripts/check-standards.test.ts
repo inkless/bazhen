@@ -40,6 +40,7 @@ import {
   testSignalDependencyFailures,
   unmarkedSignallingTests,
   skillFailures,
+  suppressionFailures,
   unsafeModuleFailures,
   migrationListFailures,
   migrationImportFailures,
@@ -3327,5 +3328,126 @@ describe("tmuxPinFailures", () => {
         /^tests\/api\/k\.test\.ts: picks its runtime with "tmux".*\.tmux\.test\.ts/,
       ),
     ]);
+  });
+});
+
+const line = (directive: string) => `const a = 1;\n// ${directive}\nconst b = 2;\n`;
+const block = (directive: string) => `const a = 1;\n/* ${directive} */\nconst b = 2;\n`;
+const inDoc = (directive: string) => `/**\n * Why.\n * ${directive}\n */\nconst b = 2;\n`;
+const at = (opener: string, rest: string) => `${opener}${rest}\n`;
+
+describe("suppressionFailures", () => {
+  const directives = [
+    "oxlint-disable",
+    "oxlint-disable-next-line bazhen/stdio-guard",
+    "oxlint-disable-line no-console",
+    "oxlint-enable",
+    "eslint-disable",
+    "eslint-disable-next-line no-console",
+    "eslint-enable",
+    "@ts-ignore",
+    "@ts-expect-error",
+    "@ts-nocheck",
+    "biome-ignore lint: reason",
+    "oxfmt-ignore",
+    "prettier-ignore",
+    "@TS-NOCHECK",
+    "ESLint-Disable",
+    "biome-ignore-all lint: reason",
+    "biome-ignore-start lint",
+  ];
+
+  it.each(directives)("flags %s in a line comment, a block comment and a doc comment", (d) => {
+    expect(suppressionFailures("a.ts", line(d))).toHaveLength(1);
+    expect(suppressionFailures("a.ts", block(d))).toHaveLength(1);
+    expect(suppressionFailures("a.ts", inDoc(d))).toHaveLength(1);
+  });
+
+  it("names the file and the line, and says to fix the code", () => {
+    const [failure] = suppressionFailures("packages/core/src/a.ts", line("oxlint-disable-line x"));
+    expect(failure).toContain("packages/core/src/a.ts:2");
+    expect(failure).toContain("Fix the code");
+  });
+
+  it("flags a directive after the comment marker's own spacing or slashes", () => {
+    expect(suppressionFailures("a.ts", at("//", "eslint-disable-line x"))).toHaveLength(1);
+    expect(suppressionFailures("a.ts", at("///   ", "@ts-ignore"))).toHaveLength(1);
+    expect(suppressionFailures("a.ts", at("foo(); //", " eslint-disable-line x"))).toHaveLength(1);
+    expect(suppressionFailures("a.ts", at("/*", "eslint-disable*/ foo();"))).toHaveLength(1);
+  });
+
+  it("flags a directive on a later line of a block comment, with or without a leading star", () => {
+    const shapes = [
+      "/*\n  eslint-disable\n*/",
+      "/*\n\toxlint-disable\n*/",
+      "/*\noxlint-disable-next-line */",
+      "/*\n  @ts-ignore */",
+      "/* why\n   @ts-expect-error */",
+      "/**\n * Why.\n *\n * @ts-ignore\n */",
+    ];
+    for (const shape of shapes) {
+      expect(suppressionFailures("a.ts", `${shape}\nconst b = 2;\n`)).toHaveLength(1);
+    }
+    expect(suppressionFailures("a.ts", `a;\n/*\n\n  eslint-disable\n*/\n`)).toEqual([
+      expect.stringContaining("a.ts:4"),
+    ]);
+  });
+
+  it("flags a directive a string's slashes would hide from a reader of syntax", () => {
+    const hidden = at("const u = 'http://x'; /* ", "oxlint-disable */");
+    expect(suppressionFailures("a.ts", hidden)).toHaveLength(1);
+    expect(suppressionFailures("a.ts", at("const r = /'/; //", " @ts-ignore"))).toHaveLength(1);
+  });
+
+  it("flags a directive in an html comment, on its line or a later one", () => {
+    const d = "prettier-ignore";
+    for (const shape of [
+      `<!-- ${d} -->`,
+      `<!--${d}-->`,
+      `<!--\n  ${d}\n-->`,
+      `a;\n--> ${d}`,
+      `a;\n  -->${d}`,
+      `a;\n/* a */ --> ${d}`,
+      `a;\n/*\n*/ --> ${d}`,
+      `a;\n\u00a0\v--> ${d}`,
+    ]) {
+      expect(suppressionFailures("a.cjs", `${shape}\nconst b = 2;\n`)).toHaveLength(1);
+    }
+  });
+
+  it("flags a directive on a line that ends with a carriage return or a unicode separator", () => {
+    const d = "oxlint-disable";
+    for (const end of ["\r", "\r\n", "\u2028", "\u2029"]) {
+      expect(suppressionFailures("a.ts", `/* why${end}${d} */`)).toHaveLength(1);
+      expect(suppressionFailures("a.ts", `// why${end}// ${d}`)).toHaveLength(1);
+      expect(suppressionFailures("a.ts", `a;${end}b;${end}/* ${end}${d} */`)).toEqual([
+        expect.stringContaining("a.ts:4"),
+      ]);
+    }
+  });
+
+  it("flags every directive, one failure each", () => {
+    const source = `${line("@ts-ignore")}${line("oxlint-disable")}`;
+    expect(suppressionFailures("a.ts", source)).toHaveLength(2);
+  });
+
+  it("flags a directive in an inline script of an html page", () => {
+    const page = `<script>\n  ${line("@ts-ignore")}</script>\n`;
+    expect(suppressionFailures("apps/web/index.html", page)).toHaveLength(1);
+  });
+
+  it("Control: leaves code and prose that only mention suppressions alone", () => {
+    expect(suppressionFailures("a.ts", "const a = 1;\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "// Never disable a lint rule here.\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "// The ignore list names the rule.\n")).toEqual([]);
+    expect(
+      suppressionFailures("a.ts", "// A directive such as oxlint-disable is banned.\n"),
+    ).toEqual([]);
+    expect(suppressionFailures("a.ts", "const w = a * b;\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "const u = 'http://example.com/a';\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "/* Why\n   the rule is on. */\n")).toEqual([]);
+    expect(suppressionFailures("a.html", "<!-- Why -->\n<p>a --> b</p>\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "while (n --> 0) f(n);\n")).toEqual([]);
+    expect(suppressionFailures("a.ts", "// Why\r\n// the rule is on.\r\n")).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId, type Caller } from "@bazhen/core";
-import type { StateSnapshot, WaitCondition } from "@bazhen/protocol";
+import type { EventPayload, EventType, StateSnapshot, WaitCondition } from "@bazhen/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { RESTARTED } from "../mailbox/activity.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
@@ -30,9 +30,12 @@ function fresh() {
   return { store, environmentId: register(store).environmentId };
 }
 
-const system = (store: Store, type: string, entityId: string, payload: object = {}) =>
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the event names are the protocol's, checked as they append
-  store.append({ type, entityId, actor: "system", payload } as Parameters<Store["append"]>[0]);
+const system = <T extends EventType>(
+  store: Store,
+  type: T,
+  entityId: string,
+  payload: EventPayload<T>,
+) => store.append({ type, entityId, actor: "system", payload });
 
 function launch(store: Store, environmentId: string, run = true) {
   const agentId = newId("agent");
@@ -62,11 +65,18 @@ const running = (store: Store, agentId: string) => {
 };
 
 const close = (store: Store, agentId: string) => {
-  system(store, "agent.closing", agentId);
-  system(store, "agent.closed", agentId);
+  system(store, "agent.closing", agentId, {});
+  system(store, "agent.closed", agentId, {});
 };
 
-const reportIdle = (store: Store, agentId: string, value = "idle", source = "native") =>
+type Activity = EventPayload<"agent.activity">;
+
+const reportIdle = (
+  store: Store,
+  agentId: string,
+  value: Activity["value"] = "idle",
+  source: Activity["source"] = "native",
+) =>
   system(store, "agent.activity", agentId, {
     value,
     source,
@@ -86,7 +96,7 @@ const mail = (store: Store, to: string, from?: string) => {
 };
 
 const see = (store: Store, id: string) => {
-  system(store, "mailbox.offered", id);
+  system(store, "mailbox.offered", id, {});
   system(store, "mailbox.seen", id, { promptId: "p" });
 };
 
@@ -279,7 +289,7 @@ describe("a wait on a shell", () => {
     });
     const ended = waiting(store, { on: "shell", shellId, until: "ended" });
     const exited = waiting(store, { on: "shell", shellId, until: "exited" });
-    system(store, "terminal.closing", shellId);
+    system(store, "terminal.closing", shellId, {});
     system(store, "terminal.closed", shellId, { reason: "user" });
     expect([await ended.answer, await exited.answer]).toEqual([
       { verdict: "met", said: `${shellId} is gone` },
