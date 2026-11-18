@@ -5,11 +5,12 @@ import type { Socket } from "node:net";
 import { join } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { newId } from "@bazhen/core";
 import { guardCallers, type SocketEnv } from "./callers.ts";
 import {
   codexServerMarked,
+  MAX_READING,
   noteAccepted,
   PEER_SOURCE,
   peerReading,
@@ -301,6 +302,19 @@ describe("readPeer, after the body is read", () => {
   });
 });
 
+/** A reading's deadline, which every stall outlasts. */
+const DEADLINE_MS = 100;
+/** Longer than the deadline, and many times what a reader takes on a loaded runner. */
+const STALL_MS = 300;
+const WAVES = 3;
+/**
+ * The most loop turns a wave of readings takes: until each reader's exit is read, then until
+ * the child's `close`, which frees its slot for the next wave.
+ */
+const TURNS_PER_WAVE = 4;
+/** Opening the connections and spawning the readers, on a loaded runner. */
+const STARTUP_MS = 2000;
+
 describe("readPeer", () => {
   it("says why it read nobody when the reader refuses, exits otherwise than cleanly, or can't start", async () => {
     const conn = await connection();
@@ -360,21 +374,43 @@ describe("readPeer", () => {
     expect(read).toEqual({ kind: "read", chain: expect.objectContaining({ pid: process.pid }) });
   });
 
-  it("reads every one of more callers than it reads at once, through repeated stalls", async () => {
-    const conns = await connections(24);
-    const readings = Promise.all(conns.map((conn) => readPeer(PEER_SOURCE, conn, 100)));
-    const stalls = setInterval(() => stall(1000), 20);
-    const read = await readings.finally(() => clearInterval(stalls));
-    for (const conn of conns) conn.destroy();
-    expect(read).toEqual(
-      conns.map(() => ({ kind: "read", chain: expect.objectContaining({ pid: process.pid }) })),
-    );
-  });
+  it(
+    "reads every one of more callers than it reads at once, through repeated stalls",
+    async () => {
+      const conns = await connections(WAVES * MAX_READING);
+      const readings = Promise.all(conns.map((conn) => readPeer(PEER_SOURCE, conn, DEADLINE_MS)));
+      const stop = stallEveryTurn(STALL_MS);
+      onTestFinished(stop);
+      const read = await readings.finally(stop);
+      for (const conn of conns) conn.destroy();
+      expect(read).toEqual(
+        conns.map(() => ({ kind: "read", chain: expect.objectContaining({ pid: process.pid }) })),
+      );
+    },
+    (WAVES * TURNS_PER_WAVE + 1) * STALL_MS + STARTUP_MS,
+  );
 });
 
 /** Blocks this process's loop for `ms`, as a busy daemon's is. */
 function stall(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Stalls the loop for `ms` now and on every turn after, until the returned stop: a reader's exit
+ * is never read before a stall, however fast the host.
+ */
+function stallEveryTurn(ms: number): () => void {
+  let stalling = true;
+  const turn = () => {
+    if (!stalling) return;
+    stall(ms);
+    setImmediate(turn);
+  };
+  turn();
+  return () => {
+    stalling = false;
+  };
 }
 
 /** A process listening on a socket of its own, its argv as `argv0` and `args` give it. */
