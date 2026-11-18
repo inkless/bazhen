@@ -791,7 +791,9 @@ export class HolderRuntime implements RuntimeAdapter {
       return await client.screen(history).catch((error: unknown) => {
         if (
           error instanceof HolderRequestError &&
-          (error.code === "unavailable" || error.code === "snapshot-too-large")
+          (error.code === "unavailable" ||
+            error.code === "snapshot-too-large" ||
+            error.code === "failed")
         ) {
           throw new ScreenUnreadable(ref.terminalId, error.reason);
         }

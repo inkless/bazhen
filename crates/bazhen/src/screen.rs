@@ -43,10 +43,12 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
         encode_uri_component(&terminal)
     );
     let screen: TerminalScreen = daemon.get(&path, CALL)?;
+    let text = printable(&screen.text);
     if p.has("json") {
-        return pretty(&screen);
+        // JSON escapes C0 controls but writes DEL and the C1 controls as they are.
+        return pretty(&TerminalScreen { text, ..screen });
     }
-    Ok(shown(&screen.text))
+    Ok(text.strip_suffix('\n').unwrap_or(&text).to_owned())
 }
 
 /// `--history`'s rows, a whole number up to the most.
@@ -59,13 +61,10 @@ fn history(given: &str) -> Step<u32> {
     }
 }
 
-/// The text as printed, without the newline its last row ends in, which printing adds back. Any
-/// control but a newline, which the daemon never sends, is written as U+FFFD all the same, so a
-/// screen can't act on the terminal it is printed to.
-fn shown(text: &str) -> String {
-    text.strip_suffix('\n')
-        .unwrap_or(text)
-        .chars()
+/// The text with any control but a newline, which the daemon never sends, written as U+FFFD all
+/// the same, so a screen can't act on the terminal it is printed to, as text or as JSON.
+fn printable(text: &str) -> String {
+    text.chars()
         .map(|c| {
             if c.is_control() && c != '\n' {
                 '\u{fffd}'
@@ -103,11 +102,10 @@ mod tests {
     }
 
     #[test]
-    fn a_screen_is_shown_without_its_last_newline_and_a_control_as_a_replacement() {
+    fn every_control_but_a_newline_is_printed_as_a_replacement() {
         assert_eq!(
-            shown("one\n\x1b[31mtwo\u{9b}\n"),
-            "one\n\u{fffd}[31mtwo\u{fffd}"
+            printable("one\n\x1b[31mtwo\u{7f}\u{9b}\r\n"),
+            "one\n\u{fffd}[31mtwo\u{fffd}\u{fffd}\u{fffd}\n"
         );
-        assert_eq!(shown(""), "");
     }
 }

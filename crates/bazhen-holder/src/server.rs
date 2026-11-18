@@ -57,6 +57,9 @@ const FOREGROUND_TRIES: usize = 3;
 /// The most text a `screen` answer carries: any screen and thousands of rows of history, and,
 /// escaped as JSON, far under the reply cap.
 const MOST_SCREEN_TEXT: usize = 1 << 20;
+/// The most rows of history a `screen` answer reads, as many as the daemon lets a reader ask for;
+/// a request for more reads this many.
+const MOST_SCREEN_HISTORY: usize = 10_000;
 /// The largest snapshot frame, header and all.
 pub const LARGEST_SNAPSHOT: usize = SNAPSHOT_HEAD + MOST_SNAPSHOT_TEXT;
 /// The most bytes of snapshots owed at once across a holder's connections: two of the largest,
@@ -921,6 +924,9 @@ fn snapshot(
 /// The screen shown as plain text, after the history asked for, whether or not the child has
 /// exited. An engine that fails as it writes is replaced by an empty one, which the text is then
 /// of, as for a snapshot.
+/// A screen answer isn't counted in `SNAPSHOTS_IN_FLIGHT`: each is at most about 2 MiB, its text
+/// with every char escaped as JSON at worst, and a connection that stops reading owes no more of
+/// them than its queue takes before `QUEUE_MARK`.
 fn screen(conn: &mut Connection, holder: &mut Holder<Screen>, id: RequestId, body: ScreenRequest) {
     match screen_text(holder, body) {
         Ok(body) => send(conn, &Reply::Screen { id, body }),
@@ -932,7 +938,7 @@ fn screen_text(
     holder: &mut Holder<Screen>,
     request: ScreenRequest,
 ) -> Result<body::Screen, (ErrorCode, &'static str)> {
-    let history = usize::try_from(request.history.get()).unwrap_or(usize::MAX);
+    let history = screen_history(request.history);
     let walled = holder.output_mut().engine_mut();
     let mut text = String::new();
     let mut written = walled.text(history, MOST_SCREEN_TEXT, &mut text);
@@ -965,6 +971,11 @@ fn screen_text(
         .ok()
         .and_then(|rows| Count::new(rows).ok());
     body::Screen::new(text, rows.ok_or(failed)?).map_err(|_| failed)
+}
+
+/// The rows of history a request asks for, at most `MOST_SCREEN_HISTORY`.
+fn screen_history(asked: Count) -> usize {
+    usize::try_from(asked.get()).map_or(MOST_SCREEN_HISTORY, |rows| rows.min(MOST_SCREEN_HISTORY))
 }
 
 /// The child's `exited`, as it is sent.
@@ -1857,6 +1868,15 @@ mod tests {
             }
             other => panic!("answered {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_screen_reads_the_history_asked_for_up_to_the_most() {
+        let read: Vec<usize> = [0, 7, 10_000, 10_001, u64::from(u32::MAX)]
+            .into_iter()
+            .map(|rows| screen_history(Count::new(rows).unwrap()))
+            .collect();
+        assert_eq!(read, [0, 7, 10_000, 10_000, 10_000]);
     }
 
     fn screen_request(history: u64) -> Request {

@@ -57,6 +57,17 @@ describe("bazhen terminals screen", () => {
     );
   });
 
+  it("writes DEL and a C1 control as replacements with --json, which JSON leaves as they are", async () => {
+    holding();
+    const body = JSON.stringify({ text: "a\u{7f}b\u{9b}c\n", history: 0 });
+    s.daemon.raw(`GET /v1/terminals/${SH1}/screen?history=0`, 200, body);
+    const ran = await s.bazhen(["terminals", "screen", SH1, "--json"]);
+    expect([/[\u{7f}-\u{9f}]/u.test(ran.stdout), JSON.parse(ran.stdout).text]).toEqual([
+      false,
+      "a\u{fffd}b\u{fffd}c\n",
+    ]);
+  });
+
   it("says when nothing has the name, or it has no terminal, reading no screen", async () => {
     s.daemon.answer(
       "GET /v1/state",

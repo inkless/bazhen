@@ -905,7 +905,7 @@ describe("HolderRuntime: reading a terminal's screen", () => {
     expect(screenReaders(fake)).toEqual([]);
   });
 
-  it.each(["unavailable", "snapshot-too-large"] as const)(
+  it.each(["unavailable", "snapshot-too-large", "failed"] as const)(
     "calls a screen its holder refuses as %s unreadable",
     async (code) => {
       const { runtime, ref } = await screened({}, screens(code));
