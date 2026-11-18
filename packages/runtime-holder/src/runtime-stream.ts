@@ -277,9 +277,6 @@ export class HolderStream implements SnapshotStream {
   private readonly control: Control;
   private readonly release: () => void;
   private at: Position = { generation: 0, offset: 0 };
-  private alternate = false;
-  /** Whether an event has said which screen it is on: every event comes after `hello`'s say. */
-  private alternateTold = false;
   /** The attach's snapshot, once read: the events before it describe the state it captured. */
   private attached: Snapshot | null = null;
   private flowing = false;
@@ -288,7 +285,6 @@ export class HolderStream implements SnapshotStream {
   private readonly held = new Set<Held>();
   private readonly dataListeners: ((bytes: Uint8Array) => void)[] = [];
   private readonly closeListeners: ((why: StreamEnd) => void)[] = [];
-  private readonly alternateListeners: ((on: boolean) => void)[] = [];
   private readonly respawnListeners: ((generation: number) => void)[] = [];
   private readonly failureListeners: ((failure: StreamFailure) => void)[] = [];
   /** What failed last and is still failing, reported once until it succeeds again. */
@@ -306,7 +302,6 @@ export class HolderStream implements SnapshotStream {
   /** Attaches on `reader`, whose events must come to `event`: its snapshot, then its output. */
   async attach(reader: HolderClient): Promise<SnapshotAttached> {
     this.reader = reader;
-    if (!this.alternateTold) this.alternate = reader.hello.alternate;
     void reader.ended.then(() => this.end("ended"));
     try {
       await reader.attach();
@@ -323,7 +318,6 @@ export class HolderStream implements SnapshotStream {
       kind: "snapshot",
       ...attached,
       stream: this,
-      alternate: this.alternate,
       historyLines: reader.hello.historyLines,
     };
   }
@@ -339,16 +333,13 @@ export class HolderStream implements SnapshotStream {
   }
 
   /**
-   * An event read before the attach's snapshot, which already shows what it did: a screen switch
-   * or a resize only sets the state the snapshot is told with, and a respawn is in it already.
+   * An event read before the attach's snapshot, which already shows what it did: a resize only
+   * sets the size the snapshot is told with, and a respawn is in it already.
    */
   private beforeSnapshot(event: HolderEvent): void {
     if (event.type === "snapshot") {
       this.attached = { vt: event.bytes, offset: event.offset, generation: event.generation };
       this.at = { generation: event.generation, offset: event.offset };
-    } else if (event.type === "alternate") {
-      this.alternate = event.body.on;
-      this.alternateTold = true;
     } else if (event.type === "resized") {
       this.size = { cols: event.body.cols, rows: event.body.rows };
     }
@@ -375,11 +366,6 @@ export class HolderStream implements SnapshotStream {
         this.at = { generation: event.body.generation, offset: 0 };
         for (const listener of this.respawnListeners) listener(event.body.generation);
         break;
-      case "alternate":
-        if (event.body.on === this.alternate) return;
-        this.alternate = event.body.on;
-        for (const listener of this.alternateListeners) listener(event.body.on);
-        break;
       case "resized":
         this.size = { cols: event.body.cols, rows: event.body.rows };
         return;
@@ -389,6 +375,7 @@ export class HolderStream implements SnapshotStream {
         return;
       case "exited":
       case "title":
+      case "alternate":
       case "refused":
       case "snapshot":
         return;
@@ -431,10 +418,6 @@ export class HolderStream implements SnapshotStream {
   onClose(cb: (why: StreamEnd) => void): void {
     if (this.ended !== null) cb(this.ended);
     else this.closeListeners.push(cb);
-  }
-
-  onAlternate(cb: (alternate: boolean) => void): void {
-    this.alternateListeners.push(cb);
   }
 
   /** A failure still failing when this is called is told at once. */

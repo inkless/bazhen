@@ -1,9 +1,10 @@
 import { assert, describe, expect, it } from "vitest";
 import { newId } from "../ids.ts";
 import { FakeRuntime, fakeContractHarness } from "./fake-runtime.ts";
-import { runtimeContract } from "./runtime-contract.ts";
+import { historyContract, runtimeContract } from "./runtime-contract.ts";
 
 runtimeContract("FakeRuntime", fakeContractHarness("history"));
+historyContract("FakeRuntime", fakeContractHarness("history"));
 runtimeContract("FakeRuntime in snapshot mode", fakeContractHarness("snapshot"));
 
 describe("the fake runtime's controls", () => {
@@ -20,9 +21,10 @@ describe("the fake runtime's controls", () => {
       historyLines: 10_000,
     } as const;
     const ref = await fake.create(spec);
-    const { stream } = await fake.attach(ref, null);
+    const attached = await fake.attach(ref, null);
+    assert(attached.kind === "history");
     const pushed: boolean[] = [];
-    stream.onAlternate((on) => pushed.push(on));
+    attached.stream.onAlternate((on) => pushed.push(on));
     fake.output(ref, "\x1b[?1049h");
     fake.exitProcess(ref);
     await fake.respawn(ref, { ...spec, generation: 1 });

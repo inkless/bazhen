@@ -174,7 +174,8 @@ interface Watched {
   /** Where the stream is: the position of the next byte it delivers. */
   at: Position;
   readonly viewers: Map<AttachmentId, Entry>;
-  alternate: boolean;
+  /** Whether the program is on its alternate screen, where the runtime's bytes don't say. */
+  alternate?: boolean;
   lease: Lease;
   /** The terminal's size as last applied. */
   size: Size;
@@ -275,7 +276,8 @@ export class TerminalHub {
     // The view may have left, or the terminal closed, while its snapshot was sent.
     if (!watched.viewers.has(id)) throw new ViewEnded();
     viewer.notify({ type: "snapshot_end" });
-    viewer.notify({ type: "screen", alternate: watched.alternate });
+    if (watched.alternate !== undefined)
+      viewer.notify({ type: "screen", alternate: watched.alternate });
     for (const { bytes } of entry.queue ?? []) viewer.send(bytes);
     delete entry.queue;
     entry.held = 0;
@@ -321,7 +323,7 @@ export class TerminalHub {
             : { generation: attached.generation, offset: attached.offset },
         size: stream.size,
         viewers: new Map(),
-        alternate: attached.alternate,
+        ...(attached.kind === "history" && { alternate: attached.alternate }),
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
       const deliver = (item: Held) => {
@@ -375,12 +377,13 @@ export class TerminalHub {
         watched.screen.dispose();
         this.forget(ref.terminalId, opening);
       });
-      stream.onAlternate((alternate) => {
-        watched.alternate = alternate;
-        for (const entry of watched.viewers.values()) {
-          entry.viewer.notify({ type: "screen", alternate });
-        }
-      });
+      if (attached.kind === "history")
+        attached.stream.onAlternate((alternate) => {
+          watched.alternate = alternate;
+          for (const entry of watched.viewers.values()) {
+            entry.viewer.notify({ type: "screen", alternate });
+          }
+        });
       stream.onFailure(({ what, cause }) => {
         const message = `${what} failed: ${failureDetail(cause)}`;
         for (const entry of watched.viewers.values())

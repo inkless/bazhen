@@ -248,13 +248,6 @@ export interface RuntimeStream {
   write(bytes: Uint8Array): void;
   resize(size: Size): Promise<void>;
   /**
-   * Each time the program moves to or from its alternate screen, from the state `Attached`
-   * reported, and never twice the same way in a row. A runtime that only learns of a switch by
-   * asking may report it before or after the output that made it reaches the stream, and a
-   * respawn's return to the main screen only once the new process prints.
-   */
-  onAlternate(cb: (alternate: boolean) => void): void;
-  /**
    * Trouble its views should hear of, after which the stream carries on: a failure that ends it
    * closes it instead. One that keeps failing is reported once, until it succeeds again.
    */
@@ -298,8 +291,6 @@ export type Attached = HistoryAttached | SnapshotAttached;
 
 interface AttachedClient {
   readonly stream: RuntimeStream;
-  /** Whether the program was on its alternate screen as the client attached. */
-  readonly alternate: boolean;
   /**
    * How many lines of history above its screen the terminal keeps, as the runtime reports it: the
    * depth it was made with, whatever the daemon's configuration says now.
@@ -307,9 +298,26 @@ interface AttachedClient {
   readonly historyLines: number;
 }
 
+/**
+ * A redrawing client's stream, whose bytes never switch to the alternate screen: the runtime keeps
+ * the client on its main screen, where it has scrollback, so it says when the program switches.
+ */
+export interface HistoryStream extends RuntimeStream {
+  /**
+   * Each time the program moves to or from its alternate screen, from the state `Attached`
+   * reported, and never twice the same way in a row. A runtime that only learns of a switch by
+   * asking may report it before or after the output that made it reaches the stream, and a
+   * respawn's return to the main screen only once the new process prints.
+   */
+  onAlternate(cb: (alternate: boolean) => void): void;
+}
+
 /** A client whose first output redraws the screen, but can't redraw the history above it. */
 export interface HistoryAttached extends AttachedClient {
   readonly kind: "history";
+  readonly stream: HistoryStream;
+  /** Whether the program was on its alternate screen as the client attached. */
+  readonly alternate: boolean;
   /**
    * The history above the screen as the client attached, oldest first: lines separated by `\n`,
    * with their SGR attributes, and empty for a program on its alternate screen. Read after the
@@ -361,8 +369,6 @@ export interface SnapshotStream extends RuntimeStream {
 export interface SnapshotAttached extends Snapshot {
   readonly kind: "snapshot";
   readonly stream: SnapshotStream;
-  /** Whether the program was on its alternate screen as the client attached. */
-  readonly alternate: boolean;
   /**
    * How many lines of history above its screen the terminal keeps, as the runtime reports it: the
    * depth it was made with, whatever the daemon's configuration says now.

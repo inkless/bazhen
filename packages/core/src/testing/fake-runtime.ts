@@ -2,7 +2,8 @@
 // runtime-contract.ts runs one suite against both, so what a test proves against this runtime
 // holds against tmux. A program's argv decides what it does: `sh -c '… exit N'` exits with N at
 // once, `cat` echoes what it is sent, and anything else runs until it is signalled. Output that
-// switches screens puts the program on its alternate screen or takes it off. As with tmux,
+// switches screens puts the program on its alternate screen or takes it off, which only its tmux
+// attach reports: a holder's bytes carry the switch. As with tmux,
 // no server runs until the first terminal is created or after the last one goes, and while none
 // runs nothing can be read. It attaches as tmux does, with the history beside a stream that
 // redraws, or, in snapshot mode, as a holder does, with one snapshot the stream carries on from:
@@ -28,6 +29,7 @@ import {
   type RuntimeHealth,
   type RuntimeInventoryEntry,
   type RuntimeRef,
+  type HistoryStream,
   type RuntimeStream,
   type Size,
   type ProcessSpec,
@@ -248,7 +250,6 @@ export class FakeRuntime implements RuntimeAdapter {
         t.clients.resizes.push(next);
         t.size = next;
       },
-      onAlternate: (cb) => void switches.push(cb),
       onFailure: (cb) => void failures.push(cb),
       onRespawn: (cb) => void respawns.push(cb),
       close: () => {
@@ -274,14 +275,17 @@ export class FakeRuntime implements RuntimeAdapter {
       return {
         ...this.snapshotOf(t),
         stream: snapshotStream,
-        alternate: t.alternate,
         historyLines: t.spec.historyLines,
       };
     }
     const history = t.alternate ? "" : t.history;
+    const historyStream: HistoryStream = {
+      ...stream,
+      onAlternate: (cb) => void switches.push(cb),
+    };
     return {
       kind: "history",
-      stream,
+      stream: historyStream,
       history,
       alternate: t.alternate,
       historyLines: t.spec.historyLines,
@@ -580,7 +584,7 @@ export class FakeRuntime implements RuntimeAdapter {
   }
 
   /** The history scrolled above a clear screen, then everything printed since from its top. */
-  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream" | "alternate" | "historyLines"> {
+  private snapshotOf(t: Terminal): Omit<SnapshotAttached, "stream" | "historyLines"> {
     const above = `${"\r\n".repeat(t.size.rows)}\x1b[0m\x1b[H`;
     const history = t.history === "" ? "" : `${t.history.replaceAll("\n", "\r\n")}${above}`;
     return {

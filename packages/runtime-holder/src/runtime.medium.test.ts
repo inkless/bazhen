@@ -38,7 +38,7 @@ import { createServer, type Socket } from "node:net";
 import { dirname } from "node:path";
 import { HOLDER_MAX_UNSENT_BYTES } from "./client.ts";
 import { HolderRuntime, type HolderRuntimeOptions } from "./runtime.ts";
-import { HolderStream, WRITER_RETRY_MS } from "./runtime-stream.ts";
+import { WRITER_RETRY_MS } from "./runtime-stream.ts";
 import { encodeTags } from "./tags.ts";
 import {
   type FakeHolder,
@@ -769,8 +769,6 @@ async function attachable(
     readonly hello?: Partial<HolderHelloReply>;
     /** Sent ahead of the attach's snapshot, as events the holder had queued first. */
     readonly beforeSnapshot?: (holder: FakeHolder) => void;
-    /** Called as a resize comes in: the resize is answered once what it returns settles. */
-    readonly duringResize?: () => void | Promise<void>;
   } = {},
 ) {
   const root = privateRoot();
@@ -784,8 +782,6 @@ async function attachable(
     } else if (request.type === "subscribe") {
       ok(holder, request);
       after(holder);
-    } else if (request.type === "resize") {
-      void Promise.resolve(options.duringResize?.()).then(() => ok(holder, request));
     } else if (request.type !== "input") ok(holder, request);
   };
   const { runtime, terminals } = startingFakes(
@@ -1130,14 +1126,11 @@ describe("HolderRuntime: watching agents' titles", () => {
 
 describe("HolderRuntime: streams", () => {
   it("attaches on the holder's snapshot, and delivers what follows it to callbacks set after", async () => {
-    const { runtime, ref, vt } = await attachable(5, (holder) =>
-      holder.send(data(5, "ab"), { type: "alternate", body: { offset: 7, on: true } }),
-    );
+    const { runtime, ref, vt } = await attachable(5, (holder) => holder.send(data(5, "ab")));
     const attached = await runtime.attach(ref, null);
     const seen: unknown[] = [];
     attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
-    attached.stream.onAlternate((on) => seen.push(on));
-    await expect.poll(() => seen).toEqual(["ab", true]);
+    await expect.poll(() => seen).toEqual(["ab"]);
     expect([attached.kind, attached.offset, attached.generation, attached.vt]).toEqual([
       "snapshot",
       5,
@@ -1154,11 +1147,11 @@ describe("HolderRuntime: streams", () => {
     attached.stream.close();
   });
 
-  it("tells a respawn before the next process's bytes, and pushes each switch of screen once", async () => {
+  it("tells a respawn before the next process's bytes, and nothing of a switch of screen, which they carry", async () => {
     const { runtime, ref } = await attachable(0, (holder) =>
       holder.send(
-        { type: "alternate", body: { offset: 0, on: false } },
         data(0, "old"),
+        { type: "alternate", body: { offset: 3, on: true } },
         { type: "respawned", body: { generation: 1, childPid: FAKE_PID, childStart: FAKE_START } },
         data(0, "new"),
       ),
@@ -1167,8 +1160,8 @@ describe("HolderRuntime: streams", () => {
     const seen: unknown[] = [];
     stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     stream.onRespawn((generation) => seen.push(generation));
-    stream.onAlternate((on) => seen.push(on));
     await expect.poll(() => seen).toEqual(["old", 1, "new"]);
+    expect("onAlternate" in stream).toBe(false);
     stream.close();
   });
 
@@ -1243,7 +1236,7 @@ describe("HolderRuntime: streams", () => {
     late.stream.close();
   });
 
-  it("takes alternate and a respawn sent before the attach's snapshot as what it shows", async () => {
+  it("takes a respawn sent before the attach's snapshot as what it shows, and says nothing of its screen", async () => {
     const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
     const { runtime, ref } = await attachable(0, (holder) => holder.send(data(0, "new")), 0, {
       beforeSnapshot: (holder) =>
@@ -1256,34 +1249,8 @@ describe("HolderRuntime: streams", () => {
     const seen: unknown[] = [];
     attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
     attached.stream.onRespawn((generation) => seen.push(generation));
-    attached.stream.onAlternate((on) => seen.push(on));
     await expect.poll(() => seen).toEqual(["new"]);
-    expect([attached.generation, attached.alternate]).toEqual([1, true]);
-    attached.stream.close();
-  });
-
-  it("keeps a screen switch sent while an attach resizes, over what its hello said", async () => {
-    let terminal: FakeTerminal | undefined;
-    const readers = () => terminal!.connections.filter((c) => c.holder.hello?.writer === false);
-    const delivered = vi.spyOn(HolderStream.prototype, "event");
-    const switched = { type: "alternate", body: { offset: 0, on: true } } as const;
-    const { runtime, ref, fake } = await attachable(0, () => {}, 0, {
-      // The switch and the resize's answer go out on different sockets, which nothing orders:
-      // the answer waits until the reader has delivered the switch, so it lands before attach.
-      duringResize: async () => {
-        readers().at(-1)!.holder.send(switched);
-        await vi.waitFor(() => expect(delivered).toHaveBeenCalledWith(switched));
-      },
-    });
-    terminal = fake;
-    const attached = await runtime.attach(ref, { cols: 90, rows: 30 });
-    expect(attached.alternate).toBe(true);
-    const pushed: boolean[] = [];
-    attached.stream.onAlternate((on) => pushed.push(on));
-    readers()
-      .at(-1)!
-      .holder.send({ type: "alternate", body: { offset: 0, on: false } });
-    await expect.poll(() => pushed).toEqual([false]);
+    expect([attached.generation, "alternate" in attached]).toEqual([1, false]);
     attached.stream.close();
   });
 

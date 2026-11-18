@@ -10,7 +10,7 @@ export type TerminalKind = "agent" | "shell";
 export interface WheelContext {
   /** The program asked for mouse reports. */
   readonly mouseTracking: boolean;
-  /** The program is on its alternate screen, as the daemon reports it. */
+  /** The program is on its alternate screen (`onAlternateScreen`). */
   readonly alternate: boolean;
   readonly kind: TerminalKind;
 }
@@ -30,6 +30,20 @@ export function wheelAction({ mouseTracking, alternate, kind }: WheelContext): W
   if (!alternate) return "local";
   return kind === "shell" ? "arrows" : "swallow";
 }
+
+/** A view's terminal, as far as which of its buffers is active. */
+export interface BufferTarget {
+  readonly buffer: { readonly active: { readonly type: "normal" | "alternate" } };
+}
+
+/**
+ * Whether the program is on its alternate screen. A holder's bytes carry the switch, so the view's
+ * own active buffer says, as of the bytes it has parsed. tmux strips it from its client's bytes,
+ * so the daemon says instead (`daemonSaid`), and never for a holder: two sources would disagree
+ * for as long as the view takes to parse what came before the daemon's word.
+ */
+export const onAlternateScreen = (term: BufferTarget, daemonSaid: boolean): boolean =>
+  daemonSaid || term.buffer.active.type === "alternate";
 
 /**
  * The scrollback a view keeps for a terminal that keeps `historyLines`, with room for a screen

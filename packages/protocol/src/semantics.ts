@@ -10,7 +10,8 @@ import { HISTORY_LINES, STREAM_FRAME_MAX_BYTES } from "./stream.ts";
  * `schema/semantics.json`, so it counts toward the id.
  */
 export const PROTOCOL_SEMANTICS = {
-  revision: 1,
-  reason: "The protocol id replaces the negotiated protocol version.",
+  revision: 2,
+  reason:
+    "A holder view gets no screen frame: its own bytes carry the switch, and a page that read the frame alone would route the wheel as if on the main screen.",
   constants: { HISTORY_LINES, STREAM_FRAME_MAX_BYTES, EVENT_FRAME_MAX_BYTES },
 } as const;

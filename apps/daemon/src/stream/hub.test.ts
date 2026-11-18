@@ -809,6 +809,18 @@ describe("terminal hub: screen state and slow views", () => {
     ]);
   });
 
+  it("tells a view of a snapshot runtime nothing of its screen, whose switches its bytes carry", async () => {
+    const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
+    rt.emit("\x1b[?1049h");
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    const a = viewer();
+    await hub.join(rt.ref, a.v, size);
+    rt.emit("\x1b[?1049l");
+    rt.emit("\x1b[?1049h");
+    const shown = await replay(a.seen.join(""), size);
+    expect([a.frames.filter((f) => f.type === "screen"), shown.buffer]).toEqual([[], "alternate"]);
+  });
+
   it("tells every view what failed in the runtime", async () => {
     const rt = await fakeRuntime();
     const hub = new Hub(rt.runtime, memoryLog().log);
