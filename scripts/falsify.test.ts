@@ -15,7 +15,7 @@ import {
   namedBinaries,
   workspaceBins,
   workspaceExports,
-  newTitles,
+  changedTests,
   noOutputReason,
   timeoutFrom,
   parseArgs,
@@ -36,9 +36,6 @@ import {
 
 const FILE = "packages/core/src/x.test.ts";
 
-const diff = (...added: string[]) =>
-  ["+++ b/" + FILE, " unchanged()", ...added.map((line) => `+${line}`)].join("\n");
-
 type Assertion = VitestReport["testResults"][number]["assertionResults"][number];
 
 const report = (...assertionResults: Assertion[]): VitestReport => ({
@@ -51,71 +48,79 @@ const result = (title: string, status: string, failureMessages: string[] = []): 
   failureMessages,
 });
 
-describe("newTitles", () => {
-  it("reads single- and double-quoted titles from added lines only", () => {
-    const text = [
-      "+++ b/" + FILE,
-      ' it("kept line", () => {})',
-      '+  it("adds a", () => {});',
-      "+  test('adds b', () => {});",
-      '-  it("removed", () => {});',
-    ].join("\n");
-    expect(newTitles(text, FILE)).toEqual(["adds a", "adds b"]);
-  });
+const changed = (base: string | undefined, head: string) => changedTests(base, head, FILE).titles;
 
-  it("leaves out an existing test whose call line only became async", () => {
-    const text = [
-      "+++ b/" + FILE,
-      '-  it("was sync", () => {',
-      '+  it("was sync", async () => {',
-      '+  it("is new", async () => {',
-    ].join("\n");
-    expect(newTitles(text, FILE)).toEqual(["is new"]);
-  });
+const UNPARSED = `<unparsed test in ${FILE}>`;
 
-  it("judges a test removed and added again under the same title, or with another change", () => {
-    const text = [
-      "+++ b/" + FILE,
-      '-  it("moved and rewritten", () => {',
-      '-  it("renamed its argument", (a) => {',
-      '+  it("moved and rewritten", () => {',
-      '+  it("renamed its argument", async (b) => {',
-    ].join("\n");
-    expect(newTitles(text, FILE)).toEqual(["moved and rewritten", "renamed its argument"]);
-  });
-
-  it("reads a backtick title without interpolation", () => {
-    expect(newTitles(diff("it(`plain backtick`, () => {});"), FILE)).toEqual(["plain backtick"]);
-  });
-
-  it("marks a test whose title can't be read as unparsed", () => {
-    expect(newTitles(diff("it(name, () => {});"), FILE)).toEqual([`<unparsed test in ${FILE}>`]);
-  });
-
-  it("marks an interpolated backtick title as unparsed", () => {
-    expect(newTitles(diff("it(`adds ${n}`, () => {});"), FILE)).toEqual([
-      `<unparsed test in ${FILE}>`,
+describe("changedTests", () => {
+  it("is each title HEAD has a test under and the base has none, in a new file too", () => {
+    const base = 'it("kept", () => {});\nit("removed", () => {});\n';
+    const head = 'it("kept", () => {});\nit("adds a", () => {});\ntest(\'adds b\', () => {});\n';
+    expect([changed(base, head), changed(undefined, head)]).toEqual([
+      ["adds a", "adds b"],
+      ["kept", "adds a", "adds b"],
     ]);
   });
 
-  it("adds the unparsed marker for each unreadable test, alongside the readable titles", () => {
-    expect(
-      newTitles(diff('it("a", () => {});', "it(", '  "wrapped",', "it(`b ${x}`, f);"), FILE),
-    ).toEqual(["a", `<unparsed test in ${FILE}>`]);
-  });
-
-  it("unescapes quotes inside the title", () => {
-    expect(newTitles(diff(String.raw`it('doesn\'t say \"no\"', () => {});`), FILE)).toEqual([
-      `doesn't say "no"`,
+  it("leaves out a test that moved, even where the diff reads it as removed and added", () => {
+    const signals =
+      'it("signals a running process", () => {\n  expect(signal(p)).toBe(true);\n});\n';
+    const other = 'describe("other", () => {\n  it("moves", () => {});\n});\n';
+    expect(changed(other + signals, `${signals}${other}it("is new", () => {});\n`)).toEqual([
+      "is new",
     ]);
   });
 
-  it("reads the title of it.each", () => {
-    expect(newTitles(diff('it.each([1, 2])("adds %i", (n) => {});'), FILE)).toEqual(["adds %i"]);
+  it("leaves out a test whose body, layout or async changed under its title", () => {
+    const base = 'it("was sync", () => {\n  expect(read()).toBe(1);\n});\n';
+    const head =
+      'it(\n  "was sync",\n  async () => {\n    expect(await read()).toBe(2);\n  },\n);\n';
+    expect(changed(base, head)).toEqual([]);
   });
 
-  it("ignores a regex .test( call", () => {
-    expect(newTitles(diff('const ok = /x/.test("abc");'), FILE)).toEqual([]);
+  it("judges a title HEAD has more tests under than the base, once", () => {
+    const one = 'it("twice", () => {});\n';
+    expect([changed(one, one + one), changed(one, one + one + one)]).toEqual([
+      ["twice"],
+      ["twice"],
+    ]);
+  });
+
+  it("reads the title a chain's call wraps onto its next line", () => {
+    const head = 'it.runIf(linux)(\n  "integrates the shell",\n  async () => {},\n);\n';
+    expect(changed("", head)).toEqual(["integrates the shell"]);
+  });
+
+  it("marks a new test whose title can't be read as unparsed, once, by its title's tokens", () => {
+    const base = "it(name, () => {});\n";
+    expect([
+      changed(base, base),
+      changed(base, `${base}it(other, () => {});\nit(\`adds \${n}\`, f);\nit("a", f);\n`),
+    ]).toEqual([[], [UNPARSED, "a"]]);
+  });
+
+  it("finds no test in a fixture string", () => {
+    expect(changed("", "const fixture = 'it(\"fixture\", f)';\n")).toEqual([]);
+  });
+
+  it("marks a .tsx file as unparsed, since its JSX can't be read, and says why", () => {
+    const tsx = "packages/a/src/view.test.tsx";
+    const head = 'it("renders", () => {\n  render(<p>Don\'t</p>);\n});\n';
+    expect(changedTests(head, head, tsx)).toEqual({
+      titles: [`<unparsed test in ${tsx}>`],
+      unreadable: "falsify can't read JSX",
+    });
+  });
+
+  it("marks a file either side of which can't be read as unparsed, and says why", () => {
+    const good = 'it("a", () => {});\n';
+    expect([
+      changedTests('it("a", () => {;\n', good, FILE),
+      changedTests(good, 'it("a, () => {});\n', FILE),
+    ]).toEqual([
+      { titles: [UNPARSED], unreadable: "the base's copy has brackets left open at its end" },
+      { titles: [UNPARSED], unreadable: expect.stringMatching(/^HEAD's copy has an unterminated/) },
+    ]);
   });
 });
 
@@ -911,8 +916,8 @@ const refusal = (base: string | undefined, head: string) =>
 /** The source with the first test's closing line cut. */
 const cut = (source: string) => source.replace('});\n\nit("keeps v"', '\nit("keeps v"');
 
-// Each fixture has a backtick the count misreads ahead of a template with a `}` line at the call's
-// indent, and a body change after that line, which a block cut there would miss.
+// Each fixture has a backtick in a string or comment ahead of a template with a `}` line at the
+// call's indent, and a body change after that line, which a reader cutting the call there would miss.
 const miscounted = (...body: string[]) => {
   const base = lines('it("renders", () => {', ...body, "});", "", 'it("keeps", () => {});');
   const head = base.replace('"renders"', '"renders it"').replace("toBe(1)", "toBe(2)");
@@ -1008,48 +1013,21 @@ describe("renameRefusal", () => {
     ]);
   });
 
-  it("judges as new a test whose block has no closing line", () => {
-    expect(refusal(cut(BASE_TESTS), cut(RENAMED))).toBe('the end of "adds one" can\'t be found');
-  });
-
-  it("reads a block on past a template's lines at the call's indent, raw", () => {
-    const base = lines(
-      'it("renders", () => {',
-      "  expect(render()).toBe(`{",
-      '  "a": 1',
-      "  ",
-      "}`);",
-      "  expect(other()).toBe(1);",
-      "});",
-    );
-    const head = base.replace('it("renders"', 'it("renders it"');
-    const renders = (source: string) => renameRefusal(base, source, "renders", "renders it");
-    const changed = '"renders it" isn\'t "renders" with only its title changed';
+  it("judges as new a test in a file whose brackets don't balance, or whose template never closes", () => {
+    const open = lines('it("renders", () => {', "  expect(render()).toBe(`{", "});");
     expect([
-      renders(head),
-      renders(head.replace("toBe(1)", "toBe(2)")),
-      renders(head.replace('"a": 1\n  \n', '"a": 1\n\n')),
-    ]).toEqual([undefined, changed, changed]);
-  });
-
-  it("reads an arrow's block on past a template's lines at the call's indent", () => {
-    const base = lines('it("prints", () =>', "  expect(print()).toBe(`a", "b`));", "");
-    const head = base.replace('it("prints"', 'it("prints it"');
-    const prints = (source: string) => renameRefusal(base, source, "prints", "prints it");
-    expect([prints(head), prints(head.replace("b`", "c`"))]).toEqual([
-      undefined,
-      '"prints it" isn\'t "prints" with only its title changed',
+      refusal(cut(BASE_TESTS), cut(RENAMED)),
+      refusal(BASE_TESTS, cut(RENAMED)),
+      renameRefusal(open, open.replace('"renders"', '"renders it"'), "renders", "renders it"),
+    ]).toEqual([
+      "the base's copy of the file has brackets left open at its end",
+      "HEAD's copy of the file has brackets left open at its end",
+      expect.stringMatching(/^the base's copy of the file has an unterminated literal/),
     ]);
   });
 
-  it("judges as new a test whose template never closes", () => {
-    const open = lines('it("renders", () => {', "  expect(render()).toBe(`{", "});");
-    expect(
-      renameRefusal(open, open.replace('"renders"', '"renders it"'), "renders", "renders it"),
-    ).toBe('the end of "renders" can\'t be found');
-  });
-
-  it("judges as new a test after which the file is read as inside a template", () => {
+  it("reads a backtick in a string or a comment as part of it, so a change after a template is seen", () => {
+    const rendersChanged = '"renders it" isn\'t "renders" with only its title changed';
     expect([
       miscounted('  expect(render()).toBe(`a ${"`"} b', "}", "`);", "  expect(other()).toBe(1);"),
       miscounted(
@@ -1060,11 +1038,6 @@ describe("renameRefusal", () => {
         "`);",
         "  expect(other()).toBe(1);",
       ),
-    ]).toEqual(['the end of "renders" can\'t be found', 'the end of "renders" can\'t be found']);
-  });
-
-  it("judges as new a test whose closing line is followed by a deeper line", () => {
-    expect(
       miscounted(
         "  /* a lone ` here */",
         "  expect(render()).toBe(`{",
@@ -1074,7 +1047,7 @@ describe("renameRefusal", () => {
         "  /* and ` here */",
         "  expect(other()).toBe(1);",
       ),
-    ).toBe('the end of "renders" can\'t be found');
+    ]).toEqual([rendersChanged, rendersChanged, rendersChanged]);
   });
 });
 

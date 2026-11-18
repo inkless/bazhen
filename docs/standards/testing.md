@@ -147,12 +147,20 @@ Every new test must be shown to fail without the code it covers.
     Every test of a brand-new function is INVALID, because the function doesn't exist before
     the change.
 
-  Titles are read from added lines that look like `it(...)` or `test(...)` calls, so a fixture
-  string such as `'it("fixture", f)'` in a test file counts as a test. It can't be found in the
-  run, comes out INVALID and asks for a control: the safe direction. An existing test whose call
-  line only became `async` is left out, since it isn't new; one removed and added again with the
-  same call line is judged. A test whose body changes under an unchanged call line is not read
-  as new, so a rewritten test gets its control by hand.
+  A test is new when its title is: the branch's copy of the file has more tests with that title
+  than the base's, counted over the whole file whatever `describe` each is in. So a test removed
+  and a different one added under the same title isn't judged. Falsify reads the test calls in
+  both copies (`scripts/test-calls.ts`, on TypeScript's scanner), so where git's diff aligns lines
+  and how the formatter lays a call out don't matter: `it.runIf(c)(` with its title on the next
+  line is read like `it(`. A string that reads like a test call isn't one. A test that moved, or
+  became `async`, isn't new. A test whose body changes under its title is not read as new either,
+  so a rewritten test gets its control by hand. A test whose title isn't a literal is counted by
+  the expression that makes it, and a file either copy of which can't be read counts as having a
+  new test whose title couldn't be read. So does every changed `.tsx` test file: falsify can't
+  read JSX, which would otherwise read as regexes and strings that could hide a test call. Falsify
+  doesn't see a test called through another name (`const t = test.extend(…)`), a computed member
+  (`it["skip"]`), a ternary (`c ? it(…) : …`) or an empty last call (`it.each(rows)()`), so a test
+  written that way gets its control by hand.
 
 - **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
   return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
@@ -181,20 +189,19 @@ Every new test must be shown to fail without the code it covers.
   sees the file as renamed):
   - the old title is exactly one test at the base and none at HEAD;
   - the new title is exactly one test at HEAD and none at the base;
-  - the test's block, from its call line to its closing line at the call's indent, is the base's
-    with only the title changed. Its quotes and its indent may change, so it can move into or
-    out of a `describe`. That move puts it under the `describe`'s hooks, which falsify doesn't
-    compare, so the reviewer checks them.
+  - the test's call, from `it` or `test` to its closing parenthesis, is the base's token for
+    token with only the title changed. Its quotes, layout, comments and trailing commas may
+    change, so it can move into or out of a `describe`. That move puts it under the
+    `describe`'s hooks, which falsify doesn't compare, so the reviewer checks them.
 
   Any other change to the test (its body, its options, `it` to `it.skip`, or a different test
   under the old title's trailer) is judged as new, as it would be without the trailer. So is a
-  test whose block's end can't be read from its layout. So is every test in a file where a
-  backtick in a string or comment leaves a test call, or the file's end, read as inside a template
-  literal. A trailer that doesn't apply is printed with the rule it broke. A SURVIVED test that is
-  a lost base test under a new title is printed with the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
+  test in a file either copy of which can't be read. A trailer that doesn't apply is printed with
+  the rule it broke. A SURVIVED test that is a lost base test under a new title is printed with
+  the trailer it needs. A move to another test file isn't a rename, and neither is a renamed
   `describe`, which never made a test look new. Rust tests take no `Renamed:` trailer: a renamed
-  one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the
-  base's falsify reads no `Renamed:` trailer, so a renamed test there also needs a real control.
+  one is judged by mutants and can take a `Control:`. On a branch that changes falsify, the base's
+  falsify reads no `Renamed:` trailer, so a renamed test there also needs a real control.
 
 Two lessons from the scaffold's controls:
 
