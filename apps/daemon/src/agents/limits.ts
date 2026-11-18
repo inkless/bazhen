@@ -6,12 +6,20 @@ const GONE: ReadonlySet<string> = new Set(["agent.exited", "agent.lost", "agent.
 
 type Recorded = { readonly type: string; readonly entityId: string };
 
+/**
+ * How long after a stop a reading of the meter is still about it. A harness reports its meter
+ * within moments of the turn that read it; a reading later than this is about the account since,
+ * and so, on an account another agent shares, about that agent's turns.
+ */
+export const LATE_READING_MS = 5 * 60_000;
+
 export interface LimitsOptions {
   /** The usage the agent's harness last reported. */
   readonly usage: (agentId: string) => Usage | undefined;
   /** Stores the agent's usage, and says null when it was already what it held. */
   readonly recordUsage: (agentId: string, usage: Usage) => number | null;
-  readonly record: (agentId: string, activity: Activity) => void;
+  /** Records an activity, and says null when it was not recorded. */
+  readonly record: (agentId: string, activity: Activity) => number | null;
   readonly now?: () => Date;
 }
 
@@ -28,14 +36,17 @@ export interface LimitsOptions {
  * it again, and one the harness has renamed is never named again.
  *
  * The meter can be read after the stop it explains, so the agent's latest stop is weighed again
- * at each change of its usage until the agent reports anything else. Weighed again, it records
+ * at each change of its usage, for `LATE_READING_MS`, until the agent reports anything else. Weighed again, it records
  * only a window used up: a later reading that shows none, as another turn's on the same account
  * may, says nothing of what stopped this one.
  */
 export class Limits {
   private readonly opts: LimitsOptions;
   private readonly now: () => Date;
-  private readonly stops = new Map<string, { activity: Activity; limit: LimitStop }>();
+  private readonly stops = new Map<
+    string,
+    { readonly activity: Activity; readonly limit: LimitStop; readonly at: number }
+  >();
 
   constructor(opts: LimitsOptions) {
     this.opts = opts;
@@ -46,14 +57,17 @@ export class Limits {
   record(agentId: string, activity: Activity, limit?: LimitStop): void {
     if (limit === undefined) {
       this.stops.delete(agentId);
-      return this.opts.record(agentId, activity);
+      this.opts.record(agentId, activity);
+      return;
     }
     const resetsAt = this.resetOf(agentId);
-    this.opts.record(
+    const id = this.opts.record(
       agentId,
       resetsAt === null && limit === "rate" ? activity : limited(activity, resetsAt),
     );
-    this.stops.set(agentId, { activity, limit });
+    // A stop the store refused, as for an agent whose process has gone, is not held.
+    if (id === null) return;
+    this.stops.set(agentId, { activity, limit, at: this.now().getTime() });
   }
 
   /** Records the usage the agent's harness reports, which may show why its last turn stopped. */
@@ -81,8 +95,10 @@ export class Limits {
 
   private reweigh(agentId: string): void {
     const stop = this.stops.get(agentId);
+    if (stop === undefined) return;
+    if (this.now().getTime() - stop.at > LATE_READING_MS) return void this.stops.delete(agentId);
     const resetsAt = this.resetOf(agentId);
-    if (stop === undefined || resetsAt === null) return;
+    if (resetsAt === null) return;
     const observedAt = this.now().toISOString();
     this.opts.record(agentId, limited({ ...stop.activity, observedAt }, resetsAt));
   }
@@ -107,7 +123,8 @@ const limited = (activity: Activity, resetsAt: string | null): Activity => ({
 
 /**
  * The usage limits held, with those an update names replaced and those it leaves out kept. Past
- * the most usage holds, the oldest of those it leaves out go first.
+ * the most usage holds, those it leaves out go first, the one first seen first; an update that
+ * alone names more keeps the first it names.
  */
 export function mergeLimits(
   held: readonly UsageLimit[] | undefined,
@@ -116,7 +133,7 @@ export function mergeLimits(
   const named = new Map(update.map((l) => [l.window, l]));
   const kept = (held ?? []).map((l) => named.get(l.window) ?? l);
   const known = new Set(kept.map((l) => l.window));
-  const merged = [...kept, ...update.filter((l) => !known.has(l.window))];
+  const merged = [...kept, ...[...named.values()].filter((l) => !known.has(l.window))];
   let over = merged.length - USAGE_LIMITS_MAX;
-  return merged.filter((l) => named.has(l.window) || over-- <= 0);
+  return merged.filter((l) => named.has(l.window) || over-- <= 0).slice(0, USAGE_LIMITS_MAX);
 }

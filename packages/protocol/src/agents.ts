@@ -69,8 +69,9 @@ export const Activity = z.object({
     "failed",
     /**
      * Stopped by the account's limit, which resets on its schedule; failed when that can't be
-     * shown. It holds until the agent's next activity, not until `resetsAt`: a reader compares
-     * that with now to say whether the reset has passed.
+     * shown, as it can't be for a rate limit whose used-up window gives no reset. It holds until
+     * the agent's next activity, not until `resetsAt`: a reader compares that with now to say
+     * whether the reset has passed.
      */
     "limited",
     "unknown",

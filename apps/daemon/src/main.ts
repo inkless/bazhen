@@ -325,7 +325,7 @@ const runtime = new RoutedRuntime({
 const limits = new Limits({
   usage: (agentId) => store.usage(agentId),
   recordUsage: (agentId, usage) => store.recordUsage(agentId, usage),
-  record: (agentId, a) => void store.recordActivity(agentId, a),
+  record: (agentId, a) => store.recordActivity(agentId, a),
 });
 limits.follow((reactor) => store.react(reactor));
 // Follows Codex TUIs from thread to thread, by their terminals' titles (§5.8).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LimitStop } from "@bazhen/core";
 import { USAGE_LIMITS_MAX, type Activity, type Usage, type UsageLimit } from "@bazhen/protocol";
-import { Limits, mergeLimits } from "./limits.ts";
+import { LATE_READING_MS, Limits, mergeLimits } from "./limits.ts";
 
 const NOW = new Date("2026-11-18T12:00:00.000Z");
 const SOON = "2026-11-18T13:00:00.000Z";
@@ -22,6 +22,8 @@ const quota = at(stop.observedAt, "failed", "usageLimitExceeded");
 function setup(limits?: UsageLimit[]) {
   const held = new Map<string, Usage>(limits === undefined ? [] : [["a", { limits }]]);
   const recorded: Activity[] = [];
+  const gone = new Set<string>();
+  const clock = { now: NOW };
   const gate = new Limits({
     usage: (agentId) => held.get(agentId),
     recordUsage: (agentId, usage) => {
@@ -29,12 +31,12 @@ function setup(limits?: UsageLimit[]) {
       held.set(agentId, usage);
       return same ? null : 1;
     },
-    record: (_, a) => recorded.push(a),
-    now: () => NOW,
+    record: (agentId, a) => (gone.has(agentId) ? null : recorded.push(a)),
+    now: () => clock.now,
   });
   const report = (a: Activity, limit?: LimitStop) => gate.record("a", a, limit);
   const meter = (next: UsageLimit[]) => gate.recordUsage("a", { limits: next });
-  return { gate, held, recorded, report, meter };
+  return { gate, held, recorded, gone, clock, report, meter };
 }
 
 describe("Limits", () => {
@@ -159,6 +161,38 @@ describe("mergeLimits", () => {
       mergeLimits(undefined, [primary]),
       mergeLimits([primary, secondary], [{ ...primary, usedPercent: 100, resetsAt: SOON }]),
     ]).toEqual([[primary], [{ ...primary, usedPercent: 100, resetsAt: SOON }, secondary]]);
+  });
+
+  it("weighs a stop again only for a reading soon after it, not one of the account hours on", () => {
+    const s = setup();
+    s.report(stop, "rate");
+    s.clock.now = new Date(NOW.getTime() + LATE_READING_MS);
+    s.meter([{ window: "five_hour", usedPercent: 100, resetsAt: LATER }]);
+    s.clock.now = new Date(NOW.getTime() + LATE_READING_MS + 1);
+    s.meter([{ window: "five_hour", usedPercent: 100, resetsAt: "2026-11-25T13:00:00.000Z" }]);
+    expect(s.recorded.map((a) => [a.value, a.resetsAt])).toEqual([
+      ["failed", undefined],
+      ["limited", LATER],
+    ]);
+  });
+
+  it("holds no stop the store didn't record, as for an agent whose process has gone", () => {
+    const s = setup();
+    s.gone.add("a");
+    s.report(stop, "rate");
+    s.gone.delete("a");
+    s.meter([{ window: "five_hour", usedPercent: 100, resetsAt: SOON }]);
+    expect(s.recorded).toEqual([]);
+  });
+
+  it("keeps no more windows than usage holds, however many one update names", () => {
+    const update = Array.from({ length: USAGE_LIMITS_MAX + 5 }, (_, i) => ({
+      window: `w${i}`,
+      usedPercent: i,
+    }));
+    expect(mergeLimits([{ window: "old", usedPercent: 1 }], update).map((l) => l.window)).toEqual(
+      update.slice(0, USAGE_LIMITS_MAX).map((l) => l.window),
+    );
   });
 
   it("keeps no more windows than usage holds, dropping first the oldest the update didn't name", () => {
