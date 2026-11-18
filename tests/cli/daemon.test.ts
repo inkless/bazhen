@@ -573,7 +573,9 @@ describe("bazhen doctor", () => {
 
     it("says nothing of tmux terminals' containment while tmux is unused", async () => {
       const said = await tail({ containment: scoped, runtimes: withTmux("unused") });
-      expect(said.filter((l) => l.includes("tmux terminals"))).toEqual([]);
+      expect(said.slice(1)).toEqual([
+        "containment: each holder terminal in a systemd scope of its own, at most 50% (31.0 GiB) each with 0 (none) of swap, and infinity (no cap) together",
+      ]);
     });
 
     it("rounds a cap's GiB half up, as it is said, and notes a systemd too old for OOMPolicy", async () => {
