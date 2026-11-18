@@ -48,4 +48,15 @@ describe("readRun", () => {
       `${join(old, "events.jsonl")}:2 is an attach whose markers aren't runs`,
     );
   });
+
+  it("refuses an attach whose runs aren't whole marker numbers", async () => {
+    const dir = runDir("fractions", {
+      "events.jsonl": [
+        JSON.stringify({ kind: "attach", t: 3, name: "f1", snapshot: [[1.5, 3]], stream: [] }),
+      ],
+    });
+    await expect(readRun(dir)).rejects.toThrow(
+      `${join(dir, "events.jsonl")}:1 is an attach whose markers aren't runs`,
+    );
+  });
 });

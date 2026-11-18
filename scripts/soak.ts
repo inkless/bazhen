@@ -263,8 +263,8 @@ const isMarkerRuns = (value: unknown) =>
     (run: unknown) =>
       Array.isArray(run) &&
       run.length === 2 &&
-      typeof run[0] === "number" &&
-      typeof run[1] === "number" &&
+      Number.isSafeInteger(run[0]) &&
+      Number.isSafeInteger(run[1]) &&
       run[0] <= run[1],
   );
 

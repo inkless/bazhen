@@ -247,6 +247,11 @@ const stuckMarkers = (e: SoakEvent): SoakEvent =>
   e.kind === "attach" && e.name === "r1"
     ? { ...e, snapshot: markerRuns([1, 2, 3]), stream: markerRuns([4, 5]) }
     : e;
+/** Each attach's markers as one run, all in its snapshot and none left for its stream. */
+const allInSnapshot = (e: SoakEvent): SoakEvent =>
+  e.kind === "attach"
+    ? { ...e, snapshot: [[e.snapshot[0]?.[0] ?? 0, e.stream.at(-1)?.[1] ?? 0]], stream: [] }
+    : e;
 /** f1's attaches each seeing a million markers and more, in order, as a flood's do. */
 const flood = (e: SoakEvent): SoakEvent =>
   e.kind === "attach" && e.name === "f1"
@@ -792,6 +797,14 @@ describe("judge", () => {
     [
       "slow echo with no flood running",
       (events) => [...events, ...floodEchoes(100).map((e) => ({ ...e, flooding: false }))],
+    ],
+    [
+      "attaches that saw all their markers as one run in the snapshot, none in the stream",
+      (events) => events.map(allInSnapshot),
+    ],
+    [
+      "an attach whose newest marker, the last of a run of several, is the one written just before",
+      (events) => [...events, { kind: "marker", t: HOUR - 2 * SEC, name: "r1", n: 605 }],
     ],
   ];
 
