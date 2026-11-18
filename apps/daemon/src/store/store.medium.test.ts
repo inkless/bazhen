@@ -1764,6 +1764,79 @@ describe("terminalPids", () => {
   });
 });
 
+const holderAt = (generation: string, childPid: string) => ({
+  runtime: "holder",
+  locator: { holderPid: "700", holderStart: "1", childPid, childStart: "2", generation },
+});
+
+async function holderAgent() {
+  return withAgent((s) =>
+    fakeEnvironment(s, async (l) => ({
+      runtime: { terminalId: l.terminalId, ...holderAt("0", "701") },
+      externalRef: null,
+    })),
+  );
+}
+
+const adopted = (agentId: string, generation: string, childPid: string) =>
+  ({
+    type: "agent.process_adopted",
+    entityId: agentId,
+    actor: "system",
+    payload: { runtimeRef: holderAt(generation, childPid) },
+  }) as const;
+
+describe("adopting a process started outside the daemon", () => {
+  it("names the adopted process as the agent's, and the one it replaced as nobody's", async () => {
+    const { store, agentId } = await holderAgent();
+    store.append(adopted(agentId, "1", "900"));
+    const pids = store.terminalPids();
+    expect([pids.agents.get(900), pids.agents.has(701)]).toEqual([agentId, false]);
+  });
+
+  it("takes the generation it was found at, its terminal running and the agent waiting on its harness", async () => {
+    const { store, agentId, terminalId } = await holderAgent();
+    store.append({
+      type: "agent.exited",
+      entityId: agentId,
+      actor: "system",
+      payload: { exit: { type: "exited", code: 0 } },
+    });
+    store.append(adopted(agentId, "4", "900"));
+    expect(store.agentTerminal({ terminalId })).toMatchObject({
+      state: "starting",
+      terminalState: "running",
+      generation: 4,
+    });
+  });
+
+  it("forgets the replaced process's signal", async () => {
+    const { store, agentId } = await holderAgent();
+    store.recordActivity(agentId, activity("working", "2026-11-12T10:00:00.000Z"));
+    store.append(adopted(agentId, "1", "900"));
+    expect(store.latestActivity(agentId)).toBeUndefined();
+  });
+
+  it("refuses a process at a generation no later than the recorded one", async () => {
+    const { store, agentId } = await holderAgent();
+    store.append(adopted(agentId, "2", "900"));
+    expect(() => store.append(adopted(agentId, "2", "901"))).toThrow(/generation/);
+    expect(() => store.append(adopted(agentId, "1", "902"))).toThrow(/generation/);
+  });
+
+  it("moves a shell's terminal to the adopted process", () => {
+    const store = Store.open(dbPath());
+    const terminalId = runningShell(store);
+    store.append({
+      type: "terminal.process_adopted",
+      entityId: terminalId,
+      actor: "system",
+      payload: { runtimeRef: { runtime: "tmux", locator: { generation: "3" } } },
+    });
+    expect(store.shell(terminalId)).toMatchObject({ state: "running", generation: 3 });
+  });
+});
+
 describe("launch roles", () => {
   it("upgrades a schema-24 database, its agents launched in no role and with no prompt to have changed from", () => {
     const path = dbPath();

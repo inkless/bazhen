@@ -37,6 +37,7 @@ import { TerminalLimit } from "../terminals/budget.ts";
 import { launchAgent, localEnvironmentId } from "./launch.ts";
 import { renameAgent } from "./names.ts";
 import { AgentQueue } from "./queue.ts";
+import { reconcile } from "./reconcile.ts";
 import {
   AgentStateConflict,
   EnvironmentUnavailable,
@@ -161,6 +162,7 @@ async function running({
   const fail = (with_?: Error) => (failure = with_);
   return {
     store,
+    terminalId,
     budget,
     prompts,
     promptDir,
@@ -202,6 +204,8 @@ async function failedLaunch(store: Store): Promise<string> {
   return failed.agentId;
 }
 
+const nothing = () => {};
+
 describe("agent lifecycle", () => {
   it("records the exit of the agent's current generation, with how it ended", async () => {
     const { exit, agent } = await running();
@@ -212,10 +216,69 @@ describe("agent lifecycle", () => {
     });
   });
 
-  it("drops a report about an earlier generation of the terminal", async () => {
-    const { exit, agent } = await running();
-    exit("7");
-    expect(agent()).toMatchObject({ state: "running", exit: null });
+  it("takes an exit at a later generation as that of a process started outside the daemon", async () => {
+    const { store, exit, agent } = await running();
+    exit("7", { type: "exited", code: 3 });
+    const recorded = store.events(0).slice(-2);
+    expect([
+      agent()?.state,
+      agent()?.generation,
+      agent()?.exit,
+      recorded.map((e) => [e.type, e.actor]),
+    ]).toEqual([
+      "exited",
+      7,
+      { type: "exited", code: 3 },
+      [
+        ["agent.process_adopted", "system"],
+        ["agent.exited", "system"],
+      ],
+    ]);
+  });
+
+  it("respawns past a process started outside the daemon in an exited agent's terminal", async () => {
+    const { lifecycle, agentId, exit, agent, respawned } = await running();
+    exit("0");
+    exit("2");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 2 });
+    expect([respawned[0]?.generation, agent()?.generation]).toEqual([3, 3]);
+  });
+
+  it("takes a later exit in the terminal of an agent still waiting on its harness", async () => {
+    const { exit, agent } = await running({ starting: true });
+    exit("1");
+    expect([agent()?.state, agent()?.generation]).toEqual(["exited", 1]);
+  });
+
+  it("records the exit of a process adopted at boot that had already ended", async () => {
+    const { store, agentId, terminalId, exit, agent } = await running();
+    const ref = { terminalId, runtime: "tmux", locator: { generation: "1" } };
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: true }]),
+    );
+    const adopted = [agent()?.state, agent()?.generation];
+    exit("1");
+    expect([adopted, [agent()?.state, agent()?.generation]]).toEqual([
+      ["starting", 1],
+      ["exited", 1],
+    ]);
+  });
+
+  it("adopts a later process only once its own respawn is recorded", async () => {
+    let during = nothing;
+    const { lifecycle, agentId, exit, agent } = await running({
+      duringRespawn: () => during(),
+    });
+    exit("0");
+    during = () => exit("5");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    const respawned = [agent()?.state, agent()?.generation];
+    exit("5");
+    expect([respawned, [agent()?.state, agent()?.generation]]).toEqual([
+      ["starting", 1],
+      ["exited", 5],
+    ]);
   });
 
   it("records an exit once, though the environment reports it on every check", async () => {

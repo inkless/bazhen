@@ -24,6 +24,30 @@ describe("terminal state machine", () => {
     expect(terminal.next("exited", "close.requested")).toBe("closing");
   });
 
+  it("runs a process replaced from outside, without taking the next generation", () => {
+    expect([
+      advanceTerminal({ state: "running", generation: 3 }, "adopted"),
+      advanceTerminal({ state: "exited", generation: 3 }, "adopted"),
+    ]).toEqual([
+      { state: "running", generation: 3 },
+      { state: "running", generation: 3 },
+    ]);
+  });
+
+  it("adopts a process only while running or exited", () => {
+    const states = [
+      "creating",
+      "running",
+      "exited",
+      "unknown",
+      "lost",
+      "closing",
+      "closed",
+      "failed",
+    ] as const;
+    expect(states.filter((s) => terminal.accepts(s, "adopted"))).toEqual(["running", "exited"]);
+  });
+
   it("refuses to revive a closed terminal", () => {
     expect(() => terminal.next("closed", "respawned")).toThrow(InvalidTransition);
   });

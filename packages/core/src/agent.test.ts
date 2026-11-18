@@ -41,6 +41,32 @@ describe("agent session lifecycle", () => {
     ]).toEqual(["exited", "lost", "closing", false]);
   });
 
+  it("waits on its harness again when its terminal's process is replaced from outside", () => {
+    expect([
+      agent.next("running", "process.adopted"),
+      agent.next("exited", "process.adopted"),
+      agent.next("starting", "process.adopted"),
+    ]).toEqual(["starting", "starting", "starting"]);
+  });
+
+  it("adopts a process only while starting, running or exited", () => {
+    const states = [
+      "starting",
+      "running",
+      "exited",
+      "closing",
+      "lost",
+      "unknown",
+      "closed",
+      "failed",
+    ] as const;
+    expect(states.filter((s) => agent.accepts(s, "process.adopted"))).toEqual([
+      "starting",
+      "running",
+      "exited",
+    ]);
+  });
+
   it("cannot be respawned while still running", () => {
     expect(() => agent.next("running", "respawn.requested")).toThrow(InvalidTransition);
   });

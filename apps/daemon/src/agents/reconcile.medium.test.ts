@@ -78,9 +78,16 @@ function launchCut(store: Store) {
   return { agentId: agent.id, terminalId: agent.terminalId, retry };
 }
 
+/** An environment whose terminals record their generation, as runtimes' refs do. */
+const numbered = (s: Store) =>
+  fakeEnvironment(s, async (l) => ({
+    runtime: atGeneration(l.terminalId, String(l.generation)),
+    externalRef: null,
+  }));
+
 /** An agent the daemon died respawning: exited at generation 0, then a respawn asked for. */
-async function midRespawn() {
-  const fixture = await withAgent();
+async function midRespawn(environment?: (s: Store) => EnvironmentAdapter) {
+  const fixture = await withAgent(environment);
   exited(fixture.store, fixture.agentId);
   fixture.store.append({
     type: "agent.respawn_requested",
@@ -122,6 +129,35 @@ const lastReason = (
     .events(0)
     .filter((e) => e.entityId === agentId && e.type === type)
     .map((e) => e.payload);
+
+/** The ref the store records for `terminalId`'s process. */
+function recordedRef(store: Store, terminalId: RuntimeRef["terminalId"]): RuntimeRef {
+  const ref = store.agentTerminal({ terminalId })?.runtime;
+  if (ref == null) throw new Error(`no process recorded for ${terminalId}`);
+  return ref;
+}
+
+/** Each adoption recorded, with who recorded it and the process it names. */
+const adoptions = (store: Store) =>
+  store
+    .events(0)
+    .filter((e) => e.type === "agent.process_adopted")
+    .map((e) => ({ actor: e.actor, payload: e.payload }));
+
+/** How a mid-respawn agent settles when its terminal is found at `generation`. */
+const respawnSettled = async (generation: string) => {
+  const { store, agentId, terminalId } = await midRespawn(numbered);
+  const ref = atGeneration(terminalId, generation);
+  await reconcile(
+    store,
+    fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+  );
+  return [
+    agentOf(store)?.generation,
+    lastReason(store, agentId, "agent.respawn_rejected"),
+    adoptions(store).length,
+  ];
+};
 
 /** An environment that can't show any terminal it lacks is gone, as with an old server unsure. */
 const unproven = (s: Store) => ({ ...fakeEnvironment(s), gone: async () => false });
@@ -293,6 +329,102 @@ describe("reconcile", () => {
       agent?.terminalId,
       lastReason(store, agentId, "agent.relaunch_rejected"),
     ]).toEqual(["lost", lostTerminal, [{ reason: "daemon_restart" }]]);
+  });
+
+  it("adopts the process a running agent's terminal runs at a later generation, waiting on its harness", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered);
+    const ref = atGeneration(terminalId, "1");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect([agentOf(store)?.state, agentOf(store)?.generation, adoptions(store)]).toEqual([
+      "starting",
+      1,
+      [
+        {
+          actor: "system",
+          payload: { runtimeRef: { runtime: "tmux", locator: { generation: "1" } } },
+        },
+      ],
+    ]);
+  });
+
+  it("adopts a later process in an exited agent's terminal", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered);
+    exited(store, agentId);
+    const ref = atGeneration(terminalId, "2");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["starting", 2]);
+  });
+
+  it("adopts a later process in the terminal of an agent still waiting on its harness", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered, { starting: true });
+    const ref = atGeneration(terminalId, "1");
+    await reconcile(
+      store,
+      fakeEnvironment(store, undefined, () => [{ agentId, ref, dead: false }]),
+    );
+    expect([agentOf(store)?.state, agentOf(store)?.generation]).toEqual(["starting", 1]);
+  });
+
+  it("adopts by the generation the store counts, when the process's record names another", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered);
+    exited(store, agentId);
+    const system = { entityId: agentId, actor: "system" } as const;
+    store.append({ ...system, type: "agent.respawn_requested", payload: {} });
+    store.append({
+      ...system,
+      type: "agent.respawned",
+      payload: { externalRef: null, runtimeRef: { runtime: "tmux", locator: { generation: "0" } } },
+    });
+    const found = (generation: string) =>
+      fakeEnvironment(store, undefined, () => [
+        { agentId, ref: atGeneration(terminalId, generation), dead: false },
+      ]);
+    await reconcile(store, found("1"));
+    const kept = agentOf(store)?.generation;
+    await reconcile(store, found("2"));
+    expect([kept, agentOf(store)?.generation, adoptions(store).length]).toEqual([1, 2, 1]);
+  });
+
+  it("adopts only a generation later than the one recorded", async () => {
+    const { store, agentId, terminalId } = await withAgent(numbered);
+    const found = (generation: string) =>
+      fakeEnvironment(store, undefined, () => [
+        { agentId, ref: atGeneration(terminalId, generation), dead: false },
+      ]);
+    await reconcile(store, found("0"));
+    const recorded = agentOf(store)?.state;
+    await reconcile(store, found("1"));
+    expect([recorded, agentOf(store)?.state, agentOf(store)?.generation]).toEqual([
+      "running",
+      "starting",
+      1,
+    ]);
+  });
+
+  it("takes the next generation as its own respawn in an agent the daemon died respawning, and adopts one past it", async () => {
+    expect([await respawnSettled("1"), await respawnSettled("2")]).toEqual([
+      [1, [], 0],
+      [2, [{ reason: "daemon_restart" }], 1],
+    ]);
+  });
+
+  it("reaches a process started in the agent's terminal while the daemon was down", async () => {
+    const runtime = new FakeRuntime();
+    const { store, terminalId } = await withAgent((s) => local(s, runtime));
+    const recorded = recordedRef(store, terminalId);
+    runtime.exitProcess(recorded);
+    await runtime.respawn(recorded, { ...runtime.specOf(recorded), generation: 1 });
+    const environment = local(store, runtime);
+    await reconcile(store, environment);
+    await expect(
+      environment.signal({ runtime: recordedRef(store, terminalId), externalRef: null }, "SIGTERM"),
+    ).resolves.toBeUndefined();
   });
 
   it("concludes nothing of an agent whose old server may still run its terminal", async () => {

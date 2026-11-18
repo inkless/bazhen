@@ -10,6 +10,7 @@ export type TerminalEvent =
   | "target.absent"
   | "respawned"
   | "relinked"
+  | "adopted"
   | "close.requested"
   | "close.completed";
 
@@ -22,6 +23,7 @@ export const terminal = machine<TerminalState, TerminalEvent>("terminal", {
     "runtime.unreachable": "unknown",
     "target.absent": "lost",
     relinked: "running",
+    adopted: "running",
     "close.requested": "closing",
   },
   unknown: {
@@ -31,7 +33,12 @@ export const terminal = machine<TerminalState, TerminalEvent>("terminal", {
     relinked: "running",
     "close.requested": "closing",
   },
-  exited: { respawned: "running", "target.absent": "lost", "close.requested": "closing" },
+  exited: {
+    respawned: "running",
+    adopted: "running",
+    "target.absent": "lost",
+    "close.requested": "closing",
+  },
   lost: { "close.requested": "closing" },
   closing: { "close.completed": "closed" },
   closed: {},
@@ -45,7 +52,8 @@ export interface TerminalPosition {
 
 /**
  * Applies `event` through the table. A respawn or a re-link starts a new runtime incarnation, so
- * it takes the next generation, and commands aimed at an older one are stale.
+ * it takes the next generation, and commands aimed at an older one are stale. An adopted process
+ * was started outside the daemon, at a generation only the runtime knows, so its caller sets it.
  */
 export function advanceTerminal(at: TerminalPosition, event: TerminalEvent): TerminalPosition {
   const state = terminal.next(at.state, event);

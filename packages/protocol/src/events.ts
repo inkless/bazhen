@@ -153,6 +153,15 @@ export const EVENTS = {
   },
   /** A reachable environment no longer has the agent's terminal (§4.5, §7.1). */
   "agent.lost": { entity: "agent", payload: z.object({}) },
+  /**
+   * Its terminal runs a process started from outside the daemon, a later generation of the same
+   * holder than the one recorded, so the recorded process has ended. The agent waits on its
+   * harness again, as after any start.
+   */
+  "agent.process_adopted": {
+    entity: "agent",
+    payload: z.object({ runtimeRef: RuntimeRefPayload }),
+  },
   /** A respawn was asked for; the terminal is still the exited one until the next event. */
   "agent.respawn_requested": { entity: "agent", payload: z.object({}) },
   /** The terminal runs again, at the next generation, on the agent's harness session. */
@@ -318,6 +327,14 @@ export const EVENTS = {
     entity: "terminal",
     /** `daemon_restart`: the daemon died while opening it, and its session never appeared. */
     payload: z.object({ reason: z.enum(["open_rejected", "daemon_restart"]) }),
+  },
+  /**
+   * The shell's terminal runs a process started from outside the daemon, a later generation of the
+   * same holder than the one recorded.
+   */
+  "terminal.process_adopted": {
+    entity: "terminal",
+    payload: z.object({ runtimeRef: RuntimeRefPayload }),
   },
   /** A reachable runtime no longer has the shell, as after a reboot; it can be restarted. */
   "terminal.lost": { entity: "terminal", payload: z.object({}) },

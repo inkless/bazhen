@@ -11,6 +11,7 @@ const STARTS: ReadonlySet<string> = new Set([
   "agent.running",
   "agent.respawned",
   "agent.relaunched",
+  "agent.process_adopted",
 ]);
 /** The events after which an agent no longer waits on its harness. */
 const SETTLES: ReadonlySet<string> = new Set([

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HealthResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { closeHolderAt, holderSockets } from "../support/holder-close.ts";
-import { bazhen, Daemon } from "./daemon.ts";
+import { bazhen, Daemon, replaceHolderChild, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 
 let model: FakeModel;
@@ -147,5 +147,56 @@ describe("a holder daemon on a machine without tmux", () => {
       .toBe("sleep");
     view.close();
     expect(daemon.tmuxRan()).toEqual([expect.stringMatching(/ -V$/)]);
+  });
+});
+
+describe("an agent whose holder ran a new process while the daemon was down", () => {
+  let daemon: Daemon;
+  let agentId: string;
+
+  /** The agent's state and generation, as a client is shown them. */
+  const agent = async () => {
+    const found = (await snapshot(daemon)).agents.find((a) => a.id === agentId);
+    return [found?.state, found?.generation];
+  };
+  const command = (name: string, body: Record<string, unknown>) =>
+    daemon.request(`/v1/agents/${agentId}/${name}`, {
+      method: "POST",
+      body: { idempotencyKey: name, ...body },
+    });
+
+  beforeAll(async () => {
+    daemon = await Daemon.start({ modelUrl: model.url, runtime: "holder" });
+    const launched = await daemon.launch("replaced");
+    agentId = launched.agentId;
+    await daemon.running(agentId);
+    // A turn on disk, so the agent's session can be resumed once the new process exits.
+    await daemon.prompt(launched, "Remember the word kestrel.");
+    await waitUntil(
+      () => daemon.transcript(agentId).includes('"type":"assistant"'),
+      "the turn in its transcript",
+      30_000,
+    );
+    await daemon.crash();
+    const socket = daemon.holderOf(agentId);
+    if (socket === undefined) throw new Error(`${agentId} has no holder`);
+    await replaceHolderChild(socket, ["sleep", "600"]);
+    await daemon.restart();
+  }, 120_000);
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("takes the new process as the agent's own, waiting on its harness", async () => {
+    await expect.poll(agent, { timeout: 30_000 }).toEqual(["starting", 1]);
+  });
+
+  it("signals the new process, records its exit, and respawns past it", async () => {
+    expect(await command("signal", { generation: 1, signal: "SIGTERM" })).toMatchObject({
+      status: 200,
+    });
+    await expect.poll(agent, { timeout: 30_000 }).toEqual(["exited", 1]);
+    expect(await command("respawn", { generation: 1 })).toMatchObject({ status: 200 });
+    await expect.poll(async () => (await agent())[1], { timeout: 30_000 }).toBe(2);
   });
 });

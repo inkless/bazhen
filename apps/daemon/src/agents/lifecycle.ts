@@ -1,8 +1,10 @@
 import {
   advanceTerminal,
+  agent,
   AgentTerminalExists,
   agentCommands,
   HarnessRefused,
+  laterGeneration,
   newId,
   NoTerminal,
   NotResumable,
@@ -83,6 +85,37 @@ function refuseTaken(store: Store, agentId: AgentSessionId, externalRef: Externa
   if (others.length > 0) throw new ThreadTaken(agentId, externalRef.id, others);
 }
 
+/**
+ * Whether `found` runs `ref` as a process started outside the daemon, which it takes as its own: a
+ * later generation of the same holder or server than its record names, so the recorded process
+ * has ended. A start in flight owns its terminal, and the daemon's own respawn is in flight while
+ * its terminal is exited, so a starting agent is adopted only once its terminal runs. A closing one
+ * never is: its close ends the terminal whatever runs in it.
+ */
+export function adopts(found: AgentTerminal, ref: RuntimeRef): boolean {
+  if (!agent.accepts(found.state, "process.adopted")) return false;
+  if (found.state === "starting" && found.terminalState !== "running") return false;
+  return found.runtime !== null && laterGeneration(found.runtime, ref) && pastCount(found, ref);
+}
+
+/**
+ * Whether `ref`'s generation is past the one the store counts for the terminal, which an adoption
+ * must be: a record whose locator names another must not let one through that the store refuses.
+ */
+export function pastCount(found: { readonly generation: number | null }, ref: RuntimeRef): boolean {
+  return found.generation !== null && Number(ref.locator.generation) > found.generation;
+}
+
+/** Records `ref`, a process started outside the daemon, as the agent's own. */
+export function recordAdopted(store: Store, agentId: string, ref: RuntimeRef): number {
+  return store.append({
+    type: "agent.process_adopted",
+    entityId: agentId,
+    actor: "system",
+    payload: { runtimeRef: runtimePayload(ref) },
+  });
+}
+
 /** A message's states before it reaches its agent or can't. */
 const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
 
@@ -134,19 +167,29 @@ export class Lifecycle {
 
   /**
    * The environment reports every dead terminal on every check, so a report about a terminal that
-   * is no longer running, or about an earlier generation, changes nothing.
+   * is no longer running, or about an earlier generation, changes nothing. One about a later
+   * generation is of a process started outside the daemon, which is adopted as it exits.
    */
   private exited(ref: RuntimeRef, status: ExitStatus): void {
     const found = this.store.agentTerminal({ terminalId: ref.terminalId });
-    if (found?.terminalState == null || !terminal.accepts(found.terminalState, "process.exited"))
-      return;
-    if (ref.locator.generation !== String(found.generation)) return;
-    this.store.append({
+    if (found === undefined) return;
+    const exit = {
       type: "agent.exited",
       entityId: found.agentId,
       actor: "system",
       payload: { exit: status },
-    });
+    } as const;
+    if (adopts(found, ref)) {
+      this.store.transaction(() => {
+        recordAdopted(this.store, found.agentId, ref);
+        this.store.append(exit);
+      });
+      return;
+    }
+    if (found.terminalState == null || !terminal.accepts(found.terminalState, "process.exited"))
+      return;
+    if (ref.locator.generation !== String(found.generation)) return;
+    this.store.append(exit);
   }
 
   /**

@@ -1174,6 +1174,46 @@ export class Daemon {
   }
 }
 
+/**
+ * Replaces the program on the holder at `socket` with `argv`, from outside the daemon and over the
+ * holder's own protocol, as any client of its socket can: asks the holder to end its child, then
+ * to start `argv` at the next generation. Resolves with what the holder says it started.
+ */
+export async function replaceHolderChild(
+  socket: string,
+  argv: string[],
+): Promise<{ generation: number; childPid: number }> {
+  const connection = createConnection(socket);
+  connection.on("error", () => {});
+  const decoder = holderReplyDecoder();
+  const send = (frame: Parameters<typeof encodeHolderRequest>[0]) =>
+    connection.write(encodeHolderRequest(frame));
+  const respawned = new Promise<{ generation: number; childPid: number }>((resolve, reject) => {
+    connection.on("data", (chunk: Buffer) => {
+      const { frames, malformed } = decoder.push(new Uint8Array(chunk));
+      for (const frame of frames) {
+        if (frame.type === "hello") send({ type: "signal", id: 2, body: { signal: "SIGKILL" } });
+        if (frame.type === "exited") {
+          const generation = frame.body.generation + 1;
+          send({ type: "respawn", id: 3, body: { argv, cwd: "/", env: {}, generation } });
+        }
+        if (frame.type === "respawned") resolve(frame.body);
+        if (frame.type === "error") reject(new Error(`${socket} refused: ${frame.body.message}`));
+      }
+      if (malformed !== null) reject(new Error(`${socket} sent ${malformed}`));
+    });
+    connection.on("close", () => reject(new Error(`${socket} hung up before respawning`)));
+  });
+  send({ type: "hello", id: 1, body: { protocol: [HOLDER_PROTOCOL_VERSION] } });
+  const timer = setTimeout(() => connection.destroy(new Error(`${socket} didn't respawn`)), 10_000);
+  try {
+    return await respawned;
+  } finally {
+    clearTimeout(timer);
+    connection.end();
+  }
+}
+
 /** What a holder's terminal shows, read over the holder's own protocol, as a client would. */
 export interface HolderLook {
   /** The title its program set last. */

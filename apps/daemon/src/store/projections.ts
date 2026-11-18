@@ -186,6 +186,18 @@ export function project(db: Statements, e: Recorded): void {
       });
       return;
     }
+    case "agent.process_adopted": {
+      const { runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      advance(db, e.id, e.entityId, ["process.adopted", "adopted"], {
+        agent: { usage: null },
+        terminal: {
+          ...adoptedIncarnation(db, agentTerminalOf(db, e.entityId), runtimeRef),
+          exit: null,
+        },
+      });
+      forgetActivity(db, e.entityId);
+      return;
+    }
     case "agent.respawn_requested":
       advance(db, e.id, e.entityId, ["respawn.requested", null]);
       return;
@@ -316,6 +328,10 @@ export function project(db: Statements, e: Recorded): void {
     case "terminal.failed":
       EVENTS[e.type].payload.parse(e.payload);
       return moveShell(db, e, "runtime.rejected", FORGET_COMMAND);
+    case "terminal.process_adopted": {
+      const { runtimeRef } = EVENTS[e.type].payload.parse(e.payload);
+      return moveShell(db, e, "adopted", adoptedIncarnation(db, e.entityId, runtimeRef));
+    }
     case "terminal.lost":
       // Nothing runs in a shell that is gone.
       return moveShell(db, e, "target.absent", { foreground: null, report_token_hash: null });
@@ -623,6 +639,35 @@ const incarnation = (ref: { runtime: string; locator: Record<string, string> }):
   runtime: ref.runtime,
   locator: JSON.stringify(ref.locator),
 });
+
+/**
+ * The columns of a process adopted at the generation its ref names, which must be later than the
+ * terminal's: generations only rise, and commands aimed at an older one must stay stale.
+ */
+function adoptedIncarnation(
+  db: Statements,
+  terminalId: string | undefined,
+  ref: { runtime: string; locator: Record<string, string> },
+): Columns {
+  const row =
+    terminalId === undefined
+      ? undefined
+      : db.prepare("SELECT generation FROM terminals WHERE id = ?").get(terminalId);
+  if (row === undefined) throw new UnknownEntity("terminal", terminalId ?? "");
+  const generation = Number(ref.locator.generation);
+  if (!Number.isSafeInteger(generation) || generation <= Number(row.generation)) {
+    throw new Error(
+      `terminal ${terminalId}: an adopted process's generation must be above ${String(row.generation)}`,
+    );
+  }
+  return { ...incarnation(ref), generation };
+}
+
+/** The terminal an agent is on now. */
+function agentTerminalOf(db: Statements, agentId: string): string | undefined {
+  const row = db.prepare("SELECT terminal_id FROM agent_sessions WHERE id = ?").get(agentId);
+  return typeof row?.terminal_id === "string" ? row.terminal_id : undefined;
+}
 
 function moveMessage(db: Statements, e: Recorded, event: MailboxEvent, columns: Columns = {}) {
   const row = db.prepare("SELECT state FROM mailbox WHERE id = ?").get(e.entityId);
