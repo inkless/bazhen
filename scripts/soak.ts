@@ -381,6 +381,8 @@ const ORPHAN_AFTER_MS = 5 * SEC;
 /** How many of the last round's attaches run at once. */
 const FINAL_ATTACHES_AT_ONCE = 6;
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+export const sleepUntil = (at: number, now: () => number = Date.now) =>
+  sleep(Math.max(0, at - now()));
 /** How long a holder gets to answer: one that doesn't is missing from the sample, not its end. */
 const timeout = () => AbortSignal.timeout(5 * SEC);
 
@@ -873,7 +875,7 @@ class Soak {
         ),
       );
     }
-    await sleep(started + p.warmupMs - Date.now());
+    await sleepUntil(started + p.warmupMs);
     const from = Date.now();
     this.record({ kind: "window", t: from, phase: "measure" });
     // Timers never fire early, so the window is never short of what was asked.
@@ -1016,7 +1018,7 @@ class Soak {
     } finally {
       // The closed terminal's processes have had seconds to go; one still here outlived the
       // close, and may hold its PTY open.
-      await sleep(closedAt + ORPHAN_AFTER_MS - Date.now());
+      await sleepUntil(closedAt + ORPHAN_AFTER_MS);
       for (const pid of outliving(terminal, isAlive)) {
         this.record({ kind: "orphan", t: Date.now(), name, pid });
       }
