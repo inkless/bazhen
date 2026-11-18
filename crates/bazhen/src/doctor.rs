@@ -1,8 +1,9 @@
 //! What `bazhen status` and `bazhen doctor` say of the daemon, as lines.
 
 use bazhen_protocol::daemon::{
-    AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap, OriginsFrom,
-    Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals, ToolCalls, Web,
+    AgentCli, AgentShell, Containment, DoctorResponse, EnvSource, Holder, Lan, MemoryCap,
+    OriginsFrom, Refusing, RunningHolder, RuntimeHealthReport, RuntimeHealthState, Terminals,
+    ToolCalls, Web,
 };
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::nullable::Nullable;
@@ -95,6 +96,9 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
         );
     }
     out.extend(peer_reader_lines(&d.peer_reader));
+    if let Some(cli) = &d.agent_cli {
+        out.extend(agent_cli_lines(cli, d.agents.shell == AgentShell::Login));
+    }
     out.extend(settings_lines(d));
     if let Some(codex) = &d.codex {
         let server = codex.daemon.as_ref().map_or_else(
@@ -179,6 +183,40 @@ fn peer_reader_lines(reader: &Nullable<bazhen_protocol::daemon::PeerReader>) -> 
         ],
         Nullable::Value(reader) => vec![format!("peer reader: {}", reader.path)],
         Nullable::Absent => vec![],
+    }
+}
+
+/// The `bazhen` agents find on their PATH, and a warning when there is none or it isn't the build
+/// beside the daemon. A login shell's rc can change the PATH the daemon captured, so it is said.
+fn agent_cli_lines(cli: &AgentCli, login_shell: bool) -> Vec<String> {
+    let rc = if login_shell {
+        " (agents.shell = login: its rc may change this PATH)"
+    } else {
+        ""
+    };
+    match (&cli.on_path, &cli.expected) {
+        (Some(found), Some(built)) if found != built => vec![
+            format!("agent CLI: {found}"),
+            format!(
+                "  warning: that is not the bazhen built with this daemon ({built}), so agents may \
+                 speak another protocol; link {built} into a directory on the PATH agents start \
+                 with{rc}"
+            ),
+        ],
+        (Some(found), _) => vec![format!("agent CLI: {found}")],
+        (None, built) => {
+            let fix = match built {
+                Some(built) => format!("link {built} into a directory on it"),
+                None => "pnpm build builds it".to_owned(),
+            };
+            vec![
+                "agent CLI: none".to_owned(),
+                format!(
+                    "  warning: no bazhen on the PATH agents start with, so they can't run it; \
+                     {fix}{rc}"
+                ),
+            ]
+        }
     }
 }
 
@@ -507,6 +545,59 @@ mod tests {
                     short_id(PROTOCOL_ID)
                 ),
             ]
+        );
+    }
+
+    fn cli(expected: Option<&str>, on_path: Option<&str>) -> AgentCli {
+        AgentCli {
+            expected: expected.map(str::to_owned),
+            on_path: on_path.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn says_which_bazhen_agents_find_and_warns_of_another_build() {
+        let same = agent_cli_lines(&cli(Some("/r/bazhen"), Some("/r/bazhen")), false);
+        let unbuilt = agent_cli_lines(&cli(None, Some("/h/bazhen")), false);
+        let other = agent_cli_lines(&cli(Some("/r/bazhen"), Some("/h/bazhen")), false);
+        assert_eq!(same, ["agent CLI: /r/bazhen"]);
+        assert_eq!(unbuilt, ["agent CLI: /h/bazhen"]);
+        assert_eq!(
+            other,
+            [
+                "agent CLI: /h/bazhen",
+                "  warning: that is not the bazhen built with this daemon (/r/bazhen), so agents \
+                 may speak another protocol; link /r/bazhen into a directory on the PATH agents \
+                 start with"
+            ]
+        );
+    }
+
+    #[test]
+    fn warns_when_the_path_agents_start_with_holds_no_bazhen() {
+        let built = agent_cli_lines(&cli(Some("/r/bazhen"), None), false);
+        let unbuilt = agent_cli_lines(&cli(None, None), false);
+        assert_eq!(
+            built,
+            [
+                "agent CLI: none",
+                "  warning: no bazhen on the PATH agents start with, so they can't run it; link \
+                 /r/bazhen into a directory on it"
+            ]
+        );
+        assert_eq!(
+            unbuilt[1],
+            "  warning: no bazhen on the PATH agents start with, so they can't run it; pnpm build \
+             builds it"
+        );
+    }
+
+    #[test]
+    fn says_a_login_shells_rc_may_change_the_path() {
+        let lines = agent_cli_lines(&cli(Some("/r/bazhen"), None), true);
+        assert!(
+            lines[1].ends_with("on it (agents.shell = login: its rc may change this PATH)"),
+            "{lines:?}"
         );
     }
 }

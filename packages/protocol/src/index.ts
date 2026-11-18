@@ -80,6 +80,12 @@ export const DoctorResponse = z.object({
    * Absent from an older daemon.
    */
   peerReader: z.object({ path: z.string() }).nullable().optional(),
+  /**
+   * The `bazhen` agents run: `onPath` is the first one on the PATH the daemon captured for them,
+   * `expected` the one built beside the daemon, both as resolved paths, null for none. They
+   * differ when agents would run another build. Absent from an older daemon.
+   */
+  agentCli: z.object({ expected: z.string().nullable(), onPath: z.string().nullable() }).optional(),
   config: z.object({ path: z.string(), found: z.boolean() }),
   /** `agents.shell`, and the login shell agents start through when it is "login". */
   agents: z.object({ shell: z.enum(["direct", "login"]), loginShell: z.string().nullable() }),

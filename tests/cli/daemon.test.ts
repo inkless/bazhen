@@ -137,6 +137,16 @@ const doctorWith = (peerReader: DoctorResponse["peerReader"]) => {
   return s.bazhen(["doctor"]);
 };
 
+/** The doctor lines about the bazhen agents find, from a daemon that reports `agentCli`. */
+const agentCliLines = async (agentCli: DoctorResponse["agentCli"]) => {
+  s.daemon
+    .answer("GET /v1/health", HealthResponse, health())
+    .answer("GET /v1/daemon/doctor", DoctorResponse, doctor({ agentCli }));
+  return lines((await s.bazhen(["doctor"])).stdout).filter((l) =>
+    /agent CLI|that is not|no bazhen/.test(l),
+  );
+};
+
 /** The doctor's codex line and the one after it, from a daemon whose Codex reads as `toolCalls`. */
 const codexLines = async (toolCalls: "marked" | "unmarked" | "unread" | null) => {
   s.daemon
@@ -242,6 +252,21 @@ describe("bazhen doctor", () => {
       "peer reader: none",
       "  warning: the daemon can't read which process calls on its socket, so a call from inside an agent that presents nothing passes as yours; pnpm build builds bazhen-peer, so this install is incomplete",
     ]);
+  });
+
+  it("says which bazhen agents find, and warns when it is none or another build", async () => {
+    expect(await agentCliLines({ expected: "/r/bazhen", onPath: "/r/bazhen" })).toEqual([
+      "agent CLI: /r/bazhen",
+    ]);
+    expect(await agentCliLines({ expected: "/r/bazhen", onPath: "/h/bazhen" })).toEqual([
+      "agent CLI: /h/bazhen",
+      "  warning: that is not the bazhen built with this daemon (/r/bazhen), so agents may speak another protocol; link /r/bazhen into a directory on the PATH agents start with",
+    ]);
+    expect(await agentCliLines({ expected: "/r/bazhen", onPath: null })).toEqual([
+      "agent CLI: none",
+      "  warning: no bazhen on the PATH agents start with, so they can't run it; link /r/bazhen into a directory on it",
+    ]);
+    expect(await agentCliLines(undefined)).toEqual([]);
   });
 
   it("fails when any runtime can't be read, not only tmux", async () => {
