@@ -52,6 +52,13 @@ const FIXTURES: Record<string, string> = {
   "packages/host-guard/src/p.test.ts":
     'export { signalPaneAt } from "./signal.ts";\nexport { vouchHolderWith } from "./holder.ts";\n',
   "packages/host-guard/src/q.medium.test.ts": 'export { killHolderAt } from "./signal.ts";\n',
+  "apps/daemon/src/u.ts":
+    'export { WebSocketServer } from "ws";\n' +
+    'import ws from "ws";\nexport const server = ws.Server;\n' +
+    'export type { WebSocket as Socket } from "ws";\n',
+  "apps/daemon/src/http/connections.ts": 'export { WebSocketServer } from "ws";\n',
+  "apps/daemon/src/testing/v.ts": 'export { WebSocketServer } from "ws";\n',
+  "apps/daemon/src/w.medium.test.ts": 'export { WebSocketServer } from "ws";\n',
   "tests/holder/g.test.ts":
     'export { spawn } from "node:child_process";\nexport { spawn as pty } from "node-pty";\n' +
     'export { createRequire } from "node:module";\nexport { fork } from "cluster";\n' +
@@ -131,6 +138,11 @@ describe("the generated oxlint config, run by oxlint", () => {
       "packages/host-guard/src/t.ts": [],
       "packages/host-guard/src/p.test.ts": [],
       "packages/host-guard/src/q.medium.test.ts": [],
+      // A WebSocket server is made only where each socket is heard, and in tests.
+      "apps/daemon/src/u.ts": ["eslint(no-restricted-imports)", "eslint(no-restricted-imports)"],
+      "apps/daemon/src/http/connections.ts": [],
+      "apps/daemon/src/testing/v.ts": [],
+      "apps/daemon/src/w.medium.test.ts": [],
     });
   });
 });

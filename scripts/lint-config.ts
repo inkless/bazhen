@@ -29,6 +29,11 @@ export type Area = {
   hostGuardModules?: string[];
   /** Its `*At` and `*With` forms, which take a clock or replace a check, are for its tests alone. */
   seamsForTestsOnly?: boolean;
+  /**
+   * The files, under `dir`, that may make a ws WebSocketServer; its other product code upgrades
+   * through theirs, which hears each socket before a route serves it.
+   */
+  webSocketServersIn?: string[];
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -138,7 +143,11 @@ export const MATRIX: Area[] = [
     platformFree: true,
     thirdParty: RUNTIME_LIBS,
   },
-  { dir: "apps/daemon", banned: ["@bazhen/web"] },
+  {
+    dir: "apps/daemon",
+    banned: ["@bazhen/web"],
+    webSocketServersIn: ["src/http/connections.ts", "src/testing/**"],
+  },
   // The black-box suite: it reaches the daemon only over its public surfaces. It may use
   // @bazhen/host-guard, a dependency-free safety guard rather than a daemon internal, to run tmux.
   {
@@ -301,7 +310,25 @@ function seamsPattern(where: string): Pattern {
   };
 }
 
-function restrictions(area: Area, smallTest: boolean, test: boolean): Restriction {
+/**
+ * Bans making a ws WebSocketServer but in the files an area names: ws reports a frame it refuses
+ * as an `error` on the socket, so a server that doesn't hear each one lets any client end the
+ * process. Its default export carries the server as `.Server`, so it is banned too.
+ */
+function webSocketServers(where: string, area: Area): Pattern {
+  return {
+    group: ["ws"],
+    importNamePattern: "^(?:WebSocketServer|default)$",
+    message: `${where} makes WebSocket servers only through heardWebSockets in ${area.webSocketServersIn?.[0] ?? "its connections module"}, which hears each socket (docs/standards/code.md).`,
+  };
+}
+
+function restrictions(
+  area: Area,
+  smallTest: boolean,
+  test: boolean,
+  makesWebSocketServers = false,
+): Restriction {
   const where = `${area.dir} (tech-stack-and-scaffold.md §3, docs/standards/code.md)`;
   const patterns: Pattern[] = [
     ...area.banned.map((p) => packagePatterns(p, `${where} must not import ${p}.`, false)),
@@ -319,6 +346,8 @@ function restrictions(area: Area, smallTest: boolean, test: boolean): Restrictio
   ];
   if (area.dir !== "packages/host-guard") patterns.push(hostGuardByPath(where, area));
   if (area.seamsForTestsOnly === true && !test) patterns.push(seamsPattern(where));
+  if (area.webSocketServersIn !== undefined && !test && !makesWebSocketServers)
+    patterns.push(webSocketServers(where, area));
   if (area.thirdParty?.length) {
     patterns.push({
       group: area.thirdParty,
@@ -374,6 +403,14 @@ function overrides(): Override[] {
         files: [`${area.dir}/**/*.medium.test.ts`],
         rules: { ...base, "no-restricted-imports": restrictions(area, false, true) },
       },
+      ...(area.webSocketServersIn === undefined
+        ? []
+        : [
+            {
+              files: area.webSocketServersIn.map((f) => `${area.dir}/${f}`),
+              rules: { ...base, "no-restricted-imports": restrictions(area, false, false, true) },
+            },
+          ]),
     ];
   });
   // Everything no area covers, tests/support and the root's files among them, gets the ban on

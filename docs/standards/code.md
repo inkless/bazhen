@@ -58,12 +58,12 @@ Each layer has one job:
   listener ends it: a child that exits before reading its stdin breaks the pipe whenever it likes.
   So each async start in product source is wrapped in `heard()` where it is made, and its exit and
   callback say how it ended. The daemon's servers hear each connection they accept and each
-  WebSocket they upgrade the same way (`apps/daemon/src/http/connections.ts`). The PTY seam hangs up
-  by closing the PTY, and the kernel hangs up whichever session holds the terminal then: node-pty
-  reaps its child before anyone hears it exit, so nothing signals that child by its pid. Rust sends
-  through `bazhen-test-signal` in tests and `crates/bazhen-holder/src/guard.rs` in the holder, which
-  sends only to the holder's own unreaped child's group or a process in the session that child leads
-  (`testing.md` § Hermeticity).
+  WebSocket they upgrade the same way (`apps/daemon/src/http/connections.ts`), the one product
+  module lint lets make a WebSocket server. The PTY seam hangs up by closing the PTY, and the kernel
+  hangs up whichever session holds the terminal then: node-pty reaps its child before anyone hears
+  it exit, so nothing signals that child by its pid. Rust sends through `bazhen-test-signal` in
+  tests and `crates/bazhen-holder/src/guard.rs` in the holder, which sends only to the holder's own
+  unreaped child's group or a process in the session that child leads (`testing.md` § Hermeticity).
 - `apps/daemon` is the composition root: it wires the adapters and implementations into core.
 - `apps/web` is the client: it talks to the daemon only through the protocol.
 - `tests/holder` runs only on a disposable host, and imports the holder client and nothing that
