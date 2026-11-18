@@ -137,7 +137,10 @@ export default defineConfig<object, DaemonOptions>({
         reuseExistingServer: false,
       },
       {
-        command: clean(env, "pnpm --filter @bazhen/web exec vite"),
+        // The web package's dev script, which runs vite with V8's fast API calls off: on Node 26 a
+        // multi-MB module's response can abort vite in Buffer.byteLength (nodejs/node#66870). The
+        // flag goes once the Node pin carries the fix, nodejs/node#67136.
+        command: clean(env, "pnpm --filter @bazhen/web run dev"),
         url: webOrigin(daemon),
         reuseExistingServer: false,
       },
