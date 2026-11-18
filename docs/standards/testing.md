@@ -59,20 +59,20 @@ worker each. An api test that reads its terminals through tmux starts its daemon
 tmux refuse on any other daemon. The e2e suite starts a daemon per runtime, each a Playwright
 project named for it: every spec runs on the tmux daemon, and those `RUNTIME_AGNOSTIC_SPECS`
 (`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec that reads tmux reaches it
-through `daemonTmux()`, which refuses on the holder project. Each
-run's containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS`
-overrides it), because a suite that starts a busy process per core would otherwise take every
-core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
-the slice's cap holds every run's containers together, and each gets a memory cap of half the
-machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its
-container. A probe container checks they land there first, which they do under rootless Podman,
-or rootless Docker with the systemd cgroup driver, under a user systemd. Where they can't, as under
-rootful Docker or Docker Desktop, the run refuses to start, except on a disposable host, which no
-other run shares: there each container gets a quarter of the machine. A run removes its
-containers, image and build context on every exit it sees, Ctrl-C, SIGTERM and SIGHUP included,
-and gives each cleanup command 30 seconds; a second signal abandons the cleanup. What a run killed
-outright or abandoned left, the next run on the same machine removes: it sweeps the stopped containers, images and contexts whose owning process is gone, and an
-image only once no container uses it.
+through `daemonTmux()`, which refuses on the holder project. Each run's containers have no network
+and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it), because a suite that starts a
+busy process per core would otherwise take every core from the agents working on the same machine.
+They run in `bazhen-tests.slice`, so the slice's cap holds every run's containers together, and each
+gets a memory cap of half the machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides
+it), so a runaway dies in its container. A probe container checks they land there first, which they
+do under rootless Podman, or rootless Docker with the systemd cgroup driver, under a user systemd.
+Where they can't, as under rootful Docker or Docker Desktop, the run refuses to start, except on a
+disposable host, which no other run shares: there each container gets a quarter of the machine. A
+run removes its containers, image and build context on every exit it sees, Ctrl-C, SIGTERM and
+SIGHUP included, and gives each cleanup command 30 seconds; a second signal abandons the cleanup.
+What a run killed outright or abandoned left, the next run on the same machine removes: it sweeps
+the stopped containers, images and contexts whose owning process is gone, and an image only once no
+container uses it.
 Docker's build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection
 bounds it, and `docker builder prune` reclaims it on a machine of your own. Under Podman, where
 `docker` is the podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on

@@ -59,6 +59,8 @@ export const e2eDaemons = () => RUNTIMES.map(e2eDaemon);
 
 export const webOrigin = (daemon: E2eDaemon) => `http://127.0.0.1:${daemon.webPort}`;
 
+const STOP_MS = 15_000;
+
 const socketOf = (home: string) => join(home, "run", "bazhen.sock");
 
 /** One request to the daemon at `home` over its socket, as the CLI makes it; answers the JSON body. */
@@ -110,9 +112,12 @@ function answers(home: string): Promise<boolean> {
 export async function stopDaemon(home: string): Promise<void> {
   if (!existsSync(socketOf(home)) || !(await answers(home))) return;
   await socketCall(home, "POST", "/v1/daemon/stop");
-  for (let waited = 0; waited < 5_000; waited += 100) {
+  // A daemon with agents still running takes a while to stop: a timeout here should mean a hang.
+  for (let waited = 0; waited < STOP_MS; waited += 100) {
     if (!(await answers(home))) return;
     await delay(100);
   }
-  throw new Error(`the daemon at ${home} still answers 5 s after it was asked to stop`);
+  throw new Error(
+    `the daemon at ${home} still answers ${STOP_MS / 1000} s after it was asked to stop`,
+  );
 }

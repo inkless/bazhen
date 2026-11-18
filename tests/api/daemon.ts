@@ -1120,10 +1120,13 @@ export class Daemon {
       ? run("codex", ["app-server", "daemon", "stop"], { env: this.env, timeout: 90_000 })
       : undefined;
     this.#tmuxServer.killServer();
-    await closeHoldersUnder(this.home);
-    await codexStopped;
-    // The agents' processes may still be writing their state as the server goes down.
-    rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try {
+      await closeHoldersUnder(this.home);
+    } finally {
+      await codexStopped;
+      // The agents' processes may still be writing their state as the server goes down.
+      rmSync(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
   }
 }
 
