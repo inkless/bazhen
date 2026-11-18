@@ -1191,19 +1191,24 @@ describe("renameRefusal, when git renamed a file", () => {
   });
 
   it("refuses a move whose file isn't TypeScript on any side, since falsify can't read its tests", () => {
-    const [oldTsx, newJsx] = [`${FILE}x`, OTHER.replace(/\.ts$/, ".jsx")];
+    const [oldTsx, oldJsx] = [`${FILE}x`, FILE.replace(/\.ts$/, ".jsx")];
+    const newJsx = OTHER.replace(/\.ts$/, ".jsx");
     const from = end("adds one", BASE_TESTS, LEFT);
     const to = end("adds one", undefined, movedTo("adds one"), OTHER);
     expect([
       renameRefusal(from, to),
       renameRefusal({ ...from, file: oldTsx }, to),
       renameRefusal({ ...from, counterpart: oldTsx }, to),
+      renameRefusal({ ...from, file: oldJsx }, to),
+      renameRefusal({ ...from, counterpart: oldJsx }, to),
       renameRefusal(from, { ...to, counterpart: newJsx }),
       renameRefusal(from, { ...to, file: newJsx }),
     ]).toEqual([
       undefined,
       `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
       `${oldTsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldJsx}: falsify reads tests only from .ts, .mts and .cts files`,
+      `${oldJsx}: falsify reads tests only from .ts, .mts and .cts files`,
       `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
       `${newJsx}: falsify reads tests only from .ts, .mts and .cts files`,
     ]);

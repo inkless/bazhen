@@ -434,7 +434,8 @@ export type RenameEnd = FileSides & { title: string };
  * at HEAD; `to` the new file at HEAD and the file git pairs it with at the base. It is a rename
  * only when the old title is one test in the old file at the base and none in it at HEAD, the new
  * title one in the new file at HEAD and none in it at the base, and the test's block is the base's
- * with only its title changed. A file whose path on either side isn't plain TypeScript is never read.
+ * with only its title changed. A file whose path on either side isn't plain TypeScript is never
+ * read.
  */
 export function renameRefusal(from: RenameEnd, to: RenameEnd): string | undefined {
   const oldAtHead = from.counterpart ?? from.file;
