@@ -8,6 +8,7 @@ import {
   main,
   parseSoakArgs,
   profile,
+  type Profile,
   ptyMasters,
   outliving,
   screenOf,
@@ -23,17 +24,32 @@ const HOUR = 3_600_000;
 const bytes = (text: string) => Buffer.from(text, "utf8");
 /** What a terminal's output processing makes of a worker's writes: each CR LF is CR CR LF. */
 const pty = (text: string) => text.replaceAll("\r\n", "\r\r\n");
+/** How often `p` restarts the daemon; zero for one that never does. */
+const restartEvery = (p: Profile) => p.restart?.everyMs ?? 0;
 
 describe("profile", () => {
   it("runs the gate's load at §12.4's rates, judged on the gate's bars over the hours asked", () => {
     const gate = profile("gate", 24);
     expect(gate.load).toEqual({ replay: 15, flood: 5, idle: 3, echo: 1 });
-    expect([gate.warmupMs, gate.restartEveryMs, gate.agentCycleEveryMs]).toEqual([
+    expect([gate.warmupMs, gate.restart?.everyMs, gate.agentCycleEveryMs]).toEqual([
       HOUR,
       600_000,
       300_000,
     ]);
     expect(gate.judge).toEqual({ ...GATE, minMeasuredMs: 24 * HOUR });
+  });
+
+  it("runs the long life as the gate does, but never restarts the daemon and judges its one life", () => {
+    const gate = profile("gate", 72);
+    const long = profile("long-life", 72);
+    const { restart: _, ...churn } = gate.judge.churnEveryMs;
+    expect(long).toEqual({
+      ...gate,
+      name: "long-life",
+      restart: null,
+      judge: { ...gate.judge, daemon: { lives: "one" }, churnEveryMs: churn },
+    });
+    expect(long.judge.churnEveryMs).not.toHaveProperty("restart");
   });
 
   it("runs the smoke's same load faster, leaving what only hours show unmeasured", () => {
@@ -51,12 +67,12 @@ describe("profile", () => {
 
   it("takes four settled samples a daemon life: a warm-up, a baseline and two held to it", () => {
     for (const p of [profile("gate", 24), profile("smoke", 0.2)]) {
-      expect(p.restartEveryMs / p.settleEveryMs).toBeGreaterThanOrEqual(4);
+      expect(restartEvery(p) / p.settleEveryMs).toBeGreaterThanOrEqual(4);
     }
   });
 
   it("asks for twice the seams its bar needs, since a seam is kept only when output pauses", () => {
-    for (const p of [profile("gate", 24), profile("smoke", 0.2)]) {
+    for (const p of [profile("gate", 24), profile("long-life", 24), profile("smoke", 0.2)]) {
       expect(HOUR / p.seamEveryMs).toBeGreaterThanOrEqual(2 * p.judge.seamsPerHour);
     }
   });
@@ -64,11 +80,16 @@ describe("profile", () => {
   it("judges the churn at the cadence it runs", () => {
     for (const p of [profile("gate", 24), profile("smoke", 0.2)]) {
       expect(p.judge.churnEveryMs).toEqual({
-        restart: p.restartEveryMs,
+        restart: restartEvery(p),
         agent: p.agentCycleEveryMs,
         idle: p.idleChurnEveryMs,
       });
     }
+    const long = profile("long-life", 24);
+    expect(long.judge.churnEveryMs).toEqual({
+      agent: long.agentCycleEveryMs,
+      idle: long.idleChurnEveryMs,
+    });
   });
 
   it("churns idle shells no faster than each can be checked twice before it closes", () => {
@@ -99,6 +120,13 @@ describe("parseSoakArgs", () => {
       out: "/r",
       faults: ["close-holder"],
       profile: { name: "smoke", hours: 0.1 },
+    });
+  });
+
+  it("runs the long life for a day by default", () => {
+    expect(parseSoakArgs(["--profile", "long-life"], now)).toMatchObject({
+      profile: { name: "long-life", hours: 24 },
+      out: expect.stringMatching(/soak-long-life-2026-11-16T10-00-00-000Z$/),
     });
   });
 

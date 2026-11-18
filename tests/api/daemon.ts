@@ -273,6 +273,7 @@ export class Daemon {
   readonly env: Record<string, string>;
   private port = 0;
   private process: ChildProcess | undefined;
+  #exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
   private output = "";
 
   private constructor(home: string, opts: DaemonOptions) {
@@ -542,6 +543,12 @@ export class Daemon {
       : child.pid;
   }
 
+  /** How the daemon process this helper last started exits, once it has. */
+  get exited(): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    if (this.#exited === undefined) throw new Error("no daemon was started");
+    return this.#exited;
+  }
+
   /** The daemon's Unix socket, beside its tmux server. */
   get socket(): string {
     return join(this.home, "run", "bazhen.sock");
@@ -554,6 +561,9 @@ export class Daemon {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.process = child;
+    this.#exited = new Promise((resolve) =>
+      child.once("exit", (code, signal) => resolve({ code, signal })),
+    );
     this.output = "";
     child.stdout.on("data", (d: Buffer) => (this.output += d.toString()));
     child.stderr.on("data", (d: Buffer) => (this.output += d.toString()));

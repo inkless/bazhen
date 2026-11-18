@@ -291,6 +291,14 @@ directory as it happens, so one cut short keeps its evidence: the driver's recor
 worker's, the driver's log, and the verdict as JSON and as text. `pnpm soak --judge <dir>` judges a directory
 again.
 
+The gate's restarts mean each daemon life lasts 10 minutes, so its daemon-memory criterion shows
+only that nothing grows across restarts. The **long-life profile** (`pnpm soak --profile
+long-life`) is the gate's without them: one daemon for the whole run. Its daemon-memory criterion
+fits that daemon's RSS over the window against the same bar, and fails if the daemon went down,
+went unread or changed pid. Its echo criterion also holds each measured hour to the bar, since a
+heap that ages slows its later hours first. A daemon that dies ends the run there, with the death
+recorded. Probes no longer have to be taken while the daemon is down, since it never is.
+
 It runs three ways:
 
 - **`pnpm test:real soak`** runs the smoke profile in the container: the same load with the churn
@@ -306,13 +314,15 @@ It runs three ways:
   of its own. **That host is a VM, or a machine used for nothing else, never the owner's daily
   machine:** the run's holders signal every process in their sessions, and a wrong pid there ends
   work that matters.
+  The long-life profile's runs, `pnpm soak --profile long-life --hours 24` or longer, go on the
+  same kind of host.
 
 ### Runbook: a long run on a VM
 
 On a Linux x86_64 host with KVM, `pnpm soak:vm` (`scripts/soak-vm.sh`) runs the steps below in a
 libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); `create [--commit
 <sha>]` makes an Ubuntu 24.04 VM and provisions it at the commit, `main` by default; `start
-[--hours 24]` marks the VM disposable and starts the run; `status` shows it; `collect` copies the
+[--profile gate|long-life] [--hours 24]` marks the VM disposable and starts the run; `status` shows it; `collect` copies the
 run's directory and log to `~/bazhen-soak-results`; `destroy` deletes the VM after asking.
 Everything that marks the VM or starts the soak runs over ssh only after the far end proves it is
 the VM `create` made: its hostname, a machine-id that isn't the host's, and an instance token

@@ -21,7 +21,13 @@ const END = 130 * MIN;
 const LIFE = 10 * MIN;
 
 /** The gate's bars over a two-hour run, with seams sampled at a rate a test can list. */
-const OPTIONS: JudgeOptions = { ...GATE, minMeasuredMs: 2 * HOUR, seamsPerHour: 10 };
+const AGE = 9 * MIN;
+const OPTIONS: JudgeOptions = {
+  ...GATE,
+  minMeasuredMs: 2 * HOUR,
+  seamsPerHour: 10,
+  daemon: { lives: "many", ageMs: AGE },
+};
 
 const HOLDERS: readonly HolderSample[] = [
   {
@@ -785,9 +791,7 @@ describe("judge", () => {
       (events) =>
         mapSamples(
           events,
-          withDaemon((d, s) =>
-            d.ageMs >= OPTIONS.daemonAgeMs ? {} : { rss: 50 * MiB + (s.t / HOUR) * 10 * MiB },
-          ),
+          withDaemon((d, s) => (d.ageMs >= AGE ? {} : { rss: 50 * MiB + (s.t / HOUR) * 10 * MiB })),
         ),
     ],
     [
@@ -915,6 +919,203 @@ describe("judge", () => {
       (c) => c.name === "output-loss",
     );
     expect(loss?.status).toBe("pass");
+  });
+});
+
+/** The same bars, for a run whose one daemon lives throughout, with no restart to churn. */
+const ONE_LIFE: JudgeOptions = {
+  ...OPTIONS,
+  daemon: { lives: "one" },
+  churnEveryMs: { agent: 5 * MIN, idle: MIN },
+};
+const DAEMON_PID = 1000;
+
+/** The clean run with one daemon throughout: never killed, so never down and never restarted. */
+function oneLifeRun(): SoakEvent[] {
+  return cleanRun()
+    .filter(
+      (e) =>
+        e.kind !== "daemon" &&
+        !(e.kind === "step" && e.step === "restart") &&
+        !(e.kind === "sample" && e.daemon === null),
+    )
+    .map((e) =>
+      e.kind === "sample" && e.daemon !== null
+        ? { ...e, daemon: { ...e.daemon, pid: DAEMON_PID, ageMs: e.t } }
+        : e,
+    );
+}
+
+const criterion = (events: readonly SoakEvent[], name: string, options = ONE_LIFE) =>
+  judge(events, options).criteria.find((c) => c.name === name);
+const died = (t: number): SoakEvent => ({
+  kind: "daemon",
+  t,
+  up: false,
+  why: "it was killed by SIGKILL",
+});
+/** `count` keystrokes timed during floods from `t`, a second apart, each echoed in `ms`. */
+const floodEchoesFrom = (t: number, ms: number, count: number) =>
+  Array.from({ length: count }, (_, i): SoakEvent => ({
+    kind: "echo",
+    t: t + i * SEC,
+    ms,
+    flooding: true,
+  }));
+const HOUR_TWO = MEASURE + HOUR;
+/** What a run recorded in its warm-up, before it recorded its window. */
+const inWarmUp = (e: SoakEvent) => e.t < MEASURE && e.kind !== "window";
+const notEchoInHourOne = (e: SoakEvent) => e.kind !== "echo" || e.t < MEASURE || e.t >= HOUR_TWO;
+
+describe("judge, with one daemon life", () => {
+  it("passes a run whose one daemon meets every bar, which the restarting gate can't judge", () => {
+    expect(notPassing(oneLifeRun(), ONE_LIFE)).toEqual([]);
+    expect(notPassing(oneLifeRun(), OPTIONS)).toEqual([
+      "probes: unmeasured",
+      "daemon-memory: fail",
+      "churn: fail",
+    ]);
+  });
+
+  it("reads the one daemon's RSS over the window, with where it began, ended and peaked", () => {
+    const events = mapSamples(
+      mapSamples(
+        oneLifeRun(),
+        withDaemon((_, s) => ({ rss: (100 + (0.5 * s.t) / HOUR) * MiB })),
+      ),
+      onlyAt(
+        HOUR,
+        withDaemon(() => ({ rss: 140 * MiB })),
+      ),
+    );
+    expect(criterion(events, "daemon-memory")).toEqual({
+      name: "daemon-memory",
+      status: "pass",
+      detail:
+        "one life, 0.50 MiB/h; RSS 100.1 MiB at the window's start, 101.1 at its end, 140.0 at most",
+    });
+  });
+
+  it.each([
+    [0.5, "pass", "one life, 0.50 MiB/h"],
+    [1, "fail", "the daemon grew 1.00 MiB/h in its one life"],
+    [2, "fail", "the daemon grew 2.00 MiB/h in its one life"],
+  ])("judges a daemon growing %f MiB an hour in its one life: %s", (perHour, status, detail) => {
+    const events = mapSamples(oneLifeRun(), daemonGrowing(perHour));
+    expect(criterion(events, "daemon-memory")).toMatchObject({
+      status,
+      detail: expect.stringContaining(detail),
+    });
+  });
+
+  it("passes in-life growth across restarts, read at the same age in each life", () => {
+    const sawtooth = withDaemon((d) => ({ rss: 100 * MiB + (d.ageMs / HOUR) * 6 * MiB }));
+    expect(criterion(mapSamples(cleanRun(), sawtooth), "daemon-memory", OPTIONS)?.status).toBe(
+      "pass",
+    );
+    const growing = mapSamples(
+      oneLifeRun(),
+      withDaemon((d) => ({ rss: 100 * MiB + (d.ageMs / HOUR) * 6 * MiB })),
+    );
+    expect(criterion(growing, "daemon-memory")?.status).toBe("fail");
+  });
+
+  it("fails a daemon that died, on daemon-memory alone, saying when and how", () => {
+    const events = [...oneLifeRun(), died(HOUR)];
+    expect(notPassing(events, ONE_LIFE)).toEqual(["daemon-memory: fail"]);
+    expect(criterion(events, "daemon-memory")?.detail).toBe(
+      "the daemon went down at 1970-01-01T01:00:00.000Z: it was killed by SIGKILL",
+    );
+  });
+
+  it("fails a daemon that died in the warm-up, before any window could be measured", () => {
+    const warmUp = oneLifeRun().filter(inWarmUp);
+    expect(criterion(warmUp, "daemon-memory")?.status).toBe("unmeasured");
+    expect(criterion([...warmUp, died(5 * MIN)], "daemon-memory")).toMatchObject({
+      status: "fail",
+      detail: "the daemon went down at 1970-01-01T00:05:00.000Z: it was killed by SIGKILL",
+    });
+  });
+
+  it("fails a daemon that ran as a second process, as a restart no one recorded", () => {
+    const events = mapSamples(
+      oneLifeRun(),
+      after(
+        HOUR,
+        withDaemon(() => ({ pid: 2000 })),
+      ),
+    );
+    expect(criterion(events, "daemon-memory")).toMatchObject({
+      status: "fail",
+      detail: "the daemon ran as 2 processes: 1000, 2000",
+    });
+  });
+
+  it("fails a daemon that a sample in the window couldn't read", () => {
+    const events = mapSamples(
+      oneLifeRun(),
+      onlyAt(HOUR, (s) => ({ ...s, daemon: null, terminals: [] })),
+    );
+    expect(criterion(events, "daemon-memory")).toMatchObject({
+      status: "fail",
+      detail:
+        "the daemon went unread in 1 of the window's 121 samples, first at 1970-01-01T01:00:00.000Z",
+    });
+  });
+
+  it("judges probes without asking for any taken while the daemon was down", () => {
+    expect(criterion(oneLifeRun(), "probes")).toMatchObject({
+      status: "pass",
+      detail: expect.stringMatching(/^\d+ probes, worst 4 ms$/),
+    });
+    const slow: SoakEvent = { kind: "probe", t: HOUR, name: "f1", ms: 60 };
+    expect(criterion([...oneLifeRun(), slow], "probes")?.status).toBe("fail");
+  });
+
+  it("fails an hour whose floods' echo p99 reaches the bar, though the window's holds", () => {
+    const fastHourOne = floodEchoesFrom(MEASURE + MIN, 6, 300);
+    const slowHourTwo = floodEchoesFrom(HOUR_TWO + MIN, 30, 2);
+    const many = criterion([...cleanRun(), ...fastHourOne, ...slowHourTwo], "echo", OPTIONS);
+    expect(many?.status).toBe("pass");
+    const one = criterion([...oneLifeRun(), ...fastHourOne, ...slowHourTwo], "echo");
+    expect(one).toMatchObject({
+      status: "fail",
+      detail: "echo p99 30 ms during floods in hour 2",
+    });
+    expect(criterion([...oneLifeRun(), ...fastHourOne], "echo")?.detail).toMatch(
+      /; worst hour's p99 6 ms$/,
+    );
+  });
+
+  it("fails an hour in which no keystroke was timed during a flood", () => {
+    expect(criterion(cleanRun().filter(notEchoInHourOne), "echo", OPTIONS)?.status).toBe("pass");
+    expect(criterion(oneLifeRun().filter(notEchoInHourOne), "echo")).toMatchObject({
+      status: "fail",
+      detail: "no keystroke was timed during a flood in hour 1",
+    });
+  });
+
+  it("judges three days of the one daemon's samples", () => {
+    const days = 72 * HOUR;
+    const events: SoakEvent[] = [
+      { kind: "window", t: HOUR, phase: "measure" },
+      { kind: "window", t: HOUR + days, phase: "end" },
+    ];
+    for (let t = 0; t <= HOUR + days; t += 30 * SEC) {
+      events.push({
+        kind: "sample",
+        t,
+        settled: false,
+        daemon: { pid: DAEMON_PID, rss: 200 * MiB, fds: 36, ageMs: t },
+        holders: HOLDERS,
+        terminals: TERMINALS,
+        ptys: 5,
+      });
+    }
+    expect(criterion(events, "daemon-memory", { ...ONE_LIFE, minMeasuredMs: days })).toMatchObject({
+      status: "pass",
+      detail: expect.stringMatching(/^one life, 0\.00 MiB\/h/),
+    });
   });
 });
 
