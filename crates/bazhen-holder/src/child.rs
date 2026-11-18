@@ -247,15 +247,15 @@ mod tests {
         use std::io::{BufRead as _, BufReader, Read as _};
         use std::process::{Command, Stdio};
 
-        let script = "trap 'echo hup' HUP; trap 'echo usr1; exit 0' USR1; echo armed
-            i=0; while [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done";
+        // Perl's handlers, not a shell's traps: macOS's sh sometimes runs a trap twice for one
+        // signal. The USR1 handler only marks the end, since Perl can run it inside the HUP
+        // handler, before that one prints.
+        let script = r#"POSIX::setsid() or die; $| = 1; my $ended;
+            $SIG{HUP} = sub { print "hup\n" }; $SIG{USR1} = sub { $ended = 1 };
+            print "armed\n"; for (1..30) { last if $ended; sleep 1 }
+            print "usr1\n" if $ended"#;
         let mut leader = Command::new("perl")
-            .args([
-                "-MPOSIX",
-                "-e",
-                "POSIX::setsid() or die; exec 'sh', '-c', $ARGV[0]",
-            ])
-            .arg(script)
+            .args(["-MPOSIX", "-e", script])
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
