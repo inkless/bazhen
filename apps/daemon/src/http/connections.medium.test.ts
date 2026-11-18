@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 const dir = mkdtempSync(join(tmpdir(), "bz-connections-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const CONNECTIONS = JSON.stringify(fileURLToPath(new URL("connections.ts", import.meta.url)));
+const DAEMON = fileURLToPath(new URL("../..", import.meta.url));
 
 /**
  * Runs, in a Node process of its own, an HTTP server on a Unix socket whose upgrade listener
@@ -36,14 +37,46 @@ function resetHeldUpgrade(
     });
     setTimeout(() => { console.log("lived"); process.exit(0); }, 500);
   `;
-  return new Promise((done) => {
+  return runModule(caller, join(dir, `held-${hear.length}.sock`));
+}
+
+/**
+ * How `caller`, run as a module in a Node process of its own from the daemon's package, so that
+ * it finds the daemon's dependencies, ended: its exit code, and what it printed.
+ */
+const runModule = (caller: string, ...args: string[]) =>
+  new Promise<{ code: number | null; out: string; err: string }>((done) => {
     execFile(
       process.execPath,
-      ["--input-type=module", "-e", caller, join(dir, `${hear.length}.sock`)],
-      { encoding: "utf8" },
+      ["--input-type=module", "-e", caller, ...args],
+      { cwd: DAEMON, encoding: "utf8" },
       (error, out, err) => done({ code: error === null ? 0 : Number(error.code), out, err }),
     );
   });
+
+/**
+ * Runs, in a Node process of its own, an HTTP server on a Unix socket whose upgrades `wss`
+ * serves with no listener of the route's own, and a client that sends a text frame of 4 KiB to
+ * a server that takes 1 KiB. How the process ended.
+ */
+function sendTooLarge(wss: string): Promise<{ code: number | null; out: string; err: string }> {
+  const caller = `
+    import { createServer } from "node:http";
+    import { WebSocket, WebSocketServer } from "ws";
+    import { heardWebSockets } from ${CONNECTIONS};
+    const [socket] = process.argv.slice(1);
+    const wss = ${wss};
+    const server = createServer();
+    server.on("upgrade", (req, held, head) => wss.handleUpgrade(req, held, head, () => {}));
+    server.listen(socket, () => {
+      const client = new WebSocket("ws+unix://" + socket + ":/");
+      client.on("error", () => {});
+      client.on("open", () => client.send("x".repeat(4096)));
+      client.on("close", (code) => console.log("closed", code));
+    });
+    setTimeout(() => { console.log("lived"); process.exit(0); }, 500);
+  `;
+  return runModule(caller, join(dir, `frame-${wss.length}.sock`));
 }
 
 describe("a server whose connections are heard from the moment they are accepted", () => {
@@ -57,5 +90,18 @@ describe("a server whose connections are heard from the moment they are accepted
     expect(ran.code).toBe(1);
     // The trace a daemon in CI died by: a read the peer reset, on a socket nothing heard.
     expect(ran.err).toMatch(/read ECONNRESET\n\s+at Pipe\.onStreamRead/);
+  });
+});
+
+describe("WebSockets served through heardWebSockets", () => {
+  it("close a socket whose frame ws refuses, and end nothing else", async () => {
+    const ran = await sendTooLarge("heardWebSockets(1024)");
+    expect(ran).toMatchObject({ code: 0, out: "closed 1009\nlived\n" });
+  });
+
+  it("end the process on that frame when unheard, which is what hearing prevents", async () => {
+    const ran = await sendTooLarge("new WebSocketServer({ noServer: true, maxPayload: 1024 })");
+    expect(ran.code).toBe(1);
+    expect(ran.err).toMatch(/RangeError: Max payload size exceeded/);
   });
 });

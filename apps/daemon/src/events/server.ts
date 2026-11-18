@@ -1,10 +1,10 @@
-import { WebSocketServer } from "ws";
 import {
   ClientEventFrame,
   EVENT_FRAME_MAX_BYTES,
   EventStreamQuery,
   parseJson,
 } from "@bazhen/protocol";
+import { heardWebSockets } from "../http/connections.ts";
 import { DRAIN_PATIENCE, HEARTBEAT_MS, keepAlive } from "../http/heartbeat.ts";
 import { refuseUpgrade, type UpgradeRoute } from "../http/upgrades.ts";
 import type { Store } from "../store/store.ts";
@@ -28,7 +28,7 @@ export function eventRoute(deps: EventDeps): UpgradeRoute {
     ms: deps.heartbeatMs ?? HEARTBEAT_MS,
     patience: deps.drainPatience ?? DRAIN_PATIENCE,
   };
-  const wss = new WebSocketServer({ noServer: true, maxPayload: EVENT_FRAME_MAX_BYTES });
+  const wss = heardWebSockets(EVENT_FRAME_MAX_BYTES);
   return {
     path: /^\/v1\/events$/,
     upgrade: (req, socket, head, url) => {

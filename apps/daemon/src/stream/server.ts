@@ -1,4 +1,4 @@
-import { WebSocketServer, type RawData, type WebSocket } from "ws";
+import type { RawData, WebSocket } from "ws";
 import { isId, type RuntimeRef } from "@bazhen/core";
 import {
   parseJson,
@@ -7,6 +7,7 @@ import {
   type StreamServerFrame,
 } from "@bazhen/protocol";
 import { failureDetail } from "../commands.ts";
+import { heardWebSockets } from "../http/connections.ts";
 import { DRAIN_PATIENCE, HEARTBEAT_MS, keepAlive } from "../http/heartbeat.ts";
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
@@ -24,7 +25,7 @@ export interface StreamDeps {
 
 /** The terminal stream's WebSocket endpoint (foundation-design §5.3). */
 export function streamRoute(deps: StreamDeps): UpgradeRoute {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: STREAM_FRAME_MAX_BYTES });
+  const wss = heardWebSockets(STREAM_FRAME_MAX_BYTES);
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
     upgrade: (req, socket, head, _url, [, terminalId = ""], device) =>
