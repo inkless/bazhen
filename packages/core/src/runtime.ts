@@ -442,9 +442,10 @@ export interface RuntimeAdapter {
   /**
    * Reports every terminal's current process on every check, at the generation it runs: with how
    * it ended once it has, null while it runs. A check that can't read a server reports nothing of
-   * it. The caller drops repeats and stale incarnations by the generation in the ref. A cause
-   * first reported unknown may be named by a later report, never the other way. Returns the
-   * unsubscribe function.
+   * it, and a process freshly dead of unknown cause may go unreported for a runtime's grace, in
+   * case its cause arrives, but is never reported running. The caller drops repeats and stale
+   * incarnations by the generation in the ref. A cause first reported unknown may be named by a
+   * later report, never the other way. Returns the unsubscribe function.
    */
   onProcess(cb: (ref: RuntimeRef, exit: ExitStatus | null) => void): () => void;
   /**

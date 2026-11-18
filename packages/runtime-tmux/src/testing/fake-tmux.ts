@@ -22,7 +22,9 @@ const made: string[] = [];
  */
 export function fakeTmux(
   script: string,
-  opts: { env?: Record<string, string>; onError?: TmuxRuntimeOptions["onError"] } = {},
+  opts: Pick<TmuxRuntimeOptions, "onError" | "processPollMs"> & {
+    env?: Record<string, string>;
+  } = {},
 ): FakeTmux {
   const root = mkdtempSync("/tmp/bz-fake-tmux-");
   made.push(root);
@@ -42,6 +44,7 @@ export function fakeTmux(
     },
     env,
     ...(opts.onError === undefined ? {} : { onError: opts.onError }),
+    ...(opts.processPollMs === undefined ? {} : { processPollMs: opts.processPollMs }),
   });
   return { runtime, root };
 }
