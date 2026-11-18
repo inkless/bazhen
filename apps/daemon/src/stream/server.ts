@@ -7,6 +7,7 @@ import {
   type StreamServerFrame,
 } from "@bazhen/protocol";
 import { failureDetail } from "../commands.ts";
+import { ClosingBudget } from "../http/closing.ts";
 import { heardWebSockets } from "../http/connections.ts";
 import {
   closeTimeoutFor,
@@ -18,6 +19,15 @@ import {
 import type { UpgradeRoute } from "../http/upgrades.ts";
 import { ViewRefused, type Attachment, type LeaveReason, type TerminalHub } from "./hub.ts";
 
+/**
+ * The most bytes the stream's closed sockets may hold queued for their peers, across the daemon.
+ * A terminal whose views are all dismissed at once, by a burst that evicts them or by its exit,
+ * holds `maxViews` (16) × about 5 MiB (`maxUnsentBytes`, plus the snapshot piece in flight and
+ * the chunk of output that tipped the view over): 80 MiB, which this keeps whole with room. It
+ * stays under the hub's 200 MiB snapshot budget.
+ */
+export const MAX_CLOSING_BYTES = 128 * 1024 * 1024;
+
 export const ANOTHER_PAGE = "this page is from another build of Bazhen than the daemon: reload it";
 
 export interface StreamDeps {
@@ -27,6 +37,7 @@ export interface StreamDeps {
   readonly runtimeRef: (terminalId: string) => RuntimeRef | undefined;
   readonly heartbeatMs?: number;
   readonly drainPatience?: number;
+  readonly maxClosingBytes?: number;
 }
 
 /** The terminal stream's WebSocket endpoint (foundation-design §5.3). */
@@ -36,11 +47,12 @@ export function streamRoute(deps: StreamDeps): UpgradeRoute {
     patience: deps.drainPatience ?? DRAIN_PATIENCE,
   };
   const wss = heardWebSockets(STREAM_FRAME_MAX_BYTES, closeTimeoutFor(every));
+  const closing = new ClosingBudget(deps.maxClosingBytes ?? MAX_CLOSING_BYTES);
   return {
     path: /^\/v1\/terminals\/([^/]+)\/stream$/,
     upgrade: (req, socket, head, _url, [, terminalId = ""], device) =>
       wss.handleUpgrade(req, socket, head, (ws) =>
-        serve(deps, every, ws, terminalId, device?.name),
+        serve(deps, every, closing, ws, terminalId, device?.name),
       ),
   };
 }
@@ -48,6 +60,7 @@ export function streamRoute(deps: StreamDeps): UpgradeRoute {
 function serve(
   deps: StreamDeps,
   every: Heartbeat,
+  closing: ClosingBudget,
   ws: WebSocket,
   terminalId: string,
   deviceName: string | undefined,
@@ -55,7 +68,7 @@ function serve(
   const notify = (frame: StreamServerFrame) => ws.send(JSON.stringify(frame));
   const refuse = (message: string) => {
     notify({ type: "error", message });
-    ws.close();
+    closing.close(ws);
   };
   let attachment: Attachment | undefined;
   // Set as soon as a hello arrives, so a second one while the first joins starts nothing.
@@ -87,7 +100,7 @@ function serve(
         send: (out: Uint8Array, written?: () => void) => ws.send(out, { binary: true }, written),
         notify,
         unsent: () => ws.bufferedAmount,
-        close: () => ws.close(),
+        close: () => closing.close(ws),
       };
       const claim = f.resumes;
       const resumes =

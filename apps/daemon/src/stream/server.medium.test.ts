@@ -45,7 +45,7 @@ async function endpoint() {
  * once and record how they left.
  */
 async function beating(
-  heartbeat: Pick<StreamDeps, "heartbeatMs" | "drainPatience"> = {
+  heartbeat: Pick<StreamDeps, "heartbeatMs" | "drainPatience" | "maxClosingBytes"> = {
     heartbeatMs: 100,
     drainPatience: 1,
   },
@@ -110,23 +110,29 @@ async function slowLink(host: string): Promise<string> {
   return `127.0.0.1:${listening.port}`;
 }
 
-/**
- * A view at the daemon's own heartbeat that stops reading, is sent more output than the kernel
- * holds for it, and is then dismissed as the hub dismisses a view that fell behind. Fakes the
- * timers, so the heartbeat and ws's close timer run only as far as `vi.advanceTimersByTimeAsync`
- * takes them; socket I/O stays real.
- */
-async function dismissedWhileStalled() {
+/** An endpoint at the daemon's own heartbeat, with fake timers, so time passes only when told. */
+async function atDaemonHeartbeat(maxClosingBytes?: number) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-  const { url, viewer, left } = await beating({
+  return beating({
     heartbeatMs: HEARTBEAT_MS,
     drainPatience: DRAIN_PATIENCE,
+    ...(maxClosingBytes === undefined ? {} : { maxClosingBytes }),
   });
-  const ws = new WebSocket(url);
+}
+
+/**
+ * A view of `served` that stops reading and is sent more output than the kernel holds for it.
+ * Socket I/O is real; the heartbeat and ws's close timer run only as far as
+ * `vi.advanceTimersByTimeAsync` takes them.
+ */
+async function stalled(served: Awaited<ReturnType<typeof beating>>) {
+  const joined = served.joins();
+  const ws = new WebSocket(served.url);
+  ws.on("error", () => {});
   await opened(ws);
   ws.send(JSON.stringify(hello));
-  await expect.poll(viewer).toBeDefined();
-  const view = viewer();
+  await expect.poll(served.joins).toBe(joined + 1);
+  const view = served.viewer();
   if (view === undefined) throw new Error("the view never joined");
   ws.pause();
   const texts: unknown[] = [];
@@ -134,10 +140,24 @@ async function dismissedWhileStalled() {
     if (!binary) texts.push(JSON.parse(data.toString()));
   });
   const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
-  view.send(Buffer.alloc(64 << 20));
+  view.send(Buffer.alloc(STALLED_BYTES));
+  return { ws, view, texts, closed };
+}
+
+const STALLED_BYTES = 64 << 20;
+
+/** Ends `view` as the hub ends one that fell behind. */
+function evict(view: Viewer): void {
   view.notify({ type: "ended", reason: "evicted_slow" });
   view.close();
-  return { ws, view, texts, closed, left };
+}
+
+/** A stalled view, dismissed as the hub dismisses a view that fell behind. */
+async function dismissedWhileStalled() {
+  const served = await atDaemonHeartbeat();
+  const view = await stalled(served);
+  evict(view.view);
+  return { ...view, left: served.left };
 }
 
 /** Whether `closed` settles within `ms` of real time. */
@@ -434,5 +454,28 @@ describe("stream endpoint", () => {
     await vi.advanceTimersByTimeAsync((DRAIN_PATIENCE + 1) * HEARTBEAT_MS);
     ws.resume();
     expect([await settles(closed, 1_000), texts, left]).toEqual([true, [], ["timed_out"]]);
+  });
+
+  it("ends the view dismissed first once dismissed views hold more than the budget, and tells the last why", async () => {
+    const served = await atDaemonHeartbeat(STALLED_BYTES);
+    const first = await stalled(served);
+    evict(first.view);
+    const second = await stalled(served);
+    const held = first.view.unsent() + second.view.unsent();
+    evict(second.view);
+    first.ws.resume();
+    second.ws.resume();
+    await expect
+      .poll(() => second.texts.at(-1), {
+        timeout: 2_000,
+        message: "the view dismissed last was not told why its stream ended",
+      })
+      .toEqual({ type: "ended", reason: "evicted_slow" });
+    expect([
+      held > STALLED_BYTES,
+      await settles(first.closed, 1_000),
+      first.texts,
+      await settles(second.closed, 1_000),
+    ]).toEqual([true, true, [], true]);
   });
 });
