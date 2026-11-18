@@ -407,7 +407,7 @@ const fn refuses(peer: u32, own: u32) -> bool {
 
 fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     use std::os::fd::AsFd as _;
-    crate::process::peer_uid(stream.as_fd())
+    bazhen_pid::peer_uid(stream.as_fd())
 }
 
 #[cfg(test)]

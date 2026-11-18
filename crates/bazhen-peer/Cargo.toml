@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 bazhen-holder = { workspace = true }
+bazhen-pid = { workspace = true }
 rustix = { workspace = true }
 
 [lints]

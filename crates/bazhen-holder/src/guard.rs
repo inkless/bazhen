@@ -6,10 +6,10 @@
 //! holder, its group, its session or any process it descends from, or to a process that isn't
 //! proven the holder's own unreaped child or a member of the session such a child leads.
 
+use std::io;
+
 use rustix::io::Errno;
-use rustix::process::{
-    Pid, Signal, WaitId, WaitIdOptions, getpgrp, getpid, getppid, getsid, waitid,
-};
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, getpid, getppid, waitid};
 
 /// How far up its parents the holder looks for a process it descends from.
 const MAX_ANCESTORS: usize = 1024;
@@ -46,16 +46,34 @@ pub(crate) fn vet(raw: i32) -> Result<(), Refused> {
     if raw <= 1 {
         return Err(Refused::NotOne(raw));
     }
-    // A session that can't be read leaves only the pid and the group to refuse; the session's own
-    // check, which refuses whatever it can't read, still stands.
-    let own = [Some(getpid()), Some(getpgrp()), getsid(None).ok()];
-    if own.into_iter().flatten().any(|pid| pid.as_raw_pid() == raw) {
+    if names_the_holder(
+        raw,
+        getpid(),
+        bazhen_pid::own_group(),
+        bazhen_pid::session(None),
+    ) {
         return Err(Refused::Holder(raw));
     }
     if is_ancestor(raw) {
         return Err(Refused::Ancestor(raw));
     }
     Ok(())
+}
+
+/// Whether `raw` numbers the holder, `own`, or its group or its session as `group` and `session`
+/// read them. A group or session led from outside this PID namespace, which no number here names,
+/// leaves the others to refuse, and so does a session that can't be read; the session's own check
+/// on a member, which refuses whatever it can't read, still stands. The group is always read.
+fn names_the_holder(
+    raw: i32,
+    own: Pid,
+    group: Option<Pid>,
+    session: io::Result<Option<Pid>>,
+) -> bool {
+    [Some(own), group, session.ok().flatten()]
+        .into_iter()
+        .flatten()
+        .any(|pid| pid.as_raw_pid() == raw)
 }
 
 /// Refuses a session leader that isn't the holder's own child, unreaped. Only such a child's pid,
@@ -79,8 +97,7 @@ pub(crate) fn vet_leader(leader: Pid) -> Result<(), Refused> {
 pub(crate) fn vet_member(pid: Pid, leader: Pid) -> Result<(), Refused> {
     vet(pid.as_raw_pid())?;
     vet_leader(leader)?;
-    // A session that can't be read, the process gone or not ours to ask about, is no proof.
-    if getsid(Some(pid)).ok() == Some(leader) {
+    if proves_member(&bazhen_pid::session(Some(pid)), leader) {
         Ok(())
     } else {
         Err(Refused::Outside {
@@ -88,6 +105,13 @@ pub(crate) fn vet_member(pid: Pid, leader: Pid) -> Result<(), Refused> {
             leader: leader.as_raw_pid(),
         })
     }
+}
+
+/// Whether a process's session, as `session` reads it, is the one `leader` leads. One that can't be
+/// read, the process gone or not ours to ask about, is no proof, and nor is one led from outside
+/// this PID namespace, which `leader`, the holder's own child, can't be.
+fn proves_member(session: &io::Result<Option<Pid>>, leader: Pid) -> bool {
+    matches!(session, Ok(Some(led)) if *led == leader)
 }
 
 /// Sends `signal` to the group `leader` leads, the holder's own child.
@@ -186,9 +210,12 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     use super::Errno;
+    use rustix::process::{getpgrp, getsid};
+
     use super::{
-        DISPOSABLE_HOST_MARKER, Pid, Refused, SendError, Signal, getpgrp, getpid, getppid, getsid,
-        signal_group, signal_member, tripwire, tripwire_at, vet, vet_leader, vet_member,
+        DISPOSABLE_HOST_MARKER, Pid, Refused, SendError, Signal, getpid, getppid, io,
+        names_the_holder, proves_member, signal_group, signal_member, tripwire, tripwire_at, vet,
+        vet_leader, vet_member,
     };
 
     #[test]
@@ -249,6 +276,49 @@ mod tests {
                 assert_eq!(vet(raw), Err(Refused::Holder(raw)));
             }
         }
+    }
+
+    /// `pid` as the guard reads a session that it names, or one that can't be read.
+    fn read_or_unreadable(pid: Option<Pid>) -> io::Result<Option<Pid>> {
+        pid.map(Some)
+            .ok_or_else(|| io::Error::other("can't be read"))
+    }
+
+    /// A session led from outside this PID namespace leaves `vet` refusing every number it refuses
+    /// when the session can't be read: never fewer, so never more permissive. The holder's group,
+    /// which is always read, is refused whatever the session reads.
+    #[test]
+    fn a_group_or_session_led_from_outside_refuses_what_an_unreadable_one_does() {
+        let own = Pid::from_raw(100).unwrap();
+        let (group, session) = (Pid::from_raw(200), Pid::from_raw(300));
+        for raw in [2, 100, 200, 300, 400] {
+            for read_group in [group, None] {
+                for read_session in [session, None] {
+                    let outside = names_the_holder(raw, own, read_group, Ok(read_session));
+                    let unreadable =
+                        names_the_holder(raw, own, read_group, read_or_unreadable(read_session));
+                    assert_eq!(
+                        outside, unreadable,
+                        "{raw} with group {read_group:?}, session {read_session:?}"
+                    );
+                }
+            }
+        }
+        for read_session in [Ok(session), Ok(None), read_or_unreadable(None)] {
+            assert!(names_the_holder(200, own, group, read_session));
+        }
+        assert!(names_the_holder(100, own, None, Ok(None)));
+        assert!(names_the_holder(300, own, None, Ok(session)));
+        assert!(!names_the_holder(400, own, group, Ok(session)));
+    }
+
+    #[test]
+    fn a_session_led_from_outside_or_unreadable_proves_no_member() {
+        let leader = Pid::from_raw(100).unwrap();
+        assert!(proves_member(&Ok(Some(leader)), leader));
+        assert!(!proves_member(&Ok(None), leader));
+        assert!(!proves_member(&read_or_unreadable(None), leader));
+        assert!(!proves_member(&Ok(Pid::from_raw(101)), leader));
     }
 
     /// `pid`'s parent as `ps` reads it, apart from the guard's own reading, which is under test.

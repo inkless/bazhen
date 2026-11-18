@@ -74,24 +74,24 @@ impl From<io::Error> for Refused {
 }
 
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
-/// it (`process::peer_pid`). Its start is read again once the walk is done: a process that started
+/// it (`bazhen_pid::peer_pid`). Its start is read again once the walk is done: a process that started
 /// since the connection was accepted holds a pid its caller gave up.
 ///
 /// # Errors
 ///
 /// As `Refused` says.
 pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
-    let uid = process::peer_uid(socket)?;
+    let uid = bazhen_pid::peer_uid(socket)?;
     if uid != geteuid().as_raw() {
         return Err(Refused::Foreign { uid });
     }
-    let pid = process::peer_pid(socket)?;
+    let pid = bazhen_pid::peer_pid(socket)?;
     let started = started(pid, accepted)?;
     let ancestors = ancestors(pid, process::parent)?;
     let line: Vec<Pid> = iter::once(pid).chain(ancestors.iter().copied()).collect();
     let peer = Peer {
         pid,
-        session: process::session(pid)?,
+        session: bazhen_pid::session(Some(pid))?,
         codex_server: codex_of(&line, own_args, process::environ)?,
         ancestors,
     };

@@ -2,11 +2,10 @@
     unsafe_code,
     reason = "libc's sysctl is the one call that says when a macOS process started, a zombie \
               included, that lists every process, and that names a process's arguments \
-              (KERN_PROCARGS2), and its environment, sized by KERN_ARGMAX; getpeereid the one that names a socket peer's user; rustix covers \
-              neither, and only unsafe can call them; and rustix's kevent, which watches a process \
-              for its exit, is unsafe; and proc_pidinfo, the one call that names another \
-              process's parent and user; and getsockopt's LOCAL_PEERPID, the one call that names \
-              a socket peer's process"
+              (KERN_PROCARGS2), and its environment, sized by KERN_ARGMAX; rustix doesn't cover \
+              it, and only unsafe can call it; and rustix's kevent, which watches a process for \
+              its exit, is unsafe; and proc_pidinfo, the one call that names another process's \
+              parent and user"
 )]
 
 //! What only macOS's own calls can tell the holder.
@@ -14,13 +13,13 @@
 use std::ffi::OsString;
 use std::io;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::ptr;
 use std::time::Duration;
 
 use rustix::event::kqueue::{Event, EventFilter, EventFlags, ProcessEvents, kevent, kqueue};
 use rustix::io::Errno;
-use rustix::process::{Pid, Signal, getsid};
+use rustix::process::{Pid, Signal};
 
 use crate::process::{procargs2_args, procargs2_env};
 use crate::session::Member;
@@ -154,7 +153,7 @@ pub(crate) fn pids() -> io::Result<Vec<Pid>> {
 pub(crate) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {
     // A session that can't be read, the process gone or another user's to ask about, is outside:
     // a member that exited is no longer one, and the guard refuses what it can't prove.
-    if getsid(Some(pid)).ok() != Some(session) {
+    if bazhen_pid::session(Some(pid)).ok().flatten() != Some(session) {
         return Member::Outside;
     }
     match kinfo(pid) {
@@ -299,43 +298,4 @@ fn procargs2(pid: Pid) -> io::Result<Vec<u8>> {
     }
     buffer.truncate(len);
     Ok(buffer)
-}
-
-/// The effective uid of the process at the other end of a Unix socket, as it was when it
-/// connected.
-pub(crate) fn peer_uid(socket: BorrowedFd<'_>) -> io::Result<u32> {
-    let mut uid: libc::uid_t = 0;
-    let mut gid: libc::gid_t = 0;
-    // SAFETY: `socket` is an open fd for the whole call, and `uid` and `gid` are writable.
-    let status = unsafe { libc::getpeereid(socket.as_raw_fd(), &raw mut uid, &raw mut gid) };
-    if status == 0 {
-        Ok(uid)
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-/// The process `LOCAL_PEERPID` names at the other end of a Unix socket. As XNU's source reads, that
-/// is the peer socket's last user, the last process to send or receive on it, which need not be
-/// the one that connected.
-pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<libc::pid_t> {
-    let mut pid: libc::pid_t = 0;
-    let mut len =
-        libc::socklen_t::try_from(std::mem::size_of::<libc::pid_t>()).map_err(io::Error::other)?;
-    // SAFETY: `socket` is an open fd for the whole call, and `pid` is writable for `len` bytes,
-    // which the call writes no more than.
-    let status = unsafe {
-        libc::getsockopt(
-            socket.as_raw_fd(),
-            libc::SOL_LOCAL,
-            libc::LOCAL_PEERPID,
-            (&raw mut pid).cast(),
-            &raw mut len,
-        )
-    };
-    if status == 0 {
-        Ok(pid)
-    } else {
-        Err(io::Error::last_os_error())
-    }
 }

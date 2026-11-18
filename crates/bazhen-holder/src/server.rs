@@ -1109,8 +1109,8 @@ fn foreground(
             StartTimeError::Absent(_) => failed("the foreground group's leader has exited"),
             StartTimeError::Unreadable { .. } => failed("its leader's start can't be read"),
         })?;
-        let leads = rustix::process::getpgid(Some(pgid)).ok() == Some(pgid)
-            && rustix::process::getsid(Some(pgid)).ok() == Some(child);
+        let leads = bazhen_pid::group(pgid).ok().flatten() == Some(pgid)
+            && bazhen_pid::session(Some(pgid)).ok().flatten() == Some(child);
         if !leads {
             return Err(failed(
                 "the foreground group has no leader in the terminal's session",
