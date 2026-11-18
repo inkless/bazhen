@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm run build:hook && pnpm run build:cli && pnpm run build:holder:release && pnpm --parallel --filter @bazhen/daemon --filter @bazhen/web run dev < /dev/null",
-    "bazhen": "pnpm -s run build:cli && target/release/bazhen",
+    "bazhen": "pnpm -s run build:cli && pnpm -s run build:holder:release && target/release/bazhen",
     "build": "pnpm run build:hook && pnpm run build:cli && pnpm run build:holder:release && tsc -b && pnpm --filter @bazhen/web run build",
     "typecheck": "tsc -b",
     "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
@@ -17,7 +17,7 @@
     "test:containment": "pnpm run build:holder && node scripts/capped.ts --memory 4G --time 20m -- vitest run --project containment",
     "test:api": "pnpm run build:hook && pnpm run build:cli && pnpm run build:holder:release && node scripts/capped.ts --memory 4G --time 30m -- vitest run --project api",
     "check": "node --disable-warning=ExperimentalWarning scripts/check-standards.ts && node scripts/protocol-schema.ts --check && pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run lint:rust && pnpm run deny && pnpm run test:rust && pnpm run test && pnpm run test:medium && pnpm run test:bench",
-    "test:e2e": "pnpm run build:hook && pnpm --filter @bazhen/e2e-tests run test",
+    "test:e2e": "pnpm run build:hook && pnpm run build:holder:release && pnpm --filter @bazhen/e2e-tests run test",
     "lint:config": "node scripts/lint-config.ts",
     "lint:shell": "scripts/lint-shell.sh",
     "schema": "node scripts/protocol-schema.ts",

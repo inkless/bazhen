@@ -11,7 +11,10 @@ export function defaultRuntimeRefusal(
   configPath: string,
 ): string | null {
   if (defaultRuntime !== "holder" || install.installed !== null) return null;
-  return `runtime.default = "holder" (${configPath}), but no holder can be started: ${install.reason}`;
+  return (
+    `no holder can be started for new terminals: ${install.reason}. ` +
+    `To run them on tmux instead, set runtime.default = "tmux" in ${configPath}`
+  );
 }
 
 /**

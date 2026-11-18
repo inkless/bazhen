@@ -7,10 +7,10 @@ const built = {
 } as const;
 
 describe("starting with a default runtime", () => {
-  it("refuses the holder default with no build installed, naming the key, the file and why", () => {
+  it("refuses the holder default with no build installed, saying why and how to use tmux", () => {
     expect(defaultRuntimeRefusal("holder", none, "/c/config.toml")).toBe(
-      'runtime.default = "holder" (/c/config.toml), but no holder can be started: ' +
-        "no build at target/release-holder",
+      "no holder can be started for new terminals: no build at target/release-holder. " +
+        'To run them on tmux instead, set runtime.default = "tmux" in /c/config.toml',
     );
   });
 

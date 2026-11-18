@@ -224,7 +224,7 @@ export function resolveConfig(
     startDeadlineMs: (file.agents?.start_deadline_seconds ?? 60) * 1000,
     maxOpenTerminals: file.terminals?.max_open ?? DEFAULT_MAX_OPEN_TERMINALS,
     historyLines: file.terminals?.history_lines ?? HISTORY_LINES,
-    defaultRuntime: file.runtime?.default ?? "tmux",
+    defaultRuntime: file.runtime?.default ?? "holder",
     terminalCaps: {
       terminal: file.terminals?.memory_max ?? DEFAULT_TERMINAL_MEMORY,
       total: file.terminals?.total_memory_max ?? DEFAULT_TOTAL_MEMORY,
