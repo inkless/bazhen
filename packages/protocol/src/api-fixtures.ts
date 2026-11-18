@@ -300,6 +300,7 @@ const fullDoctor = {
   ],
   hookClient: { path: "/r/target/release/bazhen-hook", fallback: false },
   peerReader: { path: "/r/target/release/bazhen-peer" },
+  agentCli: { expected: "/r/target/release/bazhen", onPath: "/h/bin/bazhen" },
   config: { path: "/c.toml", found: true },
   agents: { shell: "login", loginShell: "/bin/zsh" },
   codex: { daemon: "0.160.0", cli: "0.166.0", toolCalls: "unmarked" },
@@ -366,6 +367,7 @@ const bareDoctor = {
 const nullDoctor = {
   ...bareDoctor,
   peerReader: null,
+  agentCli: { expected: null, onPath: null },
   codex: { daemon: null, cli: null, toolCalls: null },
   web: {
     externalOrigins: [],

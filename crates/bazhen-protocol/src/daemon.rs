@@ -79,6 +79,15 @@ pub struct PeerReader {
     pub path: String,
 }
 
+/// The `bazhen` agents run: the first on the PATH the daemon captured for them, and the one built
+/// beside the daemon, each as a resolved path, none as null.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCli {
+    pub expected: Option<String>,
+    pub on_path: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigFile {
     pub path: String,
@@ -339,6 +348,8 @@ pub struct DoctorResponse {
         deserialize_with = "Nullable::present"
     )]
     pub peer_reader: Nullable<PeerReader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_cli: Option<AgentCli>,
     pub config: ConfigFile,
     pub agents: AgentsSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]

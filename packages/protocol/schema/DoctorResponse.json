@@ -101,6 +101,27 @@
         }
       ]
     },
+    "agentCli": {
+      "type": "object",
+      "properties": {
+        "expected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "onPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expected",
+        "onPath"
+      ]
+    },
     "config": {
       "type": "object",
       "properties": {

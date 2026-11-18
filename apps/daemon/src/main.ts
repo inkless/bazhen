@@ -77,6 +77,7 @@ import { hookApp } from "./mailbox/ingress.ts";
 import { Mailbox } from "./mailbox/mailbox.ts";
 import { observeSend } from "./mailbox/observed.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
+import { agentCli } from "./env/agent-cli.ts";
 import { capture } from "./env/capture.ts";
 import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
@@ -694,6 +695,7 @@ const socketListener = getRequestListener(
         })),
         hookClient: { path: hook.client, fallback: hookRunner === HOOK_SCRIPT },
         peerReader: peerBinary === null ? null : { path: peerBinary },
+        agentCli: agentCli(captured.env),
         holder: await holderDoctor(holderInstall, holderRuntime),
         containment: containmentDoctor(containment.decided),
         config: configFile,

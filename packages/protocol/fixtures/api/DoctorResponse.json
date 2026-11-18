@@ -30,6 +30,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -173,6 +177,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -373,6 +381,10 @@
         "removed": {}
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "codex": {
         "daemon": null,
         "cli": null,
@@ -450,6 +462,10 @@
         "fallback": true
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "config": {
         "path": "/c.toml",
         "found": false
@@ -942,6 +958,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -1085,6 +1105,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -1233,6 +1257,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -1376,6 +1404,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -1524,6 +1556,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -1667,6 +1703,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -1925,6 +1965,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -2068,6 +2112,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -2216,6 +2264,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -2359,6 +2411,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -2507,6 +2563,10 @@
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
+      },
       "config": {
         "path": "/c.toml",
         "found": true
@@ -2650,6 +2710,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -3069,6 +3133,10 @@
         "removed": {}
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "codex": {
         "daemon": null,
         "cli": null,
@@ -3146,6 +3214,10 @@
         "fallback": true
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "config": {
         "path": "/c.toml",
         "found": false
@@ -3254,6 +3326,10 @@
         "removed": {}
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "codex": {
         "daemon": null,
         "cli": null,
@@ -3331,6 +3407,10 @@
         "fallback": true
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "config": {
         "path": "/c.toml",
         "found": false
@@ -3851,6 +3931,15 @@
           ]
         }
       },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "config": {
         "path": "/c.toml",
         "found": true,
@@ -4099,6 +4188,10 @@
       },
       "peerReader": {
         "path": "/r/target/release/bazhen-peer"
+      },
+      "agentCli": {
+        "expected": "/r/target/release/bazhen",
+        "onPath": "/h/bin/bazhen"
       },
       "config": {
         "path": "/c.toml",
@@ -4354,6 +4447,15 @@
         }
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "codex": {
         "daemon": null,
         "cli": null,
@@ -4486,6 +4588,10 @@
         "fallback": true
       },
       "peerReader": null,
+      "agentCli": {
+        "expected": null,
+        "onPath": null
+      },
       "config": {
         "path": "/c.toml",
         "found": false
