@@ -54,23 +54,24 @@ impl fmt::Display for Peer {
 }
 
 /// Why no peer is named.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Refused {
     /// The socket isn't a connected Unix socket, or a process on the way can't be read.
-    Unreadable(io::Error),
+    #[error("a process on the caller's line can't be read: {0}")]
+    Unreadable(#[from] io::Error),
     /// Another user is at the other end, whom the daemon never serves.
+    #[error("the caller runs as uid {uid}, another user")]
     Foreign { uid: u32 },
     /// The pid's process started after the connection was accepted, so it took a pid its caller
     /// gave up.
+    #[error(
+        "the caller's pid is held by a process that started at {started}, \
+         after the connection was accepted at {accepted}"
+    )]
     Replaced { started: u64, accepted: u64 },
     /// The walk went past `MAX_ANCESTORS` without reaching a process with no parent.
+    #[error("the caller's ancestors go past {MAX_ANCESTORS} processes")]
     Endless,
-}
-
-impl From<io::Error> for Refused {
-    fn from(error: io::Error) -> Self {
-        Self::Unreadable(error)
-    }
 }
 
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
@@ -256,6 +257,30 @@ mod tests {
     fn refuses_a_walk_through_a_process_it_can_t_read() {
         let walked = ancestors(pid(50), table(&[(50, 40)]));
         assert!(matches!(walked, Err(Refused::Unreadable(_))));
+    }
+
+    #[test]
+    fn says_why_it_refused_on_one_line() {
+        let reasons = [
+            Refused::Unreadable(io::Error::other("no process 4242")),
+            Refused::Foreign { uid: 1001 },
+            Refused::Replaced {
+                started: 1_794_630_123,
+                accepted: 1_794_630_100,
+            },
+            Refused::Endless,
+        ]
+        .map(|refused| refused.to_string());
+        assert_eq!(
+            reasons,
+            [
+                "a process on the caller's line can't be read: no process 4242",
+                "the caller runs as uid 1001, another user",
+                "the caller's pid is held by a process that started at 1794630123, \
+                 after the connection was accepted at 1794630100",
+                "the caller's ancestors go past 256 processes",
+            ],
+        );
     }
 
     #[test]
