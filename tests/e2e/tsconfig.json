@@ -10,6 +10,7 @@
     "../support/agent-env.ts",
     "../support/transcript.ts",
     "../support/disposable-host.ts",
+    "../support/holder-close.ts",
     "../support/setup-error.ts",
     "../support/state-route.ts",
     "../support/key-*.ts"

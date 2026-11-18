@@ -6,13 +6,23 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 import { agentHomes, loginEnv } from "../support/agent-env.ts";
 import { requireDisposableHost } from "../support/disposable-host.ts";
+import {
+  e2eDaemons,
+  portVariable,
+  RUNTIME_AGNOSTIC_SPECS,
+  RUNTIMES,
+  runRoot,
+  webOrigin,
+  type E2eDaemon,
+} from "./daemons.ts";
 import { storageState } from "./pairing.ts";
 
 requireDisposableHost();
 
-// Free ports and a per-run home and tmux server, so parallel worktrees can run e2e at once.
-// Playwright re-evaluates this file in its workers; they inherit the values through the
-// environment instead of choosing new ones.
+// One daemon per runtime, each with its own home, ports and dev proxy, and a project of specs.
+// Free ports and a per-run directory, so parallel worktrees can run e2e at once. Playwright
+// re-evaluates this file in its workers; they inherit the values through the environment
+// instead of choosing new ones.
 
 function listen(): Promise<Server> {
   return new Promise((resolve, reject) => {
@@ -36,56 +46,59 @@ async function freePorts(count: number): Promise<number[]> {
   return ports;
 }
 
-if (!process.env["BZ_E2E_DAEMON_PORT"] || !process.env["BZ_E2E_WEB_PORT"]) {
-  const [daemon, web] = await freePorts(2);
-  process.env["BZ_E2E_DAEMON_PORT"] ??= String(daemon);
-  process.env["BZ_E2E_WEB_PORT"] ??= String(web);
+const unchosen = RUNTIMES.flatMap((runtime) => [
+  portVariable(runtime, "DAEMON"),
+  portVariable(runtime, "WEB"),
+]).filter((name) => !process.env[name]);
+if (unchosen.length > 0) {
+  const ports = await freePorts(unchosen.length);
+  unchosen.forEach((name, i) => (process.env[name] = String(ports[i])));
 }
-process.env["BZ_E2E_HOME"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-home-"));
-// The daemon and teardown name their server by path. Any other tmux command of the run, an agent's
-// say, lands in a socket directory of its own, outside any tmux client. Short, under /tmp, for
-// sun_path's limit; the config is loaded more than once per run, and keeps the first one.
+process.env["BZ_E2E_ROOT"] ??= mkdtempSync(join(tmpdir(), "bz-e2e-"));
+// The daemons and teardown name their servers by path. Any other tmux command of the run, an
+// agent's say, lands in a socket directory of its own, outside any tmux client. Short, under /tmp,
+// for sun_path's limit; the config is loaded more than once per run, and keeps the first one.
 process.env["BZ_E2E_TMUX_TMPDIR"] ||= mkdtempSync("/tmp/bz-tmux-");
 process.env["TMUX_TMPDIR"] = process.env["BZ_E2E_TMUX_TMPDIR"];
 delete process.env["TMUX"];
 delete process.env["TMUX_PANE"];
 // Where the page launches agents: the real Claude Code, pinned in this package, started with no
-// prompt and no way to reach a model.
-const work = join(process.env["BZ_E2E_HOME"], "work");
+// prompt and no way to reach a model. Both daemons launch them here, one project after the other.
+const work = join(runRoot(), "work");
 mkdirSync(work, { recursive: true });
 process.env["BZ_E2E_WORK"] = realpathSync(work);
-// The keys and shell-programs specs read their terminals through the daemon's tmux server, the
-// dashboard spec reads tmux's attach command, and one daemon serves every spec, so it makes its
-// terminals on tmux.
-mkdirSync(join(process.env["BZ_E2E_HOME"], "config"), { recursive: true });
-writeFileSync(
-  join(process.env["BZ_E2E_HOME"], "config", "config.toml"),
-  '[runtime]\ndefault = "tmux"\n',
-);
 const claudeBin = fileURLToPath(new URL("node_modules/.bin", import.meta.url));
 
-const daemonPort = Number(process.env["BZ_E2E_DAEMON_PORT"]);
-const webPort = Number(process.env["BZ_E2E_WEB_PORT"]);
-const env: Record<string, string> = {
-  ...loginEnv(),
-  BAZHEN_HOME: process.env["BZ_E2E_HOME"],
-  BAZHEN_PORT: String(daemonPort),
-  BAZHEN_WEB_PORT: String(webPort),
-  // With no external origin, "auto" asks no browser to pair; the suite pairs, as a phone would.
-  BAZHEN_PAIRING: "always",
-  PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
-  ...agentHomes(process.env["BZ_E2E_HOME"], process.env["BZ_E2E_WORK"]),
-};
+/**
+ * What one daemon and its dev proxy run with. Its config names its runtime, so neither daemon
+ * depends on which one is the default.
+ */
+function daemonEnv({ runtime, home, daemonPort, webPort }: E2eDaemon): Record<string, string> {
+  mkdirSync(join(home, "config"), { recursive: true });
+  writeFileSync(join(home, "config", "config.toml"), `[runtime]\ndefault = "${runtime}"\n`);
+  return {
+    ...loginEnv(),
+    BAZHEN_HOME: home,
+    BAZHEN_PORT: String(daemonPort),
+    BAZHEN_WEB_PORT: String(webPort),
+    // With no external origin, "auto" asks no browser to pair; the suite pairs, as a phone would.
+    BAZHEN_PAIRING: "always",
+    PATH: `${claudeBin}:${process.env["PATH"] ?? ""}`,
+    ...agentHomes(home, String(process.env["BZ_E2E_WORK"])),
+  };
+}
 
 /**
  * Playwright starts its web servers with its own whole environment merged in, so each command
  * runs under `env -i` with exactly `env`: no real model credential or provider switch reaches the
  * daemon or the agents it launches.
  */
-const clean = (command: string) =>
+const clean = (env: Record<string, string>, command: string) =>
   `env -i ${Object.entries(env)
     .map(([k, v]) => `${k}='${v.replaceAll("'", "'\\''")}'`)
     .join(" ")} ${command}`;
+
+const daemons = e2eDaemons();
 
 export default defineConfig({
   testDir: ".",
@@ -94,18 +107,29 @@ export default defineConfig({
   reporter: "list",
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
-  use: { baseURL: `http://127.0.0.1:${webPort}`, storageState: storageState() },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: [
-    {
-      command: clean("node ../../apps/daemon/src/main.ts"),
-      port: daemonPort,
-      reuseExistingServer: false,
+  // Each project is named for its runtime, which is how a spec finds its daemon.
+  projects: daemons.map((daemon) => ({
+    name: daemon.runtime,
+    ...(daemon.runtime === "tmux" ? {} : { testMatch: RUNTIME_AGNOSTIC_SPECS }),
+    use: {
+      ...devices["Desktop Chrome"],
+      baseURL: webOrigin(daemon),
+      storageState: storageState(daemon.home),
     },
-    {
-      command: clean("pnpm --filter @bazhen/web exec vite"),
-      url: `http://127.0.0.1:${webPort}`,
-      reuseExistingServer: false,
-    },
-  ],
+  })),
+  webServer: daemons.flatMap((daemon) => {
+    const env = daemonEnv(daemon);
+    return [
+      {
+        command: clean(env, "node ../../apps/daemon/src/main.ts"),
+        port: daemon.daemonPort,
+        reuseExistingServer: false,
+      },
+      {
+        command: clean(env, "pnpm --filter @bazhen/web exec vite"),
+        url: webOrigin(daemon),
+        reuseExistingServer: false,
+      },
+    ];
+  }),
 });

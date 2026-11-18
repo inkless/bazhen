@@ -43,7 +43,7 @@ Engineering at Google_.
 | medium | `tests/holder/containment.test.ts` | holders in real systemd scopes                 | CI's containment job only              |
 | medium | `tests/cli/*.test.ts`              | the CLI as a process, a fake daemon            | `pnpm test:medium`                     |
 | large  | `tests/api/*.test.ts`              | the daemon as a process, holders or tmux, CLIs | `pnpm test:real api`                   |
-| large  | `tests/e2e/*.spec.ts`              | daemon on tmux, web client and browser         | `pnpm test:real e2e`                   |
+| large  | `tests/e2e/*.spec.ts`              | daemons on tmux and holders, web, browser      | `pnpm test:real e2e`                   |
 
 `pnpm check` runs the small and medium tests on the host; none of them runs tmux or an agent, or
 signals a process it didn't start. The holder tests and the Rust tests that start a holder, close a
@@ -56,7 +56,10 @@ their setup refuses to start anywhere else. Never create that file on a machine 
 a container or CI they are the `pnpm test:integration`, `test:api` and `test:e2e` scripts, one
 worker each. An api test that reads its terminals through tmux starts its daemon with
 `runtime: "tmux"`, since the daemon makes holder terminals by default, and the helpers that read
-tmux refuse on any other daemon. The e2e suite's one daemon makes its terminals on tmux. Each
+tmux refuse on any other daemon. The e2e suite starts a daemon per runtime, each a Playwright
+project named for it: every spec runs on the tmux daemon, and those `RUNTIME_AGNOSTIC_SPECS`
+(`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec that reads tmux reaches it
+through `daemonTmux()`, which refuses on the holder project. Each
 run's containers have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS`
 overrides it), because a suite that starts a busy process per core would otherwise take every
 core from the agents working on the same machine. They run in `bazhen-tests.slice`, so

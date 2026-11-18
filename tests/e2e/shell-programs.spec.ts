@@ -1,8 +1,6 @@
-import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { TmuxServer } from "@bazhen/host-guard";
 import { HISTORY_LINES } from "@bazhen/protocol";
-import { atBottom, onAlternateScreen, screen, status, viewportTop } from "./page.ts";
+import { atBottom, daemonTmux, onAlternateScreen, screen, status, viewportTop } from "./page.ts";
 
 // What a person runs in a shell terminal, end to end: the page, the daemon and real tmux, with
 // each program as the distribution ships it. Full-screen programs draw on the alternate screen,
@@ -100,8 +98,7 @@ async function programScrolls(page: Page, shellId: string): Promise<void> {
 
 /** How many rows tall tmux has the shell's pane: the size its program draws for. */
 function paneHeight(shellId: string): number {
-  const home = String(process.env["BZ_E2E_HOME"]);
-  const out = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home }).runSync([
+  const out = daemonTmux().runSync([
     "list-panes",
     "-a",
     "-F",
@@ -135,8 +132,7 @@ const numbersIn = (text: string) =>
 
 /** What tmux holds of the shell's pane, its history and its screen, as text. */
 function held(shellId: string): string {
-  const home = String(process.env["BZ_E2E_HOME"]);
-  const server = TmuxServer.at(join(home, "run", "tmux.sock"), { root: home });
+  const server = daemonTmux();
   const pane = server
     .runSync(["list-panes", "-a", "-F", "#{@bazhen_terminal_id} #{pane_id}"])
     .split("\n")
