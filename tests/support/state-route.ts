@@ -5,13 +5,14 @@ export interface PatchableRoute<R> {
   continue(): Promise<void>;
 }
 
-/** Playwright's errors for a request whose page has gone from under it, as it raises them. */
-const ABANDONED = /has been disposed|Route is already handled|has been closed/;
+/** Playwright's errors for a read a reload left behind, as it raises them. */
+const ABANDONED = /has been disposed|Route is already handled/;
 
 /**
  * Answers the page's read of the daemon's state with `patch` applied to it. A reload while the
  * read is in flight disposes the response the route holds, and the page no longer waits for an
- * answer, so that read goes on unpatched; any other failure is the test's to see.
+ * answer, so that read goes on unpatched; any other failure is the test's to see, a page closed
+ * under the test among them.
  */
 export async function answerPatched<R>(
   route: PatchableRoute<R>,

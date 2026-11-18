@@ -1,12 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, patchState, screen, test } from "./page.ts";
 
-// The page goes on reading its state as a test ends, and a route still fetching then would fail
-// the test after its assertions passed.
-test.afterEach(async ({ page }) => {
-  await page.unrouteAll({ behavior: "ignoreErrors" });
-});
-
 /** Launches Claude Code from the page and waits for its TUI; answers the agent's id. */
 async function launch(page: Page): Promise<string> {
   await page.goto("/");

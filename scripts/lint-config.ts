@@ -34,6 +34,11 @@ export type Area = {
    * through theirs, which hears each socket before a route serves it.
    */
   webSocketServersIn?: string[];
+  /**
+   * Its module that alone imports Playwright's `test`, extending it with the teardown every test
+   * needs; its other files take `test` from that module.
+   */
+  playwrightTestIn?: string;
 };
 
 const PACKAGE_DIR: Record<string, string> = {
@@ -166,6 +171,7 @@ export const MATRIX: Area[] = [
   // The page against the real daemon: it reaches the daemon over its public surfaces too.
   {
     dir: "tests/e2e",
+    playwrightTestIn: "page.ts",
     banned: [
       "@bazhen/core",
       "@bazhen/runtime-tmux",
@@ -324,11 +330,14 @@ function webSocketServers(where: string, area: Area): Pattern {
   };
 }
 
+/** Files an area exempts from one of its bans, as they're the ones it allows that import in. */
+type Exempt = { makesWebSocketServers?: boolean; extendsPlaywrightTest?: boolean };
+
 function restrictions(
   area: Area,
   smallTest: boolean,
   test: boolean,
-  makesWebSocketServers = false,
+  exempt: Exempt = {},
 ): Restriction {
   const where = `${area.dir} (tech-stack-and-scaffold.md §3, docs/standards/code.md)`;
   const patterns: Pattern[] = [
@@ -347,8 +356,15 @@ function restrictions(
   ];
   if (area.dir !== "packages/host-guard") patterns.push(hostGuardByPath(where, area));
   if (area.seamsForTestsOnly === true && !test) patterns.push(seamsPattern(where));
-  if (area.webSocketServersIn !== undefined && !test && !makesWebSocketServers)
+  if (area.webSocketServersIn !== undefined && !test && exempt.makesWebSocketServers !== true)
     patterns.push(webSocketServers(where, area));
+  if (area.playwrightTestIn !== undefined && exempt.extendsPlaywrightTest !== true) {
+    patterns.push({
+      group: ["@playwright/test"],
+      importNamePattern: "^(?:test|default)$",
+      message: `${where} takes \`test\` from ${area.dir}/${area.playwrightTestIn}, whose page stops its routes before the test's context closes.`,
+    });
+  }
   if (area.thirdParty?.length) {
     patterns.push({
       group: area.thirdParty,
@@ -411,7 +427,23 @@ function overrides(): Override[] {
               rules: {
                 ...base,
                 ...wsLoads(false),
-                "no-restricted-imports": restrictions(area, false, false, true),
+                "no-restricted-imports": restrictions(area, false, false, {
+                  makesWebSocketServers: true,
+                }),
+              },
+            },
+          ]),
+      ...(area.playwrightTestIn === undefined
+        ? []
+        : [
+            {
+              files: [`${area.dir}/${area.playwrightTestIn}`],
+              rules: {
+                ...base,
+                ...wsLoads(true),
+                "no-restricted-imports": restrictions(area, false, false, {
+                  extendsPlaywrightTest: true,
+                }),
               },
             },
           ]),

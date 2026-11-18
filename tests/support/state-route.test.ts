@@ -56,6 +56,27 @@ describe("answerPatched", () => {
     expect(calls).toEqual(["continue"]);
   });
 
+  it("does not hide a page closed under the test", async () => {
+    const calls: string[] = [];
+    await expect(
+      answerPatched<Response>(
+        {
+          fetch: () =>
+            Promise.reject(
+              new Error("route.fetch: Target page, context or browser has been closed"),
+            ),
+          fulfill: () => Promise.resolve(),
+          continue: () => {
+            calls.push("continue");
+            return Promise.resolve();
+          },
+        },
+        add,
+      ),
+    ).rejects.toThrow("has been closed");
+    expect(calls).toEqual([]);
+  });
+
   it("does not hide a response that isn't JSON", async () => {
     const { fake, calls } = route(() => Promise.reject(new SyntaxError("Unexpected token <")));
     await expect(answerPatched(fake, add)).rejects.toThrow("Unexpected token <");

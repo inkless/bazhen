@@ -2856,6 +2856,105 @@
                   "**/host-guard/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
+                  "@playwright/test"
+                ],
+                "importNamePattern": "^(?:test|default)$",
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "tests/e2e/page.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/core",
+                  "@bazhen/core/**",
+                  "**/packages/core/**",
+                  "**/core/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/core."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-tmux",
+                  "@bazhen/runtime-tmux/**",
+                  "**/packages/runtime-tmux/**",
+                  "**/runtime-tmux/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-tmux."
+              },
+              {
+                "group": [
+                  "@bazhen/runtime-holder",
+                  "@bazhen/runtime-holder/**",
+                  "**/packages/runtime-holder/**",
+                  "**/runtime-holder/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/runtime-holder."
+              },
+              {
+                "group": [
+                  "@bazhen/env-local",
+                  "@bazhen/env-local/**",
+                  "**/packages/env-local/**",
+                  "**/env-local/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/env-local."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-claude-code",
+                  "@bazhen/harness-claude-code/**",
+                  "**/packages/harness-claude-code/**",
+                  "**/harness-claude-code/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-claude-code."
+              },
+              {
+                "group": [
+                  "@bazhen/harness-codex",
+                  "@bazhen/harness-codex/**",
+                  "**/packages/harness-codex/**",
+                  "**/harness-codex/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/harness-codex."
+              },
+              {
+                "group": [
+                  "@bazhen/daemon",
+                  "@bazhen/daemon/**",
+                  "**/apps/daemon/**",
+                  "**/daemon/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
               }
             ]
           }
@@ -2949,6 +3048,13 @@
                   "**/host-guard/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
+                  "@playwright/test"
+                ],
+                "importNamePattern": "^(?:test|default)$",
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
               },
               {
                 "group": [
@@ -3071,6 +3177,13 @@
                   "**/host-guard/src/**"
                 ],
                 "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
+                  "@playwright/test"
+                ],
+                "importNamePattern": "^(?:test|default)$",
+                "message": "tests/e2e (tech-stack-and-scaffold.md §3, docs/standards/code.md) takes `test` from tests/e2e/page.ts, whose page stops its routes before the test's context closes."
               }
             ]
           }
