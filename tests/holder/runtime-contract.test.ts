@@ -85,7 +85,7 @@ function holderRuntime() {
     root,
     binary: HOLDER_BINARY,
     env: holderEnv(),
-    exitPollMs: 50,
+    processPollMs: 50,
     start: holderStarter(started),
   });
   made.set(runtime, { root, started });

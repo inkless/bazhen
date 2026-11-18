@@ -126,7 +126,7 @@ export class ServerWatch {
       .run(agentId, async () => {
         if (this.stopped || !unchanged(agent, store.agentTerminal({ agentId }))) return;
         if (found === undefined && !(await provablyGone(environment, agent, say))) return;
-        // Settled as the agent is now: the exit poller records exits outside the queue, so one
+        // Settled as the agent is now: the process watch records exits outside the queue, so one
         // may have landed during the probe. A different terminal or generation proves nothing.
         store.transaction(() => {
           const now = store.agentTerminal({ agentId });

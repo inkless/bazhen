@@ -17,7 +17,7 @@ const runtimeOn = (server: ConfiguredTmuxServer) =>
     server,
     pty: nodePtySpawner,
     env: filterEnv(process.env).env,
-    exitPollMs: 50,
+    processPollMs: 50,
     // Every paste may go: what the daemon's gate reads of a shell is the api suite's to test.
     pasteGate: ["true"],
   });

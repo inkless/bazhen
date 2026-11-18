@@ -348,7 +348,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
 
   it("is unreachable while a holder's socket can't be read, and never reports it exited", async () => {
     const root = privateRoot();
-    const { runtime } = runtimeAt(root, { exitPollMs: 20 });
+    const { runtime } = runtimeAt(root, { processPollMs: 20 });
     const fake = await fakeTerminal(root, newId("term"), { exit: { type: "exited", code: 0 } });
     chmodSync(fake.server.path, 0o000);
     const seen: string[] = [];
@@ -360,7 +360,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
 
   it("refuses an inventory while any holder can't be read, and still sees the others' exits", async () => {
     const root = privateRoot();
-    const { runtime, errors } = runtimeAt(root, { exitPollMs: 20 });
+    const { runtime, errors } = runtimeAt(root, { processPollMs: 20 });
     const ended = newId("term");
     await fakeTerminal(root, ended, { exit: { type: "exited", code: 0 } });
     chmodSync((await fakeTerminal(root, newId("term"))).server.path, 0o000);
@@ -369,13 +369,13 @@ describe("HolderRuntime: creating and finding terminals", () => {
     await expect.poll(() => seen.length).toBeGreaterThan(1);
     stop();
     await expect(runtime.inventory()).rejects.toThrow("can't be read");
-    // Reported once, however often exit polling reads it while it stays unreadable.
+    // Reported once, however often process polling reads it while it stays unreadable.
     expect([seen[0], errors.length]).toEqual([ended, 1]);
   });
 
   it("reports an exited terminal on every check, under its generation", async () => {
     const root = privateRoot();
-    const { runtime } = runtimeAt(root, { exitPollMs: 20 });
+    const { runtime } = runtimeAt(root, { processPollMs: 20 });
     const terminalId = newId("term");
     await fakeTerminal(root, terminalId, {
       generation: 3,
@@ -390,7 +390,7 @@ describe("HolderRuntime: creating and finding terminals", () => {
 
   it("reports a running terminal on every check, at the generation its holder runs", async () => {
     const root = privateRoot();
-    const { runtime } = runtimeAt(root, { exitPollMs: 20 });
+    const { runtime } = runtimeAt(root, { processPollMs: 20 });
     const terminalId = newId("term");
     await fakeTerminal(root, terminalId, { generation: 4, exit: null });
     const seen: unknown[] = [];

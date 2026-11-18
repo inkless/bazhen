@@ -9,8 +9,8 @@ import { adopts, recordAdopted, recordClosed } from "./lifecycle.ts";
  * one that died, which is reachable and empty, from one it can't read just now. A runtime that
  * can't be read, or fails while being read, concludes nothing about its agents, because an
  * unreadable source is not an empty one; the other runtimes and boot go on either way. Runs before
- * any command is taken, so nothing moves under it. A pane that died meanwhile is the exit poller's
- * to record, on its first check.
+ * any command is taken, so nothing moves under it. A pane that died meanwhile is the process
+ * watch's to record, on its first check.
  */
 export async function reconcile(
   store: Store,
@@ -134,7 +134,7 @@ export function settle(
     return;
   }
   if (found !== undefined) {
-    // Dead, it is the exit poller's to record, on its first check, at the generation adopted.
+    // Dead, it is the process watch's to record, on its first check, at the generation adopted.
     if (adopts(agent, found.ref)) recordAdopted(store, agentId, found.ref);
     return;
   }

@@ -41,7 +41,7 @@ describe("a holder daemon on a machine without tmux", () => {
     await view.drive();
     view.type("sleep 300\r");
     // The shell's foreground is read through every runtime that is read, so once it says sleep
-    // the foregrounds have been read at least once with tmux unused, and its exit polls have run.
+    // the foregrounds have been read at least once with tmux unused, and its process polls have run.
     await expect
       .poll(
         async () =>

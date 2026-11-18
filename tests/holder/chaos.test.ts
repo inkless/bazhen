@@ -232,7 +232,7 @@ beforeAll(() => {
     root,
     binary: HOLDER_BINARY,
     env: holderEnv(),
-    exitPollMs: 50,
+    processPollMs: 50,
     start: holderStarter(started, undefined, CPU_SECONDS),
   });
 });

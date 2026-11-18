@@ -40,6 +40,20 @@ describe("UnknownCause", () => {
     expect(exits(grace.settle([unknown], 2500))).toEqual([null]);
   });
 
+  it("marks only a death it holds back as held, so a reader can leave it out", () => {
+    const grace = new UnknownCause(2000);
+    const rows = [
+      unknown,
+      { key: "b", exit: { type: "exited", code: 1 } as const },
+      { key: "c", exit: null },
+    ];
+    const held = (t: number) => grace.settle(rows, t).map((r) => r.held === true);
+    expect([held(0), held(2000)]).toEqual([
+      [true, false, false],
+      [false, false, false],
+    ]);
+  });
+
   it("passes a known cause straight through", () => {
     const exited = { key: "a", exit: { type: "exited", code: 1 } as const };
     expect(new UnknownCause(2000).settle([exited], 0)).toEqual([exited]);

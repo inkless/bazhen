@@ -51,7 +51,7 @@ import { redacted } from "./redact.ts";
 
 import { ScreenWatch } from "./screen-watch.ts";
 
-const EXIT_POLL_MS = 1_000;
+const PROCESS_POLL_MS = 1_000;
 const UNKNOWN_EXIT_AFTER_MS = 2_000;
 /** How long output must pause, or at most how long it may run, before the screen is re-read. */
 const SCREEN_QUIET_MS = 100;
@@ -255,10 +255,10 @@ export interface TmuxRuntimeOptions {
    * copies it into every pane, so it must already be filtered (foundation-design §9.5).
    */
   readonly env: Readonly<Record<string, string>>;
-  /** How often dead terminals are looked for while anyone listens. */
-  readonly exitPollMs?: number;
+  /** How often terminals' processes are read while anyone listens. */
+  readonly processPollMs?: number;
   /**
-   * Whether a terminal is open on this runtime. While none is, dead terminals aren't looked for,
+   * Whether a terminal is open on this runtime. While none is, terminals' processes aren't read,
    * so a daemon with no tmux terminal doesn't poll tmux. Without it, they always are.
    */
   readonly inUse?: () => boolean;
@@ -275,7 +275,7 @@ export interface TmuxRuntimeOptions {
    * appended, as `bazhen-hook pane-ready` does; exit 0 is yes. Without one, nothing is pasted.
    */
   readonly pasteGate?: readonly [string, ...string[]];
-  /** Where a failure inside exit polling goes, since no caller is waiting on it. */
+  /** Where a failure inside process polling goes, since no caller is waiting on it. */
   readonly onError?: (err: unknown) => void;
 }
 
@@ -296,9 +296,9 @@ export class TmuxRuntime implements RuntimeAdapter {
     this.env = opts.env;
     this.processes = new ProcessWatch({
       read: () => this.observed(),
-      intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      intervalMs: opts.processPollMs ?? PROCESS_POLL_MS,
       ...(opts.inUse && { active: opts.inUse }),
-      onError: opts.onError ?? ((err) => console.warn("tmux exit polling failed:", err)),
+      onError: opts.onError ?? ((err) => console.warn("tmux process polling failed:", err)),
     });
     const installed = (() => {
       try {
@@ -497,6 +497,11 @@ export class TmuxRuntime implements RuntimeAdapter {
   }
 
   async inventory(): Promise<RuntimeInventoryEntry[]> {
+    return (await this.panes()).map(({ ref, tags, exit }) => ({ ref, tags, exit }));
+  }
+
+  /** Every tagged pane, a death of unknown cause still in its grace marked `held`. */
+  private async panes() {
     const out = await this.tmux("list-panes", "-a", "-F", PANE.format).catch((err: unknown) => {
       // No server, so nothing on its socket; whether that means gone is health's to say.
       if (err instanceof TmuxError && noServer(err)) return "";
@@ -516,9 +521,7 @@ export class TmuxRuntime implements RuntimeAdapter {
         },
       ];
     });
-    return this.unknownCause
-      .settle(rows, Date.now())
-      .map(({ ref, tags, exit }) => ({ ref, tags, exit }));
+    return this.unknownCause.settle(rows, Date.now());
   }
 
   async attach(ref: RuntimeRef, size: Size | null): Promise<HistoryAttached> {
@@ -842,7 +845,8 @@ export class TmuxRuntime implements RuntimeAdapter {
 
   private async observed(): Promise<readonly ObservedProcess[]> {
     try {
-      return await this.inventory();
+      // A held pane has died, so it is not reported running; it is reported once its grace ends.
+      return (await this.panes()).filter((pane) => pane.held !== true);
     } catch (err) {
       // An unreadable server is no evidence of what its terminals run (foundation-design §7.1).
       if (err instanceof TmuxError) return [];

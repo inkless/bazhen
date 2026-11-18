@@ -70,7 +70,7 @@ import { Control, HolderStream } from "./runtime-stream.ts";
 import { decodeTags, encodeTags, unlinked } from "./tags.ts";
 import { TitleWatch } from "./title-watch.ts";
 
-const EXIT_POLL_MS = 1_000;
+const PROCESS_POLL_MS = 1_000;
 const TITLE_SYNC_MS = 5_000;
 /** How long a holder has to answer `hello` before it counts as one that can't be read. */
 const HELLO_MS = 2_000;
@@ -91,13 +91,13 @@ export interface HolderRuntimeOptions {
   readonly installDir?: string;
   /** The environment every new terminal starts from, already filtered (foundation-design §9.5). */
   readonly env: Readonly<Record<string, string>>;
-  /** How often dead terminals are looked for while anyone listens. */
-  readonly exitPollMs?: number;
+  /** How often terminals' processes are read while anyone listens. */
+  readonly processPollMs?: number;
   /** How often, while titles are listened to, agents' holders are listed for any not watched. */
   readonly titleSyncMs?: number;
   /** How long a holder has to answer `hello`. */
   readonly helloMs?: number;
-  /** Where a failure no caller waits on goes: exit polling, or a holder that can't be read. */
+  /** Where a failure no caller waits on goes: process polling, or a holder that can't be read. */
   readonly onError?: (err: unknown) => void;
   /** Starts a holder: host-guard's `startHolder`, unless a test records what it starts. */
   readonly start?: (options: StartHolderOptions) => Promise<StartedHolder>;
@@ -199,7 +199,7 @@ export class HolderRuntime implements RuntimeAdapter {
     this.env = opts.env;
     this.processes = new ProcessWatch({
       read: async () => (await this.listed()).entries,
-      intervalMs: opts.exitPollMs ?? EXIT_POLL_MS,
+      intervalMs: opts.processPollMs ?? PROCESS_POLL_MS,
       onError: this.report,
     });
     this.titles = new TitleWatch({
@@ -471,7 +471,7 @@ export class HolderRuntime implements RuntimeAdapter {
 
   /**
    * What `inventory` reads, leaving out the sockets that couldn't be read, each reported once until
-   * it reads again: for readers that only act on what they find, as exit polling does.
+   * it reads again: for readers that only act on what they find, as process polling does.
    */
   private async listed(): Promise<{
     readonly entries: RuntimeInventoryEntry[];

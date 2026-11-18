@@ -23,8 +23,9 @@ export function exitStatus(status: string, signal: string): ExitStatus {
 
 /**
  * Holds back a death of unknown cause for `graceMs`, in case its cause arrives, so a fresh death
- * reads as still running instead of unknown. After the grace it reads unknown, which a later
- * reading may still replace with the cause: unknown may become known, never the other way.
+ * reads as still running instead of unknown, marked `held` for a reader that must not take it for
+ * one. After the grace it reads unknown, which a later reading may still replace with the cause:
+ * unknown may become known, never the other way.
  */
 export class UnknownCause {
   private readonly graceMs: number;
@@ -38,13 +39,13 @@ export class UnknownCause {
   settle<T extends { readonly key: string; readonly exit: ExitStatus | null }>(
     rows: readonly T[],
     now: number,
-  ): T[] {
+  ): (T & { readonly held?: true })[] {
     const firstSeen = new Map<string, number>();
     const settled = rows.map((row) => {
       if (row.exit?.type !== "unknown") return row;
       const since = this.firstSeen.get(row.key) ?? now;
       firstSeen.set(row.key, since);
-      return now - since >= this.graceMs ? row : { ...row, exit: null };
+      return now - since >= this.graceMs ? row : { ...row, exit: null, held: true as const };
     });
     this.firstSeen = firstSeen;
     return settled;

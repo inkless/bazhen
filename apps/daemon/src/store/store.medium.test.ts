@@ -31,6 +31,7 @@ import {
 import { MIGRATIONS, NUMBERED_MIGRATIONS, type Migration } from "./migrations.ts";
 import { UnknownEntity } from "./projections.ts";
 import {
+  AGENT_BY_TERMINAL,
   NAMED_MIGRATIONS_VERSION,
   SchemaTooNew,
   Store,
@@ -1377,6 +1378,20 @@ const requested = (agentId: string, terminalId: string) => ({
   payload: { terminalId, generation: 1, fresh: false },
 });
 
+describe("Store reads read every second", () => {
+  it("finds an agent by its terminal through primary keys, never a scan of every agent", () => {
+    const path = dbPath();
+    Store.open(path).close();
+    const raw = new DatabaseSync(path);
+    const plan = raw
+      .prepare(`EXPLAIN QUERY PLAN ${AGENT_BY_TERMINAL}`)
+      .all("term_x")
+      .map((step) => String(step.detail));
+    raw.close();
+    expect(plan.filter((detail) => !detail.startsWith("SEARCH"))).toEqual([]);
+  });
+});
+
 describe("Store relaunch", () => {
   it("moves a relaunched agent to a new terminal at the next generation, leaving the lost one lost", () => {
     const store = Store.open(dbPath());
@@ -1395,7 +1410,9 @@ describe("Store relaunch", () => {
       agent?.generation,
       agent?.usage,
       store.terminalState(lostTerminal),
-    ]).toEqual(["starting", terminalId, 1, undefined, "lost"]);
+      store.agentTerminal({ terminalId })?.agentId,
+      store.agentTerminal({ terminalId: lostTerminal }),
+    ]).toEqual(["starting", terminalId, 1, undefined, "lost", agentId, undefined]);
     store.close();
   });
 
