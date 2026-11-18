@@ -371,6 +371,7 @@ export const HUMANS_ONLY: readonly (readonly [path: string, what: string])[] = [
   ["/v1/shells/:id/restart", "restart a shell"],
   ["/v1/shells/:id/rename", "rename a shell"],
   ["/v1/shells/:id/unlink", "unlink a shell"],
+  ["/v1/terminals/:id/screen", "read a terminal's screen"],
 ];
 
 /**

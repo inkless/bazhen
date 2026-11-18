@@ -19,6 +19,7 @@ export * from "./shells.ts";
 export * from "./stream.ts";
 export * from "./theme.ts";
 export * from "./tasks.ts";
+export * from "./terminals.ts";
 export * from "./version.ts";
 export * from "./waits.ts";
 

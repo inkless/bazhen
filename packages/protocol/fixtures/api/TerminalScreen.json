@@ -1,0 +1,56 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "text": "$ ls\nREADME.md\n",
+      "history": 1
+    },
+    "parsed": {
+      "text": "$ ls\nREADME.md\n",
+      "history": 1
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "text": "",
+      "history": 0
+    },
+    "parsed": {
+      "text": "",
+      "history": 0
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "text": "$ ls\nREADME.md\n",
+      "history": 1,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "text": "$ ls\nREADME.md\n",
+      "history": 1
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "text": "",
+      "history": 0,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "text": "",
+      "history": 0
+    }
+  }
+]

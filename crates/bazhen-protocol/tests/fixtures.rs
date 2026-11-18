@@ -34,6 +34,7 @@ use bazhen_protocol::tasks::{
     CreateTaskRequest, CreateTaskResponse, DelegateTaskRequest, EscalateRequest, EscalateResponse,
     FinishTaskRequest, TaskCommandResponse, TaskDetail, UnassignTaskRequest,
 };
+use bazhen_protocol::terminals::TerminalScreen;
 use bazhen_protocol::text::{TASK_NOTE_MAX_BYTES, is_plain_remote, quote_note, task_note_text};
 use bazhen_protocol::time::timestamp_ms;
 use bazhen_protocol::waits::{AgentCondition, ShellCondition, WaitRequest, WaitResponse};
@@ -145,6 +146,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("SendMessageResponse", round_trips::<SendMessageResponse>),
     ("ShellCommandResponse", round_trips::<ShellCommandResponse>),
     ("SignalAgentRequest", round_trips::<SignalAgentRequest>),
+    ("TerminalScreen", round_trips::<TerminalScreen>),
     ("StateSnapshot", round_trips::<StateSnapshot>),
     ("StopResponse", round_trips::<StopResponse>),
     ("StreamClientFrame", round_trips::<StreamClientFrame>),

@@ -554,6 +554,10 @@ const commands = {
       held.release();
     }
   },
+  terminalScreen: async (terminalId, history) => {
+    const ref = store.runtimeRef(terminalId);
+    return ref === undefined ? undefined : runtime.screen(ref, history);
+  },
 } satisfies Omit<AppDeps, "allow">;
 const app = createApp({
   ...commands,

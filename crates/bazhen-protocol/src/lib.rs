@@ -17,6 +17,7 @@ pub mod roles;
 pub mod shells;
 pub mod stream;
 pub mod tasks;
+pub mod terminals;
 pub mod text;
 pub mod time;
 pub mod waits;

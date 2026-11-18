@@ -100,6 +100,7 @@ const commands: LanParts["commands"] = {
   },
   waitMessages: refuse,
   wait: refuse,
+  terminalScreen: refuse,
 };
 
 /** The LAN listener as the daemon builds it, on 127.0.0.1, with one echo stream. */
