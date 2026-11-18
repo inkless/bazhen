@@ -105,6 +105,45 @@ describe("an agent whose holder ran a new process while the daemon was down", ()
   });
 });
 
+describe("an agent whose holder ran a new process while the daemon runs", () => {
+  let daemon: Daemon;
+  let agentId: string;
+  let socket: string;
+
+  /** The agent's state and generation, as a client is shown them. */
+  const agent = async () => {
+    const found = (await snapshot(daemon)).agents.find((a) => a.id === agentId);
+    return [found?.state, found?.generation];
+  };
+
+  beforeAll(async () => {
+    daemon = await Daemon.start({ modelUrl: model.url, runtime: "holder" });
+    const launched = await daemon.launch("replaced-live");
+    agentId = launched.agentId;
+    await daemon.running(agentId);
+    const found = daemon.holderOf(agentId);
+    if (found === undefined) throw new Error(`${agentId} has no holder`);
+    socket = found;
+  }, 120_000);
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("takes the new process as the agent's own without waiting for it to exit", async () => {
+    await replaceHolderChild(socket, ["sleep", "600"]);
+    await expect.poll(agent, { timeout: 15_000 }).toEqual(["starting", 1]);
+  });
+
+  it("signals the new process, and records its exit", async () => {
+    const signalled = await daemon.request(`/v1/agents/${agentId}/signal`, {
+      method: "POST",
+      body: { idempotencyKey: "signal", generation: 1, signal: "SIGTERM" },
+    });
+    expect(signalled).toMatchObject({ status: 200 });
+    await expect.poll(agent, { timeout: 30_000 }).toEqual(["exited", 1]);
+  });
+});
+
 describe("a daemon running terminals on several holders", () => {
   let daemon: Daemon;
   let shell: string;
