@@ -116,6 +116,15 @@ export function recordAdopted(store: Store, agentId: string, ref: RuntimeRef): n
   });
 }
 
+function exited(agentId: string, status: ExitStatus) {
+  return {
+    type: "agent.exited",
+    entityId: agentId,
+    actor: "system",
+    payload: { exit: status },
+  } as const;
+}
+
 /** A message's states before it reaches its agent or can't. */
 const IN_FLIGHT = ["queued", "offered", "emitted", "seen", "queued_in_codex"] as const;
 
@@ -160,38 +169,36 @@ export class Lifecycle {
     this.startAgain = startAgain;
   }
 
-  /** Records agents' exits as the environment reports them; returns the stop function. */
+  /**
+   * Records agents' processes as the environment reports them: their exits, and processes started
+   * outside the daemon. Returns the stop function.
+   */
   watch(): () => void {
-    return this.environment.onProcess((ref, exit) => {
-      if (exit !== null) this.exited(ref, exit);
-    });
+    return this.environment.onProcess((ref, exit) => this.observed(ref, exit));
   }
 
   /**
-   * The environment reports every dead terminal on every check, so a report about a terminal that
-   * is no longer running, or about an earlier generation, changes nothing. One about a later
-   * generation is of a process started outside the daemon, which is adopted as it exits.
+   * The environment reports every terminal's process on every check, so a report about a terminal
+   * that is no longer running, or about an earlier generation, changes nothing, and one about a
+   * process still running at the recorded generation is only read. One about a later generation
+   * is of a process started outside the daemon, which is adopted when it is seen, running or
+   * exited.
    */
-  private exited(ref: RuntimeRef, status: ExitStatus): void {
+  private observed(ref: RuntimeRef, status: ExitStatus | null): void {
     const found = this.store.agentTerminal({ terminalId: ref.terminalId });
     if (found === undefined) return;
-    const exit = {
-      type: "agent.exited",
-      entityId: found.agentId,
-      actor: "system",
-      payload: { exit: status },
-    } as const;
     if (adopts(found, ref)) {
       this.store.transaction(() => {
         recordAdopted(this.store, found.agentId, ref);
-        this.store.append(exit);
+        if (status !== null) this.store.append(exited(found.agentId, status));
       });
       return;
     }
+    if (status === null) return;
     if (found.terminalState == null || !terminal.accepts(found.terminalState, "process.exited"))
       return;
     if (ref.locator.generation !== String(found.generation)) return;
-    this.store.append(exit);
+    this.store.append(exited(found.agentId, status));
   }
 
   /**

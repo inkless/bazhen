@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FLEET_INSTRUCTIONS } from "../tasks/mail.ts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   HarnessRefused,
   LaunchFailed,
@@ -90,6 +90,8 @@ async function running({
   const replaced: string[] = [];
   const respawned: AgentRespawn[] = [];
   const signalled: Signal[] = [];
+  /** The generation each signal was sent to. */
+  const signalledAt: (string | undefined)[] = [];
   let failure: Error | undefined;
   const statesAtClose: (string | undefined)[] = [];
   let report: ((ref: RuntimeRef, exit: ExitStatus | null) => void) | undefined;
@@ -122,9 +124,10 @@ async function running({
           duringRespawn(s, r.agentId);
           return base.respawn(r);
         },
-        signal: async (_refs, signal) => {
+        signal: async (refs, signal) => {
           if (failure !== undefined) throw failure;
           signalled.push(signal);
+          signalledAt.push(refs.runtime?.locator.generation);
         },
         close: async (refs) => {
           statesAtClose.push(s.snapshot(testView).agents[0]?.state);
@@ -147,7 +150,8 @@ async function running({
     () => BUILTIN_BOOK,
     () => {},
   );
-  const lifecycle = new Lifecycle(store, environment, new AgentQueue(), {
+  const queue = new AgentQueue();
+  const lifecycle = new Lifecycle(store, environment, queue, {
     size: { cols: 80, rows: 24 },
     replaced: (id) => replaced.push(id),
     budget,
@@ -157,6 +161,9 @@ async function running({
   lifecycle.watch();
   const exit = (generation: string, status: ExitStatus = { type: "exited", code: 1 }) =>
     report?.({ terminalId, runtime: "tmux", locator: { generation } }, status);
+  /** The environment sees the agent's terminal running `generation`. */
+  const runs = (generation: string) =>
+    report?.({ terminalId, runtime: "tmux", locator: { generation } }, null);
   const agent = () => store.snapshot(testView).agents[0];
   const events = () => store.snapshot(testView).eventId;
   const fail = (with_?: Error) => (failure = with_);
@@ -173,8 +180,11 @@ async function running({
     replaced,
     respawned,
     signalled,
+    signalledAt,
     statesAtClose,
+    queue,
     exit,
+    runs,
     agent,
     events,
     fail,
@@ -279,6 +289,60 @@ describe("agent lifecycle", () => {
       ["starting", 1],
       ["exited", 5],
     ]);
+  });
+
+  it("adopts a process started outside the daemon as soon as it is seen running", async () => {
+    const { store, lifecycle, agentId, runs, agent, signalledAt } = await running();
+    runs("1");
+    const adopted = [agent()?.state, agent()?.generation, store.events(0).at(-1)?.type];
+    await lifecycle.signal(agentId, { idempotencyKey: "s", generation: 1, signal: "SIGINT" });
+    expect([adopted, signalledAt]).toEqual([["starting", 1, "agent.process_adopted"], ["1"]]);
+  });
+
+  it("adopts a process started outside the daemon in an exited agent's terminal, then its exit", async () => {
+    const { runs, exit, agent } = await running();
+    exit("0");
+    runs("1");
+    const adopted = [agent()?.state, agent()?.generation];
+    exit("1");
+    expect([adopted, [agent()?.state, agent()?.generation]]).toEqual([
+      ["starting", 1],
+      ["exited", 1],
+    ]);
+  });
+
+  it("adopts nothing seen running while its own respawn is in flight", async () => {
+    let during = nothing;
+    const { store, lifecycle, agentId, exit, runs, agent } = await running({
+      duringRespawn: () => during(),
+    });
+    exit("0");
+    during = () => {
+      runs("1");
+      runs("2");
+    };
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    expect([
+      agent()?.state,
+      agent()?.generation,
+      store.events(0).some((e) => e.type === "agent.process_adopted"),
+    ]).toEqual(["starting", 1, false]);
+  });
+
+  it("writes nothing, and takes no turn, for a process seen running at its own or an older generation", async () => {
+    const { store, lifecycle, agentId, exit, runs, queue, events } = await running();
+    exit("0");
+    await lifecycle.respawn(agentId, { idempotencyKey: "r", generation: 0 });
+    const before = events();
+    const append = vi.spyOn(store, "append");
+    const transaction = vi.spyOn(store, "transaction");
+    const turn = vi.spyOn(queue, "run");
+    for (let check = 0; check < 20; check++) {
+      runs("0");
+      runs("1");
+    }
+    const calls = [append, transaction, turn].map((spy) => spy.mock.calls.length);
+    expect([calls, events()]).toEqual([[0, 0, 0], before]);
   });
 
   it("records an exit once, though the environment reports it on every check", async () => {
