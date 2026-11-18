@@ -19,7 +19,13 @@ import { isApple, matchKey } from "./keymap.ts";
 import { statusText, type Status } from "./status.ts";
 import { Backoff } from "./reconnect.ts";
 import { PAGE_PROTOCOL, checkBuild } from "../api.ts";
-import { scrollbackFor, startSnapshot, wheelAction, type TerminalKind } from "./scroll.ts";
+import {
+  onAlternateScreen,
+  scrollbackFor,
+  startSnapshot,
+  wheelAction,
+  type TerminalKind,
+} from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
 import { loadSettings } from "./settings.ts";
 import { deviceStorage } from "../storage.ts";
@@ -134,16 +140,12 @@ function connect(
   /** The latest lease epoch. */
   let epoch: number | undefined;
   let wantsToDrive = false;
-  /** Whether the program is on its alternate screen, which only the daemon can see. */
-  let alternate = false;
+  /** What the daemon last said of a screen switch the view's bytes don't carry (tmux's). */
+  let daemonSaidAlternate = false;
+  const alternate = () => onAlternateScreen(term, daemonSaidAlternate);
   let over = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
-  const unhook = exposeForTests(
-    terminalId,
-    term,
-    () => alternate,
-    () => scroll.gliding(),
-  );
+  const unhook = exposeForTests(terminalId, term, alternate, () => scroll.gliding());
 
   const send = (frame: StreamClientFrame) => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
@@ -223,7 +225,7 @@ function connect(
         scroll.stopGlide();
         startSnapshot(term, f);
       } else if (f.type === "snapshot_end") backoff.reset();
-      else if (f.type === "screen") alternate = f.alternate;
+      else if (f.type === "screen") daemonSaidAlternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
         declare();
@@ -294,7 +296,11 @@ function connect(
     return false;
   });
   const route = () =>
-    wheelAction({ mouseTracking: term.modes.mouseTrackingMode !== "none", alternate, kind });
+    wheelAction({
+      mouseTracking: term.modes.mouseTrackingMode !== "none",
+      alternate: alternate(),
+      kind,
+    });
   const scroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
   const target: BarTarget = {
     kind,
@@ -420,8 +426,8 @@ const swallow = () => true;
 
 /**
  * For browser tests, per view: the screen as text, the top line in view, whether the view is at
- * the bottom (not scrolled back into the page's own scrollback), whether the daemon
- * reported the alternate screen, the background it paints, and the colours a program wrote text
+ * the bottom (not scrolled back into the page's own scrollback), whether the program is on its
+ * alternate screen, the background it paints, and the colours a program wrote text
  * in, whichever renderer draws.
  */
 function exposeForTests(

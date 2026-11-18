@@ -54,7 +54,8 @@ export function attachScrollInput(
 
   const wheelSteps = new ScrollSteps();
   // Caught before xterm.js sees it, which its own wheel hook can't: returning false there still
-  // scrolls the scrollback, and over an agent's alternate screen that scrollback is stale.
+  // scrolls the scrollback, which under tmux's alternate screen isn't the program's. On a real
+  // alternate buffer, xterm.js would send arrow keys as typed input, taking the lease.
   const wheel = (event: WheelEvent) => {
     const action = route();
     if (action === "app" || action === "local") return;
