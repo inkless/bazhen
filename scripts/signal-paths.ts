@@ -437,13 +437,20 @@ function unfollowedStarts(code: string, kept: string, bindings: StartBindings) {
 const blank = (text: string) => text.replaceAll(/[^\n]/g, " ");
 
 // After these, a `/` opens a regular expression rather than dividing: an operator, an opening
-// bracket, a statement's end, or a keyword that takes an expression. `<` is left out, as JSX's
-// `</` closes a tag.
+// bracket, a statement's end, or a keyword that takes an expression, though not a member named
+// like one (`map.delete`). `<` is left out, as JSX's `</` closes a tag.
 const REGEX_AFTER =
-  /(?:[=(,:[!&|?{};+\-*%>~^]|\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
-const opensRegex = (out: string) => {
+  /(?:[=(,:[&|?{};+\-*%>~^]|(?<!\.\s*)\b(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await|instanceof))$/;
+const opensRegex = (out: string): boolean => {
   const before = out.trimEnd();
-  return before === "" || REGEX_AFTER.test(before.slice(-16));
+  if (before === "") return true;
+  // A `!` after a value is TypeScript's non-null assertion, which a `/` after it divides; after
+  // anything else it is a not.
+  if (before.endsWith("!")) return opensRegex(before.replace(/!+$/, ""));
+  // Tokens are read longest first, so an even run of `+` or `-` ends in `++` or `--`, after which
+  // a regular expression can't follow.
+  const run = /(?:\++|-+)$/.exec(before)?.[0].length ?? 1;
+  return run % 2 === 1 && REGEX_AFTER.test(before.slice(-16));
 };
 
 /** The end of a regular expression literal opening at `at`, past its flags, or -1 if none does. */
@@ -464,13 +471,32 @@ function regexEnd(source: string, at: number): number {
   return -1;
 }
 
+const WORD = /[\p{L}\p{N}]/u;
+
+/**
+ * The index past the quote that closes a string opening at `at`, or -1 where none does. A string
+ * can't run past its line unless a backslash continues it, and a quote between two letters or
+ * digits is an apostrophe, as in JSX text: formatted code puts none there.
+ */
+function quoteEnd(source: string, at: number): number {
+  if (WORD.test(source[at - 1] ?? "") && WORD.test(source[at + 1] ?? "")) return -1;
+  for (let i = at + 1; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") i += source.startsWith("\r\n", i + 1) ? 2 : 1;
+    else if (c === source[at]) return i + 1;
+    else if (c === "\n" || c === "\r") return -1;
+  }
+  return -1;
+}
+
 /**
  * TypeScript with comments blanked, and with every string, template text and regular expression
  * literal's contents blanked unless `keepStrings`, character for character, so an index in one is
  * an index in the other and in the source. A template's substitutions, `${…}`, are code, read as
  * any other. A `/` opens a regular expression where the code before it can't be a value it
- * divides; JSX's `</` never does. The lint rule, which reads the syntax tree, is the check that
- * needs no such reading.
+ * divides; JSX's `</` never does. A quote that closes no string on its line is read as code, so
+ * one in JSX text hides nothing past its line. The lint rule, which reads the syntax tree, is the
+ * check that needs no such reading.
  */
 export function tsCode(
   source: string,
@@ -511,13 +537,11 @@ export function tsCode(
     } else if (c === "/" && opensRegex(out) && regexEnd(source, i) > 0) {
       i = regexEnd(source, i);
       out += "/" + text(source.slice(start + 1, i - 1)) + source[i - 1];
-    } else if (c === '"' || c === "'") {
-      i++;
-      while (i < source.length && source[i] !== c) i += source[i] === "\\" ? 2 : 1;
-      i = Math.min(i + 1, source.length);
+    } else if ((c === '"' || c === "'") && quoteEnd(source, i) > 0) {
+      i = quoteEnd(source, i);
       const body = source.slice(start + 1, i - 1);
       literals.push({ index: start, body });
-      out += c + text(body) + (i - start > 1 ? c : "");
+      out += c + text(body) + c;
     } else if (c === "`") {
       out += c;
       i++;

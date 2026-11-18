@@ -168,6 +168,55 @@ describe("raw signal calls in TypeScript", () => {
     expect(calls("a.ts", 'const re = /process.kill("x")/; const s = "child.kill()";')).toEqual([]);
   });
 
+  it("reads a / after a postfix !, ++ or --, or a member named like a keyword, as division", () => {
+    const source = [
+      "const a = n! / 2; child.kill(); const b = m / 3;",
+      "const c = i++ / 2; child.kill(); const d = m / 3;",
+      "const e = i-- / 2; child.kill(); const f = m / 3;",
+      "const g = list[0]!! / 2; child.kill(); const h = m / 3;",
+      "const k = x.in / 2; child.kill(); const l = m / 3;",
+      "const o = map ?. delete / 2; child.kill(); const q = m / 3;",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("still reads a / after a prefix !, a lone + or -, or a keyword as a regular expression", () => {
+    const source = [
+      "if (!/'/.test(s)) child.kill();",
+      "return !/'/.test(s) && child.kill();",
+      "const a = b + +/'/.source; child.kill();",
+      "const c = -/'/.lastIndex; child.kill();",
+      "const d = i++ + /'/.source; child.kill();",
+      "const e = typeof /'/; child.kill();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(calls("a.ts", "const a = !/process.kill(1)/.test(s);")).toEqual([]);
+  });
+
+  it("ends a quote at its line, so an apostrophe in JSX text hides no code", () => {
+    const source = [
+      "const a = <p>Don't stop</p>; child.kill();",
+      "child.kill();",
+      "const b = <p>it's here, and 'quoted'</p>; child.kill();",
+      "const c = <p>' opens</p>; child.kill();",
+      'const d = <p>" opens</p>; child.kill();',
+      "const e = 'x';",
+    ].join("\n");
+    expect(rawSignalCalls("a.tsx", source).map((c) => c.line)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("still reads a quote closed on its line, or continued past it, as a string", () => {
+    const source = [
+      'const a = "it\'s child.kill()"; child.kill();',
+      "const b = 'say \"child.kill()\"'; child.kill();",
+      "const c = 'one \\",
+      "child.kill()'; child.kill();",
+      "const d = 'one \\\r\nchild.kill()'; child.kill();",
+      "const e = '\\'child.kill()'; child.kill();",
+    ].join("\n");
+    expect(rawSignalCalls("a.ts", source).map((c) => c.line)).toEqual([1, 2, 4, 6, 7]);
+  });
+
   it("finds process._kill, and a re-export of process's kill", () => {
     const source = [
       "process._kill(pid, 9);",
