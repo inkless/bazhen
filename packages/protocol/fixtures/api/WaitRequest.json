@@ -1,0 +1,718 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle"
+      },
+      "timeoutMs": 60000
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 600000
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 600000
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "condition": {
+        "on": "task",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "done"
+      },
+      "timeoutMs": 60000
+    },
+    "parsed": {
+      "condition": {
+        "on": "task",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "done"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 6",
+    "wire": {
+      "condition": {
+        "on": "reply",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      },
+      "timeoutMs": 60000
+    },
+    "parsed": {
+      "condition": {
+        "on": "reply",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 7",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"starting\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "starting"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "starting"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"running\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"exited\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "exited"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "exited"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"unknown\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "unknown"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "unknown"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"lost\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "lost"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "lost"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"closing\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closing"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closing"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"closed\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closed"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closed"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"failed\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "failed"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "failed"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"ended\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"ready\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ready"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ready"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=agent).until = \"idle\"",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle"
+      },
+      "timeoutMs": 0
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"creating\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "creating"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "creating"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"running\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"exited\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "exited"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "exited"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"unknown\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "unknown"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "unknown"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"lost\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "lost"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "lost"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"closing\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closing"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closing"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"closed\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closed"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "closed"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"failed\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "failed"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "failed"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "condition.(on=shell).until = \"ended\"",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 1
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 60000,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "idle"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 0,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "agent",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 0
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 600000,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 600000
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 1,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "running"
+      },
+      "timeoutMs": 1
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "task",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "done",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 60000,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "task",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "done"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "reply",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 60000,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "reply",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      },
+      "timeoutMs": 60000
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "timeoutMs": 60000,
+      "resumed": true,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "condition": {
+        "on": "shell",
+        "shellId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "until": "ended"
+      },
+      "timeoutMs": 60000,
+      "resumed": true
+    }
+  }
+]

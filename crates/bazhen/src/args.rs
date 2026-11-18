@@ -29,11 +29,12 @@ const VALUED: [&str; 17] = [
 ];
 
 /// The options that are on or off.
-const SWITCHES: [&str; 9] = [
+const SWITCHES: [&str; 10] = [
     "all",
     "cascade",
     "json",
     "wait",
+    "reply",
     "handoff",
     "direct",
     "force",

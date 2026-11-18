@@ -18,6 +18,7 @@ import { DevicesResponse, PairingCodeResponse, RevokeDeviceResponse } from "./de
 import { HarnessId, Id } from "./ids.ts";
 import { EventEnvelopeFrame } from "./events.ts";
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
+import { AgentCondition, ShellCondition, WaitRequest, WaitResponse } from "./waits.ts";
 import {
   MESSAGE_WAIT_MAX_MS,
   SETTLED,
@@ -834,6 +835,41 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     schema: UnassignTaskRequest,
     wire: [{ idempotencyKey: KEY, assignmentId: ASGN }],
   },
+  WaitRequest: {
+    schema: WaitRequest,
+    wire: [
+      { condition: { on: "agent", agentId: AGENT, until: "idle" }, timeoutMs: 60_000 },
+      { condition: { on: "agent", agentId: AGENT, until: "running" }, timeoutMs: 0 },
+      { condition: { on: "shell", shellId: TERM, until: "ended" }, timeoutMs: 600_000 },
+      { condition: { on: "shell", shellId: TERM, until: "running" }, timeoutMs: 1 },
+      { condition: { on: "task", taskId: TASK, until: "done" }, timeoutMs: 60_000 },
+      { condition: { on: "reply", messageId: MSG }, timeoutMs: 60_000 },
+      {
+        condition: { on: "shell", shellId: TERM, until: "ended" },
+        timeoutMs: 60_000,
+        resumed: true,
+      },
+    ],
+  },
+  WaitResponse: {
+    schema: WaitResponse,
+    wire: [
+      ...[
+        fullAgent,
+        bareAgent,
+        nullAgent,
+        { ...bareAgent, exit: { type: "unknown" }, needsRestart: null },
+      ].map((agent) => ({ verdict: "met", said: "worker-1 is idle", agent })),
+      ...[fullShell, bareShell, nullShell, unservedShell].map((shell) => ({
+        verdict: "never",
+        said: "logs is closed, and can't be running now",
+        shell,
+      })),
+      ...[task, orphanTask].map((t) => ({ verdict: "pending", said: "t is open", task: t })),
+      { verdict: "met", said: "worker-1 replied", agent: bareAgent, replyId: MSG },
+      { verdict: "bounced", said: "the message to worker-1 bounced" },
+    ],
+  },
   WaitMessagesRequest: {
     schema: WaitMessagesRequest,
     wire: [{ messageIds: [MSG], timeoutMs: 60_000 }],
@@ -1073,6 +1109,8 @@ export function checkFixtures() {
       streamFrameMaxBytes: STREAM_FRAME_MAX_BYTES,
       settled: [...SETTLED].toSorted(),
       harnesses: HarnessId.options,
+      agentConditions: AgentCondition.options.flatMap((o) => o.options),
+      shellConditions: ShellCondition.options.flatMap((o) => o.options),
     },
     agentName: verdicts(AgentName, NAME_INPUTS),
     agentRef: verdicts(AgentRef, NAME_INPUTS),

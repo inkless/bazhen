@@ -21,6 +21,7 @@ import {
   EVENTS,
   MailboxState,
   NoticeState,
+  SETTLED,
   TaskState,
   TerminalState,
   type AssignmentEndReason,
@@ -370,11 +371,12 @@ export function project(db: Statements, e: Recorded): void {
       return;
     }
     case "mailbox.queued": {
-      const { agentId, body } = EVENTS[e.type].payload.parse(e.payload);
+      const { agentId, body, from } = EVENTS[e.type].payload.parse(e.payload);
       db.prepare(
-        `INSERT INTO mailbox (id, agent_session_id, body, state, created_event_id, updated_event_id)
-         VALUES (?, ?, ?, 'queued', ?, ?)`,
-      ).run(e.entityId, agentId, body, e.id, e.id);
+        `INSERT INTO mailbox (id, agent_session_id, from_agent_id, body, state, created_event_id,
+           updated_event_id)
+         VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
+      ).run(e.entityId, agentId, from ?? null, body, e.id, e.id);
       return;
     }
     case "mailbox.offered": {
@@ -625,8 +627,10 @@ const incarnation = (ref: { runtime: string; locator: Record<string, string> }):
 function moveMessage(db: Statements, e: Recorded, event: MailboxEvent, columns: Columns = {}) {
   const row = db.prepare("SELECT state FROM mailbox WHERE id = ?").get(e.entityId);
   if (row === undefined) throw new UnknownEntity("message", e.entityId);
-  const state = mailbox.next(MailboxState.parse(row.state), event);
-  update(db, "mailbox", "id", e.entityId, e.id, { state, ...columns });
+  const was = MailboxState.parse(row.state);
+  const state = mailbox.next(was, event);
+  const settled = SETTLED.has(state) && !SETTLED.has(was) ? { settled_event_id: e.id } : {};
+  update(db, "mailbox", "id", e.entityId, e.id, { state, ...settled, ...columns });
 }
 
 /** A shell's own events move only its terminal: no agent session sits above it (§4.8). */

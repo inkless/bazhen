@@ -1,0 +1,27 @@
+{
+  "$id": "AgentCondition",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "string",
+      "enum": [
+        "starting",
+        "running",
+        "exited",
+        "unknown",
+        "lost",
+        "closing",
+        "closed",
+        "failed"
+      ]
+    },
+    {
+      "type": "string",
+      "enum": [
+        "ended",
+        "ready",
+        "idle"
+      ]
+    }
+  ]
+}

@@ -48,7 +48,7 @@ import {
   type AttentionAction,
   type NeedsRestart,
   type NoticeAction,
-  type MailboxState,
+  MailboxState,
   type ResetReason,
   type EventPayload,
   type EventType,
@@ -87,7 +87,26 @@ function rowIds<P extends IdPrefix>(rows: readonly Record<string, SQLOutputValue
   return rows.flatMap((r) => (typeof r.id === "string" && isId(prefix, r.id) ? [r.id] : []));
 }
 
-/** A key reused for a different request: answering with the first one would be a lie. */
+/** A message, and the first one its recipient sent back to its sender after it. */
+export interface ReplyRead {
+  /** Null when the human sent it. */
+  readonly from: string | null;
+  readonly to: string;
+  readonly state: MailboxState;
+  readonly replyId: string | null;
+}
+
+/** What an agent's latest turn says, against the mail it has been sent; ids are event ids. */
+export interface TurnAfterMail {
+  readonly activity: Activity | undefined;
+  readonly activityAt: number | null;
+  readonly inFlight: number;
+  /** The last message that reached it; one that bounced never did, so no turn need follow it. */
+  readonly lastSettled: number | null;
+  /** When the latest activity isn't the harness's own: the latest that was, and when. */
+  readonly lastNative?: { readonly activity: Activity; readonly at: number };
+}
+
 export interface OpenAttention {
   readonly id: AttentionId;
   readonly agentId: string;
@@ -427,6 +446,7 @@ export function shellCommands(state: TerminalState, linked: boolean): ShellComma
   ];
 }
 
+/** A key reused for a different request: answering with the first one would be a lie. */
 export class IdempotencyConflict extends Error {
   readonly key: string;
 
@@ -724,6 +744,70 @@ export class Store {
     )
       .all(...ids)
       .map((r) => Message.parse(r));
+  }
+
+  /**
+   * A message's sender and recipient, its state, and the first message the recipient queued back
+   * to the sender after the message reached it, if any; undefined for a message this daemon never
+   * queued.
+   */
+  replyTo(messageId: string): ReplyRead | undefined {
+    const sent = this.prepare(
+      `SELECT m.agent_session_id AS "to", m.from_agent_id AS "from", m.state,
+         (SELECT min(e.id) FROM events e WHERE e.entity_type = 'message' AND e.entity_id = m.id
+           AND e.type IN
+           ('mailbox.offered', 'mailbox.accepted', 'mailbox.seen', 'mailbox.delivered')) AS reached
+       FROM mailbox m WHERE m.id = ?`,
+    ).get(messageId);
+    if (sent === undefined) return undefined;
+    const from = typeof sent.from === "string" ? sent.from : null;
+    // Mail its recipient wrote before the message reached it crossed it, and answers something else.
+    const reply =
+      from === null || typeof sent.reached !== "number"
+        ? undefined
+        : this.prepare(
+            `SELECT id FROM mailbox WHERE from_agent_id = ? AND agent_session_id = ?
+               AND created_event_id > ? ORDER BY created_event_id LIMIT 1`,
+          ).get(String(sent.to), from, sent.reached);
+    return {
+      from,
+      to: String(sent.to),
+      state: MailboxState.parse(sent.state),
+      replyId: typeof reply?.id === "string" ? reply.id : null,
+    };
+  }
+
+  /**
+   * An agent's latest activity with the event that reported it, how many messages to it are
+   * still on their way, and the last event that settled one.
+   */
+  turnAfterMail(agentId: string): TurnAfterMail {
+    const activity = this.prepare(
+      "SELECT activity, updated_event_id AS at FROM activity_latest WHERE agent_session_id = ?",
+    ).get(agentId);
+    const mail = this.prepare(
+      `SELECT count(*) FILTER (WHERE state NOT IN ('seen', 'delivered', 'undeliverable')) AS moving,
+         max(settled_event_id) FILTER (WHERE state <> 'undeliverable') AS settled
+       FROM mailbox WHERE agent_session_id = ?`,
+    ).get(agentId);
+    const latest = activity === undefined ? undefined : activityOf(activity.activity);
+    const native =
+      latest === undefined || latest.source === "native"
+        ? undefined
+        : this.prepare(
+            `SELECT id, payload FROM events WHERE entity_type = 'agent' AND entity_id = ?
+               AND type = 'agent.activity' AND json_extract(payload, '$.source') = 'native'
+             ORDER BY id DESC LIMIT 1`,
+          ).get(agentId);
+    return {
+      activity: latest,
+      activityAt: typeof activity?.at === "number" ? activity.at : null,
+      inFlight: typeof mail?.moving === "number" ? mail.moving : 0,
+      lastSettled: typeof mail?.settled === "number" ? mail.settled : null,
+      ...(typeof native?.id === "number" && {
+        lastNative: { activity: activityOf(native.payload), at: native.id },
+      }),
+    };
   }
 
   /** An agent's messages in the given states, oldest first, with when each was first offered. */

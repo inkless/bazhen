@@ -1,0 +1,146 @@
+{
+  "$id": "WaitRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "string",
+              "const": "agent"
+            },
+            "agentId": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "starting",
+                    "running",
+                    "exited",
+                    "unknown",
+                    "lost",
+                    "closing",
+                    "closed",
+                    "failed"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "ended",
+                    "ready",
+                    "idle"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "on",
+            "agentId",
+            "until"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "string",
+              "const": "shell"
+            },
+            "shellId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "creating",
+                    "running",
+                    "exited",
+                    "unknown",
+                    "lost",
+                    "closing",
+                    "closed",
+                    "failed"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "ended"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "on",
+            "shellId",
+            "until"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "string",
+              "const": "task"
+            },
+            "taskId": {
+              "type": "string",
+              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "until": {
+              "type": "string",
+              "const": "done"
+            }
+          },
+          "required": [
+            "on",
+            "taskId",
+            "until"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "string",
+              "const": "reply"
+            },
+            "messageId": {
+              "type": "string",
+              "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            }
+          },
+          "required": [
+            "on",
+            "messageId"
+          ]
+        }
+      ]
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 600000
+    },
+    "resumed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "condition",
+    "timeoutMs"
+  ]
+}

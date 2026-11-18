@@ -25,6 +25,7 @@ import {
   StateSnapshot,
   StopResponse,
   WaitMessagesResponse,
+  WaitResponse,
 } from "@bazhen/protocol";
 import { FakeDaemon, type Scene, checkoutWith, scene } from "./cli.ts";
 import {
@@ -67,12 +68,13 @@ describe("the command line", () => {
         "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]",
         "usage: bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
         "  bazhen agents [list] [--json]",
-        "  bazhen agents send <agent> (<text> | --file <path>) [--wait [--timeout <seconds>]]",
+        "  bazhen agents send <agent> (<text> | --file <path>) [--wait | --reply] [--timeout <seconds>] [--json]",
         "  bazhen agents launch claude-code|codex [--dir <dir>] [--name <name>] [--role <role>] [--compact-window <tokens>] [--json]",
         "  bazhen agents signal <agent> INT|TERM|HUP|KILL [--json]",
-        "  bazhen agents wait <agent> <state>|ended [--timeout <seconds>] [--json]",
+        "  bazhen agents wait <agent> <state>|ended|ready|idle [--timeout <seconds>] [--json]",
         "  bazhen tasks create --title <title> (--brief <text> | --brief-file <path>) [--parent <task>] [--assign <agent> [--role <role>]]",
         "  bazhen tasks send <task> (<text> | --file <path>) [--wait [--timeout <seconds>]]",
+        "  bazhen tasks wait <task> done [--timeout <seconds>] [--json]",
         "  bazhen inbox escalate <question> [--task <task>]",
         "  bazhen shells open [<agent> | --dir <dir>] [--json]",
         "  bazhen shells wait <shell> <state>|ended [--timeout <seconds>] [--json]",
@@ -354,7 +356,8 @@ describe("the daemon any verb reaches", () => {
           removed: {},
           refused: [],
           unchanged: [],
-        });
+        })
+        .answer("POST /v1/waits", WaitResponse, { verdict: "met", said: "a is running" });
       const verbs = [
         ["tasks", "list", "--all"],
         ["status"],
@@ -376,6 +379,7 @@ describe("the daemon any verb reaches", () => {
           "POST /v1/pairing/codes",
           "GET /v1/devices",
           "POST /v1/daemon/env",
+          "POST /v1/waits",
         ]),
       );
     } finally {

@@ -775,6 +775,24 @@ export class Daemon {
     return processEnv(this.panePid(agentId));
   }
 
+  /**
+   * The file holding the agent's token, on either runtime, for an agent this daemon started once:
+   * each start mints a file of its own.
+   */
+  tokenFile(agentId: string): string {
+    const dir = join(this.home, "run", "agents");
+    const files = readdirSync(dir).filter(
+      (f) => f.startsWith(`${agentId}.`) && f.endsWith(".token"),
+    );
+    if (files.length !== 1) throw new Error(`agent ${agentId} has ${files.length} token files`);
+    return join(dir, String(files[0]));
+  }
+
+  /** The agent's token, from `tokenFile`, on either runtime. */
+  tokenOf(agentId: string): string {
+    return readFileSync(this.tokenFile(agentId), "utf8").trim();
+  }
+
   /** The token the agent's process presents, from the file its environment names (Linux only). */
   agentToken(agentId: string): string {
     const file = this.agentEnv(agentId)["BAZHEN_AGENT_AUTH_FILE"];

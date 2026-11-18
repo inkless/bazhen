@@ -1,6 +1,6 @@
-//! The daemon's events as they happen, and waiting on them for an agent or a shell to reach a
-//! state. Both read `/v1/state` for a cursor and follow `/v1/events` from it; when the daemon goes
-//! away they try again, waiting longer each time it still isn't there.
+//! The daemon's events as they happen: `/v1/state` read for a cursor, and `/v1/events` followed
+//! from it. When the daemon goes away it tries again, waiting longer each time it still isn't
+//! there.
 
 use std::io::ErrorKind;
 use std::os::fd::BorrowedFd;
@@ -18,42 +18,20 @@ use crate::args::Parsed;
 use crate::attach::tty::Stops;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, printable};
-use crate::lifecycle::{self, answer, pretty};
+use crate::lifecycle::answer;
 use crate::out::Out;
-use crate::shells;
-use crate::tasks::{Step, Stop, need, usage};
-use crate::{AGENTS_USAGE, EVENTS_USAGE, Exit, SHELLS_USAGE};
+use crate::tasks::{Step, Stop, usage};
+use crate::{EVENTS_USAGE, Exit};
 
 /// The first wait before trying a daemon that has gone away again; each failure doubles it.
-const FIRST_RETRY: Duration = Duration::from_millis(500);
+pub(crate) const FIRST_RETRY: Duration = Duration::from_millis(500);
 const LAST_RETRY: Duration = Duration::from_secs(30);
-const DEFAULT_WAIT: Duration = Duration::from_secs(60);
-
-const AGENT_STATES: [&str; 8] = [
-    "starting", "running", "exited", "unknown", "lost", "closing", "closed", "failed",
-];
-const SHELL_STATES: [&str; 8] = [
-    "creating", "running", "exited", "unknown", "lost", "closing", "closed", "failed",
-];
 
 /// Runs `events follow`, and says how it went.
 pub(crate) fn run_follow(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     match events(p, daemon, out) {
         Ok(exit) => Ok(exit),
         Err(stop) => answer(Err(stop), EVENTS_USAGE, out),
-    }
-}
-
-/// Runs `agents wait` or `shells wait`, for `kind`, and says how it went.
-pub(crate) fn run_wait(
-    p: &Parsed,
-    kind: Kind,
-    daemon: &Daemon,
-    out: &mut Out,
-) -> Result<Exit, Failed> {
-    match wait(p, kind, daemon, out) {
-        Ok(exit) => Ok(exit),
-        Err(stop) => answer(Err(stop), kind.usage(), out),
     }
 }
 
@@ -100,7 +78,7 @@ fn events(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
                     }
                 }
             }
-            Seen::Reset(reason, _) => {
+            Seen::Reset(reason) => {
                 if json {
                     out.line(&format!(
                         r#"{{"type":"reset","reason":"{}"}}"#,
@@ -151,220 +129,6 @@ fn whole(given: &str) -> Option<u64> {
         .flatten()
 }
 
-/// What a wait is on: an agent or a shell, by id, as it was named once at the start.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    Agent,
-    Shell,
-}
-
-impl Kind {
-    fn noun(self) -> &'static str {
-        match self {
-            Self::Agent => "agent",
-            Self::Shell => "shell",
-        }
-    }
-
-    fn whose(self) -> &'static str {
-        match self {
-            Self::Agent => "an agent's",
-            Self::Shell => "a shell's",
-        }
-    }
-
-    fn states(self) -> &'static [&'static str; 8] {
-        match self {
-            Self::Agent => &AGENT_STATES,
-            Self::Shell => &SHELL_STATES,
-        }
-    }
-
-    fn usage(self) -> &'static str {
-        match self {
-            Self::Agent => AGENTS_USAGE,
-            Self::Shell => SHELLS_USAGE,
-        }
-    }
-}
-
-/// How the target stands against the condition.
-enum Verdict {
-    Met(String),
-    Never(String),
-    NotYet(String),
-}
-
-fn wait(p: &Parsed, kind: Kind, daemon: &Daemon, out: &mut Out) -> Step<Exit> {
-    let noun = kind.noun();
-    only(p, &format!("{noun}s wait"), &["timeout"], 3)?;
-    let given = need(p.word(1), &format!("the {noun}"))?;
-    let condition = need(p.word(2), "the state")?;
-    if condition != "ended" && !kind.states().contains(&condition) {
-        return usage(format!(
-            "{} state is {}, or ended; not {condition}",
-            kind.whose(),
-            kind.states().join(", ")
-        ));
-    }
-    let timeout = match p.value("timeout") {
-        None => DEFAULT_WAIT,
-        Some(t) => match whole(t) {
-            Some(0) => return usage("--timeout is at least 1 s"),
-            Some(secs) => Duration::from_secs(secs),
-            None => return usage(format!("--timeout is whole seconds, not {t}")),
-        },
-    };
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return usage(format!("--timeout is too long: {} s", timeout.as_secs()));
-    };
-    let json = p.has("json");
-    let state: StateSnapshot = daemon.get("/v1/state", CALL.min(timeout))?;
-    let id = target(&state, kind, given)?;
-    let judge = |state: &StateSnapshot| judge(state, kind, &id, condition, json);
-    let mut latest = match judge(&state)? {
-        Verdict::Met(said) => return Ok(met(&said, out)),
-        Verdict::Never(said) => return Err(Stop::Refused(said)),
-        Verdict::NotYet(said) => said,
-    };
-    let mut watched = watching(&state, kind, &id);
-    // The first stream opens from the state just judged; one opened again may have missed changes.
-    let mut first = true;
-    // A read of the state failed, so the next events are judged whatever they are on.
-    let mut unsure = false;
-    let ended = follow(daemon, Cursor::of(&state), None, Some(deadline), |seen| {
-        let read;
-        let state = match seen {
-            Seen::Reset(_, state) => state,
-            Seen::Events(events)
-                if !unsure && !events.iter().any(|e| watched.contains(&e.entity_id)) =>
-            {
-                return Ok(Flow::On);
-            }
-            Seen::Opened if first => {
-                first = false;
-                return Ok(Flow::On);
-            }
-            Seen::Lost => return Ok(Flow::On),
-            Seen::Events(_) | Seen::Opened => {
-                let Some(within) = bound(Some(deadline)) else {
-                    return Ok(Flow::On);
-                };
-                match daemon.get::<StateSnapshot>("/v1/state", within) {
-                    Ok(state) => {
-                        read = state;
-                        &read
-                    }
-                    // The stream finds out it's gone, and tries again.
-                    Err(Failed::NotRunning) => {
-                        unsure = true;
-                        return Ok(Flow::On);
-                    }
-                    Err(failed) => return Err(failed.into()),
-                }
-            }
-        };
-        unsure = false;
-        watched = watching(state, kind, &id);
-        Ok(match judge(state)? {
-            Verdict::NotYet(said) => {
-                latest = said;
-                Flow::On
-            }
-            done => Flow::Done(done),
-        })
-    })?;
-    match ended {
-        Ended::Done(Verdict::Met(said)) => Ok(met(&said, out)),
-        Ended::Done(Verdict::Never(said)) => Err(Stop::Refused(said)),
-        Ended::Done(Verdict::NotYet(_)) | Ended::Stopped | Ended::TimedOut => {
-            out.err(&format!("{latest} still, after {} s", timeout.as_secs()));
-            Ok(Exit::TimedOut)
-        }
-    }
-}
-
-fn met(said: &str, out: &mut Out) -> Exit {
-    out.line(said);
-    Exit::Done
-}
-
-/// The entities whose events may move the target: itself, and an agent's terminal.
-fn watching(state: &StateSnapshot, kind: Kind, id: &str) -> Vec<String> {
-    let mut ids = vec![id.to_owned()];
-    if kind == Kind::Agent
-        && let Some(terminal) = state
-            .agents
-            .iter()
-            .find(|a| a.id.as_str() == id)
-            .and_then(|a| a.terminal_id.as_ref())
-    {
-        ids.push(terminal.as_str().to_owned());
-    }
-    ids
-}
-
-/// The agent or shell `given` names: an agent by its id or a name one not ended has, else a
-/// shell by its id or a name one open shell has.
-fn target(state: &StateSnapshot, kind: Kind, given: &str) -> Step<String> {
-    match kind {
-        Kind::Agent => lifecycle::find(state, given).map(|a| a.id.to_string()),
-        Kind::Shell => shells::shell_named(state, given).map(|s| s.id.to_string()),
-    }
-}
-
-/// Whether the agent or shell `id` is in `condition`, can't be now, or may yet be; each says
-/// where it stands, as `--json` or a line.
-fn judge(
-    state: &StateSnapshot,
-    kind: Kind,
-    id: &str,
-    condition: &str,
-    json: bool,
-) -> Step<Verdict> {
-    let (label, now, ended, record) = match kind {
-        Kind::Agent => {
-            let Some(agent) = state.agents.iter().find(|a| a.id.as_str() == id) else {
-                return Ok(Verdict::Never(format!("{id} is gone")));
-            };
-            let record = if json { pretty(agent)? } else { String::new() };
-            (
-                lifecycle::label(agent),
-                agent.state.as_str(),
-                agent.state.ended(),
-                record,
-            )
-        }
-        Kind::Shell => {
-            let Some(shell) = state.shells.iter().find(|s| s.id.as_str() == id) else {
-                return Ok(Verdict::Never(format!("{id} is gone")));
-            };
-            let label = match shell.name.as_deref() {
-                Some(name) if !name.is_empty() => format!("{} ({id})", printable(name)),
-                _ => id.to_owned(),
-            };
-            let record = if json { pretty(shell)? } else { String::new() };
-            (label, shell.state.as_str(), shell.state.ended(), record)
-        }
-    };
-    let met = if condition == "ended" {
-        ended
-    } else {
-        now == condition
-    };
-    Ok(if met {
-        Verdict::Met(if json {
-            record
-        } else {
-            format!("{label} is {now}")
-        })
-    } else if ended {
-        Verdict::Never(format!("{label} is {now}, and can't be {condition} now"))
-    } else {
-        Verdict::NotYet(format!("{label} is {now}"))
-    })
-}
-
 /// Where the stream resumes: after the event `after`, in the store `epoch` names.
 struct Cursor {
     epoch: String,
@@ -392,8 +156,8 @@ impl Cursor {
 enum Seen<'a> {
     /// The events read at once, in order.
     Events(&'a [Event]),
-    /// Events were missed; the stream resumes from this state's cursor.
-    Reset(ResetReason, &'a StateSnapshot),
+    /// Events were missed; the stream resumes from the state read again.
+    Reset(ResetReason),
     /// The daemon stopped answering; said once each time it goes.
     Lost,
     /// The stream is open, first or again; what it missed while closed comes after.
@@ -506,7 +270,7 @@ fn follow<T>(
                     Err(failed) => return Err(failed.into()),
                 };
                 cursor = Cursor::of(&state);
-                if let Flow::Done(done) = on(Seen::Reset(reason, &state))? {
+                if let Flow::Done(done) = on(Seen::Reset(reason))? {
                     return Ok(Ended::Done(done));
                 }
                 break;
@@ -528,7 +292,8 @@ fn bound(deadline: Option<Instant>) -> Option<Duration> {
     (!left.is_zero()).then(|| left.min(CALL))
 }
 
-fn next(retry: Duration) -> Duration {
+/// How long to wait before trying a daemon gone away again, after waiting `retry` last time.
+pub(crate) fn next(retry: Duration) -> Duration {
     if retry.is_zero() {
         FIRST_RETRY
     } else {

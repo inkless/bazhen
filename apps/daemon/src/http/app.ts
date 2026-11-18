@@ -50,6 +50,8 @@ import {
   type LaunchAgentResponse,
   type ShellCommandResponse,
   type StateSnapshot,
+  WaitRequest,
+  WaitResponse,
 } from "@bazhen/protocol";
 import {
   AgentTerminalExists,
@@ -84,6 +86,7 @@ import { ShellBusy, ShellOpenFailed, ShellsUnsettled, UnknownShell } from "../sh
 import { AttentionRefused } from "../attention/inbox.ts";
 import { NoticeClosed, NoticeRefused, type Viewer } from "../attention/notices.ts";
 import { UnknownMessage } from "../mailbox/wait.ts";
+import { TooManyWaits, WaitRefused } from "../waits/waits.ts";
 import { UnknownRole } from "../roles/roles.ts";
 import { MailTooLong, UnknownTask } from "../tasks/tasks.ts";
 import { refusal, type Allowlists } from "./guard.ts";
@@ -173,6 +176,16 @@ export interface AppDeps {
     req: WaitMessagesRequest,
     signal: AbortSignal,
   ) => Promise<WaitMessagesResponse>;
+  /**
+   * Answers once the condition is met or can't be, or at the timeout or abort with where it
+   * stands then, judged on what `viewer`'s `/v1/state` shows.
+   */
+  readonly wait: (
+    caller: Caller,
+    req: WaitRequest,
+    viewer: Viewer,
+    signal: AbortSignal,
+  ) => Promise<WaitResponse>;
 }
 
 /** Task commands, each told who asks: an agent by its id, or the human as null. */
@@ -420,6 +433,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!body.success) return invalid(c, body.error);
     return c.json(await deps.waitMessages(body.data, c.req.raw.signal));
   });
+  app.post("/v1/waits", async (c) => {
+    const body = WaitRequest.safeParse(await c.req.json().catch(() => undefined));
+    if (!body.success) return invalid(c, body.error);
+    const answer = await deps.wait(callerOf(c), body.data, viewerOf(c), c.req.raw.signal);
+    return c.json(WaitResponse.parse(answer));
+  });
   app.get("/v1/tasks/:id", (c) => {
     const detail = tasks.show(c.req.param("id"));
     if (detail === undefined) throw new UnknownTask(c.req.param("id"));
@@ -460,6 +479,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (err instanceof MailTooLong || err instanceof UnknownRole) {
       return fail(c, 400, "invalid_request", err.message);
     }
+    if (err instanceof WaitRefused) return fail(c, 403, "forbidden", err.message);
+    if (err instanceof TooManyWaits) return fail(c, 429, "rate_limited", err.message);
     if (err instanceof TaskRefused) {
       return err.code === "forbidden"
         ? fail(c, 403, "forbidden", err.message)

@@ -5,6 +5,7 @@ import {
   type WaitMessagesResponse,
 } from "@bazhen/protocol";
 import type { Store } from "../store/store.ts";
+import { realAfter, until, type After } from "../waits/until.ts";
 
 export class UnknownMessage extends Error {
   constructor(messageId: string) {
@@ -14,18 +15,9 @@ export class UnknownMessage extends Error {
 
 const settled = (messages: readonly Message[]) => messages.every((m) => SETTLED.has(m.state));
 
-/** Runs `fn` after `ms`, and answers with what calls it off; tests give one they run by hand. */
-export type After = (ms: number, fn: () => void) => () => void;
-
-const realAfter: After = (ms, fn) => {
-  const timer = setTimeout(fn, ms);
-  return () => clearTimeout(timer);
-};
-
 /**
  * Answers once every message is settled, read again after each commit, or at the timeout or when
- * `signal` aborts, with the states then. A message this daemon never queued is refused at once,
- * and one wait that has answered holds nothing: no commit listener, no timer, no abort listener.
+ * `signal` aborts, with the states then. A message this daemon never queued is refused at once.
  */
 export function waitForMail(
   store: Pick<Store, "messages" | "onCommit">,
@@ -41,34 +33,14 @@ export function waitForMail(
       return message;
     });
   };
-  const first = read();
-  if (settled(first) || req.timeoutMs === 0 || signal.aborted) {
-    return Promise.resolve({ messages: first });
-  }
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const finish = (settle: () => void) => {
-      if (done) return;
-      done = true;
-      stopListening();
-      cancelTimer();
-      signal.removeEventListener("abort", now);
-      settle();
-    };
-    // Run from a timer or an abort, where a throw would end the daemon rather than this wait.
-    const now = () => {
-      try {
-        const messages = read();
-        finish(() => resolve({ messages }));
-      } catch (err) {
-        finish(() => reject(err instanceof Error ? err : new Error(String(err))));
-      }
-    };
-    const stopListening = store.onCommit(() => {
+  return until(
+    store,
+    () => {
       const messages = read();
-      if (settled(messages)) finish(() => resolve({ messages }));
-    });
-    const cancelTimer = after(req.timeoutMs, now);
-    signal.addEventListener("abort", now);
-  });
+      return { final: settled(messages), value: { messages } };
+    },
+    req.timeoutMs,
+    signal,
+    after,
+  );
 }

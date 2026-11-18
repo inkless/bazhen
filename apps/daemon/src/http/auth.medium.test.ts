@@ -94,6 +94,7 @@ function daemon(always = true) {
       note: refuse,
     },
     waitMessages: refuse,
+    wait: refuse,
     pairing: { codes, devices },
     gate: { devices, always },
   };

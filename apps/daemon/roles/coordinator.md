@@ -33,6 +33,10 @@ Wire work together. When two delegates will touch the same files, tell both, nam
 When one's work lands and another's depends on it, tell the other. Every message costs its
 reader context, so don't message an idle agent without a reason.
 
+Wait without polling. After you delegate, run bazhen tasks wait <task> done in the background for
+each task you handed out, and bazhen agents send <agent> "<question>" --reply when you need an
+answer. Act when a wait exits, rather than re-reading bazhen agents list or sleeping.
+
 When a delegate waits on a permission you may answer, decide by what the action would do, not
 by who asks:
 

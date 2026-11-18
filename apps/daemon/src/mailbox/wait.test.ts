@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { newId } from "@bazhen/core";
 import type { MailboxState } from "@bazhen/protocol";
 import { handTimer } from "../testing/fixtures.ts";
-import { UnknownMessage, waitForMail, type After } from "./wait.ts";
+import type { After } from "../waits/until.ts";
+import { UnknownMessage, waitForMail } from "./wait.ts";
 
 const AGENT = newId("agent");
 const MSG = newId("msg");

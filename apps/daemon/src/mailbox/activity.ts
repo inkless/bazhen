@@ -16,6 +16,9 @@ const SUBAGENT_RUNNING: Doing = { value: "working", detail: "subagent running" }
  * plain deny, the agent reads as it last did until its next hook, and a subagent whose stop was
  * never heard keeps it working until the session starts over.
  */
+/** The detail of the activity recorded for an agent the daemon restarted under. */
+export const RESTARTED = "daemon restarted";
+
 export class ActivityTracker {
   private readonly record: (agentId: string, activity: Activity) => void;
   private readonly main = new Map<string, Doing>();
@@ -65,10 +68,10 @@ export class ActivityTracker {
    */
   restarted(agentId: string): void {
     this.unvouched.add(agentId);
-    this.main.set(agentId, { value: "unknown", detail: "daemon restarted" });
+    this.main.set(agentId, { value: "unknown", detail: RESTARTED });
     this.record(agentId, {
       value: "unknown",
-      detail: "daemon restarted",
+      detail: RESTARTED,
       source: "heuristic",
       confidence: 1,
       observedAt: new Date().toISOString(),

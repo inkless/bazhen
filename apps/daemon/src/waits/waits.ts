@@ -1,0 +1,325 @@
+import type {
+  Agent,
+  AgentCondition,
+  Shell,
+  ShellCondition,
+  StateSnapshot,
+  Task,
+  WaitCondition,
+  WaitRequest,
+  WaitResponse,
+} from "@bazhen/protocol";
+import type { Caller } from "@bazhen/core";
+import { RESTARTED } from "../mailbox/activity.ts";
+import { UnknownMessage } from "../mailbox/wait.ts";
+import { UnknownShell } from "../shells/lifecycle.ts";
+import { UnknownAgent, type Store } from "../store/store.ts";
+import { UnknownTask } from "../tasks/tasks.ts";
+import { realAfter, until, type After, type Judged } from "./until.ts";
+
+/** A wait the caller may not make: a reply to a message it didn't send. */
+export class WaitRefused extends Error {}
+
+/** How many waits one caller may hold at once; each holds a listener and a snapshot per commit. */
+export const WAITS_PER_CALLER = 64;
+
+/** A wait refused because its caller already holds `WAITS_PER_CALLER`. */
+export class TooManyWaits extends Error {}
+
+/** The waits each caller holds, by agent id, or the human's under the empty key. */
+export class WaitLimit {
+  readonly #held = new Map<string, number>();
+  readonly #most: number;
+
+  constructor(most = WAITS_PER_CALLER) {
+    this.#most = most;
+  }
+
+  /** Counts one more of `caller`'s waits until the returned release is called. */
+  enter(caller: Caller): () => void {
+    const key = caller ?? "";
+    const held = this.#held.get(key) ?? 0;
+    if (held >= this.#most) {
+      throw new TooManyWaits(
+        `${caller ?? "you"} already ${caller === null ? "hold" : "holds"} ${held} waits, as many as one caller may; let one end first`,
+      );
+    }
+    this.#held.set(key, held + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (this.#held.get(key) ?? 1) - 1;
+      if (left === 0) this.#held.delete(key);
+      else this.#held.set(key, left);
+    };
+  }
+}
+
+/**
+ * One `/v1/state` snapshot per viewer per commit, however many waits judge through it: a commit
+ * wakes every wait, and each would otherwise build its own.
+ */
+export class SharedViews<V> {
+  readonly #made = new Map<V, { readonly at: number; readonly view: StateSnapshot }>();
+  readonly #holders = new Map<V, number>();
+  readonly #latest: () => number;
+  readonly #make: (viewer: V) => StateSnapshot;
+
+  /** `latest` is the latest event's id, which moves on each commit; `make` builds a snapshot. */
+  constructor(latest: () => number, make: (viewer: V) => StateSnapshot) {
+    this.#latest = latest;
+    this.#make = make;
+  }
+
+  /**
+   * `viewer`'s view, for one wait, kept until the last wait holding it releases it: a revoked
+   * device's view, or any viewer's no wait reads, isn't kept.
+   */
+  hold(viewer: V): { readonly view: () => StateSnapshot; readonly release: () => void } {
+    this.#holders.set(viewer, (this.#holders.get(viewer) ?? 0) + 1);
+    let released = false;
+    return {
+      view: () => this.of(viewer),
+      release: () => {
+        if (released) return;
+        released = true;
+        const left = (this.#holders.get(viewer) ?? 1) - 1;
+        if (left > 0) {
+          this.#holders.set(viewer, left);
+          return;
+        }
+        this.#holders.delete(viewer);
+        this.#made.delete(viewer);
+      },
+    };
+  }
+
+  /** What `viewer`'s `/v1/state` shows as of the latest event; kept only while a wait holds it. */
+  of(viewer: V): StateSnapshot {
+    const at = this.#latest();
+    const kept = this.#made.get(viewer);
+    if (kept?.at === at) return kept.view;
+    const view = this.#make(viewer);
+    if (this.#holders.has(viewer)) this.#made.set(viewer, { at, view });
+    return view;
+  }
+}
+
+export interface WaitDeps {
+  readonly store: Pick<Store, "onCommit" | "replyTo" | "turnAfterMail">;
+  /**
+   * What the caller's `/v1/state` shows now. Every judge reads its target here, so a wait tells
+   * no one more than they can already read.
+   */
+  readonly view: () => StateSnapshot;
+  /** The waits each caller holds; none counted when absent. */
+  readonly limit?: WaitLimit;
+}
+
+type Judge = (view: StateSnapshot, first: boolean) => Judged<WaitResponse>;
+
+const ended = (state: string) => state === "closed" || state === "failed";
+
+const named = (name: string | null | undefined, id: string) =>
+  name === null || name === undefined || name === "" ? id : `${name} (${id})`;
+
+const met = (said: string, on: Partial<WaitResponse> = {}): Judged<WaitResponse> => ({
+  final: true,
+  value: { verdict: "met", said, ...on },
+});
+const never = (said: string, on: Partial<WaitResponse> = {}): Judged<WaitResponse> => ({
+  final: true,
+  value: { verdict: "never", said, ...on },
+});
+const pending = (said: string, on: Partial<WaitResponse> = {}): Judged<WaitResponse> => ({
+  final: false,
+  value: { verdict: "pending", said, ...on },
+});
+
+/** What was there when the wait began is gone now: a closed shell leaves `/v1/state`. */
+const gone = (id: string, want: string) =>
+  want === "ended" ? met(`${id} is gone`) : never(`${id} is gone, and can't be ${want} now`);
+
+type Idleness =
+  | { readonly idle: true; readonly how: string }
+  | { readonly idle: false; readonly why: string };
+
+/**
+ * Idle: its harness said itself that a turn ended, nothing sent to it is still on the way, and
+ * that turn ended after the last message reached it. A daemon restart puts an unknown over what
+ * the harness last said, until its next hook; a parked agent sends none, so an idle it reported
+ * before the restart, after its last message, still counts, and the answer says so. Otherwise,
+ * why not, for a person.
+ */
+function idleness(store: WaitDeps["store"], agent: Agent): Idleness {
+  const turn = store.turnAfterMail(agent.id);
+  if (turn.inFlight > 0) {
+    const why =
+      turn.inFlight === 1 ? "1 message to it on the way" : `${turn.inFlight} messages on the way`;
+    return { idle: false, why };
+  }
+  const afterMail = (at: number | null) =>
+    turn.lastSettled === null || (at ?? 0) > turn.lastSettled;
+  const activity = turn.activity;
+  if (activity?.source === "heuristic" && activity.detail === RESTARTED) {
+    const before = turn.lastNative;
+    if (before?.activity.value === "idle") {
+      return afterMail(before.at)
+        ? { idle: true, how: ", as it was when the daemon restarted" }
+        : {
+            idle: false,
+            why: "the daemon restarted before it reported a turn after its last message",
+          };
+    }
+    return {
+      idle: false,
+      why: `the daemon restarted while it was ${before?.activity.value ?? "not reporting"}; idle once it reports a turn ended`,
+    };
+  }
+  if (activity === undefined || activity.source !== "native") {
+    return { idle: false, why: "no turn reported" };
+  }
+  if (activity.value !== "idle") return { idle: false, why: activity.value };
+  return afterMail(turn.activityAt)
+    ? { idle: true, how: "" }
+    : { idle: false, why: "no turn since its last message" };
+}
+
+function onAgent(store: WaitDeps["store"], agentId: string, want: AgentCondition): Judge {
+  return (view, first) => {
+    const agent = view.agents.find((a) => a.id === agentId);
+    if (agent === undefined) {
+      if (first) throw new UnknownAgent(agentId);
+      return gone(agentId, want);
+    }
+    const label = named(agent.name, agent.id);
+    const on = { agent };
+    const now = agent.state;
+    if (want === "ended")
+      return ended(now) ? met(`${label} is ${now}`, on) : pending(`${label} is ${now}`, on);
+    if (want === "ready" && now === "running") return met(`${label} is ready`, on);
+    if (want === "idle" && now === "running") {
+      const is = idleness(store, agent);
+      return is.idle
+        ? met(`${label} is idle${is.how}`, on)
+        : pending(`${label} is running: ${is.why}`, on);
+    }
+    if (want === now) return met(`${label} is ${now}`, on);
+    if (ended(now)) return never(`${label} is ${now}, and can't be ${want} now`, on);
+    return pending(`${label} is ${now}`, on);
+  };
+}
+
+function onShell(shellId: string, want: ShellCondition): Judge {
+  return (view, first) => {
+    const shell: Shell | undefined = view.shells.find((s) => s.id === shellId);
+    if (shell === undefined) {
+      if (first) throw new UnknownShell(shellId);
+      return gone(shellId, want);
+    }
+    const label = named(shell.name, shell.id);
+    const now = shell.state;
+    const on = { shell };
+    if (want === "ended" ? ended(now) : want === now) return met(`${label} is ${now}`, on);
+    if (ended(now)) return never(`${label} is ${now}, and can't be ${want} now`, on);
+    return pending(`${label} is ${now}`, on);
+  };
+}
+
+/**
+ * Done once the task is, or once nobody is still on it and someone completed their part: a
+ * worker's own done ends only its assignment, and leaves the task for whoever gave it out.
+ */
+function onTask(taskId: string): Judge {
+  return (view, first) => {
+    const task: Task | undefined = view.tasks.find((t) => t.id === taskId);
+    if (task === undefined) {
+      if (first) throw new UnknownTask(taskId);
+      return never(`${taskId} is gone`);
+    }
+    const label = named(task.title, task.id);
+    const on = { task };
+    if (task.state === "done") return met(`${label} is done`, on);
+    if (task.state === "cancelled")
+      return never(`${label} is cancelled, and can't be done now`, on);
+    const its = view.assignments.filter((a) => a.taskId === taskId);
+    const active = its.filter((a) => a.state === "active").length;
+    if (active > 0) return pending(`${label} is open, with ${active} on it`, on);
+    if (its.some((a) => a.endReason === "completed")) {
+      return met(`${label} is open, and the work on it is done`, on);
+    }
+    return pending(`${label} is open, with no one on it`, on);
+  };
+}
+
+/** The first message the recipient queued back to the sender after `messageId`. */
+function onReply(store: WaitDeps["store"], messageId: string): Judge {
+  return (view) => {
+    const sent = store.replyTo(messageId);
+    if (sent === undefined) throw new UnknownMessage(messageId);
+    const agent = view.agents.find((a) => a.id === sent.to);
+    const label = agent === undefined ? sent.to : named(agent.name, agent.id);
+    const on = agent === undefined ? {} : { agent };
+    if (sent.replyId !== null) return met(`${label} replied`, { ...on, replyId: sent.replyId });
+    if (sent.state === "undeliverable") {
+      return {
+        final: true,
+        value: { verdict: "bounced", said: `the message to ${label} bounced`, ...on },
+      };
+    }
+    if (agent === undefined) return never(`${label} is gone`);
+    if (ended(agent.state)) return never(`${label} is ${agent.state}, and can't reply now`, on);
+    return pending(`${label} hasn't replied`, on);
+  };
+}
+
+function judgeOf(store: WaitDeps["store"], condition: WaitCondition): Judge {
+  if (condition.on === "agent") return onAgent(store, condition.agentId, condition.until);
+  if (condition.on === "shell") return onShell(condition.shellId, condition.until);
+  if (condition.on === "task") return onTask(condition.taskId);
+  return onReply(store, condition.messageId);
+}
+
+/**
+ * Answers once `req.condition` is met or can't be, judged now and again after each commit, or
+ * at the timeout or when `signal` aborts, with where it stands then. A target the caller can't
+ * read is refused at once, as is a reply wait by anyone but the message's sender: who mailed whom
+ * isn't in `/v1/state`.
+ */
+export async function waitFor(
+  deps: WaitDeps,
+  caller: Caller,
+  req: WaitRequest,
+  signal: AbortSignal,
+  after: After = realAfter,
+): Promise<WaitResponse> {
+  const { condition } = req;
+  if (condition.on === "reply") {
+    const sent = deps.store.replyTo(condition.messageId);
+    if (sent === undefined) throw new UnknownMessage(condition.messageId);
+    if (sent.from === null || sent.from !== caller) {
+      throw new WaitRefused(
+        `only the agent that sent ${condition.messageId} may wait for its reply`,
+      );
+    }
+  }
+  const judge = judgeOf(deps.store, condition);
+  const release = deps.limit?.enter(caller);
+  let first = req.resumed !== true;
+  try {
+    return await until(
+      deps.store,
+      () => {
+        const judged = judge(deps.view(), first);
+        first = false;
+        return judged;
+      },
+      req.timeoutMs,
+      signal,
+      after,
+    );
+  } finally {
+    release?.();
+  }
+}
