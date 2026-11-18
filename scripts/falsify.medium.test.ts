@@ -1951,6 +1951,7 @@ describe("falsify on a branch with a new test that runs a binary", () => {
 // falsify builds the base's of for a test that reaches one.
 const RUNS_BINARIES: Record<string, string[]> = {
   "apps/daemon/src/auth/peer.ts": ["release/bazhen-peer"],
+  "apps/daemon/src/env/agent-cli.ts": ["release/bazhen"],
   "apps/daemon/src/mailbox/hook-command.ts": ["release/bazhen-hook"],
   "apps/daemon/src/terminals/holder.ts": ["release-holder/bazhen-holder"],
   "scripts/cli-bench.medium.test.ts": ["release/bazhen"],
@@ -1962,8 +1963,10 @@ const RUNS_BINARIES: Record<string, string[]> = {
   "tests/support/holder-spawn.ts": ["debug/bazhen-holder", "debug/bazhen-holder-replay"],
 };
 // Files whose paths into a target/ are data, not binaries they run: falsify itself, its tests'
-// fixtures, absolute paths in doctor's fixtures, and a store test's scratch folder named target.
+// fixtures, absolute paths in doctor's fixtures, a store test's scratch folder named target, and the
+// scratch build tree of the test of where agents find the CLI.
 const MENTIONS_TARGET = [
+  "apps/daemon/src/env/agent-cli.medium.test.ts",
   "apps/daemon/src/store/store.medium.test.ts",
   "packages/protocol/src/api-fixtures.ts",
   "scripts/falsify.medium.test.ts",

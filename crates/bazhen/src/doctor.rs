@@ -187,10 +187,10 @@ fn peer_reader_lines(reader: &Nullable<bazhen_protocol::daemon::PeerReader>) -> 
 }
 
 /// The `bazhen` agents find on their PATH, and a warning when there is none or it isn't the build
-/// beside the daemon. A login shell's rc can change the PATH the daemon captured, so it is said.
+/// beside the daemon. A login shell's rc can add to the PATH after the daemon captured it, so it is said.
 fn agent_cli_lines(cli: &AgentCli, login_shell: bool) -> Vec<String> {
     let rc = if login_shell {
-        " (agents.shell = login: its rc may change this PATH)"
+        " (agents.shell = login: a PATH its rc adds is not in the one captured, so this may be wrong)"
     } else {
         ""
     };
@@ -207,7 +207,8 @@ fn agent_cli_lines(cli: &AgentCli, login_shell: bool) -> Vec<String> {
         (None, built) => {
             let fix = match built {
                 Some(built) => format!("link {built} into a directory on it"),
-                None => "pnpm build builds it".to_owned(),
+                None => "run pnpm build, then link target/release/bazhen into a directory on it"
+                    .to_owned(),
             };
             vec![
                 "agent CLI: none".to_owned(),
@@ -587,8 +588,8 @@ mod tests {
         );
         assert_eq!(
             unbuilt[1],
-            "  warning: no bazhen on the PATH agents start with, so they can't run it; pnpm build \
-             builds it"
+            "  warning: no bazhen on the PATH agents start with, so they can't run it; run pnpm build, \
+             then link target/release/bazhen into a directory on it"
         );
     }
 
@@ -596,7 +597,9 @@ mod tests {
     fn says_a_login_shells_rc_may_change_the_path() {
         let lines = agent_cli_lines(&cli(Some("/r/bazhen"), None), true);
         assert!(
-            lines[1].ends_with("on it (agents.shell = login: its rc may change this PATH)"),
+            lines[1].ends_with(
+                "on it (agents.shell = login: a PATH its rc adds is not in the one captured, so this may be wrong)"
+            ),
             "{lines:?}"
         );
     }

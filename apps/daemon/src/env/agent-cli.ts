@@ -23,6 +23,13 @@ function runnable(file: string): string | null {
   }
 }
 
+/** `entry` as bash reads a PATH entry: a leading `~` is the home directory. */
+function expanded(entry: string, home: string | undefined): string {
+  if (home === undefined || !isAbsolute(home)) return entry;
+  if (entry === "~") return home;
+  return entry.startsWith("~/") ? join(home, entry.slice(2)) : entry;
+}
+
 /**
  * The `bazhen` an agent started with `env` runs, beside the one built with this daemon: a
  * different one is another build, which the agent's commands can't be sure to speak the daemon's
@@ -33,10 +40,11 @@ export function agentCli(
   env: Readonly<Record<string, string | undefined>>,
   built: string = BUILT,
 ): AgentCli {
-  const onPath = (env["PATH"] ?? "")
-    .split(delimiter)
-    .filter(isAbsolute)
-    .map((dir) => runnable(join(dir, "bazhen")))
-    .find((found) => found !== null);
-  return { expected: runnable(built), onPath: onPath ?? null };
+  for (const entry of (env["PATH"] ?? "").split(delimiter)) {
+    const dir = expanded(entry, env["HOME"]);
+    if (!isAbsolute(dir)) continue;
+    const found = runnable(join(dir, "bazhen"));
+    if (found !== null) return { expected: runnable(built), onPath: found };
+  }
+  return { expected: runnable(built), onPath: null };
 }

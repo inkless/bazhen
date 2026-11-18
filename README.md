@@ -40,7 +40,7 @@ Contributing, for people and agents: [AGENTS.md](AGENTS.md) and [docs/standards/
 - `crates/bazhen` — `bazhen`, the command agents and people run, a client of the daemon's Unix
   socket (Rust); `pnpm build` builds it at `target/release/bazhen`. `bazhen start` finds the
   checkout from the binary's resolved path, three levels up, so link to the binary rather than
-  copy it, and keep it under the checkout: a `CARGO_TARGET_DIR` elsewhere breaks `start`
+  copy it, and keep it under the checkout: a `CARGO_TARGET_DIR` elsewhere breaks `start`.
   Agents run `bazhen` from their PATH, so link it into a directory on the PATH they start with,
   for example `ln -s "$PWD/target/release/bazhen" ~/.local/bin/bazhen`; `bazhen doctor` warns when
   agents find none, or one that isn't this checkout's build

@@ -40,6 +40,14 @@ describe("the bazhen agents find on their PATH", () => {
     });
   });
 
+  it("reads a leading ~ in a PATH entry as the captured HOME, as bash does", () => {
+    const bin = dir("bin");
+    symlinkSync(built, join(bin, "bazhen"));
+    expect(agentCli({ PATH: "~/bin", HOME: root }, built).onPath).toBe(built);
+    expect(agentCli({ PATH: "~/bin" }, built).onPath).toBeNull();
+    expect(agentCli({ PATH: "~/bin", HOME: "home" }, built).onPath).toBeNull();
+  });
+
   it("is another build when the PATH holds a copy", () => {
     const bin = dir("bin");
     copyFileSync(built, join(bin, "bazhen"));
