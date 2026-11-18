@@ -216,6 +216,23 @@ describe.each([
     await expect.poll(() => state(messageId)).toBe("emitted");
   });
 
+  it("decides nothing on a permission request it couldn't read in time, as when no daemon answers", async () => {
+    const { socket, agentId } = await daemon(false, async () => ({ kind: "late" }));
+    const permission = JSON.stringify({
+      hook_event_name: "PermissionRequest",
+      session_id: CLAUDE_SESSION,
+      tool_name: "Bash",
+      tool_input: { command: "rm -rf /" },
+    });
+    const ask = (at: string) =>
+      run(client, "PermissionRequest", { BAZHEN_AGENT_ID: agentId, BAZHEN_SOCKET: at }, permission);
+    const [late, unanswered] = [await ask(socket), await ask(join(dir, "nobody.sock"))];
+    expect([late, unanswered]).toEqual([
+      { code: 0, stdout: "", stderr: "" },
+      { code: 0, stdout: "", stderr: "" },
+    ]);
+  });
+
   it("takes mail for an agent whose hook proves it with its token file", async () => {
     const { socket, agentId, mailbox, state, tokenFile } = await daemon(true);
     const { messageId } = mailbox.send(agentId, { idempotencyKey: "m", body: "hello" });
