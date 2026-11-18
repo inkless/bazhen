@@ -8,6 +8,7 @@ import type { PairingCodes } from "../auth/pairing.ts";
 import { admitted, peerKey, type Cidr } from "../config/cidr.ts";
 import type { LanCertificate } from "../tls/material.ts";
 import { createApp, type AppDeps } from "./app.ts";
+import { hearConnections } from "./connections.ts";
 import { upgrades, type UpgradeRoute } from "./upgrades.ts";
 
 /** A TLS handshake must finish this fast, so peers can't hold sockets open half-made. */
@@ -88,6 +89,7 @@ export function lanListener(parts: LanParts): Server {
     },
   );
   if (!(server instanceof Server)) throw new TypeError("serve() made no HTTPS server");
+  hearConnections(server);
   server.maxConnections = parts.limits?.maxConnections ?? MAX_CONNECTIONS;
   const maxPerPeer = parts.limits?.maxPerPeer ?? MAX_PER_PEER;
   // Every socket, upgraded ones included: they leave the HTTP server's own bookkeeping.

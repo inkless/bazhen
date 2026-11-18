@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EnvRules } from "@bazhen/core";
+import { heard } from "@bazhen/host-guard";
 import { handOff } from "./env/capture.ts";
 import { protocolId } from "@bazhen/protocol/id";
 import { ANOTHER_BUILD, answers, spokenProtocol } from "./socket/client.ts";
@@ -36,13 +37,15 @@ export async function detach(o: DetachOptions): Promise<number> {
   const logFile = join(o.stateDir, "daemon.log");
   const log = openSync(logFile, "a");
   try {
-    spawn(process.execPath, [o.entry], {
-      detached: true,
-      // Not the starting shell's directory, which the daemon would otherwise hold open.
-      cwd: "/",
-      stdio: ["ignore", log, log],
-      env: handOff(o.env, o.envRules),
-    }).unref();
+    heard(
+      spawn(process.execPath, [o.entry], {
+        detached: true,
+        // Not the starting shell's directory, which the daemon would otherwise hold open.
+        cwd: "/",
+        stdio: ["ignore", log, log],
+        env: handOff(o.env, o.envRules),
+      }),
+    ).unref();
   } finally {
     closeSync(log);
   }

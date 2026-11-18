@@ -19,7 +19,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { HOLDER_BUILD, HOLDER_COMMAND, holderBuildOf } from "@bazhen/host-guard";
+import { HOLDER_BUILD, HOLDER_COMMAND, heard, holderBuildOf } from "@bazhen/host-guard";
 
 const TEMP = /^\.tmp-[0-9a-f]{8}$/;
 const BAD = /^\.bad-[0-9a-f]{16}-[0-9a-f]{8}$/;
@@ -223,8 +223,9 @@ export type ProcessArgs = () => Promise<string>;
 const psArgs: ProcessArgs = async () => {
   const run = promisify(execFile);
   const ps = ["-A", "-ww", "-o", "pid=,uid=,args="];
-  return (await run("ps", ps, { env: PS_ENV, timeout: PS_TIMEOUT_MS, maxBuffer: PS_MAX_BYTES }))
-    .stdout;
+  return (
+    await heard(run("ps", ps, { env: PS_ENV, timeout: PS_TIMEOUT_MS, maxBuffer: PS_MAX_BYTES }))
+  ).stdout;
 };
 
 /**

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { HarnessRefused, type HarnessChannelPort } from "@bazhen/core";
+import { heard } from "@bazhen/host-guard";
 import { AppServer, AppServerError, realPath, type Listener } from "./app-server.ts";
 import { cliVersion } from "./version.ts";
 
@@ -25,7 +26,7 @@ export const codexHomeOf = (env: Readonly<Record<string, string | undefined>>, h
 export const codexCli =
   (env: Readonly<Record<string, string>>) =>
   (args: readonly string[]): Promise<void> =>
-    run("codex", args, { env, timeout: 60_000 }).then(() => undefined);
+    heard(run("codex", args, { env, timeout: 60_000 })).then(() => undefined);
 
 /**
  * The version of the Codex CLI that `env`'s PATH finds, or null if it doesn't answer within a
@@ -33,7 +34,7 @@ export const codexCli =
  */
 export async function codexCliVersion(env: Readonly<Record<string, string>>) {
   try {
-    const { stdout } = await run("codex", ["--version"], { env, timeout: 1_000 });
+    const { stdout } = await heard(run("codex", ["--version"], { env, timeout: 1_000 }));
     return cliVersion(stdout);
   } catch {
     return null;

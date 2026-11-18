@@ -273,3 +273,139 @@ describe("the signal-guard rule on process passed on whole", () => {
     expect(flagged("export default globalThis.process;")).toEqual([1]);
   });
 });
+
+/** The lines oxlint reports under `bazhen(<rule>)` in `source`, the rule on as in product. */
+function reportedBy(rule: string, source: string): number[] {
+  const config = join(dir, `${rule}.json`);
+  writeFileSync(
+    config,
+    JSON.stringify({
+      jsPlugins: [join(repo, "scripts/lint-plugin.ts")],
+      rules: { [`bazhen/${rule}`]: "error" },
+    }),
+  );
+  const file = join(dir, "stdio.ts");
+  writeFileSync(file, source);
+  let out = "";
+  try {
+    execFileSync(join(repo, "node_modules/.bin/oxlint"), ["-c", config, "-f", "unix", file], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+  } catch (error) {
+    out = String(Reflect.get(Object(error), "stdout"));
+  }
+  return [...out.matchAll(/stdio\.ts:(\d+):\d+: .* \[\w+\/bazhen\(([\w-]+)\)\]/g)]
+    .filter((m) => m[2] === rule)
+    .map((m) => Number(m[1]))
+    .toSorted((a, b) => a - b);
+}
+
+const unheard = (source: string) => reportedBy("stdio-guard", source);
+
+describe("the stdio-guard rule", () => {
+  it("flags each async start not wrapped in heard where it is made, by whatever name it is bound", () => {
+    expect(
+      unheard(
+        [
+          'import { execFile, spawn as sp, fork, execFileSync, type ChildProcess } from "node:child_process";',
+          'import * as cp from "child_process";',
+          'import cpd from "node:child_process";',
+          'import { promisify } from "node:util";',
+          'import { heard } from "@bazhen/host-guard";',
+          "const run = promisify(execFile);",
+          "const ef = cp.execFile;",
+          'execFile("ps", [], () => {});',
+          'sp("ps", []);',
+          'fork("x.js");',
+          'void run("ps", []);',
+          'ef("ps", [], () => {});',
+          'cp.spawn("ps", []);',
+          'cpd.exec("ps", () => {});',
+          'const c = heard(sp("ps", [])).unref();',
+          'heard(execFile("ps", [], () => {}));',
+          'void heard(run("ps", []));',
+          'heard(cp.spawn("ps", []));',
+          'execFileSync("ps", []);',
+          'cp.spawnSync("ps", []);',
+          'other(execFile("ps", [], () => {}));',
+          'heard(execFile("ps", [], () => {}), 1);',
+          "declare const other: (c: ChildProcess, n?: number) => void;",
+          "void c;",
+        ].join("\n"),
+      ),
+    ).toEqual([8, 9, 10, 11, 12, 13, 14, 21, 22]);
+  });
+
+  it("flags each use of a start it can't follow to a heard call, and a heard that isn't host-guard's binding", () => {
+    expect(
+      unheard(
+        [
+          'import { spawn, execFile, ChildProcess } from "node:child_process";',
+          'import * as cp from "node:child_process";',
+          'import { promisify } from "node:util";',
+          'import { heard } from "./child.ts";',
+          'import * as hg from "@bazhen/host-guard";',
+          "declare const flag: boolean;",
+          'spawn.call(null, "ps", []);',
+          'spawn.apply(null, ["ps", []]);',
+          "const o = { start: spawn };",
+          '(0, spawn)("ps", []);',
+          'void promisify(execFile)("ps", []);',
+          "const pick = flag ? spawn : null;",
+          "const { spawn: s2 } = cp;",
+          'const r = require("node:child_process");',
+          'void import("child_process");',
+          'heard(spawn("ps", []));',
+          'hg.heard(spawn("ps", []));',
+          "const fake = (c: unknown) => c;",
+          'fake(spawn("ps", []));',
+          "export { execFile };",
+          'cp["spawn"]("ps", []);',
+          'const k = "spawn";',
+          'cp[k]("ps", []);',
+          'hg.heard(cp.spawn("ps", []));',
+          "void [o, pick, s2, r, heard];",
+          "const t = require(`node:child_process`);",
+          "void t;",
+          'function f(heard: (c: unknown) => unknown) { heard(spawn("ps", [])); }',
+          'function g() { const heard = (c: unknown) => c; heard(cp.spawn("ps", [])); }',
+          'function h(hg: { heard: (c: unknown) => unknown }) { hg.heard(spawn("ps", [])); }',
+          "new ChildProcess();",
+          "new cp.ChildProcess();",
+          "declare const kept: ChildProcess;",
+          "void [f, g, h, kept];",
+        ].join("\n"),
+      ),
+    ).toEqual([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 26, 28, 29, 30, 31, 32]);
+  });
+});
+
+describe("the ws-loads-statically rule", () => {
+  it("flags ws loaded other than by a static import, and neither a name nor a method given ws", () => {
+    expect(
+      reportedBy(
+        "ws-loads-statically",
+        [
+          'import { WebSocket } from "ws";',
+          'import { createRequire } from "node:module";',
+          "declare const ws: WebSocket;",
+          "declare function keepAlive(socket: WebSocket): void;",
+          "keepAlive(ws);",
+          'export const a = await import("ws");',
+          "export const b = await import(`ws`);",
+          'export const c = createRequire(import.meta.url)("ws");',
+          'import d = require("ws");',
+          "export { d };",
+          'export const e = require.resolve("ws");',
+          'export const f = module.require("ws");',
+          'export const g = load("ws");',
+          "const load = createRequire(import.meta.url);",
+          'export const h = "wss://x".replace("ws", "http");',
+          'export const i = "http://x".replace("http", "ws");',
+          'export const j = ["ws", "wss"].includes("ws");',
+        ].join("\n"),
+      ),
+    ).toEqual([6, 7, 8, 9, 11, 12, 13]);
+  });
+});

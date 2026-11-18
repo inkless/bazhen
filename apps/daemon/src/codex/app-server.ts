@@ -91,7 +91,6 @@ export class AppServer {
     this.closed = new Promise((resolve) => ws.once("close", () => resolve()));
     ws.on("message", (data: Buffer) => this.receive(data.toString("utf8")));
     ws.on("close", () => this.failAll(new Error("the app-server connection ended")));
-    ws.on("error", () => ws.terminate());
   }
 
   /**
@@ -104,12 +103,19 @@ export class AppServer {
 
   /**
    * Connects and runs `initialize`, refusing a server for any Codex home but `codexHome`, which
-   * the caller has resolved to its real path.
+   * the caller has resolved to its real path. The socket is heard from the moment it is made:
+   * `once` stops hearing it when its wait is aborted, and terminating a socket still connecting
+   * emits an error.
    */
-  static async connect(socket: string, codexHome: string): Promise<AppServer> {
+  static async connect(
+    socket: string,
+    codexHome: string,
+    openMs = OPEN_TIMEOUT_MS,
+  ): Promise<AppServer> {
     const ws = new WebSocket(`ws+unix://${socket}:/`);
+    ws.on("error", () => ws.terminate());
     try {
-      await once(ws, "open", { signal: AbortSignal.timeout(OPEN_TIMEOUT_MS) });
+      await once(ws, "open", { signal: AbortSignal.timeout(openMs) });
     } catch (err) {
       ws.terminate();
       throw err;

@@ -83,6 +83,7 @@ import { answers } from "./socket/client.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./http/app.ts";
+import { hearConnections } from "./http/connections.ts";
 import { allowlists } from "./http/guard.ts";
 import { socketUpgrades, upgrades } from "./http/upgrades.ts";
 import { BUNDLE, built } from "./http/web.ts";
@@ -582,9 +583,11 @@ const hub = new TerminalHub(runtime, {
     if (store.shell(terminalId) !== undefined) void foreground.refresh();
   },
 });
-const server = serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
-  console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
-});
+const server = hearConnections(
+  serve({ fetch: app.fetch, hostname: HOSTNAME, port }, (info) => {
+    console.log(`bazhen daemon listening on http://${HOSTNAME}:${info.port} (data: ${paths.data})`);
+  }),
+);
 const terminalStream = streamRoute({
   protocolId: PROTOCOL_ID,
   hub,
@@ -777,7 +780,7 @@ const socketListener = getRequestListener(
     },
   }).fetch,
 );
-const socketServer = createServer((req, res) => void socketListener(req, res));
+const socketServer = hearConnections(createServer((req, res) => void socketListener(req, res)));
 socketServer.on("connection", (connection) => noteAccepted(connection));
 socketServer.on("upgrade", socketUpgrades(agentTokens, streams, peer));
 socketServer.requestTimeout = 0;

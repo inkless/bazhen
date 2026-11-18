@@ -24,6 +24,7 @@ import {
   uniqueUnit,
   type ProbeReading,
 } from "./scope.ts";
+import { heard } from "./child.ts";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
@@ -189,8 +190,10 @@ function output(
   timeout = STEP_TIMEOUT_MS,
 ): Promise<string | undefined> {
   return new Promise((done) => {
-    execFile(command, args, { timeout }, (error, stdout) =>
-      done(error === null ? stdout : undefined),
+    heard(
+      execFile(command, args, { timeout }, (error, stdout) =>
+        done(error === null ? stdout : undefined),
+      ),
     );
   });
 }
@@ -282,10 +285,12 @@ export function runInScope(
     void kill(signal);
     escalation ??= setTimeout(() => void kill("SIGKILL"), STOP_GRACE_MS);
   }, false);
-  const child = spawn("systemd-run", scopeArgv(unit, cap, command, args), {
-    stdio: "inherit",
-    env: { ...env, [CAPPED_ENV]: `systemd:${unit}` },
-  });
+  const child = heard(
+    spawn("systemd-run", scopeArgv(unit, cap, command, args), {
+      stdio: "inherit",
+      env: { ...env, [CAPPED_ENV]: `systemd:${unit}` },
+    }),
+  );
   // The kernel counts a kill a moment before the scope empties and its cgroup goes, so the counter
   // is read often, and on every change once the watcher is on.
   const poll = setInterval(sample, 20);

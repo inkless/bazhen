@@ -9,7 +9,9 @@
 // to a tool that isn't tmux; rename the argument or move the call into host-guard. A start it
 // can't read the argv of is an error too: one imported from child_process or host-guard used
 // other than as a call (`Reflect.apply`, a seam object, an export), and either module loaded other
-// than by a static import (`require`, `import()`, a re-export).
+// than by a static import (`require`, `import()`, a re-export). `stdio-guard`: in product source,
+// each async child_process start is wrapped in host-guard's `heard()` where it is made.
+// `ws-loads-statically`: where WebSocket servers are banned, ws is loaded only by a static import.
 
 import { CHILD_PROCESS_MODULES, CHILD_PROCESS_STARTS } from "./child-process.ts";
 
@@ -27,6 +29,7 @@ interface Variable {
 }
 interface Context {
   report(problem: { node: Node; message: string }): void;
+  readonly filename?: string;
   readonly sourceCode: { getDeclaredVariables(node: Node): readonly Variable[] };
 }
 
@@ -423,10 +426,205 @@ const guard = (reports: { tmux: boolean; signals: boolean }) => ({
   },
 });
 
+const UNHEARD =
+  "Wrap a child_process start in heard() from @bazhen/host-guard where it is made, so a stdio " +
+  "stream that breaks can't end this process (docs/standards/code.md).";
+/** The starts that return a child with streams: the sync ones return when the child has gone. */
+const ASYNC_STARTS = new Set(["spawn", "exec", "execFile", "fork"]);
+
+/**
+ * Whether an argument or source names one of `modules`, as a string or a template with no
+ * substitutions: `require`, `import()` and the like. A name made at run time can't be read.
+ */
+const loadsOneOf = (modules: ReadonlySet<string>) => (arg: unknown) => {
+  const quasis = isNode(arg) && arg.type === "TemplateLiteral" ? nodes(arg["quasis"]) : [];
+  const template =
+    quasis.length === 1 ? String(Reflect.get(Object(quasis[0]?.["value"]), "cooked")) : undefined;
+  return modules.has(template ?? nameOf(arg) ?? "");
+};
+const loadsChildProcess = loadsOneOf(CHILD_PROCESS);
+/** A module named by a string or a template: a variable that happens to be called `ws` isn't one. */
+const loadsWs = (arg: unknown) =>
+  isNode(arg) && arg.type !== "Identifier" && loadsOneOf(new Set(["ws"]))(arg);
+
+const WS_LOADED =
+  "Import ws only statically, which the import matrix reads: a WebSocket server is made only " +
+  "through heardWebSockets, which hears each socket (docs/standards/code.md).";
+
+/**
+ * `ws-loads-statically`: the import matrix keeps `WebSocketServer` to the module that hears each
+ * socket, and it reads static imports only, so ws loaded any other way (`import()`, `require`,
+ * `import = require`) is an error where the matrix bans the server.
+ */
+const wsLoadsStatically = {
+  create(context: Context) {
+    const report = (node: Node) => context.report({ node, message: WS_LOADED });
+    /** The names a `createRequire(…)` is bound to here, and the calls given "ws" to judge. */
+    const requires = new Set(["require"]);
+    const calls: Node[] = [];
+    /**
+     * Whether a callee loads a module: `require` or a name bound to `createRequire(…)`,
+     * `require.resolve` or `module.require`, or a call's result, as `createRequire(…)("ws")`. A
+     * method merely given "ws", as `url.replace("ws", "http")`, loads nothing.
+     */
+    const loads = (callee: unknown) =>
+      isNode(callee) &&
+      (callee.type === "CallExpression" ||
+        (callee.type === "Identifier" && requires.has(String(callee["name"]))) ||
+        (callee.type === "MemberExpression" &&
+          (requires.has(nameOf(callee["object"]) ?? "") || memberName(callee) === "require")));
+    return {
+      ImportExpression(node: Node) {
+        if (loadsWs(node["source"])) report(node);
+      },
+      VariableDeclarator(node: Node) {
+        const init = node["init"];
+        if (isNode(init) && isCreateRequire(init)) requires.add(nameOf(node["id"]) ?? "");
+      },
+      CallExpression(node: Node) {
+        if (nodes(node["arguments"]).some(loadsWs)) calls.push(node);
+      },
+      "Program:exit"() {
+        for (const call of calls) if (loads(call["callee"])) report(call);
+      },
+      TSImportEqualsDeclaration(node: Node) {
+        const reference = node["moduleReference"];
+        if (isNode(reference) && loadsWs(reference["expression"])) report(node);
+      },
+    };
+  },
+};
+
+/**
+ * `stdio-guard`: a child's stdio streams are sockets this process holds, and one that fails with
+ * no listener throws out of the event loop, so each async child_process start is called as the
+ * one argument of host-guard's `heard(`. The rule follows every reference to a start: by its
+ * import, a member of child_process imported whole, or a `const` aliasing or promisifying it,
+ * which is followed in turn. Any other use is an error, since what it reaches can't be read:
+ * `.call`, `.apply`, `(0, spawn)`, an object, a conditional, an argument, an export, a promisify
+ * called on the spot, a `ChildProcess` made by hand. So is child_process loaded other than by a
+ * static import, and a `heard` that isn't host-guard's own binding, though named like it.
+ */
+const stdioGuard = {
+  create(context: Context) {
+    /** Variables bound to host-guard's `heard`, and to host-guard whole. */
+    const heards: Variable[] = [];
+    const hostGuards: Variable[] = [];
+    /** Variables bound to a start, to child_process whole, and to its `ChildProcess`. */
+    const starts: Variable[] = [];
+    const modules: Variable[] = [];
+    const classes: Variable[] = [];
+    /** Each identifier that reads one of `variables`: a name shadowing it reads its own. */
+    const readers = (variables: Variable[]) =>
+      new Set(variables.flatMap((v) => v.references.map((r) => r.identifier)));
+    let heardReads = new Set<Node>();
+    let hostGuardReads = new Set<Node>();
+    const seen = new Set<Variable>();
+    const bind = (node: Node, into: Variable[]) => {
+      for (const variable of context.sourceCode.getDeclaredVariables(node))
+        if (!seen.has(variable) && seen.add(variable)) into.push(variable);
+    };
+    const report = (node: Node) => context.report({ node, message: UNHEARD });
+    /** host-guard by its package, or, inside host-guard, the module `heard` lives in. */
+    const offersHeard = (source: string) =>
+      isHostGuard(source) ||
+      (source === "./child.ts" && /packages\/host-guard\/src\/[^/]+$/.test(context.filename ?? ""));
+    /** Whether a callee is host-guard's `heard` itself, by its binding, not its name. */
+    const isHeardCallee = (callee: unknown) =>
+      isNode(callee) &&
+      ((callee.type === "Identifier" && heardReads.has(callee)) ||
+        (callee.type === "MemberExpression" &&
+          isNode(callee["object"]) &&
+          hostGuardReads.has(callee["object"]) &&
+          memberName(callee) === "heard"));
+    /** Judges one place a start is reached, `node` being the name or member that reaches it. */
+    const judge = (node: Node) => {
+      const parent = parentOf(node);
+      if (parent?.type === "CallExpression" && parent["callee"] === node) {
+        const outer = parentOf(parent);
+        const args = nodes(outer?.["arguments"]);
+        const heard =
+          outer?.type === "CallExpression" &&
+          isHeardCallee(outer["callee"]) &&
+          args.length === 1 &&
+          args[0] === parent;
+        if (!heard) report(parent);
+        return;
+      }
+      const declarator = aliasing(node);
+      if (declarator !== undefined && !isExported(declarator)) bind(declarator, starts);
+      else report(node);
+    };
+    return {
+      ImportDeclaration(node: Node) {
+        const source = isNode(node["source"]) ? String(node["source"]["value"]) : "";
+        if (node["importKind"] === "type") return;
+        for (const spec of nodes(node["specifiers"])) {
+          if (spec["importKind"] === "type") continue;
+          const imported = nameOf(spec["imported"]);
+          const named = spec.type === "ImportSpecifier" && imported !== "default";
+          if (offersHeard(source)) {
+            if (named && imported === "heard") bind(spec, heards);
+            else if (!named) bind(spec, hostGuards);
+          }
+          if (!CHILD_PROCESS.has(source)) continue;
+          if (!named) bind(spec, modules);
+          else if (ASYNC_STARTS.has(imported ?? "")) bind(spec, starts);
+          else if (imported === "ChildProcess") bind(spec, classes);
+        }
+      },
+      ImportExpression(node: Node) {
+        if (loadsChildProcess(node["source"])) report(node);
+      },
+      CallExpression(node: Node) {
+        if (nodes(node["arguments"]).some(loadsChildProcess)) report(node);
+      },
+      TSImportEqualsDeclaration(node: Node) {
+        const reference = node["moduleReference"];
+        if (isNode(reference) && loadsChildProcess(reference["expression"])) report(node);
+      },
+      ExportAllDeclaration(node: Node) {
+        if (loadsChildProcess(node["source"])) report(node);
+      },
+      ExportNamedDeclaration(node: Node) {
+        if (node["exportKind"] !== "type" && loadsChildProcess(node["source"])) report(node);
+      },
+      "Program:exit"() {
+        heardReads = readers(heards);
+        hostGuardReads = readers(hostGuards);
+        // A ChildProcess made by hand starts a process by its `spawn`, which can't be followed.
+        for (const { identifier: id } of classes.flatMap((v) => v.references))
+          if (!isTypeOf(id)) report(id);
+        for (const variable of modules) {
+          for (const { identifier: id } of variable.references) {
+            if (isTypeOf(id)) continue;
+            const parent = parentOf(id);
+            const member =
+              parent?.type === "MemberExpression" && parent["object"] === id ? parent : undefined;
+            const name = member === undefined ? undefined : memberName(member);
+            const unread = name === undefined || name === "default" || name === "ChildProcess";
+            if (member === undefined || unread) report(id);
+            else if (ASYNC_STARTS.has(name)) judge(member);
+          }
+        }
+        // Judging a reference may bind an alias, whose own references are judged in turn.
+        for (let i = 0; i < starts.length; i++) {
+          for (const reference of starts[i]?.references ?? []) {
+            if (reference.isWrite() && !reference.isRead()) continue;
+            if (!isTypeOf(reference.identifier)) judge(reference.identifier);
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "bazhen" },
   rules: {
     "host-guard": guard({ tmux: true, signals: false }),
     "signal-guard": guard({ tmux: false, signals: true }),
+    "stdio-guard": stdioGuard,
+    "ws-loads-statically": wsLoadsStatically,
   },
 };

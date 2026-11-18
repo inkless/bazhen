@@ -39,7 +39,9 @@
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
     "bazhen/host-guard": "error",
-    "bazhen/signal-guard": "error"
+    "bazhen/signal-guard": "error",
+    "bazhen/stdio-guard": "off",
+    "bazhen/ws-loads-statically": "off"
   },
   "overrides": [
     {
@@ -2305,6 +2307,45 @@
         "apps/daemon/**/*.tsx"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "error",
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@bazhen/web",
+                  "@bazhen/web/**",
+                  "**/apps/web/**",
+                  "**/web/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/web."
+              },
+              {
+                "group": [
+                  "**/host-guard/src/**"
+                ],
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
+              },
+              {
+                "group": [
+                  "ws"
+                ],
+                "importNamePattern": "^(?:WebSocketServer|default)$",
+                "message": "apps/daemon (tech-stack-and-scaffold.md §3, docs/standards/code.md) makes WebSocket servers only through heardWebSockets in src/http/connections.ts, which hears each socket (docs/standards/code.md)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/daemon/src/http/connections.ts",
+        "apps/daemon/src/testing/**"
+      ],
+      "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
@@ -2335,6 +2376,7 @@
         "apps/daemon/**/*.test.tsx"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
@@ -2394,6 +2436,7 @@
         "apps/daemon/**/*.medium.test.ts"
       ],
       "rules": {
+        "bazhen/ws-loads-statically": "off",
         "no-restricted-imports": [
           "error",
           {
@@ -4255,6 +4298,25 @@
       ],
       "rules": {
         "bazhen/signal-guard": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/*/src/**",
+        "packages/*/src/**"
+      ],
+      "rules": {
+        "bazhen/stdio-guard": "error"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/testing/**"
+      ],
+      "rules": {
+        "bazhen/stdio-guard": "off"
       }
     }
   ],
