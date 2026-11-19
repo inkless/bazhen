@@ -121,6 +121,35 @@ mod tests {
     }
 
     #[test]
+    fn takes_the_flag_over_the_keys_config_toml_names() {
+        let dir = std::env::temp_dir().join(format!("bz-detach-keys-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[attach]\ndetach_keys = \"ctrl-p,ctrl-q\"\n",
+        )
+        .unwrap();
+        let read = [
+            detach(Some("ctrl-x,ctrl-y"), Some(&dir)),
+            detach(None, Some(&dir)),
+        ];
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            read,
+            [
+                Ok(Detach {
+                    keys: keys("ctrl-x,ctrl-y"),
+                    passed_over: None
+                }),
+                Ok(Detach {
+                    keys: keys("ctrl-p,ctrl-q"),
+                    passed_over: None
+                }),
+            ]
+        );
+    }
+
+    #[test]
     fn reads_attach_detach_keys_from_the_file_and_nothing_else_there() {
         let text = "[daemon]\nport = 7901\n\n[attach]\ndetach_keys = \"ctrl-p,ctrl-q\"\n";
         assert_eq!(
