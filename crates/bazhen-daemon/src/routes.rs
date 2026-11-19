@@ -10,12 +10,15 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
+use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
+use bazhen_store::SnapshotError;
 use tokio_util::sync::CancellationToken;
 
 use crate::guard::{self, Allowlists, Arrival, Refusal};
+use crate::writer::Writer;
 
 /// Why the daemon stopped, as its last line says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,10 +66,11 @@ impl Stop {
 pub(crate) struct Shared {
     pub(crate) health: Arc<HealthResponse>,
     pub(crate) stop: Stop,
+    pub(crate) store: Writer,
 }
 
 impl Shared {
-    pub(crate) fn new(protocol_id: &str, stop: Stop) -> Self {
+    pub(crate) fn new(protocol_id: &str, stop: Stop, store: Writer) -> Self {
         Self {
             health: Arc::new(HealthResponse {
                 status: HealthStatus::Ok,
@@ -76,6 +80,7 @@ impl Shared {
                 runtimes: Vec::new(),
             }),
             stop,
+            store,
         }
     }
 }
@@ -108,6 +113,32 @@ async fn stop(State(shared): State<Shared>) -> axum::Json<StopResponse> {
     axum::Json(StopResponse {})
 }
 
+/// What a failure no route expects answers: the error is logged, and the client told nothing of
+/// it, as Hono answers one.
+fn internal(err: &dyn std::fmt::Display) -> Response {
+    tracing::error!("bazhen: {err}");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+}
+
+/// Every read model a client draws, with the cursor its event stream resumes from.
+async fn state(State(shared): State<Shared>) -> Response {
+    let store = shared.store.clone();
+    let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
+        store.reader()?.reads().snapshot()
+    })
+    .await;
+    match read {
+        Ok(Ok(snapshot)) => axum::Json(snapshot).into_response(),
+        Ok(Err(unported @ SnapshotError::Unported(_))) => fail(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::Unavailable,
+            &unported.to_string(),
+        ),
+        Ok(Err(err)) => internal(&err),
+        Err(err) => internal(&err),
+    }
+}
+
 async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
@@ -117,6 +148,7 @@ async fn not_found() -> Response {
 pub(crate) fn socket_router(shared: Shared) -> Router {
     Router::new()
         .route("/v1/health", get(health))
+        .route("/v1/state", get(state))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
@@ -130,6 +162,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let gate = Arc::new(gate);
     let api = Router::new()
         .route("/health", get(health))
+        .route("/state", get(state))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
@@ -230,7 +263,77 @@ mod tests {
     const HOST: &str = "127.0.0.1:7900";
 
     fn shared() -> Shared {
-        Shared::new("f".repeat(64).as_str(), Stop::default())
+        Shared::new("f".repeat(64).as_str(), Stop::default(), Writer::closed())
+    }
+
+    /// The state a router answers, from a store of its own after `seed` writes to it.
+    fn state_after(
+        seed: &str,
+        router: impl FnOnce(Shared) -> Router,
+        headers: &[(&str, &str)],
+    ) -> (u16, Value) {
+        let dir = crate::testing::TempDir::new("routes-state");
+        let path = dir.path().join("bazhen.db");
+        drop(bazhen_store::Store::open(&path).unwrap());
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute_batch(seed)
+            .unwrap();
+        let (store, thread) =
+            crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store);
+        let answer = send(router(shared), request("GET", "/v1/state", headers));
+        thread.finish();
+        answer
+    }
+
+    #[test]
+    fn answers_the_state_with_its_cursor_on_the_socket() {
+        let (status, body) = state_after("", socket_router, &[]);
+        assert_eq!(
+            (status, &body["eventId"], &body["tasks"], &body["agents"]),
+            (200, &json!(0), &json!([]), &json!([]))
+        );
+        assert_eq!(body["epoch"].as_str().map(str::len), Some(32), "{body}");
+    }
+
+    #[test]
+    fn answers_the_state_over_http_only_past_the_gate() {
+        let gated = |pairing_required| {
+            move |shared| {
+                let allow = guard::allowlists(7900, None, &[]);
+                http_router(
+                    shared,
+                    Gate {
+                        allow,
+                        pairing_required,
+                    },
+                )
+            }
+        };
+        let (open, body) = state_after("", gated(false), &[("host", HOST)]);
+        assert_eq!((open, &body["eventId"]), (200, &json!(0)));
+        let (paired, body) = state_after("", gated(true), &[("host", HOST)]);
+        assert_eq!((paired, &body["error"]), (401, &json!("unpaired")));
+    }
+
+    #[test]
+    fn answers_unavailable_rather_than_a_state_that_leaves_out_what_it_cant_describe() {
+        let (status, body) = state_after(
+            "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+               VALUES ((SELECT id FROM host), '2026-11-01T00:00:00.000Z', 'environment.created',
+                 'environment', 'env_1', 'system', '{}');
+             INSERT INTO environments (id, kind, created_event_id) VALUES ('env_1', 'local', 1);",
+            socket_router,
+            &[],
+        );
+        assert_eq!(
+            (status, body),
+            (
+                503,
+                refused("unavailable", "this daemon can't describe environments yet")
+            )
+        );
     }
 
     fn http(pairing_required: bool) -> Router {

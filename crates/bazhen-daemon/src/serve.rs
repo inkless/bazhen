@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use bazhen_client::paths::Paths;
 use bazhen_store::{OpenError, Store};
+
+use crate::retention;
+use crate::writer::{self, Writer};
 use tokio::net::{TcpListener, UnixListener};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
@@ -74,8 +77,8 @@ pub(crate) fn serve(startup: &Startup) -> ExitCode {
 }
 
 /// Everything before the daemon serves: its directories, a private `run`, no daemon already on
-/// the socket, and the store, migrated.
-fn prepare(startup: &Startup) -> Result<Store, Refused> {
+/// the socket, and the store, migrated, on its writer thread.
+fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
     let p = &startup.paths;
     for dir in [&p.config, &p.data, &p.bank, &p.state, &p.cache] {
         std::fs::create_dir_all(dir)
@@ -104,7 +107,8 @@ fn prepare(startup: &Startup) -> Result<Store, Refused> {
             store.missed().join(", ")
         );
     }
-    Ok(store)
+    writer::start(store, &path)
+        .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))
 }
 
 /// `EPERM` or `EACCES`, as Node names the code.
@@ -117,23 +121,27 @@ fn errno_name(err: &std::io::Error) -> &'static str {
 }
 
 /// Serves until a stop, then lets the listeners drain, and says why it stopped.
-fn run(startup: &Startup, store: Store) -> Result<Reason, Refused> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<Reason, Refused> {
+    let served = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|err| Refused::Said(format!("bazhen can't start its runtime: {err}")))?;
-    let reason = runtime.block_on(listen(startup, SERVING))?;
-    drop(store);
-    Ok(reason)
+        .map_err(|err| Refused::Said(format!("bazhen can't start its runtime: {err}")))
+        .and_then(|runtime| runtime.block_on(listen(startup, SERVING, store)));
+    writer.finish();
+    served
 }
 
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
-async fn listen(startup: &Startup, serving: Serving) -> Result<Reason, Refused> {
+async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Reason, Refused> {
     let stop = Stop::default();
     let hurry = CancellationToken::new();
     let hearing = TaskTracker::new();
     hear_signals(&hearing, &stop, &hurry)?;
-    let shared = Shared::new(bazhen_protocol::id::PROTOCOL_ID, stop.clone());
+    let shared = Shared::new(
+        bazhen_protocol::id::PROTOCOL_ID,
+        stop.clone(),
+        store.clone(),
+    );
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -171,6 +179,11 @@ async fn listen(startup: &Startup, serving: Serving) -> Result<Reason, Refused> 
 
     let tracker = TaskTracker::new();
     let token = stop.token();
+    let retiring = token.clone();
+    tracker.spawn(retention::every_hour(token.clone(), move || {
+        let (store, stop) = (store.clone(), retiring.clone());
+        async move { retention::prune(&store, jiff::Timestamp::now(), &stop).await }
+    }));
     tracker.spawn(serve_on(
         http,
         routes::http_router(shared.clone(), gate),
@@ -270,27 +283,7 @@ mod tests {
     use tokio::net::UnixStream;
 
     use super::*;
-
-    /// A directory of the test's own, removed when the test ends, whether or not it passed.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let dir =
-                std::env::temp_dir().join(format!("bz-serve-{name}-{}-{n}", std::process::id()));
-            std::fs::create_dir(&dir).unwrap();
-            Self(dir)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            // A directory left in the temp dir costs nothing a test would see.
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::testing::{TempDir, runtime};
 
     fn startup(home: &Path) -> Startup {
         let at = |name: &str| home.join(name).to_string_lossy().into_owned();
@@ -312,13 +305,6 @@ mod tests {
             pairing: "auto",
             pairing_required: false,
         }
-    }
-
-    fn runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
     }
 
     const QUICK: Serving = Serving {
@@ -353,12 +339,12 @@ mod tests {
     #[test]
     fn stops_when_asked_over_its_socket_says_so_and_leaves_no_socket_behind() {
         let home = TempDir::new("stop");
-        let startup = startup(&home.0);
+        let startup = startup(home.path());
         let socket = PathBuf::from(&startup.paths.socket);
-        let _store = prepare(&startup).unwrap();
+        let (store, writer) = prepare(&startup).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
-            let serving = tracker.spawn(async move { listen(&startup, QUICK).await });
+            let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
             let answer = ask(&socket, STOP).await;
             let asked = Instant::now();
             let reason = tokio::time::timeout(Duration::from_secs(5), serving).await;
@@ -371,17 +357,18 @@ mod tests {
             assert!(took < QUICK.drain, "{took:?}");
             assert!(!socket.exists());
         });
+        writer.finish();
     }
 
     #[test]
     fn waits_out_its_drain_for_a_connection_still_sending_its_request_then_stops() {
         let home = TempDir::new("drain");
-        let startup = startup(&home.0);
+        let startup = startup(home.path());
         let socket = PathBuf::from(&startup.paths.socket);
-        let _store = prepare(&startup).unwrap();
+        let (store, writer) = prepare(&startup).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
-            let serving = tracker.spawn(async move { listen(&startup, QUICK).await });
+            let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
             let mut held = connect(&socket).await;
             held.write_all(b"GET /v1/health HTTP/1.1\r\n")
                 .await
@@ -404,6 +391,7 @@ mod tests {
             );
             assert!(took >= QUICK.drain && took < QUICK.drain * 3, "{took:?}");
         });
+        writer.finish();
     }
 
     #[test]
@@ -468,7 +456,7 @@ mod tests {
     #[test]
     fn makes_its_socket_afresh_for_this_user_alone_and_removes_only_that_one() {
         let dir = TempDir::new("socket");
-        let path = dir.0.join("bazhen.sock");
+        let path = dir.path().join("bazhen.sock");
         std::fs::write(&path, "left from before").unwrap();
         let ours = runtime().block_on(async {
             let (_listener, made) = bind_socket(&path).unwrap();
@@ -476,7 +464,7 @@ mod tests {
         });
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         // Kept linked, so the next socket can't be given its inode.
-        std::fs::hard_link(&path, dir.0.join("kept")).unwrap();
+        std::fs::hard_link(&path, dir.path().join("kept")).unwrap();
         forget_socket(&path, ours);
         let removed = !path.exists();
         let theirs = runtime().block_on(async { bind_socket(&path).unwrap().1 });
@@ -490,7 +478,7 @@ mod tests {
     #[test]
     fn refuses_to_start_while_a_daemon_answers_on_its_socket() {
         let home = TempDir::new("running");
-        let startup = startup(&home.0);
+        let startup = startup(home.path());
         std::fs::create_dir(&startup.paths.run).unwrap();
         std::fs::set_permissions(&startup.paths.run, std::fs::Permissions::from_mode(0o700))
             .unwrap();
@@ -515,7 +503,7 @@ mod tests {
     #[test]
     fn refuses_to_start_on_a_database_it_cant_open() {
         let home = TempDir::new("store");
-        let startup = startup(&home.0);
+        let startup = startup(home.path());
         std::fs::create_dir_all(Path::new(&startup.paths.data).join("bazhen.db")).unwrap();
         let refused = prepare(&startup);
         assert!(

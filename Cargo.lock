@@ -148,6 +148,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "rusqlite",
  "rustix",
  "serde",
  "serde_json",
