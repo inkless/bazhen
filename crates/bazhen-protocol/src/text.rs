@@ -144,3 +144,120 @@ pub fn is_plain_remote(origin: &str) -> bool {
     let host = host.unwrap_or_default().to_ascii_lowercase();
     !matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
 }
+
+/// Whether `value` is a web origin exactly as a browser sends one: `http` or `https`, then the
+/// host and any port, and nothing more, each as a URL parser writes it back. So no path, query,
+/// fragment or user, no default port, and no host a parser would spell another way: uppercase,
+/// not ASCII, percent-encoded, an IPv4 address in any form but dotted decimal, or an IPv6 address
+/// in any form but its shortest.
+pub fn is_origin(value: &str) -> bool {
+    let (rest, default_port) = if let Some(rest) = value.strip_prefix("https://") {
+        (rest, "443")
+    } else if let Some(rest) = value.strip_prefix("http://") {
+        (rest, "80")
+    } else {
+        return false;
+    };
+    let (host_ok, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let Some((address, after)) = v6.split_once(']') else {
+            return false;
+        };
+        let port = match after.strip_prefix(':') {
+            Some(port) => Some(port),
+            None if after.is_empty() => None,
+            None => return false,
+        };
+        (is_shortest_ipv6(address), port)
+    } else {
+        match rest.split_once(':') {
+            Some((host, port)) => (is_canonical_host(host), Some(port)),
+            None => (is_canonical_host(rest), None),
+        }
+    };
+    host_ok && port.is_none_or(|port| is_canonical_port(port, default_port))
+}
+
+/// A port as a URL writes it: digits with no leading zero, at most 65535, and not the scheme's
+/// own, which a URL leaves out.
+fn is_canonical_port(port: &str, default_port: &str) -> bool {
+    port.bytes().all(|b| b.is_ascii_digit())
+        && (port == "0" || !port.starts_with('0'))
+        && port.parse::<u16>().is_ok()
+        && port != default_port
+}
+
+/// A host outside brackets as a URL parser leaves it: a domain it neither lowercases nor
+/// encodes, or an IPv4 address in dotted decimal. A host whose last label reads as a number is
+/// taken for an address, which then has to be one.
+fn is_canonical_host(host: &str) -> bool {
+    // ASCII a domain keeps as it is: a parser lowercases uppercase, and refuses the rest.
+    let kept = |b: u8| {
+        b.is_ascii_lowercase() || b.is_ascii_digit() || b"!\"$&'()*+,-.;=_`{}~".contains(&b)
+    };
+    if host.is_empty() || !host.bytes().all(kept) {
+        return false;
+    }
+    if !ends_in_a_number(host) {
+        return true;
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    parts.len() == 4
+        && parts.iter().all(|part| {
+            part.bytes().all(|b| b.is_ascii_digit())
+                && (*part == "0" || !part.starts_with('0'))
+                && part.parse::<u8>().is_ok()
+        })
+}
+
+/// Whether a URL parser takes `host` for an IPv4 address: its last label, past one trailing dot,
+/// is all digits, or `0x` then hex digits.
+fn ends_in_a_number(host: &str) -> bool {
+    let host = match host.strip_suffix('.') {
+        Some(rest) if !rest.is_empty() => rest,
+        _ => host,
+    };
+    let last = host.rsplit('.').next().unwrap_or_default();
+    if !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()) {
+        return true;
+    }
+    last.strip_prefix("0x")
+        .or_else(|| last.strip_prefix("0X"))
+        .is_some_and(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Whether `text` is an IPv6 address as a URL writes it: lowercase hex with no leading zeros, and
+/// the first longest run of two or more zero groups as `::`.
+fn is_shortest_ipv6(text: &str) -> bool {
+    text.parse::<std::net::Ipv6Addr>()
+        .is_ok_and(|address| shortest_ipv6(address.segments()) == text)
+}
+
+fn shortest_ipv6(groups: [u16; 8]) -> String {
+    let mut run: Option<(usize, usize)> = None;
+    let mut start = 0;
+    while start < groups.len() {
+        let len = groups.iter().skip(start).take_while(|&&g| g == 0).count();
+        if len >= 2 && run.is_none_or(|(_, longest)| len > longest) {
+            run = Some((start, len));
+        }
+        start += len.max(1);
+    }
+    let hex = |groups: &[u16]| {
+        groups
+            .iter()
+            .map(|g| format!("{g:x}"))
+            .collect::<Vec<_>>()
+            .join(":")
+    };
+    match run {
+        Some((at, len)) => {
+            let (head, rest) = groups.split_at(at);
+            format!(
+                "{}::{}",
+                hex(head),
+                hex(rest.get(len..).unwrap_or_default())
+            )
+        }
+        None => hex(&groups),
+    }
+}

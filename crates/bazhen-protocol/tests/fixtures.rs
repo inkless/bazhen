@@ -35,7 +35,9 @@ use bazhen_protocol::tasks::{
     FinishTaskRequest, TaskCommandResponse, TaskDetail, UnassignTaskRequest,
 };
 use bazhen_protocol::terminals::TerminalScreen;
-use bazhen_protocol::text::{TASK_NOTE_MAX_BYTES, is_plain_remote, quote_note, task_note_text};
+use bazhen_protocol::text::{
+    TASK_NOTE_MAX_BYTES, is_origin, is_plain_remote, quote_note, task_note_text,
+};
 use bazhen_protocol::time::timestamp_ms;
 use bazhen_protocol::waits::{AgentCondition, ShellCondition, WaitRequest, WaitResponse};
 use bazhen_protocol::wire;
@@ -212,12 +214,13 @@ fn verdict(case: &Value) -> std::result::Result<String, String> {
 }
 
 /// Each section of `checks.json` a test here reads; one it doesn't fails.
-const CHECKS: [&str; 10] = [
+const CHECKS: [&str; 11] = [
     "agentName",
     "agentRef",
     "constants",
     "datetime",
     "keystrokes",
+    "origin",
     "plainRemote",
     "quoteNote",
     "role",
@@ -295,6 +298,13 @@ fn notes_are_quoted_and_origins_judged_as_the_protocol_does() {
             case["plain"] == true,
             "{case}"
         );
+    }
+}
+
+#[test]
+fn an_origin_is_one_only_as_a_browser_sends_it() {
+    for case in cases("origin").unwrap() {
+        assert_eq!(is_origin(input(&case)), case["origin"] == true, "{case}");
     }
 }
 
