@@ -2,12 +2,10 @@
 //! typed, a frame the daemon sent, the terminal resized. No I/O: each step returns what to do.
 
 use bazhen_protocol::agents::ExitStatus;
+use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::input::has_keystrokes;
 use bazhen_protocol::stream::{AttachmentMode, EndedReason, StreamClientFrame, StreamServerFrame};
-
-/// `Ctrl-\`: twice in a row detaches.
-pub const DETACH: u8 = 0x1c;
 
 /// The most keys held while the attachment can't yet send them: a paste, not a flood.
 const HELD_MAX: usize = 64 << 10;
@@ -79,40 +77,60 @@ enum Standing {
     Driving,
 }
 
-/// The keys the person types, but for two `Ctrl-\` in a row, which detach. A `Ctrl-\` followed
-/// by any other key goes out with that key, however the reads split them.
-#[derive(Debug, Default)]
-pub struct DetachKeys {
-    /// A `Ctrl-\` held back until the next key says whether it detaches.
-    held: bool,
+/// The keys the person types, but for the sequence that detaches. Keys that start the sequence
+/// are held until the next one says whether it goes on, however the reads split them.
+#[derive(Debug)]
+pub struct DetachScan {
+    sequence: DetachKeys,
+    /// How many of the sequence's keys the latest keys typed are, held back.
+    matched: usize,
 }
 
-impl DetachKeys {
+impl DetachScan {
+    #[must_use]
+    pub fn new(sequence: DetachKeys) -> Self {
+        Self {
+            sequence,
+            matched: 0,
+        }
+    }
+
     /// The keys to send of `keys`, and whether they detach, after which the rest are dropped.
     pub fn scan(&mut self, keys: &[u8]) -> (Vec<u8>, bool) {
-        let mut typed = Vec::with_capacity(keys.len() + 1);
+        let mut typed = Vec::with_capacity(keys.len() + self.matched);
         for &key in keys {
-            if self.held {
-                self.held = false;
-                if key == DETACH {
-                    return (typed, true);
-                }
-                typed.push(DETACH);
-            }
-            if key == DETACH {
-                self.held = true;
-            } else {
-                typed.push(key);
+            if self.push(key, &mut typed) {
+                return (typed, true);
             }
         }
         (typed, false)
     }
+
+    /// Takes one key, adding to `typed` what it no longer holds back; true once the sequence is
+    /// complete. A key that breaks a partial match lets go of only the first key held: the rest,
+    /// and this one, may still start the sequence, as `a a` does of `a a b`.
+    fn push(&mut self, key: u8, typed: &mut Vec<u8>) -> bool {
+        let sequence = self.sequence.bytes();
+        if sequence.get(self.matched) == Some(&key) {
+            self.matched += 1;
+            return self.matched == sequence.len();
+        }
+        let Some((&first, rest)) = sequence.get(..self.matched).and_then(<[u8]>::split_first)
+        else {
+            typed.push(key);
+            return false;
+        };
+        let again: Vec<u8> = rest.iter().copied().chain([key]).collect();
+        typed.push(first);
+        self.matched = 0;
+        again.into_iter().any(|key| self.push(key, typed))
+    }
 }
 
 /// One attachment's state between steps.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Attachment {
-    keys: DetachKeys,
+    keys: DetachScan,
     attached: bool,
     /// The epoch of the latest lease, sent once attached.
     epoch: Option<u64>,
@@ -141,12 +159,27 @@ impl Attachment {
         }
     }
 
-    /// An attachment from a terminal of `size`.
+    /// An attachment that detaches on `keys`.
     #[must_use]
-    pub fn sized(size: Size) -> Self {
+    pub fn new(keys: DetachKeys) -> Self {
+        Self {
+            keys: DetachScan::new(keys),
+            attached: false,
+            epoch: None,
+            lease: Standing::default(),
+            held: Vec::new(),
+            dropped: 0,
+            size: None,
+            sized: false,
+        }
+    }
+
+    /// An attachment from a terminal of `size`, that detaches on `keys`.
+    #[must_use]
+    pub fn sized(size: Size, keys: DetachKeys) -> Self {
         Self {
             size: Some(size),
-            ..Self::default()
+            ..Self::new(keys)
         }
     }
 
@@ -162,8 +195,8 @@ impl Attachment {
         })]
     }
 
-    /// The keys typed: sent as typed, but for two `Ctrl-\` in a row, which detach. A `Ctrl-\`
-    /// followed by any other key is sent, with that key, however the reads split them.
+    /// The keys typed: sent as typed, but for the sequence that detaches. A key that starts it
+    /// and is followed by any other is sent, with that key, however the reads split them.
     pub fn keys(&mut self, keys: &[u8]) -> Vec<Effect> {
         let (typed, detached) = self.keys.scan(keys);
         let end = detached.then_some(Effect::End(Ending::Detached));
@@ -279,12 +312,25 @@ mod tests {
     const ATTACHED: &str =
         r#"{"type":"attached","attachmentId":"att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"}"#;
 
-    /// An attachment the daemon has attached, driving under epoch 1.
-    fn declared() -> Attachment {
-        let mut a = Attachment::default();
+    fn attachment() -> Attachment {
+        Attachment::new(DetachKeys::default())
+    }
+
+    /// The default sequence's keys.
+    fn detach() -> Vec<u8> {
+        DetachKeys::default().bytes().to_vec()
+    }
+
+    /// An attachment the daemon has attached, driving under epoch 1, that detaches on `keys`.
+    fn declared_with(keys: DetachKeys) -> Attachment {
+        let mut a = Attachment::new(keys);
         a.frame(r#"{"type":"lease","driver":true,"epoch":1}"#);
         a.frame(ATTACHED);
         a
+    }
+
+    fn declared() -> Attachment {
+        declared_with(DetachKeys::default())
     }
 
     fn typed(effects: &[Effect]) -> Vec<u8> {
@@ -302,32 +348,47 @@ mod tests {
     }
 
     #[test]
-    fn detaches_on_two_ctrl_backslashes_however_the_reads_split_them() {
+    fn detaches_on_the_sequence_however_the_reads_split_it() {
+        let detach = detach();
+        let (first, last) = detach.split_at(1);
         let mut whole = declared();
         let mut split = declared();
-        let once = whole.keys(b"ls\x1c\x1c");
-        let first = split.keys(b"ls\x1c");
-        let second = split.keys(b"\x1c");
+        let once = whole.keys(&[b"ls", &detach[..]].concat());
+        let before = split.keys(&[b"ls", first].concat());
+        let after = split.keys(last);
         assert_eq!(
             once,
             [Effect::Input(b"ls".to_vec()), Effect::End(Ending::Detached)]
         );
-        assert_eq!(first, [Effect::Input(b"ls".to_vec())]);
-        assert_eq!(second, [Effect::End(Ending::Detached)]);
+        assert_eq!(before, [Effect::Input(b"ls".to_vec())]);
+        assert_eq!(after, [Effect::End(Ending::Detached)]);
     }
 
     #[test]
-    fn sends_a_lone_ctrl_backslash_with_the_key_after_it() {
+    fn sends_a_lone_first_key_of_the_sequence_with_the_key_after_it() {
         let mut s = declared();
-        let held = s.keys(b"\x1c");
+        let first = detach()[0];
+        let held = s.keys(&[first]);
         let then = s.keys(b"q");
         assert_eq!(held, []);
-        assert_eq!(then, [Effect::Input(b"\x1cq".to_vec())]);
+        assert_eq!(then, [Effect::Input(vec![first, b'q'])]);
+    }
+
+    #[test]
+    fn detaches_on_a_sequence_that_starts_again_inside_a_broken_match() {
+        let keys = |text| DetachKeys::parse(text).unwrap();
+        assert_eq!(
+            [
+                DetachScan::new(keys("a,a,b")).scan(b"xaaab"),
+                DetachScan::new(keys("a,a,b")).scan(b"xaac"),
+            ],
+            [(b"xa".to_vec(), true), (b"xaac".to_vec(), false)]
+        );
     }
 
     #[test]
     fn declares_the_latest_epoch_once_attached_and_every_lease_after() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         let early = s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
         let attached =
             s.frame(r#"{"type":"attached","attachmentId":"att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"}"#);
@@ -342,7 +403,7 @@ mod tests {
 
     #[test]
     fn holds_keys_typed_before_the_epoch_is_declared_and_sends_them_after_it() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         let early = s.keys(b"ls");
         s.frame(r#"{"type":"lease","driver":true,"epoch":5}"#);
         let more = s.keys(b" -l");
@@ -361,7 +422,7 @@ mod tests {
 
     #[test]
     fn asks_for_the_lease_before_its_keys_and_sends_them_once_it_drives() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
         let attached = s.frame(ATTACHED);
         let first = s.keys(b"exit");
@@ -390,7 +451,7 @@ mod tests {
 
     #[test]
     fn neither_asks_for_the_lease_nor_holds_reports_and_replies_while_another_view_drives() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
         s.frame(ATTACHED);
         let focus = s.keys(b"\x1b[I\x1b[O");
@@ -411,7 +472,7 @@ mod tests {
 
     #[test]
     fn asks_again_when_the_lease_goes_to_another_view_while_it_asks() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         s.frame(r#"{"type":"lease","driver":false,"epoch":3}"#);
         s.frame(ATTACHED);
         let asked = s.keys(b"q");
@@ -428,7 +489,7 @@ mod tests {
 
     #[test]
     fn asks_for_the_lease_once_attached_for_keys_typed_while_another_view_drives() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         s.keys(b"ls\r");
         s.frame(r#"{"type":"lease","driver":false,"epoch":2}"#);
         let attached = s.frame(ATTACHED);
@@ -443,9 +504,9 @@ mod tests {
 
     #[test]
     fn holds_no_more_than_a_paste_and_still_detaches_while_holding() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         s.keys(&vec![b'x'; HELD_MAX + 10]);
-        let detach = s.keys(&[DETACH, DETACH]);
+        let detach = s.keys(&detach());
         s.frame(r#"{"type":"lease","driver":true,"epoch":1}"#);
         let attached = s.frame(ATTACHED);
         assert_eq!(detach, [Effect::End(Ending::Detached)]);
@@ -462,7 +523,7 @@ mod tests {
     fn sends_the_size_once_attached_and_each_resize_after() {
         let size = |cols, rows| Size { cols, rows };
         let resize = |cols, rows| Effect::Send(StreamClientFrame::Resize { cols, rows });
-        let mut s = Attachment::sized(size(80, 24));
+        let mut s = Attachment::sized(size(80, 24), DetachKeys::default());
         let early = s.resized(size(100, 30));
         s.frame(r#"{"type":"lease","driver":false,"epoch":1}"#);
         let attached = s.frame(ATTACHED);
@@ -482,7 +543,7 @@ mod tests {
 
     #[test]
     fn ends_as_the_daemon_says_and_passes_on_its_notices() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         let read = |s: &mut Attachment, text: &str| s.frame(text);
         assert_eq!(
             [
@@ -511,7 +572,7 @@ mod tests {
 
     #[test]
     fn fails_on_a_frame_it_cannot_read() {
-        let mut s = Attachment::default();
+        let mut s = attachment();
         let effects = s.frame(r#"{"type":"teleport"}"#);
         assert!(
             matches!(effects.as_slice(), [Effect::End(Ending::Failed(m))] if m.contains("teleport")),
@@ -538,8 +599,8 @@ mod tests {
         );
     }
 
-    fn sent(keys: &[&[u8]]) -> Vec<Effect> {
-        let mut s = declared();
+    fn sent(sequence: &DetachKeys, keys: &[&[u8]]) -> Vec<Effect> {
+        let mut s = declared_with(sequence.clone());
         let mut out = Vec::new();
         for read in keys {
             if detached(&out) {
@@ -550,35 +611,46 @@ mod tests {
         out
     }
 
+    /// Sequences of up to four keys from an alphabet small enough that typed keys often start
+    /// one, break one off, or hold one inside another.
+    fn sequences() -> impl Strategy<Value = DetachKeys> {
+        proptest::collection::vec(proptest::sample::select(vec!["a", "b", "ctrl-]"]), 1..=4)
+            .prop_map(|names| DetachKeys::parse(&names.join(",")).unwrap())
+    }
+
+    /// Keys from the sequences' alphabet, and `c`, which is in none.
+    fn typed_keys() -> impl Strategy<Value = Vec<u8>> {
+        proptest::collection::vec(proptest::sample::select(b"ab\x1dc".to_vec()), 0..64)
+    }
+
     proptest! {
         /// However the reads split the keys, the same keys are sent and the same detach happens.
         #[test]
         fn sends_the_same_however_the_reads_split(
-            keys in proptest::collection::vec(prop_oneof![Just(DETACH), any::<u8>()], 0..64),
+            sequence in sequences(),
+            keys in typed_keys(),
             cut in 0usize..64,
         ) {
             let (a, b) = keys.split_at(cut.min(keys.len()));
-            let whole = sent(&[&keys]);
-            let split = sent(&[a, b]);
+            let whole = sent(&sequence, &[&keys]);
+            let split = sent(&sequence, &[a, b]);
             prop_assert_eq!(typed(&split), typed(&whole));
             prop_assert_eq!(detached(&split), detached(&whole));
         }
 
-        /// Keys with no two `Ctrl-\` in a row, ending in anything else, are sent as typed.
+        /// Everything typed before the sequence's first whole appearance is sent, and it detaches
+        /// there; keys that never hold it are all sent, once a key outside it ends them.
         #[test]
-        fn sends_keys_without_a_pair_as_typed(
-            runs in proptest::collection::vec(
-                (any::<bool>(), any::<u8>().prop_filter("not Ctrl-\\", |k| *k != DETACH)),
-                0..32,
-            ),
+        fn sends_what_comes_before_the_sequence_and_detaches_on_it(
+            sequence in sequences(),
+            mut keys in typed_keys(),
         ) {
-            let keys: Vec<u8> = runs
-                .iter()
-                .flat_map(|&(lead, key)| lead.then_some(DETACH).into_iter().chain([key]))
-                .collect();
-            let out = sent(&[&keys]);
-            prop_assert!(!detached(&out));
-            prop_assert_eq!(typed(&out), keys);
+            keys.push(b'c');
+            let out = sent(&sequence, &[&keys]);
+            let bytes = sequence.bytes();
+            let before = keys.windows(bytes.len()).position(|w| w == bytes).map_or(&keys[..], |at| &keys[..at]);
+            prop_assert_eq!(typed(&out), before.to_vec());
+            prop_assert_eq!(detached(&out), before.len() < keys.len());
         }
     }
 }

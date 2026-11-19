@@ -20,8 +20,9 @@ use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 
 use bazhen_protocol::agents::ExitStatus;
+use bazhen_protocol::detach_keys::DetachKeys;
 
-use super::attachment::{DetachKeys, Ending, Size};
+use super::attachment::{DetachScan, Ending, Size};
 use super::tty::{self, Stops, Wakeups};
 use crate::call::Failed;
 
@@ -52,7 +53,7 @@ pub enum Step {
 /// requests have used.
 #[derive(Debug)]
 pub struct Direct {
-    keys: DetachKeys,
+    keys: DetachScan,
     writer: bool,
     next: u32,
     /// Whether the person has been told their keys go nowhere.
@@ -60,11 +61,11 @@ pub struct Direct {
 }
 
 impl Direct {
-    /// An attachment that may type, when `writer`.
+    /// An attachment that may type, when `writer`, and detaches on `keys`.
     #[must_use]
-    pub fn new(writer: bool) -> Self {
+    pub fn new(writer: bool, keys: DetachKeys) -> Self {
         Self {
-            keys: DetachKeys::default(),
+            keys: DetachScan::new(keys),
             writer,
             next: 1,
             told: false,
@@ -427,7 +428,6 @@ fn write_whole(stream: &mut UnixStream, frame: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attach::attachment::DETACH;
     use bazhen_holder_proto::body::{ErrorBody, ErrorCode};
     use bazhen_holder_proto::request_decoder;
     use serde_json::json;
@@ -465,8 +465,8 @@ mod tests {
             cols: 100,
             rows: 30,
         };
-        let mut writer = Direct::new(true);
-        let mut viewer = Direct::new(false);
+        let mut writer = Direct::new(true, DetachKeys::default());
+        let mut viewer = Direct::new(false, DetachKeys::default());
         assert_eq!(sent(&writer.keys(b"ls")), ["input"]);
         assert_eq!(sent(&writer.resized(size)), ["resize"]);
         assert_eq!(sent(&viewer.keys(b"ls")), ["note"]);
@@ -474,8 +474,8 @@ mod tests {
         assert_eq!(sent(&viewer.resized(size)), Vec::<&str>::new());
         assert_eq!(
             [
-                writer.keys(&[DETACH, DETACH]),
-                viewer.keys(&[DETACH, DETACH])
+                writer.keys(DetachKeys::default().bytes()),
+                viewer.keys(DetachKeys::default().bytes())
             ],
             [
                 vec![Step::End(Ending::Detached)],
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn stops_typing_once_the_holder_says_another_connection_has_its_input() {
-        let mut d = Direct::new(true);
+        let mut d = Direct::new(true, DetachKeys::default());
         let told = d.reply(refused("input", ErrorCode::NotWriter));
         assert_eq!(sent(&told), ["note"]);
         assert_eq!(sent(&d.keys(b"x")), Vec::<&str>::new());
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn shows_output_snapshots_again_after_a_gap_and_ends_when_the_child_exits() {
-        let mut d = Direct::new(false);
+        let mut d = Direct::new(false, DetachKeys::default());
         let data = Reply::Data {
             offset: serde_json::from_value(json!(5)).unwrap(),
             bytes: b"hi".to_vec(),
@@ -631,8 +631,8 @@ mod tests {
 
     #[test]
     fn lets_go_of_the_input_for_a_daemon_that_came_back_only_while_typing() {
-        let mut writer = Direct::new(true);
-        let mut viewer = Direct::new(false);
+        let mut writer = Direct::new(true, DetachKeys::default());
+        let mut viewer = Direct::new(false, DetachKeys::default());
         assert_eq!(writer.daemon_back(), [Step::End(Ending::Yielded)]);
         assert_eq!(viewer.daemon_back(), []);
     }

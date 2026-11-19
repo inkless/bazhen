@@ -183,6 +183,7 @@ mod tests {
     use crate::attach::attachment::{Attachment, Size};
     use crate::call::ANOTHER_BUILD;
     use bazhen_protocol::agents::ExitStatus;
+    use bazhen_protocol::detach_keys::DetachKeys;
     use std::io::{Read as _, Write as _};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
@@ -342,7 +343,7 @@ mod tests {
 
     /// As `outcome_of`, with the output shown on the way.
     fn shown_of(ws: &mut WebSocket<UnixStream>) -> (bool, Option<Outcome>, Vec<String>, Vec<u8>) {
-        let mut attachment = Attachment::default();
+        let mut attachment = Attachment::new(DetachKeys::default());
         let mut effects = Vec::new();
         let mut shown = Vec::new();
         let closed = drain(ws, &mut attachment, &mut shown, &mut effects).unwrap();

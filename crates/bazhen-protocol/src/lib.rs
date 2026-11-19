@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod daemon;
+pub mod detach_keys;
 pub mod events;
 pub mod id;
 pub mod ids;

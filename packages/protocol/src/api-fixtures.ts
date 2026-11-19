@@ -15,6 +15,7 @@ import {
   StateSnapshot,
   StopResponse,
 } from "./agents.ts";
+import { readDetachKeys } from "./detach-keys.ts";
 import { DevicesResponse, PairingCodeResponse, RevokeDeviceResponse } from "./devices.ts";
 import { HarnessId, Id } from "./ids.ts";
 import { EventEnvelopeFrame } from "./events.ts";
@@ -1318,6 +1319,34 @@ const KEY_INPUTS = [
   `${E}[200~unended`,
 ];
 
+/** Detach sequences: each kind of key, each refusal, and what only ASCII's case folding refuses. */
+const DETACH_INPUTS = [
+  "ctrl-],ctrl-]",
+  "ctrl-p,ctrl-q",
+  "CTRL-A,Ctrl-z",
+  "ctrl-@,ctrl-\\,ctrl-^,ctrl-_",
+  "x,ctrl-[",
+  "~,.",
+  "q",
+  "a,b,c,d,e,f,g,h",
+  "a,b,c,d,e,f,g,h,i",
+  "ctrl-[,x",
+  "",
+  ",",
+  "ctrl-],",
+  "ctrl-",
+  "ctrl-1",
+  "ctrl-ab",
+  "ctrl-]x",
+  "ctrl-] ",
+  " ",
+  "ctrl-\u00e9",
+  "\u00e9",
+  "ctrl-\u212a",
+  "\x7f",
+  "\x1d",
+];
+
 /** The checks a client makes before it asks the daemon, with the protocol's verdicts. */
 export function checkFixtures() {
   return {
@@ -1345,6 +1374,12 @@ export function checkFixtures() {
     ),
     quoteNote: QUOTE_INPUTS.map((input) => ({ input, quoted: quoteNote(input) })),
     keystrokes: KEY_INPUTS.map((input) => ({ input, keystrokes: hasKeystrokes(input) })),
+    detachKeys: DETACH_INPUTS.map((input) => {
+      const read = readDetachKeys(input);
+      return "problem" in read
+        ? { input, ok: false, message: read.problem }
+        : { input, ok: true, value: read.shown };
+    }),
   };
 }
 

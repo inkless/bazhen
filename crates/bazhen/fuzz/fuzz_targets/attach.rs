@@ -1,16 +1,20 @@
 #![no_main]
 
-use bazhen::attach::attachment::{Attachment, DetachKeys, Effect};
+use bazhen::attach::attachment::{Attachment, DetachScan, Effect};
 use bazhen::attach::direct::{Direct, Step};
+use bazhen::bazhen_protocol::detach_keys::DetachKeys;
 use libfuzzer_sys::fuzz_target;
 
-// Keys and frames in any order, as the person's terminal and the daemon could send them: neither
-// path panics, or sends more keys than it was given, a held `Ctrl-\` aside, and the scan under
-// both says the same.
-fuzz_target!(|steps: Vec<(bool, Vec<u8>)>| {
-    let mut attachment = Attachment::default();
-    let mut direct = Direct::new(true);
-    let mut keys = DetachKeys::default();
+// A detach sequence as a person could write it, then keys and frames in any order, as the person's
+// terminal and the daemon could send them: neither path panics, or sends more keys than it was
+// given, the sequence's held keys aside, and the scan under both says the same.
+fuzz_target!(|input: (String, Vec<(bool, Vec<u8>)>)| {
+    let (written, steps) = input;
+    let sequence = DetachKeys::parse(&written).unwrap_or_default();
+    let held = sequence.bytes().len() - 1;
+    let mut attachment = Attachment::new(sequence.clone());
+    let mut direct = Direct::new(true, sequence.clone());
+    let mut keys = DetachScan::new(sequence);
     let (mut given, mut sent, mut straight) = (0, 0, 0);
     for (typed, bytes) in steps {
         if !typed {
@@ -19,7 +23,7 @@ fuzz_target!(|steps: Vec<(bool, Vec<u8>)>| {
         }
         given += bytes.len();
         let (scanned, _) = keys.scan(&bytes);
-        assert!(scanned.len() <= bytes.len() + 1);
+        assert!(scanned.len() <= bytes.len() + held);
         for effect in attachment.keys(&bytes) {
             if let Effect::Input(input) = effect {
                 sent += input.len();
@@ -33,6 +37,6 @@ fuzz_target!(|steps: Vec<(bool, Vec<u8>)>| {
                 straight += input.len();
             }
         }
-        assert!(sent <= given + 1 && straight <= given + 1);
+        assert!(sent <= given + held && straight <= given + held);
     }
 });

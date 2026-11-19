@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use bazhen_client::Caller;
 use bazhen_protocol::agents::{Agent, AgentState, ExitStatus, HarnessId, StateSnapshot};
+use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::ids::is_id;
 use bazhen_protocol::waits::{AgentCondition, WaitCondition, WaitRequest, WaitResponse};
@@ -114,7 +115,7 @@ pub(crate) fn run(
     let mut notes = Vec::new();
     let mut rejoined = false;
     let outcome = loop {
-        let mut attachment = Attachment::sized(tty::size().unwrap_or(size));
+        let mut attachment = Attachment::sized(tty::size().unwrap_or(size), DetachKeys::default());
         let outcome = link::pump(&mut ws, &mut attachment, &resizes, &stops, &mut notes);
         if !matches!(outcome, Ok(Outcome::Ended(Ending::Evicted))) || rejoined {
             break outcome;
@@ -219,7 +220,7 @@ fn straight(
                 .to_owned(),
         );
     }
-    let mut direct = Direct::new(asks && hello.writer);
+    let mut direct = Direct::new(asks && hello.writer, DetachKeys::default());
     let (resizes, stops, raw) = take_over()?;
     let outcome = direct::pump(
         &mut stream,

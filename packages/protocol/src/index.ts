@@ -9,6 +9,7 @@ export * from "./holder.ts";
 export * from "./holder-frame.ts";
 export * from "./ids.ts";
 export * from "./agent-name.ts";
+export * from "./detach-keys.ts";
 export * from "./input.ts";
 export * from "./json.ts";
 export * from "./mail.ts";

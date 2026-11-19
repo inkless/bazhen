@@ -1448,5 +1448,127 @@
       "input": "\u001b[200~unended",
       "keystrokes": true
     }
+  ],
+  "detachKeys": [
+    {
+      "input": "ctrl-],ctrl-]",
+      "ok": true,
+      "value": "Ctrl-] Ctrl-]"
+    },
+    {
+      "input": "ctrl-p,ctrl-q",
+      "ok": true,
+      "value": "Ctrl-P Ctrl-Q"
+    },
+    {
+      "input": "CTRL-A,Ctrl-z",
+      "ok": true,
+      "value": "Ctrl-A Ctrl-Z"
+    },
+    {
+      "input": "ctrl-@,ctrl-\\,ctrl-^,ctrl-_",
+      "ok": true,
+      "value": "Ctrl-@ Ctrl-\\ Ctrl-^ Ctrl-_"
+    },
+    {
+      "input": "x,ctrl-[",
+      "ok": true,
+      "value": "x Ctrl-["
+    },
+    {
+      "input": "~,.",
+      "ok": true,
+      "value": "~ ."
+    },
+    {
+      "input": "q",
+      "ok": true,
+      "value": "q"
+    },
+    {
+      "input": "a,b,c,d,e,f,g,h",
+      "ok": true,
+      "value": "a b c d e f g h"
+    },
+    {
+      "input": "a,b,c,d,e,f,g,h,i",
+      "ok": false,
+      "message": "name at most 8 keys"
+    },
+    {
+      "input": "ctrl-[,x",
+      "ok": false,
+      "message": "can't start with ctrl-[: that is Escape, which every arrow key starts with"
+    },
+    {
+      "input": "",
+      "ok": false,
+      "message": "name at least one key"
+    },
+    {
+      "input": ",",
+      "ok": false,
+      "message": "a key between commas is missing"
+    },
+    {
+      "input": "ctrl-],",
+      "ok": false,
+      "message": "a key between commas is missing"
+    },
+    {
+      "input": "ctrl-",
+      "ok": false,
+      "message": "\"ctrl-\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-1",
+      "ok": false,
+      "message": "\"ctrl-1\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-ab",
+      "ok": false,
+      "message": "\"ctrl-ab\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-]x",
+      "ok": false,
+      "message": "\"ctrl-]x\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-] ",
+      "ok": false,
+      "message": "\"ctrl-] \" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": " ",
+      "ok": false,
+      "message": "\" \" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-é",
+      "ok": false,
+      "message": "\"ctrl-é\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "é",
+      "ok": false,
+      "message": "\"é\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-K",
+      "ok": false,
+      "message": "\"ctrl-K\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "",
+      "ok": false,
+      "message": "\"\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "\u001d",
+      "ok": false,
+      "message": "\"\u001d\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    }
   ]
 }

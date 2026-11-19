@@ -15,6 +15,7 @@ use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, ErrorResponse, HealthResponse,
     StopResponse,
 };
+use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::has_keystrokes;
@@ -216,11 +217,12 @@ fn verdict(case: &Value) -> std::result::Result<String, String> {
 }
 
 /// Each section of `checks.json` a test here reads; one it doesn't fails.
-const CHECKS: [&str; 11] = [
+const CHECKS: [&str; 12] = [
     "agentName",
     "agentRef",
     "constants",
     "datetime",
+    "detachKeys",
     "keystrokes",
     "origin",
     "plainRemote",
@@ -307,6 +309,14 @@ fn notes_are_quoted_and_origins_judged_as_the_protocol_does() {
 fn an_origin_is_one_only_as_a_browser_sends_it() {
     for case in cases("origin").unwrap() {
         assert_eq!(is_origin(input(&case)), case["origin"] == true, "{case}");
+    }
+}
+
+#[test]
+fn detach_keys_are_read_as_the_daemon_reads_them_and_shown_as_it_shows_them() {
+    for case in cases("detachKeys").unwrap() {
+        let got = DetachKeys::parse(input(&case)).map(|k| k.to_string());
+        assert_eq!(got.map_err(|e| e.to_string()), verdict(&case), "{case}");
     }
 }
 
