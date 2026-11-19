@@ -30,6 +30,15 @@ describe("resolvePaths", () => {
     ]);
   });
 
+  it("refuses a relative HOME, unless a home of Bazhen's own is named", () => {
+    expect(() => resolvePaths({ ...linux, home: "rel" })).toThrow(
+      new RangeError("HOME must be an absolute path, not rel"),
+    );
+    expect(resolvePaths({ ...linux, home: "rel", env: { BAZHEN_HOME: "/b" } }).data).toBe(
+      "/b/data",
+    );
+  });
+
   it("ignores a relative XDG variable, as the XDG spec requires", () => {
     expect(resolvePaths({ ...linux, env: { XDG_DATA_HOME: "relative/dir" } }).data).toBe(
       "/home/u/.local/share/bazhen",

@@ -19,7 +19,7 @@ pub(crate) struct Inputs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Refused {
     /// A home that isn't an absolute path, which names no instance.
-    RelativeHome(String),
+    RelativeHome(RelativeHome),
     /// A `BAZHEN_SOCKET` no daemon would have set: not absolute, not UTF-8, or holding a control
     /// character.
     BadSocket(String),
@@ -31,7 +31,7 @@ pub(crate) enum Refused {
 impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RelativeHome(home) => RelativeHome(home.clone()).fmt(f),
+            Self::RelativeHome(home) => home.fmt(f),
             Self::BadSocket(socket) => write!(
                 f,
                 "BAZHEN_SOCKET must be an absolute path, not \"{}\"",
@@ -58,7 +58,7 @@ pub(crate) struct Socket {
 /// absolute is refused even when `BAZHEN_SOCKET` wins: the command line is wrong either way.
 pub(crate) fn socket(i: &Inputs, same: impl Fn(&str, &str) -> bool) -> Result<Socket, Refused> {
     let homes = paths::resolve(&i.paths)
-        .map_err(|RelativeHome(home)| Refused::RelativeHome(home))?
+        .map_err(Refused::RelativeHome)?
         .socket;
     let Some(given) = i.bazhen_socket.as_deref().filter(|s| !s.is_empty()) else {
         return Ok(Socket {
@@ -104,6 +104,7 @@ mod tests {
             bazhen_socket: None,
             paths: paths::Inputs {
                 xdg_runtime_dir: Some("/run/user/1000".into()),
+                home: "/home/u".into(),
                 tmp: "/tmp".into(),
                 uid: 1000,
                 ..paths::Inputs::default()
@@ -141,10 +142,17 @@ mod tests {
     fn refuses_a_home_that_isnt_absolute() {
         assert_eq!(
             path(&homed(Some("rel"), None, inputs())),
-            Err(Refused::RelativeHome("rel".into()))
+            Err(Refused::RelativeHome(RelativeHome {
+                name: "BAZHEN_HOME",
+                path: "rel".into()
+            }))
         );
         assert_eq!(
-            Refused::RelativeHome("rel".into()).to_string(),
+            Refused::RelativeHome(RelativeHome {
+                name: "BAZHEN_HOME",
+                path: "rel".into()
+            })
+            .to_string(),
             "BAZHEN_HOME must be an absolute path, not rel"
         );
     }
@@ -233,7 +241,10 @@ mod tests {
     fn refuses_a_home_that_isnt_absolute_whatever_bazhen_socket_says() {
         assert_eq!(
             path(&homed(None, Some("rel"), agents())),
-            Err(Refused::RelativeHome("rel".into()))
+            Err(Refused::RelativeHome(RelativeHome {
+                name: "BAZHEN_HOME",
+                path: "rel".into()
+            }))
         );
     }
 

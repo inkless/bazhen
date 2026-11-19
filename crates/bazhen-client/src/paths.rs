@@ -87,13 +87,22 @@ pub struct Paths {
     pub socket: String,
 }
 
-/// A home that isn't an absolute path, which names no instance.
+/// A home, or the user's home directory, that isn't an absolute path: it would name another
+/// instance from each directory a command ran in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RelativeHome(pub String);
+pub struct RelativeHome {
+    /// The variable that names it: `BAZHEN_HOME`, for `--home` too, or `HOME`.
+    pub name: &'static str,
+    pub path: String,
+}
 
 impl fmt::Display for RelativeHome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BAZHEN_HOME must be an absolute path, not {}", self.0)
+        write!(
+            f,
+            "{} must be an absolute path, not {}",
+            self.name, self.path
+        )
     }
 }
 
@@ -103,13 +112,19 @@ impl std::error::Error for RelativeHome {}
 ///
 /// # Errors
 ///
-/// [`RelativeHome`] when `--home` or `BAZHEN_HOME` isn't an absolute path.
+/// [`RelativeHome`] when `--home` or `BAZHEN_HOME` isn't an absolute path, or, without either,
+/// the user's home directory isn't.
 pub fn resolve(i: &Inputs) -> Result<Paths, RelativeHome> {
     let home = i.home_flag.as_ref().or(i.bazhen_home.as_ref());
+    let relative = |name, path: &str| RelativeHome {
+        name,
+        path: path.to_owned(),
+    };
     let [config, data, state, cache, run] = match home {
-        Some(home) if !home.starts_with('/') => return Err(RelativeHome(home.clone())),
+        Some(home) if !home.starts_with('/') => return Err(relative("BAZHEN_HOME", home)),
         Some(home) => ["config", "data", "state", "cache", "run"]
             .map(|dir| normalize(&format!("{home}/{dir}"))),
+        None if !i.home.starts_with('/') => return Err(relative("HOME", &i.home)),
         None => {
             let xdg = |var: &Option<String>, fallback: &str| {
                 let base = var
@@ -163,19 +178,31 @@ fn short_hash(value: &str) -> String {
     hex(sha256(value.as_bytes()).get(..4).unwrap_or_default())
 }
 
-/// An absolute path as Node's `path.resolve` leaves it: no `.`, `..`, repeated or trailing `/`.
+/// A path as Node's `path.normalize` leaves it, without a trailing `/`: no `.`, no repeated `/`,
+/// and no `..` but those leading a relative path, which it keeps relative.
 pub fn normalize(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
         match part {
             "" | "." => {}
+            // Above an absolute path's root is the root; above a relative one's start is kept.
+            ".." if parts.last().is_none_or(|p| *p == "..") => {
+                if !path.starts_with('/') {
+                    parts.push("..");
+                }
+            }
             ".." => {
                 parts.pop();
             }
             part => parts.push(part),
         }
     }
-    format!("/{}", parts.join("/"))
+    let joined = parts.join("/");
+    match (path.starts_with('/'), joined.is_empty()) {
+        (true, _) => format!("/{joined}"),
+        (false, true) => ".".to_owned(),
+        (false, false) => joined,
+    }
 }
 
 #[cfg(test)]
@@ -234,13 +261,53 @@ mod tests {
         assert_eq!(
             [resolve(&home), resolve(&empty)],
             [
-                Err(RelativeHome("rel".into())),
-                Err(RelativeHome(String::new()))
+                Err(relative("BAZHEN_HOME", "rel")),
+                Err(relative("BAZHEN_HOME", ""))
             ]
         );
         assert_eq!(
-            RelativeHome("rel".into()).to_string(),
+            relative("BAZHEN_HOME", "rel").to_string(),
             "BAZHEN_HOME must be an absolute path, not rel"
+        );
+    }
+
+    fn relative(name: &'static str, path: &str) -> RelativeHome {
+        RelativeHome {
+            name,
+            path: path.into(),
+        }
+    }
+
+    /// The TypeScript daemon refuses it too: a relative HOME would name another instance from
+    /// each directory a command ran in. A home of Bazhen's own doesn't use it.
+    #[test]
+    fn refuses_a_relative_users_home_unless_a_home_of_bazhens_own_is_named() {
+        let rel = Inputs {
+            home: "rel".into(),
+            ..inputs()
+        };
+        let named = Inputs {
+            bazhen_home: Some("/b".into()),
+            ..rel.clone()
+        };
+        assert_eq!(
+            [
+                resolve(&rel).map(|p| p.data),
+                resolve(&named).map(|p| p.data)
+            ],
+            [Err(relative("HOME", "rel")), Ok("/b/data".into())]
+        );
+        assert_eq!(
+            relative("HOME", "rel").to_string(),
+            "HOME must be an absolute path, not rel"
+        );
+    }
+
+    #[test]
+    fn normalises_a_path_and_keeps_a_relative_one_relative() {
+        assert_eq!(
+            ["/a/./b/../c/", "/../a", "a/./b/../c", "../a/..", "a/..", ""].map(normalize),
+            ["/a/c", "/a", "a/c", "..", ".", "."]
         );
     }
 

@@ -42,6 +42,10 @@ export function resolvePaths(i: PathInputs): BazhenPaths {
   if (home !== undefined && !isAbsolute(home)) {
     throw new RangeError(`BAZHEN_HOME must be an absolute path, not ${home}`);
   }
+  // A relative HOME would name a different instance from each directory a command ran in.
+  if (home === undefined && !isAbsolute(i.home)) {
+    throw new RangeError(`HOME must be an absolute path, not ${i.home}`);
+  }
   // Normalised, so `/a` and `/a/` are one instance with one tmux server.
   const root = home === undefined ? undefined : resolve(home);
   const xdg = (name: string, fallback: string) =>
