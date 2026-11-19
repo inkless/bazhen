@@ -29,6 +29,17 @@ function key(name: string): number | undefined {
   return CTRL_PUNCTUATION.includes(name.charAt(5)) ? code - 0x40 : undefined;
 }
 
+/**
+ * `name` as a refusal quotes it: printable ASCII as itself, `"` and `\` after a backslash, and
+ * every other character as `\u{hex}`, so text from a file never reaches the terminal raw.
+ */
+const escaped = (name: string) =>
+  Array.from(name, (c) => {
+    const code = c.codePointAt(0) ?? 0;
+    if (c === '"' || c === "\\") return `\\${c}`;
+    return code >= 0x20 && code <= 0x7e ? c : `\\u{${code.toString(16)}}`;
+  }).join("");
+
 /** The bytes `text` names, or why it names none. */
 function keysOf(text: string): { keys: number[] } | { problem: string } {
   if (text === "") return { problem: "name at least one key" };
@@ -38,7 +49,7 @@ function keysOf(text: string): { keys: number[] } | { problem: string } {
     const code = key(name);
     if (code === undefined) {
       return {
-        problem: `"${name}" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma`,
+        problem: `"${escaped(name)}" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma`,
       };
     }
     keys.push(code);

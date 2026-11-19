@@ -1345,6 +1345,11 @@ const DETACH_INPUTS = [
   "ctrl-\u212a",
   "\x7f",
   "\x1d",
+  "\x1b[2J",
+  "\t",
+  'a"b\\',
+  "\u{1f600}",
+  "ctrl-p, ctrl-q",
 ];
 
 /** The checks a client makes before it asks the daemon, with the protocol's verdicts. */

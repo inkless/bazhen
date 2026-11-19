@@ -9249,7 +9249,7 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "error": "/home/u/.config/bazhen/config.toml: attach.detach_keys: \"é\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+        "error": "/home/u/.config/bazhen/config.toml: attach.detach_keys: \"\\u{e9}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
       }
     },
     {

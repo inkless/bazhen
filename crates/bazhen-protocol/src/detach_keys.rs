@@ -30,6 +30,18 @@ impl fmt::Display for NotDetachKeys {
 
 impl std::error::Error for NotDetachKeys {}
 
+/// `name` as a refusal quotes it: printable ASCII as itself, `"` and `\` after a backslash, and
+/// every other character as `\u{hex}`, so text from a file never reaches the terminal raw.
+fn escaped(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '"' | '\\' => format!("\\{c}"),
+            ' '..='~' => c.to_string(),
+            _ => format!("\\u{{{:x}}}", u32::from(c)),
+        })
+        .collect()
+}
+
 impl Default for DetachKeys {
     fn default() -> Self {
         Self(DEFAULT.to_vec())
@@ -53,8 +65,9 @@ impl DetachKeys {
             }
             let Some(key) = key(name) else {
                 return refuse(format!(
-                    "\"{name}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one \
-                     printable character other than a comma"
+                    "\"{}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one \
+                     printable character other than a comma",
+                    escaped(name)
                 ));
             };
             keys.push(key);
@@ -121,6 +134,16 @@ mod tests {
                 DetachKeys::parse("ctrl-],ctrl-]")
             ),
             ("Ctrl-] Ctrl-]".to_owned(), Ok(DetachKeys::default()))
+        );
+    }
+
+    #[test]
+    fn quotes_a_name_it_refuses_without_a_byte_a_terminal_acts_on() {
+        let refused = |text: &str| DetachKeys::parse(text).unwrap_err().to_string();
+        let quoted = |why: &str| why.split(" isn't").next().unwrap_or_default().to_owned();
+        assert_eq!(
+            ["\u{1b}[2J", "a\"b\\", "\u{e9}\u{1f600}"].map(|text| quoted(&refused(text))),
+            [r#""\u{1b}[2J""#, r#""a\"b\\""#, r#""\u{e9}\u{1f600}""#]
         );
     }
 }

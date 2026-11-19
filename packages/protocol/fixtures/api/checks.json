@@ -1548,27 +1548,52 @@
     {
       "input": "ctrl-é",
       "ok": false,
-      "message": "\"ctrl-é\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+      "message": "\"ctrl-\\u{e9}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
     },
     {
       "input": "é",
       "ok": false,
-      "message": "\"é\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+      "message": "\"\\u{e9}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
     },
     {
       "input": "ctrl-K",
       "ok": false,
-      "message": "\"ctrl-K\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+      "message": "\"ctrl-\\u{212a}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
     },
     {
       "input": "",
       "ok": false,
-      "message": "\"\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+      "message": "\"\\u{7f}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
     },
     {
       "input": "\u001d",
       "ok": false,
-      "message": "\"\u001d\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+      "message": "\"\\u{1d}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "\u001b[2J",
+      "ok": false,
+      "message": "\"\\u{1b}[2J\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "\t",
+      "ok": false,
+      "message": "\"\\u{9}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "a\"b\\",
+      "ok": false,
+      "message": "\"a\\\"b\\\\\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "😀",
+      "ok": false,
+      "message": "\"\\u{1f600}\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
+    },
+    {
+      "input": "ctrl-p, ctrl-q",
+      "ok": false,
+      "message": "\" ctrl-q\" isn't a key: name ctrl- with a letter or one of @ [ \\ ] ^ _, or one printable character other than a comma"
     }
   ]
 }
