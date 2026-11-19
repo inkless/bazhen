@@ -8,6 +8,6 @@
     "types": [],
     "emitDeclarationOnly": true
   },
-  "include": ["src"],
+  "include": ["src", "src/**/*.json"],
   "references": [{ "path": "../../packages/protocol" }]
 }
