@@ -13,7 +13,7 @@
 // tests that failed on it and why, what a `Control:` trailer names.
 //
 // A mutant of the holder can send a signal to any pid the mutated code computes, so this refuses
-// to start, before it lists or builds anything, anywhere but a sandbox: the `pnpm test:real`
+// to start, before it lists or builds anything, anywhere but a sandbox: the `moon run :test-real`
 // container or a marked CI runner (scripts/signal-paths.ts). In the container the tree is the
 // image's own copy, so a mutant applied in place is undone with the container at the latest.
 //
@@ -589,7 +589,7 @@ async function judgeBySuite(file: string, diffFile: string): Promise<boolean | n
     writeFileSync(join(scratch, "mutant.patch"), patch);
     spawnSync("git", ["apply", join(scratch, "mutant.patch")], { env: isolatedEnv() });
     if (readFileSync(file, "utf8") === original) return null;
-    return (await run("pnpm", ["test:holder"], isolatedEnv())) !== 0;
+    return (await run("moon", ["run", ":test-holder"], isolatedEnv())) !== 0;
   } finally {
     writeFileSync(file, original);
     rmSync(scratch, { recursive: true, force: true });
@@ -650,7 +650,7 @@ export async function main(
   if (!sandboxed()) {
     console.error(
       "holder-mutants: refusing to run here. A mutant of the holder can signal any pid it " +
-        "computes, so this runs only in the test container (pnpm test:real mutants) or on a CI " +
+        "computes, so this runs only in the test container (moon run :test-real -- mutants) or on a CI " +
         `runner carrying a root-owned ${DISPOSABLE_HOST_MARKER}.`,
     );
     return 1;

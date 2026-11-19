@@ -8,14 +8,15 @@ TypeScript in a pnpm workspace, and Rust in a Cargo workspace (`crates/`).
 
 - A failing check is fixed in the code, never by a suppression comment, a lowered severity or
   `--no-verify`. If the check itself is wrong, change the check, and say why in the commit
-- Call `pnpm` scripts, not the tool binaries; the scripts carry the flags the checks rely on
+- Run the moon tasks (`moon tasks` lists them), not the tool binaries; the tasks carry the flags
+  the checks rely on
 - Tests that run real tmux (integration, api, e2e, and falsify of them) run only through
-  `pnpm test:real`, in a throwaway container, never on the host: one wrong socket there ends
+  `moon run :test-real`, in a throwaway container, never on the host: one wrong socket there ends
   every tmux session on the machine. They refuse to start anywhere else
 - Holder tests, and Rust tests that start a holder, close a child or sweep the ledger, signal
-  processes they didn't start, so they run only through `pnpm test:real holder` and
-  `pnpm test:real rust`, or CI, never on the host: one wrong pid there ends every process you
-  own. They refuse to start anywhere else
+  processes they didn't start, so they run only through `moon run :test-real -- holder` and
+  `moon run :test-real -- rust`, or CI, never on the host: one wrong pid there ends every process
+  you own. They refuse to start anywhere else
 - Nothing sends a signal but the chokepoints listed in `scripts/signal-paths.ts`, which check
   the target
 - With parallel agents: stage files by name, never `git add -A`; don't use `git stash`;

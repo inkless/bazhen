@@ -1,0 +1,224 @@
+# The workspace-wide tasks: `moon run :<task> [-- <args>]`. A task's `command` is one command, so a
+# chain is a task whose `deps` run in order (`runDepsInParallel = false`), and the arguments after
+# `--` go to its own command. Every task runs afresh (`cache = false`): cargo and vitest keep caches
+# of their own, and a check that moon replayed from its cache would check nothing. A step that starts
+# tests runs under scripts/capped.ts, and scripts/check-standards.ts (moonFailures) holds each task
+# to that, and the gates and `check` to their pinned commands. moon puts nothing of node_modules on
+# a task's PATH, so a package's tool is named by its path.
+
+[tasks.check]
+deps = [
+  "standards",
+  "schema-check",
+  "lint",
+  "format-check",
+  "typecheck",
+  "lint-rust",
+  "deny",
+  "test-rust",
+  "test",
+  "test-medium",
+  "test-bench",
+]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.standards]
+command = "node --disable-warning=ExperimentalWarning scripts/check-standards.ts"
+options = { cache = false, internal = true }
+
+[tasks.schema-check]
+command = "node scripts/protocol-schema.ts --check"
+options = { cache = false, internal = true }
+
+[tasks.schema]
+command = "node scripts/protocol-schema.ts"
+options = { cache = false }
+
+[tasks.dev]
+deps = ["daemon:dev", "web:dev"]
+options = { cache = false, persistent = true, runInCI = false }
+
+[tasks.bazhen]
+command = "target/release/bazhen"
+deps = ["build-cli", "build-holder-release"]
+options = { cache = false, interactive = true, runInCI = false, runDepsInParallel = false }
+
+[tasks.build]
+deps = ["build-hook", "build-cli", "build-holder-release", "typecheck", "web:build"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.typecheck]
+command = "node_modules/.bin/tsc -b"
+options = { cache = false }
+
+[tasks.lint]
+command = "node_modules/.bin/oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error"
+deps = ["lint-config-check"]
+options = { cache = false }
+
+[tasks.lint-config-check]
+command = "node scripts/lint-config.ts --check"
+options = { cache = false, internal = true }
+
+[tasks.lint-config]
+command = "node scripts/lint-config.ts"
+options = { cache = false }
+
+[tasks.lint-shell]
+command = "scripts/lint-shell.sh"
+options = { cache = false }
+
+[tasks.format]
+command = "node_modules/.bin/oxfmt"
+deps = ["format-rust"]
+options = { cache = false }
+
+[tasks.format-rust]
+command = "cargo fmt --all"
+options = { cache = false, internal = true }
+
+[tasks.format-check]
+command = "node_modules/.bin/oxfmt --check"
+deps = ["gate-fmt"]
+options = { cache = false }
+
+[tasks.gate-fmt]
+command = "scripts/xtask.sh gate fmt"
+options = { cache = false, internal = true }
+
+[tasks.lint-rust]
+command = "scripts/xtask.sh gate lint"
+options = { cache = false }
+
+[tasks.deny]
+command = "scripts/xtask.sh gate deny"
+options = { cache = false }
+
+[tasks.test-rust]
+command = "node scripts/capped.ts --memory 4G --time 30m -- scripts/xtask.sh gate test"
+options = { cache = false }
+
+[tasks.test-rust-all]
+command = "node scripts/capped.ts --memory 4G --time 30m -- scripts/xtask.sh gate test-all"
+options = { cache = false }
+
+[tasks.test]
+command = "node scripts/capped.ts --memory 4G --time 10m -- node_modules/.bin/vitest run --project unit"
+options = { cache = false }
+
+[tasks.test-medium]
+command = "node scripts/capped.ts --memory 8G --time 20m -- node_modules/.bin/vitest run --project medium --project cli"
+deps = ["build-hook", "build-cli", "build-engine"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.test-bench]
+command = "node scripts/capped.ts --memory 4G --time 10m -- node_modules/.bin/vitest run --project bench"
+deps = ["build-hook", "build-cli"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.test-file]
+command = "node scripts/capped.ts --memory 8G --time 20m -- node_modules/.bin/vitest run"
+options = { cache = false }
+
+[tasks.test-integration]
+command = "node scripts/capped.ts --memory 4G --time 20m -- node_modules/.bin/vitest run --project integration"
+options = { cache = false }
+
+[tasks.test-holder]
+command = "node scripts/capped.ts --memory 4G --time 20m -- node_modules/.bin/vitest run --project holder"
+deps = ["build-holder"]
+options = { cache = false }
+
+[tasks.test-containment]
+command = "node scripts/capped.ts --memory 4G --time 20m -- node_modules/.bin/vitest run --project containment"
+deps = ["build-holder"]
+options = { cache = false }
+
+[tasks.test-api]
+command = "node scripts/capped.ts --memory 4G --time 30m -- node_modules/.bin/vitest run --project api"
+deps = ["build-hook", "build-cli", "build-holder-release"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.test-api-rust]
+command = "node scripts/capped.ts --memory 4G --time 30m -- node scripts/rust-daemon.ts"
+deps = ["build-hook", "build-cli", "build-holder-release", "build-daemon"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.test-soak]
+command = "node scripts/capped.ts --memory 8G --time 60m -- node_modules/.bin/vitest run --project soak"
+deps = ["build-hook", "build-cli", "build-holder-release"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.test-real]
+command = "node scripts/capped.ts --memory 16G --time 120m -- node scripts/test-real.ts"
+options = { cache = false }
+
+[tasks.test-falsify]
+command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify.ts"
+options = { cache = false }
+
+[tasks.test-falsify-base]
+command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts"
+options = { cache = false }
+
+[tasks.test-mutants-holder]
+command = "node scripts/capped.ts --memory 12G --time 115m -- node scripts/holder-mutants.ts"
+options = { cache = false }
+
+[tasks.soak]
+command = "node scripts/soak.ts"
+deps = ["build-hook", "build-cli", "build-holder-release"]
+options = { cache = false, runDepsInParallel = false }
+
+[tasks.soak-vm]
+command = "scripts/soak-vm.sh"
+options = { cache = false }
+
+[tasks.bench-engine]
+command = "node scripts/capped.ts --memory 4G --time 10m -- node scripts/engine-replay.ts"
+deps = ["build-engine"]
+options = { cache = false }
+
+[tasks.bench-hook]
+command = "node scripts/capped.ts --memory 4G --time 10m -- node scripts/hook-bench.ts"
+options = { cache = false }
+
+[tasks.capped]
+command = "node scripts/capped.ts --memory 8G --time 120m --"
+options = { cache = false }
+
+[tasks.build-cli]
+command = "cargo build --release --quiet --locked -p bazhen"
+options = { cache = false }
+
+[tasks.build-daemon]
+command = "cargo build --release --quiet --locked -p bazhen-daemon"
+options = { cache = false }
+
+[tasks.build-engine]
+command = "cargo build --release --quiet --locked -p bazhen-holder-engine"
+options = { cache = false }
+
+[tasks.build-hook]
+command = "cargo build --release --quiet --locked -p bazhen-hook -p bazhen-peer"
+options = { cache = false }
+
+[tasks.build-holder]
+command = "cargo build --quiet --locked -p bazhen-holder -p bazhen-holder-engine"
+options = { cache = false }
+
+[tasks.build-holder-release]
+command = "cargo build --profile release-holder --quiet --locked -p bazhen-holder"
+options = { cache = false }
+
+[tasks.build-bins]
+command = "cargo build --quiet --locked"
+options = { cache = false }
+
+[tasks.build-notify]
+command = "node scripts/build-notify-mac.ts"
+options = { cache = false }
+
+[tasks.font-terminal]
+command = "node scripts/terminal-font.ts"
+options = { cache = false }

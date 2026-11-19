@@ -3,7 +3,7 @@
 // judges the branch with the base's falsify as well (docs/standards/testing.md § Falsification).
 // The files are the base's list and the branch's together, so a branch can't shorten the list to
 // skip this. A base whose falsify has no --harness lists nothing, and the branch's list stands
-// alone. CI and `pnpm test:real falsify` both run it, after `pnpm test:falsify`.
+// alone. CI and `moon run :test-real -- falsify` both run it, after `moon run :test-falsify`.
 //
 // The base's falsify runs from a worktree of the base, locked as falsify locks its own, so a run
 // killed before it could clean up is swept by the next falsify. It runs only in a sandbox: a base
@@ -31,6 +31,8 @@ import { isMain } from "./is-main.ts";
 /** How CI and the container run falsify: a change to either is a change to falsify. */
 const RUNNERS = [
   ".github/workflows/ci.yml",
+  ".prototools",
+  "moon.toml",
   "package.json",
   "scripts/falsify-base.ts",
   "scripts/test-real.ts",
@@ -75,7 +77,7 @@ function main(args: readonly string[]): number {
   if (!inSandbox()) {
     console.error(
       "falsify-base: the base's falsify may revert or mutate code that signals processes, so " +
-        "this runs only in a sandbox: CI, or `pnpm test:real falsify`.",
+        "this runs only in a sandbox: CI, or `moon run :test-real -- falsify`.",
     );
     return 1;
   }

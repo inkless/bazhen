@@ -2,8 +2,8 @@
 // whole load and its churn, compressed. A clean run must pass every criterion but the slopes,
 // which only hours can show. A run with two faults injected must fail on the criteria those
 // faults break, and only those: a holder closed behind the daemon's back, and a worker that
-// reads its probes' replies late. Each run is a process of its own, as `pnpm soak` runs it, and
-// is judged from the directory it leaves.
+// reads its probes' replies late. Each run is a process of its own, as `moon run :soak` runs it,
+// and is judged from the directory it leaves.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";

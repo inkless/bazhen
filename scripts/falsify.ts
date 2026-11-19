@@ -32,7 +32,7 @@
 // that fails while it reaches a binary the base doesn't build is INVALID: the binary's absence
 // failed it. Binaries that won't build are no verdict: falsify fails, naming cargo's error.
 //
-// The judged tests run once per vitest project, as each project's pnpm script runs them: two
+// The judged tests run once per vitest project, as each project's moon task runs them: two
 // projects' global setups in one process clash.
 //
 // A new test in a file tests/rust-daemon.txt names at HEAD holds both daemons, so it also runs
@@ -2004,7 +2004,7 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
       const where = before === undefined ? `the base, ${base.slice(0, 12)}` : "HEAD";
       console.error(
         `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
-          "branch adds are unknown. Run `pnpm test:rust` there to see why; if cargo-nextest is " +
+          "branch adds are unknown. Run `moon run :test-rust` there to see why; if cargo-nextest is " +
           `missing, install it: ${installCommand("cargo-nextest")}`,
       );
       return undefined;
@@ -2321,7 +2321,7 @@ async function main(args: string[]): Promise<number> {
         );
         return 1;
       }
-      // One run per project, as its own pnpm script runs it: two projects' global setups in one
+      // One run per project, as its own moon task runs it: two projects' global setups in one
       // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).
       const runProjects = async (
         runs: [string, string[]][],

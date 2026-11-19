@@ -1,11 +1,12 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
-// `pnpm check`; every failure names the file and the fix.
+// `moon run :check`; every failure names the file and the fix.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parse as parseToml } from "smol-toml";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./rust-gate.ts";
@@ -348,8 +349,11 @@ function packageScripts(
   );
 }
 
-const scriptNames = () =>
-  new Set(Object.keys(packageScripts((p) => readFileSync(join(root, p), "utf8"))));
+/** The root package.json's scripts, and the moon tasks a person may run, by `project:task`. */
+const menu = () => ({
+  scripts: new Set(Object.keys(packageScripts((p) => readFileSync(join(root, p), "utf8")))),
+  targets: publicTargets(moonTasks(repoFiles(), readRepoFile).tasks),
+});
 
 /** The text of every inline code span, and every whitespace-separated word in fenced blocks. */
 function codeSpans(text: string): string[] {
@@ -380,6 +384,24 @@ export function pnpmScripts(span: string): string[] {
   return scripts;
 }
 
+/** The targets of the `moon run ...` commands in a code span, up to the args after `--`. */
+export function moonTargets(span: string): string[] {
+  const targets: string[] = [];
+  for (const [, rest = ""] of span.matchAll(/\bmoon run((?: +\S+)*)/g)) {
+    for (const word of rest.trim().split(/ +/)) {
+      if (word === "--") break;
+      if (/^[\w-]*:[\w.-]+$/.test(word)) targets.push(word);
+    }
+  }
+  return targets;
+}
+
+/** Whether `target`, as `moon run` takes it (`:task` in any project), names one of `targets`. */
+export function isMoonTarget(target: string, targets: ReadonlySet<string>): boolean {
+  if (!target.startsWith(":")) return targets.has(target);
+  return [...targets].some((t) => t.endsWith(target));
+}
+
 /** Paths named in the code spans and fenced blocks of a Markdown document. */
 export function pathCandidates(text: string): string[] {
   const paths = new Set<string>();
@@ -392,12 +414,19 @@ export function pathCandidates(text: string): string[] {
   return [...paths];
 }
 
-function checkContextFile(doc: string, scripts: Set<string>): void {
+function checkContextFile(doc: string, { scripts, targets }: ReturnType<typeof menu>): void {
   const text = readFileSync(join(root, doc), "utf8");
   const named = new Set(codeSpans(text).flatMap(pnpmScripts));
   for (const script of named) {
     if (!PNPM_BUILTINS.has(script) && !scripts.has(script)) {
       failures.push(`${doc}: names \`pnpm ${script}\`, which is not a package.json script.`);
+    }
+  }
+  for (const target of new Set(codeSpans(text).flatMap(moonTargets))) {
+    if (!isMoonTarget(target, targets)) {
+      failures.push(
+        `${doc}: names \`moon run ${target}\`, which is not a moon task a person runs.`,
+      );
     }
   }
   for (const candidate of pathCandidates(text)) {
@@ -409,7 +438,7 @@ function checkContextFile(doc: string, scripts: Set<string>): void {
 }
 
 function checkAgentContext(): void {
-  const scripts = scriptNames();
+  const named = menu();
   const agents = join(root, "AGENTS.md");
   if (!existsSync(agents)) {
     failures.push("AGENTS.md is missing.");
@@ -429,7 +458,7 @@ function checkAgentContext(): void {
     );
   }
   for (const doc of CONTEXT_DOCS) {
-    if (existsSync(join(root, doc))) checkContextFile(doc, scripts);
+    if (existsSync(join(root, doc))) checkContextFile(doc, named);
     else failures.push(`${doc} is missing.`);
   }
 }
@@ -2450,15 +2479,19 @@ export const DENY_CONFIG = [
   'unknown-git = "deny"',
 ];
 
-// The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
-// commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the tests run under a cap like
-// any.
+// The moon tasks that run the Rust gates, exactly, and the steps of `check` and `format-check` that
+// run each of them. The commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the
+// tests run under a cap like any.
 const GATE = "scripts/xtask.sh gate";
-export const RUST_GATE_SCRIPTS: Record<string, string> = {
-  "format:check": `${GATE} fmt && oxfmt --check`,
-  "lint:rust": `${GATE} lint`,
+export const RUST_GATE_TASKS: Record<string, string> = {
+  "gate-fmt": `${GATE} fmt`,
+  "lint-rust": `${GATE} lint`,
   deny: `${GATE} deny`,
-  "test:rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
+  "test-rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
+};
+export const GATE_STEPS: Record<string, readonly string[]> = {
+  check: ["format-check", "lint-rust", "deny", "test-rust"],
+  "format-check": ["gate-fmt"],
 };
 
 // cargo's target runner, which caps every test binary, and cargo-mutants' test tool, nextest,
@@ -2539,14 +2572,21 @@ const TEST_RUNNER =
 const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
-/** Why a package.json's scripts would start tests without a cap, or with one too big to bite. */
-export function cappedScriptFailures(file: string, scripts: Record<string, string>): string[] {
+/**
+ * Why a package.json's scripts, or moon's tasks as `noun` says, would start tests without a cap,
+ * or with one too big to bite.
+ */
+export function cappedScriptFailures(
+  file: string,
+  scripts: Record<string, string>,
+  noun = "script",
+): string[] {
   const out: string[] = [];
   for (const [name, script] of Object.entries(scripts)) {
     if (!TEST_RUNNER.test(script)) continue;
     if (/[|;\n\r`]|\$\(|(?<!&)&(?!&)/.test(script)) {
       out.push(
-        `${file}: the "${name}" script starts tests, so it joins its steps with \`&&\` alone: ` +
+        `${file}: the "${name}" ${noun} starts tests, so it joins its steps with \`&&\` alone: ` +
           "a `|`, `;`, `&`, line break or command substitution could run one round its cap.",
       );
       continue;
@@ -2556,13 +2596,13 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
       const capped = CAPPED_STEP.exec(step);
       if (capped === null) {
         out.push(
-          `${file}: the "${name}" script starts tests without a memory and time cap. Run the ` +
+          `${file}: the "${name}" ${noun} starts tests without a memory and time cap. Run the ` +
             "step as `node scripts/capped.ts --memory <n>G --time <n>m -- <command>` " +
             "(docs/standards/testing.md § Memory and time caps).",
         );
       } else if (Number(capped[1]) > MAX_CAP.gib || Number(capped[2]) > MAX_CAP.minutes) {
         out.push(
-          `${file}: the "${name}" script's cap is above ${MAX_CAP.gib}G or ` +
+          `${file}: the "${name}" ${noun}'s cap is above ${MAX_CAP.gib}G or ` +
             `${MAX_CAP.minutes}m (MAX_CAP in scripts/check-standards.ts), too big to bite.`,
         );
       }
@@ -2593,28 +2633,252 @@ const RUST_FLAG_EXEMPT: Record<string, string> = {
 const LINT_FLAG =
   /(?:\b|_)rust(?:doc)?flags\b|rustc[-_](?:workspace[-_])?wrapper|\bcargo_alias_|cap-lints/i;
 
-/** Why the package.json scripts don't run the Rust gates as RUST_GATE_SCRIPTS says. */
-export function gateScriptFailures(scripts: Record<string, string>): string[] {
-  const out: string[] = [];
-  for (const [name, command] of Object.entries(RUST_GATE_SCRIPTS)) {
-    if (scripts[name] !== command) {
-      out.push(
-        `package.json: the "${name}" script must be \`${command}\` (RUST_GATE_SCRIPTS in ` +
-          "scripts/check-standards.ts); a gate's command changes in crates/bazhen-xtask/src/gate.rs.",
+// moon is the repository's menu: its tasks are every command the repository runs. Its configs are
+// read here as moon reads them and held to what made the scripts safe to run: every task runs
+// afresh, every step that starts tests runs under a cap, the gates run their pinned commands, and
+// `check` runs each gate. A config moon would read that this doesn't (a .moon/tasks file every
+// project inherits, a moon.yml) is refused, and so is a key of a task this doesn't know, so no
+// task can run something round these rules.
+const MOON_WORKSPACE = ".moon/workspace.toml";
+const PROTOTOOLS = ".prototools";
+const MOON_CONFIG = /^\.moon\/|(?:^|\/)moon\.(?:ya?ml|json5?|jsonc|pkl|hcl|toml)$/;
+const MOON_PACKAGE = /^@moonrepo\//;
+// The moon CI and the test image run: the lockfile's, which pnpm installs from hashed packages
+// without running an install script, at the version .prototools pins for every host's proto.
+const MOON_CLI = "@moonrepo/cli";
+const ROOT_PROJECT = "root";
+// The keys of a task, and of its options, this check reads; any other could change what it runs
+// or let it pass unrun (`extends`, `options.allowFailure`, `options.envFile`, …).
+const MOON_TASK_KEYS = new Set(["command", "args", "script", "deps", "options"]);
+const MOON_TASK_OPTIONS = new Set([
+  "cache",
+  "runDepsInParallel",
+  "persistent",
+  "interactive",
+  "runInCI",
+  "internal",
+]);
+// The only package.json scripts: pnpm's own install hook, which moon can't start.
+export const PACKAGE_SCRIPTS: Record<string, Record<string, string>> = {
+  "package.json": { prepare: "husky" },
+};
+
+type Table = Record<string, unknown>;
+const isTable = (value: unknown): value is Table =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A task's command or args, a string or a list of words, as one line. */
+const taskWords = (value: unknown): string =>
+  Array.isArray(value) ? value.map(String).join(" ") : typeof value === "string" ? value : "";
+
+/** What moon runs for a task: its script, or its command and args as one line. */
+function taskCommand(task: Table): string {
+  if (typeof task["script"] === "string") return task["script"];
+  return [taskWords(task["command"]), taskWords(task["args"])].filter((w) => w !== "").join(" ");
+}
+
+/** A moon task, with the config it is in. */
+export interface MoonTask {
+  file: string;
+  task: Table;
+}
+
+/**
+ * moon's tasks by `project:task`, read from the projects .moon/workspace.toml lists, and why one
+ * couldn't be read.
+ */
+export function moonTasks(
+  paths: readonly string[],
+  read: (path: string) => string,
+): { tasks: Map<string, MoonTask>; failures: string[] } {
+  const tasks = new Map<string, MoonTask>();
+  const problems: string[] = [];
+  const toml = (file: string): Table | undefined => {
+    try {
+      return parseToml(read(file));
+    } catch (error) {
+      problems.push(`${file}: moon can't read it: ${String(error).split("\n")[0]}`);
+      return undefined;
+    }
+  };
+  if (!paths.includes(MOON_WORKSPACE)) {
+    problems.push(`${MOON_WORKSPACE} is missing; moon's tasks are the repository's commands.`);
+    return { tasks, failures: problems };
+  }
+  const workspace = toml(MOON_WORKSPACE);
+  if (workspace === undefined) return { tasks, failures: problems };
+  if (workspace["telemetry"] !== false) {
+    problems.push(`${MOON_WORKSPACE}: set \`telemetry = false\`; moon reports usage otherwise.`);
+  }
+  const projects = workspace["projects"];
+  const folders = isTable(projects) ? Object.entries(projects) : [];
+  if (
+    !isTable(projects) ||
+    folders.some(([, folder]) => typeof folder !== "string") ||
+    projects[ROOT_PROJECT] !== "."
+  ) {
+    problems.push(
+      `${MOON_WORKSPACE}: list the projects as a table of id = "folder", with ` +
+        `${ROOT_PROJECT} = "." for the workspace-wide tasks; a glob would hide which configs moon reads.`,
+    );
+  }
+  const configs = new Map<string, string>();
+  for (const [id, folder] of folders) {
+    if (typeof folder === "string")
+      configs.set(folder === "." ? "moon.toml" : `${folder}/moon.toml`, id);
+  }
+  for (const file of paths.filter((p) => MOON_CONFIG.test(p))) {
+    if (file !== MOON_WORKSPACE && !configs.has(file)) {
+      problems.push(
+        `${file}: moon reads it, and this check doesn't. A project's tasks go in its moon.toml, ` +
+          `the project listed in ${MOON_WORKSPACE}.`,
       );
     }
   }
-  const check = scripts.check ?? "";
-  const steps = /[|;\n\r]|(?<!&)&(?!&)/.test(check) ? [] : check.split("&&").map((c) => c.trim());
-  for (const name of Object.keys(RUST_GATE_SCRIPTS)) {
-    if (!steps.includes(`pnpm run ${name}`)) {
+  for (const [file, id] of configs) {
+    if (!paths.includes(file)) continue;
+    const config = toml(file);
+    const table = config?.["tasks"] ?? {};
+    if (!isTable(table)) {
+      problems.push(`${file}: \`tasks\` must be a table of tasks.`);
+      continue;
+    }
+    for (const [name, task] of Object.entries(table)) {
+      if (isTable(task)) tasks.set(`${id}:${name}`, { file, task });
+      else problems.push(`${file}: the "${name}" task must be a table.`);
+    }
+  }
+  return { tasks, failures: problems };
+}
+
+/** The tasks a person or CI may run, as `project:task`: every task but the internal ones. */
+export function publicTargets(tasks: ReadonlyMap<string, MoonTask>): Set<string> {
+  return new Set(
+    [...tasks].flatMap(([target, { task }]) =>
+      isTable(task["options"]) && task["options"]["internal"] === true ? [] : [target],
+    ),
+  );
+}
+
+/** Why moon's config, .prototools or a package.json's scripts would let a command run unchecked. */
+export function moonFailures(paths: readonly string[], read: (path: string) => string): string[] {
+  const { tasks, failures: out } = moonTasks(paths, read);
+  for (const [target, { file, task }] of tasks) {
+    const name = target.split(":")[1] ?? "";
+    for (const key of Object.keys(task).filter((k) => !MOON_TASK_KEYS.has(k))) {
       out.push(
-        `package.json: the "check" script must run \`pnpm run ${name}\` as one of its \`&&\` ` +
-          "steps, with no `|`, `;` or line break that could step round it.",
+        `${file}: the "${name}" task sets \`${key}\`, which scripts/check-standards.ts doesn't read.`,
+      );
+    }
+    const options = isTable(task["options"]) ? task["options"] : {};
+    for (const key of Object.keys(options).filter((k) => !MOON_TASK_OPTIONS.has(k))) {
+      out.push(
+        `${file}: the "${name}" task sets \`options.${key}\`, which scripts/check-standards.ts ` +
+          "doesn't read; add it to MOON_TASK_OPTIONS there, with why it can't let a task pass unrun.",
+      );
+    }
+    if (options["cache"] !== false) {
+      out.push(
+        `${file}: the "${name}" task needs \`options = { cache = false }\`: moon would replay an ` +
+          "earlier run's result in place of running it.",
+      );
+    }
+    if ("runInCI" in options && options["persistent"] !== true && options["interactive"] !== true) {
+      out.push(
+        `${file}: the "${name}" task sets \`options.runInCI\`, which only a server or the CLI ` +
+          "(`persistent` or `interactive`) may: CI would skip it.",
+      );
+    }
+    const deps = task["deps"] ?? [];
+    if (!Array.isArray(deps) || deps.some((dep) => typeof dep !== "string")) {
+      out.push(
+        `${file}: the "${name}" task must name its deps as a list of targets; a dep given args or ` +
+          "env runs another command than that task's own.",
+      );
+    }
+    out.push(...cappedScriptFailures(file, { [name]: taskCommand(task) }, "task"));
+  }
+  const rootTask = (name: string) => tasks.get(`${ROOT_PROJECT}:${name}`)?.task;
+  for (const [name, command] of Object.entries(RUST_GATE_TASKS)) {
+    const task = rootTask(name);
+    const extra = Object.keys(task ?? {}).filter((key) => key !== "command" && key !== "options");
+    if (task === undefined || task["command"] !== command || extra.length > 0) {
+      out.push(
+        `moon.toml: the "${name}" task must run \`${command}\` and nothing else (RUST_GATE_TASKS ` +
+          "in scripts/check-standards.ts); a gate's command changes in crates/bazhen-xtask/src/gate.rs.",
+      );
+    }
+  }
+  for (const [name, steps] of Object.entries(GATE_STEPS)) {
+    const deps = rootTask(name)?.["deps"];
+    const named = Array.isArray(deps)
+      ? deps.map((dep) => String(dep).replace(/^(?:root|~):/, ""))
+      : [];
+    for (const step of steps.filter((s) => !named.includes(s))) {
+      out.push(`moon.toml: the "${name}" task must run \`${step}\` among its deps.`);
+    }
+  }
+  out.push(...prototoolsFailures(paths, read));
+  const pin = prototoolsMoon(paths, read);
+  for (const file of paths.filter((p) => fileName(p) === "package.json")) {
+    const pkg: unknown = JSON.parse(read(file));
+    const scripts = packageScripts(read, file);
+    const allowed = PACKAGE_SCRIPTS[file] ?? {};
+    const names = [...new Set([...Object.keys(scripts), ...Object.keys(allowed)])];
+    for (const name of names.filter((n) => scripts[n] !== allowed[n])) {
+      out.push(
+        allowed[name] === undefined
+          ? `${file}: the "${name}" script belongs in a moon task: the repository's commands are ` +
+              "moon's (PACKAGE_SCRIPTS in scripts/check-standards.ts)."
+          : `${file}: the "${name}" script must be \`${allowed[name]}\`.`,
+      );
+    }
+    const pinned = `"${MOON_CLI}": "${pin ?? "<the moon version>"}"`;
+    for (const field of ["dependencies", "devDependencies", "optionalDependencies"]) {
+      const deps = isTable(pkg) && isTable(pkg[field]) ? pkg[field] : {};
+      for (const [dep, version] of Object.entries(deps).filter(([d]) => MOON_PACKAGE.test(d))) {
+        const rootCli = file === "package.json" && field === "devDependencies" && dep === MOON_CLI;
+        if (rootCli && (pin === undefined || version === pin)) continue;
+        out.push(
+          `${file}: depends on ${dep} ${String(version)}; the one moon package is ${pinned} in ` +
+            `package.json's devDependencies, at the version ${PROTOTOOLS} pins.`,
+        );
+      }
+    }
+    const dev = isTable(pkg) && isTable(pkg["devDependencies"]) ? pkg["devDependencies"] : {};
+    if (file === "package.json" && !(MOON_CLI in dev)) {
+      out.push(
+        `package.json: needs ${pinned} in devDependencies: CI and the test image run the moon ` +
+          `the lockfile pins, at the version ${PROTOTOOLS} pins.`,
       );
     }
   }
   return out;
+}
+
+/** The one exact moon version .prototools pins, alone; undefined if it pins anything else. */
+function prototoolsMoon(paths: readonly string[], read: (path: string) => string) {
+  if (!paths.includes(PROTOTOOLS)) return undefined;
+  try {
+    const pins = parseToml(read(PROTOTOOLS));
+    const moon = pins["moon"];
+    return Object.keys(pins).length === 1 &&
+      typeof moon === "string" &&
+      /^\d+\.\d+\.\d+$/.test(moon)
+      ? moon
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why .prototools doesn't pin moon to one exact version, or pins something this doesn't read. */
+function prototoolsFailures(paths: readonly string[], read: (path: string) => string): string[] {
+  if (!paths.includes(PROTOTOOLS))
+    return [`${PROTOTOOLS} is missing; it pins the moon every host runs.`];
+  return prototoolsMoon(paths, read) === undefined
+    ? [`${PROTOTOOLS}: must pin moon to one exact version (\`moon = "x.y.z"\`) and nothing else.`]
+    : [];
 }
 
 const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;
@@ -3095,8 +3359,6 @@ export function rustFailures(
   };
   pinned("deny.toml", DENY_CONFIG, "DENY_CONFIG");
   pinned("rust-toolchain.toml", TOOLCHAIN_CONFIG, "TOOLCHAIN_CONFIG");
-  if (paths.includes("package.json")) out.push(...gateScriptFailures(packageScripts(read)));
-  else out.push("package.json is missing; the Rust gates run from its scripts.");
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   pinned(".cargo/config.toml", CARGO_CONFIG, "CARGO_CONFIG");
   pinned(".cargo/mutants.toml", MUTANTS_CONFIG, "MUTANTS_CONFIG");
@@ -3493,11 +3755,8 @@ function checkSignalChokepoints(): void {
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
-function checkCappedScripts(): void {
-  for (const file of repoFiles().filter((p) => fileName(p) === "package.json")) {
-    const scripts = packageScripts((p) => readFileSync(join(root, p), "utf8"), file);
-    failures.push(...cappedScriptFailures(file, scripts));
-  }
+function checkMoon(): void {
+  failures.push(...moonFailures(repoFiles(), readRepoFile));
 }
 
 // An api test runs on holders, the default runtime, unless it is about tmux: those cases live in a
@@ -3581,7 +3840,7 @@ function skillDocs(): string[] {
     .map((name) => `${SKILLS_DIR}/${name}/SKILL.md`);
 }
 
-function checkSkills(scripts: Set<string>): void {
+function checkSkills(named: ReturnType<typeof menu>): void {
   let link = "";
   try {
     link = readlinkSync(join(root, ".claude/skills"));
@@ -3600,7 +3859,7 @@ function checkSkills(scripts: Set<string>): void {
       continue;
     }
     failures.push(...skillFailures(doc, dir, readFileSync(join(root, doc), "utf8")));
-    checkContextFile(doc, scripts);
+    checkContextFile(doc, named);
   }
 }
 
@@ -4017,14 +4276,14 @@ function checkSuppressions(): void {
   }
 }
 
-/** Every check `pnpm check` runs, in order. */
+/** Every check `moon run :check` runs, in order. */
 export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkSiblingTests,
   checkAgentContext,
-  () => checkSkills(scriptNames()),
+  () => checkSkills(menu()),
   checkWebTokens,
   checkRust,
-  checkCappedScripts,
+  checkMoon,
   checkTmuxPins,
   checkSignalChokepoints,
   checkMigrations,

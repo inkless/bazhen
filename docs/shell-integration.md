@@ -1,9 +1,9 @@
 # Shell integration: the last command line
 
 After a reboot or a crash of Bazhen's tmux server, every shell shows as lost, and a restart opens
-a new one in the same directory. Whatever ran there (`pnpm dev`, `cargo watch -x test`) is gone.
-With the shell integration on, Bazhen keeps the last line you ran in each shell, exactly as you
-typed it, so it can be typed back at the new shell's prompt.
+a new one in the same directory. Whatever ran there (`moon run :dev`, `cargo watch -x test`) is
+gone. With the shell integration on, Bazhen keeps the last line you ran in each shell, exactly as
+you typed it, so it can be typed back at the new shell's prompt.
 
 It is off by default, because a command line can hold a secret: `export TOKEN=…`,
 `mysql -p…`, a URL with a password in it.
@@ -40,7 +40,7 @@ It is off by default, because a command line can hold a secret: `export TOKEN=�
    test -n "$BAZHEN_SHELL_INTEGRATION"; and test -r "$BAZHEN_SHELL_INTEGRATION/fish"; and source "$BAZHEN_SHELL_INTEGRATION/fish"
    ```
 
-The integration needs the `bazhen-hook` client (`pnpm build:hook`). Without it, the daemon says
+The integration needs the `bazhen-hook` client (`moon run :build-hook`). Without it, the daemon says
 so at start and shells report nothing.
 
 ## Restarting with the last command

@@ -1,4 +1,4 @@
-//! The Rust types against the fixtures `pnpm schema` writes from the TypeScript protocol: each
+//! The Rust types against the fixtures `moon run :schema` writes from the TypeScript protocol: each
 //! message decodes from every wire example and encodes back to what zod made of it, and every
 //! check gives the protocol's verdict. A fixture file no type here reads fails the test.
 

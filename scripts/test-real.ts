@@ -1,5 +1,5 @@
-// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`: the
-// real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
+// `moon run :test-real -- [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`:
+// the real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
 // short runs (scripts/soak.ts), in a container built from this worktree
 // (docs/standards/testing.md). The build context is a fresh repository holding HEAD and falsify's
 // base, overlaid with the worktree's uncommitted files, so falsify judges commits and the other
@@ -28,19 +28,20 @@ import {
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { SLICE, inSignalSandbox, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { parse as parseToml } from "smol-toml";
 import { RUST_TOOLS } from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 
 const SUITES = {
-  integration: "test:integration",
-  api: "test:api",
-  "api-rust": "test:api:rust",
-  e2e: "test:e2e",
-  falsify: "test:falsify",
-  rust: "test:rust:all",
-  holder: "test:holder",
-  mutants: "test:mutants:holder",
-  soak: "test:soak",
+  integration: "test-integration",
+  api: "test-api",
+  "api-rust": "test-api-rust",
+  e2e: "test-e2e",
+  falsify: "test-falsify",
+  rust: "test-rust-all",
+  holder: "test-holder",
+  mutants: "test-mutants-holder",
+  soak: "test-soak",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e", "holder", "rust"];
@@ -50,7 +51,7 @@ const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
 const USAGE =
-  `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
+  `usage: moon run :test-real -- [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
   "[--group <g> [--shard k/n] [--only <regex>]]";
 
 /**
@@ -78,12 +79,24 @@ export function suiteCommand(suite: Suite, mutants?: MutantsPart): string[] {
     if (mutants === undefined) throw new Error(`the mutants suite needs --group; ${USAGE}`);
     const shard = mutants.shard === undefined ? [] : ["--shard", mutants.shard];
     const only = mutants.only === undefined ? [] : ["--only", mutants.only];
-    return ["pnpm", SUITES.mutants, "--group", mutants.group, ...shard, ...only];
+    return moonRun(SUITES.mutants, "--group", mutants.group, ...shard, ...only);
   }
-  if (suite !== "falsify") return ["pnpm", SUITES[suite]];
+  if (suite !== "falsify") return moonRun(SUITES[suite]);
   const base = `--base ${BASE_REF}`;
-  return ["sh", "-c", `pnpm ${SUITES.falsify} ${base} && pnpm test:falsify:base ${base}`];
+  return [
+    "sh",
+    "-c",
+    `moon run :${SUITES.falsify} -- ${base} && moon run :test-falsify-base -- ${base}`,
+  ];
 }
+
+/** `moon run` of a task, with the arguments its command takes after `--`. */
+const moonRun = (task: string, ...args: string[]): string[] => [
+  "moon",
+  "run",
+  `:${task}`,
+  ...(args.length === 0 ? [] : ["--", ...args]),
+];
 
 /** Why `text` isn't a JavaScript regex, as holder-mutants reads `--only`, or nothing. */
 function regexError(text: string): string | undefined {
@@ -151,6 +164,15 @@ export function parseArgs(args: readonly string[]): {
   };
 }
 
+/** The moon version .prototools pins, which every host runs. */
+export function moonVersion(read: (path: string) => string): string {
+  const moon = parseToml(read(".prototools"))["moon"];
+  if (typeof moon !== "string" || !/^\d+\.\d+\.\d+$/.test(moon)) {
+    throw new Error(".prototools pins no exact moon version");
+  }
+  return moon;
+}
+
 /** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */
 export function pins(read: (path: string) => string): Record<string, string> {
   const pkg = (path: string): Record<string, unknown> => JSON.parse(read(path));
@@ -166,6 +188,7 @@ export function pins(read: (path: string) => string): Record<string, string> {
   return {
     NODE_VERSION: read(".nvmrc").trim(),
     PNPM_VERSION: manager.slice("pnpm@".length),
+    MOON_VERSION: moonVersion(read),
     PLAYWRIGHT_VERSION: playwright,
     NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
     CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],
@@ -407,7 +430,7 @@ function fillContext(dir: string, top: string, base: string): void {
   const { copy, remove, skipped } = overlay(top);
   for (const file of remove) rmSync(join(dir, file), { force: true });
   for (const file of copy) copyEntry(join(top, file), join(dir, file));
-  if (skipped.length > 0) console.warn(`test:real: left out of the image: ${skipped.join(", ")}`);
+  if (skipped.length > 0) console.warn(`test-real: left out of the image: ${skipped.join(", ")}`);
 }
 
 /** Copies a file, or a symlink as the same link, never what it points at. */
@@ -567,8 +590,8 @@ export async function sweep(host: Host, quiet: Quiet = bounded(host)): Promise<v
     const removed = await quiet(["image", "rm", ref]);
     console.warn(
       removed.code === 0
-        ? `test:real: removed ${ref}, left by a run that is gone`
-        : `test:real: kept ${ref}: ${errors(removed.err).join("; ")}`,
+        ? `test-real: removed ${ref}, left by a run that is gone`
+        : `test-real: kept ${ref}: ${errors(removed.err).join("; ")}`,
     );
   }
   for (const dir of host.runDirs()) {
@@ -662,7 +685,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       const inSlice = "parent" in placement;
       if (!inSlice && !host.disposable) {
         console.error(
-          `test:real: ${placement.why}, so its containers would run outside the memory cap ` +
+          `test-real: ${placement.why}, so its containers would run outside the memory cap ` +
             `every capped run shares. Refusing to start: run it where containers join ${SLICE} ` +
             "(rootless Podman, or rootless Docker with the systemd cgroup driver, under a user " +
             "systemd), or on a disposable host. Rootful Docker and Docker Desktop put " +
@@ -672,7 +695,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       }
       if (!inSlice) {
         console.warn(
-          `test:real: ${placement.why}, so on this disposable host each container gets a ` +
+          `test-real: ${placement.why}, so on this disposable host each container gets a ` +
             "quarter of the machine's memory, outside the cap every capped run shares",
         );
       }
@@ -712,8 +735,8 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       }
       console.log(
         failedSuites.length === 0
-          ? `test:real: ${suites.join(", ")} passed`
-          : `test:real: ${failedSuites.join(", ")} failed`,
+          ? `test-real: ${suites.join(", ")} passed`
+          : `test-real: ${failedSuites.join(", ")} failed`,
       );
       return failedSuites.length === 0 ? 0 : 1;
     })();
@@ -728,7 +751,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
     if (dir !== undefined) host.removeDir(dir);
     unsubscribe();
     if (left.length > 0) {
-      console.warn(`test:real: left ${left.join(", ")}; the next run's sweep removes them`);
+      console.warn(`test-real: left ${left.join(", ")}; the next run's sweep removes them`);
     }
   }
   return interrupted === undefined ? code : exitCodeFor(interrupted);
@@ -833,7 +856,7 @@ if (isMain(import.meta)) {
   run(process.argv.slice(2), host).then(
     (code) => (process.exitCode = code),
     (error: unknown) => {
-      console.error(`test:real: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`test-real: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     },
   );

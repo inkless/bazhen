@@ -1,5 +1,5 @@
-// What pnpm test:real puts over HEAD in its build context, read from a throwaway repository with
-// changes staged, unstaged, deleted, renamed and untracked.
+// What moon run :test-real puts over HEAD in its build context, read from a throwaway repository
+// with changes staged, unstaged, deleted, renamed and untracked.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -72,7 +72,7 @@ function change(): void {
   write(".env", "SECRET=1\n");
 }
 
-describe("test:real's overlay", () => {
+describe("test-real's overlay", () => {
   it("is empty for a worktree that matches HEAD", () => {
     expect(overlay(repo)).toEqual({ copy: [], remove: [], skipped: [] });
   });

@@ -10,7 +10,7 @@ import {
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
   DENY_CONFIG,
-  RUST_GATE_SCRIPTS,
+  RUST_GATE_TASKS,
   WORKSPACE_LINTS,
   byteTakers,
   cargoManifestFailures,
@@ -18,7 +18,9 @@ import {
   declaredTokens,
   fuzzManifestFailures,
   tomlTables,
-  gateScriptFailures,
+  moonFailures,
+  moonTargets,
+  isMoonTarget,
   hasRuntimeCode,
   inheritsWorkspaceLints,
   attributeFailures,
@@ -300,7 +302,7 @@ describe("migrationHistoryFailures", () => {
     ]);
   });
 
-  it("is one of the checks pnpm check runs", () => {
+  it("is one of the checks moon run :check runs", () => {
     expect(STANDARDS_CHECKS).toContain(checkMigrations);
   });
 });
@@ -349,6 +351,29 @@ describe("pnpmScripts", () => {
         pnpmScripts,
       ),
     ).toEqual([["test"], ["lint"], ["test"], ["build"], []]);
+  });
+});
+
+describe("moonTargets", () => {
+  it("reads the targets of `moon run` up to the arguments after `--`", () => {
+    expect(
+      [
+        "moon run :check",
+        "moon run :test-real -- rust",
+        "moon run web:dev :build",
+        "moon run :capped -- node x:y",
+        "moon tasks",
+      ].map(moonTargets),
+    ).toEqual([[":check"], [":test-real"], ["web:dev", ":build"], [":capped"], []]);
+  });
+
+  it("knows a task by its project, or by its name in any project", () => {
+    const targets = new Set(["root:check", "web:dev", "e2e:test-e2e"]);
+    expect(
+      [":check", "web:dev", ":dev", ":test", "root:dev", ":test-e2e"].map((t) =>
+        isMoonTarget(t, targets),
+      ),
+    ).toEqual([true, true, true, false, false, true]);
   });
 });
 
@@ -530,11 +555,11 @@ describe("attributeFailures", () => {
   it("lets a test that signals processes it didn't start be ignored, by that reason alone", () => {
     const source = [
       "#[test]",
-      '#[ignore = "signals processes; runs in pnpm test:real rust"]',
+      '#[ignore = "signals processes; runs in moon run :test-real -- rust"]',
       "fn a() { bazhen_test_signal::require_sandbox().unwrap(); }",
       '#[ignore = "signals processes"]',
-      '#![ignore = "signals processes; runs in pnpm test:real rust"]',
-      '#[cfg_attr(test, ignore = "signals processes; runs in pnpm test:real rust")]',
+      '#![ignore = "signals processes; runs in moon run :test-real -- rust"]',
+      '#[cfg_attr(test, ignore = "signals processes; runs in moon run :test-real -- rust")]',
     ].join("\n");
     expect(scan(source).map((f) => f.split(": ")[0])).toEqual([
       "crates/x/src/a.rs:4",
@@ -543,7 +568,8 @@ describe("attributeFailures", () => {
     ]);
   });
   it("requires such a test to refuse to run off a sandbox, before anything else", () => {
-    const ignored = '#[test]\n#[ignore = "signals processes; runs in pnpm test:real rust"]\n';
+    const ignored =
+      '#[test]\n#[ignore = "signals processes; runs in moon run :test-real -- rust"]\n';
     const source = [
       `${ignored}fn a() {\n    bazhen_test_signal::require_sandbox().unwrap();\n    sweep();\n}`,
       `${ignored}fn b() -> Result<()> { bazhen_test_signal::require_sandbox()?; Ok(()) }`,
@@ -1189,37 +1215,6 @@ describe("skillFailures", () => {
   });
 });
 
-const CHECK = Object.keys(RUST_GATE_SCRIPTS)
-  .map((name) => `pnpm run ${name}`)
-  .join(" && ");
-
-describe("gateScriptFailures", () => {
-  it("accepts the standard's gate scripts, run by check", () => {
-    expect(
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `pnpm run lint && ${CHECK}` }),
-    ).toEqual([]);
-  });
-
-  it("refuses a gate that runs anything else, and a check that skips or steps round one", () => {
-    const loosened = { ...RUST_GATE_SCRIPTS, "lint:rust": "cargo clippy --workspace" };
-    expect([
-      gateScriptFailures({ ...loosened, check: CHECK }),
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && pnpm run deny", "") }),
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} || true` }),
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: CHECK.replace(" && ", " ; ") }),
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} && true\nexit 0` }),
-      gateScriptFailures({ ...RUST_GATE_SCRIPTS, check: `${CHECK} | cat` }),
-    ]).toEqual([
-      [expect.stringContaining('the "lint:rust" script must be')],
-      [expect.stringContaining("must run `pnpm run deny`")],
-      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
-      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
-      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("line break")),
-      Object.keys(RUST_GATE_SCRIPTS).map(() => expect.stringContaining("must run")),
-    ]);
-  });
-});
-
 describe("rustFailures on the gates' own configuration", () => {
   const standard: Record<string, string> = {
     "deny.toml": DENY_CONFIG.join("\n"),
@@ -1228,7 +1223,6 @@ describe("rustFailures on the gates' own configuration", () => {
     ".cargo/config.toml": CARGO_CONFIG.join("\n"),
     ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
     "scripts/xtask.sh": `#!/bin/sh\n# Why.\n\n${XTASK_WRAPPER.slice(1).join("\n  # and\n")}\n`,
-    "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
     "scripts/cargo-config.medium.test.ts": "RUSTFLAGS",
     "scripts/rust-gate.ts": "RUSTFLAGS",
     "scripts/rust-gate.test.ts": "RUSTFLAGS",
@@ -1311,13 +1305,6 @@ describe("rustFailures on the gates' own configuration", () => {
   it("refuses a nextest config, which could filter tests out", () => {
     expect(failures({ ".config/nextest.toml": "[profile.default]\n" })).toEqual([
       expect.stringContaining("nextest runs with its defaults"),
-    ]);
-  });
-
-  it("refuses package.json gate scripts other than the standard's", () => {
-    const loose = JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, deny: "true", check: CHECK } });
-    expect(failures({ "package.json": loose })).toEqual([
-      expect.stringContaining('the "deny" script must be'),
     ]);
   });
 
@@ -1418,6 +1405,190 @@ describe("cappedScriptFailures", () => {
       [],
       [expect.stringContaining("too big to bite")],
       [expect.stringContaining("too big")],
+    ]);
+  });
+});
+
+/** A moon task's table, named `name`, with `body` for its keys. */
+const moonTask = (name: string, body: string) => `[tasks.${name}]\n${body}\n`;
+/** A command that starts vitest under the cap `cap`, from a project one folder down. */
+const cappedVitest = (cap: string) => `node ../../scripts/capped.ts ${cap} -- vitest run`;
+/** A repository whose .moon/workspace.toml is `text`. */
+const workspace = (text: string) => ({ ".moon/workspace.toml": text });
+/** A package.json with these scripts and devDependencies. */
+const packageJson = (scripts: Record<string, string>, devDependencies = {}) =>
+  JSON.stringify({ scripts, devDependencies });
+
+describe("moonFailures", () => {
+  const task = moonTask;
+  const uncached = "options = { cache = false }";
+  const gates = Object.entries(RUST_GATE_TASKS).map(([name, command]) =>
+    task(name, `command = "${command}"\n${uncached}`),
+  );
+  const root = [
+    task("check", 'deps = ["format-check", "lint-rust", "deny", "test-rust"]\n' + uncached),
+    task("format-check", 'command = "oxfmt --check"\ndeps = ["root:gate-fmt"]\n' + uncached),
+    ...gates,
+  ].join("\n");
+  const standard: Record<string, string> = {
+    ".moon/workspace.toml": 'telemetry = false\n[projects]\nroot = "."\nweb = "apps/web"\n',
+    "moon.toml": root,
+    "apps/web/moon.toml": task("build", `command = "vite build"\n${uncached}`),
+    ".prototools": 'moon = "2.6.5"\n',
+    "package.json": packageJson({ prepare: "husky" }, { "@moonrepo/cli": "2.6.5" }),
+    "apps/web/package.json": JSON.stringify({ dependencies: { vite: "1.0.0" } }),
+  };
+  const failures = (extra: Record<string, string>, drop: string[] = []) => {
+    const repo = { ...standard, ...extra };
+    const paths = Object.keys(repo).filter((p) => !drop.includes(p));
+    return moonFailures(paths, (p) => repo[p] ?? "");
+  };
+  const web = (body: string) => ({ "apps/web/moon.toml": task("t", body) });
+
+  it("accepts the standard's workspace, tasks, moon pin and package.json", () => {
+    expect(failures({})).toEqual([]);
+  });
+
+  it("refuses a task moon could replay from its cache", () => {
+    expect([
+      failures(web('command = "vite build"')),
+      failures(web('command = "vite build"\noptions = { cache = true }')),
+    ]).toEqual([
+      [expect.stringContaining('the "t" task needs `options = { cache = false }`')],
+      [expect.stringContaining('the "t" task needs `options = { cache = false }`')],
+    ]);
+  });
+
+  it("refuses a task that starts tests without a cap, or with one too big to bite", () => {
+    const capped = cappedVitest;
+    expect([
+      failures(web(`command = "vitest run"\n${uncached}`)),
+      failures(web(`script = "${capped("--memory 4G --time 10m")}; vitest run"\n${uncached}`)),
+      failures(
+        web(`command = "${capped(`--memory ${MAX_CAP.gib + 1}G --time 10m`)}"\n${uncached}`),
+      ),
+      failures(web(`command = ["vitest"]\nargs = ["run"]\n${uncached}`)),
+    ]).toEqual([
+      [expect.stringContaining('the "t" task starts tests without a memory and time cap')],
+      [expect.stringContaining("`&&` alone")],
+      [expect.stringContaining("too big to bite")],
+      [expect.stringContaining('the "t" task starts tests without a memory and time cap')],
+    ]);
+  });
+
+  const edited = (from: string, to: string) => ({ "moon.toml": root.replace(from, to) });
+  it("refuses a gate task that runs anything else, and a check or format-check that skips one", () => {
+    expect([
+      failures(edited("scripts/xtask.sh gate lint", "cargo clippy --workspace")),
+      failures(edited('"deny", ', "")),
+      failures(edited('deps = ["root:gate-fmt"]', "deps = []")),
+      failures(edited(`[tasks.deny]\n`, `[tasks.deny]\nargs = ["--x"]\n`)),
+      failures(edited(`[tasks.deny]\ncommand = "${RUST_GATE_TASKS["deny"]}"`, "[tasks.none]")),
+    ]).toEqual([
+      [expect.stringContaining('the "lint-rust" task must run')],
+      ['moon.toml: the "check" task must run `deny` among its deps.'],
+      ['moon.toml: the "format-check" task must run `gate-fmt` among its deps.'],
+      [expect.stringContaining('the "deny" task must run')],
+      [expect.stringContaining('the "deny" task must run')],
+    ]);
+  });
+
+  it("refuses a key or option it doesn't read, a dep given args, and CI skipping a task", () => {
+    expect([
+      failures(web(`command = "vite build"\nextends = "build"\n${uncached}`)),
+      failures(web(`command = "vite build"\nenv = { NODE_OPTIONS = "--x" }\n${uncached}`)),
+      failures(web('command = "vite build"\noptions = { cache = false, allowFailure = true }')),
+      failures(web(`deps = [{ target = "root:test-rust", args = "x" }]\n${uncached}`)),
+      failures(web('command = "vite build"\noptions = { cache = false, runInCI = false }')),
+      failures(
+        web('command = "vite"\noptions = { cache = false, persistent = true, runInCI = false }'),
+      ),
+    ]).toEqual([
+      [expect.stringContaining('the "t" task sets `extends`')],
+      [expect.stringContaining('the "t" task sets `env`')],
+      [expect.stringContaining('the "t" task sets `options.allowFailure`')],
+      [expect.stringContaining('the "t" task must name its deps as a list of targets')],
+      [expect.stringContaining('the "t" task sets `options.runInCI`')],
+      [],
+    ]);
+  });
+
+  it("refuses a moon config it doesn't read, telemetry on, and projects it can't list", () => {
+    expect([
+      failures({ ".moon/tasks/all.toml": "", "apps/web/moon.yml": "" }),
+      failures(workspace('telemetry = true\n[projects]\nroot = "."\n'), ["apps/web/moon.toml"]),
+      failures(workspace('telemetry = false\nprojects = ["apps/*"]\n'), ["apps/web/moon.toml"]),
+      failures({}, [".moon/workspace.toml"]),
+      failures({ "moon.toml": "[tasks\n" }),
+    ]).toEqual([
+      [
+        expect.stringContaining(".moon/tasks/all.toml: moon reads it, and this check doesn't"),
+        expect.stringContaining("apps/web/moon.yml: moon reads it, and this check doesn't"),
+      ],
+      [expect.stringContaining("set `telemetry = false`")],
+      [
+        expect.stringContaining("list the projects as a table"),
+        expect.stringContaining("moon.toml: moon reads it, and this check doesn't"),
+        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
+        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
+          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ),
+      ],
+      [
+        ".moon/workspace.toml is missing; moon's tasks are the repository's commands.",
+        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
+        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
+          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ),
+      ],
+      [
+        expect.stringContaining("moon.toml: moon can't read it"),
+        ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
+        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
+          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ),
+      ],
+    ]);
+  });
+
+  it("refuses a .prototools that doesn't pin moon alone and exactly", () => {
+    const why = expect.stringContaining(".prototools: must pin moon to one exact version");
+    expect([
+      failures({ ".prototools": 'moon = "^2.6"\n' }),
+      failures({ ".prototools": 'moon = "2.6.5"\nnode = "26"\n' }),
+      failures({ ".prototools": "moon = \n" }),
+      failures({}, [".prototools"]),
+    ]).toEqual([
+      [why],
+      [why],
+      [why],
+      [".prototools is missing; it pins the moon every host runs."],
+    ]);
+  });
+
+  it("keeps package.json to pnpm's install hook, and moon to the lockfile's, at the pinned version", () => {
+    const cli = { "@moonrepo/cli": "2.6.5" };
+    const rootPackage = (scripts: Record<string, string>, dev: Record<string, string> = cli) => ({
+      "package.json": packageJson(scripts, dev),
+    });
+    expect([
+      failures(rootPackage({ prepare: "husky", check: "moon run :check" })),
+      failures(rootPackage({ prepare: "husky --x" })),
+      failures({ "apps/web/package.json": packageJson({ dev: "vite" }) }),
+      failures(rootPackage({ prepare: "husky" }, {})),
+      failures(rootPackage({ prepare: "husky" }, { "@moonrepo/cli": "2.6.4" })),
+      failures(
+        rootPackage({ prepare: "husky" }, { ...cli, "@moonrepo/core-linux-x64-gnu": "2.6.5" }),
+      ),
+      failures({ "apps/web/package.json": packageJson({}, cli) }),
+    ]).toEqual([
+      [expect.stringContaining('package.json: the "check" script belongs in a moon task')],
+      ['package.json: the "prepare" script must be `husky`.'],
+      [expect.stringContaining('apps/web/package.json: the "dev" script belongs in a moon task')],
+      [expect.stringContaining('package.json: needs "@moonrepo/cli": "2.6.5" in devDependencies')],
+      [expect.stringContaining("package.json: depends on @moonrepo/cli 2.6.4")],
+      [expect.stringContaining("package.json: depends on @moonrepo/core-linux-x64-gnu 2.6.5")],
+      [expect.stringContaining("apps/web/package.json: depends on @moonrepo/cli 2.6.5")],
     ]);
   });
 });
@@ -3175,7 +3346,7 @@ const unmarked = (sources: Record<string, string>) =>
   );
 
 describe("tests that signal processes they didn't start", () => {
-  const MARK = '#[ignore = "signals processes; runs in pnpm test:real rust"]';
+  const MARK = '#[ignore = "signals processes; runs in moon run :test-real -- rust"]';
   const marked = `#[test]\n${MARK}\nfn m() {\n    bazhen_test_signal::require_sandbox().unwrap();\n}`;
 
   it("must be marked in a binary that runs the holder, in any of its files", () => {

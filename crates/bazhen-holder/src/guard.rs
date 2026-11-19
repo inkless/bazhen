@@ -410,7 +410,7 @@ mod tests {
     /// The sweep's own membership check passing a stranger, as a wrong edit of it would: the
     /// guard's check, made apart from it, still sends the stranger nothing.
     #[test]
-    #[ignore = "signals processes; runs in pnpm test:real rust"]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn a_stranger_vouched_for_as_a_member_is_sent_nothing() {
         bazhen_test_signal::require_sandbox().unwrap();
         let mut leader = Command::new("sleep").arg("30").spawn().unwrap();

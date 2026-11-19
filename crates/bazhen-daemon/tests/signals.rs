@@ -96,7 +96,7 @@ fn stopped_by(name: &str, signal: Signal) -> Res<(Option<i32>, bool, bool)> {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn sigterm_stops_it_with_0_saying_so_and_leaves_no_socket() {
     bazhen_test_signal::require_sandbox().unwrap();
     assert_eq!(
@@ -106,7 +106,7 @@ fn sigterm_stops_it_with_0_saying_so_and_leaves_no_socket() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn sigint_stops_it_with_0_saying_so_and_leaves_no_socket() {
     bazhen_test_signal::require_sandbox().unwrap();
     assert_eq!(
@@ -116,7 +116,7 @@ fn sigint_stops_it_with_0_saying_so_and_leaves_no_socket() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_second_signal_ends_the_drain_at_once() {
     bazhen_test_signal::require_sandbox().unwrap();
     let home = Home::new("second").unwrap();

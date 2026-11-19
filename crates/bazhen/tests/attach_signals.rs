@@ -238,7 +238,7 @@ fn ended(s: Scene) -> String {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_second_request_to_stop_ends_an_attach_stuck_writing_to_its_terminal() {
     bazhen_test_signal::require_sandbox().unwrap();
     let s = scene("stuck", true).unwrap();
@@ -260,7 +260,7 @@ fn a_second_request_to_stop_ends_an_attach_stuck_writing_to_its_terminal() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_first_request_to_stop_ends_an_idle_attach_cleanly_saying_so() {
     bazhen_test_signal::require_sandbox().unwrap();
     let s = scene("idle", false).unwrap();

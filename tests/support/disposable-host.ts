@@ -28,7 +28,7 @@ export function requireDisposableHost(host = onDisposableHost()): void {
   if (host) return;
   const message =
     "Refusing to run: these tests start real tmux servers and agent processes, and run only " +
-    `in the test container (pnpm test:real) or CI, on a Linux host carrying a root-owned ` +
+    `in the test container (moon run :test-real) or CI, on a Linux host carrying a root-owned ` +
     `${DISPOSABLE_HOST_MARKER}. Never create that file on a machine you work on.`;
   failSetup(message);
 }
@@ -41,6 +41,6 @@ export function requireSignalSandbox(sandboxed = inSignalSandbox()): void {
   if (sandboxed) return;
   failSetup(
     "Refusing to run: the holder tests start holders, which signal every process in their " +
-      `sessions when they close, and ${SANDBOX_RULE}. Run them with pnpm test:real holder.`,
+      `sessions when they close, and ${SANDBOX_RULE}. Run them with moon run :test-real -- holder.`,
   );
 }

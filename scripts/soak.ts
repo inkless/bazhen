@@ -1,8 +1,8 @@
-// `pnpm soak [--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
+// `moon run :soak -- [--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
 // a real daemon on holders, under design §12.4's load and churn, for hours, then the verdict of
-// scripts/soak-judge.ts on what it recorded. `pnpm soak --judge <dir>` judges a finished run's
-// directory again. The long-life profile is the gate's without the daemon's restarts, so the one
-// daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
+// scripts/soak-judge.ts on what it recorded. `moon run :soak -- --judge <dir>` judges a finished
+// run's directory again. The long-life profile is the gate's without the daemon's restarts, so the
+// one daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
 //
 // The load is 25 terminals: shells running scripts/soak-worker.ts (agent-stream replays, floods,
 // idle shells and one that echoes) and a Claude Code agent on the fake model. The churn kills the
@@ -216,8 +216,8 @@ export type SoakArgs =
     };
 
 const USAGE =
-  `usage: pnpm soak [--profile ${PROFILES.join("|")}] [--hours n] [--out dir] ` +
-  "[--fault close-holder|slow-probe]… | pnpm soak --judge <dir>";
+  `usage: moon run :soak -- [--profile ${PROFILES.join("|")}] [--hours n] [--out dir] ` +
+  "[--fault close-holder|slow-probe]… | moon run :soak -- --judge <dir>";
 
 /** The command line's run, or the directory to judge again. */
 export function parseSoakArgs(args: readonly string[], now = new Date()): SoakArgs {
@@ -1368,7 +1368,7 @@ class Soak {
   }
 }
 
-/** `pnpm soak`: a run, refused off a disposable host, or a run's directory judged again. */
+/** `moon run :soak`: a run, refused off a disposable host, or a run's directory judged again. */
 export async function main(
   args: readonly string[],
   sandboxed = inSignalSandbox(),

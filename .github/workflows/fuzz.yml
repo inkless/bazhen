@@ -95,7 +95,7 @@ jobs:
       # This job never commits, so it installs no git hooks.
       HUSKY: 0
       STEP_MINUTES: 105
-      # The most a round can take: test:rust's 30-minute cap, test's 10, and a margin. No round
+      # The most a round can take: test-rust's 30-minute cap, test's 10, and a margin. No round
       # starts with less than this left, so none is cut off.
       ROUND_MINUTES: 45
     steps:
@@ -111,6 +111,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Run the property tests on random seeds
         timeout-minutes: 105
         run: |
@@ -125,10 +126,10 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Round $round: PROPTEST_RNG_SEED=$proptest_seed FC_SEED=$fc_seed"
             replay=""
-            if ! PROPTEST_RNG_SEED="$proptest_seed" pnpm test:rust; then
-              replay="PROPTEST_RNG_SEED=$proptest_seed pnpm test:rust"
-            elif ! FC_SEED="$fc_seed" pnpm test; then
-              replay="FC_SEED=$fc_seed pnpm test"
+            if ! PROPTEST_RNG_SEED="$proptest_seed" moon run :test-rust; then
+              replay="PROPTEST_RNG_SEED=$proptest_seed moon run :test-rust"
+            elif ! FC_SEED="$fc_seed" moon run :test; then
+              replay="FC_SEED=$fc_seed moon run :test"
             fi
             echo "::endgroup::"
             if [ -n "$replay" ]; then

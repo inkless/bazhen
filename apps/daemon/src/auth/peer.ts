@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentSessionId } from "@bazhen/core";
 import { heard } from "@bazhen/host-guard";
 
-/** Where `pnpm build` leaves the peer reader, which the daemon installs before running it. */
+/** Where `moon run :build` leaves the peer reader, which the daemon installs before running it. */
 export const PEER_SOURCE = fileURLToPath(
   new URL("../../../../target/release/bazhen-peer", import.meta.url),
 );

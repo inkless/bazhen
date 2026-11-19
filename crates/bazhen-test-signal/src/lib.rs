@@ -19,7 +19,7 @@ pub const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
     "Refusing to run: this test signals processes it didn't start, so it runs only on a host that \
-     exists to be thrown away: the test container (pnpm test:real rust) or a CI runner, each \
+     exists to be thrown away: the test container (moon run :test-real -- rust) or a CI runner, each \
      carrying a root-owned /etc/bazhen-disposable-host. Never create that file on a machine you \
      work on"
 )]

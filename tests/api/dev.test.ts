@@ -11,18 +11,24 @@ afterAll(async () => {
   await dev.stop();
 });
 
-describe("pnpm dev", () => {
+describe("moon run :dev", () => {
   it("leaves the terminal only to the foreground job", () => {
     expect(dev.backgroundHolders()).toEqual([]);
   });
 
-  it("stops both processes cleanly on Ctrl-C, says so, and exits 0", async () => {
-    expect(dev.statuses()).toEqual([]);
-    expect(await dev.interrupt()).toEqual({
-      exit: 0,
-      apps: ["apps/daemon dev: Done", "apps/web dev: Done"],
-    });
-    expect(dev.text).toContain("apps/daemon dev: bazhen daemon stopped (SIGINT)");
-    expect(dev.text).toContain("apps/web dev: bazhen web dev server stopped");
+  it("gives neither app the terminal's input, so vite takes no key as a shortcut", () => {
+    expect(dev.appInputs()).toEqual({ daemon: ["/dev/null"], web: ["/dev/null"] });
+  });
+
+  // moon passes the Ctrl-C on to both apps and exits without waiting for them to stop, so whether
+  // an app's own "stopped" line is printed is a race, and the apps are waited for here; the daemon
+  // is built to survive being cut short. moon marks the tasks it interrupted as failed, then dies
+  // of the SIGINT itself, as a shell expects of an interrupted program: 128 + 2.
+  it("ends both apps on Ctrl-C, says it was interrupted, and dies of the SIGINT", async () => {
+    const { daemon, web } = dev.apps();
+    expect([daemon.length > 0, web.length > 0]).toEqual([true, true]);
+    expect(await dev.interrupt()).toBe(130);
+    expect(dev.text).toContain("(interrupted)");
+    expect(await DevRun.survivors([...daemon, ...web])).toEqual([]);
   });
 });

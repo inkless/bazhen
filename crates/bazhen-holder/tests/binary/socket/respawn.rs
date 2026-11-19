@@ -91,7 +91,7 @@ fn generations(client: &mut Client, generations: usize) -> Result<Vec<Seen>> {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_to_respawn_a_child_that_still_runs_and_leaves_it_running() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -109,7 +109,7 @@ fn refuses_to_respawn_a_child_that_still_runs_and_leaves_it_running() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_a_stale_generation_a_nul_and_a_program_that_cant_start_leaving_the_terminal_as_it_was() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -137,7 +137,7 @@ fn refuses_a_stale_generation_a_nul_and_a_program_that_cant_start_leaving_the_te
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_to_respawn_once_a_close_is_asked_for() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -162,7 +162,7 @@ fn refuses_to_respawn_once_a_close_is_asked_for() {
 /// respawn, then the new child's output from 0. The asker's `ok` comes after `respawned`; the
 /// holder, its socket and the terminal stay; an old generation's offset is stale.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_respawn_tells_every_connection_in_order_and_the_new_child_counts_from_zero() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -231,7 +231,7 @@ fn a_respawn_tells_every_connection_in_order_and_the_new_child_counts_from_zero(
 /// A subscriber that stopped reading through two floods, with a respawn between them, is told of
 /// each gap in its own generation: none runs across the respawn.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_subscriber_lapped_across_a_respawn_gets_a_gap_in_each_generation() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -282,7 +282,7 @@ fn ptys_held(pid: rustix::process::Pid) -> Option<(usize, usize)> {
 /// The new child is on a fresh terminal: a mode the old program left set is gone. Each respawn
 /// closes the old PTY, so after several the holder still holds one master and no slave.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn the_new_child_gets_a_fresh_terminal_and_the_old_one_is_closed() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -346,7 +346,7 @@ fn respawned_past_a_straggler(
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_respawn_ends_what_the_old_generation_left_running() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -360,7 +360,7 @@ fn a_respawn_ends_what_the_old_generation_left_running() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_close_right_after_a_respawn_ends_the_old_generation_before_the_holder_exits() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();

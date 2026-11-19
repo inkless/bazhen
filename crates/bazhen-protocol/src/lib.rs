@@ -1,6 +1,6 @@
 //! The daemon's API messages, as the Rust CLI sends and reads them: serde types held to the
-//! fixtures `pnpm schema` writes from the TypeScript protocol (packages/protocol), and the checks a
-//! client makes before it asks the daemon. No I/O.
+//! fixtures `moon run :schema` writes from the TypeScript protocol (packages/protocol), and the
+//! checks a client makes before it asks the daemon. No I/O.
 
 pub mod agents;
 pub mod daemon;

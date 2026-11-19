@@ -1,6 +1,6 @@
-//! One of the Rust gates `pnpm check` relies on (docs/standards/rust.md). Each gate's command is
-//! fixed here, and runs in an environment no caller's flags reach: a flag can switch every lint off
-//! (`--cap-lints allow`), whether it comes from the environment, a cargo config in any parent
+//! One of the Rust gates `moon run :check` relies on (docs/standards/rust.md). Each gate's command
+//! is fixed here, and runs in an environment no caller's flags reach: a flag can switch every lint
+//! off (`--cap-lints allow`), whether it comes from the environment, a cargo config in any parent
 //! directory, or an argument, and a cargo alias can stand in for a whole gate.
 
 use std::collections::BTreeMap;
@@ -206,10 +206,18 @@ const REMOVED: [&str; 13] = [
     "CLIPPY_ARGS",
 ];
 
+/// The variables a gate keeps although their prefix is removed: how many jobs cargo builds with and
+/// how many tests nextest runs at once, which a shared host caps. Neither changes what is built or
+/// run, or with which flags.
+const KEPT: [&str; 2] = ["CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS"];
+
 /// Whether a variable is one a gate removes: those in `REMOVED`, and each with a prefix cargo,
-/// rustc or nextest read flags from, but for the target directory.
+/// rustc or nextest read flags from, but for the target directory and those in `KEPT`.
 fn removed(name: &OsStr) -> bool {
     let bytes = name.as_encoded_bytes();
+    if KEPT.iter().any(|k| k.as_bytes() == bytes) {
+        return false;
+    }
     let except = |prefix: &[u8], kept: &[u8]| bytes.starts_with(prefix) && bytes != kept;
     REMOVED.iter().any(|r| r.as_bytes() == bytes)
         || except(b"CARGO_BUILD_", b"CARGO_BUILD_TARGET_DIR")
@@ -256,7 +264,7 @@ pub(crate) fn gate_env(env: impl IntoIterator<Item = (OsString, OsString)>) -> E
 
 /// The reason a test that signals processes it didn't start is ignored outside a sandbox, as
 /// `scripts/signal-paths.ts` names it.
-const SIGNALS_IGNORE: &str = "signals processes; runs in pnpm test:real rust";
+const SIGNALS_IGNORE: &str = "signals processes; runs in moon run :test-real -- rust";
 
 /// Why a gate won't run on this host: test-all runs tests only a sandbox may.
 fn sandbox_refusal(gate: Gate, sandboxed: bool) -> Option<String> {
@@ -264,7 +272,7 @@ fn sandbox_refusal(gate: Gate, sandboxed: bool) -> Option<String> {
         format!(
             "Refusing to run: cargo xtask gate test-all includes each test ignored as \
              \"{SIGNALS_IGNORE}\": such a test signals processes it didn't start, so it runs only \
-             on a host that exists to be thrown away: the test container (pnpm test:real) or a CI \
+             on a host that exists to be thrown away: the test container (moon run :test-real) or a CI \
              runner, each carrying a root-owned /etc/bazhen-disposable-host. Never create that \
              file on a machine you work on."
         )
@@ -392,6 +400,27 @@ mod tests {
                 ("CARGO_TARGET_DIR", "/tmp/target"),
                 ("CARGO_BUILD_TARGET_DIR", "/tmp/build-target"),
                 ("CARGO_HOME", "/home/u/.cargo"),
+                ("CARGO_ENCODED_RUSTFLAGS", ""),
+                ("CARGO_ENCODED_RUSTDOCFLAGS", ""),
+                ("PROPTEST_RNG_SEED", "1"),
+            ])
+        );
+    }
+
+    #[test]
+    fn keeps_the_build_jobs_and_test_threads_a_shared_host_caps() {
+        let got = gate_env(env(&[
+            ("CARGO_BUILD_JOBS", "4"),
+            ("NEXTEST_TEST_THREADS", "4"),
+            ("CARGO_BUILD_JOBSX", "4"),
+            ("NEXTEST_TEST_THREADS_X", "4"),
+            ("NEXTEST_RETRIES", "3"),
+        ]));
+        assert_eq!(
+            got,
+            env(&[
+                ("CARGO_BUILD_JOBS", "4"),
+                ("NEXTEST_TEST_THREADS", "4"),
                 ("CARGO_ENCODED_RUSTFLAGS", ""),
                 ("CARGO_ENCODED_RUSTDOCFLAGS", ""),
                 ("PROPTEST_RNG_SEED", "1"),
@@ -616,7 +645,7 @@ mod tests {
         assert!(
             err.starts_with("Refusing to run: ")
                 && err.contains(&format!("\"{SIGNALS_IGNORE}\""))
-                && err.contains("pnpm test:real"),
+                && err.contains("moon run :test-real"),
             "{err}"
         );
     }

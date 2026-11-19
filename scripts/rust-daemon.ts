@@ -18,7 +18,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 export const LIST = "tests/rust-daemon.txt";
 /** The variable naming the daemon binary the api suite starts in place of the TypeScript one. */
 export const SELECTOR = "BAZHEN_TEST_DAEMON_BIN";
-/** The daemon the files run against, in target/: the release build `pnpm build:daemon` makes. */
+/** The daemon the files run against, in target/: the release build `moon run :build-daemon` makes. */
 export const DAEMON = "target/release/bazhen-daemon";
 export const DAEMON_BIN = join(root, DAEMON);
 
@@ -143,8 +143,9 @@ const runFiles: RunFiles = (files) => {
   const dir = mkdtempSync(join(tmpdir(), "bz-rust-daemon-"));
   const out = join(dir, "report.json");
   try {
+    // By its path: moon puts nothing of node_modules/.bin on a task's PATH.
     const run = spawnSync(
-      "vitest",
+      join(root, "node_modules/.bin/vitest"),
       [
         "run",
         "--project",
@@ -191,7 +192,7 @@ export function main(args: readonly string[], w: World = world, under = root): n
   const files = listed(w.read(LIST));
   const wrong = [...problems(files, w.exists), ...lost(files, base, w.git)];
   if (files.length === 0) wrong.push(`${LIST} names no file`);
-  if (!w.exists(DAEMON_BIN)) wrong.push(`no ${DAEMON_BIN}: run pnpm build:daemon`);
+  if (!w.exists(DAEMON_BIN)) wrong.push(`no ${DAEMON_BIN}: run moon run :build-daemon`);
   if (wrong.length === 0) {
     const ran = w.run(files);
     if (ran.report === undefined) wrong.push("vitest wrote no report");

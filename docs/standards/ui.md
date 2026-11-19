@@ -3,16 +3,16 @@
 How to build UI in `apps/web`: what the look is made of, and the rules that keep a new screen
 consistent with the rest and cheap to re-theme.
 
-| Rule                                                                                         | Enforced by                                             |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Screens use only semantic tokens: no literal colours, no primitives                          | `pnpm check` (`scripts/check-standards.ts`)             |
-| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme                    | `pnpm test` (`apps/web/src/ui/token-sheet.test.ts`)     |
-| A new pair of foreground and background is added to that test                                | review                                                  |
-| Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | `pnpm lint` (`onlyThrough` in `scripts/lint-config.ts`) |
-| Interactive targets are at least `--size-hit-min`                                            | review                                                  |
-| A keystroke's path does no work beyond sending it; work over 50 ms yields                    | review                                                  |
-| The page stays ready for a strict CSP: no `eval`, no HTML strings, no remote script          | review                                                  |
-| The page reaches storage only through `deviceStorage` (`apps/web/src/storage.ts`)            | `pnpm lint` (`scripts/lint-config.ts`)                  |
+| Rule                                                                                         | Enforced by                                                  |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Screens use only semantic tokens: no literal colours, no primitives                          | `moon run :check` (`scripts/check-standards.ts`)             |
+| Every text/background pair the UI draws meets WCAG 2.2 AA, in every theme                    | `moon run :test` (`apps/web/src/ui/token-sheet.test.ts`)     |
+| A new pair of foreground and background is added to that test                                | review                                                       |
+| Screens take interactive widgets from `apps/web/src/ui/`, never from `react-aria-components` | `moon run :lint` (`onlyThrough` in `scripts/lint-config.ts`) |
+| Interactive targets are at least `--size-hit-min`                                            | review                                                       |
+| A keystroke's path does no work beyond sending it; work over 50 ms yields                    | review                                                       |
+| The page stays ready for a strict CSP: no `eval`, no HTML strings, no remote script          | review                                                       |
+| The page reaches storage only through `deviceStorage` (`apps/web/src/storage.ts`)            | `moon run :lint` (`scripts/lint-config.ts`)                  |
 
 ## Tokens
 
@@ -55,7 +55,7 @@ durations to zero.
 A new theme is another mapping block; it never touches a screen.
 
 To see every semantic colour in both themes, open `/swatches.html` on the dev server
-(`pnpm dev`). It is not part of the build.
+(`moon run :dev`). It is not part of the build.
 
 ## Adding a colour
 
@@ -63,7 +63,7 @@ To see every semantic colour in both themes, open `/swatches.html` on the dev se
 2. Otherwise add a semantic token to the mapping in `tokens.css`, onto the primitive step whose
    role matches (a hover background is step 4, body text is step 12), in both themes.
 3. Add each pair it is drawn with to `TEXT_ON` or `SEEN_ON` in
-   `apps/web/src/ui/token-sheet.test.ts`, and run `pnpm test`.
+   `apps/web/src/ui/token-sheet.test.ts`, and run `moon run :test`.
 4. A new hue is a new 12-step scale in `palette.css`, light and dark.
 
 One file holds palette colours of its own: the app icon, `apps/web/public/icon.svg`, which the
@@ -85,10 +85,10 @@ colour, not the bright one. The selection is a solid fill, 3:1 against the backg
 own text colour.
 
 The terminal draws in JetBrainsMono Nerd Font Mono, which the page bundles
-(`apps/web/src/terminal/font/`, cut by `pnpm font:terminal` from a pinned release), so Nerd Font
-icons draw on a device with nothing installed. Its icons are the same in every style, so they ship
-once: four text faces carry no icons, and one symbols face, declared for every weight and style so
-the browser never emboldens or slants an icon, carries only them. `terminalFontFamily()`
+(`apps/web/src/terminal/font/`, cut by `moon run :font-terminal` from a pinned release), so Nerd
+Font icons draw on a device with nothing installed. Its icons are the same in every style, so they
+ship once: four text faces carry no icons, and one symbols face, declared for every weight and style
+so the browser never emboldens or slants an icon, carries only them. `terminalFontFamily()`
 (`apps/web/src/terminal/font.ts`) lists the text family, then the symbols family, then the system's
 monospace stack, with a device's own `bazhen.fontFamily` ahead of them all. An icon fills one cell
 because two things agree: every glyph of every bundled face is 600 units of a 1000-unit em, a

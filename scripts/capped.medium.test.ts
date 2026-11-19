@@ -1,5 +1,5 @@
-// Runs scripts/capped.ts as cargo runs it. These run inside `pnpm test:medium`'s own capped run,
-// which is the capped run a test binary finds around it.
+// Runs scripts/capped.ts as cargo runs it. These run inside `moon run :test-medium`'s own capped
+// run, which is the capped run a test binary finds around it.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";

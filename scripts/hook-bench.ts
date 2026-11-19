@@ -1,7 +1,7 @@
 // What the hook client adds to every hook a harness runs: the wall time of
 // `sh -c '<client> PreToolUse'` against a stub daemon socket, minus that of a bare `sh -c true`
 // (foundation-design §5.6 sets the budget at under 10 ms). Harnesses run each hook through a
-// shell, so both sides pay for it. Run: `pnpm bench:hook [client]`.
+// shell, so both sides pay for it. Run: `moon run :bench-hook -- [client]`.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

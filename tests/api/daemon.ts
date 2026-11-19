@@ -107,7 +107,7 @@ export function overSocket(
   });
 }
 
-/** This checkout's CLI, which `pnpm test:api` builds. */
+/** This checkout's CLI, which `moon run :test-api` builds. */
 const CLI = join(repo, "target/release/bazhen");
 
 /** How a process exited: its code, or the signal that ended it. */
@@ -1304,7 +1304,7 @@ export class Daemon {
 
   /**
    * PTY handles the daemon process holds, from /proc: these suites run only on Linux, in CI or
-   * the `pnpm test:real` container.
+   * the `moon run :test-real` container.
    */
   ptyHandles(): number {
     const pid = this.process?.pid;

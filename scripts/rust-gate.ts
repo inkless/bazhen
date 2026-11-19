@@ -68,8 +68,13 @@ const REMOVED = new Set([
   "CLIPPY_CONF_DIR",
   "CLIPPY_ARGS",
 ]);
+/**
+ * Variables with a removed prefix but for the target directory, how many jobs cargo builds with and
+ * how many tests nextest runs at once: a shared host caps the last two, and neither changes what is
+ * built or run, or with which flags.
+ */
 const REMOVED_PREFIX =
-  /^(CARGO_BUILD_(?!TARGET_DIR$)|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_)/;
+  /^(CARGO_BUILD_(?!(?:TARGET_DIR|JOBS)$)|CARGO_TARGET_(?!DIR$)|CARGO_ALIAS_|CARGO_PROFILE_|NEXTEST_(?!TEST_THREADS$))/;
 
 /**
  * The seed every proptest draws its cases from unless the caller gives one, so that a run tests the

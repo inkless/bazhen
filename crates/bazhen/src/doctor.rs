@@ -111,7 +111,7 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
         ));
         if macos && n.notifier.is_none() {
             out.push(
-                "  warning: Bazhen.app is not built; run pnpm build:notify for macOS notifications"
+                "  warning: Bazhen.app is not built; run `moon run :build-notify` for macOS notifications"
                     .to_owned(),
             );
         }
@@ -160,7 +160,7 @@ fn peer_reader_lines(reader: &Nullable<bazhen_protocol::daemon::PeerReader>) -> 
         Nullable::Null => vec![
             "peer reader: none".to_owned(),
             "  warning: the daemon can't read which process calls on its socket, so a call from \
-             inside an agent that presents nothing passes as yours; pnpm build builds \
+             inside an agent that presents nothing passes as yours; moon run :build builds \
              bazhen-peer, so this install is incomplete"
                 .to_owned(),
         ],
@@ -190,8 +190,10 @@ fn agent_cli_lines(cli: &AgentCli, login_shell: bool) -> Vec<String> {
         (None, built) => {
             let fix = match built {
                 Some(built) => format!("link {built} into a directory on it"),
-                None => "run pnpm build, then link target/release/bazhen into a directory on it"
-                    .to_owned(),
+                None => {
+                    "run `moon run :build`, then link target/release/bazhen into a directory on it"
+                        .to_owned()
+                }
             };
             vec![
                 "agent CLI: none".to_owned(),
@@ -255,7 +257,7 @@ fn web_lines(web: &Web) -> Vec<String> {
     }
     match &web.app {
         Nullable::Null => out.push(
-            "web app: not built; `pnpm build` builds it, and the daemon serves only the API until \
+            "web app: not built; `moon run :build` builds it, and the daemon serves only the API until \
              then"
                 .to_owned(),
         ),
@@ -571,7 +573,7 @@ mod tests {
         );
         assert_eq!(
             unbuilt[1],
-            "  warning: no bazhen on the PATH agents start with, so they can't run it; run pnpm build, \
+            "  warning: no bazhen on the PATH agents start with, so they can't run it; run `moon run :build`, \
              then link target/release/bazhen into a directory on it"
         );
     }

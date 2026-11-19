@@ -1,4 +1,4 @@
-// `pnpm dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
+// `moon run :dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
 // /proc and util-linux `script`: like every api helper, it runs on a disposable host.
 
 import type { ChildProcess } from "node:child_process";
@@ -56,19 +56,24 @@ function descendants(root: number): number[] {
   return found;
 }
 
+/** What `pids` read as their input, each once. */
+const inputsOf = (pids: number[]) => [
+  ...new Set(pids.map((pid) => link(`/proc/${pid}/fd/0`) ?? `${pid} (exited)`)),
+];
+
 const commandLine = (pid: number) =>
   proc(() => readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim());
 
 /**
- * `pnpm dev` on a fresh home and free ports, in the pty of a `script` that leads a process group
- * of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
+ * `moon run :dev` on a fresh home and free ports, in the pty of a `script` that leads a process
+ * group of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
  */
 export class DevRun {
   private readonly home: string;
   private readonly script: ChildProcess;
   private output = "";
   private exited = false;
-  /** What `script -e` reports: pnpm's exit status, or 128 + the signal that ended it. */
+  /** What `script -e` reports: moon's exit status, or 128 + the signal that ended it. */
   private status: number | null = null;
   /** Everything the run started, kept so `stop` can wait for processes reparented away. */
   private readonly seen = new Set<number>();
@@ -92,8 +97,8 @@ export class DevRun {
       BAZHEN_PORT: String(await freePort()),
       BAZHEN_WEB_PORT: String(await freePort()),
     };
-    // `exec`, so the status is pnpm's: a non-interactive sh left in between dies of the Ctrl-C.
-    const script = spawnGroup("script", ["-qefc", "exec pnpm dev", "/dev/null"], {
+    // `exec`, so the status is moon's: a non-interactive sh left in between dies of the Ctrl-C.
+    const script = spawnGroup("script", ["-qefc", "exec moon run :dev", "/dev/null"], {
       cwd: repo,
       env,
       stdio: "pipe",
@@ -105,10 +110,10 @@ export class DevRun {
           run.record();
           return run.exited || (run.text.includes("listening on") && run.text.includes("ready in"));
         },
-        "pnpm dev to start",
+        "moon run :dev to start",
         90_000,
       );
-      if (run.exited) throw new Error(`pnpm dev exited at start:\n${run.text}`);
+      if (run.exited) throw new Error(`moon run :dev exited at start:\n${run.text}`);
     } catch (err) {
       await run.stop();
       throw err;
@@ -121,9 +126,37 @@ export class DevRun {
     return stripVTControlCharacters(this.output);
   }
 
-  /** The status pnpm gave each app so far, sorted. */
-  statuses(): string[] {
-    return (this.text.match(/apps\/\w+ dev: (?:Done|Failed)\b/g) ?? []).toSorted();
+  /**
+   * Each app's node processes, by app: the daemon's (`node --watch` and the daemon it starts) and
+   * vite's. The `sh` moon starts each app's script in is left out: it reads nothing, and holds the
+   * terminal moon gave it.
+   */
+  apps(): { daemon: number[]; web: number[] } {
+    const below = this.record();
+    const of = (marker: string) =>
+      below.filter((pid) => {
+        const line = commandLine(pid);
+        return line?.split(" ")[0]?.endsWith("node") === true && line.includes(marker);
+      });
+    return { daemon: of("src/main.ts"), web: of("vite/bin/vite.js") };
+  }
+
+  /** What each app's node processes read as their input, by app. */
+  appInputs(): { daemon: string[]; web: string[] } {
+    const { daemon, web } = this.apps();
+    return { daemon: inputsOf(daemon), web: inputsOf(web) };
+  }
+
+  /**
+   * The command lines of `pids` still running once they have all ended or `timeoutMs` has passed:
+   * none, when they end in time.
+   */
+  static async survivors(pids: number[], timeoutMs = 10_000): Promise<string[]> {
+    const alive = () => pids.filter((pid) => existsSync(`/proc/${pid}`));
+    for (const start = Date.now(); alive().length > 0 && Date.now() - start < timeoutMs;) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return alive().map((pid) => commandLine(pid) ?? `${pid} (exited)`);
   }
 
   private record(): number[] {
@@ -134,12 +167,12 @@ export class DevRun {
   }
 
   /**
-   * The command lines of the processes under `pnpm dev` that hold its terminal on stdin, stdout
-   * or stderr from outside the foreground process group, which the shell doesn't wait for.
+   * The command lines of the processes under `moon run :dev` that hold its terminal on stdin,
+   * stdout or stderr from outside the foreground process group, which the shell doesn't wait for.
    */
   backgroundHolders(): string[] {
-    const [pnpm, ...rest] = this.record();
-    const terminal = pnpm === undefined ? undefined : link(`/proc/${pnpm}/fd/0`);
+    const [moon, ...rest] = this.record();
+    const terminal = moon === undefined ? undefined : link(`/proc/${moon}/fd/0`);
     return rest
       .filter((pid) => {
         const s = stat(pid);
@@ -149,25 +182,25 @@ export class DevRun {
       .map((pid) => commandLine(pid) ?? `${pid} (exited)`);
   }
 
-  /** Presses Ctrl-C and waits for `pnpm dev` to end; its exit status and each app's. */
-  async interrupt(): Promise<{ exit: number | null; apps: string[] }> {
+  /** Presses Ctrl-C and waits for `moon run :dev` to end; its exit status. */
+  async interrupt(): Promise<number | null> {
     this.record();
     this.script.stdin?.write("\x03");
-    await waitUntil(() => this.exited, "pnpm dev to exit", 30_000);
-    return { exit: this.status, apps: this.statuses() };
+    await waitUntil(() => this.exited, "moon run :dev to exit", 30_000);
+    return this.status;
   }
 
   /**
    * Ends the whole tree, then removes the home. Killing `script` closes the pty, whose hangup
-   * ends pnpm, and pnpm's own reaper then kills the process groups it gave each app. Nothing is
-   * removed until every process the run started has gone.
+   * ends moon and the apps, which run in the terminal's foreground process group with it. Nothing
+   * is removed until every process the run started has gone.
    */
   async stop(): Promise<void> {
     this.record();
     if (!this.exited) signalGroup(this.script, "SIGKILL");
     await waitUntil(
       () => [...this.seen].every((pid) => !existsSync(`/proc/${pid}`)),
-      "every process of pnpm dev to exit",
+      "every process of moon run :dev to exit",
       20_000,
     );
     TmuxServer.at(join(this.home, "run", "tmux.sock"), { root: this.home }).killServer();

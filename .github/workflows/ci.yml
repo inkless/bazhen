@@ -50,21 +50,22 @@ jobs:
       # The real-tmux suites refuse to run on any host that is not thrown away after use.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; `pnpm check` runs
-      # rustfmt, clippy, cargo-deny and nextest on them.
+      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; `moon run :check`
+      # runs rustfmt, clippy, cargo-deny and nextest on them.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - uses: ./.github/actions/moon
+      - run: moon run :check
       # shellcheck is on the runner image, not on every developer's machine, so it runs here.
-      - run: pnpm lint:shell
+      - run: moon run :lint-shell
       # The suites that signal processes they didn't start, which run only on a sandbox: this
-      # runner, marked disposable above, or the test container. `pnpm check` leaves them out.
-      - run: pnpm test:holder
-      - run: pnpm test:rust:all
+      # runner, marked disposable above, or the test container. `moon run :check` leaves them out.
+      - run: moon run :test-holder
+      - run: moon run :test-rust-all
 
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
   # Only clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the
@@ -92,12 +93,14 @@ jobs:
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint:rust
-      - run: pnpm test:rust:all
-      - run: pnpm test:holder
+      - uses: ./.github/actions/moon
+      - run: moon run :lint-rust
+      - run: moon run :test-rust-all
+      - run: moon run :test-holder
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
-  # model, so it needs no credentials. It is slower than `pnpm check`, so it is a job of its own.
+  # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its
+  # own.
   api:
     name: api (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -127,7 +130,8 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:api
+      - uses: ./.github/actions/moon
+      - run: moon run :test-api
 
   # The api test files tests/rust-daemon.txt lists, against the Rust daemon, which is to replace the
   # TypeScript one: each passes on both, running every test it has. It also fails when the list lost
@@ -156,6 +160,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Fetch what main was before the push
         if: github.event_name == 'push'
         env:
@@ -164,7 +169,7 @@ jobs:
       - name: Run the listed files against the Rust daemon
         env:
           BASE: ${{ github.event_name == 'push' && github.event.before || 'HEAD^1' }}
-        run: pnpm test:api:rust --base "$BASE"
+        run: moon run :test-api-rust -- --base "$BASE"
 
   # The tmux runtime's own suite, against a private real tmux. tmux is an opt-in runtime, so this
   # job runs on every pull request but isn't a required check.
@@ -190,7 +195,8 @@ jobs:
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:integration
+      - uses: ./.github/actions/moon
+      - run: moon run :test-integration
 
   e2e:
     runs-on: ubuntu-latest
@@ -213,8 +219,9 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - run: moon run :test-e2e
 
   falsify:
     if: github.event_name == 'pull_request'
@@ -242,12 +249,13 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
-      - name: pnpm test:falsify
+      - uses: ./.github/actions/moon
+      - name: moon run :test-falsify
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: pnpm test:falsify --base "origin/$BASE_REF"
+        run: moon run :test-falsify -- --base "origin/$BASE_REF"
       # A branch that changes falsify is judged by the base's falsify too (scripts/falsify-base.ts).
-      - name: pnpm test:falsify:base
+      - name: moon run :test-falsify-base
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: pnpm test:falsify:base --base "origin/$BASE_REF"
+        run: moon run :test-falsify-base -- --base "origin/$BASE_REF"

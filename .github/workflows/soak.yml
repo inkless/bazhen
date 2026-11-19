@@ -64,10 +64,11 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Soak
         env:
           HOURS: ${{ inputs.hours }}
-        run: pnpm soak --hours "$HOURS" --out soak-run
+        run: moon run :soak -- --hours "$HOURS" --out soak-run
       - uses: actions/upload-artifact@v7
         if: always()
         with:

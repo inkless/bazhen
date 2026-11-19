@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 import type { Context } from "hono";
 import { getMimeType } from "hono/utils/mime";
 
-/** Where `pnpm build` leaves the web client: `apps/web/dist`, beside this app in the checkout. */
+/** Where `moon run :build` leaves the web client: `apps/web/dist`, beside this app in the checkout. */
 export const BUNDLE = fileURLToPath(new URL("../../../web/dist", import.meta.url));
 
 /** What the page answers when there is no bundle to serve. */
-export const NOT_BUILT = "The web app isn't built. Run `pnpm build`, then reload.";
+export const NOT_BUILT = "The web app isn't built. Run `moon run :build`, then reload.";
 
 /** Vite names these by their content, so a new build never reuses a name. */
 const ASSETS = "/assets/";

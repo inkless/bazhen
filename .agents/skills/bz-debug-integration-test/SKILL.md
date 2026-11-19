@@ -1,6 +1,6 @@
 ---
 name: bz-debug-integration-test
-description: Diagnoses Bazhen integration test runs that hang, report leaked tmux servers ("Tests left N tmux server(s) running"), refuse to start ("Refusing to run" — N PTYs are in use), or fail intermittently. Use when pnpm test:real or pnpm check misbehaves while changing Bazhen's source in this repository. Not for operating a running Bazhen.
+description: Diagnoses Bazhen integration test runs that hang, report leaked tmux servers ("Tests left N tmux server(s) running"), refuse to start ("Refusing to run" — N PTYs are in use), or fail intermittently. Use when moon run :test-real or moon run :check misbehaves while changing Bazhen's source in this repository. Not for operating a running Bazhen.
 ---
 
 # Debug an integration test run
@@ -12,8 +12,8 @@ add sleeps to make a run pass.**
 
 ## "Refusing to run: these tests start real tmux servers"
 
-The suite was started on the host. Run it with `pnpm test:real <suite>` instead; never create
-the disposable-host marker to get past it.
+The suite was started on the host. Run it with `moon run :test-real -- <suite>` instead; never
+create the disposable-host marker to get past it.
 
 ## "Refusing to run: N PTYs are in use machine-wide"
 
@@ -41,7 +41,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
 
 1. Find the hung container with `docker ps`, open a shell in it with
    `docker exec -it <container> bash`, and run one file at a time there to see which tests never
-   finish: `pnpm test:file tests/integration/<file>.test.ts --reporter=verbose`
+   finish: `moon run :test-file -- tests/integration/<file>.test.ts --reporter=verbose`
 2. For handles that keep the process alive, add `--reporter=hanging-process`.
 3. Usual causes:
    - a `stream` never `close()`d after `attach()`;
@@ -53,7 +53,7 @@ Teardown found servers from this run alive, and has already killed them. The mes
 ## It fails sometimes
 
 1. In a container shell (as above), rerun only that test, about 20 times:
-   `for i in $(seq 20); do pnpm test:file <file> -t "<name>" || break; done`
+   `for i in $(seq 20); do moon run :test-file -- <file> -t "<name>" || break; done`
 2. Usual causes:
    - an option set after `new-session` that had to apply before it: move it into `TMUX_CONFIG`;
    - asserting before the output arrived: use `expect.poll`;

@@ -1,7 +1,7 @@
-// `pnpm build:notify [<dir>]`: builds Bazhen.app, the macOS notifier the daemon launches, into
-// `<dir>` (apps/notify-mac/dist by default). Skipped, and still exiting 0, off macOS or without
-// Xcode's command-line tools: notifications are optional, and `bazhen doctor` says when the app
-// is missing. Never committed; it is built on the machine that runs it.
+// `moon run :build-notify -- [<dir>]`: builds Bazhen.app, the macOS notifier the daemon launches,
+// into `<dir>` (apps/notify-mac/dist by default). Skipped, and still exiting 0, off macOS or
+// without Xcode's command-line tools: notifications are optional, and `bazhen doctor` says when the
+// app is missing. Never committed; it is built on the machine that runs it.
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -48,7 +48,7 @@ if (isMain(import.meta)) {
   const out = process.argv[2] ?? DEFAULT_OUT;
   const skip = cannotBuild(process.platform, hasSwiftc);
   if (skip !== null) {
-    console.log(`build:notify: skipped (${skip}); no desktop notifications on this machine`);
+    console.log(`build-notify: skipped (${skip}); no desktop notifications on this machine`);
   } else {
     const app = join(out, APP_NAME);
     mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
@@ -56,6 +56,6 @@ if (isMain(import.meta)) {
     for (const step of buildSteps(SOURCE, out)) {
       execFileSync(step.command, step.args, { stdio: "inherit" });
     }
-    console.log(`build:notify: built ${app}`);
+    console.log(`build-notify: built ${app}`);
   }
 }
