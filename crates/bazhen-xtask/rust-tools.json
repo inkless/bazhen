@@ -1,0 +1,5 @@
+{
+  "cargo-nextest": "0.9.152",
+  "cargo-deny": "0.20.2",
+  "cargo-mutants": "27.1.0"
+}

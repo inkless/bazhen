@@ -746,6 +746,12 @@ const FUZZED_DECODERS: Record<string, string> = {
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::read_config_file":
     "reads config.toml only to hand its bytes to parse_config, which its config target fuzzes",
+  "crates/bazhen-xtask/src/cargo_config.rs::config_failures":
+    "finds the keys in a cargo config's text that refuse a gate, building nothing from it; a property drives it with any text",
+  "crates/bazhen-xtask/src/gate.rs::run":
+    "hands cargo configs' text to config_failures; parses nothing itself",
+  "crates/bazhen-xtask/src/main.rs::Real::read":
+    "reads a cargo config's text for config_failures; parses nothing",
   "crates/bazhen-holder/src/process.rs::procargs2_split":
     "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
   "crates/bazhen-holder/src/engine.rs::advance":
@@ -2489,9 +2495,13 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
 // Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
 // naming one is setting it where a gate would run.
 const RUST_FLAG_EXEMPT: Record<string, string> = {
+  "crates/bazhen-xtask/src/gate.rs":
+    "removes them from every gate's environment, and tests it does",
+  "crates/bazhen-xtask/src/cargo_config.rs": "plants them in configs to check they are refused",
   "scripts/cargo-gate.ts": "removes them from every gate's environment",
   "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
   "scripts/cargo-gate.medium.test.ts": "sets them to check the tool never sees them",
+  "scripts/xtask-gate.medium.test.ts": "sets them to check the tool never sees them",
   "scripts/check-standards.ts": "names them to find them",
   "scripts/check-standards.test.ts": "plants them to check they are found",
 };
