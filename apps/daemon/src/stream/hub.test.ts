@@ -171,6 +171,7 @@ function memoryLog(closing = false) {
     epoch: () => 4,
     closing: () => closing,
     theme: () => "dark",
+    exited: (t: TerminalId, exit) => events.push(`exited ${t} ${exit.generation}`),
   };
   return { log, events };
 }
@@ -1477,6 +1478,25 @@ describe("terminal hub: a process's exit", () => {
       expect(events.filter((e) => e.startsWith("ended"))).toEqual([]);
     },
   );
+
+  it("has it recorded before any view is told of it", async () => {
+    const rt = await fakeRuntime();
+    const { log, events } = memoryLog();
+    const view = viewer();
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: (t, exit) => {
+        log.exited(t, exit);
+        events.push(`views told: ${exitsOf(view).length}`);
+      },
+    });
+    await hub.join(rt.ref, view.v, size);
+    rt.runtime.exitProcess(rt.ref);
+    expect([events.filter((e) => /^(exited|views told)/.test(e)), exitsOf(view)]).toEqual([
+      [`exited ${rt.ref.terminalId} 0`, "views told: 0"],
+      [exitFrame(0)],
+    ]);
+  });
 
   it("holds it for a view whose snapshot is on its way, behind the output before it", async () => {
     const o = await snapshotTerminal();

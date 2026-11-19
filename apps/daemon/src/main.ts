@@ -589,6 +589,7 @@ const app = createApp({
 const attachments = storeLog(store);
 const hub = new TerminalHub(runtime, {
   ...attachments,
+  exited: (terminalId, exit) => lifecycle.told(terminalId, exit),
   // A view that opens a shell sees what runs in it now, not as of the last tick (§4.8).
   started: (attachment, terminalId, mode) => {
     attachments.started(attachment, terminalId, mode);

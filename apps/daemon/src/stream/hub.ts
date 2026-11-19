@@ -7,6 +7,7 @@ import {
   RESPAWN_RESET,
   type AttachmentId,
   type Lease,
+  type ProgramExit,
   type RuntimeAdapter,
   type RuntimeRef,
   type RuntimeStream,
@@ -112,6 +113,8 @@ export interface AttachmentLog {
   theme(terminal: TerminalId): TuiTheme;
   /** Whether the terminal is being closed, so its client's exit ends views as terminal_closed. */
   closing(terminal: TerminalId): boolean;
+  /** Its process exited, as its stream told: recorded before any view is told, to act on. */
+  exited(terminal: TerminalId, exit: ProgramExit): void;
 }
 
 /** A view's handle on its attachment. */
@@ -358,7 +361,10 @@ export class TerminalHub {
         watched.at = { generation, offset: 0 };
         deliver({ kind: "reset", generation, bytes: RESPAWN_BYTES });
       });
-      stream.onExit((exit) => deliver({ kind: "exited", at: watched.at, exit }));
+      stream.onExit((exit) => {
+        this.log.exited(ref.terminalId, exit);
+        deliver({ kind: "exited", at: watched.at, exit });
+      });
       stream.onClose((why) => {
         this.unpark(ref.terminalId, stream)?.cancel();
         // The client also exits when its connection to tmux is lost while the terminal lives on.

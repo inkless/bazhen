@@ -98,10 +98,8 @@ describe("bazhen terminals attach, on a holder terminal", () => {
     await attached.shows(said, "the attach saying how to start the agent again");
     const code = await attached.exited;
     const shown = attached.shown();
-    const agentOf = async () => (await state(daemon)).agents.find((a) => a.id === agentId);
-    // The daemon records the exit on its own, a moment after the stream told the attach of it.
-    await expect.poll(async () => (await agentOf())?.state, { timeout: 10_000 }).toBe("exited");
-    const agent = await agentOf();
+    // Read the moment the attach ends: the daemon records the exit before it tells any view.
+    const agent = (await state(daemon)).agents.find((a) => a.id === agentId);
     expect([
       code,
       shown.includes(said),

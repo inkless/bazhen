@@ -2,7 +2,7 @@ import type { Store } from "../store/store.ts";
 import type { AttachmentLog } from "./hub.ts";
 
 /** Attachments and leases are evented for audit; payloads carry no terminal bytes (§4.2, §9.1). */
-export function storeLog(store: Store): AttachmentLog {
+export function storeLog(store: Store): Omit<AttachmentLog, "exited"> {
   return {
     theme: (terminal) => store.terminalTheme(terminal),
     started: (attachment, terminalId, mode) =>

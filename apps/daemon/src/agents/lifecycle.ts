@@ -13,6 +13,7 @@ import {
   terminal,
   type AgentSessionId,
   type EnvironmentAdapter,
+  type ProgramExit,
   type RuntimeRef,
   type Size,
 } from "@bazhen/core";
@@ -195,9 +196,24 @@ export class Lifecycle {
       return;
     }
     if (status === null) return;
+    if (ref.locator.generation !== String(found.generation)) return;
+    this.recordExit(found, status);
+  }
+
+  /**
+   * The agent's process exited, as its terminal's stream told before any view hears of it:
+   * recorded then, ahead of the environment's next report, so whoever acts on the exit finds the
+   * agent exited. Only the recorded generation's exit is taken; any other is the report's to read.
+   */
+  told(terminalId: string, exit: ProgramExit): void {
+    const found = this.store.agentTerminal({ terminalId });
+    if (found === undefined || found.generation !== exit.generation) return;
+    this.recordExit(found, exit.status);
+  }
+
+  private recordExit(found: AgentTerminal, status: ExitStatus): void {
     if (found.terminalState == null || !terminal.accepts(found.terminalState, "process.exited"))
       return;
-    if (ref.locator.generation !== String(found.generation)) return;
     this.store.append(exited(found.agentId, status));
   }
 
