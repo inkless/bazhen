@@ -394,7 +394,10 @@ deliberate cases below. A command in Codex's
 `workspace-write` sandbox can't reach the daemon's socket at all; run `bazhen` outside it. On
 macOS, the kernel hides the environment of a process it restricts (`cs_restricted`, unless SIP is
 off), so a command left running after its shell exits is marked only when it isn't one; the
-`bazhen` CLI isn't.
+`bazhen` CLI isn't. On Linux, the kernel hides a process's environment from the daemon when the
+process runs as another of your groups, as a `newgrp` or `sg` shell's do. Such a call is marked
+by the `CODEX_THREAD_ID` that `bazhen` sends instead, so a client that sends none, left running
+after its shell exits, isn't marked.
 
 These checks catch an agent's ordinary and accidental calls, not a determined agent's. Agents run
 as you, the same user, so an agent that does any of these looks like you to Bazhen:
