@@ -84,6 +84,17 @@ would vanish, and a cell painted with it carries light text poorly. Bold is draw
 colour, not the bright one. The selection is a solid fill, 3:1 against the background, with its
 own text colour.
 
+The terminal draws in JetBrainsMono Nerd Font Mono, which the page bundles
+(`apps/web/src/terminal/font/`, cut by `pnpm font:terminal` from a pinned release), so Nerd Font
+icons draw on a device with nothing installed. Its icons are the same in every style, so they ship
+once: four text faces carry no icons, and one symbols face carries only them. `terminalFontFamily()`
+(`apps/web/src/terminal/font.ts`) lists the text family, then the symbols family, then the system's
+monospace stack, with a device's own `bazhen.fontFamily` ahead of them all. The Mono faces give an
+icon a letter's advance, and Unicode 11 widths give each icon one cell; `widths.test.ts` holds the
+two together. xterm.js measures its cell as it opens, and the WebGL renderer keeps each glyph it
+has drawn, so a terminal opens only once the faces it draws with have loaded, or after 5 seconds.
+A face that fails opens it on the fallback stack rather than not at all.
+
 An agent's TUI picks its colours once, as it starts, so its terminal is drawn in the theme it
 was started for, whatever the page's: a TUI drawn for dark is unreadable on a light terminal. A
 launch and a respawn send the theme the page shows, and the daemon passes it to the harness:
