@@ -59,18 +59,79 @@ describe("bazhen terminals attach, on a holder terminal", () => {
     ]).toEqual([0, false, true]);
   });
 
-  it("ends, saying so, when the terminal exits", async () => {
+  it("ends, saying so, when the shell's program exits", async () => {
     const terminalId = await shell("exits");
     const attached = attachInScript(daemon, terminalId);
     left.push(attached.leave);
-    attached.type("exit\r");
-    await attached.shows(
-      `${terminalId}: the terminal exited`,
-      "the attach saying the terminal exited",
-    );
+    attached.type("exit 0\r");
+    const said = `${terminalId}: its program exited (code 0)`;
+    await attached.shows(said, "the attach saying the shell exited");
+    expect([await attached.exited, attached.shown().includes(said)]).toEqual([0, true]);
+  });
+
+  /**
+   * An agent whose harness prints `ready`, then on a line typed prints its last words and exits
+   * 0, as Codex does on `/exit`, on a session it can resume.
+   */
+  async function quitting(): Promise<{ agentId: string; terminalId: string; name: string }> {
+    const program = await daemon.program([
+      "sh",
+      "-c",
+      "printf 'ready\\n'; read line; printf 'last-words-%s\\n' 7; exit 0",
+    ]);
+    const agentOf = async () => (await state(daemon)).agents.find((a) => a.id === program.agentId);
+    await daemon.giveTranscript(program.agentId, String((await agentOf())?.externalRef?.id));
+    await expect.poll(async () => (await agentOf())?.resumable, { timeout: 10_000 }).toBe(true);
+    return { ...program, name: String((await agentOf())?.name) };
+  }
+
+  it("ends after an agent's last output when its harness exits, and says how to start it again", async () => {
+    const { agentId, name } = await quitting();
+    const attached = attachInScript(daemon, name);
+    left.push(attached.leave);
+    await attached.shows("ready", "the harness's first output");
+    attached.type("/exit\r");
+    const said =
+      `${name}: Claude Code exited (code 0); its terminal and thread are kept. ` +
+      `\`bazhen agents respawn ${name}\` starts it again on the same thread; ` +
+      `\`bazhen agents close ${name}\` ends it.`;
+    await attached.shows(said, "the attach saying how to start the agent again");
     const code = await attached.exited;
-    expect([code, attached.shown().includes(`${terminalId}: the terminal exited`)]).toEqual([
+    const shown = attached.shown();
+    const agentOf = async () => (await state(daemon)).agents.find((a) => a.id === agentId);
+    // The daemon records the exit on its own, a moment after the stream told the attach of it.
+    await expect.poll(async () => (await agentOf())?.state, { timeout: 10_000 }).toBe("exited");
+    const agent = await agentOf();
+    expect([
+      code,
+      shown.includes(said),
+      shown.split(said)[0]?.includes("last-words-7"),
+      agent?.state,
+      agent?.commands.includes("respawn"),
+    ]).toEqual([0, true, true, "exited", true]);
+    const respawned = await daemon.request(`/v1/agents/${agentId}/respawn`, {
+      method: "POST",
+      body: { idempotencyKey: "respawn-after-exit", generation: 0 },
+    });
+    expect(respawned.status).toBe(200);
+  });
+
+  it("with --direct, ends after an agent's last output when its harness exits", async () => {
+    const { terminalId } = await quitting();
+    const direct = attachInScript(daemon, `${terminalId} --direct`);
+    left.push(direct.leave);
+    await direct.shows("ready", "the harness's first output");
+    const view = await daemon.socketView(terminalId, "interactive");
+    await view.drive();
+    view.type("/exit\r");
+    const said = `${terminalId}: its program exited (code 0)`;
+    await direct.shows(said, "the attach saying the program exited");
+    const code = await direct.exited;
+    view.close();
+    const shown = direct.shown();
+    expect([code, shown.includes(said), shown.split(said)[0]?.includes("last-words-7")]).toEqual([
       0,
+      true,
       true,
     ]);
   });

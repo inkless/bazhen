@@ -13,7 +13,7 @@ use std::io;
 use std::path::Path;
 
 use bazhen_client::Caller;
-use bazhen_protocol::agents::{Agent, AgentCommand, ExitStatus, HarnessId, StateSnapshot};
+use bazhen_protocol::agents::{Agent, ExitStatus, HarnessId, StateSnapshot};
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::ids::is_id;
 use serde::Deserialize;
@@ -140,8 +140,9 @@ pub(crate) fn run(
     Ok(report(done, target, after.as_ref(), &notes, out))
 }
 
-/// The agent `target` names as it stands once its program's exit ended the attachment, for what
-/// to do next; none for any other ending, a shell or a terminal, or a daemon that can't say.
+/// The agent `target` names, once its program's exit ended the attachment, for what to do next;
+/// none for any other ending, a shell or a terminal, or a daemon that can't say. The daemon may
+/// not have recorded the exit yet, so only what the exit doesn't change is read from it.
 fn exited_agent(done: &Done, daemon: &Daemon, target: &str) -> Option<Agent> {
     if !matches!(done, Done::Ended(Ending::ProgramExited(_))) {
         return None;
@@ -273,7 +274,7 @@ fn program_exited(target: &str, agent: Option<&Agent>, status: &ExitStatus) -> S
         HarnessId::Codex => "Codex",
     };
     let close = format!("`bazhen agents close {name}` ends it");
-    if agent.commands.contains(&AgentCommand::Respawn) {
+    if agent.resumable {
         format!(
             "{name}: {harness} exited ({how}); its terminal and thread are kept. `bazhen agents \
              respawn {name}` starts it again on the same thread; {close}."
@@ -306,8 +307,8 @@ fn terminal_of(state: &StateSnapshot, target: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// The protocol's example agent, as a Codex agent named `name` offering `commands`.
-    fn codex(name: &str, commands: Vec<AgentCommand>) -> Agent {
+    /// The protocol's example agent, as a Codex agent named `name` whose thread may resume.
+    fn codex(name: &str, resumable: bool) -> Agent {
         let examples: serde_json::Value = bazhen_protocol::wire::from_slice(include_bytes!(
             "../../../packages/protocol/fixtures/api/StateSnapshot.json"
         ))
@@ -316,14 +317,14 @@ mod tests {
         let mut agent = state.agents[0].clone();
         agent.name = name.to_owned();
         agent.harness = HarnessId::Codex;
-        agent.commands = commands;
+        agent.resumable = resumable;
         agent
     }
 
     #[test]
     fn says_what_an_agents_exit_keeps_and_what_starts_it_again() {
-        let resumes = codex("scout", vec![AgentCommand::Respawn, AgentCommand::Close]);
-        let fresh = codex("scout", vec![AgentCommand::Relaunch, AgentCommand::Close]);
+        let resumes = codex("scout", true);
+        let fresh = codex("scout", false);
         let code = |code| ExitStatus::Exited { code };
         assert_eq!(
             [
