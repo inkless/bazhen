@@ -100,15 +100,14 @@ function parseLog(text: string): Logged[] {
 
 /**
  * The environment a gate is started in: the stubs on PATH, the crate's directory as `cargo run`
- * names it, and the caller's own variables.
+ * names it, unless the caller names the root as scripts/xtask.sh does, having removed it, and the
+ * caller's own variables.
  */
-const startEnv = (env: Record<string, string>) => ({
-  PATH: bin,
-  CARGO_HOME: home,
-  CARGO_MANIFEST_DIR: join(root, "crates", "bazhen-xtask"),
-  STUB_LOG: log,
-  ...env,
-});
+function startEnv(env: Record<string, string>) {
+  const manifest =
+    "BAZHEN_XTASK_ROOT" in env ? {} : { CARGO_MANIFEST_DIR: join(root, "crates", "bazhen-xtask") };
+  return { PATH: bin, CARGO_HOME: home, ...manifest, STUB_LOG: log, ...env };
+}
 
 /** What a gate run did: its exit, the tools it started, and the hint it gave, if any. */
 function gate(command: string[], env: Record<string, string> = {}) {
@@ -161,7 +160,7 @@ describe("cargo xtask gate", () => {
   it("runs nothing unless it is named a root at a full path, or cargo names the crate's directory", () => {
     const runs = [{ CARGO_MANIFEST_DIR: "" }, { BAZHEN_XTASK_ROOT: "repo" }].map((env) => {
       const { status, stderr, logged } = rust(["fmt"], env);
-      return { status, runs: logged.length, said: stderr.includes("run it as scripts/xtask.sh") };
+      return { status, runs: logged.length, said: stderr.includes("or as scripts/xtask.sh") };
     });
     expect(runs).toEqual([0, 1].map(() => ({ status: 2, runs: 0, said: true })));
   });

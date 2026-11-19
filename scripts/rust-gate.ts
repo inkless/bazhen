@@ -51,8 +51,10 @@ export const RUST_TOOLS: Readonly<Record<RustTool, string>> = (() => {
 export const installCommand = (...tools: RustTool[]): string =>
   `cargo install --locked ${tools.map((tool) => `${tool}@${RUST_TOOLS[tool]}`).join(" ")}`;
 
-// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags.
+// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags,
+// and the root scripts/xtask.sh names, which is xtask's alone.
 const REMOVED = new Set([
+  "BAZHEN_XTASK_ROOT",
   "PROPTEST_CASES",
   "RUSTFLAGS",
   "RUSTDOCFLAGS",

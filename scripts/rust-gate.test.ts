@@ -31,6 +31,7 @@ describe("gateEnv", () => {
       CLIPPY_ARGS: "--cap-lints=allow",
       NEXTEST_PROFILE: "lax",
       PROPTEST_CASES: "1",
+      BAZHEN_XTASK_ROOT: "/w/repo",
     });
     expect(env).toEqual({
       PATH: "/usr/bin",

@@ -98,30 +98,89 @@ function workspace(): string {
   return copy;
 }
 
-/** Where cargo puts the checkout's builds, so a copy's build reuses what they built. */
-function buildsGoTo(): string {
-  const metadata = spawnSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
-    cwd: root,
+/**
+ * `gate fmt` in `copy`, through `command`. Plain `cargo xtask` builds in a folder of the test's
+ * own, and scripts/xtask.sh in the copy's, so neither reuses a binary another test built.
+ */
+function formatCopy(
+  copy: string,
+  command = join(copy, "scripts", "xtask.sh"),
+  args: string[] = [],
+  env: Record<string, string> = {},
+) {
+  const run = spawnSync(command, [...args, "gate", "fmt"], {
+    cwd: copy,
     encoding: "utf8",
+    env: { ...process.env, CARGO_TARGET_DIR: join(dir, "builds"), ...env },
+  });
+  return { status: run.status, stderr: run.stderr };
+}
+
+/** A copy of the workspace with a file rustfmt would change, so a genuine `gate fmt` fails. */
+function misformatted(): string {
+  const copy = workspace();
+  const lib = join(copy, "crates", "bazhen-pid", "src", "lib.rs");
+  writeFileSync(lib, `pub const  MISFORMATTED : u8=0;\n${readFileSync(lib, "utf8")}`);
+  return copy;
+}
+
+/** Plants `config` as the cargo config of the folder above the copy. */
+function parentConfig(config: string): string {
+  mkdirSync(join(dir, ".cargo"));
+  writeFileSync(join(dir, ".cargo", "config.toml"), config);
+  return join(dir, ".cargo", "config.toml");
+}
+
+/** The version of `name` that `copy`'s Cargo.lock holds. */
+function lockedVersion(copy: string, name: string): string {
+  const lock = readFileSync(join(copy, "Cargo.lock"), "utf8");
+  const version = new RegExp(`name = "${name}"\\nversion = "([^"]+)"`).exec(lock)?.[1];
+  if (version === undefined) throw new Error(`Cargo.lock holds no ${name}`);
+  return version;
+}
+
+/**
+ * A linker at `name` in the test's folder that links with the system's `cc`, then puts a script
+ * that exits 0 in place of xtask.
+ */
+function forger(name: string): string {
+  const cc = spawnSync("sh", ["-c", "command -v cc"], { encoding: "utf8" }).stdout.trim();
+  return runner(
+    name,
+    [
+      `${cc} "$@" || exit`,
+      'out=; prev=; for arg; do [ "$prev" = -o ] && out=$arg; prev=$arg; done',
+      "case $out in */bazhen_xtask*) printf '#!/bin/sh\\nexit 0\\n' > \"$out\" ;; esac",
+    ].join("\n"),
+  );
+}
+
+/** The target directory cargo uses for `copy` when nothing names one. */
+function targetOf(copy: string): string {
+  const { CARGO_TARGET_DIR: _, ...env } = process.env;
+  const metadata = spawnSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+    cwd: copy,
+    encoding: "utf8",
+    env,
   }).stdout;
   const named = /"target_directory":"([^"\\]+)"/.exec(metadata)?.[1];
   if (named === undefined) throw new Error(`cargo metadata named no target directory: ${metadata}`);
   return named;
 }
 
-/** `gate fmt` in `copy`, through `command`, building where the checkout's builds go. */
-function formatCopy(
-  copy: string,
-  command = join(copy, "scripts", "xtask.sh"),
-  args: string[] = [],
-) {
-  const run = spawnSync(command, [...args, "gate", "fmt"], {
-    cwd: copy,
+/** scripts/xtask.sh's `help`, from a temporary folder under `tmp`: its exit and what it said. */
+function helpFrom(tmp: string) {
+  mkdirSync(tmp, { recursive: true });
+  const run = spawnSync(WRAPPER, ["help"], {
     encoding: "utf8",
-    env: { ...process.env, CARGO_TARGET_DIR: buildsGoTo() },
+    env: { ...process.env, TMPDIR: tmp },
   });
   return { status: run.status, stderr: run.stderr };
 }
+
+/** What genuine xtask says of a config it refuses; a forged one says nothing. */
+const refusedBy = (stderr: string, config: string) =>
+  stderr.includes(`${config} `) && stderr.includes("which the Rust gates can't override");
 
 /** A cargo home sharing the real one's downloads, whose config sets `config`. */
 function cargoHome(config: string): string {
@@ -189,9 +248,7 @@ describe("scripts/xtask.sh", () => {
       `CARGO_MANIFEST_DIR=${join(elsewhere, "crates", "x")}`,
       `PATH=${firstOnPath(dir)}`,
     ];
-    mkdirSync(join(dir, ".cargo"));
-    const config = `[target.${host()}]\nrunner = ${JSON.stringify(forged)}\n`;
-    writeFileSync(join(dir, ".cargo", "config.toml"), config);
+    parentConfig(`[target.${host()}]\nrunner = ${JSON.stringify(forged)}\n`);
     const direct = formatCopy(copy, "cargo", ["xtask"]).status;
     const { status, stderr } = formatCopy(copy);
     rmSync(elsewhere, { recursive: true, force: true });
@@ -216,5 +273,131 @@ describe("scripts/xtask.sh", () => {
       status: 1,
       refused: true,
     });
+  }, 600_000);
+
+  it("builds xtask itself under a parent config whose linker would forge it", () => {
+    const copy = misformatted();
+    const config = parentConfig(
+      `[target.${host()}]\nlinker = ${JSON.stringify(forger("forger"))}\n`,
+    );
+    const direct = formatCopy(copy, "cargo", ["xtask"]).status;
+    const { status, stderr } = formatCopy(copy);
+    expect({ direct, status, refused: refusedBy(stderr, config) }).toEqual({
+      direct: 0,
+      status: 1,
+      refused: true,
+    });
+  }, 600_000);
+
+  // [env] reaches rustc, and so the `cc` it links with.
+  it("builds xtask itself under a parent config whose [env] puts a forging cc first", () => {
+    const copy = misformatted();
+    mkdirSync(join(dir, "bin"));
+    forger(join("bin", "cc"));
+    const path = JSON.stringify(firstOnPath(join(dir, "bin")));
+    const config = parentConfig(`[env]\nPATH = { value = ${path}, force = true }\n`);
+    const direct = formatCopy(copy, "cargo", ["xtask"]).status;
+    const { status, stderr } = formatCopy(copy);
+    expect({ direct, status, refused: refusedBy(stderr, config) }).toEqual({
+      direct: 0,
+      status: 1,
+      refused: true,
+    });
+  }, 600_000);
+
+  // `paths` swaps a dependency's code without changing Cargo.lock; this one doesn't compile.
+  it("builds xtask itself under a parent config whose `paths` swaps a dependency", () => {
+    const copy = misformatted();
+    const version = lockedVersion(copy, "itoa");
+    const swapped = join(dir, "itoa");
+    mkdirSync(join(swapped, "src"), { recursive: true });
+    writeFileSync(
+      join(swapped, "Cargo.toml"),
+      `[package]\nname = "itoa"\nversion = "${version}"\nedition = "2021"\n`,
+    );
+    writeFileSync(join(swapped, "src", "lib.rs"), 'compile_error!("swapped itoa");\n');
+    const config = parentConfig(`paths = [${JSON.stringify(swapped)}]\n`);
+    const direct = formatCopy(copy, "cargo", ["xtask"]);
+    const { status, stderr } = formatCopy(copy);
+    expect({
+      direct: direct.status,
+      swapped: direct.stderr.includes("swapped itoa"),
+      status,
+      refused: refusedBy(stderr, config),
+    }).toEqual({ direct: 101, swapped: true, status: 1, refused: true });
+  }, 600_000);
+
+  // The build runs with none of the caller's variables but those the wrapper names.
+  it("builds xtask with no linker, rustflags or rustc wrapper from the caller's environment", () => {
+    const copy = workspace();
+    const logs = runner("logs", `echo "$*" >> "${dir}/log"\nexit 1`);
+    const linker = `CARGO_TARGET_${host().toUpperCase().replaceAll("-", "_")}_LINKER`;
+    const planted = { [linker]: logs, RUSTFLAGS: "--no-such-flag", RUSTC_WRAPPER: logs };
+    const run = spawnSync(join(copy, "scripts", "xtask.sh"), ["nope"], {
+      cwd: copy,
+      encoding: "utf8",
+      env: { ...process.env, ...planted },
+    });
+    expect({ status: run.status, ran: existsSync(join(dir, "log")) }).toEqual({
+      status: 2,
+      ran: false,
+    });
+  }, 600_000);
+
+  it("builds xtask itself under a cargo home config whose linker would forge it", () => {
+    const copy = misformatted();
+    const linker = `[target.${host()}]\nlinker = ${JSON.stringify(forger("forger"))}\n`;
+    const home = cargoHome(linker);
+    const direct = formatCopy(copy, "cargo", ["xtask"], { CARGO_HOME: home }).status;
+    const { status, stderr } = formatCopy(copy, undefined, [], { CARGO_HOME: home });
+    expect({ direct, status, refused: refusedBy(stderr, join(home, "config.toml")) }).toEqual({
+      direct: 0,
+      status: 1,
+      refused: true,
+    });
+  }, 600_000);
+
+  it("names the root it is in, whatever CARGO_MANIFEST_DIR the caller set", () => {
+    const copy = workspace();
+    const elsewhere = join(dir, "elsewhere", "crates", "x");
+    expect(formatCopy(copy, undefined, [], { CARGO_MANIFEST_DIR: elsewhere }).status).toBe(0);
+  }, 600_000);
+});
+
+describe("scripts/xtask.sh's own build", () => {
+  it("refuses to build under a cargo config above the folder it builds from", () => {
+    const refused = ["config", "config.toml"].map((name) => {
+      mkdirSync(join(dir, name, ".cargo"), { recursive: true });
+      const config = join(dir, name, ".cargo", name);
+      writeFileSync(config, "[build]\njobs = 1\n");
+      const { status, stderr } = helpFrom(join(dir, name, "tmp"));
+      return { status, refused: stderr.includes(`cargo would read ${config} while it builds`) };
+    });
+    expect(refused).toEqual([0, 1].map(() => ({ status: 1, refused: true })));
+  });
+
+  it("refuses to build under a .cargo above it that it can't search", () => {
+    writeFileSync(join(dir, ".cargo"), "");
+    const { status, stderr } = helpFrom(join(dir, "tmp"));
+    expect({ status, refused: stderr.includes(`can't search ${dir}/.cargo`) }).toEqual({
+      status: 1,
+      refused: true,
+    });
+  });
+
+  it("refuses to build with a config in its own cargo home", () => {
+    const copy = workspace();
+    const wrapper = join(copy, "scripts", "xtask.sh");
+    const built = spawnSync(wrapper, ["help"], { encoding: "utf8" }).status;
+    writeFileSync(
+      join(targetOf(copy), "xtask", "cargo-home", "config.toml"),
+      "[build]\njobs = 1\n",
+    );
+    const run = spawnSync(wrapper, ["help"], { encoding: "utf8" });
+    expect({
+      built,
+      status: run.status,
+      refused: run.stderr.includes("the build's own cargo home has a config.toml"),
+    }).toEqual({ built: 0, status: 1, refused: true });
   }, 600_000);
 });

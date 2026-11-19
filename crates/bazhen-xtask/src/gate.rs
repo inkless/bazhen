@@ -188,8 +188,10 @@ fn is_test_name(name: &str) -> bool {
         .all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
 }
 
-/// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags.
-const REMOVED: [&str; 12] = [
+/// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags,
+/// and the root scripts/xtask.sh names, which is xtask's alone.
+const REMOVED: [&str; 13] = [
+    "BAZHEN_XTASK_ROOT",
     "PROPTEST_CASES",
     "RUSTFLAGS",
     "RUSTDOCFLAGS",
@@ -380,6 +382,7 @@ mod tests {
             ("CLIPPY_ARGS", "--cap-lints=allow"),
             ("NEXTEST_PROFILE", "lax"),
             ("PROPTEST_CASES", "1"),
+            ("BAZHEN_XTASK_ROOT", "/w/repo"),
         ]));
         assert_eq!(
             got,

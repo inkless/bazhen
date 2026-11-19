@@ -49,19 +49,20 @@ impl Host for Real {
     }
 }
 
-/// The repository root: the full path `scripts/xtask.sh` names in `BAZHEN_XTASK_ROOT`, which it
-/// takes from where it is, or else two levels above the crate's directory, which `cargo run` names
-/// in `CARGO_MANIFEST_DIR` when xtask runs as `cargo xtask`. Read when xtask runs, not when it was
-/// built: cargo reuses a binary that another checkout built in a shared target directory, and a
-/// copy cargo-mutants made builds its own.
+/// The repository root: two levels above the crate's directory, which `cargo run` names in
+/// `CARGO_MANIFEST_DIR` when xtask runs as `cargo xtask`, so a `BAZHEN_XTASK_ROOT` the caller left
+/// set can't move it; or else the full path `scripts/xtask.sh` names in `BAZHEN_XTASK_ROOT`, which
+/// it takes from where it is, having removed `CARGO_MANIFEST_DIR`. Read when xtask runs, not when
+/// it was built: cargo reuses a binary that another checkout built in a shared target directory,
+/// and a copy cargo-mutants made builds its own.
 fn root_of(env: &Env) -> Option<PathBuf> {
-    if let Some(named) = env.get(OsStr::new("BAZHEN_XTASK_ROOT")) {
-        return Some(PathBuf::from(named)).filter(|root| root.is_absolute());
+    if let Some(manifest) = env.get(OsStr::new("CARGO_MANIFEST_DIR")) {
+        return Path::new(manifest)
+            .ancestors()
+            .nth(2)
+            .map(Path::to_path_buf);
     }
-    Path::new(env.get(OsStr::new("CARGO_MANIFEST_DIR"))?)
-        .ancestors()
-        .nth(2)
-        .map(Path::to_path_buf)
+    Some(PathBuf::from(env.get(OsStr::new("BAZHEN_XTASK_ROOT"))?)).filter(|root| root.is_absolute())
 }
 
 /// Where the cargo configs cargo would read from its home are: `CARGO_HOME`, or `.cargo` in the
@@ -81,9 +82,8 @@ fn cargo_home(env: &Env, home: Option<PathBuf>) -> Option<PathBuf> {
 fn start(env: Env, args: &[OsString], stderr: &mut impl Write) -> cli::Exit {
     // Nowhere left to report a write to stderr that failed.
     let Some(root) = root_of(&env) else {
-        let why = "xtask: run it as scripts/xtask.sh, which names the repository in \
-                   BAZHEN_XTASK_ROOT, or as `cargo xtask`, which names its crate in \
-                   CARGO_MANIFEST_DIR.";
+        let why = "xtask: run it as `cargo xtask`, which names its crate in CARGO_MANIFEST_DIR, \
+                   or as scripts/xtask.sh, which names the repository in BAZHEN_XTASK_ROOT.";
         writeln!(stderr, "{why}").ok();
         return cli::Exit::Usage;
     };
@@ -125,13 +125,14 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_root_the_wrapper_names_or_else_the_one_above_the_crate_cargo_names() {
+    fn takes_the_root_above_the_crate_cargo_names_or_else_the_one_the_wrapper_names() {
         let at = |vars: &[(&str, &str)]| root_of(&env(vars));
         let manifest = ("CARGO_MANIFEST_DIR", "/w/repo/crates/bazhen-xtask");
-        assert_eq!(at(&[manifest]), Some(PathBuf::from("/w/repo")));
         let named = ("BAZHEN_XTASK_ROOT", "/x/repo");
-        assert_eq!(at(&[named, manifest]), Some(PathBuf::from("/x/repo")));
-        assert_eq!(at(&[("BAZHEN_XTASK_ROOT", "repo"), manifest]), None);
+        assert_eq!(at(&[manifest]), Some(PathBuf::from("/w/repo")));
+        assert_eq!(at(&[named, manifest]), Some(PathBuf::from("/w/repo")));
+        assert_eq!(at(&[named]), Some(PathBuf::from("/x/repo")));
+        assert_eq!(at(&[("BAZHEN_XTASK_ROOT", "repo")]), None);
         assert_eq!(at(&[("CARGO_MANIFEST_DIR", "")]), None);
         assert_eq!(at(&[]), None);
     }

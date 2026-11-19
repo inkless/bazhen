@@ -9,8 +9,9 @@ runner = ["scripts/capped.ts", "--test-binary", "--"]
 # xtask runs the Rust gates, so it is built with no rustc wrapper or compiler a cargo config
 # names, as the gates build: one could stand in for xtask itself. RUSTC_WRAPPER in the caller's
 # environment still outranks `--config`; the gates' own commands run without it. A runner set for
-# the host's triple outranks this one, so the gate scripts run scripts/xtask.sh, which builds xtask
-# with the same overrides and runs it with no runner at all.
+# the host's triple outranks this one, and any config's linker or [env] still reaches the build, so
+# the gate scripts run scripts/xtask.sh, which builds xtask where no config or caller's variable
+# reaches it and runs it with no runner at all.
 [alias]
 xtask = [
   "run",

@@ -213,8 +213,21 @@ script runs `scripts/xtask.sh gate`, which builds xtask (`crates/bazhen-xtask/sr
 the binary itself, naming the repository it is in as the root. `cargo xtask` would start xtask
 through a target runner, and a runner set for the host's triple outranks the one the alias names:
 it could stand in for xtask, or start it with another root and `PATH`, and pass with no gate run.
-cargo uses no runner to build. The build takes the alias's overrides of a configured compiler or
-wrapper, and no rustflags. `scripts/check-standards.ts` pins the script's text. xtask holds the
+cargo uses no runner to build. And xtask can only check the configs once it runs, after cargo has
+built it under them: a config's linker, `[env]`, `paths` or source replacement could build
+another xtask that passes. So the script builds xtask where no cargo config reaches it:
+
+- from a new, empty folder, since cargo reads configs from the folder it runs in and those above
+  it, refusing if one of those has a cargo config, named `config` or `config.toml` in its
+  `.cargo` folder, or can't be searched;
+- with a cargo home of its own, in `target/xtask/cargo-home`, which shares the caller's downloads
+  and has no config;
+- with no variable from the caller but `PATH`, `HOME` and `RUSTUP_HOME`, so no `CARGO_*`, `RUSTC*`
+  or `RUSTFLAGS` reaches it, and with the toolchain `rust-toolchain.toml` pins.
+
+It builds into `target/xtask`, apart from the gates' builds. It takes no shared compiler cache,
+so its first build in a checkout costs a few seconds; later runs find it built.
+`scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
 any option after the gate (`pnpm test:rust <name>` may name tests), removes the variables that
 change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every
@@ -230,19 +243,19 @@ Every gate, fmt and deny too, refuses to run under a cargo config that sets what
   `Cargo.lock`, so `--locked` doesn't catch them.
 
 That covers each config outside the repository, in a parent directory or the cargo home. It also
-covers a file named `config`, with no extension, beside the repository's `.cargo/config.toml`, tracked or not, whatever it sets: cargo reads that in
-place of the pinned `.cargo/config.toml`, and only warns. A config is parsed as TOML and its keys
+covers a file named `config`, with no extension, beside the repository's `.cargo/config.toml`,
+tracked or not, whatever it sets: cargo reads that in place of the pinned `.cargo/config.toml`, and
+only warns. A config is parsed as TOML and its keys
 read as cargo reads them, so no quoting or escaping hides one, and a config that doesn't parse is
 refused. A global `RUSTFLAGS` or a wrapper such as sccache is ignored by the gates, not an error.
 
 **What the gates defend against.** The configs, environment and tools a developer's machine
 gathers by accident or from elsewhere: a global `RUSTFLAGS`, a cross-compiling runner in a parent
 directory, an alias, a config another project left behind. None of these makes a gate pass with
-less checked. They don't defend against a local user who sets out to defeat them, who can rewrite
-the toolchain, `PATH` or the script itself. In particular, `RUSTC`, `RUSTC_WRAPPER` or
-`RUSTC_WORKSPACE_WRAPPER` in the caller's environment outranks the build's overrides and still
-builds xtask; that is what keeps sccache working. CI runs the same gates on a clean runner, and
-that run decides.
+less checked. What is left to trust is what the script starts with: `sh`, the tools on `PATH`
+(`cargo`, the linker `cc`), and the rustup toolchain. They don't defend against a local user who
+sets out to defeat them, who can rewrite those or the script itself. CI runs the same gates on a
+clean runner, and that run decides.
 
 **Every fd is close-on-exec.** `clippy.toml` disallows the rustix calls that make an fd without
 `O_CLOEXEC` (`rustix::fs::open`, `rustix::fs::openat`, `rustix::io::dup`): a child would inherit
