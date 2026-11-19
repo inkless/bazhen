@@ -35,56 +35,59 @@ const Range = z.string().superRefine((text, ctx) => {
   if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
 });
 
+/**
+ * A table of the file. smol-toml reads a datetime as a `Date`, which zod takes for an object with
+ * no keys, so it is refused before zod sees it.
+ */
+const table = <Shape extends z.core.$ZodLooseShape>(shape: Shape) =>
+  z.preprocess((value, ctx) => {
+    if (value instanceof Date)
+      ctx.addIssue({ code: "invalid_type", expected: "object", input: value });
+    return value;
+  }, z.strictObject(shape));
+
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
 export const ConfigFile = z.strictObject({
-  daemon: z.strictObject({ port: Port.optional() }).optional(),
-  bank: z.strictObject({ path: z.string().startsWith("/").optional() }).optional(),
-  notifications: z.strictObject({ desktop: z.boolean().optional() }).optional(),
-  shells: z.strictObject({ retype_last_command: z.boolean().optional() }).optional(),
-  agents: z
-    .strictObject({
-      shell: Shell.optional(),
-      /** How many agents one agent may have launched to delegate to and still open at once. */
-      max_launched: z.int().min(0).optional(),
-      /** How many launches down an agent may still launch another. */
-      max_launch_depth: z.int().min(1).optional(),
-      /** How long an agent's harness has to come up, once its terminal runs, before you're told. */
-      start_deadline_seconds: z.int().min(1).optional(),
-      env: z
-        .strictObject({
-          deny: z.array(EnvRule).optional(),
-          passthrough: z.array(EnvRule).optional(),
-        })
-        .optional(),
-    })
-    .optional(),
-  terminals: z
-    .strictObject({
-      /** How many terminals, agents' and shells', may be open at once. */
-      max_open: z.int().min(1).optional(),
-      /** The memory each terminal's processes may use together, where they can be contained. */
-      memory_max: MemoryMax.optional(),
-      /** The memory every terminal's processes may use together. */
-      total_memory_max: MemoryMax.optional(),
-      /** The swap each terminal's processes may use together, where they can be contained. */
-      swap_max: SwapMax.optional(),
-      /** How many lines of history above its screen each new terminal keeps. */
-      history_lines: z.int().min(0).max(HOLDER_MAX_HISTORY_LINES).optional(),
-    })
-    .optional(),
+  daemon: table({ port: Port.optional() }).optional(),
+  bank: table({ path: z.string().startsWith("/").optional() }).optional(),
+  notifications: table({ desktop: z.boolean().optional() }).optional(),
+  shells: table({ retype_last_command: z.boolean().optional() }).optional(),
+  agents: table({
+    shell: Shell.optional(),
+    /** How many agents one agent may have launched to delegate to and still open at once. */
+    max_launched: z.int().min(0).optional(),
+    /** How many launches down an agent may still launch another. */
+    max_launch_depth: z.int().min(1).optional(),
+    /** How long an agent's harness has to come up, once its terminal runs, before you're told. */
+    start_deadline_seconds: z.int().min(1).optional(),
+    env: table({
+      deny: z.array(EnvRule).optional(),
+      passthrough: z.array(EnvRule).optional(),
+    }).optional(),
+  }).optional(),
+  terminals: table({
+    /** How many terminals, agents' and shells', may be open at once. */
+    max_open: z.int().min(1).optional(),
+    /** The memory each terminal's processes may use together, where they can be contained. */
+    memory_max: MemoryMax.optional(),
+    /** The memory every terminal's processes may use together. */
+    total_memory_max: MemoryMax.optional(),
+    /** The swap each terminal's processes may use together, where they can be contained. */
+    swap_max: SwapMax.optional(),
+    /** How many lines of history above its screen each new terminal keeps. */
+    history_lines: z.int().min(0).max(HOLDER_MAX_HISTORY_LINES).optional(),
+  }).optional(),
   /** Where new terminals run; each one already made stays on the runtime it was made on. */
-  runtime: z.strictObject({ default: RuntimeKind.optional() }).optional(),
-  web: z
-    .strictObject({
-      external_origins: z.array(Origin).optional(),
-      allow_insecure_origins: z.boolean().optional(),
-      pairing: z.enum(["auto", "always"]).optional(),
-      /** "lan" also serves HTTPS on every interface, to the ranges `lan_allow` lists. */
-      listen: Listen.optional(),
-      lan_port: Port.optional(),
-      lan_allow: z.array(Range).optional(),
-    })
-    .optional(),
+  runtime: table({ default: RuntimeKind.optional() }).optional(),
+  web: table({
+    external_origins: z.array(Origin).optional(),
+    allow_insecure_origins: z.boolean().optional(),
+    pairing: z.enum(["auto", "always"]).optional(),
+    /** "lan" also serves HTTPS on every interface, to the ranges `lan_allow` lists. */
+    listen: Listen.optional(),
+    lan_port: Port.optional(),
+    lan_allow: z.array(Range).optional(),
+  }).optional(),
 });
 type ConfigFile = z.infer<typeof ConfigFile>;
 

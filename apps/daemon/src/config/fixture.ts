@@ -14,7 +14,20 @@ interface Leaf {
   readonly bad: readonly string[];
 }
 
-const NOT_SCALARS = ["[1]", "{}", "{ a = 1 }", "1979-05-27T07:32:00Z", "07:32:00"];
+/**
+ * Datetimes of each kind, and two the parsers once read apart: JavaScript reads a day past its
+ * month's end, which the toml crate refuses, and refuses a leap second, which the crate reads.
+ */
+const DATETIMES = [
+  "1979-05-27T07:32:00Z",
+  "1979-05-27 07:32:00+01:00",
+  "1979-05-27T07:32:00",
+  "1979-05-27",
+  "07:32:00",
+  "2023-02-30",
+  "23:59:60",
+];
+const NOT_SCALARS = ["[1]", "{}", "{ a = 1 }", ...DATETIMES];
 const NUMBERS_BAD = ['"1"', "true", "1.5", "nan", "-nan", "inf", "+inf", "-inf", "1e300", "-1e300"];
 const STRINGS_BAD = ["1", "1.5", "true", "nan", "inf", "-inf", ...NOT_SCALARS];
 const port = (table: string, key: string): Leaf => ({
@@ -77,8 +90,11 @@ const strings = (
     "[[]]",
     '[["A"]]',
     "[1979-05-27]",
+    '["A", 2023-02-30]',
+    "[23:59:60]",
     "{}",
     "1979-05-27",
+    "2023-02-30",
   ],
 });
 const text = (
@@ -290,7 +306,7 @@ const tableCases = (table: string): Case[] => {
   const [parent, child] = table.includes(".") ? table.split(".") : [undefined, table];
   const under = (line: string) => (parent === undefined ? line : `[${parent}]\n${line}`);
   return [
-    ...["1", '"x"', "[]", "[{}]", "true", "1979-05-27", "07:32:00", "{}", "nan"].map((value) => ({
+    ...["1", '"x"', "[]", "[{}]", "true", ...DATETIMES, "{}", "nan"].map((value) => ({
       name: `${table} as ${value}`,
       toml: `${under(`${child} = ${value}`)}\n`,
     })),
@@ -384,6 +400,18 @@ const SHAPES: Case[] = [
   { name: "a key that is empty", toml: '"" = 1\n' },
   { name: "a key that isn't ASCII", toml: '"ключ" = 1\n' },
   { name: "the second bad element of a list", toml: '[agents.env]\ndeny = ["A", 1, "1A"]\n' },
+  { name: "an unknown key holding a day past its month's end", toml: "nope = 2023-04-31\n" },
+  { name: "an unknown key holding a leap second", toml: "nope = 1979-05-27T23:59:60Z\n" },
+  {
+    name: "days past their months' ends, in a list and a table",
+    toml: "nope = [2023-02-29, 2023-02-31T07:32:00Z]\n[daemon]\nport = 2024-02-30 07:32:00\n",
+  },
+  { name: "a day past its month's end, at a leap second", toml: "nope = 2023-02-30T23:59:60\n" },
+  { name: "a day past its month's end, at hour 24", toml: "nope = 2023-02-30T24:00:00\n" },
+  { name: "a day past its month's end, then bad syntax", toml: "nope = 2023-02-30\nport =\n" },
+  { name: "day 32", toml: "nope = 2023-01-32\n" },
+  { name: "a leap day", toml: "[daemon]\nport = 2024-02-29\n" },
+  { name: "a datetime in a string", toml: '[bank]\npath = "2023-02-30"\n' },
   { name: "a byte order mark", toml: "﻿[daemon]\nport = 7901\n" },
   { name: "CRLF line ends", toml: "[daemon]\r\nport = 7901\r\n" },
   { name: "a literal string", toml: "[bank]\npath = '/srv/bank'\n" },

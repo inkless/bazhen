@@ -351,6 +351,92 @@
       }
     },
     {
+      "name": "an unknown key holding a day past its month's end",
+      "toml": "nope = 2023-04-31\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: (top level): Unrecognized key: \"nope\""
+      }
+    },
+    {
+      "name": "an unknown key holding a leap second",
+      "toml": "nope = 1979-05-27T23:59:60Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  nope = 1979-05-27T23:59:60Z\n           ^\n",
+        "syntax": true
+      }
+    },
+    {
+      "name": "days past their months' ends, in a list and a table",
+      "toml": "nope = [2023-02-29, 2023-02-31T07:32:00Z]\n[daemon]\nport = 2024-02-30 07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon.port: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "a day past its month's end, at a leap second",
+      "toml": "nope = 2023-02-30T23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  nope = 2023-02-30T23:59:60\n           ^\n",
+        "syntax": true
+      }
+    },
+    {
+      "name": "a day past its month's end, at hour 24",
+      "toml": "nope = 2023-02-30T24:00:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  nope = 2023-02-30T24:00:00\n           ^\n",
+        "syntax": true
+      }
+    },
+    {
+      "name": "a day past its month's end, then bad syntax",
+      "toml": "nope = 2023-02-30\nport =\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid value\n\n1:  nope = 2023-02-30\n2:  port =\n          ^\n",
+        "syntax": true
+      }
+    },
+    {
+      "name": "day 32",
+      "toml": "nope = 2023-01-32\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  nope = 2023-01-32\n           ^\n",
+        "syntax": true
+      }
+    },
+    {
+      "name": "a leap day",
+      "toml": "[daemon]\nport = 2024-02-29\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon.port: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "a datetime in a string",
+      "toml": "[bank]\npath = \"2023-02-30\"\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid string: must start with \"/\""
+      }
+    },
+    {
       "name": "a byte order mark",
       "toml": "﻿[daemon]\nport = 7901\n",
       "env": {},
@@ -681,40 +767,39 @@
       }
     },
     {
+      "name": "daemon as 1979-05-27T07:32:00Z",
+      "toml": "daemon = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "daemon as 1979-05-27 07:32:00+01:00",
+      "toml": "daemon = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "daemon as 1979-05-27T07:32:00",
+      "toml": "daemon = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "daemon as 1979-05-27",
       "toml": "daemon = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -723,35 +808,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "daemon as 2023-02-30",
+      "toml": "daemon = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: daemon: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "daemon as 23:59:60",
+      "toml": "daemon = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  daemon = 23:59:60\n             ^\n",
+        "syntax": true
       }
     },
     {
@@ -882,40 +958,39 @@
       }
     },
     {
+      "name": "bank as 1979-05-27T07:32:00Z",
+      "toml": "bank = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "bank as 1979-05-27 07:32:00+01:00",
+      "toml": "bank = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "bank as 1979-05-27T07:32:00",
+      "toml": "bank = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "bank as 1979-05-27",
       "toml": "bank = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -924,35 +999,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "bank as 2023-02-30",
+      "toml": "bank = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "bank as 23:59:60",
+      "toml": "bank = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  bank = 23:59:60\n           ^\n",
+        "syntax": true
       }
     },
     {
@@ -1083,40 +1149,39 @@
       }
     },
     {
+      "name": "notifications as 1979-05-27T07:32:00Z",
+      "toml": "notifications = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications as 1979-05-27 07:32:00+01:00",
+      "toml": "notifications = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications as 1979-05-27T07:32:00",
+      "toml": "notifications = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "notifications as 1979-05-27",
       "toml": "notifications = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -1125,35 +1190,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications as 2023-02-30",
+      "toml": "notifications = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications as 23:59:60",
+      "toml": "notifications = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  notifications = 23:59:60\n                    ^\n",
+        "syntax": true
       }
     },
     {
@@ -1284,40 +1340,39 @@
       }
     },
     {
+      "name": "shells as 1979-05-27T07:32:00Z",
+      "toml": "shells = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "shells as 1979-05-27 07:32:00+01:00",
+      "toml": "shells = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "shells as 1979-05-27T07:32:00",
+      "toml": "shells = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "shells as 1979-05-27",
       "toml": "shells = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -1326,35 +1381,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "shells as 2023-02-30",
+      "toml": "shells = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "shells as 23:59:60",
+      "toml": "shells = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  shells = 23:59:60\n             ^\n",
+        "syntax": true
       }
     },
     {
@@ -1485,40 +1531,39 @@
       }
     },
     {
+      "name": "agents as 1979-05-27T07:32:00Z",
+      "toml": "agents = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents as 1979-05-27 07:32:00+01:00",
+      "toml": "agents = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents as 1979-05-27T07:32:00",
+      "toml": "agents = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "agents as 1979-05-27",
       "toml": "agents = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -1527,35 +1572,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents as 2023-02-30",
+      "toml": "agents = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents as 23:59:60",
+      "toml": "agents = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  agents = 23:59:60\n             ^\n",
+        "syntax": true
       }
     },
     {
@@ -1686,40 +1722,39 @@
       }
     },
     {
+      "name": "agents.env as 1979-05-27T07:32:00Z",
+      "toml": "[agents]\nenv = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env as 1979-05-27 07:32:00+01:00",
+      "toml": "[agents]\nenv = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env as 1979-05-27T07:32:00",
+      "toml": "[agents]\nenv = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "agents.env as 1979-05-27",
       "toml": "[agents]\nenv = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -1728,35 +1763,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env as 2023-02-30",
+      "toml": "[agents]\nenv = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env as 23:59:60",
+      "toml": "[agents]\nenv = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents]\n2:  env = 23:59:60\n          ^\n",
+        "syntax": true
       }
     },
     {
@@ -1887,40 +1913,39 @@
       }
     },
     {
+      "name": "terminals as 1979-05-27T07:32:00Z",
+      "toml": "terminals = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals as 1979-05-27 07:32:00+01:00",
+      "toml": "terminals = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals as 1979-05-27T07:32:00",
+      "toml": "terminals = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "terminals as 1979-05-27",
       "toml": "terminals = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -1929,35 +1954,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals as 2023-02-30",
+      "toml": "terminals = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals as 23:59:60",
+      "toml": "terminals = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  terminals = 23:59:60\n                ^\n",
+        "syntax": true
       }
     },
     {
@@ -2088,40 +2104,39 @@
       }
     },
     {
+      "name": "runtime as 1979-05-27T07:32:00Z",
+      "toml": "runtime = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "runtime as 1979-05-27 07:32:00+01:00",
+      "toml": "runtime = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "runtime as 1979-05-27T07:32:00",
+      "toml": "runtime = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "runtime as 1979-05-27",
       "toml": "runtime = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -2130,35 +2145,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "runtime as 2023-02-30",
+      "toml": "runtime = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "runtime as 23:59:60",
+      "toml": "runtime = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  runtime = 23:59:60\n              ^\n",
+        "syntax": true
       }
     },
     {
@@ -2289,40 +2295,39 @@
       }
     },
     {
+      "name": "web as 1979-05-27T07:32:00Z",
+      "toml": "web = 1979-05-27T07:32:00Z\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "web as 1979-05-27 07:32:00+01:00",
+      "toml": "web = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "web as 1979-05-27T07:32:00",
+      "toml": "web = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
       "name": "web as 1979-05-27",
       "toml": "web = 1979-05-27\n",
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
       }
     },
     {
@@ -2331,35 +2336,26 @@
       "env": {},
       "lan": false,
       "outcome": {
-        "config": {
-          "port": 7900,
-          "bank": null,
-          "loginShell": null,
-          "envRules": {
-            "deny": [],
-            "passthrough": []
-          },
-          "desktopNotifications": true,
-          "retypeLastCommand": false,
-          "launchLimits": {
-            "maxLaunched": 5,
-            "maxDepth": 3
-          },
-          "startDeadlineMs": 60000,
-          "maxOpenTerminals": 100,
-          "historyLines": 10000,
-          "defaultRuntime": "holder",
-          "terminalCaps": {
-            "terminal": "50%",
-            "total": "80%",
-            "swap": "0"
-          },
-          "externalOrigins": [],
-          "externalOriginsFrom": null,
-          "allowInsecureOrigins": false,
-          "pairing": "auto",
-          "pairingRequired": false
-        }
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "web as 2023-02-30",
+      "toml": "web = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web: Invalid input: expected object, received TomlDate"
+      }
+    },
+    {
+      "name": "web as 23:59:60",
+      "toml": "web = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  web = 23:59:60\n          ^\n",
+        "syntax": true
       }
     },
     {
@@ -3187,12 +3183,58 @@
       }
     },
     {
+      "name": "bank.path refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[bank]\npath = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "bank.path refuses 1979-05-27T07:32:00",
+      "toml": "[bank]\npath = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "bank.path refuses 1979-05-27",
+      "toml": "[bank]\npath = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
       "name": "bank.path refuses 07:32:00",
       "toml": "[bank]\npath = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "bank.path refuses 2023-02-30",
+      "toml": "[bank]\npath = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: bank.path: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "bank.path refuses 23:59:60",
+      "toml": "[bank]\npath = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [bank]\n2:  path = 23:59:60\n           ^\n",
+        "syntax": true
       }
     },
     {
@@ -3333,12 +3375,58 @@
       }
     },
     {
+      "name": "notifications.desktop refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[notifications]\ndesktop = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications.desktop: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications.desktop refuses 1979-05-27T07:32:00",
+      "toml": "[notifications]\ndesktop = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications.desktop: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications.desktop refuses 1979-05-27",
+      "toml": "[notifications]\ndesktop = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications.desktop: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
       "name": "notifications.desktop refuses 07:32:00",
       "toml": "[notifications]\ndesktop = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: notifications.desktop: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications.desktop refuses 2023-02-30",
+      "toml": "[notifications]\ndesktop = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: notifications.desktop: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "notifications.desktop refuses 23:59:60",
+      "toml": "[notifications]\ndesktop = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [notifications]\n2:  desktop = 23:59:60\n              ^\n",
+        "syntax": true
       }
     },
     {
@@ -3479,12 +3567,58 @@
       }
     },
     {
+      "name": "shells.retype_last_command refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[shells]\nretype_last_command = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells.retype_last_command: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "shells.retype_last_command refuses 1979-05-27T07:32:00",
+      "toml": "[shells]\nretype_last_command = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells.retype_last_command: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "shells.retype_last_command refuses 1979-05-27",
+      "toml": "[shells]\nretype_last_command = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells.retype_last_command: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
       "name": "shells.retype_last_command refuses 07:32:00",
       "toml": "[shells]\nretype_last_command = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: shells.retype_last_command: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "shells.retype_last_command refuses 2023-02-30",
+      "toml": "[shells]\nretype_last_command = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: shells.retype_last_command: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "shells.retype_last_command refuses 23:59:60",
+      "toml": "[shells]\nretype_last_command = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [shells]\n2:  retype_last_command = 23:59:60\n                          ^\n",
+        "syntax": true
       }
     },
     {
@@ -3660,12 +3794,58 @@
       }
     },
     {
+      "name": "agents.shell refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[agents]\nshell = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.shell: Invalid option: expected one of \"direct\"|\"login\""
+      }
+    },
+    {
+      "name": "agents.shell refuses 1979-05-27T07:32:00",
+      "toml": "[agents]\nshell = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.shell: Invalid option: expected one of \"direct\"|\"login\""
+      }
+    },
+    {
+      "name": "agents.shell refuses 1979-05-27",
+      "toml": "[agents]\nshell = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.shell: Invalid option: expected one of \"direct\"|\"login\""
+      }
+    },
+    {
       "name": "agents.shell refuses 07:32:00",
       "toml": "[agents]\nshell = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: agents.shell: Invalid option: expected one of \"direct\"|\"login\""
+      }
+    },
+    {
+      "name": "agents.shell refuses 2023-02-30",
+      "toml": "[agents]\nshell = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.shell: Invalid option: expected one of \"direct\"|\"login\""
+      }
+    },
+    {
+      "name": "agents.shell refuses 23:59:60",
+      "toml": "[agents]\nshell = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents]\n2:  shell = 23:59:60\n            ^\n",
+        "syntax": true
       }
     },
     {
@@ -4007,12 +4187,58 @@
       }
     },
     {
+      "name": "agents.max_launched refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[agents]\nmax_launched = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launched: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launched refuses 1979-05-27T07:32:00",
+      "toml": "[agents]\nmax_launched = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launched: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launched refuses 1979-05-27",
+      "toml": "[agents]\nmax_launched = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launched: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
       "name": "agents.max_launched refuses 07:32:00",
       "toml": "[agents]\nmax_launched = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: agents.max_launched: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launched refuses 2023-02-30",
+      "toml": "[agents]\nmax_launched = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launched: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launched refuses 23:59:60",
+      "toml": "[agents]\nmax_launched = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents]\n2:  max_launched = 23:59:60\n                   ^\n",
+        "syntax": true
       }
     },
     {
@@ -4354,12 +4580,58 @@
       }
     },
     {
+      "name": "agents.max_launch_depth refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[agents]\nmax_launch_depth = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launch_depth: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launch_depth refuses 1979-05-27T07:32:00",
+      "toml": "[agents]\nmax_launch_depth = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launch_depth: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launch_depth refuses 1979-05-27",
+      "toml": "[agents]\nmax_launch_depth = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launch_depth: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
       "name": "agents.max_launch_depth refuses 07:32:00",
       "toml": "[agents]\nmax_launch_depth = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: agents.max_launch_depth: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launch_depth refuses 2023-02-30",
+      "toml": "[agents]\nmax_launch_depth = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.max_launch_depth: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.max_launch_depth refuses 23:59:60",
+      "toml": "[agents]\nmax_launch_depth = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents]\n2:  max_launch_depth = 23:59:60\n                       ^\n",
+        "syntax": true
       }
     },
     {
@@ -4701,12 +4973,58 @@
       }
     },
     {
+      "name": "agents.start_deadline_seconds refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[agents]\nstart_deadline_seconds = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.start_deadline_seconds: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.start_deadline_seconds refuses 1979-05-27T07:32:00",
+      "toml": "[agents]\nstart_deadline_seconds = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.start_deadline_seconds: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.start_deadline_seconds refuses 1979-05-27",
+      "toml": "[agents]\nstart_deadline_seconds = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.start_deadline_seconds: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
       "name": "agents.start_deadline_seconds refuses 07:32:00",
       "toml": "[agents]\nstart_deadline_seconds = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: agents.start_deadline_seconds: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.start_deadline_seconds refuses 2023-02-30",
+      "toml": "[agents]\nstart_deadline_seconds = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.start_deadline_seconds: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.start_deadline_seconds refuses 23:59:60",
+      "toml": "[agents]\nstart_deadline_seconds = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents]\n2:  start_deadline_seconds = 23:59:60\n                             ^\n",
+        "syntax": true
       }
     },
     {
@@ -5078,6 +5396,25 @@
       }
     },
     {
+      "name": "agents.env.deny refuses [\"A\", 2023-02-30]",
+      "toml": "[agents.env]\ndeny = [\"A\", 2023-02-30]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env.deny.1: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env.deny refuses [23:59:60]",
+      "toml": "[agents.env]\ndeny = [23:59:60]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents.env]\n2:  deny = [23:59:60]\n            ^\n",
+        "syntax": true
+      }
+    },
+    {
       "name": "agents.env.deny refuses {}",
       "toml": "[agents.env]\ndeny = {}\n",
       "env": {},
@@ -5089,6 +5426,15 @@
     {
       "name": "agents.env.deny refuses 1979-05-27",
       "toml": "[agents.env]\ndeny = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env.deny: Invalid input: expected array, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env.deny refuses 2023-02-30",
+      "toml": "[agents.env]\ndeny = 2023-02-30\n",
       "env": {},
       "lan": false,
       "outcome": {
@@ -5464,6 +5810,25 @@
       }
     },
     {
+      "name": "agents.env.passthrough refuses [\"A\", 2023-02-30]",
+      "toml": "[agents.env]\npassthrough = [\"A\", 2023-02-30]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env.passthrough.1: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env.passthrough refuses [23:59:60]",
+      "toml": "[agents.env]\npassthrough = [23:59:60]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [agents.env]\n2:  passthrough = [23:59:60]\n                   ^\n",
+        "syntax": true
+      }
+    },
+    {
       "name": "agents.env.passthrough refuses {}",
       "toml": "[agents.env]\npassthrough = {}\n",
       "env": {},
@@ -5475,6 +5840,15 @@
     {
       "name": "agents.env.passthrough refuses 1979-05-27",
       "toml": "[agents.env]\npassthrough = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: agents.env.passthrough: Invalid input: expected array, received TomlDate"
+      }
+    },
+    {
+      "name": "agents.env.passthrough refuses 2023-02-30",
+      "toml": "[agents.env]\npassthrough = 2023-02-30\n",
       "env": {},
       "lan": false,
       "outcome": {
@@ -5820,12 +6194,58 @@
       }
     },
     {
+      "name": "terminals.max_open refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[terminals]\nmax_open = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.max_open: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.max_open refuses 1979-05-27T07:32:00",
+      "toml": "[terminals]\nmax_open = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.max_open: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.max_open refuses 1979-05-27",
+      "toml": "[terminals]\nmax_open = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.max_open: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
       "name": "terminals.max_open refuses 07:32:00",
       "toml": "[terminals]\nmax_open = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: terminals.max_open: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.max_open refuses 2023-02-30",
+      "toml": "[terminals]\nmax_open = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.max_open: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.max_open refuses 23:59:60",
+      "toml": "[terminals]\nmax_open = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [terminals]\n2:  max_open = 23:59:60\n               ^\n",
+        "syntax": true
       }
     },
     {
@@ -6645,12 +7065,58 @@
       }
     },
     {
+      "name": "terminals.memory_max refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[terminals]\nmemory_max = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.memory_max refuses 1979-05-27T07:32:00",
+      "toml": "[terminals]\nmemory_max = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.memory_max refuses 1979-05-27",
+      "toml": "[terminals]\nmemory_max = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
       "name": "terminals.memory_max refuses 07:32:00",
       "toml": "[terminals]\nmemory_max = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: terminals.memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.memory_max refuses 2023-02-30",
+      "toml": "[terminals]\nmemory_max = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.memory_max refuses 23:59:60",
+      "toml": "[terminals]\nmemory_max = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [terminals]\n2:  memory_max = 23:59:60\n                 ^\n",
+        "syntax": true
       }
     },
     {
@@ -7470,12 +7936,58 @@
       }
     },
     {
+      "name": "terminals.total_memory_max refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[terminals]\ntotal_memory_max = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.total_memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.total_memory_max refuses 1979-05-27T07:32:00",
+      "toml": "[terminals]\ntotal_memory_max = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.total_memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.total_memory_max refuses 1979-05-27",
+      "toml": "[terminals]\ntotal_memory_max = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.total_memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
       "name": "terminals.total_memory_max refuses 07:32:00",
       "toml": "[terminals]\ntotal_memory_max = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: terminals.total_memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.total_memory_max refuses 2023-02-30",
+      "toml": "[terminals]\ntotal_memory_max = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.total_memory_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.total_memory_max refuses 23:59:60",
+      "toml": "[terminals]\ntotal_memory_max = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [terminals]\n2:  total_memory_max = 23:59:60\n                       ^\n",
+        "syntax": true
       }
     },
     {
@@ -7845,12 +8357,58 @@
       }
     },
     {
+      "name": "terminals.swap_max refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[terminals]\nswap_max = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.swap_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.swap_max refuses 1979-05-27T07:32:00",
+      "toml": "[terminals]\nswap_max = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.swap_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.swap_max refuses 1979-05-27",
+      "toml": "[terminals]\nswap_max = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.swap_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
       "name": "terminals.swap_max refuses 07:32:00",
       "toml": "[terminals]\nswap_max = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: terminals.swap_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.swap_max refuses 2023-02-30",
+      "toml": "[terminals]\nswap_max = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.swap_max: Invalid input: expected string, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.swap_max refuses 23:59:60",
+      "toml": "[terminals]\nswap_max = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [terminals]\n2:  swap_max = 23:59:60\n               ^\n",
+        "syntax": true
       }
     },
     {
@@ -8192,12 +8750,58 @@
       }
     },
     {
+      "name": "terminals.history_lines refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[terminals]\nhistory_lines = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.history_lines: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.history_lines refuses 1979-05-27T07:32:00",
+      "toml": "[terminals]\nhistory_lines = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.history_lines: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.history_lines refuses 1979-05-27",
+      "toml": "[terminals]\nhistory_lines = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.history_lines: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
       "name": "terminals.history_lines refuses 07:32:00",
       "toml": "[terminals]\nhistory_lines = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: terminals.history_lines: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.history_lines refuses 2023-02-30",
+      "toml": "[terminals]\nhistory_lines = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: terminals.history_lines: Invalid input: expected number, received TomlDate"
+      }
+    },
+    {
+      "name": "terminals.history_lines refuses 23:59:60",
+      "toml": "[terminals]\nhistory_lines = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [terminals]\n2:  history_lines = 23:59:60\n                    ^\n",
+        "syntax": true
       }
     },
     {
@@ -8401,12 +9005,58 @@
       }
     },
     {
+      "name": "runtime.default refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[runtime]\ndefault = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime.default: Invalid option: expected one of \"tmux\"|\"holder\""
+      }
+    },
+    {
+      "name": "runtime.default refuses 1979-05-27T07:32:00",
+      "toml": "[runtime]\ndefault = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime.default: Invalid option: expected one of \"tmux\"|\"holder\""
+      }
+    },
+    {
+      "name": "runtime.default refuses 1979-05-27",
+      "toml": "[runtime]\ndefault = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime.default: Invalid option: expected one of \"tmux\"|\"holder\""
+      }
+    },
+    {
       "name": "runtime.default refuses 07:32:00",
       "toml": "[runtime]\ndefault = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: runtime.default: Invalid option: expected one of \"tmux\"|\"holder\""
+      }
+    },
+    {
+      "name": "runtime.default refuses 2023-02-30",
+      "toml": "[runtime]\ndefault = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: runtime.default: Invalid option: expected one of \"tmux\"|\"holder\""
+      }
+    },
+    {
+      "name": "runtime.default refuses 23:59:60",
+      "toml": "[runtime]\ndefault = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [runtime]\n2:  default = 23:59:60\n              ^\n",
+        "syntax": true
       }
     },
     {
@@ -8917,6 +9567,25 @@
       }
     },
     {
+      "name": "web.external_origins refuses [\"A\", 2023-02-30]",
+      "toml": "[web]\nexternal_origins = [\"A\", 2023-02-30]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.external_origins.0: must be an origin, such as https://bazhen.example.com"
+      }
+    },
+    {
+      "name": "web.external_origins refuses [23:59:60]",
+      "toml": "[web]\nexternal_origins = [23:59:60]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [web]\n2:  external_origins = [23:59:60]\n                        ^\n",
+        "syntax": true
+      }
+    },
+    {
       "name": "web.external_origins refuses {}",
       "toml": "[web]\nexternal_origins = {}\n",
       "env": {},
@@ -8928,6 +9597,15 @@
     {
       "name": "web.external_origins refuses 1979-05-27",
       "toml": "[web]\nexternal_origins = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.external_origins: Invalid input: expected array, received TomlDate"
+      }
+    },
+    {
+      "name": "web.external_origins refuses 2023-02-30",
+      "toml": "[web]\nexternal_origins = 2023-02-30\n",
       "env": {},
       "lan": false,
       "outcome": {
@@ -9072,12 +9750,58 @@
       }
     },
     {
+      "name": "web.allow_insecure_origins refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[web]\nallow_insecure_origins = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.allow_insecure_origins: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "web.allow_insecure_origins refuses 1979-05-27T07:32:00",
+      "toml": "[web]\nallow_insecure_origins = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.allow_insecure_origins: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "web.allow_insecure_origins refuses 1979-05-27",
+      "toml": "[web]\nallow_insecure_origins = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.allow_insecure_origins: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
       "name": "web.allow_insecure_origins refuses 07:32:00",
       "toml": "[web]\nallow_insecure_origins = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: web.allow_insecure_origins: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "web.allow_insecure_origins refuses 2023-02-30",
+      "toml": "[web]\nallow_insecure_origins = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.allow_insecure_origins: Invalid input: expected boolean, received TomlDate"
+      }
+    },
+    {
+      "name": "web.allow_insecure_origins refuses 23:59:60",
+      "toml": "[web]\nallow_insecure_origins = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [web]\n2:  allow_insecure_origins = 23:59:60\n                             ^\n",
+        "syntax": true
       }
     },
     {
@@ -9281,12 +10005,58 @@
       }
     },
     {
+      "name": "web.pairing refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[web]\npairing = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.pairing: Invalid option: expected one of \"auto\"|\"always\""
+      }
+    },
+    {
+      "name": "web.pairing refuses 1979-05-27T07:32:00",
+      "toml": "[web]\npairing = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.pairing: Invalid option: expected one of \"auto\"|\"always\""
+      }
+    },
+    {
+      "name": "web.pairing refuses 1979-05-27",
+      "toml": "[web]\npairing = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.pairing: Invalid option: expected one of \"auto\"|\"always\""
+      }
+    },
+    {
       "name": "web.pairing refuses 07:32:00",
       "toml": "[web]\npairing = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: web.pairing: Invalid option: expected one of \"auto\"|\"always\""
+      }
+    },
+    {
+      "name": "web.pairing refuses 2023-02-30",
+      "toml": "[web]\npairing = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.pairing: Invalid option: expected one of \"auto\"|\"always\""
+      }
+    },
+    {
+      "name": "web.pairing refuses 23:59:60",
+      "toml": "[web]\npairing = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [web]\n2:  pairing = 23:59:60\n              ^\n",
+        "syntax": true
       }
     },
     {
@@ -9462,12 +10232,58 @@
       }
     },
     {
+      "name": "web.listen refuses 1979-05-27 07:32:00+01:00",
+      "toml": "[web]\nlisten = 1979-05-27 07:32:00+01:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.listen: Invalid option: expected one of \"loopback\"|\"lan\""
+      }
+    },
+    {
+      "name": "web.listen refuses 1979-05-27T07:32:00",
+      "toml": "[web]\nlisten = 1979-05-27T07:32:00\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.listen: Invalid option: expected one of \"loopback\"|\"lan\""
+      }
+    },
+    {
+      "name": "web.listen refuses 1979-05-27",
+      "toml": "[web]\nlisten = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.listen: Invalid option: expected one of \"loopback\"|\"lan\""
+      }
+    },
+    {
       "name": "web.listen refuses 07:32:00",
       "toml": "[web]\nlisten = 07:32:00\n",
       "env": {},
       "lan": false,
       "outcome": {
         "error": "/home/u/.config/bazhen/config.toml: web.listen: Invalid option: expected one of \"loopback\"|\"lan\""
+      }
+    },
+    {
+      "name": "web.listen refuses 2023-02-30",
+      "toml": "[web]\nlisten = 2023-02-30\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.listen: Invalid option: expected one of \"loopback\"|\"lan\""
+      }
+    },
+    {
+      "name": "web.listen refuses 23:59:60",
+      "toml": "[web]\nlisten = 23:59:60\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [web]\n2:  listen = 23:59:60\n             ^\n",
+        "syntax": true
       }
     },
     {
@@ -11110,6 +11926,25 @@
       }
     },
     {
+      "name": "web.lan_allow refuses [\"A\", 2023-02-30]",
+      "toml": "[web]\nlan_allow = [\"A\", 2023-02-30]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.lan_allow.0: A is not a range, such as 192.168.1.0/24"
+      }
+    },
+    {
+      "name": "web.lan_allow refuses [23:59:60]",
+      "toml": "[web]\nlan_allow = [23:59:60]\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: Invalid TOML document: invalid date\n\n1:  [web]\n2:  lan_allow = [23:59:60]\n                 ^\n",
+        "syntax": true
+      }
+    },
+    {
       "name": "web.lan_allow refuses {}",
       "toml": "[web]\nlan_allow = {}\n",
       "env": {},
@@ -11121,6 +11956,15 @@
     {
       "name": "web.lan_allow refuses 1979-05-27",
       "toml": "[web]\nlan_allow = 1979-05-27\n",
+      "env": {},
+      "lan": false,
+      "outcome": {
+        "error": "/home/u/.config/bazhen/config.toml: web.lan_allow: Invalid input: expected array, received TomlDate"
+      }
+    },
+    {
+      "name": "web.lan_allow refuses 2023-02-30",
+      "toml": "[web]\nlan_allow = 2023-02-30\n",
       "env": {},
       "lan": false,
       "outcome": {

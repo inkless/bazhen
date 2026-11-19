@@ -29,7 +29,8 @@ const { file, cases } = fixture();
 
 /** The dotted path of each table, the top level's empty, and of each key in one. */
 function keys(schema: z.core.$ZodType, path = ""): { tables: string[]; leaves: string[] } {
-  const inner = schema instanceof z.ZodOptional ? schema.unwrap() : schema;
+  const optional = schema instanceof z.ZodOptional ? schema.unwrap() : schema;
+  const inner = optional instanceof z.ZodPipe ? optional.out : optional;
   if (!(inner instanceof z.ZodObject)) return { tables: [], leaves: [path] };
   const below = Object.entries(inner.shape).map(([key, value]) =>
     keys(value, path === "" ? key : `${path}.${key}`),
@@ -73,6 +74,15 @@ describe("configFixture", () => {
 
   it.each(tables.filter((t) => t !== ""))("refuses %s of the wrong type", (table) => {
     expect(refusals).toContain(`${table}: Invalid input: expected object, received number`);
+  });
+
+  it.each(tables.filter((t) => t !== ""))("refuses every kind of datetime as %s", (table) => {
+    const kinds = ["1979-05-27T07:32:00Z", "1979-05-27T07:32:00", "1979-05-27", "07:32:00"];
+    for (const kind of kinds) {
+      expect(cases.find((c) => c.name === `${table} as ${kind}`)?.outcome).toEqual({
+        error: `${file}: ${table}: Invalid input: expected object, received TomlDate`,
+      });
+    }
   });
 
   it.each([

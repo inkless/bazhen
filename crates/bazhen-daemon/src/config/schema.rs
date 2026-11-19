@@ -6,6 +6,7 @@ use std::fmt;
 
 use bazhen_protocol::text::is_origin;
 use toml::de::{DeTable, DeValue};
+use toml::value::Datetime;
 
 use super::{
     FileConfig, HOLDER_MAX_HISTORY_LINES, Listen, PairingMode, RuntimeKind, Shell, ranges, sizes,
@@ -86,15 +87,41 @@ fn number(value: &DeValue<'_>) -> Option<Number> {
     }
 }
 
-/// Whether every integer in `table` is one JavaScript holds exactly, as the TOML parser the
-/// TypeScript daemon uses requires of the whole file.
-fn lossless(value: &DeValue<'_>) -> bool {
+fn leap_second(at: &Datetime) -> bool {
+    at.time.is_some_and(|time| time.second == Some(60))
+}
+
+/// What in `value` the TOML parser the TypeScript daemon uses refuses the whole file for, in its
+/// words: an integer JavaScript can't hold exactly, or a leap second, which its `Date` can't.
+fn unreadable(value: &DeValue<'_>) -> Option<&'static str> {
     match value {
-        DeValue::Integer(n) => integer(n).is_some(),
-        DeValue::Array(items) => items.iter().all(|item| lossless(item.get_ref())),
-        DeValue::Table(table) => table.values().all(|item| lossless(item.get_ref())),
-        _ => true,
+        DeValue::Integer(n) if integer(n).is_none() => {
+            Some("integer value cannot be represented losslessly")
+        }
+        DeValue::Datetime(at) if leap_second(at) => Some("invalid date"),
+        DeValue::Array(items) => items.iter().find_map(|item| unreadable(item.get_ref())),
+        DeValue::Table(table) => table.values().find_map(|item| unreadable(item.get_ref())),
+        _ => None,
     }
+}
+
+/// Whether `err`, from parsing `text`, is only a day past its month's end, such as 2023-02-30,
+/// which JavaScript's `Date`, and so the TOML parser the TypeScript daemon uses, reads as a day of
+/// the next month. Its value is read as a datetime all the same, refused wherever it stands.
+pub(super) fn rolls_over(text: &str, err: &toml::de::Error) -> bool {
+    let Some(raw) = err.span().and_then(|span| text.get(span)) else {
+        return false;
+    };
+    let Some(((month, day), rest)) = raw
+        .split_at_checked(10)
+        .and_then(|(date, rest)| Some((date.split_at_checked(8)?, rest)))
+    else {
+        return false;
+    };
+    matches!(day, "29" | "30" | "31")
+        && format!("{month}28{rest}")
+            .parse::<Datetime>()
+            .is_ok_and(|at| !leap_second(&at))
 }
 
 /// What zod says it received, for a value of the wrong type.
@@ -333,29 +360,22 @@ fn array_index(key: &str) -> Option<u64> {
         .filter(|&i| canonical && i < u64::from(u32::MAX))
 }
 
-/// A table of the file, at `path`. A datetime passes for one with no keys, as zod takes a `Date`.
+/// A table of the file, at `path`.
 struct Table<'a, 'i> {
-    entries: Option<&'a DeTable<'i>>,
+    entries: &'a DeTable<'i>,
     path: String,
 }
 
 impl<'a, 'i> Table<'a, 'i> {
     fn of(value: &'a DeValue<'i>, path: String) -> Checked<Self> {
         match value {
-            DeValue::Table(entries) => Ok(Self {
-                entries: Some(entries),
-                path,
-            }),
-            DeValue::Datetime(_) => Ok(Self {
-                entries: None,
-                path,
-            }),
+            DeValue::Table(entries) => Ok(Self { entries, path }),
             _ => issue(&path, expected("object", value)),
         }
     }
 
     fn get(&self, key: &str) -> Option<&'a DeValue<'i>> {
-        self.entries?.get(key).map(toml::Spanned::get_ref)
+        self.entries.get(key).map(toml::Spanned::get_ref)
     }
 
     /// The value at `key`, if there is one, as `parse` reads it.
@@ -378,10 +398,8 @@ impl<'a, 'i> Table<'a, 'i> {
 
     /// Refuses the keys not in `known`, all at once, in the order JavaScript lists them.
     fn strict(&self, known: &[&str]) -> Checked<()> {
-        let Some(entries) = self.entries else {
-            return Ok(());
-        };
-        let mut unknown: Vec<_> = entries
+        let mut unknown: Vec<_> = self
+            .entries
             .keys()
             .filter(|key| !known.contains(&key.get_ref().as_ref()))
             .collect();
@@ -406,11 +424,11 @@ impl<'a, 'i> Table<'a, 'i> {
 
 /// What `root`, a parsed file, says, or the message for the first thing wrong with it.
 pub(super) fn file_config(root: &DeTable<'_>) -> Result<FileConfig, String> {
-    if !root.values().all(|value| lossless(value.get_ref())) {
-        return Err("Invalid TOML document: integer value cannot be represented losslessly".into());
+    if let Some(why) = root.values().find_map(|value| unreadable(value.get_ref())) {
+        return Err(format!("Invalid TOML document: {why}"));
     }
     let top = Table {
-        entries: Some(root),
+        entries: root,
         path: String::new(),
     };
     read(&top).map_err(|issue| issue.to_string())

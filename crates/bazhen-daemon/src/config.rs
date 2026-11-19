@@ -215,11 +215,15 @@ pub const LAN_REFUSAL: &str = "web.listen: this daemon doesn't serve the LAN yet
 /// # Errors
 ///
 /// [`InvalidConfig`] naming `file`: for TOML that doesn't parse, an integer JavaScript can't hold,
-/// a key the file doesn't take, or a value its key doesn't, with the first such key.
+/// a leap second, a key the file doesn't take, or a value its key doesn't, with the first such key.
 pub fn parse_config(file: &str, bytes: &[u8]) -> Result<FileConfig, InvalidConfig> {
     let text = String::from_utf8_lossy(bytes);
-    let table = toml::de::DeTable::parse(&text)
-        .map_err(|err| InvalidConfig(format!("{file}: Invalid TOML document: {err}")))?;
+    let (table, errors) = toml::de::DeTable::parse_recoverable(&text);
+    if let Some(err) = errors.iter().find(|err| !schema::rolls_over(&text, err)) {
+        return Err(InvalidConfig(format!(
+            "{file}: Invalid TOML document: {err}"
+        )));
+    }
     schema::file_config(table.get_ref()).map_err(|issue| InvalidConfig(format!("{file}: {issue}")))
 }
 
