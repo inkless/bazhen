@@ -215,6 +215,7 @@ async function failedLaunch(store: Store): Promise<string> {
 }
 
 const nothing = () => {};
+const exitedWith = (code: number) => ({ type: "exited", code }) as const;
 
 describe("agent lifecycle", () => {
   it("records the exit of the agent's current generation, with how it ended", async () => {
@@ -224,6 +225,21 @@ describe("agent lifecycle", () => {
       state: "exited",
       exit: { type: "signalled", signal: "SIGKILL" },
     });
+  });
+
+  it("records the exit its terminal's stream told at once, for the current generation only, once", async () => {
+    const { store, lifecycle, terminalId, exit, agent } = await running();
+    lifecycle.told(terminalId, { generation: 3, status: exitedWith(9) });
+    const ignored = agent()?.state;
+    lifecycle.told(terminalId, { generation: 0, status: exitedWith(0) });
+    const told = agent()?.state;
+    exit("0", exitedWith(0));
+    expect([
+      ignored,
+      told,
+      agent()?.exit,
+      store.events(0).filter((e) => e.type === "agent.exited").length,
+    ]).toEqual(["running", "exited", exitedWith(0), 1]);
   });
 
   it("takes an exit at a later generation as that of a process started outside the daemon", async () => {

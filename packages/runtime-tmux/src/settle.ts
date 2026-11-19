@@ -25,6 +25,11 @@ export class Settle {
     this.deadline ??= setTimeout(() => this.run(), this.maxWaitMs);
   }
 
+  /** Forgets what was seen so far: the next poke starts both waits afresh. */
+  reset(): void {
+    this.clear();
+  }
+
   /** For good: a later poke does nothing. */
   dispose(): void {
     this.stopped = true;

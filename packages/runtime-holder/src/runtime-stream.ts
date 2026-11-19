@@ -7,6 +7,7 @@
 //   so the output between is never sent there, and other views reading it would miss it.
 
 import type {
+  ProgramExit,
   Size,
   Snapshot,
   SnapshotAttached,
@@ -286,6 +287,8 @@ export class HolderStream implements SnapshotStream {
   private readonly dataListeners: ((bytes: Uint8Array) => void)[] = [];
   private readonly closeListeners: ((why: StreamEnd) => void)[] = [];
   private readonly respawnListeners: ((generation: number) => void)[] = [];
+  private readonly exitListeners: ((exit: ProgramExit) => void)[] = [];
+  private exit: ProgramExit | null = null;
   private readonly failureListeners: ((failure: StreamFailure) => void)[] = [];
   /** What failed last and is still failing, reported once until it succeeds again. */
   private failing: StreamFailure | null = null;
@@ -364,8 +367,19 @@ export class HolderStream implements SnapshotStream {
         // One the stream's position has already passed told it nothing new.
         if (event.body.generation <= this.at.generation) return;
         this.at = { generation: event.body.generation, offset: 0 };
+        this.exit = null;
         for (const listener of this.respawnListeners) listener(event.body.generation);
         break;
+      case "exited": {
+        // The holder sends a generation's exit again after a subscription's `ok`, and an earlier
+        // generation's belongs to a process a respawn has replaced.
+        const { generation, status } = event.body;
+        if (generation !== this.at.generation || this.exit !== null) return;
+        const exit = { generation, status };
+        this.exit = exit;
+        for (const listener of this.exitListeners) listener(exit);
+        return;
+      }
       case "resized":
         this.size = { cols: event.body.cols, rows: event.body.rows };
         return;
@@ -373,7 +387,6 @@ export class HolderStream implements SnapshotStream {
         this.end("behind");
         this.reader?.end();
         return;
-      case "exited":
       case "title":
       case "alternate":
       case "refused":
@@ -428,6 +441,14 @@ export class HolderStream implements SnapshotStream {
 
   onRespawn(cb: (generation: number) => void): void {
     this.respawnListeners.push(cb);
+  }
+
+  onExit(cb: (exit: ProgramExit) => void): void {
+    this.exitListeners.push(cb);
+  }
+
+  get exited(): ProgramExit | null {
+    return this.exit;
   }
 
   write(bytes: Uint8Array): void {

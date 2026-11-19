@@ -11,11 +11,13 @@ pub(crate) mod tty;
 
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use bazhen_client::Caller;
-use bazhen_protocol::agents::StateSnapshot;
+use bazhen_protocol::agents::{Agent, AgentState, ExitStatus, HarnessId, StateSnapshot};
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::ids::is_id;
+use bazhen_protocol::waits::{AgentCondition, WaitCondition, WaitRequest, WaitResponse};
 use serde::Deserialize;
 
 use self::attachment::{Attachment, Ending};
@@ -24,8 +26,11 @@ use self::link::Outcome;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
-use crate::target::{Named, named, unknown};
+use crate::target::{Named, agent_named, named, unknown};
 use crate::{Exit, TERMINALS_USAGE};
+
+/// How long an attachment that ended on its program's exit waits for the daemon to record it.
+const RECORDED_WITHIN: Duration = Duration::from_secs(2);
 
 const NOT_A_TERMINAL: &str =
     "bazhen terminals attach takes over a terminal: run it in one, not from a pipe or a script";
@@ -68,7 +73,7 @@ pub(crate) fn run(
     };
     let holders = socket.parent().unwrap_or(socket).join("holders");
     if p.has("direct") {
-        return straight(&holders, socket, target, out);
+        return straight(&holders, socket, daemon, target, out);
     }
     match daemon.get::<Answering>("/v1/health", CALL) {
         Ok(health) if health.protocol_id != PROTOCOL_ID => {
@@ -85,7 +90,7 @@ pub(crate) fn run(
                 return Ok(Exit::NotRunning);
             }
             out.err("bazhen is not running: attaching straight to the terminal's holder");
-            return straight(&holders, socket, target, out);
+            return straight(&holders, socket, daemon, target, out);
         }
         Err(e) => return Err(e),
     }
@@ -136,12 +141,59 @@ pub(crate) fn run(
         Ok(Outcome::Gone) => Done::DaemonGone,
         Err(e) => Done::Broke(e),
     };
-    Ok(report(done, target, &notes, out))
+    let left = exited_agent(&done, daemon, target);
+    let (done, after) = read_as(done, left);
+    Ok(report(done, target, after.as_ref(), &notes, out))
+}
+
+/// The agent `target` names, once its program's exit ended the attachment, as the daemon has
+/// recorded the exit; none for any other ending, a shell or a terminal, or no daemon to say. A
+/// direct attachment hears of the exit from the holder alongside the daemon, and may be first.
+fn exited_agent(done: &Done, daemon: &Daemon, target: &str) -> Option<Agent> {
+    if !matches!(done, Done::Ended(Ending::ProgramExited(_))) {
+        return None;
+    }
+    let state: StateSnapshot = daemon.get("/v1/state", CALL).ok()?;
+    let agent = agent_named(&state, target)?.clone();
+    if !matches!(agent.state, AgentState::Starting | AgentState::Running) {
+        return Some(agent);
+    }
+    let request = WaitRequest {
+        condition: WaitCondition::Agent {
+            agent_id: agent.id.clone(),
+            until: AgentCondition::Exited,
+        },
+        timeout_ms: u64::try_from(RECORDED_WITHIN.as_millis()).unwrap_or(u64::MAX),
+        resumed: None,
+    };
+    match daemon.post::<WaitResponse>("/v1/waits", &request, RECORDED_WITHIN + CALL) {
+        Ok(WaitResponse {
+            agent: Some(after), ..
+        }) => Some(after),
+        _ => Some(agent),
+    }
+}
+
+/// How the person should read `done`, given the agent its program's exit left: an exit a close
+/// caused is the close, with nothing to start again.
+fn read_as(done: Done, agent: Option<Agent>) -> (Done, Option<Agent>) {
+    match agent {
+        Some(a) if matches!(a.state, AgentState::Closing | AgentState::Closed) => {
+            (Done::Ended(Ending::Closed), None)
+        }
+        agent => (done, agent),
+    }
 }
 
 /// Attaches straight to `target`'s holder, in `holders`. It asks to type only when no daemon
 /// answers, and says so when it can't.
-fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Result<Exit, Failed> {
+fn straight(
+    holders: &Path,
+    socket: &Path,
+    daemon: &Daemon,
+    target: &str,
+    out: &mut Out,
+) -> Result<Exit, Failed> {
     if !is_id("term", target) {
         out.err("bazhen terminals attach --direct takes a terminal id: names are the daemon's to resolve");
         return Ok(Exit::Usage);
@@ -186,7 +238,9 @@ fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Resul
         Ok(None) => Done::HolderGone,
         Err(e) => Done::Broke(e),
     };
-    Ok(report(done, target, &notes, out))
+    let left = exited_agent(&done, daemon, target);
+    let (done, after) = read_as(done, left);
+    Ok(report(done, target, after.as_ref(), &notes, out))
 }
 
 /// The person's terminal, raw, with its resizes and the signals to stop watched.
@@ -200,8 +254,15 @@ fn take_over() -> Result<(tty::Wakeups, tty::Stops, tty::Raw), Failed> {
 }
 
 /// Says how the attachment to `target` ended, with what the daemon or holder said on the way,
-/// once the person's terminal is theirs again.
-fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
+/// once the person's terminal is theirs again. `agent` is what `target` names, once its program's
+/// exit ended it.
+fn report(
+    done: Done,
+    target: &str,
+    agent: Option<&Agent>,
+    notes: &[String],
+    out: &mut Out,
+) -> Exit {
     for note in notes {
         out.err(&format!("bazhen: {note}"));
     }
@@ -218,7 +279,10 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
             format!("stopped by a signal; {target} goes on"),
             Exit::Failed,
         ),
-        Done::Ended(Ending::Exited) => (format!("{target}: the terminal exited"), Exit::Done),
+        Done::Ended(Ending::ProgramExited(status)) => {
+            (program_exited(target, agent, &status), Exit::Done)
+        }
+        Done::Ended(Ending::Closed) => (format!("{target}: the terminal closed"), Exit::Done),
         Done::Ended(Ending::Evicted) => (
             "fell behind the terminal's output twice in a row: attach again".to_owned(),
             Exit::Failed,
@@ -236,6 +300,35 @@ fn report(done: Done, target: &str, notes: &[String], out: &mut Out) -> Exit {
     exit
 }
 
+/// Says that `target`'s program exited, and for an agent, what's kept and what starts it again.
+fn program_exited(target: &str, agent: Option<&Agent>, status: &ExitStatus) -> String {
+    let how = match status {
+        ExitStatus::Exited { code } => format!("code {code}"),
+        ExitStatus::Signalled { signal } => format!("signal {signal}"),
+        ExitStatus::Unknown => "how is unknown".to_owned(),
+    };
+    let Some(agent) = agent else {
+        return format!("{target}: its program exited ({how})");
+    };
+    let name = &agent.name;
+    let harness = match agent.harness {
+        HarnessId::ClaudeCode => "Claude Code",
+        HarnessId::Codex => "Codex",
+    };
+    let close = format!("`bazhen agents close {name}` ends it");
+    if agent.resumable {
+        format!(
+            "{name}: {harness} exited ({how}); its terminal and thread are kept. `bazhen agents \
+             respawn {name}` starts it again on the same thread; {close}."
+        )
+    } else {
+        format!(
+            "{name}: {harness} exited ({how}); its terminal is kept, but no thread to resume. \
+             `bazhen agents relaunch {name} --fresh` starts it on a new one; {close}."
+        )
+    }
+}
+
 /// The terminal `target` names, refused, saying why, when there's none or it can't be attached to.
 fn terminal_of(state: &StateSnapshot, target: &str) -> Result<String, String> {
     match named(state, target) {
@@ -249,5 +342,85 @@ fn terminal_of(state: &StateSnapshot, target: &str) -> Result<String, String> {
             "{target} runs on a holder this build can't speak to: restart it, then attach"
         )),
         Some(_) => Err(format!("{target} has no running terminal to attach to")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The protocol's example agent, as a Codex agent named `name` whose thread may resume.
+    fn codex(name: &str, resumable: bool) -> Agent {
+        let examples: serde_json::Value = bazhen_protocol::wire::from_slice(include_bytes!(
+            "../../../packages/protocol/fixtures/api/StateSnapshot.json"
+        ))
+        .unwrap();
+        let state: StateSnapshot = serde_json::from_value(examples[0]["wire"].clone()).unwrap();
+        let mut agent = state.agents[0].clone();
+        agent.name = name.to_owned();
+        agent.harness = HarnessId::Codex;
+        agent.resumable = resumable;
+        agent
+    }
+
+    #[test]
+    fn says_what_an_agents_exit_keeps_and_what_starts_it_again() {
+        let resumes = codex("scout", true);
+        let fresh = codex("scout", false);
+        let code = |code| ExitStatus::Exited { code };
+        assert_eq!(
+            [
+                program_exited("term_x", Some(&resumes), &code(0)),
+                program_exited("scout", Some(&fresh), &code(1)),
+            ],
+            [
+                "scout: Codex exited (code 0); its terminal and thread are kept. `bazhen agents \
+                 respawn scout` starts it again on the same thread; `bazhen agents close scout` \
+                 ends it.",
+                "scout: Codex exited (code 1); its terminal is kept, but no thread to resume. \
+                 `bazhen agents relaunch scout --fresh` starts it on a new one; `bazhen agents \
+                 close scout` ends it.",
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_an_exit_a_close_caused_as_the_close() {
+        let exited = || Done::Ended(Ending::ProgramExited(ExitStatus::Exited { code: 0 }));
+        let at = |state| {
+            let mut agent = codex("scout", true);
+            agent.state = state;
+            read_as(exited(), Some(agent))
+        };
+        let read = [
+            at(AgentState::Closing),
+            at(AgentState::Closed),
+            at(AgentState::Exited),
+            read_as(exited(), None),
+        ]
+        .map(|(done, agent)| (matches!(done, Done::Ended(Ending::Closed)), agent.is_some()));
+        assert_eq!(
+            read,
+            [(true, false), (true, false), (false, true), (false, false)]
+        );
+    }
+
+    #[test]
+    fn says_only_that_a_shells_or_terminals_program_exited() {
+        let signalled = ExitStatus::Signalled {
+            signal: "SIGHUP".to_owned(),
+        };
+        assert_eq!(
+            [
+                program_exited("build", None, &ExitStatus::Exited { code: 2 }),
+                program_exited("term_x", None, &signalled),
+                program_exited("term_x", None, &ExitStatus::Unknown),
+            ],
+            [
+                "build: its program exited (code 2)",
+                "term_x: its program exited (signal SIGHUP)",
+                "term_x: its program exited (how is unknown)",
+            ]
+        );
     }
 }

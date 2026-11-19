@@ -47,6 +47,7 @@ import {
   type ScreenText,
 } from "@bazhen/core";
 import { exitStatus, UnknownCause } from "./exit-status.ts";
+import { ExitWatch } from "./exit-watch.ts";
 import { redacted } from "./redact.ts";
 
 import { ScreenWatch } from "./screen-watch.ts";
@@ -290,6 +291,8 @@ export class TmuxRuntime implements RuntimeAdapter {
   private settingsPending = true;
   /** Whether the tmux this runtime runs needs `DEAD_PANE_RESET`. */
   private readonly resetDeadPanes: boolean;
+  /** Each open client's exits, by its terminal, so a respawn here retires its process's at once. */
+  private readonly exitWatches = new Map<string, Set<ExitWatch>>();
 
   constructor(opts: TmuxRuntimeOptions) {
     this.opts = opts;
@@ -564,11 +567,14 @@ export class TmuxRuntime implements RuntimeAdapter {
       alternate: alternate === 1,
     });
     proc.onData(() => screen.poke());
+    const exits = this.watchExits(ref.terminalId, Number(pane.ref.locator.generation));
+    proc.onData(() => exits.watch.output());
     const closeHandlers: Array<(why: StreamEnd) => void> = [];
     let closed = false;
     proc.onExit(() => {
       closed = true;
       screen.dispose();
+      exits.stop();
       for (const h of closeHandlers) h("ended");
     });
     const stream: HistoryStream = {
@@ -587,8 +593,13 @@ export class TmuxRuntime implements RuntimeAdapter {
       onAlternate: (cb) => screen.onAlternate(cb),
       onFailure: (cb) => screen.onFailure(cb),
       onRespawn: () => {},
+      onExit: (cb) => exits.watch.onExit(cb),
+      get exited() {
+        return exits.watch.exited;
+      },
       close: () => {
         screen.dispose();
+        exits.stop();
         // Closing the master alone hangs the client up only once every copy of it is closed, and
         // a later attach client can inherit one. tmux detaches the client by its terminal
         // device, which names no other PTY while this master is open, and only then: `tty` is
@@ -699,6 +710,10 @@ export class TmuxRuntime implements RuntimeAdapter {
     // tmux runs one client's command list without another client's commands in between. Were it
     // ever split, the number going first means a stale ref is refused rather than acting on the
     // new process.
+    // Its process's exit is retired first, so no client opening meanwhile is told it: a respawn
+    // that then fails leaves the agent exited all the same, as recorded.
+    for (const watch of this.exitWatches.get(ref.terminalId) ?? [])
+      watch.respawned(spec.generation);
     const location = await this.tmux(
       ...sequence([
         generationCommand(target, spec.generation),
@@ -710,6 +725,30 @@ export class TmuxRuntime implements RuntimeAdapter {
       ]),
     );
     return { ...ref, locator: this.locator(LOCATION.parse(location)) };
+  }
+
+  /**
+   * A client's watch on its terminal's exits from the process reports, until `stop`, from the
+   * process of `generation` on.
+   */
+  private watchExits(terminalId: string, generation: number) {
+    const watch = new ExitWatch(SCREEN_QUIET_MS, SCREEN_MAX_WAIT_MS, generation);
+    const watches = this.exitWatches.get(terminalId) ?? new Set();
+    watches.add(watch);
+    this.exitWatches.set(terminalId, watches);
+    const unsubscribe = this.processes.subscribe((ref, exit) => {
+      if (ref.terminalId === terminalId) watch.report(Number(ref.locator.generation), exit);
+    });
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      unsubscribe();
+      watch.dispose();
+      watches.delete(watch);
+      if (watches.size === 0) this.exitWatches.delete(terminalId);
+    };
+    return { watch, stop };
   }
 
   /**

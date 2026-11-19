@@ -12,11 +12,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{
-    Cols, HelloReply, HelloRequest, Rows, Size as HolderSize, SubscribeRequest, Versions,
+    Cols, ExitStatus as HolderExit, HelloReply, HelloRequest, Rows, Size as HolderSize,
+    SubscribeRequest, Versions,
 };
 use bazhen_holder_proto::{FrameDecoder, Reply, Request, RequestId, reply_decoder};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
+
+use bazhen_protocol::agents::ExitStatus;
 
 use super::attachment::{DetachKeys, Ending, Size};
 use super::tty::{self, Stops, Wakeups};
@@ -140,7 +143,7 @@ impl Direct {
         match reply {
             Reply::Snapshot { bytes, .. } | Reply::Data { bytes, .. } => vec![Step::Show(bytes)],
             Reply::Gap(_) => [Step::Clear].into_iter().chain(self.start()).collect(),
-            Reply::Exited(_) => vec![Step::End(Ending::Exited)],
+            Reply::Exited(exited) => vec![Step::End(program_exited(exited.status))],
             Reply::Error { body, .. } if body.request == "input" || body.request == "resize" => {
                 if body.code == "not-writer" {
                     self.writer = false;
@@ -391,6 +394,15 @@ pub(crate) fn pump(
     }
 }
 
+/// A holder's word that its child exited, as the daemon's view says it.
+fn program_exited(status: HolderExit) -> Ending {
+    Ending::ProgramExited(match status {
+        HolderExit::Exited { code } => ExitStatus::Exited { code: code.get() },
+        HolderExit::Signalled { signal } => ExitStatus::Signalled { signal },
+        HolderExit::Unknown => ExitStatus::Unknown,
+    })
+}
+
 /// Writes all of `frame` to the non-blocking `stream`, waiting while the holder catches up.
 fn write_whole(stream: &mut UnixStream, frame: &[u8]) -> io::Result<()> {
     let mut rest = frame;
@@ -505,7 +517,25 @@ mod tests {
             sent(&d.reply(refused("subscribe", ErrorCode::StaleGeneration))),
             ["clear", "snapshot", "subscribe"]
         );
-        assert_eq!(d.reply(exited), [Step::End(Ending::Exited)]);
+        assert_eq!(
+            d.reply(exited),
+            [Step::End(Ending::ProgramExited(ExitStatus::Exited {
+                code: 0
+            }))]
+        );
+        let signalled = Reply::Exited(
+            serde_json::from_value(json!({
+                "generation": 1,
+                "status": { "type": "signalled", "signal": "SIGHUP" }
+            }))
+            .unwrap(),
+        );
+        assert_eq!(
+            d.reply(signalled),
+            [Step::End(Ending::ProgramExited(ExitStatus::Signalled {
+                signal: "SIGHUP".to_owned()
+            }))]
+        );
         assert!(matches!(
             d.reply(refused("snapshot", ErrorCode::Unavailable)).as_slice(),
             [Step::End(Ending::Failed(m))] if m.starts_with("the holder refused snapshot")

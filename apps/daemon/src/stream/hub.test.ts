@@ -3,6 +3,7 @@ import { assert, describe, expect, it, vi } from "vitest";
 import {
   newId,
   type AttachmentId,
+  type ProgramExit,
   type RuntimeRef,
   type Snapshot,
   type TerminalId,
@@ -118,6 +119,8 @@ function viewer(
 ) {
   const seen: string[] = [];
   const frames: StreamServerFrame[] = [];
+  /** Output and exits, in the order the view was sent them. */
+  const log: string[] = [];
   let closed = false;
   let epoch = 0;
   let handle: Attachment | undefined;
@@ -126,10 +129,12 @@ function viewer(
     mode,
     send: (bytes, written) => {
       seen.push(Buffer.from(bytes).toString());
+      log.push(Buffer.from(bytes).toString());
       written?.();
     },
     notify: (frame) => {
       frames.push(frame);
+      if (frame.type === "exited") log.push(`<exited ${frame.generation}>`);
       if (frame.type !== "lease") return;
       epoch = frame.epoch;
       declare();
@@ -141,7 +146,7 @@ function viewer(
     handle = attachment;
     declare();
   });
-  return { v, seen, frames, closed: () => closed };
+  return { v, seen, frames, log, closed: () => closed };
 }
 
 /** The log, but `during` runs as the second view opens, once its snapshot has been asked for. */
@@ -167,6 +172,7 @@ function memoryLog(closing = false) {
     epoch: () => 4,
     closing: () => closing,
     theme: () => "dark",
+    exited: (t: TerminalId, exit) => events.push(`exited ${t} ${exit.generation}`),
   };
   return { log, events };
 }
@@ -759,7 +765,7 @@ describe("terminal hub", () => {
     const attached = await hub.join(rt.ref, a.v, size);
     rt.end();
     expect([a.frames.at(-1), a.closed(), events.at(-1)]).toEqual([
-      { type: "exit" },
+      { type: "closed" },
       true,
       `ended ${attached.id} terminal_closed`,
     ]);
@@ -1407,7 +1413,7 @@ describe("terminal hub: a snapshot stream that closes", () => {
   it.each([
     ["falls behind", false, fallBehind, { type: "ended", reason: "evicted_slow" }, "evicted_slow"],
     ["is lost", false, vanish, { type: "ended", reason: "disconnected" }, "disconnected"],
-    ["ends with its terminal", true, vanish, { type: "exit" }, "terminal_closed"],
+    ["ends with its terminal", true, vanish, { type: "closed" }, "terminal_closed"],
   ] as const)("ends every view as its stream %s", async (_how, closing, close, frame, reason) => {
     const rt = await fakeRuntime("earlier output", { attach: "snapshot" });
     const { log, events } = memoryLog(closing);
@@ -1436,4 +1442,173 @@ describe("terminal hub: a snapshot stream that closes", () => {
       ["earlier output", "missed while away"],
     ]);
   });
+});
+
+/**
+ * A runtime whose streams go on reporting the first exit they told after a respawn, as tmux's
+ * may until it sees the next process run.
+ */
+class StaleExits extends FakeRuntime {
+  override async attach(...args: Parameters<FakeRuntime["attach"]>) {
+    const attached = await super.attach(...args);
+    let first: ProgramExit | null = null;
+    attached.stream.onExit((exit) => (first ??= exit));
+    Object.defineProperty(attached.stream, "exited", { get: () => first });
+    return attached;
+  }
+}
+
+/** The exits a view was told of. */
+const exitsOf = (view: { frames: StreamServerFrame[] }) =>
+  view.frames.filter((f) => f.type === "exited");
+
+/** The frame for the exit of the process of `generation`, with `code`. */
+const exitFrame = (generation: number, code = 0) => ({
+  type: "exited",
+  generation,
+  exit: { type: "exited", code },
+});
+
+describe("terminal hub: a process's exit", () => {
+  const modes = ["history", "snapshot"] as const;
+
+  it.each(modes)(
+    "tells every open %s view of it after the output before it, and keeps the views open",
+    async (attach) => {
+      const rt = await fakeRuntime("earlier output", { attach });
+      const { log, events } = memoryLog();
+      const hub = new Hub(rt.runtime, log);
+      const [one, two] = [viewer(), viewer("observe")];
+      await hub.join(rt.ref, one.v, size);
+      await hub.join(rt.ref, two.v, size);
+      rt.emit("last words");
+      rt.runtime.exitProcess(rt.ref);
+      for (const view of [one, two]) {
+        expect([view.log.slice(-2), exitsOf(view), view.closed()]).toEqual([
+          ["last words", "<exited 0>"],
+          [exitFrame(0)],
+          false,
+        ]);
+      }
+      expect(events.filter((e) => e.startsWith("ended"))).toEqual([]);
+    },
+  );
+
+  it("has it recorded before any view is told of it", async () => {
+    const rt = await fakeRuntime();
+    const { log, events } = memoryLog();
+    const view = viewer();
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: (t, exit) => {
+        log.exited(t, exit);
+        events.push(`views told: ${exitsOf(view).length}`);
+      },
+    });
+    await hub.join(rt.ref, view.v, size);
+    rt.runtime.exitProcess(rt.ref);
+    expect([events.filter((e) => /^(exited|views told)/.test(e)), exitsOf(view)]).toEqual([
+      [`exited ${rt.ref.terminalId} 0`, "views told: 0"],
+      [exitFrame(0)],
+    ]);
+  });
+
+  it("has an exit told before a view opened recorded as that view is told", async () => {
+    const rt = await fakeRuntime();
+    const { log } = memoryLog();
+    const recorded: string[] = [];
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: (t, exit) => recorded.push(`${t} ${exit.generation}`),
+    });
+    await hub.join(rt.ref, viewer().v, size);
+    rt.runtime.exitProcess(rt.ref);
+    recorded.length = 0;
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect([recorded, exitsOf(late)]).toEqual([[`${rt.ref.terminalId} 0`], [exitFrame(0)]]);
+  });
+
+  it("still tells its views of an exit that could not be recorded, and says why", async () => {
+    const rt = await fakeRuntime();
+    const { log } = memoryLog();
+    const failed = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: () => {
+        throw new Error("the store is read-only");
+      },
+    });
+    const view = viewer();
+    await hub.join(rt.ref, view.v, size);
+    rt.runtime.exitProcess(rt.ref);
+    expect([exitsOf(view), failed.mock.calls.map((c) => String(c[1]))]).toEqual([
+      [exitFrame(0)],
+      ["Error: the store is read-only"],
+    ]);
+    failed.mockRestore();
+  });
+
+  it("never tells a view whose snapshot is of a respawned process an exit its runtime still reports", async () => {
+    const o = await snapshotTerminal(new StaleExits({ attach: "snapshot" }));
+    o.r.exitProcess(o.ref);
+    await o.r.respawn(o.ref, { ...o.r.specOf(o.ref), generation: 1 });
+    o.emit("next");
+    const late = viewer();
+    await o.hub.join(o.ref, late.v, size);
+    expect([exitsOf(o.first), exitsOf(late)]).toEqual([[exitFrame(0)], []]);
+  });
+
+  it("holds it for a view whose snapshot is on its way, behind the output before it", async () => {
+    const o = await snapshotTerminal();
+    const { hold, late, joined } = await openHeld(o);
+    o.emit("one ");
+    o.r.exitProcess(o.ref);
+    hold.take();
+    o.emit("two");
+    hold.release();
+    await joined;
+    const at = late.log.indexOf("<exited 0>");
+    expect([exitsOf(late), late.log.slice(0, at).join("")]).toEqual([
+      [exitFrame(0)],
+      expect.stringContaining("one "),
+    ]);
+    expect(late.log.slice(at + 1).join("")).toBe("two");
+  });
+
+  it.each(modes)("tells a %s view that opens after it of it, once", async (attach) => {
+    const rt = await fakeRuntime("earlier output", { attach });
+    const hub = new Hub(rt.runtime, memoryLog().log);
+    await hub.join(rt.ref, viewer().v, size);
+    rt.emit("last words");
+    rt.runtime.exitProcess(rt.ref, { type: "exited", code: 3 });
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    const ended = late.frames.findIndex((f) => f.type === "snapshot_end");
+    const told = late.frames.findIndex((f) => f.type === "exited");
+    expect([exitsOf(late), told > ended]).toEqual([[exitFrame(0, 3)], true]);
+  });
+
+  it.each(modes)(
+    "never tells a %s view of a respawned terminal the exit before the respawn",
+    async (attach) => {
+      const rt = await fakeRuntime("earlier output", { attach });
+      const hub = new Hub(rt.runtime, memoryLog().log);
+      const first = viewer();
+      await hub.join(rt.ref, first.v, size);
+      rt.runtime.exitProcess(rt.ref);
+      const next = await rt.runtime.respawn(rt.ref, {
+        ...rt.runtime.specOf(rt.ref),
+        generation: 1,
+      });
+      rt.emit("next");
+      const late = viewer();
+      await hub.join(rt.ref, late.v, size);
+      rt.runtime.exitProcess(next, { type: "exited", code: 2 });
+      expect([exitsOf(first), exitsOf(late)]).toEqual([
+        [exitFrame(0), exitFrame(1, 2)],
+        [exitFrame(1, 2)],
+      ]);
+    },
+  );
 });

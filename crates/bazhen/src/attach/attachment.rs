@@ -1,6 +1,7 @@
 //! What `bazhen terminals attach` makes of each thing that happens while it is attached: a key the person
 //! typed, a frame the daemon sent, the terminal resized. No I/O: each step returns what to do.
 
+use bazhen_protocol::agents::ExitStatus;
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::input::has_keystrokes;
 use bazhen_protocol::stream::{AttachmentMode, EndedReason, StreamClientFrame, StreamServerFrame};
@@ -42,8 +43,10 @@ pub enum Ending {
     Stopped,
     /// A direct attachment let go of the terminal's input for a daemon that came back.
     Yielded,
+    /// The terminal's program exited, after the last of its output. The terminal goes on.
+    ProgramExited(ExitStatus),
     /// The terminal closed.
-    Exited,
+    Closed,
     /// The daemon ended the view for falling behind; a new one starts from a fresh snapshot.
     Evicted,
     /// The daemon's client lost the terminal.
@@ -217,7 +220,10 @@ impl Attachment {
                 self.attached = true;
                 self.declare()
             }
-            StreamServerFrame::Exit => vec![Effect::End(Ending::Exited)],
+            StreamServerFrame::Exited { exit, .. } => {
+                vec![Effect::End(Ending::ProgramExited(exit))]
+            }
+            StreamServerFrame::Closed => vec![Effect::End(Ending::Closed)],
             StreamServerFrame::Ended { reason } => vec![Effect::End(match reason {
                 EndedReason::EvictedSlow => Ending::Evicted,
                 EndedReason::Disconnected => Ending::Lost,
@@ -480,14 +486,21 @@ mod tests {
         let read = |s: &mut Attachment, text: &str| s.frame(text);
         assert_eq!(
             [
-                read(&mut s, r#"{"type":"exit"}"#),
+                read(
+                    &mut s,
+                    r#"{"type":"exited","generation":1,"exit":{"type":"exited","code":3}}"#
+                ),
+                read(&mut s, r#"{"type":"closed"}"#),
                 read(&mut s, r#"{"type":"ended","reason":"evicted_slow"}"#),
                 read(&mut s, r#"{"type":"ended","reason":"disconnected"}"#),
                 read(&mut s, r#"{"type":"error","message":"no such terminal"}"#),
                 read(&mut s, r#"{"type":"notice","message":"resize refused"}"#),
             ],
             [
-                vec![Effect::End(Ending::Exited)],
+                vec![Effect::End(Ending::ProgramExited(ExitStatus::Exited {
+                    code: 3
+                }))],
+                vec![Effect::End(Ending::Closed)],
                 vec![Effect::End(Ending::Evicted)],
                 vec![Effect::End(Ending::Lost)],
                 vec![Effect::End(Ending::Failed("no such terminal".to_owned()))],

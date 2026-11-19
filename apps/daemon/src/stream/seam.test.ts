@@ -75,9 +75,11 @@ function scenario(
   return {
     delivered: units.map((u) => u.byte),
     snapshot: units.filter((u) => precedes(u, taken)).map((u) => u.byte),
-    rest: (rest ?? []).flatMap((item) => [...item.bytes]),
+    rest: (rest ?? []).flatMap(bytesOf),
   };
 }
+
+const bytesOf = (item: Held) => (item.kind === "exited" ? [] : [...item.bytes]);
 
 describe("the seam between a snapshot and the output held while it was taken", () => {
   it("gives a view that replays the snapshot exactly the rest of the stream", () => {
@@ -119,9 +121,27 @@ describe("the seam between a snapshot and the output held while it was taken", (
     ];
     const now = { generation: 1, offset: 2 };
     expect([
-      seam(held, from, now, from)?.map((item) => [...item.bytes]),
-      seam(held, from, now, { generation: 1, offset: 0 })?.map((item) => [...item.bytes]),
-      seam(held, from, now, { generation: 1, offset: 1 })?.map((item) => [...item.bytes]),
+      seam(held, from, now, from)?.map(bytesOf),
+      seam(held, from, now, { generation: 1, offset: 0 })?.map(bytesOf),
+      seam(held, from, now, { generation: 1, offset: 1 })?.map(bytesOf),
     ]).toEqual([[[RESET], [1, 2]], [[1, 2]], [[2]]]);
+  });
+
+  it("keeps an exit for a snapshot of its own process, wherever in it, and drops it for a later one", () => {
+    const from = { generation: 0, offset: 4 };
+    const exit = { generation: 0, status: { type: "exited", code: 0 } } as const;
+    const held: Held[] = [
+      { kind: "data", at: from, bytes: Uint8Array.of(1, 2) },
+      { kind: "exited", exit },
+      { kind: "data", at: { generation: 0, offset: 6 }, bytes: Uint8Array.of(3) },
+      { kind: "reset", generation: 1, bytes: Uint8Array.of(RESET) },
+    ];
+    const now = { generation: 1, offset: 0 };
+    const kinds = (taken: Position) => seam(held, from, now, taken)?.map((item) => item.kind);
+    expect([
+      kinds(from),
+      kinds({ generation: 0, offset: 7 }),
+      kinds({ generation: 1, offset: 0 }),
+    ]).toEqual([["data", "exited", "data", "reset"], ["exited", "reset"], []]);
   });
 });

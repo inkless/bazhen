@@ -114,15 +114,70 @@
   {
     "name": "example 11",
     "wire": {
-      "type": "exit"
+      "type": "exited",
+      "generation": 2,
+      "exit": {
+        "type": "exited",
+        "code": 0
+      }
     },
     "parsed": {
-      "type": "exit"
+      "type": "exited",
+      "generation": 2,
+      "exit": {
+        "type": "exited",
+        "code": 0
+      }
     }
   },
   {
     "name": "example 12",
     "wire": {
+      "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP"
+      }
+    },
+    "parsed": {
+      "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP"
+      }
+    }
+  },
+  {
+    "name": "example 13",
+    "wire": {
+      "type": "exited",
+      "generation": 1,
+      "exit": {
+        "type": "unknown"
+      }
+    },
+    "parsed": {
+      "type": "exited",
+      "generation": 1,
+      "exit": {
+        "type": "unknown"
+      }
+    }
+  },
+  {
+    "name": "example 14",
+    "wire": {
+      "type": "closed"
+    },
+    "parsed": {
+      "type": "closed"
+    }
+  },
+  {
+    "name": "example 15",
+    "wire": {
       "type": "ended",
       "reason": "evicted_slow"
     },
@@ -132,7 +187,7 @@
     }
   },
   {
-    "name": "example 13",
+    "name": "example 16",
     "wire": {
       "type": "error",
       "message": "no such terminal"
@@ -143,7 +198,7 @@
     }
   },
   {
-    "name": "example 14",
+    "name": "example 17",
     "wire": {
       "type": "notice",
       "message": "the runtime refused the resize"
@@ -340,7 +395,17 @@
   {
     "name": "example 11, with a field no version defines in each of its objects",
     "wire": {
-      "type": "exit",
+      "type": "exited",
+      "generation": 2,
+      "exit": {
+        "type": "exited",
+        "code": 0,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "fieldFromANewerDaemon": {
         "any": [
           1
@@ -348,11 +413,86 @@
       }
     },
     "parsed": {
-      "type": "exit"
+      "type": "exited",
+      "generation": 2,
+      "exit": {
+        "type": "exited",
+        "code": 0
+      }
     }
   },
   {
     "name": "example 12, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP"
+      }
+    }
+  },
+  {
+    "name": "example 13, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "exited",
+      "generation": 1,
+      "exit": {
+        "type": "unknown",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "exited",
+      "generation": 1,
+      "exit": {
+        "type": "unknown"
+      }
+    }
+  },
+  {
+    "name": "example 14, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "closed",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "closed"
+    }
+  },
+  {
+    "name": "example 15, with a field no version defines in each of its objects",
     "wire": {
       "type": "ended",
       "reason": "evicted_slow",
@@ -368,7 +508,7 @@
     }
   },
   {
-    "name": "example 13, with a field no version defines in each of its objects",
+    "name": "example 16, with a field no version defines in each of its objects",
     "wire": {
       "type": "error",
       "message": "no such terminal",
@@ -384,7 +524,7 @@
     }
   },
   {
-    "name": "example 14, with a field no version defines in each of its objects",
+    "name": "example 17, with a field no version defines in each of its objects",
     "wire": {
       "type": "notice",
       "message": "the runtime refused the resize",

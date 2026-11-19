@@ -267,7 +267,7 @@ function connect(
         // event stream's next reconnect.
         checkBuild().catch(() => undefined);
         end(`The daemon refused this view: ${f.message}`);
-      } else if (f.type === "exit") end("The terminal has closed.");
+      } else if (f.type === "closed") end("The terminal has closed.");
       // The daemon closes the socket next; its close is what reattaches.
       else if (f.type === "ended") report({ status: { kind: "reconnecting" } });
     });
