@@ -172,19 +172,19 @@ ranges that may connect, and trust its certificate on the phone after checking i
 Otherwise Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
 another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
-your own domain or without one. Build the web app (`moon run :build`), point the route at the daemon,
-`http://127.0.0.1:7900`, which serves the built app as well as the API, and list the address it
-presents, exactly as the browser shows it (scheme, host and any port), in
+your own domain or without one. Build the web app (`moon run :build`), point the route at the
+daemon, `http://127.0.0.1:7900`, which serves the built app as well as the API, and list the address
+it presents, exactly as the browser shows it (scheme, host and any port), in
 `BAZHEN_EXTERNAL_ORIGINS` or `web.external_origins`:
-`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com moon run :bazhen -- start`. The daemon then accepts that
-address, and refuses every other non-loopback one; it logs it at start, and `bazhen doctor`
-lists it. Build again after you pull: the daemon serves whatever was built last, from the next
-page load on. Never point a route at the web dev server (`moon run :dev`, port 7901): it serves the
-repository's source. It refuses a request with another Host, another page's Origin, or a proxy's
-forwarding header, but a forwarder that presents a loopback Host and adds no header (`socat`,
-`ssh -R`, a proxy set to rewrite Host) gets through, and with it the source. Plain `http://` to another host is refused unless
-`web.allow_insecure_origins = true` (or `BAZHEN_ALLOW_INSECURE_ORIGINS=true`), since anyone on the
-network could read the traffic.
+`BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com moon run :bazhen -- start`. The daemon then
+accepts that address, and refuses every other non-loopback one; it logs it at start, and
+`bazhen doctor` lists it. Build again after you pull: the daemon serves whatever was built last,
+from the next page load on. Never point a route at the web dev server (`moon run :dev`, port 7901):
+it serves the repository's source. It refuses a request with another Host, another page's Origin, or
+a proxy's forwarding header, but a forwarder that presents a loopback Host and adds no header
+(`socat`, `ssh -R`, a proxy set to rewrite Host) gets through, and with it the source. Plain
+`http://` to another host is refused unless `web.allow_insecure_origins = true` (or
+`BAZHEN_ALLOW_INSECURE_ORIGINS=true`), since anyone on the network could read the traffic.
 
 Once any external origin is set, every browser must pair before it can reach anything, on
 loopback too. A proxy in front can make any request look like loopback's, so loopback alone
@@ -419,8 +419,8 @@ keeps the environment of whatever started it, which can be a `codex app-server d
 `codex update` run inside an agent. So each agent's thread also sets `BAZHEN_AGENT_ID` and
 `BAZHEN_AGENT_AUTH_FILE` empty, and under the server the thread alone says which agent a call is. The daemon knows
 the server by its command line (`codex` or `codex-<platform>`, run as `app-server`), so a Codex
-that renames its binary or that subcommand would be missed; `moon run :test-real -- api` checks the Codex
-the tests install, and `bazhen doctor` warns when a live Codex agent's server doesn't match.
+that renames its binary or that subcommand would be missed; `moon run :test-real -- api` checks the
+Codex the tests install, and `bazhen doctor` warns when a live Codex agent's server doesn't match.
 
 Every Codex agent's commands run under the same server, so only the thread a call names tells one
 Codex agent from another, and any of them can name another's. A process in an agent's terminal

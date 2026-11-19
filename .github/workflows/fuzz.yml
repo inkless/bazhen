@@ -95,7 +95,7 @@ jobs:
       # This job never commits, so it installs no git hooks.
       HUSKY: 0
       STEP_MINUTES: 105
-      # The most a round can take: test:rust's 30-minute cap, test's 10, and a margin. No round
+      # The most a round can take: test-rust's 30-minute cap, test's 10, and a margin. No round
       # starts with less than this left, so none is cut off.
       ROUND_MINUTES: 45
     steps:

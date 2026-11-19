@@ -85,10 +85,10 @@ colour, not the bright one. The selection is a solid fill, 3:1 against the backg
 own text colour.
 
 The terminal draws in JetBrainsMono Nerd Font Mono, which the page bundles
-(`apps/web/src/terminal/font/`, cut by `moon run :font-terminal` from a pinned release), so Nerd Font
-icons draw on a device with nothing installed. Its icons are the same in every style, so they ship
-once: four text faces carry no icons, and one symbols face, declared for every weight and style so
-the browser never emboldens or slants an icon, carries only them. `terminalFontFamily()`
+(`apps/web/src/terminal/font/`, cut by `moon run :font-terminal` from a pinned release), so Nerd
+Font icons draw on a device with nothing installed. Its icons are the same in every style, so they
+ship once: four text faces carry no icons, and one symbols face, declared for every weight and style
+so the browser never emboldens or slants an icon, carries only them. `terminalFontFamily()`
 (`apps/web/src/terminal/font.ts`) lists the text family, then the symbols family, then the system's
 monospace stack, with a device's own `bazhen.fontFamily` ahead of them all. An icon fills one cell
 because two things agree: every glyph of every bundled face is 600 units of a 1000-unit em, a

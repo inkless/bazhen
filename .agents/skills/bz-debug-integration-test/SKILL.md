@@ -12,8 +12,8 @@ add sleeps to make a run pass.**
 
 ## "Refusing to run: these tests start real tmux servers"
 
-The suite was started on the host. Run it with `moon run :test-real -- <suite>` instead; never create
-the disposable-host marker to get past it.
+The suite was started on the host. Run it with `moon run :test-real -- <suite>` instead; never
+create the disposable-host marker to get past it.
 
 ## "Refusing to run: N PTYs are in use machine-wide"
 

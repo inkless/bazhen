@@ -22,7 +22,7 @@ for something no check covers.
 | Dependencies are pinned exactly, with a reason for any pre-release                                        | review                                                                                                       |
 | The committed JSON Schema matches the protocol's zod schemas                                              | `moon run :check` (`scripts/protocol-schema.ts --check`)                                                     |
 | `apps/web` screens use only semantic design tokens (`ui.md`)                                              | `moon run :check` (`scripts/check-standards.ts`)                                                             |
-| Rust follows `rust.md`: pedantic clippy, no suppressions, cargo-deny                                      | `moon run :check` (`format:check`, `lint:rust`, `deny`, `test:rust`, standards check)                        |
+| Rust follows `rust.md`: pedantic clippy, no suppressions, cargo-deny                                      | `moon run :check` (`format-check`, `lint-rust`, `deny`, `test-rust`, standards check)                        |
 
 ## Boundaries
 

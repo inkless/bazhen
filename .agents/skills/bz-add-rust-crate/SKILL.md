@@ -33,9 +33,9 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    writes the lockfile: the gates build with `--locked`, so until then each fails with "cannot
    update the lock file".
 4. **Take dependencies from `[workspace.dependencies]`.** A new third-party one goes there, pinned
-   exactly (`=1.2.3`) with default features off (§ Dependencies). Run `moon run :deny`: a new licence
-   or a second version of a crate is fixed now, not later. The new crate itself joins that table,
-   as a `path` in name order, in the commit where another member first takes it: an entry no
+   exactly (`=1.2.3`) with default features off (§ Dependencies). Run `moon run :deny`: a new
+   licence or a second version of a crate is fixed now, not later. The new crate itself joins that
+   table, as a `path` in name order, in the commit where another member first takes it: an entry no
    member uses draws a cargo warning on every gate.
 5. **Lay the targets out where Cargo looks:** `crates/<name>/src/lib.rs`,
    `crates/<name>/src/main.rs`, `crates/<name>/tests/`. A crate whose code takes bytes from
@@ -50,8 +50,8 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    `scripts/check-standards.ts`, and its crate's name in `RUST_SENDERS` (§ Signals). Each entry
    says why in one line.
 8. **Write its first test before its code** (bz-write-rust-test).
-9. **Run the gates:** `moon run :check`, `moon run :lint-rust`, `moon run :test-rust`, `moon run :deny` and
-   `moon run :format-check`. Fix each failure in the code.
+9. **Run the gates:** `moon run :check`, `moon run :lint-rust`, `moon run :test-rust`,
+   `moon run :deny` and `moon run :format-check`. Fix each failure in the code.
 
 ## Checklist
 

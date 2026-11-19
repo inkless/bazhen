@@ -50,8 +50,8 @@ jobs:
       # The real-tmux suites refuse to run on any host that is not thrown away after use.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
-      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; `moon run :check` runs
-      # rustfmt, clippy, cargo-deny and nextest on them.
+      # The Rust crates (crates/) build on the toolchain rust-toolchain.toml pins; `moon run :check`
+      # runs rustfmt, clippy, cargo-deny and nextest on them.
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -99,7 +99,8 @@ jobs:
       - run: moon run :test-holder
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
-  # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its own.
+  # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its
+  # own.
   api:
     name: api (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

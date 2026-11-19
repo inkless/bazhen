@@ -217,6 +217,6 @@ sudo chown -R "$(whoami)" ~/Library/Application\ Support/Caddy
 ## Checking it
 
 `bazhen doctor` lists the external origins the daemon admits, and where it serves the web app
-from; a page that says the app isn't built needs `moon run :build`. If the page loads but the terminal
-says the daemon refused the view, the address in the browser's bar differs from the one in
+from; a page that says the app isn't built needs `moon run :build`. If the page loads but the
+terminal says the daemon refused the view, the address in the browser's bar differs from the one in
 `BAZHEN_EXTERNAL_ORIGINS`: they must match exactly, scheme and port included.

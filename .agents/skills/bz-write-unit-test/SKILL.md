@@ -46,7 +46,8 @@ check rejects a pull request whose new test passes without your change.
   tests, or move the logic into a helper at module scope, as the property test does.
 - **No mocks of code we own.** Use a fake object built from the real interface, like the
   `runtime` fake in `app.test.ts`. No fake timers: pass time and IDs in.
-- **A source file with runtime code needs a sibling test.** `moon run :check` names any that lack one.
+- **A source file with runtime code needs a sibling test.** `moon run :check` names any that lack
+  one.
 
 ## Rationalizations
 

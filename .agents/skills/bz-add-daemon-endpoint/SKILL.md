@@ -11,10 +11,10 @@ Never rename, remove or tighten anything that has shipped.
 ## Steps
 
 1. **Schema.** In `packages/protocol/src/index.ts`, add or extend the zod schema and export the
-   inferred type. New fields on existing messages are `.optional()`. Run `moon run :schema` and commit
-   `packages/protocol/schema/`. Its hash is the protocol id (`protocolId()`) that clients compare
-   with the daemon's, so there is no version to bump. A change the schema can't show, such as a
-   refinement, a constant like `HISTORY_LINES`, or what the daemon does with a message, bumps
+   inferred type. New fields on existing messages are `.optional()`. Run `moon run :schema` and
+   commit `packages/protocol/schema/`. Its hash is the protocol id (`protocolId()`) that clients
+   compare with the daemon's, so there is no version to bump. A change the schema can't show, such
+   as a refinement, a constant like `HISTORY_LINES`, or what the daemon does with a message, bumps
    `revision` in `packages/protocol/src/semantics.ts` with a one-line `reason` instead.
 2. **Protocol tests** in `packages/protocol/src/index.test.ts`: one test that a valid message
    parses, and one that a malformed message is rejected.

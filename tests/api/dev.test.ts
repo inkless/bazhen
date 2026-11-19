@@ -22,8 +22,8 @@ describe("moon run :dev", () => {
 
   // moon passes the Ctrl-C on to both apps and exits without waiting for them to stop, so whether
   // an app's own "stopped" line is printed is a race, and the apps are waited for here; the daemon
-  // is built to survive being cut short. moon marks the tasks it interrupted as failed, then dies of
-  // the SIGINT itself, as a shell expects of an interrupted program: 128 + 2.
+  // is built to survive being cut short. moon marks the tasks it interrupted as failed, then dies
+  // of the SIGINT itself, as a shell expects of an interrupted program: 128 + 2.
   it("ends both apps on Ctrl-C, says it was interrupted, and dies of the SIGINT", async () => {
     const { daemon, web } = dev.apps();
     expect([daemon.length > 0, web.length > 0]).toEqual([true, true]);

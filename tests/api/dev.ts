@@ -65,8 +65,8 @@ const commandLine = (pid: number) =>
   proc(() => readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim());
 
 /**
- * `moon run :dev` on a fresh home and free ports, in the pty of a `script` that leads a process group
- * of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
+ * `moon run :dev` on a fresh home and free ports, in the pty of a `script` that leads a process
+ * group of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
  */
 export class DevRun {
   private readonly home: string;
@@ -167,8 +167,8 @@ export class DevRun {
   }
 
   /**
-   * The command lines of the processes under `moon run :dev` that hold its terminal on stdin, stdout
-   * or stderr from outside the foreground process group, which the shell doesn't wait for.
+   * The command lines of the processes under `moon run :dev` that hold its terminal on stdin,
+   * stdout or stderr from outside the foreground process group, which the shell doesn't wait for.
    */
   backgroundHolders(): string[] {
     const [moon, ...rest] = this.record();

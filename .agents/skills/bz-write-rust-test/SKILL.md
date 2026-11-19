@@ -28,11 +28,11 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
 4. **Run it and watch it fail:** `moon run :test-rust -- <name>`. It must fail on an
    assertion. A compile error proves nothing.
 5. Implement until it passes, then run `moon run :check`.
-6. **Commit, then run `moon run :test-falsify`.** Each new test it reports KILLED has its control: the
-   mutant printed beside it. For each one it reports INVALID, break the code the test names
-   (swap a comparison, drop a check, return a constant), run the test, see it fail on its
-   assertion, and restore the code. Add a trailer to a commit on the branch naming the test by
-   the path nextest lists (falsify prints the trailer to fill in):
+6. **Commit, then run `moon run :test-falsify`.** Each new test it reports KILLED has its control:
+   the mutant printed beside it. For each one it reports INVALID, break the code the test names
+   (swap a comparison, drop a check, return a constant), run the test, see it fail on its assertion,
+   and restore the code. Add a trailer to a commit on the branch naming the test by the path nextest
+   lists (falsify prints the trailer to fill in):
    `Control: <module::path::test_name>: <what you broke> -> <how the test failed>`.
 
 ## Checklist
@@ -56,10 +56,10 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
   so a hang fails fast with what it saw.
 - **nextest runs each test in its own process,** so a test can't lean on state another left.
 - **A test that starts the holder, closes a child or sweeps the ledger signals processes it
-  didn't start,** so it is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]` and its
-  first line is `bazhen_test_signal::require_sandbox().unwrap();`; `moon run :check` requires both.
-  Run it with `moon run :test-real -- rust`, never on the host, and send any signal through
-  `bazhen_test_signal`.
+  didn't start,** so it is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]`
+  and its first line is `bazhen_test_signal::require_sandbox().unwrap();`; `moon run :check`
+  requires both. Run it with `moon run :test-real -- rust`, never on the host, and send any signal
+  through `bazhen_test_signal`.
 - **Never snapshot screen contents.** insta is for protocol frames only; assert the bytes that
   matter.
 

@@ -26,9 +26,9 @@ const loopbackOnly = (): Plugin => ({
 });
 
 /**
- * Vite's CLI closes the dev server on SIGTERM only, so Ctrl-C killed it and `moon run :dev` reported
- * it failed. This closes it the same way on SIGINT. A restarted server adds its own handler, so
- * each one removes its handler when it closes.
+ * Vite's CLI closes the dev server on SIGTERM only, so Ctrl-C killed it and `moon run :dev`
+ * reported it failed. This closes it the same way on SIGINT. A restarted server adds its own
+ * handler, so each one removes its handler when it closes.
  */
 const closeOnSigint = (): Plugin => ({
   name: "bazhen:close-on-sigint",

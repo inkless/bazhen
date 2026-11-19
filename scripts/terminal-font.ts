@@ -1,7 +1,7 @@
-// `moon run :font-terminal`: regenerates the web terminal's bundled font, JetBrainsMono Nerd Font Mono,
-// from one pinned Nerd Fonts release. Never run by `moon run :check` or CI: it downloads the release,
-// and cuts it with fontTools through `uvx`, so it needs the network and uv. Its outputs are
-// committed, and `scripts/terminal-font.medium.test.ts` holds them to the hashes it records.
+// `moon run :font-terminal`: regenerates the web terminal's bundled font, JetBrainsMono Nerd Font
+// Mono, from one pinned Nerd Fonts release. Never run by `moon run :check` or CI: it downloads the
+// release, and cuts it with fontTools through `uvx`, so it needs the network and uv. Its outputs
+// are committed, and `scripts/terminal-font.medium.test.ts` holds them to the hashes it records.
 //
 // The icons are the same glyphs in every face, so they ship once: four text faces without the
 // private-use code points, and one symbols face with only them.
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
       return { name: path.slice(FONT_DIR.length), bytes: bytes.length, sha256: sha256(bytes) };
     });
     writeFileSync(join(FONT_DIR, "README.md"), readme(files));
-    for (const f of files) console.log(`font:terminal: ${f.name} ${f.bytes} bytes`);
+    for (const f of files) console.log(`font-terminal: ${f.name} ${f.bytes} bytes`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

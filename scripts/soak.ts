@@ -1,8 +1,8 @@
 // `moon run :soak -- [--profile gate|long-life|smoke] [--hours n] [--out dir] [--fault close-holder|slow-probe]…`:
 // a real daemon on holders, under design §12.4's load and churn, for hours, then the verdict of
-// scripts/soak-judge.ts on what it recorded. `moon run :soak -- --judge <dir>` judges a finished run's
-// directory again. The long-life profile is the gate's without the daemon's restarts, so the one
-// daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
+// scripts/soak-judge.ts on what it recorded. `moon run :soak -- --judge <dir>` judges a finished
+// run's directory again. The long-life profile is the gate's without the daemon's restarts, so the
+// one daemon's memory and echo are read over its whole life; a run whose daemon dies ends there.
 //
 // The load is 25 terminals: shells running scripts/soak-worker.ts (agent-stream replays, floods,
 // idle shells and one that echoes) and a Claude Code agent on the fake model. The churn kills the

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A disposable libvirt VM for the long holder soak: docs/standards/testing.md, "Runbook: a long run
-# on a VM". Run it as `moon run :soak-vm -- <command>`; `moon run :soak-vm -- help` lists the commands.
+# on a VM". Run it as `moon run :soak-vm -- <command>`; `moon run :soak-vm -- help` lists the
+# commands.
 #
 # The disposable marker, the soak and its holders exist only inside the VM. Each ssh session that
 # provisions the VM, marks it or starts the soak first proves, in that same session, that the far

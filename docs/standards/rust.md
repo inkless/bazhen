@@ -69,10 +69,10 @@ unit.
 **What starts on every call stays light.** The CLI and the hook start on every call an agent
 makes, and a crate they share with the daemon passes on whatever it takes. So no member builds a
 crate in `HEAVY_CRATES` (tokio, hyper, axum, rusqlite and the like) unless `HEAVY_ALLOWED` in
-`scripts/check-standards.ts` lists it, with why. `moon run :check` follows each member's dependencies,
-but not its dev-dependencies, which only its tests build, through `Cargo.lock`, and names the chain
-that reaches one. A member that depends on a listed one reaches what that one reaches, so it needs
-an entry of its own: the daemon's crates go there, and the CLI never does.
+`scripts/check-standards.ts` lists it, with why. `moon run :check` follows each member's
+dependencies, but not its dev-dependencies, which only its tests build, through `Cargo.lock`, and
+names the chain that reaches one. A member that depends on a listed one reaches what that one
+reaches, so it needs an entry of its own: the daemon's crates go there, and the CLI never does.
 
 The split this gives, with the TypeScript each takes over:
 
@@ -113,11 +113,11 @@ check most:
 ## Lints
 
 `[workspace.lints]` in `Cargo.toml` holds every lint level, and every crate inherits it with
-`[lints] workspace = true`. Clippy's `pedantic` group is denied, and `moon run :lint-rust` runs clippy
-with `-D warnings`, so any finding fails. Every lint named on its own below is `forbid`, not
-`deny`: no `#[allow]` or `#[expect]` can lower a forbidden lint, whether it is written out, built
-by a macro or brought in by `include!`, so the compiler itself refuses the suppression (E0453).
-Of rustc's own lints, `unsafe_code` is denied (§ Unsafe), and these are forbidden:
+`[lints] workspace = true`. Clippy's `pedantic` group is denied, and `moon run :lint-rust` runs
+clippy with `-D warnings`, so any finding fails. Every lint named on its own below is `forbid`, not
+`deny`: no `#[allow]` or `#[expect]` can lower a forbidden lint, whether it is written out, built by
+a macro or brought in by `include!`, so the compiler itself refuses the suppression (E0453). Of
+rustc's own lints, `unsafe_code` is denied (§ Unsafe), and these are forbidden:
 
 - `unsafe_op_in_unsafe_fn`: an `unsafe fn`'s body is not one big unsafe block, so each unsafe
   call in it still gets its own block and proof;
@@ -161,10 +161,10 @@ source with comments and strings set aside, and fails on:
   joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
   attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints. The one `#[ignore]`
-  allowed is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]`, exactly, on a test that
-  may signal processes it didn't start, and only on one whose body starts with
-  `bazhen_test_signal::require_sandbox().unwrap();`: the host skips it, and `moon run :test-rust-all`
-  runs it on a disposable host (`testing.md` § Hermeticity);
+  allowed is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]`, exactly, on a
+  test that may signal processes it didn't start, and only on one whose body starts with
+  `bazhen_test_signal::require_sandbox().unwrap();`: the host skips it, and
+  `moon run :test-rust-all` runs it on a disposable host (`testing.md` § Hermeticity);
 - a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
   `not` around one: code compiled only in a release build, on another OS, under a feature or
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
@@ -235,9 +235,9 @@ outlive the run, and `cargo clean` removes it.
 
 `scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
-any option after the gate (`moon run :test-rust -- <name>` may name tests), removes the variables that
-change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every
-other source of rustflags), and overrides any configured compiler or wrapper.
+any option after the gate (`moon run :test-rust -- <name>` may name tests), removes the variables
+that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
+every other source of rustflags), and overrides any configured compiler or wrapper.
 
 Every gate, fmt and deny too, refuses to run under a cargo config that sets what it can't override:
 
@@ -278,9 +278,9 @@ its protocol defines, and still flags a fifth.
 
 ## Formatting
 
-rustfmt with its defaults: no `rustfmt.toml`. `moon run :format` applies it, `moon run :format-check`
-checks it, and the pre-commit hook formats staged `.rs` files. Defaults mean no style is ever
-up for discussion in a review.
+rustfmt with its defaults: no `rustfmt.toml`. `moon run :format` applies it,
+`moon run :format-check` checks it, and the pre-commit hook formats staged `.rs` files. Defaults
+mean no style is ever up for discussion in a review.
 
 ## Unsafe
 
@@ -391,15 +391,16 @@ and ruff snapshot a CLI's output, those suites do it here.
 The daemon's API is defined by the zod schemas in `packages/protocol`, and `moon run :schema` writes
 their JSON Schema to `packages/protocol/schema/`. While the daemon is TypeScript, a Rust crate that
 speaks the API holds hand-written serde types for the messages it uses. They are held to the
-TypeScript by fixtures `moon run :schema` writes for each of those messages, as it writes the holder's
-for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and encodes it
-back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so only a
-strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
+TypeScript by fixtures `moon run :schema` writes for each of those messages, as it writes the
+holder's for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and
+encodes it back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so
+only a strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
 
 `moon run :schema` also writes `crates/bazhen-protocol/src/id.rs`, the `PROTOCOL_ID` the Rust crates
-speak: the hash of `packages/protocol/schema/` that `protocolId()` gives. `moon run :schema -- --check` holds
-it to the schema, and a test in `crates/bazhen` hashes the schema itself, so neither side drifts.
-The CLI compares it with the daemon's `protocolId`, and calls one that differs another build.
+speak: the hash of `packages/protocol/schema/` that `protocolId()` gives.
+`moon run :schema -- --check` holds it to the schema, and a test in `crates/bazhen` hashes the
+schema itself, so neither side drifts. The CLI compares it with the daemon's `protocolId`, and calls
+one that differs another build.
 
 The types aren't generated from the JSON Schema. typify, tried on every schema, fails on the event
 and agent-reference unions, names each nested type by where it sits because the schemas inline
@@ -442,8 +443,8 @@ route, a message, a config key or an error that both have lands in both, in the 
 and a migration always does (testing.md § Black-box behaviour tests says how that is held).
 
 - **The store is one schema.** `crates/bazhen-store` runs the TypeScript daemon's migrations, in
-  its order, from the fixture `moon run :schema` writes, so a database either daemon wrote opens in the
-  other. A new migration is written in TypeScript first and reaches the fixture; the Rust store
+  its order, from the fixture `moon run :schema` writes, so a database either daemon wrote opens in
+  the other. A new migration is written in TypeScript first and reaches the fixture; the Rust store
   refuses a database whose recorded migrations it doesn't know.
 - **The wire types are the protocol's.** `bazhen-protocol` holds the serde twin of each zod
   schema a route answers with, and `crates/bazhen-protocol/tests/fixtures.rs` decodes each from
@@ -471,15 +472,15 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
   features you don't use. Upgrade one foundational crate per commit: one most of a crate's code
   is written against, such as serde, the async runtime or the PTY crate, whose upgrade can change
   behaviour everywhere at once.
-- **`moon run :deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the allow-list
-  (dev-dependencies included), an advisory or a yanked crate, two versions of one crate, a
-  wildcard version, or a source other than crates.io. It reads the dependency tree for the
-  triples Bazhen is built for, Linux and macOS on x86_64 and aarch64 (`[graph] targets`): a
-  crate only Windows builds, such as alacritty_terminal's `windows-sys`, is neither checked nor a
-  second version. A new licence joins the allow-list in the commit that needs it, naming the
-  crate: Unicode-3.0 is there for `unicode-ident`, which `serde_derive` and `thiserror-impl`
-  build on. A crate that brings a second version of one already in the tree (`syn`, say) aligns
-  the versions rather than relaxing `multiple-versions`.
+- **`moon run :deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the
+  allow-list (dev-dependencies included), an advisory or a yanked crate, two versions of one crate,
+  a wildcard version, or a source other than crates.io. It reads the dependency tree for the triples
+  Bazhen is built for, Linux and macOS on x86_64 and aarch64 (`[graph] targets`): a crate only
+  Windows builds, such as alacritty_terminal's `windows-sys`, is neither checked nor a second
+  version. A new licence joins the allow-list in the commit that needs it, naming the crate:
+  Unicode-3.0 is there for `unicode-ident`, which `serde_derive` and `thiserror-impl` build on. A
+  crate that brings a second version of one already in the tree (`syn`, say) aligns the versions
+  rather than relaxing `multiple-versions`.
 - **An advisory fails `moon run :check` on every branch the day it is published,** main included,
   with no code change. That is deliberate: the fix is to upgrade the crate, or, when the advisory
   can't reach our use of it, to list its id in `deny.toml`'s `[advisories] ignore` with the
@@ -495,7 +496,7 @@ What differs:
 - **Run with nextest** (`moon run :test-rust`), which runs each test in its own process, so one
   test's panic or leaked state can't reach another. nextest doesn't run doctests, so an example in
   a doc comment is documentation, not a test; the first library crate with one adds
-  `cargo test --doc` to `test:rust`. Unit tests sit in a `#[cfg(test)] mod tests`
+  `cargo test --doc` to `test-rust`. Unit tests sit in a `#[cfg(test)] mod tests`
   at the bottom of the file they test; tests of a crate's public API go in its `tests/`.
 - **Property tests with proptest** for every decoder and state machine: a round trip through
   the encoder, and the decoder's answer for every malformed input, such as every truncation

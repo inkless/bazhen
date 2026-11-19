@@ -2,9 +2,9 @@
 // bogus GIT_DIR and GIT_INDEX_FILE in its environment that must never reach git or the tests. A
 // stub `pnpm` stands in for install and vitest, and a stub `cargo` for the binaries' build and
 // their listing, each logging what it saw: the build makes a binary of each crate with a
-// src/main.rs, in the profile it is given, that prints that file. A stub `cargo-nextest` lists the Rust tests named in the tree's rust-tests.txt and
-// runs them, failing each on the line of kills.txt whose marker the Rust source holds; a stub
-// `cargo-mutants` lists mutants.json.
+// src/main.rs, in the profile it is given, that prints that file. A stub `cargo-nextest` lists the
+// Rust tests named in the tree's rust-tests.txt and runs them, failing each on the line of
+// kills.txt whose marker the Rust source holds; a stub `cargo-mutants` lists mutants.json.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";

@@ -46,40 +46,40 @@ Engineering at Google_.
 | large  | `tests/api/*.test.ts`              | the daemon as a process, holders or tmux, CLIs | `moon run :test-real -- api`                |
 | large  | `tests/e2e/*.spec.ts`              | daemons on tmux and holders, web, browser      | `moon run :test-real -- e2e`                |
 
-`moon run :check` runs the small and medium tests on the host; none of them runs tmux or an agent, or
-signals a process it didn't start. The holder tests and the Rust tests that start a holder, close a
-child or sweep the ledger do signal such processes, as a closing holder signals its child's session,
-so they run only on a disposable host: `moon run :test-real -- holder` and `moon run :test-real -- rust`, or CI. The
-integration, api and e2e tests run real tmux, so they run only on a disposable host too: the test
-container (`moon run :test-real`, which builds it from the worktree without mounting it) or a CI runner.
-A disposable host carries a root-owned `/etc/bazhen-disposable-host`, and for real tmux is Linux;
-their setup refuses to start anywhere else. Never create that file on a machine you work on. Inside
-a container or CI they are the `moon run :test-integration`, `test:api` and `test:e2e` scripts, one
-worker each. An api test runs on holders, the default, unless it is about tmux: a case that reads
-its terminals through tmux lives in a `*.tmux.test.ts` sibling and starts its daemon with
-`runtime: "tmux"`, and the helpers that read tmux refuse on any other daemon. The e2e suite starts a
-daemon per runtime, each a Playwright project named for it: every spec runs on the tmux daemon, and
-those `RUNTIME_AGNOSTIC_SPECS` (`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec
-that reads tmux reaches it through `daemonTmux()`, which refuses on the holder project. Every agent
-is a real Claude Code, so the `test` that `tests/e2e/page.ts` exports closes the agents a test
-opened when it ends, and every one left on its daemon when its worker stops, before the next project
-starts. Each run's containers have no network and get a CPU quota of half the machine
-(`BZ_TEST_CPUS` overrides it), because a suite that starts a busy process per core would otherwise
-take every core from the agents working on the same machine. They run in `bazhen-tests.slice`, so
-the slice's cap holds every run's containers together, and each gets a memory cap of half the
-machine, with no swap beyond it (`BZ_TEST_MEMORY`, in GiB, overrides it), so a runaway dies in its
-container. A probe container checks they land there first, which they do under rootless Podman, or
-rootless Docker with the systemd cgroup driver, under a user systemd. Where they can't, as under
-rootful Docker or Docker Desktop, the run refuses to start, except on a disposable host, which no
-other run shares: there each container gets a quarter of the machine. A run removes its containers,
-image and build context on every exit it sees, Ctrl-C, SIGTERM and SIGHUP included, and gives each
-cleanup command 30 seconds; a second signal abandons the cleanup. What a run killed outright or
-abandoned left, the next run on the same machine removes: it sweeps the stopped containers, images
-and contexts whose owning process is gone, and an image only once no container uses it. Docker's
-build cache keeps the layers, so repeat runs are fast; BuildKit's garbage collection bounds it, and
-`docker builder prune` reclaims it on a machine of your own. Under Podman, where `docker` is the
-podman-docker shim, nothing bounds the cache; `podman image prune` reclaims it on a machine of your
-own.
+`moon run :check` runs the small and medium tests on the host; none of them runs tmux or an agent,
+or signals a process it didn't start. The holder tests and the Rust tests that start a holder, close
+a child or sweep the ledger do signal such processes, as a closing holder signals its child's
+session, so they run only on a disposable host: `moon run :test-real -- holder` and
+`moon run :test-real -- rust`, or CI. The integration, api and e2e tests run real tmux, so they run
+only on a disposable host too: the test container (`moon run :test-real`, which builds it from the
+worktree without mounting it) or a CI runner. A disposable host carries a root-owned
+`/etc/bazhen-disposable-host`, and for real tmux is Linux; their setup refuses to start anywhere
+else. Never create that file on a machine you work on. Inside a container or CI they are the
+`moon run :test-integration`, `:test-api` and `:test-e2e` tasks, one worker each. An api test runs
+on holders, the default, unless it is about tmux: a case that reads its terminals through tmux lives
+in a `*.tmux.test.ts` sibling and starts its daemon with `runtime: "tmux"`, and the helpers that
+read tmux refuse on any other daemon. The e2e suite starts a daemon per runtime, each a Playwright
+project named for it: every spec runs on the tmux daemon, and those `RUNTIME_AGNOSTIC_SPECS`
+(`tests/e2e/daemons.ts`) lists run on the holder daemon too. A spec that reads tmux reaches it
+through `daemonTmux()`, which refuses on the holder project. Every agent is a real Claude Code, so
+the `test` that `tests/e2e/page.ts` exports closes the agents a test opened when it ends, and every
+one left on its daemon when its worker stops, before the next project starts. Each run's containers
+have no network and get a CPU quota of half the machine (`BZ_TEST_CPUS` overrides it), because a
+suite that starts a busy process per core would otherwise take every core from the agents working on
+the same machine. They run in `bazhen-tests.slice`, so the slice's cap holds every run's containers
+together, and each gets a memory cap of half the machine, with no swap beyond it (`BZ_TEST_MEMORY`,
+in GiB, overrides it), so a runaway dies in its container. A probe container checks they land there
+first, which they do under rootless Podman, or rootless Docker with the systemd cgroup driver, under
+a user systemd. Where they can't, as under rootful Docker or Docker Desktop, the run refuses to
+start, except on a disposable host, which no other run shares: there each container gets a quarter
+of the machine. A run removes its containers, image and build context on every exit it sees, Ctrl-C,
+SIGTERM and SIGHUP included, and gives each cleanup command 30 seconds; a second signal abandons the
+cleanup. What a run killed outright or abandoned left, the next run on the same machine removes: it
+sweeps the stopped containers, images and contexts whose owning process is gone, and an image only
+once no container uses it. Docker's build cache keeps the layers, so repeat runs are fast;
+BuildKit's garbage collection bounds it, and `docker builder prune` reclaims it on a machine of your
+own. Under Podman, where `docker` is the podman-docker shim, nothing bounds the cache;
+`podman image prune` reclaims it on a machine of your own.
 
 **Remove every scratch Docker image and container you build,** by its own tag or name, when you
 are done with it. Several agents share one Docker host, so never prune, and never remove an image
@@ -106,17 +106,17 @@ against the daemon's public surfaces, never its TypeScript internals.
 - **Either daemon runs it.** `BAZHEN_TEST_DAEMON_BIN`, an absolute path, names the Rust daemon's
   binary, and the suite, the e2e config and `bazhen start` then start it in place of `apps/daemon`,
   `bazhen start` saying which it started; without it they start the TypeScript one.
-  `tests/rust-daemon.txt` lists the api test files the Rust daemon passes, and `moon run :test-api-rust`
-  runs them against its release build. The `api (rust daemon)` job runs that on every pull request
-  and push to `main`, and fails when a listed file runs no test or skips one or leaves one to do, or
-  when the list lost a file against the base's (rust.md § While both daemons are built): a file
-  joins the list in the pull request that makes every test of it pass, and leaves only at the
-  cutover, with the job and the variable. A change to a listed file's behaviour lands in both
-  daemons, as the job holds.
+  `tests/rust-daemon.txt` lists the api test files the Rust daemon passes, and
+  `moon run :test-api-rust` runs them against its release build. The `api (rust daemon)` job runs
+  that on every pull request and push to `main`, and fails when a listed file runs no test or skips
+  one or leaves one to do, or when the list lost a file against the base's (rust.md § While both
+  daemons are built): a file joins the list in the pull request that makes every test of it pass,
+  and leaves only at the cutover, with the job and the variable. A change to a listed file's
+  behaviour lands in both daemons, as the job holds.
 - `tests/cli` is the CLI's own, held to the same rule: it runs the `bazhen` binary `BAZHEN_CLI`
-  names (without it, the release build `moon run :build-cli` makes) against a fake daemon on the socket
-  the CLI looks for, and asserts what the CLI sent, printed and exited with. It needs no tmux, so it
-  runs on the host, and it holds a CLI in any language to the same verbs.
+  names (without it, the release build `moon run :build-cli` makes) against a fake daemon on the
+  socket the CLI looks for, and asserts what the CLI sent, printed and exited with. It needs no
+  tmux, so it runs on the host, and it holds a CLI in any language to the same verbs.
 
 ## Falsification
 
@@ -147,9 +147,9 @@ Every new test must be shown to fail without the code it covers.
   judged tests run once per vitest project, as each project's moon task runs them. A branch
   that changes falsify,
   anything it imports, or how it is run is judged by the base's falsify too, in CI and in
-  `moon run :test-real -- falsify` (`moon run :test-falsify-base`, `scripts/falsify-base.ts`, which runs only
-  in a sandbox), so its new tests also need what that falsify asks for, usually a `Control:`
-  line. Only committed work counts. Each test comes out as one of:
+  `moon run :test-real -- falsify` (`moon run :test-falsify-base`, `scripts/falsify-base.ts`, which
+  runs only in a sandbox), so its new tests also need what that falsify asks for, usually a
+  `Control:` line. Only committed work counts. Each test comes out as one of:
   - **KILLED** — it failed. Good.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, runs one it names with
@@ -217,9 +217,9 @@ Every new test must be shown to fail without the code it covers.
   base builds no Rust daemon, and when the Rust run leaves a listed test without a pass or a fail
   (skipped, not collected, unfinished, or a run that left no report). An INVALID listed test takes a
   `Control:` that breaks the Rust daemon by hand and watches the test fail on its assertion under
-  `moon run :test-api-rust`. So a test written after the change it covers, as when a surface lands in one
-  pull request and its listed tests in the next, goes in on a branch that changes nothing it is
-  related to, where it is INVALID, with such a control; on a branch that changes the CLI, say, it
+  `moon run :test-api-rust`. So a test written after the change it covers, as when a surface lands
+  in one pull request and its listed tests in the next, goes in on a branch that changes nothing it
+  is related to, where it is INVALID, with such a control; on a branch that changes the CLI, say, it
   passes on both bases while related to the change, and is SURVIVED.
 
 - **Renamed and moved tests.** A test given a truer title, or moved to another test file, and
@@ -267,21 +267,21 @@ Two lessons from the scaffold's controls:
 - **A control can find a real bug.** One control caught a race where a fast-exiting process
   destroyed its tmux session before `remain-on-exit` applied.
 
-`moon run :test-falsify -- --base <ref>` judges the branch against another base. On the host, a new test
-that runs real tmux comes out INVALID, because its setup refuses; `moon run :test-real -- falsify` judges
-it in the container. Hand-made mutants of such a test run there too. The image carries
-cargo-nextest and cargo-mutants at the versions `crates/bazhen-xtask/rust-tools.json` pins, and
-fetches what the base's lockfiles name as well as HEAD's, so a branch touching the Rust workspace
-is judged there with no network, the base's falsify included. When falsify can't install a
-worktree's dependencies, it prints the end of what pnpm said.
+`moon run :test-falsify -- --base <ref>` judges the branch against another base. On the host, a new
+test that runs real tmux comes out INVALID, because its setup refuses;
+`moon run :test-real -- falsify` judges it in the container. Hand-made mutants of such a test run
+there too. The image carries cargo-nextest and cargo-mutants at the versions
+`crates/bazhen-xtask/rust-tools.json` pins, and fetches what the base's lockfiles name as well as
+HEAD's, so a branch touching the Rust workspace is judged there with no network, the base's falsify
+included. When falsify can't install a worktree's dependencies, it prints the end of what pnpm said.
 
 Falsify reverts and mutates code that signals processes only in a sandbox, as
 `scripts/signal-paths.ts` defines one. Outside it, a branch that would revert or mutate such code
 (`isSignallingSource`), or run a test that signals (`isSignallingTest`), is refused before any of
-its tests run. Falsify names the files and points at `moon run :test-real -- falsify`, and judges none of
-the branch, since a partial verdict would read as a pass. Inside the sandbox it also runs the Rust
-tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation
-scores are not a gate, because their cost and equivalent mutants make the number meaningless.
+its tests run. Falsify names the files and points at `moon run :test-real -- falsify`, and judges
+none of the branch, since a partial verdict would read as a pass. Inside the sandbox it also runs
+the Rust tests ignored as signalling, which a plain nextest run skips. Stryker-style mutation scores
+are not a gate, because their cost and equivalent mutants make the number meaningless.
 
 The holder's whole crate is swept by `moon run :test-real -- mutants --group <signal|lifecycle|rest>
 [--shard k/n]` (`scripts/holder-mutants.ts`), a tool for finding untested code, not a check. The
@@ -297,16 +297,15 @@ re-sweep doesn't triage them again. Each is matched by function and mutation, no
 script refuses a run in which one names other than the mutants it was classed for, or one whose
 line of source isn't the one it was classed on, so code that moves can't leave one excluding a
 mutant nobody read.
-Every mutant cargo-mutants' Rust tests miss is judged again by `moon run :test-holder`, so one only the
-black-box suite catches isn't counted missed. A survivor gets a test that kills it, or a note
+Every mutant cargo-mutants' Rust tests miss is judged again by `moon run :test-holder`, so one only
+the black-box suite catches isn't counted missed. A survivor gets a test that kills it, or a note
 saying why it changes nothing. `--only <regex>` narrows a group to the mutants whose names it
-matches, to see new tests kill them: each one caught is printed with the tests that failed on it
-and where they panicked, what the tests' `Control:` trailers name. It refuses a narrowed run that
-would list a mutant it doesn't name, as cargo-mutants does a struct-field deletion whatever its
-`--re` says. The script refuses to start
-before it lists anything anywhere but a sandbox, since a mutant of the holder can signal any pid
-it computes, and refuses a run whose groups don't partition the crate's mutants. CI's
-`Holder mutants` workflow runs a group by hand, never on a push.
+matches, to see new tests kill them: each one caught is printed with the tests that failed on it and
+where they panicked, what the tests' `Control:` trailers name. It refuses a narrowed run that would
+list a mutant it doesn't name, as cargo-mutants does a struct-field deletion whatever its `--re`
+says. The script refuses to start before it lists anything anywhere but a sandbox, since a mutant of
+the holder can signal any pid it computes, and refuses a run whose groups don't partition the
+crate's mutants. CI's `Holder mutants` workflow runs a group by hand, never on a push.
 
 The chaos suite, `tests/holder/chaos.test.ts`, deals holders the faults of a daemon's machine
 through a stand-in daemon, a process of its own running `HolderRuntime`
@@ -337,8 +336,8 @@ whose counts must be back at their baselines.
 criteria and the contract the driver keeps. Nothing passes for want of data, and what only a
 longer run can judge is `unmeasured`, which fails the gate. A run writes everything to its
 directory as it happens, so one cut short keeps its evidence: the driver's records, each
-worker's, the driver's log, and the verdict as JSON and as text. `moon run :soak -- --judge <dir>` judges a directory
-again.
+worker's, the driver's log, and the verdict as JSON and as text. `moon run :soak -- --judge <dir>`
+judges a directory again.
 
 The gate's restarts mean each daemon life lasts 10 minutes, so its daemon-memory criterion shows
 only that nothing grows across restarts. The **long-life profile** (`moon run :soak -- --profile
@@ -352,11 +351,11 @@ Probes aren't required while the daemon is down, since it never is.
 
 It runs three ways:
 
-- **`moon run :test-real -- soak`** runs the smoke profile in the container: the same load with the churn
-  compressed, for minutes. A clean run must pass every criterion but the slopes, which only hours
-  show. Then a run with two faults injected must fail on the criteria they break and no others: a
-  holder closed behind the daemon's back, and a worker that reads its probe replies late. It takes
-  about half an hour of the heavy slot.
+- **`moon run :test-real -- soak`** runs the smoke profile in the container: the same load with the
+  churn compressed, for minutes. A clean run must pass every criterion but the slopes, which only
+  hours show. Then a run with two faults injected must fail on the criteria they break and no
+  others: a holder closed behind the daemon's back, and a worker that reads its probe replies late.
+  It takes about half an hour of the heavy slot.
 - **CI's `Holder soak` workflow** runs `moon run :soak -- --hours <h>` on hosted Linux and macOS
   runners, marked disposable. That is at most 4 measured hours after the warm-up hour, since a
   hosted job is cut off at 6. It runs only when the owner starts it, never on a push, and an
@@ -365,13 +364,13 @@ It runs three ways:
   of its own. **That host is a VM, or a machine used for nothing else, never the owner's daily
   machine:** the run's holders signal every process in their sessions, and a wrong pid there ends
   work that matters.
-  The long-life profile's runs, `moon run :soak -- --profile long-life --hours 24` or longer, go on the
-  same kind of host.
+  The long-life profile's runs, `moon run :soak -- --profile long-life --hours 24` or longer, go on
+  the same kind of host.
 
 ### Runbook: a long run on a VM
 
-On a Linux x86_64 host with KVM, `moon run :soak-vm` (`scripts/soak-vm.sh`) runs the steps below in a
-libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); `create [--commit
+On a Linux x86_64 host with KVM, `moon run :soak-vm` (`scripts/soak-vm.sh`) runs the steps below in
+a libvirt VM it creates. `setup` installs libvirt once (with sudo, after asking); `create [--commit
 <sha>]` makes an Ubuntu 24.04 VM and provisions it at the commit, `main` by default; `start
 [--profile gate|long-life] [--hours 24]` marks the VM disposable and starts the run; `status`
 shows it; `collect` copies the run's directory and log to `~/bazhen-soak-results`; `destroy`
@@ -418,8 +417,8 @@ of its own, and a runaway dies alone.
 
 - **Scripts.** A `package.json` step that starts tests runs as
   `node scripts/capped.ts --memory <n>G --time <n>m -- <command>`, its caps beside its command.
-  `moon run :check` fails a step without one, or with a cap above 24 GiB or 120 min. Run anything else
-  that runs tests by hand as `moon run :capped -- <command>` (8 GiB, 120 min): `cargo mutants`,
+  `moon run :check` fails a step without one, or with a cap above 24 GiB or 120 min. Run anything
+  else that runs tests by hand as `moon run :capped -- <command>` (8 GiB, 120 min): `cargo mutants`,
   `cargo test`, a one-off script.
 - **Test binaries.** `.cargo/config.toml` makes `scripts/capped.ts --test-binary` cargo's target
   runner, so cargo test, nextest and cargo-mutants start every test process through it, a
@@ -551,8 +550,8 @@ A test owns everything it touches and leaves nothing behind.
   It fails closed on a module that is only named `signal`: a glob or rename of tokio's counts, so
   import its items by name. A Rust test that may signal processes it didn't start is
   `#[ignore = "signals processes; runs in moon run :test-real -- rust"]` and starts with
-  `bazhen_test_signal::require_sandbox().unwrap();`, both of which `moon run :check` requires, so the
-  host skips it and `moon run :test-rust-all` runs it only on a host carrying a root-owned
+  `bazhen_test_signal::require_sandbox().unwrap();`, both of which `moon run :check` requires, so
+  the host skips it and `moon run :test-rust-all` runs it only on a host carrying a root-owned
   `/etc/bazhen-disposable-host`: the test container or a CI runner. A PID namespace doesn't count:
   Flatpak terminals, devcontainers, LXD and WSL2 are workstations in one. A test of a guard asserts
   on what the guard returns, sends `SIGCONT`, or signals only a child it started, so a guard a
@@ -568,9 +567,9 @@ A test owns everything it touches and leaves nothing behind.
   machine, because every agent on it slows down with you. A comparison that needs load runs on a
   CI runner: rerun the pull request's CI job that runs the suite, for example `api`. The per-suite
   `--cpus` quota (`BZ_TEST_CPUS`) is a backstop, not permission.
-- **Untracked files run.** `moon run :test-real` copies untracked, non-ignored files from the worktree
-  into the image, so an uncommitted test file runs as part of the suite. Remove probes before you
-  run it.
+- **Untracked files run.** `moon run :test-real` copies untracked, non-ignored files from the
+  worktree into the image, so an uncommitted test file runs as part of the suite. Remove probes
+  before you run it.
 
 ## Writing the test
 
@@ -596,15 +595,15 @@ A test owns everything it touches and leaves nothing behind.
   was written; two written in parallel must not depend on each other, and when their appends
   conflict, keep both. A migration on main is never edited, renamed or removed. Its file imports
   only types and exports its migration frozen, so a later change elsewhere can't alter what it
-  does. `moon run :check` holds those, against the merge base with main: each name is listed once, for
-  its own file and that file's own frozen export; files on main are unchanged and keep their
+  does. `moon run :check` holds those, against the merge base with main: each name is listed once,
+  for its own file and that file's own frozen export; files on main are unchanged and keep their
   order; and the list starts with `NUMBERED_MIGRATIONS`, which never changes. A medium test runs
   each named migration after all the others, as a database that missed it would, and requires a
   fresh database's schema, so two that don't commute fail it. Nothing checks that a new migration
-  has its own upgrade test. The formatter skips the directory, so a formatter upgrade can't
-  rewrite a shipped migration. A new migration gets a medium test that opens a database at the
-  migration before it and upgrades it. While both daemons are built, the Rust store runs the same list
-  from the fixture `moon run :schema` writes (`moon run :schema -- --check` holds it), so a new migration
+  has its own upgrade test. The formatter skips the directory, so a formatter upgrade can't rewrite
+  a shipped migration. A new migration gets a medium test that opens a database at the migration
+  before it and upgrades it. While both daemons are built, the Rust store runs the same list from
+  the fixture `moon run :schema` writes (`moon run :schema -- --check` holds it), so a new migration
   lands in both in one pull request, and its fixture comes with it.
 - **No snapshots of terminal output.** Assert the specific bytes or screen content that matter.
 - **Flaky tests are bugs.** There are no retries. Fix the race, or delete the test and record why.

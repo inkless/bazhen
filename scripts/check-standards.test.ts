@@ -302,7 +302,7 @@ describe("migrationHistoryFailures", () => {
     ]);
   });
 
-  it("is one of the checks pnpm check runs", () => {
+  it("is one of the checks moon run :check runs", () => {
     expect(STANDARDS_CHECKS).toContain(checkMigrations);
   });
 });
@@ -1482,7 +1482,7 @@ describe("moonFailures", () => {
       failures(edited("scripts/xtask.sh gate lint", "cargo clippy --workspace")),
       failures(edited('"deny", ', "")),
       failures(edited('deps = ["root:gate-fmt"]', "deps = []")),
-      failures(edited(`[tasks.deny]\n`, `[tasks.deny]\nenv = { CARGO_DENY = "x" }\n`)),
+      failures(edited(`[tasks.deny]\n`, `[tasks.deny]\nargs = ["--x"]\n`)),
       failures(edited(`[tasks.deny]\ncommand = "${RUST_GATE_TASKS["deny"]}"`, "[tasks.none]")),
     ]).toEqual([
       [expect.stringContaining('the "lint-rust" task must run')],
@@ -1496,6 +1496,7 @@ describe("moonFailures", () => {
   it("refuses a key or option it doesn't read, a dep given args, and CI skipping a task", () => {
     expect([
       failures(web(`command = "vite build"\nextends = "build"\n${uncached}`)),
+      failures(web(`command = "vite build"\nenv = { NODE_OPTIONS = "--x" }\n${uncached}`)),
       failures(web('command = "vite build"\noptions = { cache = false, allowFailure = true }')),
       failures(web(`deps = [{ target = "root:test-rust", args = "x" }]\n${uncached}`)),
       failures(web('command = "vite build"\noptions = { cache = false, runInCI = false }')),
@@ -1504,6 +1505,7 @@ describe("moonFailures", () => {
       ),
     ]).toEqual([
       [expect.stringContaining('the "t" task sets `extends`')],
+      [expect.stringContaining('the "t" task sets `env`')],
       [expect.stringContaining('the "t" task sets `options.allowFailure`')],
       [expect.stringContaining('the "t" task must name its deps as a list of targets')],
       [expect.stringContaining('the "t" task sets `options.runInCI`')],

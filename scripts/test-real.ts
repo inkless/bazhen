@@ -1,5 +1,5 @@
-// `moon run :test-real -- [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`: the
-// real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
+// `moon run :test-real -- [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`:
+// the real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
 // short runs (scripts/soak.ts), in a container built from this worktree
 // (docs/standards/testing.md). The build context is a fresh repository holding HEAD and falsify's
 // base, overlaid with the worktree's uncommitted files, so falsify judges commits and the other
@@ -430,7 +430,7 @@ function fillContext(dir: string, top: string, base: string): void {
   const { copy, remove, skipped } = overlay(top);
   for (const file of remove) rmSync(join(dir, file), { force: true });
   for (const file of copy) copyEntry(join(top, file), join(dir, file));
-  if (skipped.length > 0) console.warn(`test:real: left out of the image: ${skipped.join(", ")}`);
+  if (skipped.length > 0) console.warn(`test-real: left out of the image: ${skipped.join(", ")}`);
 }
 
 /** Copies a file, or a symlink as the same link, never what it points at. */
@@ -590,8 +590,8 @@ export async function sweep(host: Host, quiet: Quiet = bounded(host)): Promise<v
     const removed = await quiet(["image", "rm", ref]);
     console.warn(
       removed.code === 0
-        ? `test:real: removed ${ref}, left by a run that is gone`
-        : `test:real: kept ${ref}: ${errors(removed.err).join("; ")}`,
+        ? `test-real: removed ${ref}, left by a run that is gone`
+        : `test-real: kept ${ref}: ${errors(removed.err).join("; ")}`,
     );
   }
   for (const dir of host.runDirs()) {
@@ -685,7 +685,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       const inSlice = "parent" in placement;
       if (!inSlice && !host.disposable) {
         console.error(
-          `test:real: ${placement.why}, so its containers would run outside the memory cap ` +
+          `test-real: ${placement.why}, so its containers would run outside the memory cap ` +
             `every capped run shares. Refusing to start: run it where containers join ${SLICE} ` +
             "(rootless Podman, or rootless Docker with the systemd cgroup driver, under a user " +
             "systemd), or on a disposable host. Rootful Docker and Docker Desktop put " +
@@ -695,7 +695,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       }
       if (!inSlice) {
         console.warn(
-          `test:real: ${placement.why}, so on this disposable host each container gets a ` +
+          `test-real: ${placement.why}, so on this disposable host each container gets a ` +
             "quarter of the machine's memory, outside the cap every capped run shares",
         );
       }
@@ -735,8 +735,8 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
       }
       console.log(
         failedSuites.length === 0
-          ? `test:real: ${suites.join(", ")} passed`
-          : `test:real: ${failedSuites.join(", ")} failed`,
+          ? `test-real: ${suites.join(", ")} passed`
+          : `test-real: ${failedSuites.join(", ")} failed`,
       );
       return failedSuites.length === 0 ? 0 : 1;
     })();
@@ -751,7 +751,7 @@ export async function run(args: readonly string[], host: Host): Promise<number> 
     if (dir !== undefined) host.removeDir(dir);
     unsubscribe();
     if (left.length > 0) {
-      console.warn(`test:real: left ${left.join(", ")}; the next run's sweep removes them`);
+      console.warn(`test-real: left ${left.join(", ")}; the next run's sweep removes them`);
     }
   }
   return interrupted === undefined ? code : exitCodeFor(interrupted);
@@ -856,7 +856,7 @@ if (isMain(import.meta)) {
   run(process.argv.slice(2), host).then(
     (code) => (process.exitCode = code),
     (error: unknown) => {
-      console.error(`test:real: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`test-real: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     },
   );

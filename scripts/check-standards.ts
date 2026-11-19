@@ -1,5 +1,5 @@
 // Repository standards that no linter covers (docs/standards/code.md, testing.md). Runs first in
-// `pnpm check`; every failure names the file and the fix.
+// `moon run :check`; every failure names the file and the fix.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
@@ -2649,7 +2649,7 @@ const MOON_CLI = "@moonrepo/cli";
 const ROOT_PROJECT = "root";
 // The keys of a task, and of its options, this check reads; any other could change what it runs
 // or let it pass unrun (`extends`, `options.allowFailure`, `options.envFile`, …).
-const MOON_TASK_KEYS = new Set(["command", "args", "script", "deps", "env", "options"]);
+const MOON_TASK_KEYS = new Set(["command", "args", "script", "deps", "options"]);
 const MOON_TASK_OPTIONS = new Set([
   "cache",
   "runDepsInParallel",
@@ -4276,7 +4276,7 @@ function checkSuppressions(): void {
   }
 }
 
-/** Every check `pnpm check` runs, in order. */
+/** Every check `moon run :check` runs, in order. */
 export const STANDARDS_CHECKS: readonly (() => void)[] = [
   checkSiblingTests,
   checkAgentContext,

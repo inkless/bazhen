@@ -1,6 +1,6 @@
-//! One of the Rust gates `moon run :check` relies on (docs/standards/rust.md). Each gate's command is
-//! fixed here, and runs in an environment no caller's flags reach: a flag can switch every lint off
-//! (`--cap-lints allow`), whether it comes from the environment, a cargo config in any parent
+//! One of the Rust gates `moon run :check` relies on (docs/standards/rust.md). Each gate's command
+//! is fixed here, and runs in an environment no caller's flags reach: a flag can switch every lint
+//! off (`--cap-lints allow`), whether it comes from the environment, a cargo config in any parent
 //! directory, or an argument, and a cargo alias can stand in for a whole gate.
 
 use std::collections::BTreeMap;
