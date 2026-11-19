@@ -938,6 +938,11 @@ const NOT_DECODERS: Record<string, string> = {
     "asks for the lease when keys are held for it; reads no bytes",
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::fmt":
     "writes the keys DetachKeys::parse has read as a person reads them; parses nothing",
+  "crates/bazhen/src/attach/keys.rs::detach":
+    "reads config.toml with the toml crate and passes its keys to DetachKeys::parse, which the protocol's detach_keys target fuzzes",
+  "crates/bazhen/src/attach.rs::straight":
+    "takes the keys DetachKeys::parse read, for Direct::new, which the attach target fuzzes",
+  "crates/bazhen/src/attach.rs::starting": "shows the keys DetachKeys::parse read; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::DetachScan::push":
     "reached only through DetachScan::scan, which the attach target fuzzes",
   "crates/bazhen/src/attach/attachment.rs::Attachment::sized":
