@@ -46,9 +46,9 @@ pub struct Peer {
 }
 
 /// One line of decimals: the pid, the session or 0, the Codex app-server or 0, 1 when the caller's
-/// environment was withheld or else 0, then each ancestor. The app-server and the environment come
-/// before the ancestors, so a reader that expects neither reads an ancestor as one, which refuses
-/// the call rather than passing it as the human's.
+/// environment was withheld or else 0, then each ancestor. A daemon of another build would read
+/// these fields as other ones, the flag as an ancestor's pid; the daemon installs and runs the
+/// reader of its own build, so the two always agree.
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let session = self.session.map_or(0, Pid::as_raw_pid);
@@ -232,15 +232,17 @@ pub fn codex_of(
     })
 }
 
-/// Whether the kernel withholds a process's environment from a reader running as `uid` and `gid`
-/// for the process's group alone. The kernel shows it only to a reader whose filesystem uid is the
-/// process's real, effective and saved uid, whose filesystem gid is its real, effective and saved
-/// gid, and only while the process is dumpable (`__ptrace_may_access`), and a process that isn't
-/// dumpable has its `environ` owned by root. So: its `environ` is `owner`'s and that is `uid`, all
-/// four of its uids are `uid`, and all four of its gids are one group that isn't `gid`, as a
-/// `newgrp` or `sg` shell's are. Gids that differ among themselves are a set-group-id program's,
-/// and are not taken for this.
-fn withheld_for_group(owner: u32, theirs: Credentials, uid: u32, gid: u32) -> bool {
+/// Whether the kernel withholds a process's environment, its `environ` file `owner`'s, from a
+/// reader with credentials `ours` for the process's group alone. The kernel shows it only to a
+/// reader whose filesystem uid is the process's real, effective and saved uid, whose filesystem gid
+/// is its real, effective and saved gid, and only while the process is dumpable
+/// (`__ptrace_may_access`), and a process that isn't dumpable has its `environ` owned by root.
+/// So: `owner` is our filesystem uid, all four of its uids are that uid, and all four of its gids
+/// are one group that isn't our filesystem gid, as a `newgrp` or `sg` shell's are. Gids that
+/// differ among themselves are a set-group-id program's, and are not taken for this.
+fn withheld_for_group(owner: u32, theirs: Credentials, ours: Credentials) -> bool {
+    let [.., uid] = ours.uids;
+    let [.., gid] = ours.gids;
     let [group, ..] = theirs.gids;
     owner == uid && theirs.uids == [uid; 4] && theirs.gids == [group; 4] && group != gid
 }
@@ -276,17 +278,16 @@ fn own_environ(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
 /// Whether the kernel withholds `pid`'s environment from this process for `pid`'s group alone.
 #[cfg(target_os = "linux")]
 fn group_withholds(pid: Pid) -> io::Result<bool> {
-    use std::os::unix::fs::MetadataExt as _;
+    withholds_from(pid, process::credentials(rustix::process::getpid())?)
+}
 
-    use rustix::process::getegid;
+/// Whether the kernel withholds `pid`'s environment from a reader with credentials `ours` for
+/// `pid`'s group alone.
+#[cfg(target_os = "linux")]
+fn withholds_from(pid: Pid, ours: Credentials) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt as _;
     let owner = std::fs::metadata(format!("/proc/{}/environ", pid.as_raw_pid()))?.uid();
-    let theirs = process::credentials(pid)?;
-    Ok(withheld_for_group(
-        owner,
-        theirs,
-        geteuid().as_raw(),
-        getegid().as_raw(),
-    ))
+    Ok(withheld_for_group(owner, process::credentials(pid)?, ours))
 }
 
 /// macOS denies another process's environment by rules of its own, none of them taken for this.
@@ -655,8 +656,13 @@ mod tests {
         );
     }
 
+    /// The reader's uid and gid, apart so that a rule reading one for the other is told apart.
     const READER_UID: u32 = 1000;
-    const READER_GID: u32 = 1000;
+    const READER_GID: u32 = 2000;
+    const READER: Credentials = Credentials {
+        uids: [READER_UID; 4],
+        gids: [READER_GID; 4],
+    };
 
     /// A `newgrp libvirt` shell's credentials: every uid the reader's, every gid group 141.
     const GROUP_SHELL: Credentials = Credentials {
@@ -665,7 +671,7 @@ mod tests {
     };
 
     fn group_withheld(owner: u32, theirs: Credentials) -> bool {
-        withheld_for_group(owner, theirs, READER_UID, READER_GID)
+        withheld_for_group(owner, theirs, READER)
     }
 
     #[test]
@@ -694,6 +700,22 @@ mod tests {
             theirs.gids[slot] = READER_GID;
             assert!(!group_withheld(READER_UID, theirs), "gid {slot}");
         }
+    }
+
+    #[test]
+    fn compares_with_the_reader_s_filesystem_uid_and_gid() {
+        let reader = |uid: u32, gid: u32| Credentials {
+            uids: [1, 1, 1, uid],
+            gids: [1, 1, 1, gid],
+        };
+        assert_eq!(
+            [
+                withheld_for_group(READER_UID, GROUP_SHELL, reader(READER_UID, READER_GID)),
+                withheld_for_group(READER_UID, GROUP_SHELL, reader(READER_UID, 141)),
+                withheld_for_group(READER_UID, GROUP_SHELL, reader(1, READER_GID)),
+            ],
+            [true, false, false],
+        );
     }
 
     #[test]
@@ -729,6 +751,41 @@ mod tests {
             withheld_or(Err(io::Error::other("ESRCH")), || Ok(true)),
         ];
         assert!(kept.iter().all(Result::is_err), "{kept:?}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn takes_no_denial_of_init_s_or_this_process_s_environment_for_the_group_s() {
+        let init = Pid::from_raw(1).unwrap();
+        assert_eq!(
+            [
+                group_withholds(init).unwrap(),
+                group_withholds(getpid()).unwrap()
+            ],
+            [false, false],
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn takes_this_process_for_a_group_shell_to_a_reader_of_another_group() {
+        let ours = process::credentials(getpid()).unwrap();
+        let [.., gid] = ours.gids;
+        let other_group = Credentials {
+            gids: [gid.wrapping_add(1); 4],
+            ..ours
+        };
+        let other_user = Credentials {
+            uids: ours.uids.map(|uid| uid.wrapping_add(1)),
+            ..other_group
+        };
+        assert_eq!(
+            [
+                withholds_from(getpid(), other_group).unwrap(),
+                withholds_from(getpid(), other_user).unwrap(),
+            ],
+            [true, false],
+        );
     }
 
     #[test]
