@@ -1,7 +1,7 @@
 //! What the binary does with its arguments: serve in the foreground with none, as `main.ts`;
 //! `start`, as `start.ts`, to detach a daemon that serves in a session of its own.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
@@ -47,7 +47,7 @@ pub fn run(args: &[OsString]) -> ExitCode {
         return ExitCode::from(2);
     };
     let uid = rustix::process::getuid().as_raw();
-    let lookup = |name: &str| std::env::var(name).ok();
+    let lookup = |name: &str| std::env::var_os(name).as_deref().map(as_node_reads);
     let settings = match load_settings(&Inputs::current(None, uid), &lookup) {
         Ok(settings) => settings,
         Err(InvalidConfig(message)) => {
@@ -65,6 +65,13 @@ pub fn run(args: &[OsString]) -> ExitCode {
     }
 }
 
+/// A variable as Node's `process.env` gives it: bytes that aren't UTF-8 read as U+FFFD, so the
+/// config refuses a value that isn't text as it refuses any other it can't take, never reads it as
+/// unset.
+fn as_node_reads(value: &OsStr) -> String {
+    value.to_string_lossy().into_owned()
+}
+
 /// What serving needs, from the settings and `BAZHEN_WEB_PORT`, an empty one unset.
 fn startup(settings: Settings, uid: u32) -> Startup {
     let config = settings.config;
@@ -72,8 +79,9 @@ fn startup(settings: Settings, uid: u32) -> Startup {
         paths: settings.paths,
         uid,
         port: config.port,
-        web_port: std::env::var("BAZHEN_WEB_PORT")
-            .ok()
+        web_port: std::env::var_os("BAZHEN_WEB_PORT")
+            .as_deref()
+            .map(as_node_reads)
             .filter(|p| !p.is_empty()),
         external_origins: config.external_origins,
         external_origins_from: config.external_origins_from.map(OriginsFrom::as_str),
@@ -114,6 +122,13 @@ fn start(settings: &Settings, uid: u32, err: &mut dyn Write) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_a_variable_that_isnt_utf8_as_node_does_never_as_unset() {
+        use std::os::unix::ffi::OsStringExt;
+        let port = OsString::from_vec(b"79\xff0".to_vec());
+        assert_eq!(as_node_reads(&port), "79\u{fffd}0");
+    }
 
     #[test]
     fn serves_with_no_argument_and_starts_with_start_and_nothing_else() {
