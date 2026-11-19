@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ids::{AgentId, AssignmentId, TaskId};
+
 /// Why the stream couldn't resume from a cursor: older than retention, or not from this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,6 +21,207 @@ impl ResetReason {
             Self::Foreign => "foreign",
         }
     }
+}
+
+/// An event type the daemon records: the entity its events are about, and the top-level payload
+/// keys a client is sent, in the order they are sent. The rest of a payload never leaves the
+/// daemon: a task's brief, a message's body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventKind {
+    pub name: &'static str,
+    pub entity: &'static str,
+    pub streamed: &'static [&'static str],
+}
+
+const fn registered(
+    name: &'static str,
+    entity: &'static str,
+    streamed: &'static [&'static str],
+) -> EventKind {
+    EventKind {
+        name,
+        entity,
+        streamed,
+    }
+}
+
+/// Every event type either daemon records, as `EVENTS` in packages/protocol/src/events.ts registers
+/// them, held to it by the store's fixture.
+pub const EVENT_KINDS: &[EventKind] = &[
+    registered("environment.registered", "environment", &["kind"]),
+    registered(
+        "environment.harness_version",
+        "environment",
+        &["harness", "version", "previous"],
+    ),
+    registered(
+        "agent.launched",
+        "agent",
+        &[
+            "environmentId",
+            "harness",
+            "project",
+            "cwd",
+            "terminalId",
+            "launchedBy",
+            "name",
+            "nameOrdinal",
+            "runtime",
+            "role",
+            "promptHash",
+            "compactWindowTokens",
+        ],
+    ),
+    registered("agent.renamed", "agent", &["name", "previous"]),
+    registered(
+        "agent.running",
+        "agent",
+        &["externalRef", "runtimeRef", "theme", "harnessName"],
+    ),
+    registered("agent.ready", "agent", &["sign"]),
+    registered("agent.failed", "agent", &["reason", "detail"]),
+    registered("agent.lost", "agent", &[]),
+    registered("agent.process_adopted", "agent", &["runtimeRef"]),
+    registered("agent.respawn_requested", "agent", &[]),
+    registered(
+        "agent.respawned",
+        "agent",
+        &[
+            "externalRef",
+            "runtimeRef",
+            "theme",
+            "harnessName",
+            "promptHash",
+        ],
+    ),
+    registered("agent.respawn_rejected", "agent", &["reason", "detail"]),
+    registered(
+        "agent.relaunch_requested",
+        "agent",
+        &["terminalId", "generation", "fresh", "runtime"],
+    ),
+    registered(
+        "agent.relaunched",
+        "agent",
+        &[
+            "externalRef",
+            "runtimeRef",
+            "theme",
+            "harnessName",
+            "promptHash",
+        ],
+    ),
+    registered("agent.relaunch_rejected", "agent", &["reason", "detail"]),
+    registered("agent.external_ref_updated", "agent", &["externalRef"]),
+    registered("agent.transcript_recorded", "agent", &["sessionId"]),
+    registered("agent.signalled", "agent", &["signal"]),
+    registered(
+        "agent.activity",
+        "agent",
+        &[
+            "value",
+            "source",
+            "confidence",
+            "observedAt",
+            "detail",
+            "resetsAt",
+        ],
+    ),
+    registered(
+        "agent.usage",
+        "agent",
+        &[
+            "model",
+            "contextUsedPercent",
+            "contextWindowTokens",
+            "limits",
+        ],
+    ),
+    registered("agent.compacted", "agent", &["sign", "before", "hook"]),
+    registered("agent.exited", "agent", &["exit"]),
+    registered("agent.closing", "agent", &[]),
+    registered("agent.closed", "agent", &[]),
+    registered(
+        "terminal.opened",
+        "terminal",
+        &[
+            "environmentId",
+            "cwd",
+            "linkedAgentId",
+            "theme",
+            "restartOf",
+            "runtime",
+        ],
+    ),
+    registered("terminal.running", "terminal", &["runtimeRef"]),
+    registered("terminal.failed", "terminal", &["reason"]),
+    registered("terminal.process_adopted", "terminal", &["runtimeRef"]),
+    registered("terminal.lost", "terminal", &[]),
+    registered("terminal.closing", "terminal", &[]),
+    registered("terminal.closed", "terminal", &["reason"]),
+    registered("terminal.foreground_changed", "terminal", &["command"]),
+    registered("terminal.needs_restart", "terminal", &["protocol"]),
+    registered("terminal.restart_cleared", "terminal", &[]),
+    registered("terminal.unlinked", "terminal", &[]),
+    registered("terminal.renamed", "terminal", &["name"]),
+    registered("attachment.started", "attachment", &["terminalId", "mode"]),
+    registered("attachment.ended", "attachment", &["reason"]),
+    registered("mailbox.queued", "message", &["agentId", "from"]),
+    registered("mailbox.offered", "message", &["promptId"]),
+    registered("mailbox.emitted", "message", &[]),
+    registered("mailbox.seen", "message", &["promptId"]),
+    registered("mailbox.delivered", "message", &[]),
+    registered("mailbox.accepted", "message", &["offline"]),
+    registered("mailbox.undeliverable", "message", &["reason"]),
+    registered(
+        "message.observed",
+        "observed_message",
+        &["from", "to", "summary", "accepted", "toolUseId"],
+    ),
+    registered("mailbox.requeued", "message", &["reason"]),
+    registered(
+        "attention.opened",
+        "attention",
+        &[
+            "agentId",
+            "summary",
+            "kind",
+            "taskId",
+            "messageId",
+            "toolUseId",
+            "mainAgent",
+        ],
+    ),
+    registered("attention.answered", "attention", &["decision"]),
+    registered("attention.closed", "attention", &["reason"]),
+    registered("device.paired", "device", &["name"]),
+    registered("device.revoked", "device", &[]),
+    registered("notice.opened", "notice", &["kind", "summary", "device"]),
+    registered("notice.closed", "notice", &["reason", "by", "fromDevice"]),
+    registered("lease.granted", "terminal", &["attachmentId", "epoch"]),
+    registered(
+        "task.created",
+        "task",
+        &["title", "ownerAgentId", "parentTaskId", "delegatedFrom"],
+    ),
+    registered("task.finished", "task", &["outcome"]),
+    registered(
+        "task.owner_changed",
+        "task",
+        &["ownerAgentId", "delegatedFrom"],
+    ),
+    registered("task.noted", "task", &["handoff", "role"]),
+    registered(
+        "assignment.granted",
+        "assignment",
+        &["taskId", "agentId", "role", "parentAssignmentId"],
+    ),
+    registered("assignment.ended", "assignment", &["reason"]),
+];
+
+/// The registered type named `name`.
+pub fn event_kind(name: &str) -> Option<&'static EventKind> {
+    EVENT_KINDS.iter().find(|kind| kind.name == name)
 }
 
 /// One event, as the stream sends it.
@@ -50,4 +253,15 @@ pub enum EventFrame {
     Reset {
         reason: ResetReason,
     },
+}
+
+/// The payload of `task.created`, in the order the TypeScript daemon writes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCreated {
+    pub title: String,
+    pub brief: String,
+    pub owner_agent_id: Option<AgentId>,
+    pub parent_task_id: Option<TaskId>,
+    pub delegated_from: Option<AssignmentId>,
 }

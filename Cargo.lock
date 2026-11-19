@@ -246,6 +246,7 @@ dependencies = [
  "libc",
  "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "thiserror",
 ]

@@ -20,7 +20,7 @@ const Fixture = z.object({
 
 const fixture = () => {
   const files = storeFixture();
-  expect(Object.keys(files)).toEqual(["typescript.json"]);
+  expect(Object.keys(files)).toEqual(["typescript.json", "events.json"]);
   return Fixture.parse(JSON.parse(files["typescript.json"] ?? ""));
 };
 

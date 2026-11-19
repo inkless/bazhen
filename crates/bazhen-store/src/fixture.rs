@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::testing::TempDir;
 use crate::{
     MIGRATIONS, Migration, NAMED_MIGRATIONS_VERSION, NUMBERED_MIGRATIONS, OpenError, PRAGMAS, Store,
 };
@@ -17,33 +18,6 @@ fn fixture() -> Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../packages/protocol/fixtures/store/typescript.json");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-}
-
-/// A directory of the test's own, removed when the test ends, whether or not it passed.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> Self {
-        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "bz-store-fixture-{name}-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&dir).unwrap();
-        Self(dir)
-    }
-
-    fn db(&self, name: &str) -> PathBuf {
-        self.0.join(name)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        // A directory left in the temp dir costs nothing a test would see.
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 fn open(path: &Path, migrations: &[Migration]) -> Store {

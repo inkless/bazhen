@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { eventsFixture } from "./events-fixture.ts";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "./migrations.ts";
 import { NAMED_MIGRATIONS_VERSION, PRAGMAS, Store } from "./store.ts";
 
@@ -113,7 +114,10 @@ export function storeFixture(): Record<string, string> {
       pragmas: pragmas(dir),
       hooks: hookResults(dir),
     };
-    return { "typescript.json": `${JSON.stringify(fixture, null, 2)}\n` };
+    return {
+      "typescript.json": `${JSON.stringify(fixture, null, 2)}\n`,
+      "events.json": eventsFixture(),
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
