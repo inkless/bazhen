@@ -14,21 +14,33 @@ export const PEER_COMMAND = "bazhen-peer";
 /**
  * A socket peer as `bazhen-peer` names it: its pid, its session (0 for one led from outside the
  * daemon's PID namespace, which no terminal's process leads), the nearest Codex app-server among
- * it and its ancestors, and its ancestors to the root.
+ * it and its ancestors, whether the kernel withheld its environment for the group it runs as, and
+ * its ancestors to the root.
  */
 export interface PeerChain {
   readonly pid: number;
   readonly session: number;
   readonly codexServer: number | undefined;
+  readonly environmentWithheld: boolean;
   readonly ancestors: readonly number[];
 }
 
-/** The line `bazhen-peer` prints, its Codex app-server 0 for none, or undefined for anything else. */
+/**
+ * The line `bazhen-peer` prints, its Codex app-server 0 for none and its environment 1 for
+ * withheld, 0 for read, or undefined for anything else.
+ */
 export function parsePeer(line: string): PeerChain | undefined {
   const fields = line.trim().split(" ");
-  if (fields.length < 3 || !fields.every((f) => /^[0-9]{1,10}$/.test(f))) return undefined;
-  const [pid = 0, session = 0, codexServer = 0, ...ancestors] = fields.map(Number);
-  return { pid, session, codexServer: codexServer === 0 ? undefined : codexServer, ancestors };
+  if (fields.length < 4 || !fields.every((f) => /^[0-9]{1,10}$/.test(f))) return undefined;
+  const [pid = 0, session = 0, codexServer = 0, withheld = 0, ...ancestors] = fields.map(Number);
+  if (withheld > 1) return undefined;
+  return {
+    pid,
+    session,
+    codexServer: codexServer === 0 ? undefined : codexServer,
+    environmentWithheld: withheld === 1,
+    ancestors,
+  };
 }
 
 /** When each connection to the socket was accepted, which a peer's process must have started by. */
@@ -146,11 +158,16 @@ export interface TerminalPids {
  */
 export type CodexReading = { readonly kind: "codex"; readonly via: "server" | "environment" };
 
-/** What a socket peer's process says of the caller. */
+/**
+ * What a socket peer's process says of the caller. `withheld` is outside every agent's terminal
+ * with its environment unread, so only the thread the call presents can say it is a Codex tool
+ * call.
+ */
 export type PeerReading =
   | { readonly kind: "agent"; readonly agentId: AgentSessionId }
   | CodexReading
   | { readonly kind: "outside" }
+  | { readonly kind: "withheld" }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "late" };
 
@@ -166,7 +183,8 @@ export type PeerReading =
  * root nearer the caller than the server, as when Bazhen itself runs under one, still names it.
  * A caller marked only by its own environment (`bazhen-peer` names the caller itself) is a Codex
  * tool call only where no agent's terminal places it: any agent can set `CODEX_THREAD_ID`, and a
- * real Codex command runs under the server, outside every terminal.
+ * real Codex command runs under the server, outside every terminal. A caller outside every
+ * terminal whose environment the kernel withheld can't be read for that mark, so it is `withheld`.
  */
 export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReading {
   const line = [chain.pid, ...chain.ancestors];
@@ -180,10 +198,13 @@ export function readingOf(chain: PeerChain, terminals: TerminalPids): PeerReadin
     return { kind: "codex", via: "server" };
   if (agentId !== undefined) return { kind: "agent", agentId };
   if (markedOnly) return { kind: "codex", via: "environment" };
-  if (line.some((pid) => terminals.shells.has(pid))) return { kind: "outside" };
+  const outside = chain.environmentWithheld
+    ? { kind: "withheld" as const }
+    : { kind: "outside" as const };
+  if (line.some((pid) => terminals.shells.has(pid))) return outside;
   if (line.some((pid) => terminals.runtimes.has(pid)))
     return { kind: "refused", reason: "the caller runs under Bazhen's runtime, in no terminal" };
-  return { kind: "outside" };
+  return outside;
 }
 
 /**
