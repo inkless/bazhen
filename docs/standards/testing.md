@@ -17,7 +17,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Holder tests use only their run's home, reach no tmux, and leave no holder running | holder setup and teardown                   |
 | An api test picks tmux only in a `*.tmux.test.ts` file                             | `pnpm check` (`scripts/check-standards.ts`) |
 | A signal is sent only from a chokepoint that checks its target                     | `pnpm check` (`scripts/check-standards.ts`) |
-| A test that may signal processes it didn't start runs only in a sandbox            | `cargo-gate test-all`; `require_sandbox()`  |
+| A test that may signal processes it didn't start runs only in a sandbox            | `xtask gate test-all`; `require_sandbox()`  |
 | Suites never synthesise CPU load on a shared machine                               | review; `--cpus` quota on each container    |
 | Every test runs under a memory and time cap                                        | `pnpm check`; vitest setup; cargo's runner  |
 | Fakes over mocks; behaviour-named tests; no snapshots of terminal output           | review                                      |
@@ -239,7 +239,7 @@ Two lessons from the scaffold's controls:
 `pnpm test:falsify --base <ref>` judges the branch against another base. On the host, a new test
 that runs real tmux comes out INVALID, because its setup refuses; `pnpm test:real falsify` judges
 it in the container. Hand-made mutants of such a test run there too. The image carries
-cargo-nextest and cargo-mutants at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins, and
+cargo-nextest and cargo-mutants at the versions `crates/bazhen-xtask/rust-tools.json` pins, and
 fetches what the base's lockfiles name as well as HEAD's, so a branch touching the Rust workspace
 is judged there with no network, the base's falsify included. When falsify can't install a
 worktree's dependencies, it prints the end of what pnpm said.

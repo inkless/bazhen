@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CARGO_CONFIG,
+  XTASK_WRAPPER,
   CLIPPY_CONFIG,
   MAX_CAP,
   MUTANTS_CONFIG,
@@ -1226,10 +1227,14 @@ describe("rustFailures on the gates' own configuration", () => {
     "rust-toolchain.toml": TOOLCHAIN_CONFIG.join("\n"),
     ".cargo/config.toml": CARGO_CONFIG.join("\n"),
     ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
+    "scripts/xtask.sh": `#!/bin/sh\n# Why.\n\n${XTASK_WRAPPER.slice(1).join("\n  # and\n")}\n`,
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
-    "scripts/cargo-gate.ts": "RUSTFLAGS",
-    "scripts/cargo-gate.test.ts": "RUSTFLAGS",
-    "scripts/cargo-gate.medium.test.ts": "RUSTFLAGS",
+    "scripts/cargo-config.medium.test.ts": "RUSTFLAGS",
+    "scripts/rust-gate.ts": "RUSTFLAGS",
+    "scripts/rust-gate.test.ts": "RUSTFLAGS",
+    "scripts/xtask-gate.medium.test.ts": "RUSTFLAGS",
+    "crates/bazhen-xtask/src/gate.rs": "RUSTFLAGS",
+    "crates/bazhen-xtask/src/cargo_config.rs": "RUSTFLAGS",
     "scripts/check-standards.ts": "RUSTFLAGS",
     "scripts/check-standards.test.ts": "RUSTFLAGS",
     "docs/standards/rust.md": "`RUSTFLAGS` and `--cap-lints` are removed by the gate.",
@@ -1267,13 +1272,33 @@ describe("rustFailures on the gates' own configuration", () => {
     ]);
   });
 
+  it("refuses a gate wrapper that differs from the pinned one but in comments, or none", () => {
+    const edited = XTASK_WRAPPER.join("\n").replace('exec "$bin" "$@"', 'exec cargo xtask "$@"');
+    expect([failures({ "scripts/xtask.sh": edited }), failures({}, ["scripts/xtask.sh"])]).toEqual([
+      ["scripts/xtask.sh: differs from XTASK_WRAPPER in scripts/check-standards.ts."],
+      [
+        "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/xtask.sh.",
+        "scripts/xtask.sh is missing; the Rust gates need it.",
+      ],
+    ]);
+  });
+
+  it("refuses a .cargo/config, which cargo reads in place of the pinned one", () => {
+    expect(failures({ ".cargo/config": "[build]\njobs = 2\n" })).toEqual([
+      expect.stringContaining(".cargo/config: cargo config can pass flags"),
+    ]);
+  });
+
   it("refuses a cargo config without the capping test runner, or none", () => {
     expect([
       failures({ ".cargo/config.toml": "[build]\njobs = 2\n" }),
       failures({}, [".cargo/config.toml"]),
     ]).toEqual([
       [expect.stringContaining(".cargo/config.toml: differs from CARGO_CONFIG")],
-      [expect.stringContaining(".cargo/config.toml is missing")],
+      [
+        "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing .cargo/config.toml.",
+        expect.stringContaining(".cargo/config.toml is missing"),
+      ],
     ]);
   });
 
@@ -1323,8 +1348,8 @@ describe("rustFailures on the gates' own configuration", () => {
   });
 
   it("names an exempt file that no longer exists", () => {
-    expect(failures({}, ["scripts/cargo-gate.test.ts"])).toEqual([
-      "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/cargo-gate.test.ts.",
+    expect(failures({}, ["scripts/rust-gate.test.ts"])).toEqual([
+      "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/rust-gate.test.ts.",
     ]);
   });
 });
@@ -1344,7 +1369,7 @@ describe("cappedScriptFailures", () => {
         test: `${cap} vitest run --project unit`,
         "test:medium": `pnpm run build:hook && ${cap} vitest run --project medium`,
         check: "pnpm run lint && pnpm run test:rust",
-        "lint:rust": "node scripts/cargo-gate.ts lint",
+        "lint:rust": "scripts/xtask.sh gate lint",
       }),
     ).toEqual([]);
   });
@@ -1366,13 +1391,14 @@ describe("cappedScriptFailures", () => {
         "cargo nextest run",
         "cargo bench",
         "cargo +nightly-2026-11-01 fuzz run parse_reply",
-        "node scripts/cargo-gate.ts test",
+        "cargo xtask gate test",
+        "scripts/xtask.sh gate test-all",
         "node scripts/falsify.ts",
         "node scripts/hook-bench.ts",
         "node scripts/test-real.ts",
         `vitest run && ${cap} vitest run`,
       ].map((t) => cappedScriptFailures("package.json", { t }).length),
-    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("refuses a capped step joined by anything but && to one that could run round it", () => {

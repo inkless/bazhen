@@ -13,7 +13,7 @@ a review asks for something no check covers.
 | Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
 | No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
 | No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `pnpm check` (`scripts/check-standards.ts`)           |
-| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/cargo-gate.ts`, which every gate script runs |
+| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/xtask.sh gate`, which every gate script runs |
 | Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                                   |
 | No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                                      |
 | No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                                      |
@@ -209,15 +209,59 @@ in `RUST_FLAG_EXEMPT` that names a flag or variable able to switch lints off (`R
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
 argument, and a cargo alias can replace `cargo clippy` with a command that passes. So each gate
-script runs `scripts/cargo-gate.ts`, which holds the gate's command, calls the subcommand's own
-binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
-<name>` may name tests), removes the variables that change flags, tools or the test runner, sets
-`CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
-configured compiler or wrapper. A cargo config outside the repository may still set what the gate
-can't override: a test runner, a `rustdoc` or a linker, `[env]` (which can hand clippy its flags), a
-profile (which can turn off overflow checks and debug assertions in the tests) or an `include` of
-another file. The lint and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper
-such as sccache is ignored by the gates, not an error.
+script runs `scripts/xtask.sh gate`, which builds xtask (`crates/bazhen-xtask/src/gate.rs`) and runs
+the binary itself, naming the repository it is in as the root. `cargo xtask` would start xtask
+through a target runner, and a runner set for the host's triple outranks the one the alias names:
+it could stand in for xtask, or start it with another root and `PATH`, and pass with no gate run.
+cargo uses no runner to build. And xtask can only check the configs once it runs, after cargo has
+built it under them: a config's linker, `[env]`, `paths` or source replacement could build
+another xtask that passes. So the script builds xtask where no cargo config reaches it:
+
+- from `/`, since cargo reads configs from the folder it runs in and those above it, refusing if
+  `/.cargo` has a cargo config, named `config` or `config.toml`. Only root can write there, where
+  a temporary folder could sit under a symlink, or in `/tmp`, where any user can plant one;
+- with a cargo home of its own, `cargo-home` in its build folder, which shares the caller's downloads
+  and has no config;
+- with no variable from the caller but `PATH`, `HOME` and `RUSTUP_HOME`, so no `CARGO_*`, `RUSTC*`
+  or `RUSTFLAGS` reaches it, and with the toolchain `rust-toolchain.toml` pins.
+
+It builds into a folder of its own, xtask in the target directory, apart from the gates' builds,
+and runs the one executable cargo names. It removes xtask's own crate's build first, so cargo
+builds it afresh each run and a binary put in its place is never taken for a built one; that costs
+about a third of a second. It takes no
+shared compiler cache, so its first build in a checkout costs a few seconds. The dependencies it
+built stay built: a library forged in that folder by something else that builds there would
+outlive the run, and `cargo clean` removes it.
+
+`scripts/check-standards.ts` pins the script's text. xtask holds the
+gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
+any option after the gate (`pnpm test:rust <name>` may name tests), removes the variables that
+change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every
+other source of rustflags), and overrides any configured compiler or wrapper.
+
+Every gate, fmt and deny too, refuses to run under a cargo config that sets what it can't override:
+
+- a test runner, a `rustdoc` or a linker;
+- `[env]`, which can hand clippy its flags or put another `cargo-fmt` first on `PATH`;
+- a profile, which can turn off overflow checks and debug assertions in the tests;
+- an `include` of another file;
+- `paths` or a source's `replace-with`, which swap a dependency's code without changing
+  `Cargo.lock`, so `--locked` doesn't catch them.
+
+That covers each config outside the repository, in a parent directory or the cargo home. It also
+covers a file named `config`, with no extension, beside the repository's `.cargo/config.toml`,
+tracked or not, whatever it sets: cargo reads that in place of the pinned `.cargo/config.toml`, and
+only warns. A config is parsed as TOML and its keys
+read as cargo reads them, so no quoting or escaping hides one, and a config that doesn't parse is
+refused. A global `RUSTFLAGS` or a wrapper such as sccache is ignored by the gates, not an error.
+
+**What the gates defend against.** The configs, environment and tools a developer's machine
+gathers by accident or from elsewhere: a global `RUSTFLAGS`, a cross-compiling runner in a parent
+directory, an alias, a config another project left behind. None of these makes a gate pass with
+less checked. What is left to trust is what the script starts with: `sh`, the tools on `PATH`
+(`cargo`, the linker `cc`), and the rustup toolchain. They don't defend against a local user who
+sets out to defeat them, who can rewrite those or the script itself. CI runs the same gates on a
+clean runner, and that run decides.
 
 **Every fd is close-on-exec.** `clippy.toml` disallows the rustix calls that make an fd without
 `O_CLOEXEC` (`rustix::fs::open`, `rustix::fs::openat`, `rustix::io::dup`): a child would inherit
@@ -427,7 +471,7 @@ What differs:
 - **Property tests with proptest** for every decoder and state machine: a round trip through
   the encoder, and the decoder's answer for every malformed input, such as every truncation
   (`crates/bazhen-hook/src/lib.rs`, `mod properties`).
-  - **A pull request tests the change, not the draw.** `gateEnv` in `scripts/cargo-gate.ts` fixes
+  - **A pull request tests the change, not the draw.** `cargo xtask gate`, and `gateEnv` in `scripts/rust-gate.ts`, fix
     `PROPTEST_RNG_SEED` for every gate and for falsify, and drops `PROPTEST_CASES`, so each
     `proptest!` block runs the case count its code gives (proptest's 256 where it gives none). A
     run sees the cases the last one saw, so a property that fails on a pull request failed
@@ -550,7 +594,7 @@ What differs:
   memory cap (`testing.md` § Memory and time caps), and a mutant whose run had one killed there is
   listed INVALID with that reason, as one that ran out of time is. Install cargo-mutants once:
   `cargo install --locked cargo-mutants@27.1.0`; the `pnpm test:real` image carries it, and
-  cargo-nextest, at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins.
+  cargo-nextest, at the versions `crates/bazhen-xtask/rust-tools.json` pins.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from
 outside, as `testing.md` § Black-box behaviour tests describes: `tests/api` delivers mail to

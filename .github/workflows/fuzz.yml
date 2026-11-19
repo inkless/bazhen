@@ -84,7 +84,7 @@ jobs:
           name: fuzz-artifacts
           path: crates/*/fuzz/artifacts/
 
-  # A pull request runs every property test on one fixed seed (scripts/cargo-gate.ts and
+  # A pull request runs every property test on one fixed seed (`cargo xtask gate` and
   # tests/support/fast-check-seed.ts), so it fails only for what it changed. This job draws new
   # cases: round after round, each on random seeds it prints, while a whole round still fits.
   properties:

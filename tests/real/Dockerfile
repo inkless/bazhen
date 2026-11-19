@@ -30,7 +30,7 @@ RUN echo "${TMUX_SHA256}  /tmp/tmux.tar.gz" | sha256sum -c - \
   && make -j"$(nproc)" \
   && make install DESTDIR=/tmux-root
 
-# The cargo tools falsify runs, at the versions scripts/cargo-gate.ts pins, built from source with
+# The cargo tools falsify runs, at the versions crates/bazhen-xtask/rust-tools.json pins, built from source with
 # their lockfiles. A stage of their own, so only a toolchain or version change rebuilds them.
 FROM node:${NODE_VERSION}-trixie AS rust-tools
 ARG RUSTUP_VERSION

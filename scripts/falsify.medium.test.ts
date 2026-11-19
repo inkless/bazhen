@@ -24,7 +24,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAlive, signalOwnChild } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installCommand } from "./cargo-gate.ts";
+import { installCommand } from "./rust-gate.ts";
 import { binariesOf, manifestNames, namedBinaries } from "./falsify.ts";
 import { inSignalSandbox } from "./signal-paths.ts";
 
@@ -2172,12 +2172,14 @@ const RUNS_BINARIES: Record<string, string[]> = {
   "tests/support/holder-spawn.ts": ["debug/bazhen-holder", "debug/bazhen-holder-replay"],
 };
 // Files whose paths into a target/ are data, not binaries they run: falsify itself, its tests'
-// fixtures, absolute paths in doctor's fixtures, a store test's scratch folder named target, and the
-// scratch build tree of the test of where agents find the CLI.
+// fixtures, absolute paths in doctor's fixtures, a store test's scratch folder named target, the
+// scratch build tree of the test of where agents find the CLI, and the text of scripts/xtask.sh
+// that the standards check pins.
 const MENTIONS_TARGET = [
   "apps/daemon/src/env/agent-cli.medium.test.ts",
   "apps/daemon/src/store/store.medium.test.ts",
   "packages/protocol/src/api-fixtures.ts",
+  "scripts/check-standards.ts",
   "scripts/falsify.medium.test.ts",
   "scripts/falsify.test.ts",
   "scripts/falsify.ts",

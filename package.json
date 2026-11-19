@@ -10,7 +10,7 @@
     "typecheck": "tsc -b",
     "lint": "node scripts/lint-config.ts --check && oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
     "format": "cargo fmt --all && oxfmt",
-    "format:check": "node scripts/cargo-gate.ts fmt && oxfmt --check",
+    "format:check": "scripts/xtask.sh gate fmt && oxfmt --check",
     "test": "node scripts/capped.ts --memory 4G --time 10m -- vitest run --project unit",
     "test:integration": "node scripts/capped.ts --memory 4G --time 20m -- vitest run --project integration",
     "test:holder": "pnpm run build:holder && node scripts/capped.ts --memory 4G --time 20m -- vitest run --project holder",
@@ -41,11 +41,11 @@
     "bench:engine": "pnpm run build:engine && node scripts/capped.ts --memory 4G --time 10m -- node scripts/engine-replay.ts",
     "bench:hook": "node scripts/capped.ts --memory 4G --time 10m -- node scripts/hook-bench.ts",
     "test:bench": "pnpm run build:hook && pnpm run build:cli && node scripts/capped.ts --memory 4G --time 10m -- vitest run --project bench",
-    "lint:rust": "node scripts/cargo-gate.ts lint",
-    "test:rust": "node scripts/capped.ts --memory 4G --time 30m -- node scripts/cargo-gate.ts test",
-    "test:rust:all": "node scripts/capped.ts --memory 4G --time 30m -- node scripts/cargo-gate.ts test-all",
+    "lint:rust": "scripts/xtask.sh gate lint",
+    "test:rust": "node scripts/capped.ts --memory 4G --time 30m -- scripts/xtask.sh gate test",
+    "test:rust:all": "node scripts/capped.ts --memory 4G --time 30m -- scripts/xtask.sh gate test-all",
     "capped": "node scripts/capped.ts --memory 8G --time 120m --",
-    "deny": "node scripts/cargo-gate.ts deny",
+    "deny": "scripts/xtask.sh gate deny",
     "font:terminal": "node scripts/terminal-font.ts"
   },
   "devDependencies": {
@@ -62,6 +62,7 @@
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",
     "oxlint-tsgolint": "7.0.2006",
+    "smol-toml": "1.9.1",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },

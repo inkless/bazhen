@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
-import { gateEnv } from "./cargo-gate.ts";
+import { gateEnv } from "./rust-gate.ts";
 import { mergeBase } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 import {
@@ -485,7 +485,7 @@ const CFG_ALLOWED: Record<string, string> = {
   feature:
     "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
     "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
-    "which lint checks too (SHIPPED_LINT in scripts/cargo-gate.ts). CFG_VALUES holds it to that one",
+    "which lint checks too (SHIPPED_LINT in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds it to that one",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
@@ -638,7 +638,7 @@ export function attributeFailures(
       strings[first] === SIGNALS_IGNORE
     ) {
       // A test that signals processes it didn't start: skipped on the host, and run in a sandbox
-      // by `cargo-gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
+      // by `cargo xtask gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
       // itself, so the attribute can't serve as a plain way to switch a test off.
       if (!REQUIRES_SANDBOX.test(code.slice(fnBodyStart(code, end)))) {
         out.push(
@@ -746,6 +746,14 @@ const FUZZED_DECODERS: Record<string, string> = {
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::read_config_file":
     "reads config.toml only to hand its bytes to parse_config, which its config target fuzzes",
+  "crates/bazhen-xtask/src/cargo_config.rs::config_failures":
+    "finds the keys in a cargo config's text that refuse a gate, building nothing from it; a property drives it with any text",
+  "crates/bazhen-xtask/src/cargo_config.rs::shadow_failure":
+    "asks only whether the repository's .cargo/config is there, never what it says",
+  "crates/bazhen-xtask/src/gate.rs::run":
+    "hands cargo configs' text to config_failures; parses nothing itself",
+  "crates/bazhen-xtask/src/main.rs::Real::read":
+    "reads a cargo config's text for config_failures; parses nothing",
   "crates/bazhen-holder/src/process.rs::procargs2_split":
     "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
   "crates/bazhen-holder/src/engine.rs::advance":
@@ -2425,8 +2433,9 @@ export const DENY_CONFIG = [
 ];
 
 // The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
-// commands themselves are fixed in scripts/cargo-gate.ts; the tests run under a cap like any.
-const GATE = "node scripts/cargo-gate.ts";
+// commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the tests run under a cap like
+// any.
+const GATE = "scripts/xtask.sh gate";
 export const RUST_GATE_SCRIPTS: Record<string, string> = {
   "format:check": `${GATE} fmt && oxfmt --check`,
   "lint:rust": `${GATE} lint`,
@@ -2440,14 +2449,75 @@ export const RUST_GATE_SCRIPTS: Record<string, string> = {
 export const CARGO_CONFIG = [
   "[target.'cfg(all())']",
   'runner = ["scripts/capped.ts", "--test-binary", "--"]',
+  "[alias]",
+  'xtask = [ "run", "--quiet", "--locked", "--package", "bazhen-xtask", "--config", ' +
+    `"target.'cfg(all())'.runner=['env']", "--config", "build.rustc-wrapper=''", ` +
+    `"--config", "build.rustc-workspace-wrapper=''", "--config", "build.rustc='rustc'", "--", ]`,
 ];
+// scripts/xtask.sh, which every Rust gate script runs through, less its comments and blank lines:
+// it builds xtask where no cargo config or caller's variable reaches the build, and runs it
+// itself, so no target runner stands in for it.
+export const XTASK_WRAPPER = [
+  "#!/bin/sh",
+  "set -u",
+  'root=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 1',
+  "refuse() {",
+  '  echo "scripts/xtask.sh: $*" >&2',
+  "  exit 1",
+  "}",
+  'toolchain=$(sed -n \'s/^channel = "\\([0-9.]*\\)"$/\\1/p\' "$root/rust-toolchain.toml")',
+  '[ -n "$toolchain" ] || refuse "rust-toolchain.toml names no channel this can read."',
+  "home=${HOME:-}",
+  'case $home in /*) ;; *) refuse "HOME names no full path." ;; esac',
+  "cargo_home=${CARGO_HOME:-$home/.cargo}",
+  'case $cargo_home in /*) ;; *) refuse "CARGO_HOME names no full path." ;; esac',
+  "rustup_home=${RUSTUP_HOME:-$home/.rustup}",
+  "build=$root/target/xtask",
+  "own_home=$build/cargo-home",
+  "for name in config config.toml; do",
+  '  if [ -e "/.cargo/$name" ] || [ -L "/.cargo/$name" ]; then',
+  '    refuse "cargo would read /.cargo/$name while it builds xtask. Remove it."',
+  "  fi",
+  "done",
+  'mkdir -p -- "$cargo_home/registry" "$cargo_home/git" "$own_home" || exit 1',
+  "for name in registry git; do",
+  '  ln -sfn -- "$cargo_home/$name" "$own_home/$name" || exit 1',
+  "done",
+  "for name in config config.toml; do",
+  '  if [ -e "$own_home/$name" ] || [ -L "$own_home/$name" ]; then',
+  '    refuse "the build\'s own cargo home has a $name."',
+  "  fi",
+  "done",
+  "isolated() {",
+  '  (cd / && env -i PATH="${PATH:-}" HOME="$home" RUSTUP_HOME="$rustup_home" \\',
+  '    RUSTUP_TOOLCHAIN="$toolchain" CARGO_HOME="$own_home" CARGO_TARGET_DIR="$build" \\',
+  '    cargo "$@" --quiet --locked --manifest-path "$root/Cargo.toml" --package bazhen-xtask)',
+  "}",
+  'isolated clean || refuse "cargo couldn\'t remove the xtask it built before."',
+  "built=$(isolated build --bin bazhen-xtask --message-format=json-render-diagnostics) ||",
+  '  refuse "cargo couldn\'t build xtask."',
+  'bins=$(printf \'%s\\n\' "$built" | sed -n \'s/.*"executable":"\\([^"\\\\]*\\)".*/\\1/p\')',
+  '[ "$(printf \'%s\\n\' "$bins" | grep -c .)" = 1 ] ||',
+  '  refuse "cargo named no single executable for bazhen-xtask this can run."',
+  "bin=$bins",
+  '[ -x "$bin" ] || refuse "cargo named $bin for bazhen-xtask, which isn\'t an executable."',
+  "unset CARGO_MANIFEST_DIR",
+  "BAZHEN_XTASK_ROOT=$root",
+  "export BAZHEN_XTASK_ROOT",
+  'exec "$bin" "$@"',
+];
+
+/** A shell script's lines, less its comments and blank lines. */
+const shellLines = (text: string): string[] =>
+  text.split("\n").filter((line) => line.trim() !== "" && !/^\s*#(?!!)/.test(line));
+
 export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 
 // What starts tests: vitest, playwright, nextest, cargo-mutants, cargo-fuzz, cargo test and bench,
 // and the scripts that run one of those. A script step that does runs under scripts/capped.ts, at
 // most at these caps.
 const TEST_RUNNER =
-  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|cargo-gate\.ts test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
+  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|(?:cargo xtask|xtask\.sh) gate test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
 const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
@@ -2486,9 +2556,19 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
 // Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
 // naming one is setting it where a gate would run.
 const RUST_FLAG_EXEMPT: Record<string, string> = {
-  "scripts/cargo-gate.ts": "removes them from every gate's environment",
-  "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
-  "scripts/cargo-gate.medium.test.ts": "sets them to check the tool never sees them",
+  ".cargo/config.toml":
+    "overrides a configured wrapper for xtask's own build; CARGO_CONFIG pins it",
+  "scripts/xtask.sh":
+    "builds xtask with no variable from the caller but those it names; XTASK_WRAPPER pins it",
+  "crates/bazhen-xtask/src/gate.rs":
+    "removes them from every gate's environment, and tests it does",
+  "crates/bazhen-xtask/src/cargo_config.rs": "plants them in configs to check they are refused",
+  "scripts/cargo-config.medium.test.ts":
+    "sets a host runner and CARGO_ALIAS_XTASK to show scripts/xtask.sh fails a run xtask never saw",
+  "scripts/rust-gate.ts":
+    "removes them from the environment falsify and holder-mutants run cargo in",
+  "scripts/rust-gate.test.ts": "sets them to check gateEnv removes them",
+  "scripts/xtask-gate.medium.test.ts": "sets them to check the tool never sees them",
   "scripts/check-standards.ts": "names them to find them",
   "scripts/check-standards.test.ts": "plants them to check they are found",
 };
@@ -2502,7 +2582,7 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
     if (scripts[name] !== command) {
       out.push(
         `package.json: the "${name}" script must be \`${command}\` (RUST_GATE_SCRIPTS in ` +
-          "scripts/check-standards.ts); a gate's command changes in scripts/cargo-gate.ts.",
+          "scripts/check-standards.ts); a gate's command changes in crates/bazhen-xtask/src/gate.rs.",
       );
     }
   }
@@ -2980,7 +3060,7 @@ export function rustFailures(
       if (flag !== null) {
         out.push(
           `${file}: names \`${flag[0]}\`, which can switch the Rust lints off. The gates run ` +
-            "through scripts/cargo-gate.ts, which removes it; a file that must set it goes in " +
+            "through `cargo xtask gate`, which removes it; a file that must set it goes in " +
             "RUST_FLAG_EXEMPT in scripts/check-standards.ts, with why.",
         );
       }
@@ -3002,6 +3082,11 @@ export function rustFailures(
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   pinned(".cargo/config.toml", CARGO_CONFIG, "CARGO_CONFIG");
   pinned(".cargo/mutants.toml", MUTANTS_CONFIG, "MUTANTS_CONFIG");
+  if (!paths.includes("scripts/xtask.sh")) {
+    out.push("scripts/xtask.sh is missing; the Rust gates need it.");
+  } else if (shellLines(read("scripts/xtask.sh")).join("\n") !== XTASK_WRAPPER.join("\n")) {
+    out.push("scripts/xtask.sh: differs from XTASK_WRAPPER in scripts/check-standards.ts.");
+  }
   out.push(
     ...decoderFailures(
       paths,

@@ -2,7 +2,7 @@
 // carries a root-owned marker. Only there may a test signal processes it didn't start, or run
 // real tmux. Never a PID namespace alone: Flatpak terminals, devcontainers, LXD and WSL2 are
 // workstations in one, and a stray kill(-1) there still ends the developer's own processes.
-// Only Node built-ins, so the gate scripts can import it by path (scripts/cargo-gate.ts).
+// Only Node built-ins, so scripts can import it by path (scripts/signal-paths.ts).
 
 import { lstatSync } from "node:fs";
 

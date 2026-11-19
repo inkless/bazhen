@@ -1,6 +1,6 @@
 // child_process as the checks that guard process starts know it: read by the signal scan
 // (scripts/signal-paths.ts) and the lint rules (scripts/lint-plugin.ts), so both agree on what a
-// start is. No imports, as cargo-gate and oxlint both load it.
+// start is. No imports, as signal-paths and oxlint both load it.
 
 /** child_process's process-starting functions. */
 export const CHILD_PROCESS_STARTS = [
