@@ -17,7 +17,8 @@ yanked = "deny"
 [licenses]
 # Add a licence only when a crate needs it, saying which in the commit.
 # Unicode-3.0: unicode-ident, which serde_derive and thiserror-impl build on.
-allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+# BSD-3-Clause: matchit, axum's router, which bazhen-daemon serves the API with.
+allow = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0"]
 # Test-only crates too: the policy is one list, whatever ships.
 include-dev = true
 # Our own crates are never published, so they carry no licence.

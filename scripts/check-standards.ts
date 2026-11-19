@@ -437,6 +437,10 @@ function checkAgentContext(): void {
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
 // Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
 const UNSAFE_MODULES: Record<string, string> = {
+  "crates/bazhen-daemon/src/session.rs":
+    "Command::pre_exec, to make the detached daemon a session leader between fork and exec, as " +
+    "Node's detached does, so no signal to the starting terminal reaches it; std's process_group " +
+    "would leave it a group leader, which can't then call setsid",
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
@@ -737,8 +741,11 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::cmdline_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
+  "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-daemon/src/config.rs::read_config_file":
+    "reads config.toml only to hand its bytes to parse_config, which its config target fuzzes",
   "crates/bazhen-holder/src/process.rs::procargs2_split":
     "reached only through procargs2_args and procargs2_env, which proc_args fuzzes",
   "crates/bazhen-holder/src/engine.rs::advance":
@@ -1078,6 +1085,15 @@ const NOT_DECODERS: Record<string, string> = {
     "reads the holder's socket into FrameDecoder::push, which the proto crate's frame target fuzzes",
   "crates/bazhen-protocol/src/ids.rs::Id::mint":
     "writes 16 bytes its caller drew at random as an id's hex; parses nothing",
+  "crates/bazhen-daemon/src/probe.rs::spoken":
+    "reads a health answer only through bazhen-client's split_head, status and body, which its " +
+    "framing fuzz target drives, and serde_json; it decodes nothing of its own",
+  "crates/bazhen-daemon/src/detach.rs::detach":
+    "reads the daemon's own log only to print its last lines, lossily as text; parses nothing",
+  "crates/bazhen-daemon/src/env.rs::matches":
+    "compares a variable's name with an agents.env rule byte for byte; parses nothing",
+  "crates/bazhen-daemon/src/env.rs::denying":
+    "finds the agents.env rule a variable's name matches, through matches; parses nothing",
   "crates/bazhen-store/src/lib.rs::urandom":
     "reads 16 random bytes from /dev/urandom for an id; parses nothing",
   "crates/bazhen/src/fmt.rs::uuid":
@@ -2319,8 +2335,10 @@ export const TOOLCHAIN_CONFIG = [
   'profile = "minimal"',
   'components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]',
 ];
-const NO_CLOEXEC = (path: string, reason: string) => `{ path = "${path}", reason = "${reason}" },`;
+const DISALLOWED = (path: string, reason: string) => `{ path = "${path}", reason = "${reason}" },`;
 const SETS_NO_O_CLOEXEC = "it sets no O_CLOEXEC; use std::fs::OpenOptions, which does";
+// A task nothing awaits loses its error (docs/standards/rust.md § Async and the daemon).
+const UNOWNED_TASK = "every task has an owner: spawn through a TaskTracker or a JoinSet";
 
 export const CLIPPY_CONFIG = [
   "allow-unwrap-in-tests = true",
@@ -2331,38 +2349,40 @@ export const CLIPPY_CONFIG = [
   // One line: an entry the formatter wraps is read joined (tomlLines).
   [
     "disallowed-methods = [",
-    NO_CLOEXEC("rustix::fs::open", SETS_NO_O_CLOEXEC),
-    NO_CLOEXEC("rustix::fs::openat", SETS_NO_O_CLOEXEC),
-    NO_CLOEXEC(
+    DISALLOWED("rustix::fs::open", SETS_NO_O_CLOEXEC),
+    DISALLOWED("rustix::fs::openat", SETS_NO_O_CLOEXEC),
+    DISALLOWED(
       "rustix::io::dup",
       "the copy has no FD_CLOEXEC; use OwnedFd::try_clone, which sets it",
     ),
-    NO_CLOEXEC("rustix::net::socket", "it sets no SOCK_CLOEXEC; use std's sockets, which do"),
-    NO_CLOEXEC(
+    DISALLOWED("rustix::net::socket", "it sets no SOCK_CLOEXEC; use std's sockets, which do"),
+    DISALLOWED(
       "rustix::net::socketpair",
       "it sets SOCK_CLOEXEC only if asked; use UnixStream::pair, which does",
     ),
-    NO_CLOEXEC(
+    DISALLOWED(
       "rustix::net::accept",
       "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does",
     ),
-    NO_CLOEXEC(
+    DISALLOWED(
       "rustix::net::acceptfrom",
       "it sets no SOCK_CLOEXEC; use UnixListener::accept, which does",
     ),
-    NO_CLOEXEC(
+    DISALLOWED(
       "rustix::net::socket_with",
       "it sets SOCK_CLOEXEC only if asked; use std's sockets, which do",
     ),
-    NO_CLOEXEC(
+    DISALLOWED(
       "rustix::net::accept_with",
       "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does",
     ),
-    NO_CLOEXEC(
+    DISALLOWED(
       "rustix::net::acceptfrom_with",
       "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does",
     ),
-    NO_CLOEXEC(
+    DISALLOWED("tokio::spawn", UNOWNED_TASK),
+    DISALLOWED("tokio::task::spawn", UNOWNED_TASK),
+    DISALLOWED(
       "rustix::net::recvmsg",
       "fds it receives have no FD_CLOEXEC unless asked; the holder receives none",
     ),
@@ -2379,7 +2399,7 @@ export const DENY_CONFIG = [
   "[advisories]",
   'yanked = "deny"',
   "[licenses]",
-  'allow = ["Apache-2.0", "MIT", "Unicode-3.0"]',
+  'allow = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0"]',
   "include-dev = true",
   "private = { ignore = true }",
   "[bans]",
@@ -2732,6 +2752,8 @@ export const HEAVY_CRATES = [
 // The members that may reach a crate in HEAVY_CRATES, each with why. A member that depends on
 // one of them reaches the heavy crate too, so it needs its own entry.
 const HEAVY_ALLOWED: Record<string, string> = {
+  "bazhen-daemon":
+    "the Rust daemon: its async runtime and HTTP stack serve the API, and it opens the store",
   "bazhen-store": "the daemon's SQLite seam: it builds SQLite, which only the daemon needs",
 };
 
@@ -3093,6 +3115,28 @@ const SIGNALLING_CALL =
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
 
 /**
+ * `code` with each `close()` of a tokio TaskTracker blanked out, to its length so positions hold:
+ * it only stops the tracker taking tasks, and signals nothing. A tracker is a binding the file
+ * types as `TaskTracker` or makes with `TaskTracker::new()`, named alone or as `self.<name>`, and
+ * only a close with nothing in its parentheses is one; any other call on it still counts.
+ */
+export function withoutTrackerCloses(code: string): string {
+  const names = new Set([
+    ...[...code.matchAll(/\b(\w+)\s*:\s*&?\s*(?:mut\s+)?TaskTracker\b/g)].map((m) => m[1] ?? ""),
+    ...[...code.matchAll(/\blet\s+(?:mut\s+)?(\w+)\s*=\s*TaskTracker\s*::\s*new\s*\(\s*\)/g)].map(
+      (m) => m[1] ?? "",
+    ),
+  ]);
+  names.delete("");
+  if (names.size === 0) return code;
+  const close = new RegExp(
+    `(?<![\\w.]\\s*)(?:self\\s*\\.\\s*)?(?:${[...names].join("|")})\\s*\\.\\s*close\\s*\\(\\s*\\)`,
+    "g",
+  );
+  return code.replace(close, (call) => call.replace(/[^\n]/g, " "));
+}
+
+/**
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
@@ -3108,7 +3152,7 @@ export function unmarkedSignallingTests(
   holderBinaries.delete("");
   return rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = rustCode(read(file), strings);
+    const code = withoutTrackerCloses(rustCode(read(file), strings));
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however

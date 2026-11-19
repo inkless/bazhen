@@ -502,6 +502,688 @@
       "plain": true
     }
   ],
+  "origin": [
+    {
+      "input": "http://192.168.1.5:7900",
+      "origin": true
+    },
+    {
+      "input": "http://box.ts.net",
+      "origin": true
+    },
+    {
+      "input": "https://box.ts.net",
+      "origin": true
+    },
+    {
+      "input": "http://localhost:7901",
+      "origin": true
+    },
+    {
+      "input": "http://127.0.0.1:7900",
+      "origin": true
+    },
+    {
+      "input": "http://[::1]:7900",
+      "origin": true
+    },
+    {
+      "input": "http://LOCALHOST:7901",
+      "origin": false
+    },
+    {
+      "input": "http://127.0.0.2",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com/",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com/app",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com?a=1",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com?",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com#top",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com#",
+      "origin": false
+    },
+    {
+      "input": "https://user@bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://user:pass@bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://@bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://Bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "HTTPS://bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "Https://bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https:bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https:/bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https:///bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https:\\\\bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com\\",
+      "origin": false
+    },
+    {
+      "input": " https://bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com ",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com\n",
+      "origin": false
+    },
+    {
+      "input": "https://baz\then.example.com",
+      "origin": false
+    },
+    {
+      "input": "https://baz hen.example.com",
+      "origin": false
+    },
+    {
+      "input": "ftp://bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "ws://bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "file:///tmp",
+      "origin": false
+    },
+    {
+      "input": "bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "//bazhen.example.com",
+      "origin": false
+    },
+    {
+      "input": "",
+      "origin": false
+    },
+    {
+      "input": "https://",
+      "origin": false
+    },
+    {
+      "input": "http://",
+      "origin": false
+    },
+    {
+      "input": "https://:443",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:443",
+      "origin": false
+    },
+    {
+      "input": "http://bazhen.example.com:443",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com:80",
+      "origin": true
+    },
+    {
+      "input": "http://bazhen.example.com:80",
+      "origin": false
+    },
+    {
+      "input": "http://bazhen.example.com:080",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:0443",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:8443",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com:08443",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:0",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com:00",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:65535",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com:65536",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:99999999999999999999",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:+80",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:8a",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com:８０",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com.",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen.example.com..",
+      "origin": true
+    },
+    {
+      "input": "https://.bazhen.example.com",
+      "origin": true
+    },
+    {
+      "input": "https://bazhen..example.com",
+      "origin": true
+    },
+    {
+      "input": "https://.",
+      "origin": true
+    },
+    {
+      "input": "https://..",
+      "origin": true
+    },
+    {
+      "input": "https://a",
+      "origin": true
+    },
+    {
+      "input": "https://-a-.example",
+      "origin": true
+    },
+    {
+      "input": "https://a_b.example",
+      "origin": true
+    },
+    {
+      "input": "https://_",
+      "origin": true
+    },
+    {
+      "input": "https://a~b!$&'()*+,;=`{}\".example",
+      "origin": true
+    },
+    {
+      "input": "https://a*b.example",
+      "origin": true
+    },
+    {
+      "input": "https://a%41.example",
+      "origin": false
+    },
+    {
+      "input": "https://a%2541.example",
+      "origin": false
+    },
+    {
+      "input": "https://a%zz.example",
+      "origin": false
+    },
+    {
+      "input": "https://a#b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a<b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a>b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a^b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a|b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a[b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a]b.example",
+      "origin": false
+    },
+    {
+      "input": "https://ab.example",
+      "origin": false
+    },
+    {
+      "input": "https://a\u0000b.example",
+      "origin": false
+    },
+    {
+      "input": "https://bücher.example",
+      "origin": false
+    },
+    {
+      "input": "https://xn--bcher-kva.example",
+      "origin": true
+    },
+    {
+      "input": "https://xn--bcher-KVA.example",
+      "origin": false
+    },
+    {
+      "input": "https://xn--.example",
+      "origin": true
+    },
+    {
+      "input": "https://xn--zz.example",
+      "origin": true
+    },
+    {
+      "input": "https://ＢＡＺＨＥＮ.example",
+      "origin": false
+    },
+    {
+      "input": "https://ß.example",
+      "origin": false
+    },
+    {
+      "input": "https://a­b.example",
+      "origin": false
+    },
+    {
+      "input": "https://a​b.example",
+      "origin": false
+    },
+    {
+      "input": "https://ａ.example",
+      "origin": false
+    },
+    {
+      "input": "https://例え.テスト",
+      "origin": false
+    },
+    {
+      "input": "https://bazhen.example.com/ü",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3.4",
+      "origin": true
+    },
+    {
+      "input": "https://0.0.0.0",
+      "origin": true
+    },
+    {
+      "input": "https://255.255.255.255",
+      "origin": true
+    },
+    {
+      "input": "https://256.0.0.1",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3.256",
+      "origin": false
+    },
+    {
+      "input": "https://01.2.3.4",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3.04",
+      "origin": false
+    },
+    {
+      "input": "https://0x7f.0.0.1",
+      "origin": false
+    },
+    {
+      "input": "https://0x7f000001",
+      "origin": false
+    },
+    {
+      "input": "https://2130706433",
+      "origin": false
+    },
+    {
+      "input": "https://127.1",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3.4.",
+      "origin": false
+    },
+    {
+      "input": "https://1.2.3.4..",
+      "origin": true
+    },
+    {
+      "input": "https://1.2.3.4.5",
+      "origin": false
+    },
+    {
+      "input": "https://.1.2.3.4",
+      "origin": false
+    },
+    {
+      "input": "https://1..2.3",
+      "origin": false
+    },
+    {
+      "input": "https://a.1",
+      "origin": false
+    },
+    {
+      "input": "https://a.1.",
+      "origin": false
+    },
+    {
+      "input": "https://a.0x",
+      "origin": false
+    },
+    {
+      "input": "https://a.0x1f",
+      "origin": false
+    },
+    {
+      "input": "https://a.0X1F",
+      "origin": false
+    },
+    {
+      "input": "https://a.0xg",
+      "origin": true
+    },
+    {
+      "input": "https://a.09",
+      "origin": false
+    },
+    {
+      "input": "https://a.1a",
+      "origin": true
+    },
+    {
+      "input": "https://1a",
+      "origin": true
+    },
+    {
+      "input": "https://1e3",
+      "origin": true
+    },
+    {
+      "input": "https://0x",
+      "origin": false
+    },
+    {
+      "input": "https://0X",
+      "origin": false
+    },
+    {
+      "input": "https://99999999999",
+      "origin": false
+    },
+    {
+      "input": "https://4294967295",
+      "origin": false
+    },
+    {
+      "input": "https://4294967296",
+      "origin": false
+    },
+    {
+      "input": "https://１.２.３.４",
+      "origin": false
+    },
+    {
+      "input": "https://[::1]",
+      "origin": true
+    },
+    {
+      "input": "https://[::1]:443",
+      "origin": false
+    },
+    {
+      "input": "https://[::1]:8443",
+      "origin": true
+    },
+    {
+      "input": "https://[::1]:",
+      "origin": false
+    },
+    {
+      "input": "https://[::1]:08443",
+      "origin": false
+    },
+    {
+      "input": "https://[::]",
+      "origin": true
+    },
+    {
+      "input": "https://[::0]",
+      "origin": false
+    },
+    {
+      "input": "https://[0::]",
+      "origin": false
+    },
+    {
+      "input": "https://[0:0:0:0:0:0:0:0]",
+      "origin": false
+    },
+    {
+      "input": "https://[0:0:0:0:0:0:0:1]",
+      "origin": false
+    },
+    {
+      "input": "https://[1::]",
+      "origin": true
+    },
+    {
+      "input": "https://[1::1]",
+      "origin": true
+    },
+    {
+      "input": "https://[1:0::1]",
+      "origin": false
+    },
+    {
+      "input": "https://[1:2:3:4:5:6:7:8]",
+      "origin": true
+    },
+    {
+      "input": "https://[1:2:3:4:5:6:7::]",
+      "origin": false
+    },
+    {
+      "input": "https://[1:2:3:4:5:6::8]",
+      "origin": false
+    },
+    {
+      "input": "https://[::2:3:4:5:6:7:8]",
+      "origin": false
+    },
+    {
+      "input": "https://[1:0:0:4:0:0:7:8]",
+      "origin": false
+    },
+    {
+      "input": "https://[1::4:0:0:7:8]",
+      "origin": true
+    },
+    {
+      "input": "https://[1:0:0:4::7:8]",
+      "origin": false
+    },
+    {
+      "input": "https://[0:0:1:0:0:0:1:0]",
+      "origin": false
+    },
+    {
+      "input": "https://[0:0:1::1:0]",
+      "origin": true
+    },
+    {
+      "input": "https://[1:0:1:0:1:0:1:0]",
+      "origin": true
+    },
+    {
+      "input": "https://[fd00::1]",
+      "origin": true
+    },
+    {
+      "input": "https://[FD00::1]",
+      "origin": false
+    },
+    {
+      "input": "https://[fd00::0001]",
+      "origin": false
+    },
+    {
+      "input": "https://[fd00:0::1]",
+      "origin": false
+    },
+    {
+      "input": "https://[::ffff:1.2.3.4]",
+      "origin": false
+    },
+    {
+      "input": "https://[::ffff:102:304]",
+      "origin": true
+    },
+    {
+      "input": "https://[::1.2.3.4]",
+      "origin": false
+    },
+    {
+      "input": "https://[::102:304]",
+      "origin": true
+    },
+    {
+      "input": "https://[::1%25eth0]",
+      "origin": false
+    },
+    {
+      "input": "https://[fe80::1%eth0]",
+      "origin": false
+    },
+    {
+      "input": "https://[::1",
+      "origin": false
+    },
+    {
+      "input": "https://::1]",
+      "origin": false
+    },
+    {
+      "input": "https://::1",
+      "origin": false
+    },
+    {
+      "input": "https://[]",
+      "origin": false
+    },
+    {
+      "input": "https://[:]",
+      "origin": false
+    },
+    {
+      "input": "https://[:::]",
+      "origin": false
+    },
+    {
+      "input": "https://[1:2:3:4:5:6:7:8:9]",
+      "origin": false
+    },
+    {
+      "input": "https://[12345::]",
+      "origin": false
+    },
+    {
+      "input": "https://[g::]",
+      "origin": false
+    },
+    {
+      "input": "https://[::1].example",
+      "origin": false
+    },
+    {
+      "input": "https://[::1]x",
+      "origin": false
+    }
+  ],
   "datetime": [
     {
       "input": "2026-11-16T12:00:00.000Z",

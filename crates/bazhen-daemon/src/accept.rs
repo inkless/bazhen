@@ -1,0 +1,314 @@
+//! Each listener's connections, served under the limits Node's HTTP server keeps by default, so a
+//! client that sends slowly, sends too much, or opens connections without end can't hold the
+//! daemon: axum's own `serve` has no timer at all.
+
+use std::convert::Infallible;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::http::{HeaderValue, Request, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::serve::Listener;
+use hyper::body::Incoming;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::server::graceful::GracefulShutdown;
+use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use tower::ServiceExt;
+
+/// What a listener allows each connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Limits {
+    /// Node's `headersTimeout`: how long a request's head may take to arrive, timed from when
+    /// the connection is ready for one, so an idle connection is closed after it too.
+    pub(crate) head: Duration,
+    /// Node's `requestTimeout`: how long a request may take to be answered, its body read
+    /// included, before it is answered 408. `None` for none, as the TypeScript daemon's socket
+    /// sets it to 0.
+    pub(crate) request: Option<Duration>,
+    /// Node's `maxHeaderSize`: a request whose head, its start line included, is longer is
+    /// answered 431.
+    pub(crate) head_bytes: usize,
+    /// How many connections are served at once. A later one waits in the backlog until one
+    /// ends, so connections to one listener can't take the descriptors the other needs.
+    pub(crate) connections: usize,
+}
+
+/// The loopback HTTP listener's limits: Node's defaults.
+pub(crate) const HTTP: Limits = Limits {
+    head: Duration::from_secs(60),
+    request: Some(Duration::from_secs(300)),
+    head_bytes: 16 * 1024,
+    connections: 128,
+};
+
+/// The socket's limits: HTTP's, with no request timeout, as `main.ts` sets for its socket.
+pub(crate) const SOCKET: Limits = Limits {
+    request: None,
+    ..HTTP
+};
+
+/// Serves `router` on `listener` until `stop`. Then it stops accepting, calls `stopped`, and asks
+/// each open connection to end once it has answered the request it is on. Every connection is a
+/// task on `tracker`, so waiting on it waits on them.
+pub(crate) async fn serve_on<L: Listener>(
+    mut listener: L,
+    router: Router,
+    limits: Limits,
+    stop: CancellationToken,
+    tracker: TaskTracker,
+    stopped: impl FnOnce(),
+) {
+    let open = Arc::new(Semaphore::new(limits.connections));
+    let graceful = GracefulShutdown::new();
+    loop {
+        let Some(Ok(permit)) = stop
+            .run_until_cancelled(Arc::clone(&open).acquire_owned())
+            .await
+        else {
+            break;
+        };
+        let Some((io, _)) = stop.run_until_cancelled(listener.accept()).await else {
+            break;
+        };
+        let router = router.clone();
+        let service = service_fn(move |request| answer(router.clone(), limits.request, request));
+        let connection = http1::Builder::new()
+            .timer(TokioTimer::new())
+            .header_read_timeout(limits.head)
+            .max_header_size(limits.head_bytes)
+            .serve_connection(TokioIo::new(io), service);
+        let connection = graceful.watch(connection);
+        tracker.spawn(async move {
+            // A connection that fails, as one the client drops does, has no one to tell.
+            let _ = connection.await;
+            drop(permit);
+        });
+    }
+    drop(listener);
+    stopped();
+    tracker.spawn(graceful.shutdown());
+}
+
+/// `request`'s answer from `router`, or 408 if it isn't answered within `limit`.
+async fn answer(
+    router: Router,
+    limit: Option<Duration>,
+    request: Request<Incoming>,
+) -> Result<Response, Infallible> {
+    let answered = router.oneshot(request);
+    let Some(limit) = limit else {
+        return answered.await;
+    };
+    Ok(tokio::time::timeout(limit, answered)
+        .await
+        .unwrap_or_else(|_| Ok(timed_out()))
+        .unwrap_or_else(|never: Infallible| match never {}))
+}
+
+/// Node's answer to a request that took too long: 408, and the connection closed.
+fn timed_out() -> Response {
+    (
+        StatusCode::REQUEST_TIMEOUT,
+        [(header::CONNECTION, HeaderValue::from_static("close"))],
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use axum::body::Bytes;
+    use axum::routing::{get, post};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    use super::*;
+
+    const SHORT: Limits = Limits {
+        head: Duration::from_millis(300),
+        request: Some(Duration::from_millis(300)),
+        head_bytes: 16 * 1024,
+        connections: 1,
+    };
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    /// A listener on loopback serving `/` and `/echo`, which reads the whole body, under
+    /// `limits`, and its address.
+    async fn serving(limits: Limits) -> (std::net::SocketAddr, CancellationToken, TaskTracker) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .route("/echo", post(|body: Bytes| async move { body }));
+        let stop = CancellationToken::new();
+        let tracker = TaskTracker::new();
+        tracker.spawn(serve_on(
+            listener,
+            router,
+            limits,
+            stop.clone(),
+            tracker.clone(),
+            || {},
+        ));
+        (address, stop, tracker)
+    }
+
+    /// What the server sends on `stream` until it closes it, or what it sent by `within`.
+    async fn read_for(stream: &mut TcpStream, within: Duration) -> String {
+        let mut got = Vec::new();
+        let _ = tokio::time::timeout(within, stream.read_to_end(&mut got)).await;
+        String::from_utf8_lossy(&got).into_owned()
+    }
+
+    const GET: &[u8] = b"GET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n";
+
+    #[test]
+    fn closes_a_connection_whose_head_takes_too_long_and_answers_one_that_doesnt() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(SHORT).await;
+            let mut slow = TcpStream::connect(address).await.unwrap();
+            slow.write_all(b"GET / HTTP/1.1\r\nhost: x\r\n")
+                .await
+                .unwrap();
+            let started = Instant::now();
+            let said = read_for(&mut slow, Duration::from_secs(5)).await;
+            let waited = started.elapsed();
+            assert!(!said.contains("200 OK"), "{said}");
+            assert!(waited < Duration::from_secs(2), "{waited:?}");
+            let mut quick = TcpStream::connect(address).await.unwrap();
+            quick.write_all(GET).await.unwrap();
+            let said = read_for(&mut quick, Duration::from_secs(5)).await;
+            assert!(said.starts_with("HTTP/1.1 200 OK"), "{said}");
+        });
+    }
+
+    #[test]
+    fn answers_408_to_a_request_whose_body_takes_too_long() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(SHORT).await;
+            let mut slow = TcpStream::connect(address).await.unwrap();
+            slow.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 10\r\n\r\nabc")
+                .await
+                .unwrap();
+            let said = read_for(&mut slow, Duration::from_secs(5)).await;
+            assert!(said.starts_with("HTTP/1.1 408"), "{said}");
+        });
+    }
+
+    #[test]
+    fn answers_a_request_on_a_listener_without_a_request_limit_however_long_it_takes() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(Limits {
+                request: None,
+                head: Duration::from_secs(5),
+                ..SHORT
+            })
+            .await;
+            let mut slow = TcpStream::connect(address).await.unwrap();
+            slow.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-length: 6\r\n\r\nabc")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            slow.write_all(b"def").await.unwrap();
+            let said = read_for(&mut slow, Duration::from_secs(5)).await;
+            assert!(said.starts_with("HTTP/1.1 200 OK"), "{said}");
+            assert!(said.ends_with("abcdef"), "{said}");
+        });
+    }
+
+    #[test]
+    fn answers_431_to_a_head_longer_than_its_limit() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(SHORT).await;
+            let mut long = TcpStream::connect(address).await.unwrap();
+            let padding = "a".repeat(20 * 1024);
+            let request = format!("GET / HTTP/1.1\r\nhost: x\r\nx-pad: {padding}\r\n\r\n");
+            // The server may answer and close before it has read it all.
+            let _ = long.write_all(request.as_bytes()).await;
+            let said = read_for(&mut long, Duration::from_secs(5)).await;
+            assert!(said.starts_with("HTTP/1.1 431"), "{said}");
+        });
+    }
+
+    #[test]
+    fn serves_no_more_connections_at_once_than_its_limit() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(Limits {
+                head: Duration::from_secs(5),
+                ..SHORT
+            })
+            .await;
+            let mut first = TcpStream::connect(address).await.unwrap();
+            first
+                .write_all(b"GET / HTTP/1.1\r\nhost: x\r\n\r\n")
+                .await
+                .unwrap();
+            let mut answer = [0; 15];
+            first.read_exact(&mut answer).await.unwrap();
+            assert_eq!(&answer, b"HTTP/1.1 200 OK");
+            let mut second = TcpStream::connect(address).await.unwrap();
+            second.write_all(GET).await.unwrap();
+            let while_first_open = read_for(&mut second, Duration::from_millis(500)).await;
+            drop(first);
+            let after = read_for(&mut second, Duration::from_secs(5)).await;
+            assert_eq!(while_first_open, "");
+            assert!(after.starts_with("HTTP/1.1 200 OK"), "{after}");
+        });
+    }
+
+    #[test]
+    fn stops_accepting_at_the_stop_says_so_and_lets_an_open_request_finish() {
+        runtime().block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let router = Router::new().route("/echo", post(|body: Bytes| async move { body }));
+            let stop = CancellationToken::new();
+            let tracker = TaskTracker::new();
+            let (told, heard) = tokio::sync::oneshot::channel();
+            tracker.spawn(serve_on(
+                listener,
+                router,
+                // Room for another, so the stop finds it waiting on the accept.
+                Limits {
+                    head: Duration::from_secs(5),
+                    request: None,
+                    connections: 2,
+                    ..SHORT
+                },
+                stop.clone(),
+                tracker.clone(),
+                move || {
+                    let _ = told.send(());
+                },
+            ));
+            let mut open = TcpStream::connect(address).await.unwrap();
+            open.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 6\r\n\r\nabc")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            stop.cancel();
+            let said_so = tokio::time::timeout(Duration::from_secs(5), heard).await;
+            assert!(matches!(said_so, Ok(Ok(()))), "{said_so:?}");
+            assert!(TcpStream::connect(address).await.is_err());
+            open.write_all(b"def").await.unwrap();
+            let said = read_for(&mut open, Duration::from_secs(5)).await;
+            assert!(said.ends_with("abcdef"), "{said}");
+            tracker.close();
+            tokio::time::timeout(Duration::from_secs(5), tracker.wait())
+                .await
+                .unwrap();
+        });
+    }
+}

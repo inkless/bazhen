@@ -11,18 +11,26 @@ publish = false
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
 alacritty_terminal = { version = "=0.26.0", default-features = false }
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 bazhen-client = { path = "crates/bazhen-client" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }
 bazhen-pid = { path = "crates/bazhen-pid" }
 bazhen-protocol = { path = "crates/bazhen-protocol" }
+bazhen-store = { path = "crates/bazhen-store" }
 bazhen-test-signal = { path = "crates/bazhen-test-signal" }
 clap = { version = "=4.6.7", default-features = false, features = [
   "std",
   "help",
   "usage",
   "error-context",
+] }
+hyper = { version = "=1.12.0", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = [
+  "http1",
+  "server-graceful",
+  "tokio",
 ] }
 jiff = { version = "=0.2.42", default-features = false, features = [
   "std",
@@ -47,6 +55,17 @@ serde = { version = "=1.0.229", default-features = false, features = ["std", "de
 serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
 signal-hook = { version = "=0.4.6", default-features = false }
 thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
+tokio = { version = "=1.54.1", default-features = false, features = [
+  "io-util",
+  "net",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+tokio-util = { version = "=0.7.20", default-features = false, features = ["rt"] }
+toml = { version = "=1.2.1", default-features = false, features = ["parse", "serde", "std"] }
+tower = { version = "=0.5.3", default-features = false, features = ["util"] }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
 tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }

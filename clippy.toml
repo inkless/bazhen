@@ -17,5 +17,8 @@ disallowed-methods = [
   { path = "rustix::net::socket_with", reason = "it sets SOCK_CLOEXEC only if asked; use std's sockets, which do" },
   { path = "rustix::net::accept_with", reason = "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does" },
   { path = "rustix::net::acceptfrom_with", reason = "it sets SOCK_CLOEXEC only if asked; use UnixListener::accept, which does" },
+  # A task nothing awaits loses its error (docs/standards/rust.md § Async and the daemon).
+  { path = "tokio::spawn", reason = "every task has an owner: spawn through a TaskTracker or a JoinSet" },
+  { path = "tokio::task::spawn", reason = "every task has an owner: spawn through a TaskTracker or a JoinSet" },
   { path = "rustix::net::recvmsg", reason = "fds it receives have no FD_CLOEXEC unless asked; the holder receives none" },
 ]

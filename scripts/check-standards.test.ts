@@ -3229,6 +3229,33 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("needn't be marked for a task tracker's own close(), and must be for any other call", () => {
+    // A tracker's close(), with nothing in its parentheses, only stops it taking tasks. Any other
+    // call on it, a close of what isn't one, or of one the file never types, still counts.
+    const source = [
+      "fn drained(tracker: &TaskTracker) { tracker.close(); }",
+      "#[test]\nfn a() { drained(&tracker); }",
+      "#[test]\nfn b() { let t = TaskTracker::new();\n t.close(); }",
+      "#[test]\nfn c() { self.tracker\n.close( ); }",
+      "#[test]\nfn d() { tracker.close(now); }",
+      "#[test]\nfn e() { tracker.signal(9); }",
+      "#[test]\nfn f() { tracker.respawn(x); }",
+      "#[test]\nfn g() { tracker.close_step(); }",
+      "#[test]\nfn h() { holder.tracker.close(); }",
+      "#[test]\nfn i() { child.close(); }",
+    ].join("\n");
+    const untyped = "#[test]\nfn a() { tracker.close(); }";
+    expect(unmarked({ "crates/h/src/serve.rs": source, "crates/h/src/x.rs": untyped })).toEqual([
+      "crates/h/src/serve.rs:10",
+      "crates/h/src/serve.rs:12",
+      "crates/h/src/serve.rs:14",
+      "crates/h/src/serve.rs:16",
+      "crates/h/src/serve.rs:18",
+      "crates/h/src/serve.rs:20",
+      "crates/h/src/x.rs:1",
+    ]);
+  });
+
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
     const source = [
       "fn end(r: &mut Running) { r.child.close(group, now); }",
