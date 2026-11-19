@@ -101,7 +101,6 @@ export function notice(ofl: string, icons: string): string {
   ].join("\n");
 }
 
-/** A file the README records, as `readme` writes it and `recorded` reads it back. */
 /** Every glyph's advance a cell font has, out of a 1000-unit em: a letter's, and so an icon's. */
 export const CELL_ADVANCE = 600;
 
@@ -152,12 +151,13 @@ export function metrics(woff2: Uint8Array): { unitsPerEm: number; advances: numb
   const unitsPerEm = view.getUint16(table(TABLE.head).offset + 18);
   const numberOfHMetrics = view.getUint16(table(TABLE.hhea).offset + 34);
   const numGlyphs = view.getUint16(table(TABLE.maxp).offset + 4);
-  // A transformed hmtx starts with a flags byte, then the advances alone; a plain one interleaves
-  // each advance with its left side bearing.
+  // A transformed hmtx drops the side bearings glyf can give. fontTools writes one only when its
+  // `woff2 compress` is asked to (`--hmtx-transform`), never from `subset`, so one is refused
+  // rather than read by code nothing exercises.
   const hmtx = table(TABLE.hmtx);
-  const [start, stride] = hmtx.transformed ? [hmtx.offset + 1, 2] : [hmtx.offset, 4];
+  if (hmtx.transformed) throw new Error("a transformed hmtx, which subset never writes");
   const advances = Array.from({ length: numGlyphs }, (_, glyph) =>
-    view.getUint16(start + Math.min(glyph, numberOfHMetrics - 1) * stride),
+    view.getUint16(hmtx.offset + Math.min(glyph, numberOfHMetrics - 1) * 4),
   );
   return { unitsPerEm, advances };
 }
@@ -169,6 +169,7 @@ export function offCell(woff2: Uint8Array): number[] {
   return [...new Set(advances.filter((advance) => advance !== cell))];
 }
 
+/** A file the README records, as `readme` writes it and `recorded` reads it back. */
 export interface Recorded {
   readonly name: string;
   readonly bytes: number;
