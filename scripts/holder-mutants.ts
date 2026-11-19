@@ -25,7 +25,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gateEnv } from "./cargo-gate.ts";
+import { gateEnv } from "./rust-gate.ts";
 import { isolatedEnv } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 import { patchOf } from "./rust-mutants.ts";

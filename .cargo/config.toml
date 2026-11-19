@@ -6,6 +6,9 @@ runner = ["scripts/capped.ts", "--test-binary", "--"]
 
 # cargo starts `cargo run` through the runner too, which would cap xtask as one test process and
 # every command it starts with it. A `--config` runner replaces the array; `[]` and `""` are refused.
+# xtask runs the Rust gates, so it is built with no rustc wrapper or compiler a cargo config
+# names, as the gates build: one could stand in for xtask itself. RUSTC_WRAPPER in the caller's
+# environment still outranks `--config`; the gates' own commands run without it.
 [alias]
 xtask = [
   "run",
@@ -15,5 +18,11 @@ xtask = [
   "bazhen-xtask",
   "--config",
   "target.'cfg(all())'.runner=['env']",
+  "--config",
+  "build.rustc-wrapper=''",
+  "--config",
+  "build.rustc-workspace-wrapper=''",
+  "--config",
+  "build.rustc='rustc'",
   "--",
 ]

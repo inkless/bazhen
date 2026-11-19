@@ -4,7 +4,7 @@
 // check-standards) compute. The gate also reads the cargo configs in the repository's real parent
 // directories; one there with a runner or [env] fails these tests too.
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -12,16 +12,17 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { GATES, configFailures, gateEnv } from "./cargo-gate.ts";
+import { RUST_TOOLS, type RustTool, TEST_BUILD, configFailures, gateEnv } from "./rust-gate.ts";
+import { SANDBOX_RULE, SIGNALS_IGNORE } from "./signal-paths.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const GATE_SCRIPT = fileURLToPath(new URL("cargo-gate.ts", import.meta.url));
 
 // Each line `ARGV: …`, then the environment as `env -0` prints it, after a `ENV:` line.
 const STUB = `#!/bin/sh
@@ -116,13 +117,22 @@ function gate(command: string[], env: Record<string, string> = {}) {
 }
 
 const rust = (args: string[], env?: Record<string, string>) => gate([xtask, "gate", ...args], env);
-const ts = (args: string[], env?: Record<string, string>) =>
-  gate([process.execPath, GATE_SCRIPT, ...args], env);
 
 /** The variables the stub itself adds, or that its shell sets: not the gate's. */
 const OWN = new Set(["PWD", "SHLVL", "_", "OLDPWD"]);
 const gateVars = (env: Record<string, string> | undefined) =>
   Object.fromEntries(Object.entries(env ?? {}).filter(([name]) => !OWN.has(name)));
+
+/** The test gate's command as nextest is handed it: falsify's build options, and the gate's own. */
+const TEST_COMMAND = [
+  "nextest",
+  "run",
+  ...TEST_BUILD,
+  "--status-level",
+  "fail",
+  "--final-status-level",
+  "fail",
+];
 
 const CALLER = {
   RUSTFLAGS: "--cap-lints allow",
@@ -140,7 +150,7 @@ describe("cargo xtask gate", () => {
     const { status, logged } = rust(["test", "tests::a", "b"], CALLER);
     expect({ status, argv: logged.map((l) => l.argv) }).toEqual({
       status: 0,
-      argv: [[...GATES.test.slice(1), "tests::a", "b"].join(" ")],
+      argv: [[...TEST_COMMAND, "tests::a", "b"].join(" ")],
     });
     expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
   });
@@ -222,38 +232,41 @@ describe("the rules the TypeScript rails share with the Rust gate", () => {
     }
   });
 
+  it("refuse test-all off a sandbox in the words the signal scan uses", () => {
+    const { status, stderr, logged } = rust(["test-all"]);
+    expect({ status, runs: logged.length }).toEqual({ status: 2, runs: 0 });
+    expect(stderr).toContain(`"${SIGNALS_IGNORE}": ${SANDBOX_RULE}.`);
+  });
+
   it("build the tests falsify lists as the test gate builds them", () => {
-    expect(rust(["test"]).logged[0]?.argv).toBe(GATES.test.slice(1).join(" "));
+    expect(rust(["test"]).logged[0]?.argv).toBe(TEST_COMMAND.join(" "));
   });
 });
 
-/** Exit 0, 1 or 2: the TypeScript gate passed a tool's own code through. */
-const exitClass = (status: number | null) => (status === 0 || status === 2 ? status : 1);
+const isFile = (path: string) => existsSync(path) && statSync(path).isFile();
+const isRustTool = (name: string | undefined): name is RustTool =>
+  name !== undefined && Object.hasOwn(RUST_TOOLS, name);
 
-/** What a gate run did, as both gates must agree on it. */
-const seen = (run: ReturnType<typeof gate>) => ({
-  exit: exitClass(run.status),
-  runs: run.logged.map((l) => [l.argv, gateVars(l.env)]),
-});
+describe("the pinned Rust tools", () => {
+  const PINNED = /\b(cargo-(?:nextest|deny|mutants))[@ ]v?(\d[\w.-]*)/g;
+  const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter((file) => file !== "" && file !== "pnpm-lock.yaml" && isFile(join(root, file)));
+  const pins = tracked.flatMap((file) =>
+    [...readFileSync(join(root, file), "utf8").matchAll(PINNED)].flatMap(([, tool, version]) =>
+      isRustTool(tool) ? [{ file, tool, version }] : [],
+    ),
+  );
+  const named = (file: string) => new Set(pins.filter((p) => p.file === file).map((p) => p.tool));
 
-describe("cargo xtask gate, beside scripts/cargo-gate.ts", () => {
-  const cases: [string, string[], Record<string, string>][] = [
-    ["each gate", ["fmt"], {}],
-    ["lint", ["lint"], {}],
-    ["deny", ["deny"], {}],
-    ["test", ["test"], CALLER],
-    ["test with names", ["test", "a::b", "c"], {}],
-    ["test-all off a sandbox", ["test-all"], {}],
-    ["an option", ["lint", "--cap-lints", "allow"], {}],
-    ["a test name for lint", ["lint", "x"], {}],
-    ["an unknown gate", ["build"], {}],
-    ["no gate", [], {}],
-    ["a failing tool", ["lint"], { STUB_EXIT: "3" }],
-    ["a tool that can't run", ["test"], { STUB_VERSION_EXIT: "1" }],
-  ];
+  it("are installed at the version rust-tools.json names, wherever a file names one", () => {
+    expect(pins.filter((pin) => pin.version !== RUST_TOOLS[pin.tool])).toEqual([]);
+  });
 
-  it.each(cases)("does as it does for %s", (_, args, env) => {
-    const [r, t] = [rust(args, env), ts(args, env)];
-    expect(seen(r)).toEqual(seen(t));
+  it("are all named by CI and the README", () => {
+    expect({ ci: named(".github/workflows/ci.yml"), readme: named("README.md") }).toEqual({
+      ci: new Set(Object.keys(RUST_TOOLS)),
+      readme: new Set(Object.keys(RUST_TOOLS)),
+    });
   });
 });

@@ -1227,9 +1227,8 @@ describe("rustFailures on the gates' own configuration", () => {
     ".cargo/config.toml": CARGO_CONFIG.join("\n"),
     ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
-    "scripts/cargo-gate.ts": "RUSTFLAGS",
-    "scripts/cargo-gate.test.ts": "RUSTFLAGS",
-    "scripts/cargo-gate.medium.test.ts": "RUSTFLAGS",
+    "scripts/rust-gate.ts": "RUSTFLAGS",
+    "scripts/rust-gate.test.ts": "RUSTFLAGS",
     "scripts/xtask-gate.medium.test.ts": "RUSTFLAGS",
     "crates/bazhen-xtask/src/gate.rs": "RUSTFLAGS",
     "crates/bazhen-xtask/src/cargo_config.rs": "RUSTFLAGS",
@@ -1276,7 +1275,10 @@ describe("rustFailures on the gates' own configuration", () => {
       failures({}, [".cargo/config.toml"]),
     ]).toEqual([
       [expect.stringContaining(".cargo/config.toml: differs from CARGO_CONFIG")],
-      [expect.stringContaining(".cargo/config.toml is missing")],
+      [
+        "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing .cargo/config.toml.",
+        expect.stringContaining(".cargo/config.toml is missing"),
+      ],
     ]);
   });
 
@@ -1326,8 +1328,8 @@ describe("rustFailures on the gates' own configuration", () => {
   });
 
   it("names an exempt file that no longer exists", () => {
-    expect(failures({}, ["scripts/cargo-gate.test.ts"])).toEqual([
-      "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/cargo-gate.test.ts.",
+    expect(failures({}, ["scripts/rust-gate.test.ts"])).toEqual([
+      "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/rust-gate.test.ts.",
     ]);
   });
 });
@@ -1347,7 +1349,7 @@ describe("cappedScriptFailures", () => {
         test: `${cap} vitest run --project unit`,
         "test:medium": `pnpm run build:hook && ${cap} vitest run --project medium`,
         check: "pnpm run lint && pnpm run test:rust",
-        "lint:rust": "node scripts/cargo-gate.ts lint",
+        "lint:rust": "cargo xtask gate lint",
       }),
     ).toEqual([]);
   });
@@ -1369,13 +1371,14 @@ describe("cappedScriptFailures", () => {
         "cargo nextest run",
         "cargo bench",
         "cargo +nightly-2026-11-01 fuzz run parse_reply",
-        "node scripts/cargo-gate.ts test",
+        "cargo xtask gate test",
+        "cargo xtask gate test-all",
         "node scripts/falsify.ts",
         "node scripts/hook-bench.ts",
         "node scripts/test-real.ts",
         `vitest run && ${cap} vitest run`,
       ].map((t) => cappedScriptFailures("package.json", { t }).length),
-    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    ).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("refuses a capped step joined by anything but && to one that could run round it", () => {

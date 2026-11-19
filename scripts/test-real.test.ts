@@ -1,6 +1,6 @@
 import { SLICE } from "@bazhen/host-guard";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RUST_TOOLS } from "./cargo-gate.ts";
+import { RUST_TOOLS } from "./rust-gate.ts";
 import { GROUPS } from "./holder-mutants.ts";
 import {
   MUTANT_GROUPS,

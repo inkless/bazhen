@@ -5,8 +5,8 @@
 // - a test that may signal processes it didn't start runs only in a sandbox, where the worst a
 //   wrong pid can reach is the sandbox itself.
 //
-// Read by check-standards (the chokepoint rule), cargo-gate (which tests may run here) and
-// falsify (what it may mutate here). Only Node built-ins, as cargo-gate needs.
+// Read by check-standards (the chokepoint rule) and falsify (what it may mutate here). Only Node
+// built-ins, so it loads where node_modules isn't installed.
 
 import {
   DISPOSABLE_HOST_MARKER,

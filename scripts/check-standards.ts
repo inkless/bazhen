@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
-import { gateEnv } from "./cargo-gate.ts";
+import { gateEnv } from "./rust-gate.ts";
 import { mergeBase } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 import {
@@ -485,7 +485,7 @@ const CFG_ALLOWED: Record<string, string> = {
   feature:
     "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
     "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
-    "which lint checks too (SHIPPED_LINT in scripts/cargo-gate.ts). CFG_VALUES holds it to that one",
+    "which lint checks too (SHIPPED_LINT in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds it to that one",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
@@ -638,7 +638,7 @@ export function attributeFailures(
       strings[first] === SIGNALS_IGNORE
     ) {
       // A test that signals processes it didn't start: skipped on the host, and run in a sandbox
-      // by `cargo-gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
+      // by `cargo xtask gate test-all` (scripts/signal-paths.ts). It refuses to run anywhere else
       // itself, so the attribute can't serve as a plain way to switch a test off.
       if (!REQUIRES_SANDBOX.test(code.slice(fnBodyStart(code, end)))) {
         out.push(
@@ -2431,8 +2431,9 @@ export const DENY_CONFIG = [
 ];
 
 // The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
-// commands themselves are fixed in scripts/cargo-gate.ts; the tests run under a cap like any.
-const GATE = "node scripts/cargo-gate.ts";
+// commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the tests run under a cap like
+// any.
+const GATE = "cargo xtask gate";
 export const RUST_GATE_SCRIPTS: Record<string, string> = {
   "format:check": `${GATE} fmt && oxfmt --check`,
   "lint:rust": `${GATE} lint`,
@@ -2448,7 +2449,8 @@ export const CARGO_CONFIG = [
   'runner = ["scripts/capped.ts", "--test-binary", "--"]',
   "[alias]",
   'xtask = [ "run", "--quiet", "--locked", "--package", "bazhen-xtask", "--config", ' +
-    `"target.'cfg(all())'.runner=['env']", "--", ]`,
+    `"target.'cfg(all())'.runner=['env']", "--config", "build.rustc-wrapper=''", ` +
+    `"--config", "build.rustc-workspace-wrapper=''", "--config", "build.rustc='rustc'", "--", ]`,
 ];
 export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 
@@ -2456,7 +2458,7 @@ export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 // and the scripts that run one of those. A script step that does runs under scripts/capped.ts, at
 // most at these caps.
 const TEST_RUNNER =
-  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|cargo-gate\.ts test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
+  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|cargo xtask gate test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
 const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
@@ -2495,12 +2497,14 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
 // Files that may name a flag or variable that can switch lints off, each with why. Anywhere else,
 // naming one is setting it where a gate would run.
 const RUST_FLAG_EXEMPT: Record<string, string> = {
+  ".cargo/config.toml":
+    "overrides a configured wrapper for xtask's own build; CARGO_CONFIG pins it",
   "crates/bazhen-xtask/src/gate.rs":
     "removes them from every gate's environment, and tests it does",
   "crates/bazhen-xtask/src/cargo_config.rs": "plants them in configs to check they are refused",
-  "scripts/cargo-gate.ts": "removes them from every gate's environment",
-  "scripts/cargo-gate.test.ts": "sets them to check the gate removes them",
-  "scripts/cargo-gate.medium.test.ts": "sets them to check the tool never sees them",
+  "scripts/rust-gate.ts":
+    "removes them from the environment falsify and holder-mutants run cargo in",
+  "scripts/rust-gate.test.ts": "sets them to check gateEnv removes them",
   "scripts/xtask-gate.medium.test.ts": "sets them to check the tool never sees them",
   "scripts/check-standards.ts": "names them to find them",
   "scripts/check-standards.test.ts": "plants them to check they are found",
@@ -2515,7 +2519,7 @@ export function gateScriptFailures(scripts: Record<string, string>): string[] {
     if (scripts[name] !== command) {
       out.push(
         `package.json: the "${name}" script must be \`${command}\` (RUST_GATE_SCRIPTS in ` +
-          "scripts/check-standards.ts); a gate's command changes in scripts/cargo-gate.ts.",
+          "scripts/check-standards.ts); a gate's command changes in crates/bazhen-xtask/src/gate.rs.",
       );
     }
   }
@@ -2993,7 +2997,7 @@ export function rustFailures(
       if (flag !== null) {
         out.push(
           `${file}: names \`${flag[0]}\`, which can switch the Rust lints off. The gates run ` +
-            "through scripts/cargo-gate.ts, which removes it; a file that must set it goes in " +
+            "through `cargo xtask gate`, which removes it; a file that must set it goes in " +
             "RUST_FLAG_EXEMPT in scripts/check-standards.ts, with why.",
         );
       }

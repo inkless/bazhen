@@ -5,33 +5,33 @@ TypeScript wherever this page doesn't say otherwise. Where a check enforces a ru
 says enough to fix the problem without this page. Read this page when a rule seems wrong, or when
 a review asks for something no check covers.
 
-| Rule                                                                                                                                    | Enforced by                                           |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)           |
-| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `pnpm check` (`scripts/check-standards.ts`)           |
-| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)           |
-| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
-| No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
-| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `pnpm check` (`scripts/check-standards.ts`)           |
-| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/cargo-gate.ts`, which every gate script runs |
-| Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                                   |
-| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                                      |
-| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                                      |
-| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `pnpm lint:rust`                                      |
-| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)           |
-| Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                           |
-| Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
-| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`pnpm test:falsify`)             |
-| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
-| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)           |
-| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
-| Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
-| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)           |
-| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)              |
-| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `pnpm deny`                                           |
-| A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
-| API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
-| Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                                |
+| Rule                                                                                                                                    | Enforced by                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)      |
+| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `pnpm check` (`scripts/check-standards.ts`)      |
+| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)      |
+| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                 |
+| No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                          |
+| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `pnpm check` (`scripts/check-standards.ts`)      |
+| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `cargo xtask gate`, which every gate script runs |
+| Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                              |
+| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                                 |
+| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                                 |
+| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `pnpm lint:rust`                                 |
+| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)      |
+| Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                      |
+| Tests run under nextest                                                                                                                 | `pnpm test:rust`                                 |
+| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`pnpm test:falsify`)        |
+| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                           |
+| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)      |
+| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                           |
+| Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                           |
+| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)      |
+| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)         |
+| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `pnpm deny`                                      |
+| A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                           |
+| API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                           |
+| Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                           |
 
 ## Layout
 
@@ -209,7 +209,7 @@ in `RUST_FLAG_EXEMPT` that names a flag or variable able to switch lints off (`R
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
 argument, and a cargo alias can replace `cargo clippy` with a command that passes. So each gate
-script runs `scripts/cargo-gate.ts`, which holds the gate's command, calls the subcommand's own
+script runs `cargo xtask gate` (`crates/bazhen-xtask/src/gate.rs`), which holds the gate's command, calls the subcommand's own
 binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
 `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
@@ -427,7 +427,7 @@ What differs:
 - **Property tests with proptest** for every decoder and state machine: a round trip through
   the encoder, and the decoder's answer for every malformed input, such as every truncation
   (`crates/bazhen-hook/src/lib.rs`, `mod properties`).
-  - **A pull request tests the change, not the draw.** `gateEnv` in `scripts/cargo-gate.ts` fixes
+  - **A pull request tests the change, not the draw.** `cargo xtask gate`, and `gateEnv` in `scripts/rust-gate.ts`, fix
     `PROPTEST_RNG_SEED` for every gate and for falsify, and drops `PROPTEST_CASES`, so each
     `proptest!` block runs the case count its code gives (proptest's 256 where it gives none). A
     run sees the cases the last one saw, so a property that fails on a pull request failed
@@ -550,7 +550,7 @@ What differs:
   memory cap (`testing.md` § Memory and time caps), and a mutant whose run had one killed there is
   listed INVALID with that reason, as one that ran out of time is. Install cargo-mutants once:
   `cargo install --locked cargo-mutants@27.1.0`; the `pnpm test:real` image carries it, and
-  cargo-nextest, at the versions `RUST_TOOLS` in `scripts/cargo-gate.ts` pins.
+  cargo-nextest, at the versions `crates/bazhen-xtask/rust-tools.json` pins.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from
 outside, as `testing.md` § Black-box behaviour tests describes: `tests/api` delivers mail to

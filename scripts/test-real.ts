@@ -28,7 +28,7 @@ import {
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { SLICE, inSignalSandbox, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { RUST_TOOLS } from "./cargo-gate.ts";
+import { RUST_TOOLS } from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 
 const SUITES = {

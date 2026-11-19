@@ -24,7 +24,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isAlive, signalOwnChild } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installCommand } from "./cargo-gate.ts";
+import { installCommand } from "./rust-gate.ts";
 import { binariesOf, manifestNames, namedBinaries } from "./falsify.ts";
 import { inSignalSandbox } from "./signal-paths.ts";
 

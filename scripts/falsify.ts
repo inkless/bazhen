@@ -95,7 +95,13 @@ import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
-import { GATES, configFailures, gateEnv, installCommand, outsideConfigs } from "./cargo-gate.ts";
+import {
+  TEST_BUILD,
+  configFailures,
+  gateEnv,
+  installCommand,
+  outsideConfigs,
+} from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
@@ -178,12 +184,6 @@ const MUTANT_TIMEOUT_MS = timeoutFrom(
 );
 // nextest's libtest JSON is experimental; the version pins its shape.
 const LIBTEST_JSON_VERSION = "0.1";
-// The test gate's build options (workspace, features, lockfile, wrapper overrides), so the tests
-// listed are the ones the gate runs.
-const TEST_BUILD = GATES.test.slice(
-  GATES.test.indexOf("run") + 1,
-  GATES.test.indexOf("--status-level"),
-);
 const KILL_GRACE_MS = 2000;
 // Beside this file, never the worktree's copy, which the branch's revert may have changed or removed.
 const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
