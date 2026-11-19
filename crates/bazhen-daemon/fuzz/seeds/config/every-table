@@ -1,0 +1,20 @@
+[daemon]
+port = 7901
+
+[agents]
+shell = "direct"
+max_launched = 2
+
+[agents.env]
+deny = ["AWS_*"]
+passthrough = ["TERM"]
+
+[terminals]
+memory_max = "4G"
+swap_max = "0"
+history_lines = 5000
+
+[web]
+external_origins = ["https://bazhen.example.com", "http://[::1]:8080"]
+pairing = "always"
+lan_allow = ["192.168.1.0/24", "fe80::/10%eno1"]

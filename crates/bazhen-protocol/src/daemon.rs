@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::AgentId;
 use crate::nullable::Nullable;
 use crate::record::Record;
+use crate::shells::BusyShell;
 
 /// A runtime's state as the daemon reports it: its health when it was read, or `Unused` when it
 /// wasn't, since it is not the default and no terminal is open on it.
@@ -367,3 +368,44 @@ pub struct EnvRefreshResponse {
 /// `POST /v1/daemon/stop`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StopResponse {}
+
+/// What every refused request answers, whatever the route.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub error: ErrorCode,
+    pub message: String,
+    /// With `busy`: each shell, and what runs in it, that the close would end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy: Option<Vec<BusyShell>>,
+}
+
+/// Why a request was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    InvalidRequest,
+    Unsupported,
+    /// The agent's process could not be started; repeating won't help until the reason changes.
+    LaunchFailed,
+    Conflict,
+    StaleGeneration,
+    NotResumable,
+    Unavailable,
+    /// A close found no terminal, but the server it ran on may still run it.
+    ServerUnconfirmed,
+    /// A close reached a holder this build can't speak to.
+    NeedsRestart,
+    /// A shell close found a program other than the shell running.
+    Busy,
+    NotFound,
+    OriginNotAllowed,
+    HostNotAllowed,
+    Forbidden,
+    /// No device cookie, or one revoked or expired: the browser must pair.
+    Unpaired,
+    /// The code was wrong, expired, used or burned; which one is not said.
+    PairingFailed,
+    RateLimited,
+    /// A new agent or shell refused: as many terminals are open as the daemon allows.
+    TerminalLimit,
+}

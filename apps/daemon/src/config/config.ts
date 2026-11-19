@@ -36,7 +36,7 @@ const Range = z.string().superRefine((text, ctx) => {
 });
 
 /** The keys `config.toml` may hold. Unknown keys are refused, so a typo never means "default". */
-const ConfigFile = z.strictObject({
+export const ConfigFile = z.strictObject({
   daemon: z.strictObject({ port: Port.optional() }).optional(),
   bank: z.strictObject({ path: z.string().startsWith("/").optional() }).optional(),
   notifications: z.strictObject({ desktop: z.boolean().optional() }).optional(),
@@ -164,6 +164,11 @@ export function readConfigFile(file: string): ConfigFile | undefined {
     if (err instanceof Error && "code" in err && err.code === "ENOENT") return undefined;
     throw new InvalidConfig(`${file}: ${String(err)}`, { cause: err });
   }
+  return parseConfigText(file, text);
+}
+
+/** The settings `text`, read from `file`, holds; InvalidConfig naming `file` and the first key wrong. */
+export function parseConfigText(file: string, text: string): ConfigFile {
   let toml: unknown;
   try {
     toml = parse(text);

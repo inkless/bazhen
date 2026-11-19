@@ -4,6 +4,7 @@ import {
   AgentCommandResponse,
   CallerResponse,
   CloseAgentRequest,
+  ErrorResponse,
   FleetAgent,
   LaunchAgentRequest,
   LaunchAgentResponse,
@@ -594,6 +595,19 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     schema: EnvRefreshResponse,
     wire: [
       { capturedAt: AT, kept: 12, removed: { secrets: 2 }, refused: ["BAD"], unchanged: [AGENT] },
+    ],
+  },
+  ErrorResponse: {
+    schema: ErrorResponse,
+    wire: [
+      { error: "unpaired", message: "pair this browser: run `bazhen devices pair`" },
+      { error: "host_not_allowed", message: "evil.example" },
+      { error: "origin_not_allowed", message: "" },
+      {
+        error: "busy",
+        message: "a program runs in it",
+        busy: [{ terminalId: TERM, program: "vim" }],
+      },
     ],
   },
   EscalateRequest: {

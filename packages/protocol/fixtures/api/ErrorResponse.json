@@ -1,0 +1,337 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "error": "unpaired",
+      "message": "pair this browser: run `bazhen devices pair`"
+    },
+    "parsed": {
+      "error": "unpaired",
+      "message": "pair this browser: run `bazhen devices pair`"
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "error": "host_not_allowed",
+      "message": "evil.example"
+    },
+    "parsed": {
+      "error": "host_not_allowed",
+      "message": "evil.example"
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "error": "origin_not_allowed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "origin_not_allowed",
+      "message": ""
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "error": "busy",
+      "message": "a program runs in it",
+      "busy": [
+        {
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "program": "vim"
+        }
+      ]
+    },
+    "parsed": {
+      "error": "busy",
+      "message": "a program runs in it",
+      "busy": [
+        {
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "program": "vim"
+        }
+      ]
+    }
+  },
+  {
+    "name": "error = \"invalid_request\"",
+    "wire": {
+      "error": "invalid_request",
+      "message": ""
+    },
+    "parsed": {
+      "error": "invalid_request",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"unsupported\"",
+    "wire": {
+      "error": "unsupported",
+      "message": ""
+    },
+    "parsed": {
+      "error": "unsupported",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"launch_failed\"",
+    "wire": {
+      "error": "launch_failed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "launch_failed",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"conflict\"",
+    "wire": {
+      "error": "conflict",
+      "message": ""
+    },
+    "parsed": {
+      "error": "conflict",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"stale_generation\"",
+    "wire": {
+      "error": "stale_generation",
+      "message": ""
+    },
+    "parsed": {
+      "error": "stale_generation",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"not_resumable\"",
+    "wire": {
+      "error": "not_resumable",
+      "message": ""
+    },
+    "parsed": {
+      "error": "not_resumable",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"unavailable\"",
+    "wire": {
+      "error": "unavailable",
+      "message": ""
+    },
+    "parsed": {
+      "error": "unavailable",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"server_unconfirmed\"",
+    "wire": {
+      "error": "server_unconfirmed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "server_unconfirmed",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"needs_restart\"",
+    "wire": {
+      "error": "needs_restart",
+      "message": ""
+    },
+    "parsed": {
+      "error": "needs_restart",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"busy\"",
+    "wire": {
+      "error": "busy",
+      "message": ""
+    },
+    "parsed": {
+      "error": "busy",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"not_found\"",
+    "wire": {
+      "error": "not_found",
+      "message": ""
+    },
+    "parsed": {
+      "error": "not_found",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"origin_not_allowed\"",
+    "wire": {
+      "error": "origin_not_allowed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "origin_not_allowed",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"host_not_allowed\"",
+    "wire": {
+      "error": "host_not_allowed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "host_not_allowed",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"forbidden\"",
+    "wire": {
+      "error": "forbidden",
+      "message": ""
+    },
+    "parsed": {
+      "error": "forbidden",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"unpaired\"",
+    "wire": {
+      "error": "unpaired",
+      "message": ""
+    },
+    "parsed": {
+      "error": "unpaired",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"pairing_failed\"",
+    "wire": {
+      "error": "pairing_failed",
+      "message": ""
+    },
+    "parsed": {
+      "error": "pairing_failed",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"rate_limited\"",
+    "wire": {
+      "error": "rate_limited",
+      "message": ""
+    },
+    "parsed": {
+      "error": "rate_limited",
+      "message": ""
+    }
+  },
+  {
+    "name": "error = \"terminal_limit\"",
+    "wire": {
+      "error": "terminal_limit",
+      "message": ""
+    },
+    "parsed": {
+      "error": "terminal_limit",
+      "message": ""
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "error": "unpaired",
+      "message": "pair this browser: run `bazhen devices pair`",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "error": "unpaired",
+      "message": "pair this browser: run `bazhen devices pair`"
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "error": "host_not_allowed",
+      "message": "evil.example",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "error": "host_not_allowed",
+      "message": "evil.example"
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "error": "origin_not_allowed",
+      "message": "",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "error": "origin_not_allowed",
+      "message": ""
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "error": "busy",
+      "message": "a program runs in it",
+      "busy": [
+        {
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "program": "vim",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        }
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "error": "busy",
+      "message": "a program runs in it",
+      "busy": [
+        {
+          "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "program": "vim"
+        }
+      ]
+    }
+  }
+]

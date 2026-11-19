@@ -12,7 +12,8 @@ use bazhen_protocol::agents::{
     RespawnAgentRequest, SignalAgentRequest, StateSnapshot,
 };
 use bazhen_protocol::daemon::{
-    DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
+    DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, ErrorResponse, HealthResponse,
+    StopResponse,
 };
 use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
@@ -129,6 +130,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("DoctorResponse", round_trips::<DoctorResponse>),
     ("EnvRefreshRequest", round_trips::<EnvRefreshRequest>),
     ("EnvRefreshResponse", round_trips::<EnvRefreshResponse>),
+    ("ErrorResponse", round_trips::<ErrorResponse>),
     ("EscalateRequest", round_trips::<EscalateRequest>),
     ("EscalateResponse", round_trips::<EscalateResponse>),
     ("EventEnvelopeFrame", round_trips::<EventFrame>),
