@@ -12,6 +12,7 @@ e2e = "tests/e2e"
 # Under CI (CI set, as on every runner and in the test container) `moon run` lists the files
 # changed since the default branch, and fails when git can't resolve it: a shallow checkout, or the
 # container's, has no `master` or `main`. Nothing here runs only what changed, so the list is
-# taken against HEAD, which every checkout has.
+# taken against HEAD, which every checkout has. On a pull request moon takes GitHub's base ref
+# instead, so .github/actions/moon sets MOON_BASE to HEAD too.
 [vcs]
 defaultBranch = "HEAD"
