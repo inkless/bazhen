@@ -57,12 +57,18 @@ pub fn run(args: &[OsString]) -> ExitCode {
     };
     match verb {
         Verb::Start => start(&settings, uid, &mut err),
-        Verb::Detached if !leads_own_session() => {
+        _ if !may_serve(&verb, leads_own_session()) => {
             let _ = writeln!(err, "{NOT_DETACHED}");
             ExitCode::FAILURE
         }
         Verb::Detached | Verb::Serve => serve(&startup(settings, uid)),
     }
+}
+
+/// Whether `verb` may serve here: one run detached only as the leader of a session of its own, as
+/// `start` makes it, so no signal to the terminal that started it can reach it.
+fn may_serve(verb: &Verb, leads_own_session: bool) -> bool {
+    *verb != Verb::Detached || leads_own_session
 }
 
 /// A variable as Node's `process.env` gives it: bytes that aren't UTF-8 read as U+FFFD, so the
@@ -128,6 +134,18 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
         let port = OsString::from_vec(b"79\xff0".to_vec());
         assert_eq!(as_node_reads(&port), "79\u{fffd}0");
+    }
+
+    #[test]
+    fn serves_detached_only_as_the_leader_of_its_own_session() {
+        assert_eq!(
+            [
+                may_serve(&Verb::Detached, true),
+                may_serve(&Verb::Detached, false),
+                may_serve(&Verb::Serve, false),
+            ],
+            [true, false, true]
+        );
     }
 
     #[test]
