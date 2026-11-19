@@ -1,6 +1,7 @@
 //! The verbs on the daemon itself: start it, stop it, say how it is, refresh the environment it
 //! gives agents, and pair and list the browsers that may reach it.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::sleep;
@@ -27,31 +28,69 @@ const STOPPED_WITHIN: Duration = Duration::from_secs(5);
 /// How long the daemon may take to take a stop, or a new environment, before it is wedged.
 const SLOW_CALL: Duration = Duration::from_secs(30);
 
-/// Runs the daemon's own start-up, which detaches it and reports whether it came up. The daemon
-/// is the checkout's this binary was built in: `<checkout>/target/<profile>/bazhen`.
-pub(crate) fn start(p: &Parsed, out: &mut Out) -> Exit {
-    let entry = checkout().map(|root| root.join("apps/daemon/src/start.ts"));
-    let Some(entry) = entry.filter(|e| e.is_file()) else {
-        out.err(
-            "bazhen start runs the daemon of the checkout it was built in, and finds none here",
-        );
-        return Exit::Failed;
+/// The variable that names the Rust daemon's binary for `start`, while both daemons are built.
+const TEST_DAEMON_BIN: &str = "BAZHEN_TEST_DAEMON_BIN";
+
+/// The daemon binary `value`, `TEST_DAEMON_BIN`'s, names: none when it is unset or empty, and an
+/// error for a path that isn't absolute, which would be looked up on `PATH` or the directory.
+fn test_daemon_bin(value: Option<OsString>) -> Result<Option<PathBuf>, String> {
+    let Some(bin) = value.filter(|b| !b.is_empty()).map(PathBuf::from) else {
+        return Ok(None);
     };
-    let mut node = Command::new("node");
-    node.arg(&entry);
+    if bin.is_absolute() {
+        Ok(Some(bin))
+    } else {
+        Err(format!(
+            "{TEST_DAEMON_BIN} names {}, which isn't an absolute path",
+            bin.display()
+        ))
+    }
+}
+
+/// Runs the daemon's own start-up, which detaches it and reports whether it came up. The daemon
+/// is the Rust daemon's binary `TEST_DAEMON_BIN` names, when it names one, saying so; else the
+/// TypeScript one of the checkout this binary was built in: `<checkout>/target/<profile>/bazhen`.
+pub(crate) fn start(p: &Parsed, out: &mut Out) -> Exit {
+    let rust = match test_daemon_bin(std::env::var_os(TEST_DAEMON_BIN)) {
+        Ok(rust) => rust,
+        Err(message) => {
+            out.err(&message);
+            return Exit::Failed;
+        }
+    };
+    let mut daemon = if let Some(bin) = rust {
+        out.err(&format!(
+            "bazhen start: starting the daemon at {}, as {TEST_DAEMON_BIN} names",
+            bin.display()
+        ));
+        let mut rust = Command::new(bin);
+        rust.arg("start");
+        rust
+    } else {
+        let entry = checkout().map(|root| root.join("apps/daemon/src/start.ts"));
+        let Some(entry) = entry.filter(|e| e.is_file()) else {
+            out.err(
+                "bazhen start runs the daemon of the checkout it was built in, and finds none here",
+            );
+            return Exit::Failed;
+        };
+        let mut node = Command::new("node");
+        node.arg(&entry);
+        node
+    };
     if let Some(home) = p.value("home") {
-        node.env("BAZHEN_HOME", home);
+        daemon.env("BAZHEN_HOME", home);
     }
     if let Some(port) = p.value("port") {
-        node.env("BAZHEN_PORT", port);
+        daemon.env("BAZHEN_PORT", port);
     }
-    match node.status() {
+    match daemon.status() {
         Ok(status) => status
             .code()
             .and_then(|c| u8::try_from(c).ok())
             .map_or(Exit::Failed, Exit::Code),
         Err(e) => {
-            out.err(&format!("can't run node to start the daemon: {e}"));
+            out.err(&format!("can't run the daemon to start it: {e}"));
             Exit::Failed
         }
     }
@@ -285,5 +324,32 @@ pub(crate) fn devices(
             }
             Ok(Exit::Done)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn takes_the_test_daemon_only_by_an_absolute_path_and_none_unset_or_empty() {
+        let named = |v: &str| test_daemon_bin(Some(OsString::from(v)));
+        assert_eq!(
+            [
+                test_daemon_bin(None),
+                named(""),
+                named("/opt/bazhen-daemon"),
+                named("bin/bazhen-daemon"),
+            ],
+            [
+                Ok(None),
+                Ok(None),
+                Ok(Some(PathBuf::from("/opt/bazhen-daemon"))),
+                Err(
+                    "BAZHEN_TEST_DAEMON_BIN names bin/bazhen-daemon, which isn't an absolute path"
+                        .into()
+                ),
+            ]
+        );
     }
 }

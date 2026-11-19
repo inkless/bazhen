@@ -1,0 +1,3 @@
+# Each api test file the Rust daemon passes, as the TypeScript one does. The api (rust daemon)
+# job runs them against it, and fails when a line goes: a file leaves only at the cutover.
+tests/api/daemon-process.test.ts

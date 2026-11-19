@@ -493,6 +493,28 @@ describe("the daemon any verb reaches", () => {
     ]);
   });
 
+  it("starts the Rust daemon BAZHEN_TEST_DAEMON_BIN names, saying so, by an absolute path only", async () => {
+    const stub = join(s.dir, "rust-daemon");
+    writeFileSync(stub, '#!/bin/sh\nprintf "rust %s home=%s" "$*" "$BAZHEN_HOME"\n');
+    chmodSync(stub, 0o755);
+    const named = await s.bazhen(["start", "--home", s.home], { BAZHEN_TEST_DAEMON_BIN: stub });
+    const bare = await s.bazhen(["start", "--home", s.home], {
+      BAZHEN_TEST_DAEMON_BIN: "rust-daemon",
+    });
+    expect([named, bare]).toEqual([
+      {
+        code: 0,
+        stdout: `rust start home=${s.home}`,
+        stderr: `bazhen start: starting the daemon at ${stub}, as BAZHEN_TEST_DAEMON_BIN names\n`,
+      },
+      {
+        code: 1,
+        stdout: "",
+        stderr: "BAZHEN_TEST_DAEMON_BIN names rust-daemon, which isn't an absolute path\n",
+      },
+    ]);
+  });
+
   it("is under --home over BAZHEN_HOME, and under a home given with a trailing slash", async () => {
     state();
     const flag = await s.bazhen(["tasks", "list", "--all", "--home", s.home], {

@@ -12,6 +12,7 @@
     "../support/disposable-host.ts",
     "../support/holder-close.ts",
     "../support/programs.ts",
+    "../support/test-daemon.ts",
     "../support/setup-error.ts",
     "../support/state-route.ts",
     "../support/key-*.ts"
