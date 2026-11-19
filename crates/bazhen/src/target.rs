@@ -1,7 +1,7 @@
 //! The terminal a command line names: an agent's or a shell's, by its name or id, or a terminal
 //! by its own id.
 
-use bazhen_protocol::agents::StateSnapshot;
+use bazhen_protocol::agents::{Agent, StateSnapshot};
 
 /// What a target names, as the daemon's state shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,12 +16,7 @@ pub(crate) struct Named {
 
 /// What `target` names in `state`; none when no agent, shell or terminal has that name or id.
 pub(crate) fn named(state: &StateSnapshot, target: &str) -> Option<Named> {
-    let agent = state.agents.iter().find(|a| {
-        a.id.as_str() == target
-            || a.name.eq_ignore_ascii_case(target)
-            || a.terminal_id.as_ref().is_some_and(|t| t.as_str() == target)
-    });
-    agent
+    agent_named(state, target)
         .map(|a| Named {
             terminal: a.terminal_id.as_ref().map(|t| t.as_str().to_owned()),
             attachable: a.attach_command.is_some(),
@@ -38,6 +33,15 @@ pub(crate) fn named(state: &StateSnapshot, target: &str) -> Option<Named> {
                     unserved: s.needs_restart.as_ref().is_some_and(|r| !r.served),
                 })
         })
+}
+
+/// The agent `target` names in `state`, by its name, its id or its terminal's.
+pub(crate) fn agent_named<'a>(state: &'a StateSnapshot, target: &str) -> Option<&'a Agent> {
+    state.agents.iter().find(|a| {
+        a.id.as_str() == target
+            || a.name.eq_ignore_ascii_case(target)
+            || a.terminal_id.as_ref().is_some_and(|t| t.as_str() == target)
+    })
 }
 
 /// Said of a target that names nothing.

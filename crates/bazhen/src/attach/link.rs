@@ -115,9 +115,11 @@ pub(crate) fn pump(
     }
 }
 
-/// Reads all the daemon has sent so far: output to `shown`, and what its frames mean to
-/// `effects`. True once the daemon has closed the stream, which it does straight after a frame
-/// that ends the attachment, so the caller acts on `effects` before it takes that for gone.
+/// Reads what the daemon has sent so far, up to a frame that ends the attachment: output to
+/// `shown`, and what its frames mean to `effects`. True once the daemon has closed the stream,
+/// which it does straight after a frame that ends the view, so the caller acts on `effects` before
+/// it takes that for gone. A program's exit leaves the stream open, and what follows it, a
+/// respawn's output, is never shown.
 fn drain(
     ws: &mut WebSocket<UnixStream>,
     attachment: &mut Attachment,
@@ -127,7 +129,14 @@ fn drain(
     let closed = loop {
         match ws.read() {
             Ok(Message::Binary(output)) => shown.write_all(&output)?,
-            Ok(Message::Text(text)) => effects.extend(attachment.frame(text.as_str())),
+            Ok(Message::Text(text)) => {
+                let said = attachment.frame(text.as_str());
+                let ends = said.iter().any(|e| matches!(e, Effect::End(_)));
+                effects.extend(said);
+                if ends {
+                    break false;
+                }
+            }
             Ok(Message::Close(_)) => break true,
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if e.kind() == ErrorKind::WouldBlock => break false,
@@ -173,6 +182,7 @@ mod tests {
     use super::*;
     use crate::attach::attachment::{Attachment, Size};
     use crate::call::ANOTHER_BUILD;
+    use bazhen_protocol::agents::ExitStatus;
     use std::io::{Read as _, Write as _};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
@@ -304,40 +314,54 @@ mod tests {
     /// A client and a server end of one stream, as the daemon sends on it: frames written in one
     /// go, then its close.
     fn sent_then_closed(frames: &[&str]) -> WebSocket<UnixStream> {
+        let mut messages: Vec<Message> = frames.iter().map(|f| Message::text(*f)).collect();
+        messages.push(Message::Close(None));
+        sent(messages)
+    }
+
+    /// The client end of a stream the daemon wrote `messages` to in one go, and the server end,
+    /// kept open.
+    fn sent(messages: Vec<Message>) -> WebSocket<UnixStream> {
         let (client, server) = UnixStream::pair().unwrap();
         let mut daemon =
             WebSocket::from_raw_socket(server, tungstenite::protocol::Role::Server, None);
-        for frame in frames {
-            daemon.write(Message::text(*frame)).unwrap();
+        for message in messages {
+            daemon.write(message).unwrap();
         }
-        daemon.write(Message::Close(None)).unwrap();
         daemon.flush().unwrap();
+        // The daemon's end stays open as long as the client's, as a view's does past an exit.
+        std::mem::forget(daemon);
         client.set_nonblocking(true).unwrap();
         WebSocket::from_raw_socket(client, tungstenite::protocol::Role::Client, None)
     }
 
     /// What one wake-up makes of what the daemon sent: drained, then acted on, as `pump` does.
     fn outcome_of(ws: &mut WebSocket<UnixStream>) -> (bool, Option<Outcome>, Vec<String>) {
+        let (closed, outcome, notes, _) = shown_of(ws);
+        (closed, outcome, notes)
+    }
+
+    /// As `outcome_of`, with the output shown on the way.
+    fn shown_of(ws: &mut WebSocket<UnixStream>) -> (bool, Option<Outcome>, Vec<String>, Vec<u8>) {
         let mut attachment = Attachment::default();
         let mut effects = Vec::new();
         let mut shown = Vec::new();
         let closed = drain(ws, &mut attachment, &mut shown, &mut effects).unwrap();
         let mut notes = Vec::new();
         let outcome = act(ws, effects, &mut notes).unwrap();
-        (closed, outcome, notes)
+        (closed, outcome, notes, shown)
     }
 
     #[test]
     fn acts_on_the_frame_the_daemon_closed_the_stream_after() {
-        let mut exited = sent_then_closed(&[r#"{"type":"exit"}"#]);
+        let mut exited = sent_then_closed(&[r#"{"type":"closed"}"#]);
         let mut refused = sent_then_closed(&[
             r#"{"type":"notice","message":"resize refused"}"#,
             r#"{"type":"error","message":"no such terminal"}"#,
         ]);
-        let (closed, outcome, _) = outcome_of(&mut exited);
-        assert!(closed);
+        let (_, outcome, _) = outcome_of(&mut exited);
         assert!(
-            matches!(outcome, Some(Outcome::Ended(Ending::Exited))),
+            matches!(outcome, Some(Outcome::Ended(Ending::Closed))),
             "{outcome:?}"
         );
         let (_, outcome, notes) = outcome_of(&mut refused);
@@ -346,6 +370,27 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(notes, ["resize refused"]);
+    }
+
+    #[test]
+    fn ends_on_its_programs_exit_after_the_output_before_it_and_shows_none_after() {
+        let mut ws = sent(vec![
+            Message::binary(b"last words".to_vec()),
+            Message::text(r#"{"type":"exited","generation":0,"exit":{"type":"exited","code":0}}"#),
+            Message::binary(b"a respawn's output".to_vec()),
+        ]);
+        let (closed, outcome, _, shown) = shown_of(&mut ws);
+        assert!(!closed);
+        assert!(
+            matches!(
+                outcome,
+                Some(Outcome::Ended(Ending::ProgramExited(ExitStatus::Exited {
+                    code: 0
+                })))
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(String::from_utf8_lossy(&shown), "last words");
     }
 
     #[test]

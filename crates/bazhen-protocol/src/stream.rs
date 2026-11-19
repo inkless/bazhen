@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::ExitStatus;
 use crate::ids::AttachmentId;
 
 /// The largest frame a view may send.
@@ -96,8 +97,14 @@ pub enum StreamServerFrame {
     Screen {
         alternate: bool,
     },
-    /// The terminal closed.
-    Exit,
+    /// The terminal's process of `generation` exited, after the last of its output. The
+    /// terminal goes on.
+    Exited {
+        generation: u64,
+        exit: ExitStatus,
+    },
+    /// The terminal closed, and the view with it.
+    Closed,
     Ended {
         reason: EndedReason,
     },

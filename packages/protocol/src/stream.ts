@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExitStatus } from "./agents.ts";
 import { AttachmentMode, Id } from "./ids.ts";
 
 /**
@@ -102,8 +103,18 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
    * each switch.
    */
   z.object({ type: z.literal("screen"), alternate: z.boolean() }),
-  /** The terminal closed. */
-  z.object({ type: z.literal("exit") }),
+  /**
+   * The terminal's process exited, after the last of the output it printed: the process of
+   * `generation`, as a respawn numbers them. The terminal goes on, and a respawn may follow on the
+   * same view; a view that only shows a running program ends here.
+   */
+  z.object({
+    type: z.literal("exited"),
+    generation: z.number().int().nonnegative(),
+    exit: ExitStatus,
+  }),
+  /** The terminal closed, and the view with it. */
+  z.object({ type: z.literal("closed") }),
   /**
    * The daemon ended this view while the terminal goes on: it fell too far behind its output, or
    * the daemon's client lost the terminal. Reattaching opens a fresh snapshot (§5.3).

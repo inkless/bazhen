@@ -23,7 +23,7 @@ import {
 import { failureDetail } from "../commands.ts";
 import { classifyInput } from "./input-filter.ts";
 import { emulatorScreen, runtimeScreen, type ScreenSource } from "./screen-source.ts";
-import { seam, type Held, type Position } from "./seam.ts";
+import { heldBytes, seam, type Held, type Position } from "./seam.ts";
 
 /** One browser view of a terminal, as the hub sees it. */
 export interface Viewer {
@@ -243,6 +243,9 @@ export class TerminalHub {
       resumeDigest: digest(resumeToken),
     };
     watched.viewers.set(id, entry);
+    // An exit told before this view opened still ends it, unless its snapshot is of a later process.
+    const { exited } = watched.stream;
+    if (exited !== null) entry.queue?.push({ kind: "exited", at: from, exit: exited });
     const taking = watched.screen.snapshot(from);
     this.log.started(id, watched.terminal, viewer.mode);
     const shown = await taking.catch((err: unknown) => {
@@ -258,7 +261,7 @@ export class TerminalHub {
     }
     // What the snapshot covers is never sent, so it neither stays held nor counts against the view.
     entry.queue = rest;
-    entry.held = rest.reduce((n, item) => n + item.bytes.length, 0);
+    entry.held = rest.reduce((n, item) => n + heldBytes(item), 0);
     if (!this.makeRoom(shown.vt.length)) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused(
@@ -278,7 +281,7 @@ export class TerminalHub {
     viewer.notify({ type: "snapshot_end" });
     if (watched.alternate !== undefined)
       viewer.notify({ type: "screen", alternate: watched.alternate });
-    for (const { bytes } of entry.queue ?? []) viewer.send(bytes);
+    for (const item of entry.queue ?? []) pass(viewer, item);
     delete entry.queue;
     entry.held = 0;
     // The most recent interactive view sizes the terminal while nobody drives it.
@@ -327,13 +330,12 @@ export class TerminalHub {
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
       const deliver = (item: Held) => {
-        const { bytes } = item;
-        watched.screen.write(bytes);
+        if (item.kind !== "exited") watched.screen.write(item.bytes);
         for (const [id, entry] of watched.viewers) {
           if (entry.queue) {
             entry.queue.push(item);
-            entry.held += bytes.length;
-          } else entry.viewer.send(bytes);
+            entry.held += heldBytes(item);
+          } else pass(entry.viewer, item);
           const behind = entry.viewer.unsent() - entry.snapshotBytes + entry.held;
           if (behind > this.opts.maxUnsentBytes) {
             this.evict(watched, id, entry);
@@ -356,6 +358,7 @@ export class TerminalHub {
         watched.at = { generation, offset: 0 };
         deliver({ kind: "reset", generation, bytes: RESPAWN_BYTES });
       });
+      stream.onExit((exit) => deliver({ kind: "exited", at: watched.at, exit }));
       stream.onClose((why) => {
         this.unpark(ref.terminalId, stream)?.cancel();
         // The client also exits when its connection to tmux is lost while the terminal lives on.
@@ -369,7 +372,7 @@ export class TerminalHub {
           this.unload(id);
           dismiss(
             entry,
-            reason === "terminal_closed" ? { type: "exit" } : { type: "ended", reason },
+            reason === "terminal_closed" ? { type: "closed" } : { type: "ended", reason },
           );
           this.log.ended(id, reason);
         }
@@ -617,6 +620,14 @@ export class TerminalHub {
 }
 
 const RESPAWN_BYTES = Buffer.from(RESPAWN_RESET);
+
+/** A held item, to a view whose snapshot is done: output as its bytes, an exit as its frame. */
+function pass(viewer: Viewer, item: Held): void {
+  if (item.kind === "exited") {
+    const { generation, status } = item.exit;
+    viewer.notify({ type: "exited", generation, exit: status });
+  } else viewer.send(item.bytes);
+}
 
 const digest = (token: string) => createHash("sha256").update(token).digest();
 
