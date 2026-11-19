@@ -19,7 +19,6 @@ mod paths;
 mod printers;
 pub mod reply;
 mod screen;
-mod sha256;
 mod shells;
 mod target;
 mod tasks;
@@ -358,30 +357,10 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
 /// This process's inputs to the socket's place: `BAZHEN_SOCKET` if `with_socket`, then `--home`,
 /// then `BAZHEN_HOME`.
 fn inputs(home_flag: Option<&str>, with_socket: bool) -> paths::Inputs {
-    let var = |name: &str| std::env::var(name).ok();
-    let tmp = ["TMPDIR", "TMP", "TEMP"]
-        .iter()
-        .find_map(|name| var(name).filter(|v| !v.is_empty()))
-        .map_or_else(
-            || "/tmp".to_owned(),
-            |t| {
-                let trimmed = t.trim_end_matches('/');
-                if trimmed.is_empty() {
-                    "/".to_owned()
-                } else {
-                    trimmed.to_owned()
-                }
-            },
-        );
     paths::Inputs {
         bazhen_socket: std::env::var_os("BAZHEN_SOCKET")
             .filter(|_| with_socket)
             .map(|v| v.to_string_lossy().into_owned()),
-        home_flag: home_flag.map(str::to_owned),
-        bazhen_home: var("BAZHEN_HOME"),
-        xdg_runtime_dir: var("XDG_RUNTIME_DIR"),
-        tmp,
-        uid: rustix::process::getuid().as_raw(),
-        macos: std::env::consts::OS == "macos",
+        paths: bazhen_client::paths::Inputs::current(home_flag, rustix::process::getuid().as_raw()),
     }
 }

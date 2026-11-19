@@ -29,6 +29,27 @@ impl<K: Kind> Id<K> {
     pub fn as_str(&self) -> &str {
         &self.text
     }
+
+    /// A new id, as `newId` in packages/core/src/ids.ts mints one: the `UUIDv7` of `random` with
+    /// the millisecond `now_ms` in its first 48 bits, its version and variant set.
+    pub fn mint(now_ms: u64, mut random: [u8; 16]) -> Self {
+        let [_, _, ms @ ..] = now_ms.to_be_bytes();
+        let (time, rest) = random.split_at_mut(6);
+        time.copy_from_slice(&ms);
+        if let [version, _, variant, ..] = rest {
+            *version = (*version & 0x0f) | 0x70;
+            *variant = (*variant & 0x3f) | 0x80;
+        }
+        let hex: String = random
+            .iter()
+            .flat_map(|b| [b >> 4, b & 0x0f])
+            .filter_map(|nibble| char::from_digit(u32::from(nibble), 16))
+            .collect();
+        Self {
+            text: format!("{}_{hex}", K::PREFIX),
+            kind: PhantomData,
+        }
+    }
 }
 
 /// Whether `text` is an id of the kind `prefix` names.
@@ -107,6 +128,14 @@ pub mod kind {
 
     impl Kind for Agent {
         const PREFIX: &'static str = "agent";
+    }
+
+    /// Ids that start `host_`: an installation's, minted once in its database.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Host {}
+
+    impl Kind for Host {
+        const PREFIX: &'static str = "host";
     }
 
     /// Ids that start `env_`.
@@ -190,6 +219,7 @@ pub mod kind {
     }
 }
 
+pub type HostId = Id<kind::Host>;
 pub type AgentId = Id<kind::Agent>;
 pub type EnvironmentId = Id<kind::Environment>;
 pub type TerminalId = Id<kind::Terminal>;
@@ -201,3 +231,30 @@ pub type NoticeId = Id<kind::Notice>;
 pub type DeviceId = Id<kind::Device>;
 pub type ObservedId = Id<kind::Observed>;
 pub type AttachmentId = Id<kind::Attachment>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mints_the_id_typescripts_new_id_mints_from_the_same_time_and_bytes() {
+        let falling: [u8; 16] = std::array::from_fn(|i| 0xff - u8::try_from(i).unwrap() * 7);
+        assert_eq!(
+            [
+                HostId::mint(0x0190_a0b0_c0d0, falling),
+                HostId::mint(1_763_000_000_123, [0; 16])
+            ]
+            .map(|id| id.as_str().to_owned()),
+            [
+                "host_0190a0b0c0d075ce87c0b9b2aba49d96",
+                "host_019a7afd1e7b70008000000000000000"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_minted_id_parses_as_its_kind() {
+        let id = HostId::mint(u64::MAX, [0xff; 16]);
+        assert_eq!(HostId::parse(id.as_str()), Some(id));
+    }
+}

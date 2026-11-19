@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiFixtures } from "../packages/protocol/src/api-fixtures.ts";
+import { storeFixture } from "../apps/daemon/src/store/fixture.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
 import { filesHash, protocolFiles, protocolId } from "../packages/protocol/src/id.ts";
@@ -78,6 +79,7 @@ const outputs = (): Record<string, Record<string, string>> => ({
   "schema/": protocolFiles(),
   [`fixtures/holder/${HOLDER_PROTOCOL_VERSION}/`]: holderFixtures(),
   "fixtures/api/": apiFixtures(),
+  "fixtures/store/": storeFixture(),
 });
 
 /** Where the Rust crates' protocol id is written, relative to the repository. */

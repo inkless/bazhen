@@ -80,7 +80,7 @@ const H0: [u32; 8] = [
 ];
 
 /// The digest of `data`.
-pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
+pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut padded = data.to_vec();
     padded.push(0x80);
     while padded.len() % 64 != 56 {
@@ -102,7 +102,7 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// `bytes` as lowercase hex.
-pub(crate) fn hex(bytes: &[u8]) -> String {
+pub fn hex(bytes: &[u8]) -> String {
     let digit = |n: u8| char::from_digit(u32::from(n), 16).unwrap_or('0');
     bytes
         .iter()

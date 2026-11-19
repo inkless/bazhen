@@ -955,10 +955,11 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-hook/src/lib.rs::hook_request": "an encoder: it writes the request",
   "crates/bazhen/src/call.rs::Daemon::call":
     "writes a request; the reply goes to reply::decode, fuzzed",
-  "crates/bazhen/src/sha256.rs::sha256":
-    "a hash of the run directory's path, which the CLI made itself; it reads its input as data only",
-  "crates/bazhen/src/sha256.rs::compress": "reached only through sha256, of a path the CLI made",
-  "crates/bazhen/src/sha256.rs::hex": "an encoder: it writes bytes as hex",
+  "crates/bazhen-client/src/sha256.rs::sha256":
+    "a hash of the run directory's path, which the caller made from its own settings; it reads its input as data only",
+  "crates/bazhen-client/src/sha256.rs::compress":
+    "reached only through sha256, of a path the caller made",
+  "crates/bazhen-client/src/sha256.rs::hex": "an encoder: it writes bytes as hex",
   "crates/bazhen-protocol/src/wire.rs::hex4": "reached only through well_formed, fuzzed",
   "crates/bazhen-hook/src/lib.rs::ask": "sends a request; the reply goes to parse_reply",
   "crates/bazhen-hook/src/lib.rs::post": "writes a request; the reply goes to read_response",
@@ -1075,6 +1076,10 @@ const NOT_DECODERS: Record<string, string> = {
     "hands stdin's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
   "crates/bazhen/src/attach/direct.rs::open":
     "reads the holder's socket into FrameDecoder::push, which the proto crate's frame target fuzzes",
+  "crates/bazhen-protocol/src/ids.rs::Id::mint":
+    "writes 16 bytes its caller drew at random as an id's hex; parses nothing",
+  "crates/bazhen-store/src/lib.rs::urandom":
+    "reads 16 random bytes from /dev/urandom for an id; parses nothing",
   "crates/bazhen/src/fmt.rs::uuid":
     "reads 16 random bytes from /dev/urandom and formats them; parses nothing",
   "crates/bazhen/src/tasks.rs::read_file":
@@ -2726,7 +2731,9 @@ export const HEAVY_CRATES = [
 
 // The members that may reach a crate in HEAVY_CRATES, each with why. A member that depends on
 // one of them reaches the heavy crate too, so it needs its own entry.
-const HEAVY_ALLOWED: Record<string, string> = {};
+const HEAVY_ALLOWED: Record<string, string> = {
+  "bazhen-store": "the daemon's SQLite seam: it builds SQLite, which only the daemon needs",
+};
 
 /** Each package's dependencies, by name, as Cargo.lock records them. */
 export function lockGraph(lock: string): Map<string, string[]> {

@@ -31,9 +31,9 @@ use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed, WAIT_MARGIN};
 use crate::fmt::{encode_uri_component, uuid};
 use crate::out::Out;
-use crate::paths::normalize;
 use crate::printers::{active_for, fleet, list_agents, list_roles, list_tasks, show_task, whoami};
 use crate::waits;
+use bazhen_client::paths::normalize;
 
 /// Why a task verb stopped before it was done.
 #[derive(Debug)]

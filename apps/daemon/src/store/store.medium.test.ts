@@ -349,6 +349,13 @@ describe("Store migrations", () => {
     warn.mockRestore();
   });
 
+  it("says nothing of missed migrations on a fresh database", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    Store.open(dbPath()).close();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("says nothing of missed migrations when there are none", () => {
     const path = dbPath();
     Store.open(path, MIGRATIONS.slice(0, 10)).close();

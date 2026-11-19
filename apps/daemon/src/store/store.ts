@@ -499,8 +499,19 @@ export class SchemaTooNew extends Error {
  */
 function holeFills(migrations: readonly Migration[], applied: ReadonlySet<string>): string[] {
   const last = migrations.findLastIndex((m) => applied.has(m.name));
+  if (last < 0) return [];
   return migrations.slice(0, last).flatMap((m) => (applied.has(m.name) ? [] : [m.name]));
 }
+
+/** Every pragma the store sets on opening a database, and its value; see `Store.open` for why. */
+export const PRAGMAS: readonly (readonly [string, string])[] = [
+  ["journal_mode", "WAL"],
+  ["synchronous", "NORMAL"],
+  ["foreign_keys", "ON"],
+  ["busy_timeout", "5000"],
+  ["secure_delete", "FAST"],
+  ["journal_size_limit", "0"],
+];
 
 /**
  * What `schema_version` holds once migrations are named: past every version a build that
@@ -571,9 +582,7 @@ export class Store {
     // cleared or replaced, rather than leaving it in the page's free space; FAST does so only
     // where that costs no extra I/O, so a page freed whole may keep it until reused. A zero
     // journal_size_limit truncates the WAL after each checkpoint, rather than keep old frames.
-    db.exec(
-      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = FAST; PRAGMA journal_size_limit = 0;",
-    );
+    db.exec(PRAGMAS.map(([name, value]) => `PRAGMA ${name} = ${value};`).join(" "));
     db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT");
     const store = new Store(db);
     store.migrate(migrations);
