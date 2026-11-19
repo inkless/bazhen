@@ -1775,8 +1775,8 @@ export class View {
   }
 }
 
-/** `Ctrl-\` twice: what detaches. */
-export const DETACH = "\x1c\x1c";
+/** `Ctrl-]` twice: what detaches unless the person names other keys. */
+export const DETACH = "\x1d\x1d";
 
 /**
  * `bazhen terminals attach <target>` in a terminal of its own, which util-linux's `script` gives it, sized
