@@ -220,16 +220,17 @@ another xtask that passes. So the script builds xtask where no cargo config reac
 - from `/`, since cargo reads configs from the folder it runs in and those above it, refusing if
   `/.cargo` has a cargo config, named `config` or `config.toml`. Only root can write there, where
   a temporary folder could sit under a symlink, or in `/tmp`, where any user can plant one;
-- with a cargo home of its own, in `target/xtask/cargo-home`, which shares the caller's downloads
+- with a cargo home of its own, `cargo-home` in its build folder, which shares the caller's downloads
   and has no config;
 - with no variable from the caller but `PATH`, `HOME` and `RUSTUP_HOME`, so no `CARGO_*`, `RUSTC*`
   or `RUSTFLAGS` reaches it, and with the toolchain `rust-toolchain.toml` pins.
 
-It builds into `target/xtask`, apart from the gates' builds, and runs the one executable cargo
-names. It removes xtask's own crate's build first, so cargo builds it afresh each run and a binary
-put in its place is never taken for a built one; that costs about a third of a second. It takes no
+It builds into a folder of its own, xtask in the target directory, apart from the gates' builds,
+and runs the one executable cargo names. It removes xtask's own crate's build first, so cargo
+builds it afresh each run and a binary put in its place is never taken for a built one; that costs
+about a third of a second. It takes no
 shared compiler cache, so its first build in a checkout costs a few seconds. The dependencies it
-built stay built: a library forged in `target/xtask` by something else that builds there would
+built stay built: a library forged in that folder by something else that builds there would
 outlive the run, and `cargo clean` removes it.
 
 `scripts/check-standards.ts` pins the script's text. xtask holds the
