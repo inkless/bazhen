@@ -34,6 +34,7 @@ import { isMain } from "./is-main.ts";
 const SUITES = {
   integration: "test:integration",
   api: "test:api",
+  "api-rust": "test:api:rust",
   e2e: "test:e2e",
   falsify: "test:falsify",
   rust: "test:rust:all",

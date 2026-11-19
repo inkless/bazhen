@@ -434,6 +434,24 @@ async runtime (§ Crates). A crate the CLI or the hook shares stays blocking.
 - **Logging:** § Logging, with a span per connection, terminal and agent, and no token, device
   secret or brief in a field.
 
+### While both daemons are built
+
+`crates/bazhen-daemon` is taking over from `apps/daemon` a surface at a time, and until the cutover
+both are built and either can serve a home. What both serve stays one behaviour: a change to a
+route, a message, a config key or an error that both have lands in both, in the same pull request,
+and a migration always does (testing.md § Black-box behaviour tests says how that is held).
+
+- **The store is one schema.** `crates/bazhen-store` runs the TypeScript daemon's migrations, in
+  its order, from the fixture `pnpm schema` writes, so a database either daemon wrote opens in the
+  other. A new migration is written in TypeScript first and reaches the fixture; the Rust store
+  refuses a database whose recorded migrations it doesn't know.
+- **The wire types are the protocol's.** `bazhen-protocol` holds the serde twin of each zod
+  schema a route answers with, and `crates/bazhen-protocol/tests/fixtures.rs` decodes each from
+  the examples `pnpm schema` writes and encodes it back to what zod made of it.
+- **The Rust daemon serves only what it has.** A `/v1` path it has no route for answers 404, and
+  until it can pair a device, a request that must come from a paired one is refused as unpaired,
+  whatever its path: a surface that isn't ported is closed, never open.
+
 ## Dependencies
 
 - **Pin exactly in `[workspace.dependencies]`** (`proptest = { version = "=1.12.0" }`) and take

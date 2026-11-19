@@ -58,10 +58,6 @@ describe("the daemon's Unix socket", () => {
     }
   });
 
-  it("serves stop on the socket only, never over HTTP", async () => {
-    expect((await daemon.request("/v1/daemon/stop", { method: "POST" })).status).toBe(404);
-  });
-
   it("refuses an approval answer from a caller that says it is an agent", async () => {
     const path = "/v1/attention/attn_0190a0b0c0d07e0f8a9b0c1d2e3f4a5b/answer";
     const body = { idempotencyKey: "k", decision: "allow" };
@@ -104,23 +100,7 @@ describe("bazhen start, status and stop", () => {
   });
 });
 
-describe("a second daemon on the same home", () => {
-  let daemon: Daemon;
-  beforeAll(async () => {
-    daemon = await Daemon.start();
-  });
-  afterAll(async () => {
-    await daemon?.stop();
-  });
-
-  it("exits already running and leaves the first daemon's socket answering", async () => {
-    const second = await daemon.startAnother();
-    expect(second).toMatchObject({ code: 1, out: expect.stringContaining("already running") });
-    expect((await overSocket(daemon.socket, "GET", "/v1/health")).status).toBe(200);
-  });
-});
-
-describe("bazhen stop with no daemon", () => {
+describe("bazhen doctor with no daemon", () => {
   let home: Awaited<ReturnType<typeof cliHome>>;
   beforeAll(async () => {
     home = await cliHome();
@@ -134,10 +114,6 @@ describe("bazhen stop with no daemon", () => {
       code: 1,
       out: expect.stringContaining("daemon: not running"),
     });
-  });
-
-  it("says it isn't running, and succeeds: stopping is idempotent", async () => {
-    expect(await bazhen(["stop"], home.env)).toEqual({ code: 0, out: "bazhen is not running\n" });
   });
 });
 

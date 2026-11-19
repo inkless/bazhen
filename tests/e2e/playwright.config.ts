@@ -102,6 +102,16 @@ const clean = (env: Record<string, string>, command: string) =>
     .map(([k, v]) => `${k}='${v.replaceAll("'", "'\\''")}'`)
     .join(" ")} ${command}`;
 
+/**
+ * The daemon each web server runs: `BAZHEN_DAEMON_BIN`, the Rust daemon's binary, while both
+ * daemons are built, else the TypeScript one. The selector goes at the cutover.
+ */
+const daemonBin = process.env["BAZHEN_DAEMON_BIN"] || undefined;
+const daemonCommand =
+  daemonBin === undefined
+    ? "node ../../apps/daemon/src/main.ts"
+    : `'${daemonBin.replaceAll("'", "'\\''")}'`;
+
 // Playwright matches each name anywhere under the test directory, so a misspelt one would match
 // nothing and drop its spec from the holder project without a word.
 const missing = RUNTIME_AGNOSTIC_SPECS.filter(
@@ -137,7 +147,7 @@ export default defineConfig<object, DaemonOptions>({
     const env = daemonEnv(daemon);
     return [
       {
-        command: clean(env, "node ../../apps/daemon/src/main.ts"),
+        command: clean(env, daemonCommand),
         port: daemon.daemonPort,
         reuseExistingServer: false,
       },

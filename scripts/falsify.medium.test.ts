@@ -2167,6 +2167,7 @@ const RUNS_BINARIES: Record<string, string[]> = {
   "scripts/engine-replay.ts": ["release/bazhen-holder-replay"],
   "scripts/engine-snapshot.medium.test.ts": ["release/bazhen-holder-replay"],
   "scripts/hook-bench.ts": ["release/bazhen-hook"],
+  "scripts/rust-daemon.ts": ["release/bazhen-daemon"],
   "tests/api/daemon.ts": ["release/bazhen"],
   "tests/cli/cli.ts": ["release/bazhen"],
   "tests/support/holder-spawn.ts": ["debug/bazhen-holder", "debug/bazhen-holder-replay"],

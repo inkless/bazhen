@@ -160,9 +160,30 @@ function absentTmux(home: string): string {
   return dir;
 }
 
-/** A daemon's environment on `home`: the login session's, and nothing of the test run's. */
+/**
+ * The Rust daemon's binary, when the run names one: `BAZHEN_DAEMON_BIN` swaps it in for the
+ * TypeScript daemon everywhere a test starts one, while both are built. It goes at the cutover.
+ */
+const daemonBin = process.env["BAZHEN_DAEMON_BIN"] || undefined;
+
+/** The command that runs the daemon under test in the foreground: its program, then its args. */
+function daemonCommand(): [string, ...string[]] {
+  return daemonBin === undefined
+    ? [process.execPath, join(repo, "apps/daemon/src/main.ts")]
+    : [daemonBin];
+}
+
+/**
+ * A daemon's environment on `home`: the login session's, and nothing of the test run's but the
+ * daemon to run, which `bazhen start` reads too.
+ */
 export function homeEnv(home: string): Record<string, string> {
-  return { ...loginEnv(), PATH: process.env["PATH"] ?? "/usr/bin:/bin", BAZHEN_HOME: home };
+  return {
+    ...loginEnv(),
+    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    BAZHEN_HOME: home,
+    ...(daemonBin !== undefined && { BAZHEN_DAEMON_BIN: daemonBin }),
+  };
 }
 
 /**
@@ -563,7 +584,8 @@ export class Daemon {
 
   private async spawn(): Promise<void> {
     this.port = await freePort();
-    const child = spawn(process.execPath, [join(repo, "apps/daemon/src/main.ts")], {
+    const [program, ...args] = daemonCommand();
+    const child = spawn(program, args, {
       env: { ...this.env, BAZHEN_PORT: String(this.port) },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -1041,10 +1063,11 @@ export class Daemon {
    * `bazhen start`'s own check, and resolves with how it exited and what it printed.
    */
   startAnother(): Promise<{ code: number; out: string }> {
+    const [program, ...args] = daemonCommand();
     return new Promise((resolve) => {
       execFile(
-        process.execPath,
-        [join(repo, "apps/daemon/src/main.ts")],
+        program,
+        args,
         { env: { ...this.env, BAZHEN_PORT: String(this.port) }, timeout: 30_000 },
         (err, stdout, stderr) =>
           resolve({ code: err === null ? 0 : Number(err.code ?? 1), out: stdout + stderr }),
@@ -1057,7 +1080,8 @@ export class Daemon {
    * as a child, since `bazhen start` detaches it (Linux only).
    */
   daemonCwd(): string {
-    const entry = join(repo, "apps/daemon/src/main.ts");
+    // The TypeScript daemon's entry point, or the Rust daemon's binary, is the last word.
+    const entry = daemonCommand().at(-1) ?? "";
     for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
       try {
         const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");

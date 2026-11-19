@@ -28,30 +28,40 @@ const STOPPED_WITHIN: Duration = Duration::from_secs(5);
 const SLOW_CALL: Duration = Duration::from_secs(30);
 
 /// Runs the daemon's own start-up, which detaches it and reports whether it came up. The daemon
-/// is the checkout's this binary was built in: `<checkout>/target/<profile>/bazhen`.
+/// is `BAZHEN_DAEMON_BIN`, the Rust daemon's binary, when that is set, while both daemons are
+/// built; else the TypeScript one of the checkout this binary was built in:
+/// `<checkout>/target/<profile>/bazhen`.
 pub(crate) fn start(p: &Parsed, out: &mut Out) -> Exit {
-    let entry = checkout().map(|root| root.join("apps/daemon/src/start.ts"));
-    let Some(entry) = entry.filter(|e| e.is_file()) else {
-        out.err(
-            "bazhen start runs the daemon of the checkout it was built in, and finds none here",
-        );
-        return Exit::Failed;
-    };
-    let mut node = Command::new("node");
-    node.arg(&entry);
+    let mut daemon =
+        if let Some(bin) = std::env::var_os("BAZHEN_DAEMON_BIN").filter(|b| !b.is_empty()) {
+            let mut rust = Command::new(bin);
+            rust.arg("start");
+            rust
+        } else {
+            let entry = checkout().map(|root| root.join("apps/daemon/src/start.ts"));
+            let Some(entry) = entry.filter(|e| e.is_file()) else {
+                out.err(
+                "bazhen start runs the daemon of the checkout it was built in, and finds none here",
+            );
+                return Exit::Failed;
+            };
+            let mut node = Command::new("node");
+            node.arg(&entry);
+            node
+        };
     if let Some(home) = p.value("home") {
-        node.env("BAZHEN_HOME", home);
+        daemon.env("BAZHEN_HOME", home);
     }
     if let Some(port) = p.value("port") {
-        node.env("BAZHEN_PORT", port);
+        daemon.env("BAZHEN_PORT", port);
     }
-    match node.status() {
+    match daemon.status() {
         Ok(status) => status
             .code()
             .and_then(|c| u8::try_from(c).ok())
             .map_or(Exit::Failed, Exit::Code),
         Err(e) => {
-            out.err(&format!("can't run node to start the daemon: {e}"));
+            out.err(&format!("can't run the daemon to start it: {e}"));
             Exit::Failed
         }
     }

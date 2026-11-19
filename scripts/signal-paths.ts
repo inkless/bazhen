@@ -1172,7 +1172,7 @@ export const ALLOWED_SIGNALS: Readonly<Record<string, readonly AllowedSignal[]>>
   "tests/api/daemon.ts": [
     timedOut(/execFile\(CLI, args, \{ env, timeout: 30_000 \}/, "the bazhen CLI"),
     timedOut(
-      /execFile\(\s*process\.execPath,\s*\[join\(repo, "apps\/daemon\/src\/main\.ts"\)\],\s*\{ env: \{ \.\.\.this\.env, BAZHEN_PORT: String\(this\.port\) \}, timeout: 30_000 \}/,
+      /execFile\(\s*program,\s*args,\s*\{ env: \{ \.\.\.this\.env, BAZHEN_PORT: String\(this\.port\) \}, timeout: 30_000 \}/,
       "a second daemon, which should refuse to start",
     ),
     timedOut(/run\("codex", args, \{ env, timeout: 90_000 \}\)/, "the codex CLI"),
