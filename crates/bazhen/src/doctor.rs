@@ -480,7 +480,7 @@ fn containment_lines(c: &Containment, holders: &[RunningHolder], tmux: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sha256::{hex, sha256};
+    use bazhen_client::sha256::{hex, sha256};
     use std::path::PathBuf;
 
     /// The id is what `protocolId()` makes of the committed schema, hashed here by the Rust side's

@@ -1,10 +1,13 @@
 //! One HTTP/1.1 exchange with the Bazhen daemon over its Unix socket, as the CLI and the hook make
 //! them: the request's head, who the caller is, a deadline, and a response framed by its
-//! `Content-Length`. Standard library only: the hook builds it, runs on every tool call, and builds with no network.
+//! `Content-Length`; and where a home keeps its socket and the rest (`paths`). Standard library
+//! only: the hook builds it, runs on every tool call, and builds with no network.
 //!
 //! Its decoders are public so the fuzz targets in `fuzz/` can reach them.
 
 pub mod framing;
+pub mod paths;
+pub mod sha256;
 
 use std::env;
 use std::io::{self, Read, Write};
