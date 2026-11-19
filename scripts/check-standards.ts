@@ -2440,6 +2440,9 @@ export const RUST_GATE_SCRIPTS: Record<string, string> = {
 export const CARGO_CONFIG = [
   "[target.'cfg(all())']",
   'runner = ["scripts/capped.ts", "--test-binary", "--"]',
+  "[alias]",
+  'xtask = [ "run", "--quiet", "--locked", "--package", "bazhen-xtask", "--config", ' +
+    `"target.'cfg(all())'.runner=['env']", "--", ]`,
 ];
 export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 

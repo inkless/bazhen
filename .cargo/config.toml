@@ -3,3 +3,17 @@
 # caps). Pinned as CARGO_CONFIG in scripts/check-standards.ts.
 [target.'cfg(all())']
 runner = ["scripts/capped.ts", "--test-binary", "--"]
+
+# cargo starts `cargo run` through the runner too, which would cap xtask as one test process and
+# every command it starts with it. A `--config` runner replaces the array; `[]` and `""` are refused.
+[alias]
+xtask = [
+  "run",
+  "--quiet",
+  "--locked",
+  "--package",
+  "bazhen-xtask",
+  "--config",
+  "target.'cfg(all())'.runner=['env']",
+  "--",
+]
