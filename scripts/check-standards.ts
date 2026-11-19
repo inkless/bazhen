@@ -3106,14 +3106,35 @@ function closingBrace(code: string, from: number): number {
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
 // nothing. An ending signals only through a `Session` it was given, so what is matched is any
 // mention of `Session`, however one is made or named, and `Ending::start`, which takes one. Not
-// `Ending::new` on its own, which a test gives a stand-in that signals nothing. Nor a `tracker`'s
-// close, which is a tokio TaskTracker's: it only stops the tracker taking tasks.
+// `Ending::new` on its own, which a test gives a stand-in that signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /(?<!\btracker\s*)\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
+
+/**
+ * `code` with each `close()` of a tokio TaskTracker blanked out, to its length so positions hold:
+ * it only stops the tracker taking tasks, and signals nothing. A tracker is a binding the file
+ * types as `TaskTracker` or makes with `TaskTracker::new()`, named alone or as `self.<name>`, and
+ * only a close with nothing in its parentheses is one; any other call on it still counts.
+ */
+export function withoutTrackerCloses(code: string): string {
+  const names = new Set([
+    ...[...code.matchAll(/\b(\w+)\s*:\s*&?\s*(?:mut\s+)?TaskTracker\b/g)].map((m) => m[1] ?? ""),
+    ...[...code.matchAll(/\blet\s+(?:mut\s+)?(\w+)\s*=\s*TaskTracker\s*::\s*new\s*\(\s*\)/g)].map(
+      (m) => m[1] ?? "",
+    ),
+  ]);
+  names.delete("");
+  if (names.size === 0) return code;
+  const close = new RegExp(
+    `(?<![\\w.]\\s*)(?:self\\s*\\.\\s*)?(?:${[...names].join("|")})\\s*\\.\\s*close\\s*\\(\\s*\\)`,
+    "g",
+  );
+  return code.replace(close, (call) => call.replace(/[^\n]/g, " "));
+}
 
 /**
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
@@ -3131,7 +3152,7 @@ export function unmarkedSignallingTests(
   holderBinaries.delete("");
   return rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = rustCode(read(file), strings);
+    const code = withoutTrackerCloses(rustCode(read(file), strings));
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however

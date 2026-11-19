@@ -3233,10 +3233,35 @@ describe("tests that signal processes they didn't start", () => {
     const source = [
       "fn drained(tracker: &TaskTracker) { tracker.close(); }",
       "#[test]\nfn a() { drained(&tracker); }",
-      "#[test]\nfn b() { self.tracker.close(); }",
-      "#[test]\nfn c() { tracker.child.close(group, now); }",
+      "#[test]\nfn b() { let t = TaskTracker::new();\n t.close(); }",
+      "#[test]\nfn c() { self.tracker\n.close( ); }",
     ].join("\n");
-    expect(unmarked({ "crates/h/src/serve.rs": source })).toEqual(["crates/h/src/serve.rs:6"]);
+    expect(unmarked({ "crates/h/src/serve.rs": source })).toEqual([]);
+  });
+
+  it("must still be marked for any other call on a tracker, or a close of what isn't one", () => {
+    const source = [
+      "fn drained(tracker: &TaskTracker) { tracker.close(); }",
+      "#[test]\nfn a() { tracker.close(now); }",
+      "#[test]\nfn b() { tracker.signal(9); }",
+      "#[test]\nfn c() { tracker.respawn(x); }",
+      "#[test]\nfn d() { tracker.close_step(); }",
+      "#[test]\nfn e() { holder.tracker.close(); }",
+      "#[test]\nfn f() { child.close(); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/serve.rs": source })).toEqual([
+      "crates/h/src/serve.rs:2",
+      "crates/h/src/serve.rs:4",
+      "crates/h/src/serve.rs:6",
+      "crates/h/src/serve.rs:8",
+      "crates/h/src/serve.rs:10",
+      "crates/h/src/serve.rs:12",
+    ]);
+  });
+
+  it("must be marked when a close is of a tracker the file never types as a TaskTracker", () => {
+    const source = "#[test]\nfn a() { tracker.close(); }";
+    expect(unmarked({ "crates/h/src/x.rs": source })).toEqual(["crates/h/src/x.rs:1"]);
   });
 
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
