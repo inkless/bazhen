@@ -14,10 +14,10 @@ use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use hyper_util::server::graceful::GracefulShutdown;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+use tokio_util::task::task_tracker::TaskTrackerToken;
 use tower::ServiceExt;
 
 /// What a listener allows each connection.
@@ -52,8 +52,17 @@ pub(crate) const SOCKET: Limits = Limits {
     ..HTTP
 };
 
+/// A connection's place under its listener's cap and in its tracker, which every request on it
+/// carries: a WebSocket route moves it into the task its upgraded socket runs in, so the socket
+/// counts against the cap and the drain until it closes, not just until the upgrade.
+#[derive(Debug, Clone)]
+pub(crate) struct Held {
+    _place: Arc<(OwnedSemaphorePermit, TaskTrackerToken)>,
+}
+
 /// Serves `router` on `listener` until `stop`. Then it stops accepting, calls `stopped`, and asks
-/// each open connection to end once it has answered the request it is on. Every connection is a
+/// each open connection to end once it has answered the request it is on; an upgraded one is its
+/// route's to end. Every connection is a
 /// task on `tracker`, so waiting on it waits on them.
 pub(crate) async fn serve_on<L: Listener>(
     mut listener: L,
@@ -64,7 +73,6 @@ pub(crate) async fn serve_on<L: Listener>(
     stopped: impl FnOnce(),
 ) {
     let open = Arc::new(Semaphore::new(limits.connections));
-    let graceful = GracefulShutdown::new();
     loop {
         let Some(Ok(permit)) = stop
             .run_until_cancelled(Arc::clone(&open).acquire_owned())
@@ -76,22 +84,32 @@ pub(crate) async fn serve_on<L: Listener>(
             break;
         };
         let router = router.clone();
-        let service = service_fn(move |request| answer(router.clone(), limits.request, request));
+        let held = Held {
+            _place: Arc::new((permit, tracker.token())),
+        };
+        let service = service_fn(move |mut request: Request<Incoming>| {
+            request.extensions_mut().insert(held.clone());
+            answer(router.clone(), limits.request, request)
+        });
         let connection = http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(limits.head)
             .max_header_size(limits.head_bytes)
-            .serve_connection(TokioIo::new(io), service);
-        let connection = graceful.watch(connection);
+            .serve_connection(TokioIo::new(io), service)
+            .with_upgrades();
+        let stopping = stop.clone();
         tracker.spawn(async move {
+            let mut connection = std::pin::pin!(connection);
             // A connection that fails, as one the client drops does, has no one to tell.
+            tokio::select! {
+                _ = connection.as_mut() => return,
+                () = stopping.cancelled() => connection.as_mut().graceful_shutdown(),
+            }
             let _ = connection.await;
-            drop(permit);
         });
     }
     drop(listener);
     stopped();
-    tracker.spawn(graceful.shutdown());
 }
 
 /// `request`'s answer from `router`, or 408 if it isn't answered within `limit`.
@@ -123,7 +141,9 @@ fn timed_out() -> Response {
 mod tests {
     use std::time::Instant;
 
+    use axum::Extension;
     use axum::body::Bytes;
+    use axum::extract::WebSocketUpgrade;
     use axum::routing::{get, post};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
@@ -151,7 +171,8 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let router = Router::new()
             .route("/", get(|| async { "ok" }))
-            .route("/echo", post(|body: Bytes| async move { body }));
+            .route("/echo", post(|body: Bytes| async move { body }))
+            .route("/ws", get(held_open));
         let stop = CancellationToken::new();
         let tracker = TaskTracker::new();
         tracker.spawn(serve_on(
@@ -163,6 +184,67 @@ mod tests {
             || {},
         ));
         (address, stop, tracker)
+    }
+
+    /// A WebSocket that holds its connection's place until the client closes it.
+    async fn held_open(ws: WebSocketUpgrade, Extension(held): Extension<Held>) -> Response {
+        ws.on_upgrade(move |mut socket| async move {
+            let _held = held;
+            while let Some(Ok(_)) = socket.recv().await {}
+        })
+    }
+
+    const UPGRADE: &[u8] =
+        b"GET /ws HTTP/1.1\r\nhost: x\r\nconnection: upgrade\r\nupgrade: websocket\r\n\
+        sec-websocket-version: 13\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+
+    /// A WebSocket to `/ws`, once its upgrade is answered.
+    async fn upgraded(address: std::net::SocketAddr) -> TcpStream {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream.write_all(UPGRADE).await.unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(stream.read_u8().await.unwrap());
+        }
+        assert!(
+            head.starts_with(b"HTTP/1.1 101 "),
+            "{}",
+            String::from_utf8_lossy(&head)
+        );
+        stream
+    }
+
+    #[test]
+    fn counts_an_upgraded_socket_against_its_limit_until_it_closes() {
+        runtime().block_on(async {
+            let (address, _stop, _tracker) = serving(HTTP).await;
+            let mut sockets = Vec::new();
+            for _ in 0..HTTP.connections {
+                sockets.push(upgraded(address).await);
+            }
+            let mut next = TcpStream::connect(address).await.unwrap();
+            next.write_all(GET).await.unwrap();
+            assert_eq!(read_for(&mut next, Duration::from_millis(300)).await, "");
+            drop(sockets.pop());
+            let answer = read_for(&mut next, Duration::from_secs(5)).await;
+            assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
+        });
+    }
+
+    #[test]
+    fn drains_an_upgraded_socket_as_a_connection_until_it_closes() {
+        runtime().block_on(async {
+            let (address, stop, tracker) = serving(SHORT).await;
+            let socket = upgraded(address).await;
+            stop.cancel();
+            tracker.close();
+            let drained = tokio::time::timeout(Duration::from_millis(300), tracker.wait()).await;
+            assert!(drained.is_err(), "drained with a socket open");
+            drop(socket);
+            tokio::time::timeout(Duration::from_secs(5), tracker.wait())
+                .await
+                .unwrap();
+        });
     }
 
     /// What the server sends on `stream` until it closes it, or what it sent by `within`.

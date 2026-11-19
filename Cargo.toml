@@ -11,7 +11,13 @@ publish = false
 # (docs/standards/rust.md § Dependencies).
 [workspace.dependencies]
 alacritty_terminal = { version = "=0.26.0", default-features = false }
-axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "=0.8.9", default-features = false, features = [
+  "http1",
+  "json",
+  "query",
+  "tokio",
+  "ws",
+] }
 bazhen-client = { path = "crates/bazhen-client" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
@@ -68,7 +74,7 @@ toml = { version = "=1.2.1", default-features = false, features = ["parse", "ser
 tower = { version = "=0.5.3", default-features = false, features = ["util"] }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+tungstenite = { version = "=0.29.0", default-features = false, features = ["handshake"] }
 unicode-width = { version = "=0.2.3", default-features = false }
 
 [workspace.lints.rust]
