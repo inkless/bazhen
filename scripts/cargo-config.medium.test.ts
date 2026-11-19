@@ -32,5 +32,9 @@ function xtask(args: string[]) {
 }
 
 it("cargo xtask runs xtask through the alias's own runner, not the capping test runner", () => {
-  expect(xtask(["nope"])).toEqual({ status: 2, log: "target/debug/bazhen-xtask nope\n" });
+  // Wherever the target directory is: falsify builds in one of its own.
+  expect(xtask(["nope"])).toEqual({
+    status: 2,
+    log: expect.stringMatching(/^\S*\/bazhen-xtask nope\n$/),
+  });
 }, 300_000);
