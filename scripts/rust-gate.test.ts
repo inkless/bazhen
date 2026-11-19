@@ -91,6 +91,9 @@ describe("configFailures", () => {
       'target = { x86_64-unknown-linux-gnu = { rustflags = [" #"], runner = "true" } }\n',
     "/r/.cargo/config.toml": '[env\nPATH = "/fake"\n',
     "/s/.cargo/config.toml": '[[target.x.y]]\nrunner = "true"\n',
+    "/t/.cargo/config.toml": 'paths = ["/elsewhere/serde"]\n',
+    "/u/.cargo/config.toml":
+      '[source.crates-io]\nreplace-with = "mine"\n[source.mine]\ndirectory = "/v"\n',
   };
   const accepted: Record<string, string> = {
     "/h/.cargo/config.toml": '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',

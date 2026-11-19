@@ -110,7 +110,16 @@ export function gateEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 // overrides itself, so a wrapper such as sccache is fine. A config is parsed as TOML and each key
 // read as cargo reads it, quoted, escaped, dotted or inline; one that doesn't parse is refused, as
 // cargo's reading of it can't be vouched for.
-const REFUSED_KEYS = new Set(["runner", "rustdoc", "linker", "include", "env", "profile"]);
+const REFUSED_KEYS = new Set([
+  "runner",
+  "rustdoc",
+  "linker",
+  "include",
+  "env",
+  "profile",
+  "paths",
+  "replace-with",
+]);
 
 /** Whether a parsed config value, or any table within it, sets a key the gate refuses. */
 function setsRefusedKey(value: unknown): boolean {
@@ -130,7 +139,7 @@ function refusal(text: string): string | undefined {
     return "isn't TOML that cargo's reading of could be vouched for";
   }
   return setsRefusedKey(table)
-    ? "sets a test runner, a rustdoc, a linker, [env], a profile or include"
+    ? "sets a test runner, a rustdoc, a linker, [env], a profile, include, paths or a source's replace-with"
     : undefined;
 }
 

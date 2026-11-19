@@ -1,40 +1,23 @@
 #!/bin/sh
-# `cargo xtask "$@"`, exiting as xtask itself did. cargo starts xtask through a runner, and a runner
-# set for the host's target triple, in the environment or a cargo config in any parent directory,
-# outranks the one the alias names. Such a runner stands in for xtask: it can exit 0 with no gate
-# run, start xtask with other arguments, or hide what xtask exited. So this names a file and a
-# nonce, xtask writes there the nonce, its exit code and each of its arguments, and this exits with
-# that code, failing a run whose receipt is missing or names other arguments.
+# `cargo xtask "$@"`, with no runner in the way. `cargo xtask` starts xtask through a target runner,
+# and a runner set for the host's triple, in the environment or a cargo config in any parent
+# directory, outranks the one the alias names: it could stand in for xtask, or start it with
+# another root, and pass with no gate run. cargo uses no runner to build. So this builds xtask, as
+# the alias would, and runs the binary cargo names itself, naming the repository root it is in.
 set -u
-receipt=$(mktemp) || exit 1
-asked=$(mktemp) || { rm -f "$receipt"; exit 1; }
-trap 'rm -f "$receipt" "$asked"' EXIT
-nonce=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-[ -n "$nonce" ] || exit 1
-# Each argument hex-encoded on a line of its own, as xtask writes them.
-for arg in "$@"; do
-  printf '%s' "$arg" | od -An -v -tx1 | tr -d ' \n'
-  echo
-done >"$asked"
-BAZHEN_XTASK_RECEIPT=$receipt BAZHEN_XTASK_NONCE=$nonce cargo xtask "$@"
-status=$?
-if [ "$(sed -n 1p "$receipt")" != "$nonce" ]; then
-  echo "scripts/xtask.sh: cargo xtask exited $status, but xtask never ran: a target runner stood" \
-    "in for it. Unset CARGO_TARGET_<triple>_RUNNER, or move the cargo config that sets it out" \
-    "of this repository's parent directories." >&2
+root=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 1
+# The alias's overrides, so a config's rustc wrapper or compiler doesn't build xtask either, and
+# no flags from a config or the environment reach it.
+built=$(cd -- "$root" && CARGO_ENCODED_RUSTFLAGS='' cargo build --quiet --locked \
+  --package bazhen-xtask --bin bazhen-xtask --message-format=json-render-diagnostics \
+  --config "build.rustc-wrapper=''" --config "build.rustc-workspace-wrapper=''" \
+  --config "build.rustc='rustc'") || exit 1
+# The one executable the build made; a path JSON would escape isn't taken.
+bin=$(printf '%s\n' "$built" | sed -n 's/.*"executable":"\([^"\\]*\)".*/\1/p' | tail -n 1)
+if [ -z "$bin" ] || [ ! -x "$bin" ]; then
+  echo "scripts/xtask.sh: cargo built bazhen-xtask but named no executable this can run." >&2
   exit 1
 fi
-if ! tail -n +3 "$receipt" | cmp -s - "$asked"; then
-  echo "scripts/xtask.sh: xtask ran with other arguments than these: a target runner or an" \
-    "alias for xtask in the environment changed them. Unset it, or move the cargo config that" \
-    "sets it out of this repository's parent directories." >&2
-  exit 1
-fi
-code=$(sed -n 2p "$receipt")
-case $code in
-'' | *[!0-9]*)
-  echo "scripts/xtask.sh: xtask's receipt names no exit code." >&2
-  exit 1
-  ;;
-esac
-exit "$code"
+BAZHEN_XTASK_ROOT=$root
+export BAZHEN_XTASK_ROOT
+exec "$bin" "$@"

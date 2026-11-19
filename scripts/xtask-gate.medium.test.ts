@@ -158,10 +158,24 @@ describe("cargo xtask gate", () => {
     expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
   });
 
-  it("runs nothing unless cargo names the crate's directory, as `cargo xtask` does", () => {
-    const { status, stderr, logged } = rust(["fmt"], { CARGO_MANIFEST_DIR: "" });
-    expect({ status, runs: logged.length }).toEqual({ status: 2, runs: 0 });
-    expect(stderr).toContain("run it as `cargo xtask`");
+  it("runs nothing unless it is named a root at a full path, or cargo names the crate's directory", () => {
+    const runs = [{ CARGO_MANIFEST_DIR: "" }, { BAZHEN_XTASK_ROOT: "repo" }].map((env) => {
+      const { status, stderr, logged } = rust(["fmt"], env);
+      return { status, runs: logged.length, said: stderr.includes("run it as scripts/xtask.sh") };
+    });
+    expect(runs).toEqual([0, 1].map(() => ({ status: 2, runs: 0, said: true })));
+  });
+
+  // cargo reads it in place of the pinned .cargo/config.toml, and only warns.
+  it("refuses every gate in a repository with a .cargo/config, and runs nothing", () => {
+    const repo = join(dir, "repo");
+    mkdirSync(join(repo, ".cargo"), { recursive: true });
+    writeFileSync(join(repo, ".cargo", "config"), "[build]\njobs = 2\n");
+    const refused = ["fmt", "lint", "deny", "test"].map((g) => {
+      const { status, stderr, logged } = rust([g], { BAZHEN_XTASK_ROOT: repo });
+      return { status, refused: stderr.includes(".cargo/config is there"), runs: logged.length };
+    });
+    expect(refused).toEqual([0, 1, 2, 3].map(() => ({ status: 1, refused: true, runs: 0 })));
   });
 
   it("fails when the tool does, and starts nothing after it", () => {
@@ -210,6 +224,8 @@ const CONFIGS = [
   "  [profile.test]\noverflow-checks = false\n",
   "profile.dev.debug-assertions = false\n",
   'include = ["/elsewhere/more.toml"]\n',
+  'paths = ["/elsewhere/serde"]\n',
+  '[source.crates-io]\nreplace-with = "mine"\n[source.mine]\ndirectory = "/v"\n',
   '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',
   '# runner = "true" is off\n[net]\ngit-fetch-with-cli = true # no runner = x\n',
   "[environment]\nmyenv = 1\nprofiles = 2\nrunners = 3\n",

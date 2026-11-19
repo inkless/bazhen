@@ -748,6 +748,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads config.toml only to hand its bytes to parse_config, which its config target fuzzes",
   "crates/bazhen-xtask/src/cargo_config.rs::config_failures":
     "finds the keys in a cargo config's text that refuse a gate, building nothing from it; a property drives it with any text",
+  "crates/bazhen-xtask/src/cargo_config.rs::shadow_failure":
+    "asks only whether the repository's .cargo/config is there, never what it says",
   "crates/bazhen-xtask/src/gate.rs::run":
     "hands cargo configs' text to config_failures; parses nothing itself",
   "crates/bazhen-xtask/src/main.rs::Real::read":
@@ -2453,41 +2455,23 @@ export const CARGO_CONFIG = [
     `"--config", "build.rustc-workspace-wrapper=''", "--config", "build.rustc='rustc'", "--", ]`,
 ];
 // scripts/xtask.sh, which every Rust gate script runs through, less its comments and blank lines:
-// it is what fails a gate run that xtask didn't make, or didn't make with these arguments.
+// it builds xtask and runs it itself, so no target runner stands in for it.
 export const XTASK_WRAPPER = [
   "#!/bin/sh",
   "set -u",
-  "receipt=$(mktemp) || exit 1",
-  'asked=$(mktemp) || { rm -f "$receipt"; exit 1; }',
-  `trap 'rm -f "$receipt" "$asked"' EXIT`,
-  "nonce=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')",
-  '[ -n "$nonce" ] || exit 1',
-  'for arg in "$@"; do',
-  `  printf '%s' "$arg" | od -An -v -tx1 | tr -d ' \\n'`,
-  "  echo",
-  'done >"$asked"',
-  'BAZHEN_XTASK_RECEIPT=$receipt BAZHEN_XTASK_NONCE=$nonce cargo xtask "$@"',
-  "status=$?",
-  'if [ "$(sed -n 1p "$receipt")" != "$nonce" ]; then',
-  '  echo "scripts/xtask.sh: cargo xtask exited $status, but xtask never ran: a target runner stood" \\',
-  '    "in for it. Unset CARGO_TARGET_<triple>_RUNNER, or move the cargo config that sets it out" \\',
-  `    "of this repository's parent directories." >&2`,
+  'root=$(cd -- "$(dirname -- "$0")/.." && pwd -P) || exit 1',
+  `built=$(cd -- "$root" && CARGO_ENCODED_RUSTFLAGS='' cargo build --quiet --locked \\`,
+  "  --package bazhen-xtask --bin bazhen-xtask --message-format=json-render-diagnostics \\",
+  `  --config "build.rustc-wrapper=''" --config "build.rustc-workspace-wrapper=''" \\`,
+  `  --config "build.rustc='rustc'") || exit 1`,
+  `bin=$(printf '%s\\n' "$built" | sed -n 's/.*"executable":"\\([^"\\\\]*\\)".*/\\1/p' | tail -n 1)`,
+  'if [ -z "$bin" ] || [ ! -x "$bin" ]; then',
+  '  echo "scripts/xtask.sh: cargo built bazhen-xtask but named no executable this can run." >&2',
   "  exit 1",
   "fi",
-  'if ! tail -n +3 "$receipt" | cmp -s - "$asked"; then',
-  '  echo "scripts/xtask.sh: xtask ran with other arguments than these: a target runner or an" \\',
-  '    "alias for xtask in the environment changed them. Unset it, or move the cargo config that" \\',
-  `    "sets it out of this repository's parent directories." >&2`,
-  "  exit 1",
-  "fi",
-  'code=$(sed -n 2p "$receipt")',
-  "case $code in",
-  "'' | *[!0-9]*)",
-  `  echo "scripts/xtask.sh: xtask's receipt names no exit code." >&2`,
-  "  exit 1",
-  "  ;;",
-  "esac",
-  'exit "$code"',
+  "BAZHEN_XTASK_ROOT=$root",
+  "export BAZHEN_XTASK_ROOT",
+  'exec "$bin" "$@"',
 ];
 
 /** A shell script's lines, less its comments and blank lines. */
@@ -2541,6 +2525,8 @@ export function cappedScriptFailures(file: string, scripts: Record<string, strin
 const RUST_FLAG_EXEMPT: Record<string, string> = {
   ".cargo/config.toml":
     "overrides a configured wrapper for xtask's own build; CARGO_CONFIG pins it",
+  "scripts/xtask.sh":
+    "sets CARGO_ENCODED_RUSTFLAGS empty for xtask's own build; XTASK_WRAPPER pins it",
   "crates/bazhen-xtask/src/gate.rs":
     "removes them from every gate's environment, and tests it does",
   "crates/bazhen-xtask/src/cargo_config.rs": "plants them in configs to check they are refused",

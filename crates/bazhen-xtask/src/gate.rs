@@ -302,11 +302,12 @@ pub(crate) fn run(
         return Exit::Usage;
     }
     let env = gate_env(env);
-    // Every gate, as cargo started xtask: an outside config's [env] reaches xtask itself, and could
-    // put another cargo-fmt or cargo-deny first on its PATH.
+    // Every gate, fmt and deny too: a config's [env] could put another cargo-fmt or cargo-deny first
+    // on PATH for a cargo that starts them.
     let configs = cargo_config::outside_configs(&places.root, &places.cargo_home);
     let read: Read<'_> = &|path| host.read(path);
-    let failures = cargo_config::config_failures(&configs, read);
+    let mut failures = cargo_config::config_failures(&configs, read);
+    failures.extend(cargo_config::shadow_failure(&places.root, read));
     if !failures.is_empty() {
         let _ = writeln!(err, "{}", failures.join("\n"));
         return Exit::Failed;
@@ -549,6 +550,7 @@ mod tests {
     struct Fake {
         sandboxed: bool,
         config: Option<&'static str>,
+        shadow: bool,
         probe: Status,
         status: Status,
         runs: Vec<Vec<String>>,
@@ -559,6 +561,7 @@ mod tests {
             Self {
                 sandboxed,
                 config: None,
+                shadow: false,
                 probe: Some(0),
                 status: Some(0),
                 runs: Vec::new(),
@@ -571,6 +574,9 @@ mod tests {
             self.sandboxed
         }
         fn read(&self, path: &Path) -> Result<Option<String>, String> {
+            if path == Path::new("/a/repo/.cargo/config") {
+                return Ok(self.shadow.then(String::new));
+            }
             let home = path.starts_with("/home/u/.cargo");
             Ok(self.config.filter(|_| home).map(str::to_owned))
         }
@@ -663,6 +669,17 @@ mod tests {
             let (exit, runs, err) = ran(&mut host, name, &[]);
             assert_eq!((exit, runs), (Exit::Failed, vec![]), "{name}");
             assert!(err.contains("sets a test runner"), "{err}");
+        }
+    }
+
+    #[test]
+    fn refuses_every_gate_under_a_config_in_the_repository_that_shadows_the_pinned_one() {
+        for name in ["fmt", "lint", "deny", "test"] {
+            let mut host = Fake::new(false);
+            host.shadow = true;
+            let (exit, runs, err) = ran(&mut host, name, &[]);
+            assert_eq!((exit, runs), (Exit::Failed, vec![]), "{name}");
+            assert!(err.contains("/a/repo/.cargo/config is there"), "{err}");
         }
     }
 

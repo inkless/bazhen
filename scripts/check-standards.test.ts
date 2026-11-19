@@ -1273,10 +1273,19 @@ describe("rustFailures on the gates' own configuration", () => {
   });
 
   it("refuses a gate wrapper that differs from the pinned one but in comments, or none", () => {
-    const edited = XTASK_WRAPPER.join("\n").replace('exit "$code"', "exit 0");
+    const edited = XTASK_WRAPPER.join("\n").replace('exec "$bin" "$@"', 'exec cargo xtask "$@"');
     expect([failures({ "scripts/xtask.sh": edited }), failures({}, ["scripts/xtask.sh"])]).toEqual([
       ["scripts/xtask.sh: differs from XTASK_WRAPPER in scripts/check-standards.ts."],
-      ["scripts/xtask.sh is missing; the Rust gates need it."],
+      [
+        "scripts/check-standards.ts: RUST_FLAG_EXEMPT lists missing scripts/xtask.sh.",
+        "scripts/xtask.sh is missing; the Rust gates need it.",
+      ],
+    ]);
+  });
+
+  it("refuses a .cargo/config, which cargo reads in place of the pinned one", () => {
+    expect(failures({ ".cargo/config": "[build]\njobs = 2\n" })).toEqual([
+      expect.stringContaining(".cargo/config: cargo config can pass flags"),
     ]);
   });
 

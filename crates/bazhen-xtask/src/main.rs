@@ -49,12 +49,16 @@ impl Host for Real {
     }
 }
 
-/// The repository root: two levels above the crate's directory, which `cargo run` names in
-/// `CARGO_MANIFEST_DIR`. Read when xtask runs, not when it was built: cargo reuses a binary that
-/// another checkout built in a shared target directory, and a copy cargo-mutants made builds its
-/// own.
-fn root_of(manifest: Option<&OsString>) -> Option<PathBuf> {
-    Path::new(manifest?)
+/// The repository root: the full path `scripts/xtask.sh` names in `BAZHEN_XTASK_ROOT`, which it
+/// takes from where it is, or else two levels above the crate's directory, which `cargo run` names
+/// in `CARGO_MANIFEST_DIR` when xtask runs as `cargo xtask`. Read when xtask runs, not when it was
+/// built: cargo reuses a binary that another checkout built in a shared target directory, and a
+/// copy cargo-mutants made builds its own.
+fn root_of(env: &Env) -> Option<PathBuf> {
+    if let Some(named) = env.get(OsStr::new("BAZHEN_XTASK_ROOT")) {
+        return Some(PathBuf::from(named)).filter(|root| root.is_absolute());
+    }
+    Path::new(env.get(OsStr::new("CARGO_MANIFEST_DIR"))?)
         .ancestors()
         .nth(2)
         .map(Path::to_path_buf)
@@ -73,45 +77,13 @@ fn cargo_home(env: &Env, home: Option<PathBuf>) -> Option<PathBuf> {
         .filter(|h| h.is_absolute())
 }
 
-/// What `scripts/xtask.sh` hands xtask to prove it ran: the file to write the receipt to, and the
-/// nonce to write.
-#[derive(Debug, PartialEq, Eq)]
-struct Proof {
-    at: PathBuf,
-    nonce: OsString,
-}
-
-/// Takes the receipt's variables out of `env`, so no tool a gate starts sees them, and the proof
-/// they ask for when both are there.
-fn take_proof(env: &mut Env) -> Option<Proof> {
-    let at = env.remove(OsStr::new("BAZHEN_XTASK_RECEIPT"));
-    let nonce = env.remove(OsStr::new("BAZHEN_XTASK_NONCE"));
-    Some(Proof {
-        at: PathBuf::from(at?),
-        nonce: nonce?,
-    })
-}
-
-/// The receipt: the nonce, xtask's exit code, and each argument it was given, hex-encoded, a line
-/// each. So the script checks that xtask itself ran the command it asked for, and exits as xtask
-/// did: a runner that stood in for xtask could start it with other arguments, or hide its exit.
-fn receipt(nonce: &OsStr, exit: u8, args: &[OsString]) -> Vec<u8> {
-    let mut out = nonce.as_encoded_bytes().to_vec();
-    out.extend(format!("\n{exit}\n").bytes());
-    for arg in args {
-        for byte in arg.as_encoded_bytes() {
-            out.extend(format!("{byte:02x}").bytes());
-        }
-        out.push(b'\n');
-    }
-    out
-}
-
 /// Runs the command `args` name, from the repository `env` places it in.
 fn start(env: Env, args: &[OsString], stderr: &mut impl Write) -> cli::Exit {
     // Nowhere left to report a write to stderr that failed.
-    let Some(root) = root_of(env.get(OsStr::new("CARGO_MANIFEST_DIR"))) else {
-        let why = "xtask: run it as `cargo xtask`, which names its crate in CARGO_MANIFEST_DIR.";
+    let Some(root) = root_of(&env) else {
+        let why = "xtask: run it as scripts/xtask.sh, which names the repository in \
+                   BAZHEN_XTASK_ROOT, or as `cargo xtask`, which names its crate in \
+                   CARGO_MANIFEST_DIR.";
         writeln!(stderr, "{why}").ok();
         return cli::Exit::Usage;
     };
@@ -136,18 +108,9 @@ fn start(env: Env, args: &[OsString], stderr: &mut impl Write) -> cli::Exit {
 }
 
 fn main() -> ExitCode {
-    let mut env: Env = std::env::vars_os().collect();
-    let proof = take_proof(&mut env);
+    let env: Env = std::env::vars_os().collect();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let mut stderr = io::stderr().lock();
-    let exit = start(env, &args, &mut stderr).code();
-    if let Some(Proof { at, nonce }) = proof
-        && let Err(error) = std::fs::write(&at, receipt(&nonce, exit, &args))
-    {
-        // scripts/xtask.sh finds no receipt and fails the run.
-        writeln!(stderr, "xtask: can't write {}: {error}", at.display()).ok();
-    }
-    ExitCode::from(exit)
+    ExitCode::from(start(env, &args, &mut io::stderr().lock()).code())
 }
 
 #[cfg(test)]
@@ -162,40 +125,15 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_root_from_the_manifest_directory_cargo_names_when_it_runs() {
-        let manifest = OsString::from("/w/repo/crates/bazhen-xtask");
-        assert_eq!(root_of(Some(&manifest)), Some(PathBuf::from("/w/repo")));
-        assert_eq!(root_of(Some(&OsString::new())), None);
-        assert_eq!(root_of(None), None);
-    }
-
-    #[test]
-    fn takes_the_receipts_variables_out_and_asks_for_one_only_when_both_are_there() {
-        let mut both = env(&[
-            ("PATH", "/usr/bin"),
-            ("BAZHEN_XTASK_RECEIPT", "/r"),
-            ("BAZHEN_XTASK_NONCE", "n"),
-        ]);
-        let proof = Proof {
-            at: PathBuf::from("/r"),
-            nonce: OsString::from("n"),
-        };
-        assert_eq!(take_proof(&mut both), Some(proof));
-        assert_eq!(both, env(&[("PATH", "/usr/bin")]));
-        for one in ["BAZHEN_XTASK_RECEIPT", "BAZHEN_XTASK_NONCE"] {
-            let mut alone = env(&[(one, "x")]);
-            assert_eq!(take_proof(&mut alone), None, "{one}");
-            assert_eq!(alone, Env::new(), "{one}");
-        }
-    }
-
-    #[test]
-    fn writes_the_nonce_the_exit_and_each_argument_hex_encoded_on_a_line_of_its_own() {
-        let args = ["gate", "", "a b\n"].map(OsString::from);
-        assert_eq!(
-            receipt(OsStr::new("n0"), 2, &args),
-            b"n0\n2\n67617465\n\n6120620a\n"
-        );
+    fn takes_the_root_the_wrapper_names_or_else_the_one_above_the_crate_cargo_names() {
+        let at = |vars: &[(&str, &str)]| root_of(&env(vars));
+        let manifest = ("CARGO_MANIFEST_DIR", "/w/repo/crates/bazhen-xtask");
+        assert_eq!(at(&[manifest]), Some(PathBuf::from("/w/repo")));
+        let named = ("BAZHEN_XTASK_ROOT", "/x/repo");
+        assert_eq!(at(&[named, manifest]), Some(PathBuf::from("/x/repo")));
+        assert_eq!(at(&[("BAZHEN_XTASK_ROOT", "repo"), manifest]), None);
+        assert_eq!(at(&[("CARGO_MANIFEST_DIR", "")]), None);
+        assert_eq!(at(&[]), None);
     }
 
     #[test]

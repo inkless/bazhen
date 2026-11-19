@@ -1,10 +1,13 @@
-//! The cargo configs outside the repository a gate refuses to run under. A config can set what the
-//! gate can't override from the command line: a runner that stands in for the test binaries or
-//! for xtask itself, a rustdoc or a linker, environment variables (`[env]`, which can hand clippy
-//! `--cap-lints` or put another `cargo-fmt` first on PATH), a profile (which can turn off overflow
-//! checks and debug assertions in the tests), or another config file to read (`include`), which
-//! this check wouldn't. Rustflags, rustc and the wrappers the gate overrides itself, so a wrapper
-//! such as sccache is fine. A config is parsed as TOML and each key read as cargo reads it, quoted,
+//! The cargo configs a gate refuses to run under: one outside the repository that sets what the
+//! gate can't override from the command line, and any `.cargo/config` in the repository, which
+//! cargo reads in place of the pinned `.cargo/config.toml`. What a config can set: a runner that
+//! stands in for the test binaries, a rustdoc or a linker, environment variables (`[env]`, which
+//! can hand clippy `--cap-lints` or put another `cargo-fmt` first on PATH), a profile (which can
+//! turn off overflow checks and debug assertions in the tests), another config file to read
+//! (`include`), which this check wouldn't, or another source for a dependency's code (`paths`, a
+//! source's `replace-with`), which `--locked` doesn't catch as Cargo.lock doesn't change.
+//! Rustflags, rustc and the wrappers the gate overrides itself, so a wrapper such as sccache is
+//! fine. A config is parsed as TOML and each key read as cargo reads it, quoted,
 //! escaped, dotted or inline; one that doesn't parse is refused, as cargo's reading of it can't be
 //! vouched for.
 
@@ -24,6 +27,20 @@ pub(crate) fn outside_configs(dir: &Path, cargo_home: &Path) -> Vec<PathBuf> {
     seen.iter()
         .flat_map(|d| [d.join("config"), d.join("config.toml")])
         .collect()
+}
+
+/// Why the repository's `.cargo/config` would change what a gate runs, if there is one: cargo
+/// reads it in place of the pinned `.cargo/config.toml`, and only warns. Tracked or not, and
+/// whatever it sets.
+pub(crate) fn shadow_failure(root: &Path, read: Read<'_>) -> Option<String> {
+    let path = root.join(".cargo").join("config");
+    match read(&path) {
+        Ok(None) => None,
+        Ok(Some(_)) | Err(_) => Some(format!(
+            "{} is there, and cargo reads it in place of the pinned .cargo/config.toml. Remove it.",
+            path.display()
+        )),
+    }
 }
 
 /// A config's text, or why it couldn't be read; `None` when there is none.
@@ -53,14 +70,23 @@ pub(crate) fn config_failures(paths: &[PathBuf], read: Read<'_>) -> Vec<String> 
 }
 
 /// The keys a gate refuses wherever a config sets them.
-const REFUSED_KEYS: [&str; 6] = ["runner", "rustdoc", "linker", "include", "env", "profile"];
+const REFUSED_KEYS: [&str; 8] = [
+    "runner",
+    "rustdoc",
+    "linker",
+    "include",
+    "env",
+    "profile",
+    "paths",
+    "replace-with",
+];
 
 /// Why a config's text could change what a gate runs, if it could.
 fn refusal(text: &str) -> Option<&'static str> {
     match text.parse::<toml::Table>() {
         Err(_) => Some("isn't TOML that cargo's reading of could be vouched for"),
         Ok(table) => sets_refused_key(&table)
-            .then_some("sets a test runner, a rustdoc, a linker, [env], a profile or include"),
+            .then_some("sets a test runner, a rustdoc, a linker, [env], a profile, include, paths or a source's replace-with"),
     }
 }
 
@@ -118,7 +144,7 @@ mod tests {
         );
     }
 
-    const REFUSED: [(&str, &str); 17] = [
+    const REFUSED: [(&str, &str); 19] = [
         (
             "/a/.cargo/config.toml",
             "[target.x86_64-unknown-linux-gnu]\nrunner = \"true\"\n",
@@ -184,6 +210,11 @@ mod tests {
             "/s/.cargo/config.toml",
             "[[target.x.y]]\nrunner = \"true\"\n",
         ),
+        ("/t/.cargo/config.toml", "paths = [\"/elsewhere/serde\"]\n"),
+        (
+            "/u/.cargo/config.toml",
+            "[source.crates-io]\nreplace-with = \"mine\"\n[source.mine]\ndirectory = \"/v\"\n",
+        ),
     ];
 
     const ACCEPTED: [(&str, &str); 3] = [
@@ -229,6 +260,22 @@ mod tests {
         );
         assert!(failures[0].contains(" sets a test runner"), "{failures:?}");
         assert!(failures[1].contains(" isn't TOML"), "{failures:?}");
+    }
+
+    #[test]
+    fn refuses_a_config_in_the_repository_that_cargo_reads_in_place_of_the_pinned_one() {
+        let at = |found: Result<Option<String>, String>| {
+            let read: Read<'_> = &|path| {
+                assert_eq!(path, Path::new("/a/repo/.cargo/config"));
+                found.clone()
+            };
+            shadow_failure(Path::new("/a/repo"), read)
+        };
+        assert_eq!(at(Ok(None)), None);
+        for found in [Ok(Some(String::new())), Err("denied".to_owned())] {
+            let why = at(found).unwrap_or_default();
+            assert!(why.starts_with("/a/repo/.cargo/config is there"), "{why}");
+        }
     }
 
     #[test]
