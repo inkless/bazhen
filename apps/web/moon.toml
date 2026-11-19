@@ -1,8 +1,9 @@
 # The web client's own tasks, run in this folder; `moon run :dev` and `moon run :build` (root) run
 # these beside the daemon's and the crates' own.
 
+# On no terminal's input: vite would read keys from it, as shortcuts that stop or restart the server.
 [tasks.dev]
-command = "node --no-turbo-fast-api-calls node_modules/vite/bin/vite.js"
+script = "node --no-turbo-fast-api-calls node_modules/vite/bin/vite.js < /dev/null"
 options = { cache = false, persistent = true, runInCI = false }
 
 [tasks.build]
