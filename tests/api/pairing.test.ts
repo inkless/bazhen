@@ -158,7 +158,7 @@ describe.each([
       cookie: null,
       headers: { "x-forwarded-for": "192.168.1.30, 127.0.0.1" },
     });
-    expect([page.status, String(page.body).includes("pnpm build")]).toEqual([404, true]);
+    expect([page.status, String(page.body).includes("moon run :build")]).toEqual([404, true]);
   });
 });
 

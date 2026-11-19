@@ -10,14 +10,14 @@ alone. A proxy on another host can't do that: it would reach Bazhen over the net
 Bazhen refuses to listen on.
 
 Caddy forwards to the daemon, `127.0.0.1:7900`, which serves the built web app and the API on
-one origin. Build the app first (`pnpm build`), and again after you pull: the daemon serves
+one origin. Build the app first (`moon run :build`), and again after you pull: the daemon serves
 whatever was built last, from the next page load on. Caddy passes WebSockets through as they
 are, and says in `X-Forwarded-For` which device each request came from. The daemon asks every
 such request to pair, even if it was started without the external origin. Only a proxy that
 says where a request came from is noticed this way: a forwarder that adds no header, such as
 `ssh -R` or `socat`, needs `web.pairing = "always"`.
 
-Never point Caddy, or any other forwarder, at the web dev server (`pnpm dev`, port 7901). It
+Never point Caddy, or any other forwarder, at the web dev server (`moon run :dev`, port 7901). It
 serves the repository's source, `/@fs/` paths included. It refuses a request with a Host other
 than loopback's, another page's Origin, or a proxy's forwarding header (`X-Forwarded-For`,
 `Forwarded`, `Via`, `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`), but it can't tell a
@@ -122,8 +122,8 @@ domain.
 
    ```sh
    caddy run --config Caddyfile --envfile ~/.config/caddy/cloudflare.env
-   pnpm build
-   BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com pnpm bazhen start
+   moon run :build
+   BAZHEN_EXTERNAL_ORIGINS=https://bazhen.example.com moon run :bazhen -- start
    ```
 
 ## Without a domain
@@ -164,8 +164,8 @@ trusts that authority once.
 
    ```sh
    caddy run --config Caddyfile
-   pnpm build
-   BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20,https://my-mac.local pnpm bazhen start
+   moon run :build
+   BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20,https://my-mac.local moon run :bazhen -- start
    ```
 
 The root certificate lets whoever holds its key sign a certificate that device trusts for any
@@ -195,7 +195,7 @@ https://192.168.1.20:8443 {
 ```
 
 ```sh
-BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20:8443 pnpm bazhen start
+BAZHEN_EXTERNAL_ORIGINS=https://192.168.1.20:8443 moon run :bazhen -- start
 ```
 
 Caddy would otherwise also listen on port 80 to redirect plain HTTP, on the bound address, which
@@ -217,6 +217,6 @@ sudo chown -R "$(whoami)" ~/Library/Application\ Support/Caddy
 ## Checking it
 
 `bazhen doctor` lists the external origins the daemon admits, and where it serves the web app
-from; a page that says the app isn't built needs `pnpm build`. If the page loads but the terminal
+from; a page that says the app isn't built needs `moon run :build`. If the page loads but the terminal
 says the daemon refused the view, the address in the browser's bar differs from the one in
 `BAZHEN_EXTERNAL_ORIGINS`: they must match exactly, scheme and port included.

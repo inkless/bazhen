@@ -12,7 +12,7 @@ export async function filesHash(files: Readonly<Record<string, string>>): Promis
 }
 
 /**
- * The files `pnpm schema` commits to `packages/protocol/schema/`: the JSON Schema of every message,
+ * The files `moon run :schema` commits to `packages/protocol/schema/`: the JSON Schema of every message,
  * and `semantics.json` for what a schema can't say.
  */
 export function protocolFiles(): Record<string, string> {

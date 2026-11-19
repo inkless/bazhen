@@ -11,7 +11,7 @@ afterAll(async () => {
   await dev.stop();
 });
 
-describe("pnpm dev", () => {
+describe("moon run :dev", () => {
   it("leaves the terminal only to the foreground job", () => {
     expect(dev.backgroundHolders()).toEqual([]);
   });

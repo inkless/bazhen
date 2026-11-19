@@ -50,7 +50,7 @@ fn logged_the_text(socket: &Path) -> Result<bool> {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_raw_reader_takes_a_paste_marked_when_asked_or_when_it_has_bracketed_paste_on() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -91,7 +91,7 @@ fn a_raw_reader_takes_a_paste_marked_when_asked_or_when_it_has_bracketed_paste_o
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_program_reading_whole_lines_is_not_ready_and_is_typed_nothing() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -122,7 +122,7 @@ my $job = fork // die; if (!$job) { setpgid(0, 0); $SIG{TTOU} = "IGNORE";
 sleep 20;"#;
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_child_whose_job_holds_the_foreground_is_not_ready() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -141,7 +141,7 @@ fn a_child_whose_job_holds_the_foreground_is_not_ready() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn input_not_yet_read_makes_a_paste_not_ready() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -170,7 +170,7 @@ fn input_not_yet_read_makes_a_paste_not_ready() {
 const ASKS_DA1: &str = r"stty -icanon -echo; printf '\033[c'; exec cat";
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_paste_right_after_the_program_read_the_holders_reply_is_typed() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -185,7 +185,7 @@ fn a_paste_right_after_the_program_read_the_holders_reply_is_typed() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_paste_for_another_generation_or_an_exited_child_is_refused() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -212,7 +212,7 @@ fn a_paste_for_another_generation_or_an_exited_child_is_refused() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_paste_holding_a_control_character_is_invalid_and_its_connection_hung_up() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();

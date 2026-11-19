@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A disposable libvirt VM for the long holder soak: docs/standards/testing.md, "Runbook: a long run
-# on a VM". Run it as `pnpm soak:vm <command>`; `pnpm soak:vm help` lists the commands.
+# on a VM". Run it as `moon run :soak-vm -- <command>`; `moon run :soak-vm -- help` lists the commands.
 #
 # The disposable marker, the soak and its holders exist only inside the VM. Each ssh session that
 # provisions the VM, marks it or starts the soak first proves, in that same session, that the far
@@ -46,7 +46,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-usage: pnpm soak:vm <command> [options]
+usage: moon run :soak-vm -- <command> [options]
 
   setup                     install KVM and libvirt on this host (sudo, asks first; once)
   create [--commit SHA]     make the VM, then provision it at SHA (default: main on GitHub)
@@ -64,7 +64,7 @@ EOF
 
 # --- host side ------------------------------------------------------------------------------
 
-need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found; run: pnpm soak:vm setup"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found; run: moon run :soak-vm -- setup"; }
 
 confirm() {
   local answer=""
@@ -86,7 +86,7 @@ ensure_libvirt_group() {
     export BAZHEN_SOAK_SG=1
     exec sg libvirt -c "$(printf '%q ' "$0" "${ORIG_ARGS[@]}")"
   fi
-  die "user $USER is not in group libvirt; run: pnpm soak:vm setup"
+  die "user $USER is not in group libvirt; run: moon run :soak-vm -- setup"
 }
 
 host_prereqs() {
@@ -171,7 +171,7 @@ require_token() {
   t=$(host_token) || true
   [[ $t =~ ^[0-9a-f-]{36}$ ]] || die "VM $VM has no instance token in $TOKEN_FILE, so this script \
 didn't create it; refusing to touch it. Once whoever made it is done with it, destroy it and run: \
-pnpm soak:vm create"
+moon run :soak-vm -- create"
   printf '%s\n' "$t"
 }
 
@@ -201,7 +201,7 @@ vol_sha256() {
 # Prints the volume's name.
 ensure_base_volume() {
   [[ -f $CLOUD_KEYRING ]] || die "no $CLOUD_KEYRING to check the cloud image's signature with; \
-it comes with $KEYRING_PACKAGE: run pnpm soak:vm setup, or sudo apt-get install $KEYRING_PACKAGE"
+it comes with $KEYRING_PACKAGE: run moon run :soak-vm -- setup, or sudo apt-get install $KEYRING_PACKAGE"
   need gpgv
   mkdir -p "$CACHE"
   log "Fetching $IMG_BASE_URL/SHA256SUMS and its signature"
@@ -311,7 +311,7 @@ HOST_ID_SHA=""
 init_ssh() {
   TOKEN=$(require_ours)
   vm_running || die "VM $VM is not running; start it with: virsh -c qemu:///system start $VM"
-  [[ -f $KEY ]] || die "no ssh key at $KEY; run: pnpm soak:vm create"
+  [[ -f $KEY ]] || die "no ssh key at $KEY; run: moon run :soak-vm -- create"
   need ssh
   [[ $(hostname) != "$VM" ]] || die "this host itself is named '$VM'; refusing"
   HOST_ID_SHA=$(sha256sum </etc/machine-id)
@@ -395,7 +395,7 @@ cmd_create() {
     local left
     left=$(vm_volumes)
     [[ -z $left ]] || die "pool '$POOL' still holds $(echo "$left" | paste -sd' ') from an \
-earlier VM; remove them with: pnpm soak:vm destroy"
+earlier VM; remove them with: moon run :soak-vm -- destroy"
     commit=$(resolve_commit "$commit")
     ensure_key
     mkdir -p "$STATE"
@@ -435,7 +435,7 @@ earlier VM; remove them with: pnpm soak:vm destroy"
 cmd_provision() {
   local commit="$1"
   host_prereqs
-  vm_exists || die "no VM $VM; run: pnpm soak:vm create"
+  vm_exists || die "no VM $VM; run: moon run :soak-vm -- create"
   commit=$(resolve_commit "$commit")
   provision "$commit"
 }
@@ -452,7 +452,7 @@ provision() {
   case $rc in
     0) ;;
     2) warn "cloud-init finished with recoverable errors; continuing" ;;
-    *) die "cloud-init failed in the VM (exit $rc); see: pnpm soak:vm ssh sudo cloud-init status --long" ;;
+    *) die "cloud-init failed in the VM (exit $rc); see: moon run :soak-vm -- ssh sudo cloud-init status --long" ;;
   esac
   log "Provisioning the VM at $commit (apt, rustup, clone, Node, pnpm, install, build)"
   vm_run "$PROVISION" "$commit" "$REPO_URL"
@@ -531,11 +531,11 @@ fi
 
 say "pnpm install --frozen-lockfile"
 pnpm install --frozen-lockfile
-# pnpm soak builds these too; building now fails provisioning, not the run, on a broken build.
+# moon run :soak builds these too; building now fails provisioning, not the run, on a broken build.
 say "building the hook, the CLI and the release holder"
-pnpm run build:hook
-pnpm run build:cli
-pnpm run build:holder:release
+moon run :build-hook
+moon run :build-cli
+moon run :build-holder-release
 
 printf "%s\n" "$full" > "$HOME/soak-commit"
 say "provisioned; commit under test (in ~/soak-commit): $full"
@@ -545,7 +545,7 @@ REMOTE
 cmd_start() {
   local profile="$1" hours="$2"
   host_prereqs
-  vm_exists || die "no VM $VM; run: pnpm soak:vm create"
+  vm_exists || die "no VM $VM; run: moon run :soak-vm -- create"
   init_ssh
   wait_ssh
   log "Marking the VM disposable and starting a $hours h $profile soak (after an hour's warm-up)"
@@ -555,7 +555,7 @@ cmd_start() {
 
 START=$(cat <<'REMOTE'
 profile="$1"; hours="$2"
-[[ -s "$HOME/soak-commit" ]] || refuse "the VM is not provisioned; run: pnpm soak:vm provision"
+[[ -s "$HOME/soak-commit" ]] || refuse "the VM is not provisioned; run: moon run :soak-vm -- provision"
 if [[ -f "$HOME/soak-run" ]]; then
   pid=$(sed -n "s/^pid=//p" "$HOME/soak-run")
   if [[ -n "$pid" && -d "/proc/$pid" ]]; then
@@ -568,7 +568,7 @@ sudo touch /etc/bazhen-disposable-host
 . "$HOME/.cargo/env"
 cd "$HOME/bazhen"
 name="soak-${profile}-${hours}h"
-setsid nohup pnpm soak --profile "$profile" --hours "$hours" --out "$HOME/$name" \
+setsid nohup moon run :soak -- --profile "$profile" --hours "$hours" --out "$HOME/$name" \
   > "$HOME/$name.log" 2>&1 < /dev/null &
 pid=$!
 cat > "$HOME/soak-run" <<EOF
@@ -584,7 +584,7 @@ sleep 5
 if [[ ! -d "/proc/$pid" ]]; then
   echo "The soak exited at once; its log:" >&2; tail -n 40 "$HOME/$name.log" >&2; exit 1
 fi
-echo "Started pid $pid: pnpm soak --profile $profile --hours $hours --out ~/$name (log ~/$name.log)"
+echo "Started pid $pid: moon run :soak -- --profile $profile --hours $hours --out ~/$name (log ~/$name.log)"
 echo "Commit under test: $(cat "$HOME/soak-commit")"
 REMOTE
 )
@@ -660,7 +660,7 @@ cmd_collect() {
     echo "--- verdict.txt (head) ---"
     head -n 40 "$to/$out/verdict.txt"
   else
-    echo "No verdict.txt yet (the run is still going, or was cut short); judge it with pnpm soak --judge."
+    echo "No verdict.txt yet (the run is still going, or was cut short); judge it with moon run :soak -- --judge."
   fi
 }
 
@@ -676,7 +676,7 @@ cmd_destroy() {
   if vm_exists; then
     require_ours >/dev/null
     echo "This powers off $VM and deletes it with its disks (the cached base image stays)."
-    echo "Collect first if you haven't: pnpm soak:vm collect"
+    echo "Collect first if you haven't: moon run :soak-vm -- collect"
   else
     local list
     list=$(paste -sd' ' <<<"$left")
@@ -761,7 +761,7 @@ main() {
   done
   [[ -z $commit || $commit =~ ^[0-9a-f]{7,40}$ ]] || die "--commit takes a hex sha, not '$commit'"
   [[ $profile == gate || $profile == long-life ]] ||
-    die "--profile takes gate or long-life, not '$profile' (smoke runs in pnpm test:real soak)"
+    die "--profile takes gate or long-life, not '$profile' (smoke runs in moon run :test-real -- soak)"
   if ! [[ $hours =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v h="$hours" 'BEGIN { exit !(h > 0) }'; then
     die "--hours takes a positive number, not '$hours'"
   fi

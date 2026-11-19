@@ -6,7 +6,7 @@ terminal, and each outlives the daemon.
 
 ## Installing and upgrading
 
-`pnpm build`, `pnpm dev` and `pnpm bazhen` build the holder with the `release-holder` profile, into
+`moon run :build`, `moon run :dev` and `moon run :bazhen` build the holder with the `release-holder` profile, into
 `target/release-holder/bazhen-holder`. At start, the daemon copies it into Bazhen's state
 directory, at `holder/<build>/bazhen-holder`, where `<build>` is the first 16 hex digits of the
 binary's SHA-256. New terminals run that copy. Nothing writes to it again, so `cargo build` and

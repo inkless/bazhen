@@ -35,7 +35,7 @@ import { TERMINAL_COLOURS } from "./theme.ts";
 
 /*
  * Frames and spawn specs that pin `holder/1` for every other speaker, written by
- * `pnpm schema` to `fixtures/holder/<version>/`. Each outcome is what this codec makes of the
+ * `moon run :schema` to `fixtures/holder/<version>/`. Each outcome is what this codec makes of the
  * input, so another speaker that agrees with every fixture agrees with this codec. Only the
  * current version's directory is written: an older one is what that version's peers really sent,
  * and every later build must still read it.

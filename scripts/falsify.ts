@@ -2004,7 +2004,7 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
       const where = before === undefined ? `the base, ${base.slice(0, 12)}` : "HEAD";
       console.error(
         `falsify: \`cargo-nextest nextest list\` failed at ${where}, so the Rust tests the ` +
-          "branch adds are unknown. Run `pnpm test:rust` there to see why; if cargo-nextest is " +
+          "branch adds are unknown. Run `moon run :test-rust` there to see why; if cargo-nextest is " +
           `missing, install it: ${installCommand("cargo-nextest")}`,
       );
       return undefined;

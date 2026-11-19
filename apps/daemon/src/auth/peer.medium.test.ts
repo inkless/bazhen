@@ -42,7 +42,8 @@ const ours: TerminalPids = { ...none, agents: new Map([[process.pid, agent]]) };
  * two human routes that answer who called and how much they were sent; returns the socket path.
  */
 async function guarded(peer: (connection: Socket) => Promise<PeerReading>) {
-  if (!existsSync(PEER_SOURCE)) throw new Error("bazhen-peer isn't built; pnpm build:hook does");
+  if (!existsSync(PEER_SOURCE))
+    throw new Error("bazhen-peer isn't built; moon run :build-hook does");
   const app = new Hono<SocketEnv>();
   guardCallers(app, { agentOf: () => undefined, untokened: () => false }, peer);
   app.post("/v1/daemon/stop", (c) => c.json({ caller: c.get("caller") }));

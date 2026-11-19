@@ -1,6 +1,6 @@
 # The only place the real-tmux suites run besides CI: a Linux host that exists to be thrown away.
 # Nothing of the host is mounted, so no tmux command, signal or agent in here can reach the
-# host's own servers or processes. Built by `pnpm test:real` (scripts/test-real.ts), which passes
+# host's own servers or processes. Built by `moon run :test-real` (scripts/test-real.ts), which passes
 # the pins below from the repository.
 
 ARG NODE_VERSION

@@ -63,4 +63,4 @@ jobs:
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
-      - run: pnpm test:containment
+      - run: moon run :test-containment

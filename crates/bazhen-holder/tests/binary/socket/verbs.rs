@@ -166,7 +166,7 @@ fn code(reply: &Reply) -> Option<&str> {
 const ECHO_BYTES: &str = "stty raw -echo; echo R; exec head -c 80000";
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn the_writers_input_reaches_the_child_in_order() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -183,7 +183,7 @@ fn the_writers_input_reaches_the_child_in_order() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn takes_input_and_resizes_only_from_the_writer() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -228,7 +228,7 @@ fn stuck(home: &crate::Home) -> Result<(crate::Started, std::path::PathBuf, Clie
 /// A program that stops reading fills the queue, and the writer is told: the frame that didn't
 /// fit, and every one after it until the program reads, even one that would fit.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn input_for_a_program_that_stops_reading_is_refused_until_it_reads() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -254,7 +254,7 @@ fn input_for_a_program_that_stops_reading_is_refused_until_it_reads() {
 const STUCK_FOR: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_holder_whose_input_is_stuck_stays_idle() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -267,7 +267,7 @@ fn a_holder_whose_input_is_stuck_stays_idle() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn input_signals_and_foreground_after_the_childs_exit_are_refused_exited() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -313,7 +313,7 @@ while (1) { my $r = sysread(STDIN, my $b, 1); next unless defined $r; last if !$
   my $size = `stty size`; $size =~ s/\s+$//; print "winch $n size $size;\n"; }"#;
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_storm_of_resizes_costs_one_sigwinch_and_a_zero_size_is_clamped() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -360,7 +360,7 @@ fn a_storm_of_resizes_costs_one_sigwinch_and_a_zero_size_is_clamped() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn each_signal_reaches_the_child_and_ends_it_by_that_signal() {
     bazhen_test_signal::require_sandbox().unwrap();
     for signal in Signal::ALL {
@@ -386,7 +386,7 @@ fn each_signal_reaches_the_child_and_ends_it_by_that_signal() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn set_tags_changes_what_hello_echoes() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -409,7 +409,7 @@ fn set_tags_changes_what_hello_echoes() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn the_foreground_of_a_terminal_running_only_its_child_is_the_childs_group() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -442,7 +442,7 @@ my $job = fork // die; if (!$job) { setpgid(0, 0); $SIG{TTOU} = "IGNORE";
 if ($how eq "leave") { waitpid($job, 0); print "gone $job;\n" } sleep 20;"#;
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn the_foreground_is_a_jobs_group_with_when_its_leader_started() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -480,7 +480,7 @@ my $job = fork // die; if (!$job) { setpgid(0, 0); $SIG{TTOU} = "IGNORE";
 sleep 20;"#;
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_foreground_group_with_no_member_left_is_refused_failed_though_its_number_is_a_live_pid() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -495,7 +495,7 @@ fn a_foreground_group_with_no_member_left_is_refused_failed_though_its_number_is
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_foreground_group_whose_leader_has_exited_is_refused_failed() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -511,7 +511,7 @@ fn a_foreground_group_whose_leader_has_exited_is_refused_failed() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_reader_reads_the_screen_as_text_without_its_colours() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();

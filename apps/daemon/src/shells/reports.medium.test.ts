@@ -67,8 +67,8 @@ describe("shell reports", () => {
     const { path, store, open, reports } = setup();
     const { terminalId, env } = await open();
     const token = env.BAZHEN_SHELL_TOKEN;
-    const outcome = reports.report(terminalId, line(token, 1, "pnpm dev"));
-    expect([outcome, store.lastShellCommand(terminalId)]).toEqual(["kept", "pnpm dev"]);
+    const outcome = reports.report(terminalId, line(token, 1, "moon run :dev"));
+    expect([outcome, store.lastShellCommand(terminalId)]).toEqual(["kept", "moon run :dev"]);
     expect([env.BAZHEN_HOOK, env.BAZHEN_SHELL_INTEGRATION]).toEqual([
       INTEGRATION.hook,
       INTEGRATION.dir,
@@ -120,10 +120,13 @@ describe("shell reports", () => {
     const { terminalId, env } = await open();
     const token = env.BAZHEN_SHELL_TOKEN;
     const outcomes = [
-      reports.report(terminalId, line(token, 20, "pnpm dev")),
+      reports.report(terminalId, line(token, 20, "moon run :dev")),
       reports.report(terminalId, line(token, 10, "ls")),
     ];
-    expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([["kept", "stale"], "pnpm dev"]);
+    expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([
+      ["kept", "stale"],
+      "moon run :dev",
+    ]);
     store.close();
   });
 
@@ -134,15 +137,18 @@ describe("shell reports", () => {
     const token = env.BAZHEN_SHELL_TOKEN;
     const outcomes = [reports.report(terminalId, line(token, Number.MAX_SAFE_INTEGER, "far"))];
     now += 61_000_000;
-    outcomes.push(reports.report(terminalId, line(token, now, "pnpm dev")));
-    expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([["kept", "kept"], "pnpm dev"]);
+    outcomes.push(reports.report(terminalId, line(token, now, "moon run :dev")));
+    expect([outcomes, store.lastShellCommand(terminalId)]).toEqual([
+      ["kept", "kept"],
+      "moon run :dev",
+    ]);
     store.close();
   });
 
   it("forgets every kept line and token when the integration is turned off", async () => {
     const { store, open, reports } = setup();
     const { terminalId, env } = await open();
-    reports.report(terminalId, line(env.BAZHEN_SHELL_TOKEN, 1, "pnpm dev"));
+    reports.report(terminalId, line(env.BAZHEN_SHELL_TOKEN, 1, "moon run :dev"));
     store.forgetShellCommands();
     const outcome = reports.report(terminalId, line(env.BAZHEN_SHELL_TOKEN, 2, "make"));
     expect([outcome, store.lastShellCommand(terminalId)]).toEqual(["refused", null]);

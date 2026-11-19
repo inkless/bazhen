@@ -11,7 +11,7 @@ Never rename, remove or tighten anything that has shipped.
 ## Steps
 
 1. **Schema.** In `packages/protocol/src/index.ts`, add or extend the zod schema and export the
-   inferred type. New fields on existing messages are `.optional()`. Run `pnpm schema` and commit
+   inferred type. New fields on existing messages are `.optional()`. Run `moon run :schema` and commit
    `packages/protocol/schema/`. Its hash is the protocol id (`protocolId()`) that clients compare
    with the daemon's, so there is no version to bump. A change the schema can't show, such as a
    refinement, a constant like `HISTORY_LINES`, or what the daemon does with a message, bumps
@@ -32,12 +32,12 @@ Never rename, remove or tighten anything that has shipped.
 
 5. **Client.** If the web client uses the endpoint, import the schema from `@bazhen/protocol`,
    never from the daemon. Then add or extend an e2e test in `tests/e2e/`.
-6. Run `pnpm check` (and `pnpm test:real e2e` if step 5 applied). Before pushing, run
-   `pnpm test:falsify` and handle the result as in `bz-write-unit-test` step 6.
+6. Run `moon run :check` (and `moon run :test-real -- e2e` if step 5 applied). Before pushing, run
+   `moon run :test-falsify` and handle the result as in `bz-write-unit-test` step 6.
 
 ## Checklist
 
-- [ ] The schema is additive, and `pnpm schema`'s output is in the same commit.
+- [ ] The schema is additive, and `moon run :schema`'s output is in the same commit.
 - [ ] The request and response are both parsed at the daemon's edge.
 - [ ] Tests cover success, a malformed request, and the expected failure.
 - [ ] `apps/web` imports only `@bazhen/protocol`; lint enforces this.
@@ -56,4 +56,4 @@ Never rename, remove or tighten anything that has shipped.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | "Renaming the field is cleaner"                  | It breaks every client on `/v1`. Add the new field, and deprecate the old one in a comment |
 | "Parsing the response is redundant, we built it" | It is what keeps the daemon from shipping a shape the schema doesn't allow                 |
-| "The schema export can come later"               | `pnpm check` fails without it, and its hash is what tells a client the daemon changed      |
+| "The schema export can come later"               | `moon run :check` fails without it, and its hash is what tells a client the daemon changed |

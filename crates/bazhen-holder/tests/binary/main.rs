@@ -564,7 +564,7 @@ fn machine() -> String {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_a_spec_that_isnt_one_with_exit_2() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -579,7 +579,7 @@ fn refuses_a_spec_that_isnt_one_with_exit_2() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_a_nul_in_argv_with_exit_2() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -595,7 +595,7 @@ fn refuses_a_nul_in_argv_with_exit_2() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_a_daemon_it_shares_no_major_with_with_exit_3() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -613,7 +613,7 @@ fn refuses_a_daemon_it_shares_no_major_with_with_exit_3() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn refuses_to_start_as_a_group_leader_outside_its_own_session_with_exit_4() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -630,7 +630,7 @@ fn refuses_to_start_as_a_group_leader_outside_its_own_session_with_exit_4() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_program_that_cant_start_exits_1_before_ready() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -647,7 +647,7 @@ fn a_program_that_cant_start_exits_1_before_ready() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn says_ready_and_leads_a_session_of_its_own() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -665,7 +665,7 @@ fn says_ready_and_leads_a_session_of_its_own() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn lets_go_of_its_stdout_and_stderr_once_ready_and_runs_on() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -693,7 +693,7 @@ fn lets_go_of_its_stdout_and_stderr_once_ready_and_runs_on() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn logs_the_exit_of_a_child_that_exits_at_once() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -707,7 +707,7 @@ fn logs_the_exit_of_a_child_that_exits_at_once() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn an_fd_leaked_into_the_holder_does_not_reach_the_child() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -730,7 +730,7 @@ fn an_fd_leaked_into_the_holder_does_not_reach_the_child() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn the_child_starts_with_default_signals_whatever_the_holder_ignored() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -759,7 +759,7 @@ fn the_child_starts_with_default_signals_whatever_the_holder_ignored() {
 }
 
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_hundred_holders_start_from_a_spawner_whose_soft_nofile_is_256() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
@@ -803,7 +803,7 @@ fn a_hundred_holders_start_from_a_spawner_whose_soft_nofile_is_256() {
 
 /// The TypeScript harness reads and writes this ledger too: both hold to one checked-in entry.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn reads_and_writes_the_ledger_entry_the_typescript_harness_does() {
     bazhen_test_signal::require_sandbox().unwrap();
     let fixture = concat!(
@@ -831,7 +831,7 @@ fn reads_and_writes_the_ledger_entry_the_typescript_harness_does() {
 
 /// An owner `ps` can't read may live: its holders are spared, never killed in use.
 #[test]
-#[ignore = "signals processes; runs in pnpm test:real rust"]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_sweep_counts_an_owner_gone_only_when_it_provably_is() {
     bazhen_test_signal::require_sandbox().unwrap();
     let fixture = concat!(

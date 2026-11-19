@@ -56,7 +56,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
-          pnpm test:mutants:holder --group "$GROUP" --shard "$SHARD/4" | tee holder-mutants.txt
+          moon run :test-mutants-holder -- --group "$GROUP" --shard "$SHARD/4" | tee holder-mutants.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:

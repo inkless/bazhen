@@ -25,10 +25,10 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
    - a table of bad inputs: `refuses_malformed_replies`;
    - a socket pair, no daemon: `daemon_wrote` and the `read_response` tests;
    - properties: `mod properties`, a strategy per input and `prop_assert_eq!` in the body.
-4. **Run it and watch it fail:** `pnpm test:rust <name>`. It must fail on an
+4. **Run it and watch it fail:** `moon run :test-rust -- <name>`. It must fail on an
    assertion. A compile error proves nothing.
-5. Implement until it passes, then run `pnpm check`.
-6. **Commit, then run `pnpm test:falsify`.** Each new test it reports KILLED has its control: the
+5. Implement until it passes, then run `moon run :check`.
+6. **Commit, then run `moon run :test-falsify`.** Each new test it reports KILLED has its control: the
    mutant printed beside it. For each one it reports INVALID, break the code the test names
    (swap a comparison, drop a check, return a constant), run the test, see it fail on its
    assertion, and restore the code. Add a trailer to a commit on the branch naming the test by
@@ -42,13 +42,13 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
       mutant has a `Control:` trailer naming it.
 - [ ] A behaviour the daemon or a user can observe also has its test in the black-box suite
       (`tests/api`), which drives the binary from outside.
-- [ ] `pnpm check` passes.
+- [ ] `moon run :check` passes.
 
 ## Gotchas
 
 - **`unwrap` and `expect` are fine in tests, not in the code they test.** `clippy.toml` allows
   them in `#[test]` functions and `#[cfg(test)]` items only. A helper in a crate's `tests/`
-  directory outside those fails `pnpm lint:rust`, so it returns a `Result`.
+  directory outside those fails `moon run :lint-rust`, so it returns a `Result`.
 - **No `#[allow]` to quiet a lint, in tests either.** The standards check rejects it. Fix the code.
 - **A mutant leaves a `proptest-regressions` file.** Delete it after a control; commit one only
   when it records a real bug the property found.
@@ -56,9 +56,9 @@ KILLED by one of those mutants or named by a `Control:` trailer you recorded by 
   so a hang fails fast with what it saw.
 - **nextest runs each test in its own process,** so a test can't lean on state another left.
 - **A test that starts the holder, closes a child or sweeps the ledger signals processes it
-  didn't start,** so it is `#[ignore = "signals processes; runs in pnpm test:real rust"]` and its
-  first line is `bazhen_test_signal::require_sandbox().unwrap();`; `pnpm check` requires both.
-  Run it with `pnpm test:real rust`, never on the host, and send any signal through
+  didn't start,** so it is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]` and its
+  first line is `bazhen_test_signal::require_sandbox().unwrap();`; `moon run :check` requires both.
+  Run it with `moon run :test-real -- rust`, never on the host, and send any signal through
   `bazhen_test_signal`.
 - **Never snapshot screen contents.** insta is for protocol frames only; assert the bytes that
   matter.

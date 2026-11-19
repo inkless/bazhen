@@ -1,4 +1,4 @@
-// `pnpm dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
+// `moon run :dev` as a developer's terminal runs it: in a pty, stopped with Ctrl-C. Linux only, for
 // /proc and util-linux `script`: like every api helper, it runs on a disposable host.
 
 import type { ChildProcess } from "node:child_process";
@@ -60,7 +60,7 @@ const commandLine = (pid: number) =>
   proc(() => readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim());
 
 /**
- * `pnpm dev` on a fresh home and free ports, in the pty of a `script` that leads a process group
+ * `moon run :dev` on a fresh home and free ports, in the pty of a `script` that leads a process group
  * of this run's own. Ctrl-C goes in through `script`'s stdin, as a key would.
  */
 export class DevRun {
@@ -93,7 +93,7 @@ export class DevRun {
       BAZHEN_WEB_PORT: String(await freePort()),
     };
     // `exec`, so the status is pnpm's: a non-interactive sh left in between dies of the Ctrl-C.
-    const script = spawnGroup("script", ["-qefc", "exec pnpm dev", "/dev/null"], {
+    const script = spawnGroup("script", ["-qefc", "exec moon run :dev", "/dev/null"], {
       cwd: repo,
       env,
       stdio: "pipe",
@@ -105,10 +105,10 @@ export class DevRun {
           run.record();
           return run.exited || (run.text.includes("listening on") && run.text.includes("ready in"));
         },
-        "pnpm dev to start",
+        "moon run :dev to start",
         90_000,
       );
-      if (run.exited) throw new Error(`pnpm dev exited at start:\n${run.text}`);
+      if (run.exited) throw new Error(`moon run :dev exited at start:\n${run.text}`);
     } catch (err) {
       await run.stop();
       throw err;
@@ -134,7 +134,7 @@ export class DevRun {
   }
 
   /**
-   * The command lines of the processes under `pnpm dev` that hold its terminal on stdin, stdout
+   * The command lines of the processes under `moon run :dev` that hold its terminal on stdin, stdout
    * or stderr from outside the foreground process group, which the shell doesn't wait for.
    */
   backgroundHolders(): string[] {
@@ -149,11 +149,11 @@ export class DevRun {
       .map((pid) => commandLine(pid) ?? `${pid} (exited)`);
   }
 
-  /** Presses Ctrl-C and waits for `pnpm dev` to end; its exit status and each app's. */
+  /** Presses Ctrl-C and waits for `moon run :dev` to end; its exit status and each app's. */
   async interrupt(): Promise<{ exit: number | null; apps: string[] }> {
     this.record();
     this.script.stdin?.write("\x03");
-    await waitUntil(() => this.exited, "pnpm dev to exit", 30_000);
+    await waitUntil(() => this.exited, "moon run :dev to exit", 30_000);
     return { exit: this.status, apps: this.statuses() };
   }
 
@@ -167,7 +167,7 @@ export class DevRun {
     if (!this.exited) signalGroup(this.script, "SIGKILL");
     await waitUntil(
       () => [...this.seen].every((pid) => !existsSync(`/proc/${pid}`)),
-      "every process of pnpm dev to exit",
+      "every process of moon run :dev to exit",
       20_000,
     );
     TmuxServer.at(join(this.home, "run", "tmux.sock"), { root: this.home }).killServer();

@@ -27,7 +27,7 @@ const repo: Record<string, string> = {
 };
 const read = (files: Record<string, string>) => (path: string) => files[path] ?? "";
 
-describe("pnpm test:real", () => {
+describe("moon run :test-real", () => {
   it("runs the suites it is given, once each and in order, or all but falsify", () => {
     expect(parseArgs([]).suites).toEqual(["integration", "api", "e2e", "holder", "rust"]);
     expect(parseArgs(["falsify", "api", "falsify"]).suites).toEqual(["falsify", "api"]);
@@ -341,7 +341,7 @@ const refusal = (why: string) => ({
   said: expect.stringContaining(why),
 });
 
-describe("pnpm test:real cleans up after itself", () => {
+describe("moon run :test-real cleans up after itself", () => {
   it("names its run, image and containers by its own pid and host, and labels them with both", async () => {
     const fake = fakeHost(passing);
     expect(await run(["api"], fake.host)).toBe(0);
@@ -609,7 +609,7 @@ function grace() {
   return { wait: () => promise, elapse: () => resolve() };
 }
 
-describe("pnpm test:real's stop", () => {
+describe("moon run :test-real's stop", () => {
   it("kills a command still running when the grace period ends", async () => {
     const sent: NodeJS.Signals[] = [];
     const clock = grace();
@@ -705,7 +705,7 @@ const host = cli("docker");
 
 const isList = (c: string[]) => verb(c) === "image ls" || (c[0] === "ps" && !c.includes("--quiet"));
 
-describe("pnpm test:real's sweep of runs that died", () => {
+describe("moon run :test-real's sweep of runs that died", () => {
   it("asks docker only for what this script labelled on this host", async () => {
     const fake = fakeHost(host, { alive: [222] });
     await sweep(fake.host);

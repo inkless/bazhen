@@ -1,4 +1,4 @@
-//! One of the Rust gates `pnpm check` relies on (docs/standards/rust.md). Each gate's command is
+//! One of the Rust gates `moon run :check` relies on (docs/standards/rust.md). Each gate's command is
 //! fixed here, and runs in an environment no caller's flags reach: a flag can switch every lint off
 //! (`--cap-lints allow`), whether it comes from the environment, a cargo config in any parent
 //! directory, or an argument, and a cargo alias can stand in for a whole gate.
@@ -256,7 +256,7 @@ pub(crate) fn gate_env(env: impl IntoIterator<Item = (OsString, OsString)>) -> E
 
 /// The reason a test that signals processes it didn't start is ignored outside a sandbox, as
 /// `scripts/signal-paths.ts` names it.
-const SIGNALS_IGNORE: &str = "signals processes; runs in pnpm test:real rust";
+const SIGNALS_IGNORE: &str = "signals processes; runs in moon run :test-real -- rust";
 
 /// Why a gate won't run on this host: test-all runs tests only a sandbox may.
 fn sandbox_refusal(gate: Gate, sandboxed: bool) -> Option<String> {
@@ -264,7 +264,7 @@ fn sandbox_refusal(gate: Gate, sandboxed: bool) -> Option<String> {
         format!(
             "Refusing to run: cargo xtask gate test-all includes each test ignored as \
              \"{SIGNALS_IGNORE}\": such a test signals processes it didn't start, so it runs only \
-             on a host that exists to be thrown away: the test container (pnpm test:real) or a CI \
+             on a host that exists to be thrown away: the test container (moon run :test-real) or a CI \
              runner, each carrying a root-owned /etc/bazhen-disposable-host. Never create that \
              file on a machine you work on."
         )
@@ -616,7 +616,7 @@ mod tests {
         assert!(
             err.starts_with("Refusing to run: ")
                 && err.contains(&format!("\"{SIGNALS_IGNORE}\""))
-                && err.contains("pnpm test:real"),
+                && err.contains("moon run :test-real"),
             "{err}"
         );
     }

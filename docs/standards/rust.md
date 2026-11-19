@@ -7,28 +7,28 @@ a review asks for something no check covers.
 
 | Rule                                                                                                                                    | Enforced by                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `pnpm check` (`scripts/check-standards.ts`)           |
-| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `pnpm check` (`scripts/check-standards.ts`)           |
-| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `pnpm check` (`scripts/check-standards.ts`)           |
-| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `pnpm lint:rust` (`-D warnings`)                      |
+| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `moon run :check` (`scripts/check-standards.ts`)      |
+| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `moon run :check` (`scripts/check-standards.ts`)      |
+| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `moon run :check` (`scripts/check-standards.ts`)      |
+| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `moon run :lint-rust` (`-D warnings`)                 |
 | No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
-| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `pnpm check` (`scripts/check-standards.ts`)           |
+| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `moon run :check` (`scripts/check-standards.ts`)      |
 | The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/xtask.sh gate`, which every gate script runs |
-| Code is formatted by rustfmt's defaults                                                                                                 | `pnpm format:check`                                   |
-| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `pnpm lint:rust`                                      |
-| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `pnpm lint:rust`                                      |
-| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `pnpm lint:rust`                                      |
-| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `pnpm check` (`scripts/check-standards.ts`)           |
-| Dependencies have permitted licences, no advisory, one version each                                                                     | `pnpm deny`                                           |
-| Tests run under nextest                                                                                                                 | `pnpm test:rust`                                      |
-| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`pnpm test:falsify`)             |
+| Code is formatted by rustfmt's defaults                                                                                                 | `moon run :format-check`                              |
+| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `moon run :lint-rust`                                 |
+| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `moon run :lint-rust`                                 |
+| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `moon run :lint-rust`                                 |
+| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `moon run :check` (`scripts/check-standards.ts`)      |
+| Dependencies have permitted licences, no advisory, one version each                                                                     | `moon run :deny`                                      |
+| Tests run under nextest                                                                                                                 | `moon run :test-rust`                                 |
+| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`moon run :test-falsify`)        |
 | Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
-| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `pnpm check` (`scripts/check-standards.ts`)           |
+| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `moon run :check` (`scripts/check-standards.ts`)      |
 | Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
 | Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
-| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `pnpm check` (`scripts/check-standards.ts`)           |
-| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `pnpm check` (`scripts/signal-paths.ts`)              |
-| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `pnpm deny`                                           |
+| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `moon run :check` (`scripts/check-standards.ts`)      |
+| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `moon run :check` (`scripts/signal-paths.ts`)         |
+| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `moon run :deny`                                      |
 | A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
 | API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
 | Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                                |
@@ -69,7 +69,7 @@ unit.
 **What starts on every call stays light.** The CLI and the hook start on every call an agent
 makes, and a crate they share with the daemon passes on whatever it takes. So no member builds a
 crate in `HEAVY_CRATES` (tokio, hyper, axum, rusqlite and the like) unless `HEAVY_ALLOWED` in
-`scripts/check-standards.ts` lists it, with why. `pnpm check` follows each member's dependencies,
+`scripts/check-standards.ts` lists it, with why. `moon run :check` follows each member's dependencies,
 but not its dev-dependencies, which only its tests build, through `Cargo.lock`, and names the chain
 that reaches one. A member that depends on a listed one reaches what that one reaches, so it needs
 an entry of its own: the daemon's crates go there, and the CLI never does.
@@ -113,7 +113,7 @@ check most:
 ## Lints
 
 `[workspace.lints]` in `Cargo.toml` holds every lint level, and every crate inherits it with
-`[lints] workspace = true`. Clippy's `pedantic` group is denied, and `pnpm lint:rust` runs clippy
+`[lints] workspace = true`. Clippy's `pedantic` group is denied, and `moon run :lint-rust` runs clippy
 with `-D warnings`, so any finding fails. Every lint named on its own below is `forbid`, not
 `deny`: no `#[allow]` or `#[expect]` can lower a forbidden lint, whether it is written out, built
 by a macro or brought in by `include!`, so the compiler itself refuses the suppression (E0453).
@@ -161,15 +161,15 @@ source with comments and strings set aside, and fails on:
   joins the list once a review has read its macros;
 - `#[ignore]` and `#[should_panic]`, which skip a test or pass it when it fails, and any
   attribute naming `clippy` (`#[clippy::msrv]`), which changes how it lints. The one `#[ignore]`
-  allowed is `#[ignore = "signals processes; runs in pnpm test:real rust"]`, exactly, on a test that
+  allowed is `#[ignore = "signals processes; runs in moon run :test-real -- rust"]`, exactly, on a test that
   may signal processes it didn't start, and only on one whose body starts with
-  `bazhen_test_signal::require_sandbox().unwrap();`: the host skips it, and `pnpm test:rust:all`
+  `bazhen_test_signal::require_sandbox().unwrap();`: the host skips it, and `moon run :test-rust-all`
   runs it on a disposable host (`testing.md` § Hermeticity);
 - a `cfg` or `cfg_attr` predicate other than those in `CFG_ALLOWED` (`test` alone today), or
   `not` around one: code compiled only in a release build, on another OS, under a feature or
   outside tests is code the gates never build, so no lint or test reads it. A predicate joins
   the list with why the gates build it: a `target_os` joins only with a CI job in the same pull
-  request that runs `pnpm lint:rust` and `pnpm test:rust` on that OS, as the PTY holder's
+  request that runs `moon run :lint-rust` and `moon run :test-rust` on that OS, as the PTY holder's
   `linux` and `macos` code will need (CI's `rust-macos` job runs them on macOS);
 - a test harness of a member's own (`harness = false`), which could run nothing.
 
@@ -235,7 +235,7 @@ outlive the run, and `cargo clean` removes it.
 
 `scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
-any option after the gate (`pnpm test:rust <name>` may name tests), removes the variables that
+any option after the gate (`moon run :test-rust -- <name>` may name tests), removes the variables that
 change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every
 other source of rustflags), and overrides any configured compiler or wrapper.
 
@@ -278,7 +278,7 @@ its protocol defines, and still flags a fifth.
 
 ## Formatting
 
-rustfmt with its defaults: no `rustfmt.toml`. `pnpm format` applies it, `pnpm format:check`
+rustfmt with its defaults: no `rustfmt.toml`. `moon run :format` applies it, `moon run :format-check`
 checks it, and the pre-commit hook formats staged `.rs` files. Defaults mean no style is ever
 up for discussion in a review.
 
@@ -324,7 +324,7 @@ whose output the harness reads, logs nothing.
 ## Signals
 
 `testing.md` § Hermeticity holds the rule and what the scan reads. In Rust, a signal goes through
-the chokepoint for its role, which each failure of `pnpm check` names:
+the chokepoint for its role, which each failure of `moon run :check` names:
 
 - the holder's: `crates/bazhen-holder/src/guard.rs`;
 - tests': the `bazhen-test-signal` crate, a dev-dependency only;
@@ -335,7 +335,7 @@ the chokepoint for its role, which each failure of `pnpm check` names:
   once its command and start time match.
 
 The host-guard crate's file joins `PRODUCT_CHOKEPOINTS` in `scripts/check-standards.ts` too, which
-`pnpm check` requires of every Rust chokepoint outside the tests' crate: its product code is
+`moon run :check` requires of every Rust chokepoint outside the tests' crate: its product code is
 exempt, and its own tests send through `bazhen-test-signal` like any others. A caller names it as
 `bazhen_host_guard`, which `RUST_SENDERS` in `scripts/signal-paths.ts` reads, so falsify changes a
 caller only in a sandbox.
@@ -388,16 +388,16 @@ and ruff snapshot a CLI's output, those suites do it here.
 
 ## Protocol types
 
-The daemon's API is defined by the zod schemas in `packages/protocol`, and `pnpm schema` writes
+The daemon's API is defined by the zod schemas in `packages/protocol`, and `moon run :schema` writes
 their JSON Schema to `packages/protocol/schema/`. While the daemon is TypeScript, a Rust crate that
 speaks the API holds hand-written serde types for the messages it uses. They are held to the
-TypeScript by fixtures `pnpm schema` writes for each of those messages, as it writes the holder's
+TypeScript by fixtures `moon run :schema` writes for each of those messages, as it writes the holder's
 for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and encodes it
 back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so only a
 strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
 
-`pnpm schema` also writes `crates/bazhen-protocol/src/id.rs`, the `PROTOCOL_ID` the Rust crates
-speak: the hash of `packages/protocol/schema/` that `protocolId()` gives. `pnpm schema --check` holds
+`moon run :schema` also writes `crates/bazhen-protocol/src/id.rs`, the `PROTOCOL_ID` the Rust crates
+speak: the hash of `packages/protocol/schema/` that `protocolId()` gives. `moon run :schema -- --check` holds
 it to the schema, and a test in `crates/bazhen` hashes the schema itself, so neither side drifts.
 The CLI compares it with the daemon's `protocolId`, and calls one that differs another build.
 
@@ -442,12 +442,12 @@ route, a message, a config key or an error that both have lands in both, in the 
 and a migration always does (testing.md § Black-box behaviour tests says how that is held).
 
 - **The store is one schema.** `crates/bazhen-store` runs the TypeScript daemon's migrations, in
-  its order, from the fixture `pnpm schema` writes, so a database either daemon wrote opens in the
+  its order, from the fixture `moon run :schema` writes, so a database either daemon wrote opens in the
   other. A new migration is written in TypeScript first and reaches the fixture; the Rust store
   refuses a database whose recorded migrations it doesn't know.
 - **The wire types are the protocol's.** `bazhen-protocol` holds the serde twin of each zod
   schema a route answers with, and `crates/bazhen-protocol/tests/fixtures.rs` decodes each from
-  the examples `pnpm schema` writes and encodes it back to what zod made of it.
+  the examples `moon run :schema` writes and encodes it back to what zod made of it.
 - **The Rust daemon serves only what it has.** A `/v1` path it has no route for answers 404, and
   until it can pair a device, a request that must come from a paired one is refused as unpaired,
   whatever its path: a surface that isn't ported is closed, never open.
@@ -471,7 +471,7 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
   features you don't use. Upgrade one foundational crate per commit: one most of a crate's code
   is written against, such as serde, the async runtime or the PTY crate, whose upgrade can change
   behaviour everywhere at once.
-- **`pnpm deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the allow-list
+- **`moon run :deny`** runs cargo-deny with `deny.toml`. It fails on a licence outside the allow-list
   (dev-dependencies included), an advisory or a yanked crate, two versions of one crate, a
   wildcard version, or a source other than crates.io. It reads the dependency tree for the
   triples Bazhen is built for, Linux and macOS on x86_64 and aarch64 (`[graph] targets`): a
@@ -480,7 +480,7 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
   crate: Unicode-3.0 is there for `unicode-ident`, which `serde_derive` and `thiserror-impl`
   build on. A crate that brings a second version of one already in the tree (`syn`, say) aligns
   the versions rather than relaxing `multiple-versions`.
-- **An advisory fails `pnpm check` on every branch the day it is published,** main included,
+- **An advisory fails `moon run :check` on every branch the day it is published,** main included,
   with no code change. That is deliberate: the fix is to upgrade the crate, or, when the advisory
   can't reach our use of it, to list its id in `deny.toml`'s `[advisories] ignore` with the
   reason.
@@ -492,7 +492,7 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
 `testing.md` holds for Rust: sizes, hermeticity, behaviour names, fakes over mocks, no sleeps.
 What differs:
 
-- **Run with nextest** (`pnpm test:rust`), which runs each test in its own process, so one
+- **Run with nextest** (`moon run :test-rust`), which runs each test in its own process, so one
   test's panic or leaked state can't reach another. nextest doesn't run doctests, so an example in
   a doc comment is documentation, not a test; the first library crate with one adds
   `cargo test --doc` to `test:rust`. Unit tests sit in a `#[cfg(test)] mod tests`
@@ -596,13 +596,13 @@ What differs:
     libFuzzer's instrumentation needs it; everything else builds on the pinned toolchain. Its
     `properties` job runs the property tests (above), not the targets. To run a target locally,
     install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
-    `pnpm capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
+    `moon run :capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
     -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's
     test runner, so the cap and libFuzzer's own limits are given by hand.
 - **Falsify judges Rust tests by mutating the change, not by reverting it.** A Rust unit test
   lives in the file it tests, so reverting the source would revert the test, and a test of a new
   function wouldn't compile without it. When a branch touches `crates/` or the Cargo files,
-  `pnpm test:falsify` has nextest list the tests at the base and at HEAD, so it finds every new
+  `moon run :test-falsify` has nextest list the tests at the base and at HEAD, so it finds every new
   test however it is declared (`#[test]`, proptest, a macro of the crate's own). It then has
   cargo-mutants list the mutants of the code the branch changed, and runs the new tests against
   them, one mutant at a time, in a throwaway worktree. A test that passes unmutated, fails
@@ -622,7 +622,7 @@ What differs:
   One trailer may name several tests it covers. Each test process runs under the cargo runner's
   memory cap (`testing.md` § Memory and time caps), and a mutant whose run had one killed there is
   listed INVALID with that reason, as one that ran out of time is. Install cargo-mutants once:
-  `cargo install --locked cargo-mutants@27.1.0`; the `pnpm test:real` image carries it, and
+  `cargo install --locked cargo-mutants@27.1.0`; the `moon run :test-real` image carries it, and
   cargo-nextest, at the versions `crates/bazhen-xtask/rust-tools.json` pins.
 
 **Black-box first.** A Rust component is certified by the TypeScript suites that drive it from

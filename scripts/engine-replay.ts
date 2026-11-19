@@ -1,7 +1,7 @@
 // What the holder's terminal engine costs: resident memory with 10,000 rows of history at
 // 160x50, for one engine and for 25, and how fast it takes a flood. It replays generated streams
 // through `bazhen-holder-replay` and reads each run's resident set from `ps`. Run:
-// `pnpm bench:engine`, which builds the bin first.
+// `moon run :bench-engine`, which builds the bin first.
 
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";

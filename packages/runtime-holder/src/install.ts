@@ -137,7 +137,8 @@ export async function installHolder(
   seams: InstallSeams = {},
 ): Promise<HolderInstall> {
   const built = await lstatOrNull(source);
-  if (built === null) return { installed: null, reason: `${source} isn't built; run pnpm build` };
+  if (built === null)
+    return { installed: null, reason: `${source} isn't built; run moon run :build` };
   const refusal = await dirRefusal(dir, uid);
   if (refusal !== undefined) {
     return { installed: null, reason: `refusing ${dir} for ${command} builds: ${refusal}` };

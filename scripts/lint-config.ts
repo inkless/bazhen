@@ -1,5 +1,5 @@
 // Generates .oxlintrc.json from the package import matrix below. Edit the matrix, then run
-// `pnpm lint:config`; `pnpm lint` fails when the committed file is stale.
+// `moon run :lint-config`; `moon run :lint` fails when the committed file is stale.
 //
 // oxlint overrides that match the same file replace each other's `no-restricted-imports`
 // instead of merging, so every override repeats its package's full matrix.
@@ -551,7 +551,7 @@ if (isMain(import.meta)) {
   const generated = `${JSON.stringify(config, null, 2)}\n`;
   if (process.argv.includes("--check")) {
     if (readFileSync(target, "utf8") !== generated) {
-      console.error(".oxlintrc.json is stale: run `pnpm lint:config` and commit the result.");
+      console.error(".oxlintrc.json is stale: run `moon run :lint-config` and commit the result.");
       process.exit(1);
     }
   } else {

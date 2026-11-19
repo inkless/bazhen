@@ -1,4 +1,4 @@
-// `pnpm build:notify [<dir>]`: builds Bazhen.app, the macOS notifier the daemon launches, into
+// `moon run :build-notify -- [<dir>]`: builds Bazhen.app, the macOS notifier the daemon launches, into
 // `<dir>` (apps/notify-mac/dist by default). Skipped, and still exiting 0, off macOS or without
 // Xcode's command-line tools: notifications are optional, and `bazhen doctor` says when the app
 // is missing. Never committed; it is built on the machine that runs it.

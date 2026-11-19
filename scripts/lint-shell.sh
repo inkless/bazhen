@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `pnpm lint:shell`: shellcheck over every tracked shell script. CI's Ubuntu runners have it
+# `moon run :lint-shell`: shellcheck over every tracked shell script. CI's Ubuntu runners have it
 # installed; where it isn't, this fails and names a container that runs the same check.
 set -euo pipefail
 cd "$(dirname "$0")/.."

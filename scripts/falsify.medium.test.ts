@@ -1673,7 +1673,7 @@ describe("falsify outside a sandbox", () => {
     expect({
       status: result.status,
       named: result.output.includes(`  ${SOURCE}`),
-      pointsAt: result.output.includes("pnpm test:real falsify"),
+      pointsAt: result.output.includes("moon run :test-real -- falsify"),
       crashed: /EACCES|permission denied/i.test(result.output),
       installed: stubLog().includes("ARGS: install"),
       leftovers: leftovers(),

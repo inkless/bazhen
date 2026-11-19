@@ -14,14 +14,14 @@ describe("the disposable-host check", () => {
   });
 
   it("refuses to start a suite off a disposable host, naming the command to use", () => {
-    expect(() => requireDisposableHost(false)).toThrow("pnpm test:real");
+    expect(() => requireDisposableHost(false)).toThrow("moon run :test-real");
     expect(() => requireDisposableHost(true)).not.toThrow();
   });
 });
 
 describe("the signal-sandbox check", () => {
   it("refuses to start the holder suite off a sandbox, naming the command to use", () => {
-    expect(() => requireSignalSandbox(false)).toThrow("pnpm test:real holder");
+    expect(() => requireSignalSandbox(false)).toThrow("moon run :test-real -- holder");
     expect(() => requireSignalSandbox(true)).not.toThrow();
   });
 });

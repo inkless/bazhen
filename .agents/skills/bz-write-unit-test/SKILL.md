@@ -20,10 +20,10 @@ check rejects a pull request whose new test passes without your change.
    - a state table: `packages/core/src/machine.property.test.ts`, which uses fast-check;
    - HTTP: `apps/daemon/src/http/app.test.ts` (`app.request` with `host: "127.0.0.1:7900"`);
    - SQLite: `apps/daemon/src/store/store.medium.test.ts`.
-4. **Run it and watch it fail:** `pnpm test:file <path> -t "<name>"`. It must fail on an
+4. **Run it and watch it fail:** `moon run :test-file -- <path> -t "<name>"`. It must fail on an
    assertion. A failure to import or compile proves nothing.
-5. Implement until it passes, then run `pnpm check`.
-6. **Commit, then run `pnpm test:falsify` before pushing.** It reruns the branch's new tests
+5. Implement until it passes, then run `moon run :check`.
+6. **Commit, then run `moon run :test-falsify` before pushing.** It reruns the branch's new tests
    against the source at the branch's base, as CI does on the pull request:
    - **SURVIVED** — the test doesn't depend on your change. Fix the assertion.
    - **INVALID** (a brand-new function) — break your code by hand, confirm the test fails on its
@@ -36,7 +36,7 @@ check rejects a pull request whose new test passes without your change.
 - [ ] The file name matches the size, and lint is clean.
 - [ ] Each test name states one behaviour.
 - [ ] I watched it fail on an assertion before the implementation existed, or recorded a control.
-- [ ] `pnpm check` passes.
+- [ ] `moon run :check` passes.
 
 ## Gotchas
 
@@ -46,7 +46,7 @@ check rejects a pull request whose new test passes without your change.
   tests, or move the logic into a helper at module scope, as the property test does.
 - **No mocks of code we own.** Use a fake object built from the real interface, like the
   `runtime` fake in `app.test.ts`. No fake timers: pass time and IDs in.
-- **A source file with runtime code needs a sibling test.** `pnpm check` names any that lack one.
+- **A source file with runtime code needs a sibling test.** `moon run :check` names any that lack one.
 
 ## Rationalizations
 

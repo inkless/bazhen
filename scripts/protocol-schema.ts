@@ -91,7 +91,7 @@ const RUST_ID = "crates/bazhen-protocol/src/id.rs";
 export function rustProtocolId(id: string): string {
   return [
     "//! The protocol this build speaks, as `protocolId()` in packages/protocol/src/id.ts hashes it.",
-    "//! Written by `pnpm schema`, and held to it by `pnpm schema --check`: don't edit it by hand.",
+    "//! Written by `moon run :schema`, and held to it by `moon run :schema -- --check`: don't edit it by hand.",
     "",
     "/// The SHA-256, in hex, of every file in packages/protocol/schema/, each `name\\0content\\0` in",
     "/// name order. A daemon that answers with another is another build, to restart.",
@@ -127,7 +127,7 @@ if (isMain(import.meta)) {
     if (check) {
       if (stale.length > 0) {
         console.error(
-          `packages/protocol/${relative} is stale (${stale.join(", ")}): run \`pnpm schema\` and commit the result.`,
+          `packages/protocol/${relative} is stale (${stale.join(", ")}): run \`moon run :schema\` and commit the result.`,
         );
         failed = true;
       }
@@ -143,7 +143,7 @@ if (isMain(import.meta)) {
   const rust = rustProtocolId(await protocolId());
   if (trackedFile(RUST_ID) !== rust) {
     if (check) {
-      console.error(`${RUST_ID} is stale: run \`pnpm schema\` and commit the result.`);
+      console.error(`${RUST_ID} is stale: run \`moon run :schema\` and commit the result.`);
       failed = true;
     } else {
       writeFileSync(join(root, "../..", RUST_ID), rust);

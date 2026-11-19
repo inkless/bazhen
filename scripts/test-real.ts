@@ -1,4 +1,4 @@
-// `pnpm test:real [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`: the
+// `moon run :test-real -- [suite…] [--base <ref>] [--group <g> [--shard k/n] [--only <regex>]]`: the
 // real-tmux suites, the holder's mutants by group (scripts/holder-mutants.ts), and the soak's
 // short runs (scripts/soak.ts), in a container built from this worktree
 // (docs/standards/testing.md). The build context is a fresh repository holding HEAD and falsify's
@@ -51,7 +51,7 @@ const BASE_REF = "refs/remotes/origin/main";
 
 const isSuite = (name: string): name is Suite => Object.hasOwn(SUITES, name);
 const USAGE =
-  `usage: pnpm test:real [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
+  `usage: moon run :test-real -- [${Object.keys(SUITES).join("|")}]… [--base <ref>] ` +
   "[--group <g> [--shard k/n] [--only <regex>]]";
 
 /**

@@ -64,7 +64,7 @@ import {
 } from "./fixture-coverage.ts";
 
 /*
- * The API messages another language's client speaks, as fixtures `pnpm schema` writes to
+ * The API messages another language's client speaks, as fixtures `moon run :schema` writes to
  * `fixtures/api/`: for each, examples as they arrive on the wire, each with what the protocol
  * makes of it (defaults filled in, unknown fields dropped). A client's types decode the wire form
  * and encode back the parsed one. Between them the examples exercise every property, optional,

@@ -1,4 +1,4 @@
-//! The config against what `pnpm schema` records of the TypeScript daemon's
+//! The config against what `moon run :schema` records of the TypeScript daemon's
 //! (packages/protocol/fixtures/config/): every case's file and environment, read to the same
 //! settings or refused with the same words. A case that reaches the LAN listener is refused here
 //! instead, until this daemon has one.

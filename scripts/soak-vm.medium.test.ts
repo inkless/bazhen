@@ -159,10 +159,10 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
   it("prints its usage for help, and fails with it for no command or an unknown one", () => {
     expect(run(["help"])).toMatchObject({
       status: 0,
-      stdout: expect.stringContaining("usage: pnpm soak:vm"),
+      stdout: expect.stringContaining("usage: moon run :soak-vm"),
       calls: [],
     });
-    expect(run([])).toMatchObject({ ...refused("usage: pnpm soak:vm"), calls: [] });
+    expect(run([])).toMatchObject({ ...refused("usage: moon run :soak-vm"), calls: [] });
     expect(run(["frobnicate"])).toMatchObject({
       ...refused("unknown command 'frobnicate'"),
       calls: [],
@@ -200,9 +200,9 @@ describe.runIf(process.platform === "linux")("soak-vm.sh", () => {
   ])("start %j starts the %s soak in the VM, named for its profile", (args, profile) => {
     const result = run(["start", ...args, "--hours", "48"], ours);
     expect(result.status).toBe(0);
-    const start = result.ran.find((remote) => remote.includes("pnpm soak"));
+    const start = result.ran.find((remote) => remote.includes("moon run :soak"));
     expect(start).toMatch(new RegExp(` ${profile} 48 $`));
-    expect(start).toContain('pnpm soak --profile "$profile" --hours "$hours"');
+    expect(start).toContain('moon run :soak -- --profile "$profile" --hours "$hours"');
   });
 
   it.each(BAD_COMMITS)("refuses --commit %j", (commit) => {

@@ -126,10 +126,10 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Round $round: PROPTEST_RNG_SEED=$proptest_seed FC_SEED=$fc_seed"
             replay=""
-            if ! PROPTEST_RNG_SEED="$proptest_seed" pnpm test:rust; then
-              replay="PROPTEST_RNG_SEED=$proptest_seed pnpm test:rust"
-            elif ! FC_SEED="$fc_seed" pnpm test; then
-              replay="FC_SEED=$fc_seed pnpm test"
+            if ! PROPTEST_RNG_SEED="$proptest_seed" moon run :test-rust; then
+              replay="PROPTEST_RNG_SEED=$proptest_seed moon run :test-rust"
+            elif ! FC_SEED="$fc_seed" moon run :test; then
+              replay="FC_SEED=$fc_seed moon run :test"
             fi
             echo "::endgroup::"
             if [ -n "$replay" ]; then
