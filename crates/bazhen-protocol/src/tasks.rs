@@ -5,6 +5,24 @@ use serde::{Deserialize, Serialize};
 use crate::agents::HarnessId;
 use crate::ids::{AgentId, AssignmentId, AttentionId, MessageId, TaskId};
 use crate::names::{AgentName, AgentRef, Role};
+use crate::text::trim;
+
+/// The longest title a task holds, in UTF-16 code units, as zod counts a string's length.
+pub const TASK_TITLE_MAX: usize = 200;
+/// The longest brief a task holds, counted as a title is.
+pub const TASK_BRIEF_MAX: usize = 20_000;
+
+/// Whether `title` is one a task is stored with: trimmed, and neither empty nor too long.
+#[must_use]
+pub fn is_task_title(title: &str) -> bool {
+    trim(title) == title && (1..=TASK_TITLE_MAX).contains(&title.encode_utf16().count())
+}
+
+/// Whether `brief` is one a task is stored with: neither empty nor too long.
+#[must_use]
+pub fn is_task_brief(brief: &str) -> bool {
+    (1..=TASK_BRIEF_MAX).contains(&brief.encode_utf16().count())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,4 +287,35 @@ pub struct BroadcastMessageResponse {
     /// Assignees that take no mail now.
     pub skipped: Vec<Skipped>,
     pub event_ids: Vec<u64>,
+}
+
+#[cfg(test)]
+mod stored_text {
+    use super::*;
+
+    #[test]
+    fn takes_a_title_trimmed_and_up_to_200_utf16_units_as_zod_counts_them() {
+        let astral = "\u{1f600}".repeat(100);
+        let verdicts = [
+            is_task_title("Ship"),
+            is_task_title(&astral),
+            is_task_title(&format!("{astral}a")),
+            is_task_title(" Ship"),
+            is_task_title("Ship\u{feff}"),
+            is_task_title("Ship\u{85}"),
+            is_task_title(""),
+        ];
+        assert_eq!(verdicts, [true, true, false, false, false, true, false]);
+    }
+
+    #[test]
+    fn takes_a_brief_up_to_20000_utf16_units_untrimmed() {
+        let verdicts = [
+            is_task_brief(" "),
+            is_task_brief(&"b".repeat(TASK_BRIEF_MAX)),
+            is_task_brief(&"b".repeat(TASK_BRIEF_MAX + 1)),
+            is_task_brief(""),
+        ];
+        assert_eq!(verdicts, [true, true, false, false]);
+    }
 }

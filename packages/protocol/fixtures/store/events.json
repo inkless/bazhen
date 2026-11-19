@@ -1,0 +1,663 @@
+{
+  "registry": [
+    {
+      "type": "environment.registered",
+      "entity": "environment",
+      "streamed": [
+        "kind"
+      ]
+    },
+    {
+      "type": "environment.harness_version",
+      "entity": "environment",
+      "streamed": [
+        "harness",
+        "version",
+        "previous"
+      ]
+    },
+    {
+      "type": "agent.launched",
+      "entity": "agent",
+      "streamed": [
+        "environmentId",
+        "harness",
+        "project",
+        "cwd",
+        "terminalId",
+        "launchedBy",
+        "name",
+        "nameOrdinal",
+        "runtime",
+        "role",
+        "promptHash",
+        "compactWindowTokens"
+      ]
+    },
+    {
+      "type": "agent.renamed",
+      "entity": "agent",
+      "streamed": [
+        "name",
+        "previous"
+      ]
+    },
+    {
+      "type": "agent.running",
+      "entity": "agent",
+      "streamed": [
+        "externalRef",
+        "runtimeRef",
+        "theme",
+        "harnessName"
+      ]
+    },
+    {
+      "type": "agent.ready",
+      "entity": "agent",
+      "streamed": [
+        "sign"
+      ]
+    },
+    {
+      "type": "agent.failed",
+      "entity": "agent",
+      "streamed": [
+        "reason",
+        "detail"
+      ]
+    },
+    {
+      "type": "agent.lost",
+      "entity": "agent",
+      "streamed": []
+    },
+    {
+      "type": "agent.process_adopted",
+      "entity": "agent",
+      "streamed": [
+        "runtimeRef"
+      ]
+    },
+    {
+      "type": "agent.respawn_requested",
+      "entity": "agent",
+      "streamed": []
+    },
+    {
+      "type": "agent.respawned",
+      "entity": "agent",
+      "streamed": [
+        "externalRef",
+        "runtimeRef",
+        "theme",
+        "harnessName",
+        "promptHash"
+      ]
+    },
+    {
+      "type": "agent.respawn_rejected",
+      "entity": "agent",
+      "streamed": [
+        "reason",
+        "detail"
+      ]
+    },
+    {
+      "type": "agent.relaunch_requested",
+      "entity": "agent",
+      "streamed": [
+        "terminalId",
+        "generation",
+        "fresh",
+        "runtime"
+      ]
+    },
+    {
+      "type": "agent.relaunched",
+      "entity": "agent",
+      "streamed": [
+        "externalRef",
+        "runtimeRef",
+        "theme",
+        "harnessName",
+        "promptHash"
+      ]
+    },
+    {
+      "type": "agent.relaunch_rejected",
+      "entity": "agent",
+      "streamed": [
+        "reason",
+        "detail"
+      ]
+    },
+    {
+      "type": "agent.external_ref_updated",
+      "entity": "agent",
+      "streamed": [
+        "externalRef"
+      ]
+    },
+    {
+      "type": "agent.transcript_recorded",
+      "entity": "agent",
+      "streamed": [
+        "sessionId"
+      ]
+    },
+    {
+      "type": "agent.signalled",
+      "entity": "agent",
+      "streamed": [
+        "signal"
+      ]
+    },
+    {
+      "type": "agent.activity",
+      "entity": "agent",
+      "streamed": [
+        "value",
+        "source",
+        "confidence",
+        "observedAt",
+        "detail",
+        "resetsAt"
+      ]
+    },
+    {
+      "type": "agent.usage",
+      "entity": "agent",
+      "streamed": [
+        "model",
+        "contextUsedPercent",
+        "contextWindowTokens",
+        "limits"
+      ]
+    },
+    {
+      "type": "agent.compacted",
+      "entity": "agent",
+      "streamed": [
+        "sign",
+        "before",
+        "hook"
+      ]
+    },
+    {
+      "type": "agent.exited",
+      "entity": "agent",
+      "streamed": [
+        "exit"
+      ]
+    },
+    {
+      "type": "agent.closing",
+      "entity": "agent",
+      "streamed": []
+    },
+    {
+      "type": "agent.closed",
+      "entity": "agent",
+      "streamed": []
+    },
+    {
+      "type": "terminal.opened",
+      "entity": "terminal",
+      "streamed": [
+        "environmentId",
+        "cwd",
+        "linkedAgentId",
+        "theme",
+        "restartOf",
+        "runtime"
+      ]
+    },
+    {
+      "type": "terminal.running",
+      "entity": "terminal",
+      "streamed": [
+        "runtimeRef"
+      ]
+    },
+    {
+      "type": "terminal.failed",
+      "entity": "terminal",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "terminal.process_adopted",
+      "entity": "terminal",
+      "streamed": [
+        "runtimeRef"
+      ]
+    },
+    {
+      "type": "terminal.lost",
+      "entity": "terminal",
+      "streamed": []
+    },
+    {
+      "type": "terminal.closing",
+      "entity": "terminal",
+      "streamed": []
+    },
+    {
+      "type": "terminal.closed",
+      "entity": "terminal",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "terminal.foreground_changed",
+      "entity": "terminal",
+      "streamed": [
+        "command"
+      ]
+    },
+    {
+      "type": "terminal.needs_restart",
+      "entity": "terminal",
+      "streamed": [
+        "protocol"
+      ]
+    },
+    {
+      "type": "terminal.restart_cleared",
+      "entity": "terminal",
+      "streamed": []
+    },
+    {
+      "type": "terminal.unlinked",
+      "entity": "terminal",
+      "streamed": []
+    },
+    {
+      "type": "terminal.renamed",
+      "entity": "terminal",
+      "streamed": [
+        "name"
+      ]
+    },
+    {
+      "type": "attachment.started",
+      "entity": "attachment",
+      "streamed": [
+        "terminalId",
+        "mode"
+      ]
+    },
+    {
+      "type": "attachment.ended",
+      "entity": "attachment",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "mailbox.queued",
+      "entity": "message",
+      "streamed": [
+        "agentId",
+        "from"
+      ]
+    },
+    {
+      "type": "mailbox.offered",
+      "entity": "message",
+      "streamed": [
+        "promptId"
+      ]
+    },
+    {
+      "type": "mailbox.emitted",
+      "entity": "message",
+      "streamed": []
+    },
+    {
+      "type": "mailbox.seen",
+      "entity": "message",
+      "streamed": [
+        "promptId"
+      ]
+    },
+    {
+      "type": "mailbox.delivered",
+      "entity": "message",
+      "streamed": []
+    },
+    {
+      "type": "mailbox.accepted",
+      "entity": "message",
+      "streamed": [
+        "offline"
+      ]
+    },
+    {
+      "type": "mailbox.undeliverable",
+      "entity": "message",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "message.observed",
+      "entity": "observed_message",
+      "streamed": [
+        "from",
+        "to",
+        "summary",
+        "accepted",
+        "toolUseId"
+      ]
+    },
+    {
+      "type": "mailbox.requeued",
+      "entity": "message",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "attention.opened",
+      "entity": "attention",
+      "streamed": [
+        "agentId",
+        "summary",
+        "kind",
+        "taskId",
+        "messageId",
+        "toolUseId",
+        "mainAgent"
+      ]
+    },
+    {
+      "type": "attention.answered",
+      "entity": "attention",
+      "streamed": [
+        "decision"
+      ]
+    },
+    {
+      "type": "attention.closed",
+      "entity": "attention",
+      "streamed": [
+        "reason"
+      ]
+    },
+    {
+      "type": "device.paired",
+      "entity": "device",
+      "streamed": [
+        "name"
+      ]
+    },
+    {
+      "type": "device.revoked",
+      "entity": "device",
+      "streamed": []
+    },
+    {
+      "type": "notice.opened",
+      "entity": "notice",
+      "streamed": [
+        "kind",
+        "summary",
+        "device"
+      ]
+    },
+    {
+      "type": "notice.closed",
+      "entity": "notice",
+      "streamed": [
+        "reason",
+        "by",
+        "fromDevice"
+      ]
+    },
+    {
+      "type": "lease.granted",
+      "entity": "terminal",
+      "streamed": [
+        "attachmentId",
+        "epoch"
+      ]
+    },
+    {
+      "type": "task.created",
+      "entity": "task",
+      "streamed": [
+        "title",
+        "ownerAgentId",
+        "parentTaskId",
+        "delegatedFrom"
+      ]
+    },
+    {
+      "type": "task.finished",
+      "entity": "task",
+      "streamed": [
+        "outcome"
+      ]
+    },
+    {
+      "type": "task.owner_changed",
+      "entity": "task",
+      "streamed": [
+        "ownerAgentId",
+        "delegatedFrom"
+      ]
+    },
+    {
+      "type": "task.noted",
+      "entity": "task",
+      "streamed": [
+        "handoff",
+        "role"
+      ]
+    },
+    {
+      "type": "assignment.granted",
+      "entity": "assignment",
+      "streamed": [
+        "taskId",
+        "agentId",
+        "role",
+        "parentAssignmentId"
+      ]
+    },
+    {
+      "type": "assignment.ended",
+      "entity": "assignment",
+      "streamed": [
+        "reason"
+      ]
+    }
+  ],
+  "log": {
+    "requests": [
+      {
+        "idempotencyKey": "create parent",
+        "title": "  Ship the port ",
+        "brief": "all"
+      },
+      {
+        "idempotencyKey": "create child",
+        "title": "Events",
+        "brief": "the log",
+        "parentTaskId": "task_01900000000070008000000000000002"
+      }
+    ],
+    "responses": [
+      {
+        "taskId": "task_01900000000070008000000000000002",
+        "assignmentId": null,
+        "eventIds": [
+          1
+        ]
+      },
+      {
+        "taskId": "task_01900000000070008000000000000003",
+        "assignmentId": null,
+        "eventIds": [
+          2
+        ]
+      }
+    ],
+    "tables": {
+      "host": [
+        {
+          "id": "host_01900000000070008000000000000001",
+          "created_at": "2026-11-01T00:00:00.000Z"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "host_id": "host_01900000000070008000000000000001",
+          "ts": "2026-11-01T00:00:01.000Z",
+          "type": "task.created",
+          "entity_type": "task",
+          "entity_id": "task_01900000000070008000000000000002",
+          "actor": "human",
+          "causation_id": null,
+          "correlation_id": null,
+          "payload": "{\"title\":\"Ship the port\",\"brief\":\"all\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}"
+        },
+        {
+          "id": 2,
+          "host_id": "host_01900000000070008000000000000001",
+          "ts": "2026-11-01T00:00:02.000Z",
+          "type": "task.created",
+          "entity_type": "task",
+          "entity_id": "task_01900000000070008000000000000003",
+          "actor": "human",
+          "causation_id": null,
+          "correlation_id": null,
+          "payload": "{\"title\":\"Events\",\"brief\":\"the log\",\"ownerAgentId\":null,\"parentTaskId\":\"task_01900000000070008000000000000002\",\"delegatedFrom\":null}"
+        },
+        {
+          "id": 3,
+          "host_id": "host_01900000000070008000000000000001",
+          "ts": "2026-11-01T00:00:03.000Z",
+          "type": "task.noted",
+          "entity_type": "task",
+          "entity_id": "task_01900000000070008000000000000002",
+          "actor": "human",
+          "causation_id": null,
+          "correlation_id": null,
+          "payload": "{\"text\":\"half done\",\"handoff\":false,\"role\":null}"
+        },
+        {
+          "id": 4,
+          "host_id": "host_01900000000070008000000000000001",
+          "ts": "2026-11-01T00:00:04.000Z",
+          "type": "task.finished",
+          "entity_type": "task",
+          "entity_id": "task_01900000000070008000000000000003",
+          "actor": "human",
+          "causation_id": null,
+          "correlation_id": null,
+          "payload": "{\"outcome\":\"done\",\"note\":\"merged\"}"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_01900000000070008000000000000002",
+          "title": "Ship the port",
+          "brief": "all",
+          "state": "open",
+          "owner_agent_id": null,
+          "parent_task_id": null,
+          "note": null,
+          "created_event_id": 1,
+          "updated_event_id": 1,
+          "delegated_from": null
+        },
+        {
+          "id": "task_01900000000070008000000000000003",
+          "title": "Events",
+          "brief": "the log",
+          "state": "done",
+          "owner_agent_id": null,
+          "parent_task_id": "task_01900000000070008000000000000002",
+          "note": "merged",
+          "created_event_id": 2,
+          "updated_event_id": 4,
+          "delegated_from": null
+        }
+      ],
+      "task_notes": [
+        {
+          "event_id": 3,
+          "task_id": "task_01900000000070008000000000000002",
+          "agent_session_id": null,
+          "author_role": null,
+          "text": "half done",
+          "handoff": 0
+        }
+      ],
+      "idempotency_keys": [
+        {
+          "key": "create parent",
+          "response": "{\"request\":\"{\\\"caller\\\":null,\\\"title\\\":\\\"Ship the port\\\",\\\"brief\\\":\\\"all\\\"}\",\"response\":{\"taskId\":\"task_01900000000070008000000000000002\",\"assignmentId\":null,\"eventIds\":[1]}}"
+        },
+        {
+          "key": "create child",
+          "response": "{\"request\":\"{\\\"caller\\\":null,\\\"title\\\":\\\"Events\\\",\\\"brief\\\":\\\"the log\\\",\\\"parentTaskId\\\":\\\"task_01900000000070008000000000000002\\\"}\",\"response\":{\"taskId\":\"task_01900000000070008000000000000003\",\"assignmentId\":null,\"eventIds\":[2]}}"
+        },
+        {
+          "key": "note",
+          "response": "{\"request\":\"{\\\"caller\\\":null,\\\"taskId\\\":\\\"task_01900000000070008000000000000002\\\",\\\"text\\\":\\\"half done\\\",\\\"handoff\\\":false}\",\"response\":{\"eventIds\":[3]}}"
+        },
+        {
+          "key": "finish",
+          "response": "{\"request\":\"{\\\"caller\\\":null,\\\"taskId\\\":\\\"task_01900000000070008000000000000003\\\",\\\"outcome\\\":\\\"done\\\",\\\"note\\\":\\\"merged\\\",\\\"cascade\\\":false}\",\"response\":{\"eventIds\":[4]}}"
+        }
+      ],
+      "event_log": [
+        {
+          "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "pruned_through": 0
+        }
+      ]
+    },
+    "frames": [
+      "{\"type\":\"event\",\"event\":{\"id\":1,\"ts\":\"2026-11-01T00:00:01.000Z\",\"type\":\"task.created\",\"entityType\":\"task\",\"entityId\":\"task_01900000000070008000000000000002\",\"actor\":\"human\",\"causationId\":null,\"correlationId\":null,\"payload\":{\"title\":\"Ship the port\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}}}",
+      "{\"type\":\"event\",\"event\":{\"id\":2,\"ts\":\"2026-11-01T00:00:02.000Z\",\"type\":\"task.created\",\"entityType\":\"task\",\"entityId\":\"task_01900000000070008000000000000003\",\"actor\":\"human\",\"causationId\":null,\"correlationId\":null,\"payload\":{\"title\":\"Events\",\"ownerAgentId\":null,\"parentTaskId\":\"task_01900000000070008000000000000002\",\"delegatedFrom\":null}}}",
+      "{\"type\":\"event\",\"event\":{\"id\":3,\"ts\":\"2026-11-01T00:00:03.000Z\",\"type\":\"task.noted\",\"entityType\":\"task\",\"entityId\":\"task_01900000000070008000000000000002\",\"actor\":\"human\",\"causationId\":null,\"correlationId\":null,\"payload\":{\"handoff\":false,\"role\":null}}}",
+      "{\"type\":\"event\",\"event\":{\"id\":4,\"ts\":\"2026-11-01T00:00:04.000Z\",\"type\":\"task.finished\",\"entityType\":\"task\",\"entityId\":\"task_01900000000070008000000000000003\",\"actor\":\"human\",\"causationId\":null,\"correlationId\":null,\"payload\":{\"outcome\":\"done\"}}}"
+    ],
+    "snapshot": {
+      "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "eventId": 4,
+      "environments": [],
+      "agents": [],
+      "attention": [],
+      "messages": [],
+      "shells": [],
+      "tasks": [
+        {
+          "id": "task_01900000000070008000000000000002",
+          "title": "Ship the port",
+          "state": "open",
+          "ownerAgentId": null,
+          "parentTaskId": null
+        },
+        {
+          "id": "task_01900000000070008000000000000003",
+          "title": "Events",
+          "state": "done",
+          "ownerAgentId": null,
+          "parentTaskId": "task_01900000000070008000000000000002"
+        }
+      ],
+      "assignments": [],
+      "notices": [],
+      "observed": []
+    }
+  }
+}

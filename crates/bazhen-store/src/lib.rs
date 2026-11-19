@@ -2,19 +2,32 @@
 //! schema the TypeScript daemon gives it (`apps/daemon/src/store/store.ts`), so either daemon opens
 //! the other's database. Blocking, as `SQLite` is: an async caller runs it on a thread of its own.
 
+mod events;
+#[cfg(test)]
+mod events_fixture;
 #[cfg(test)]
 mod fixture;
 mod migrations;
 mod private;
+mod projections;
+mod snapshot;
+#[cfg(test)]
+mod testing;
 
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use bazhen_protocol::ids::HostId;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
+/// Every event type, with the payload keys a frame of it keeps.
+pub use bazhen_protocol::events::EVENT_KINDS;
+pub use events::{AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, Writer};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
+pub use snapshot::SnapshotError;
 
 /// What `schema_version` holds once migrations are named: past every version a build that
 /// numbered them supports, so such a build refuses the database rather than re-run its first.
@@ -57,6 +70,8 @@ pub struct Store {
     db: Connection,
     host: Option<HostId>,
     missed: Vec<String>,
+    /// Every event a projection still points at; retention keeps them, as it keeps projections.
+    referenced: String,
 }
 
 impl Store {
@@ -88,10 +103,79 @@ impl Store {
             db,
             host: None,
             missed: Vec::new(),
+            referenced: String::new(),
         };
         store.migrate(migrations)?;
         store.host = store.ensure_host()?;
+        store.referenced = events::referenced_events(&store.db)?;
         Ok(store)
+    }
+
+    /// Reads of the database on this connection.
+    pub fn reads(&self) -> Reads<'_> {
+        Reads(&self.db)
+    }
+
+    /// Runs `write` in one transaction, committed only when it answers `Ok`.
+    ///
+    /// # Errors
+    ///
+    /// `write`'s, or `SQLite`'s beginning or committing.
+    pub fn write<T, E: From<rusqlite::Error>>(
+        &mut self,
+        write: impl FnOnce(&Writer<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let writer = Writer {
+            tx: self
+                .db
+                .transaction_with_behavior(TransactionBehavior::Immediate)?,
+            host: self.host.as_ref().map(HostId::as_str),
+        };
+        let out = write(&writer)?;
+        writer.tx.commit()?;
+        Ok(out)
+    }
+
+    /// Runs a mutation once per idempotency key: a repeat of the same `request` gets the first
+    /// answer, and the same key for another request is refused. `request` is the request's JSON
+    /// text, as the TypeScript daemon writes it, so a key either daemon recorded replays in the
+    /// other. The answer is recorded in the transaction that makes the mutation.
+    ///
+    /// # Errors
+    ///
+    /// `mutate`'s, or [`OnceError`] as `E`.
+    pub fn once<R, E>(
+        &mut self,
+        key: &str,
+        request: &str,
+        mutate: impl FnOnce(&Writer<'_>) -> Result<R, E>,
+    ) -> Result<R, E>
+    where
+        R: Serialize + DeserializeOwned,
+        E: From<OnceError> + From<rusqlite::Error>,
+    {
+        self.write(|writer| {
+            if let Some(prior) = events::replay(writer.connection(), key, request)? {
+                return Ok(prior);
+            }
+            let response = mutate(writer)?;
+            events::answered(writer.connection(), key, request, &response)?;
+            Ok(response)
+        })
+    }
+
+    /// Retires up to `limit` events recorded before `cutoff`, and answers whether more may wait.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s; nothing is retired then.
+    pub fn prune_batch(&mut self, cutoff: jiff::Timestamp, limit: u32) -> rusqlite::Result<bool> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let more = events::prune_batch(&tx, &self.referenced, &iso(cutoff), limit)?;
+        tx.commit()?;
+        Ok(more)
     }
 
     /// This installation's host id, minted on first open; none while the schema has no host.
@@ -175,6 +259,33 @@ impl Store {
     }
 }
 
+/// A connection that only reads a database the daemon's [`Store`] opened, for reads that mustn't
+/// wait behind its writes.
+#[derive(Debug)]
+pub struct Reader {
+    db: Connection,
+}
+
+impl Reader {
+    /// A read-only connection to the database at `path`.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn open(path: &Path) -> rusqlite::Result<Self> {
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Self { db })
+    }
+
+    pub fn reads(&self) -> Reads<'_> {
+        Reads(&self.db)
+    }
+}
+
 fn applied(db: &Connection) -> Result<BTreeSet<String>, rusqlite::Error> {
     db.prepare("SELECT name FROM migrations")?
         .query_map((), |row| row.get(0))?
@@ -236,8 +347,14 @@ fn urandom() -> std::io::Result<[u8; 16]> {
 }
 
 /// Now, as `new Date().toISOString()` writes it.
-fn now() -> String {
-    format!("{:.3}", jiff::Timestamp::now())
+pub(crate) fn now() -> String {
+    iso(jiff::Timestamp::now())
+}
+
+/// `at` as `Date.prototype.toISOString` writes it, which is how every stored time is written, so
+/// two compare as text as they do as times.
+fn iso(at: jiff::Timestamp) -> String {
+    format!("{at:.3}")
 }
 
 fn now_ms() -> u64 {

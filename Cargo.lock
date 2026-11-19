@@ -244,8 +244,10 @@ dependencies = [
  "bazhen-protocol",
  "jiff",
  "libc",
+ "proptest",
  "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "thiserror",
 ]

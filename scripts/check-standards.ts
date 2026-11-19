@@ -723,6 +723,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
+  "crates/bazhen-store/src/events.rs::StoredEvent::frame": "frame",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::push": "frame",
@@ -748,6 +749,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-store/src/lib.rs::Reader::reads":
+    "wraps its connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/config.rs::read_config_file":
     "reads config.toml only to hand its bytes to parse_config, which its config target fuzzes",
   "crates/bazhen-xtask/src/cargo_config.rs::config_failures":
