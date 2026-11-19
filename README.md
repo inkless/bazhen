@@ -11,6 +11,8 @@ client. Agents, tasks, and orchestration come later.
 
 - Node.js 24 or newer (development uses the version `.nvmrc` pins)
 - pnpm 12 (pinned through `packageManager`)
+- [proto](https://moonrepo.dev/docs/proto/install), which installs moon, the repository's task
+  runner, at the version `.prototools` pins
 - tmux 3.x, only for terminals on tmux (`runtime.default = "tmux"`); 3.5 or later avoids a crash
   Bazhen can only work around before it ([docs/tmux.md](docs/tmux.md))
 - Rust through rustup, which installs the toolchain `rust-toolchain.toml` pins on first use, and
@@ -18,6 +20,19 @@ client. Agents, tasks, and orchestration come later.
   `cargo install --locked cargo-nextest@0.9.152 cargo-deny@0.20.2 cargo-mutants@27.1.0`
 - macOS or Linux
 - For the tests that run real tmux, Docker, or Podman with its `docker` shim (`moon run :test-real`)
+
+## Setup
+
+Install proto once per machine, then, in the checkout:
+
+```sh
+proto install                   # moon, at the version .prototools pins
+pnpm install --frozen-lockfile  # the dependencies, and the git hooks
+moon run :check                 # every check CI runs on a workstation
+```
+
+Every command is a moon task: `moon tasks` lists them, and `moon run :<task> -- <args>` passes
+arguments on to the task's command.
 
 ## Commands
 

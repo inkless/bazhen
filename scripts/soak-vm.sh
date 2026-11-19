@@ -201,7 +201,7 @@ vol_sha256() {
 # Prints the volume's name.
 ensure_base_volume() {
   [[ -f $CLOUD_KEYRING ]] || die "no $CLOUD_KEYRING to check the cloud image's signature with; \
-it comes with $KEYRING_PACKAGE: run moon run :soak-vm -- setup, or sudo apt-get install $KEYRING_PACKAGE"
+it comes with $KEYRING_PACKAGE: run 'moon run :soak-vm -- setup', or sudo apt-get install $KEYRING_PACKAGE"
   need gpgv
   mkdir -p "$CACHE"
   log "Fetching $IMG_BASE_URL/SHA256SUMS and its signature"
@@ -454,7 +454,7 @@ provision() {
     2) warn "cloud-init finished with recoverable errors; continuing" ;;
     *) die "cloud-init failed in the VM (exit $rc); see: moon run :soak-vm -- ssh sudo cloud-init status --long" ;;
   esac
-  log "Provisioning the VM at $commit (apt, rustup, clone, Node, pnpm, install, build)"
+  log "Provisioning the VM at $commit (apt, rustup, clone, Node, pnpm, moon, install, build)"
   vm_run "$PROVISION" "$commit" "$REPO_URL"
 }
 
@@ -527,6 +527,12 @@ pnpm_version=$(sed -n "s/^ *\"packageManager\": *\"pnpm@\([0-9][0-9.]*\)\".*/\1/
 if [[ "$(pnpm --version 2>/dev/null || true)" != "$pnpm_version" ]]; then
   say "pnpm $pnpm_version"
   sudo npm install -g --silent "pnpm@$pnpm_version"
+fi
+moon_version=$(sed -n 's/^moon = "\([0-9][0-9.]*\)"$/\1/p' .prototools)
+[[ -n "$moon_version" ]] || { echo "no exact moon version in .prototools" >&2; exit 1; }
+if [[ "$(moon --version 2>/dev/null || true)" != "moon $moon_version" ]]; then
+  say "moon $moon_version"
+  sudo npm install -g --silent "@moonrepo/cli@$moon_version"
 fi
 
 say "pnpm install --frozen-lockfile"

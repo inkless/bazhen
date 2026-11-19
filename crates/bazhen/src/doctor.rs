@@ -111,7 +111,7 @@ pub(crate) fn lines(d: &DoctorResponse, macos: bool) -> Vec<String> {
         ));
         if macos && n.notifier.is_none() {
             out.push(
-                "  warning: Bazhen.app is not built; run moon run :build-notify for macOS notifications"
+                "  warning: Bazhen.app is not built; run `moon run :build-notify` for macOS notifications"
                     .to_owned(),
             );
         }
@@ -191,7 +191,7 @@ fn agent_cli_lines(cli: &AgentCli, login_shell: bool) -> Vec<String> {
             let fix = match built {
                 Some(built) => format!("link {built} into a directory on it"),
                 None => {
-                    "run moon run :build, then link target/release/bazhen into a directory on it"
+                    "run `moon run :build`, then link target/release/bazhen into a directory on it"
                         .to_owned()
                 }
             };
@@ -573,7 +573,7 @@ mod tests {
         );
         assert_eq!(
             unbuilt[1],
-            "  warning: no bazhen on the PATH agents start with, so they can't run it; run moon run :build, \
+            "  warning: no bazhen on the PATH agents start with, so they can't run it; run `moon run :build`, \
              then link target/release/bazhen into a directory on it"
         );
     }

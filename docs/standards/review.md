@@ -53,8 +53,8 @@ The commit body says why the change was made, and records any `Control:` and `Re
   skills, signal chokepoints), the protocol schema drift check, lint (including the import matrix,
   the test rules and `any`), the format check, types for sources, tests and scripts, and the small
   and medium tests. CI then runs, on its disposable runners, the suites no workstation runs: the
-  holder suite and the Rust tests ignored as signalling processes (`moon run :test-holder`, `pnpm
-  test:rust:all`), and the integration, api and e2e suites; `moon run :test-real` runs each in a
+  holder suite and the Rust tests ignored as signalling processes (`moon run :test-holder`,
+  `moon run :test-rust-all`), and the integration, api and e2e suites; `moon run :test-real` runs each in a
   container. It runs on Linux, on Node 24 and 26; on macOS it runs the Rust gates (`moon run :lint-rust`,
   `moon run :test-rust-all`). A change to the holder or its tests is checked with `moon run :test-real -- holder`
   and `moon run :test-real -- rust`. On a pull request it also runs `moon run :test-falsify` against the target

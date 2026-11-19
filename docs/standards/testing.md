@@ -144,7 +144,7 @@ Every new test must be shown to fail without the code it covers.
   needs a control. A test that fails while it reaches a binary the base doesn't build is INVALID.
   Binaries that won't build fail the check, naming cargo's error. A new helper that names a binary
   goes in `RUNS_BINARIES` in `scripts/falsify.medium.test.ts`, which fails until it does. The
-  judged tests run once per vitest project, as each project's pnpm script runs them. A branch
+  judged tests run once per vitest project, as each project's moon task runs them. A branch
   that changes falsify,
   anything it imports, or how it is run is judged by the base's falsify too, in CI and in
   `moon run :test-real -- falsify` (`moon run :test-falsify-base`, `scripts/falsify-base.ts`, which runs only
@@ -388,8 +388,9 @@ libvirt, follow the steps by hand:
    enough. Keep its host from sleeping for the run's length.
 2. In the VM, install git, a C toolchain, tmux, Node at the version `.nvmrc` pins, pnpm at the
    version `packageManager` in `package.json` pins (`npm install -g pnpm@<version>`: Node 25 and
-   later ship no corepack), and rustup. Clone the repository at the commit under test, and run
-   `pnpm install --frozen-lockfile`.
+   later ship no corepack), moon at the version `.prototools` pins
+   (`npm install -g @moonrepo/cli@<version>`, or `proto install` in the clone), and rustup. Clone
+   the repository at the commit under test, and run `pnpm install --frozen-lockfile`.
 3. Mark the VM disposable, in the VM and nowhere else: `sudo touch /etc/bazhen-disposable-host`.
    The soak refuses to start without the root-owned marker.
 4. Start the run so it outlives the login session:

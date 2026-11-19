@@ -8,7 +8,8 @@ TypeScript in a pnpm workspace, and Rust in a Cargo workspace (`crates/`).
 
 - A failing check is fixed in the code, never by a suppression comment, a lowered severity or
   `--no-verify`. If the check itself is wrong, change the check, and say why in the commit
-- Call `pnpm` scripts, not the tool binaries; the scripts carry the flags the checks rely on
+- Run the moon tasks (`moon tasks` lists them), not the tool binaries; the tasks carry the flags
+  the checks rely on
 - Tests that run real tmux (integration, api, e2e, and falsify of them) run only through
   `moon run :test-real`, in a throwaway container, never on the host: one wrong socket there ends
   every tmux session on the machine. They refuse to start anywhere else

@@ -5,33 +5,33 @@ TypeScript wherever this page doesn't say otherwise. Where a check enforces a ru
 says enough to fix the problem without this page. Read this page when a rule seems wrong, or when
 a review asks for something no check covers.
 
-| Rule                                                                                                                                    | Enforced by                                           |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `moon run :check` (`scripts/check-standards.ts`)      |
-| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `moon run :check` (`scripts/check-standards.ts`)      |
-| The lint levels, test allowances, `deny.toml` and the gate scripts are the ones below, with nothing beside them to loosen them          | `moon run :check` (`scripts/check-standards.ts`)      |
-| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `moon run :lint-rust` (`-D warnings`)                 |
-| No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                               |
-| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `moon run :check` (`scripts/check-standards.ts`)      |
-| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/xtask.sh gate`, which every gate script runs |
-| Code is formatted by rustfmt's defaults                                                                                                 | `moon run :format-check`                              |
-| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `moon run :lint-rust`                                 |
-| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `moon run :lint-rust`                                 |
-| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `moon run :lint-rust`                                 |
-| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `moon run :check` (`scripts/check-standards.ts`)      |
-| Dependencies have permitted licences, no advisory, one version each                                                                     | `moon run :deny`                                      |
-| Tests run under nextest                                                                                                                 | `moon run :test-rust`                                 |
-| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`moon run :test-falsify`)        |
-| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                                |
-| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `moon run :check` (`scripts/check-standards.ts`)      |
-| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                                |
-| Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                                |
-| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `moon run :check` (`scripts/check-standards.ts`)      |
-| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `moon run :check` (`scripts/signal-paths.ts`)         |
-| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `moon run :deny`                                      |
-| A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                                |
-| API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                                |
-| Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                                |
+| Rule                                                                                                                                    | Enforced by                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Crates live only in `crates/<name>`, each taking the workspace lints                                                                    | `moon run :check` (`scripts/check-standards.ts`)    |
+| Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `moon run :check` (`scripts/check-standards.ts`)    |
+| The lint levels, test allowances, `deny.toml` and the gate tasks are the ones below, with nothing beside them to loosen them            | `moon run :check` (`scripts/check-standards.ts`)    |
+| Clippy's pedantic group and the restriction lints below fail the build                                                                  | `moon run :lint-rust` (`-D warnings`)               |
+| No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                             |
+| No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `moon run :check` (`scripts/check-standards.ts`)    |
+| The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/xtask.sh gate`, which every gate task runs |
+| Code is formatted by rustfmt's defaults                                                                                                 | `moon run :format-check`                            |
+| No `unwrap`, `expect`, `panic!` or indexing that can panic outside tests; no `todo!`, `unimplemented!`, `unreachable!` or `dbg!` at all | `moon run :lint-rust`                               |
+| No `print!` or `eprint!`: stdout and stderr may be the protocol                                                                         | `moon run :lint-rust`                               |
+| Every `unsafe` block has a `SAFETY:` comment, one unsafe operation each                                                                 | `moon run :lint-rust`                               |
+| Dependencies are pinned exactly in `[workspace.dependencies]`, and members take them from there                                         | `moon run :check` (`scripts/check-standards.ts`)    |
+| Dependencies have permitted licences, no advisory, one version each                                                                     | `moon run :deny`                                    |
+| Tests run under nextest                                                                                                                 | `moon run :test-rust`                               |
+| Every new Rust test fails on a mutant of the change, or has a `Control:` trailer naming it                                              | CI on pull requests (`moon run :test-falsify`)      |
+| Library errors are typed with thiserror; long-running processes log with tracing                                                        | review                                              |
+| Every function that takes bytes from outside is fuzzed, or listed with why it is no decoder                                             | `moon run :check` (`scripts/check-standards.ts`)    |
+| Rust components are certified black-box, by the TypeScript suites                                                                       | review                                              |
+| Crates split by dependency weight and I/O boundary, not one per module                                                                  | review                                              |
+| No crate builds an async runtime, HTTP stack or SQLite unless `HEAVY_ALLOWED` lists it                                                  | `moon run :check` (`scripts/check-standards.ts`)    |
+| Rust signals only from the chokepoint for its role; an import that hides a `kill` counts as a raw call                                  | `moon run :check` (`scripts/signal-paths.ts`)       |
+| No dependency that signals any pid through a method: the crates `deny.toml` bans (§ Signals)                                            | `moon run :deny`                                    |
+| A command line is parsed by clap's builder API: long flags only, nothing inferred                                                       | review; the api suites                              |
+| API message types are hand-written serde, held to the fixtures `packages/protocol` writes                                               | review                                              |
+| Async code owns every task, cancels through one token tree and never blocks the runtime                                                 | review                                              |
 
 ## Layout
 
@@ -194,10 +194,10 @@ under the workspace lints before taking its crate on.
 **The configuration is pinned too.** `scripts/check-standards.ts` holds `[workspace.lints]`, the
 root manifest's other tables, `rust-toolchain.toml`, `clippy.toml` and `deny.toml` as
 `WORKSPACE_LINTS`, `ROOT_TABLES`, `TOOLCHAIN_CONFIG`, `CLIPPY_CONFIG` and `DENY_CONFIG`, and the
-gate scripts in `package.json` as `RUST_GATE_SCRIPTS`, and the root `.cargo/config.toml` (the
+gate tasks in `moon.toml` as `RUST_GATE_TASKS`, and the root `.cargo/config.toml` (the
 capping test runner, which caps what `cargo run` and `cargo bench` start too) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
 when the files differ, so a lint level, the toolchain or a gate changes only in a commit that
-changes the script and this page with it. The root manifest holds no other table (a patch, an
+changes the task and this page with it. The root manifest holds no other table (a patch, an
 excluded crate, another profile), and a workspace dependency is an exact version or a path to
 `crates/<name>`. It also fails on anything that would loosen them from beside: cargo config in any
 other `.cargo` directory, whose `rustflags` can turn lints off; a second `clippy.toml` or
@@ -209,7 +209,7 @@ in `RUST_FLAG_EXEMPT` that names a flag or variable able to switch lints off (`R
 **The gates run in a clean environment.** `--cap-lints allow` switches every lint off, forbidden
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
 argument, and a cargo alias can replace `cargo clippy` with a command that passes. So each gate
-script runs `scripts/xtask.sh gate`, which builds xtask (`crates/bazhen-xtask/src/gate.rs`) and runs
+task runs `scripts/xtask.sh gate`, which builds xtask (`crates/bazhen-xtask/src/gate.rs`) and runs
 the binary itself, naming the repository it is in as the root. `cargo xtask` would start xtask
 through a target runner, and a runner set for the host's triple outranks the one the alias names:
 it could stand in for xtask, or start it with another root and `PATH`, and pass with no gate run.

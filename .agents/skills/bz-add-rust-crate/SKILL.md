@@ -29,7 +29,7 @@ boundary a check pins by path. Anything else is a module in an existing crate.
    ```
 
 3. **Record it in `Cargo.lock`:** `cargo update --workspace` adds the new member, and any new
-   dependency, without moving another version. It is called directly because no pnpm script
+   dependency, without moving another version. It is called directly because no moon task
    writes the lockfile: the gates build with `--locked`, so until then each fails with "cannot
    update the lock file".
 4. **Take dependencies from `[workspace.dependencies]`.** A new third-party one goes there, pinned
