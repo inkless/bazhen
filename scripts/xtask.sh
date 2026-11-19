@@ -39,14 +39,14 @@ for name in config config.toml; do
     refuse "the build's own cargo home has a $name."
   fi
 done
-# cargo, from `/`, with no variable from the caller but these.
+# cargo, from `/`, with no variable from the caller but these, and with Cargo.lock as it is.
 isolated() {
   (cd / && env -i PATH="${PATH:-}" HOME="$home" RUSTUP_HOME="$rustup_home" \
     RUSTUP_TOOLCHAIN="$toolchain" CARGO_HOME="$own_home" CARGO_TARGET_DIR="$build" \
-    cargo "$@" --quiet --manifest-path "$root/Cargo.toml" --package bazhen-xtask)
+    cargo "$@" --quiet --locked --manifest-path "$root/Cargo.toml" --package bazhen-xtask)
 }
 isolated clean || refuse "cargo couldn't remove the xtask it built before."
-built=$(isolated build --locked --bin bazhen-xtask --message-format=json-render-diagnostics) ||
+built=$(isolated build --bin bazhen-xtask --message-format=json-render-diagnostics) ||
   refuse "cargo couldn't build xtask."
 # The one executable the build made; a path JSON would escape isn't taken.
 bins=$(printf '%s\n' "$built" | sed -n 's/.*"executable":"\([^"\\]*\)".*/\1/p')

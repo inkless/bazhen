@@ -395,6 +395,22 @@ describe("scripts/xtask.sh's own build", () => {
     expect({ built, next: spawnSync(wrapper, ["nope"]).status }).toEqual({ built: 0, next: 2 });
   }, 600_000);
 
+  // cargo would rewrite a stale Cargo.lock while it resolves the workspace, and then build with it.
+  it("refuses a Cargo.lock that doesn't match the workspace, and leaves it as it was", () => {
+    const copy = workspace();
+    const lock = join(copy, "Cargo.lock");
+    const stale = readFileSync(lock, "utf8").replace(
+      /(name = "bazhen-xtask"\nversion = )"[^"]+"/,
+      '$1"0.0.9"',
+    );
+    writeFileSync(lock, stale);
+    const status = spawnSync(join(copy, "scripts", "xtask.sh"), ["gate", "fmt"]).status;
+    expect({ status, kept: readFileSync(lock, "utf8") === stale }).toEqual({
+      status: 1,
+      kept: true,
+    });
+  }, 600_000);
+
   it("runs only the one executable cargo names, and refuses none or two", () => {
     const runs = [[], ["/bin/true", "/bin/false"], ["/bin/true"]].map((executables) => {
       const run = spawnSync(WRAPPER, ["help"], { encoding: "utf8", env: fakeCargo(executables) });
