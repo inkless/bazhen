@@ -4,6 +4,7 @@
 //! socket with it, and the Rust daemon puts it there.
 
 use std::fmt;
+use std::path::PathBuf;
 
 use crate::sha256::{hex, sha256};
 
@@ -47,13 +48,21 @@ impl Inputs {
             xdg_state_home: var("XDG_STATE_HOME"),
             xdg_cache_home: var("XDG_CACHE_HOME"),
             xdg_runtime_dir: var("XDG_RUNTIME_DIR"),
-            home: std::env::home_dir()
-                .map_or_else(|| "/".to_owned(), |h| h.to_string_lossy().into_owned()),
+            home: node_homedir(var("HOME"), std::env::home_dir),
             tmp: node_tmpdir(var),
             uid,
             macos: std::env::consts::OS == "macos",
         }
     }
+}
+
+/// `os.homedir()`: `HOME` whenever it is set, empty too, which a home then refuses as relative;
+/// the password database's only when it isn't. std's `home_dir` would take the database's for an
+/// empty `HOME`, and so reach another home than the TypeScript daemon does.
+fn node_homedir(home: Option<String>, passwd: impl FnOnce() -> Option<PathBuf>) -> String {
+    home.unwrap_or_else(|| {
+        passwd().map_or_else(|| "/".to_owned(), |h| h.to_string_lossy().into_owned())
+    })
 }
 
 /// `os.tmpdir()`: the first of `TMPDIR`, `TMP` and `TEMP` that is set, less a trailing `/`.
@@ -301,6 +310,25 @@ mod tests {
             relative("HOME", "rel").to_string(),
             "HOME must be an absolute path, not rel"
         );
+    }
+
+    #[test]
+    fn the_users_home_is_home_when_set_even_empty_and_the_password_databases_only_when_not() {
+        let passwd = || Some(PathBuf::from("/home/pw"));
+        assert_eq!(
+            [
+                node_homedir(Some("/home/env".into()), passwd),
+                node_homedir(Some(String::new()), passwd),
+                node_homedir(None, passwd),
+                node_homedir(None, || None),
+            ],
+            ["/home/env", "", "/home/pw", "/"]
+        );
+        let empty = Inputs {
+            home: node_homedir(Some(String::new()), passwd),
+            ..inputs()
+        };
+        assert_eq!(resolve(&empty).map(|p| p.data), Err(relative("HOME", "")));
     }
 
     #[test]
