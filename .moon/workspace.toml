@@ -1,0 +1,10 @@
+# moon's workspace: the menu of every command the repository runs (`moon run :<task>`). The root
+# project holds the workspace-wide tasks; a project of its own holds a task only where the command
+# runs in that folder. Pinned by scripts/check-standards.ts (moonFailures).
+telemetry = false
+
+[projects]
+root = "."
+daemon = "apps/daemon"
+web = "apps/web"
+e2e = "tests/e2e"

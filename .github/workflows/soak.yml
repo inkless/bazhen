@@ -64,6 +64,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Soak
         env:
           HOURS: ${{ inputs.hours }}

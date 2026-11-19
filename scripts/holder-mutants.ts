@@ -589,7 +589,7 @@ async function judgeBySuite(file: string, diffFile: string): Promise<boolean | n
     writeFileSync(join(scratch, "mutant.patch"), patch);
     spawnSync("git", ["apply", join(scratch, "mutant.patch")], { env: isolatedEnv() });
     if (readFileSync(file, "utf8") === original) return null;
-    return (await run("pnpm", ["test:holder"], isolatedEnv())) !== 0;
+    return (await run("moon", ["run", ":test-holder"], isolatedEnv())) !== 0;
   } finally {
     writeFileSync(file, original);
     rmSync(scratch, { recursive: true, force: true });

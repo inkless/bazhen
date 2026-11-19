@@ -1,0 +1,3 @@
+# The version of moon every host runs: proto reads this file (`proto install`), and CI and the
+# real-tmux image install the version it names. scripts/check-standards.ts holds it to one exact pin.
+moon = "2.6.5"

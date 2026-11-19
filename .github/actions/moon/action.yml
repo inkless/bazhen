@@ -1,0 +1,13 @@
+# Installs the moon .prototools pins, the version every host runs through proto, so a job's
+# `moon run` runs the same moon as a developer's. Needs node (actions/setup-node) and a checkout.
+name: moon
+description: Install the moon version .prototools pins.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        version=$(sed -n 's/^moon = "\([0-9][0-9.]*\)"$/\1/p' .prototools)
+        [ -n "$version" ] || { echo ".prototools pins no exact moon version" >&2; exit 1; }
+        npm install -g "@moonrepo/cli@${version}"
+        test "$(moon --version)" = "moon ${version}"

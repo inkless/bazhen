@@ -31,6 +31,8 @@ import { isMain } from "./is-main.ts";
 /** How CI and the container run falsify: a change to either is a change to falsify. */
 const RUNNERS = [
   ".github/workflows/ci.yml",
+  ".prototools",
+  "moon.toml",
   "package.json",
   "scripts/falsify-base.ts",
   "scripts/test-real.ts",

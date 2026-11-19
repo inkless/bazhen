@@ -1,0 +1,10 @@
+# The daemon's own tasks, run in this folder; `moon run :dev` (root) starts this beside web's.
+
+[tasks.dev]
+script = "BAZHEN_WEB_PORT=${BAZHEN_WEB_PORT:-7901} node --watch --watch-preserve-output src/main.ts"
+deps = ["root:build-hook", "root:build-cli", "root:build-holder-release"]
+options = { cache = false, persistent = true, runInCI = false, runDepsInParallel = false }
+
+[tasks.start]
+command = "node src/main.ts"
+options = { cache = false, persistent = true, runInCI = false }

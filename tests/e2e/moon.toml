@@ -1,0 +1,6 @@
+# The browser suite, run in this folder, where playwright.config.ts is.
+
+[tasks.test-e2e]
+command = "node ../../scripts/capped.ts --memory 10G --time 30m -- node_modules/.bin/playwright test"
+deps = ["root:build-hook", "root:build-holder-release"]
+options = { cache = false, runDepsInParallel = false }

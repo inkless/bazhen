@@ -111,6 +111,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Run the property tests on random seeds
         timeout-minutes: 105
         run: |

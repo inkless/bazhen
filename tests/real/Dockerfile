@@ -48,6 +48,8 @@ RUN cd /tmp/rust-tools \
 FROM node:${NODE_VERSION}-trixie
 
 ARG PNPM_VERSION
+# The moon .prototools pins, which runs each suite's task (moon.toml).
+ARG MOON_VERSION
 ARG PLAYWRIGHT_VERSION
 ARG TMUX_VERSION
 # What the shell-terminal suite runs in a shell, pinned as tmux is.
@@ -73,7 +75,7 @@ RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
     "htop=${HTOP_VERSION}" "rustup=${RUSTUP_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g "pnpm@${PNPM_VERSION}" \
+  && npm install -g "pnpm@${PNPM_VERSION}" "@moonrepo/cli@${MOON_VERSION}" \
   && touch /etc/bazhen-disposable-host
 
 COPY --from=tmux-build /tmux-root/usr/local /usr/local
@@ -102,6 +104,9 @@ COPY --chown=node crates crates
 RUN cargo fetch --locked
 COPY --chown=node . .
 RUN pnpm install --offline --frozen-lockfile
+# moon fetches the plugins its tasks run with on first use, into its home (~/.moon); the suites'
+# containers have no network, so they are fetched here, and the build proves it has the pinned moon.
+RUN moon tasks > /dev/null && test "$(moon --version)" = "moon ${MOON_VERSION}"
 # Falsify lists the Rust tests at the merge base, and judges a branch that changes falsify with
 # the base's falsify too: both need what the base's lockfiles name, which HEAD's may not. They
 # are fetched from a throwaway worktree of the merge base, which falsify judges against, while the

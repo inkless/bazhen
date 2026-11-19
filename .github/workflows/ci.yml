@@ -58,6 +58,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm check
       # shellcheck is on the runner image, not on every developer's machine, so it runs here.
       - run: pnpm lint:shell
@@ -92,6 +93,7 @@ jobs:
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm lint:rust
       - run: pnpm test:rust:all
       - run: pnpm test:holder
@@ -127,6 +129,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm test:api
 
   # The api test files tests/rust-daemon.txt lists, against the Rust daemon, which is to replace the
@@ -156,6 +159,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Fetch what main was before the push
         if: github.event_name == 'push'
         env:
@@ -190,6 +194,7 @@ jobs:
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm test:integration
 
   e2e:
@@ -213,6 +218,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
       - run: pnpm test:e2e
 
@@ -242,6 +248,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: pnpm test:falsify
         env:
           BASE_REF: ${{ github.base_ref }}

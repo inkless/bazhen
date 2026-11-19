@@ -49,6 +49,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/moon
       - name: Mutate
         env:
           GROUP: ${{ inputs.group }}

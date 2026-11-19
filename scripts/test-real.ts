@@ -28,19 +28,20 @@ import {
 import { availableParallelism, constants, hostname, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { SLICE, inSignalSandbox, isAlive, signalGroup, spawnGroup } from "@bazhen/host-guard";
+import { parse as parseToml } from "smol-toml";
 import { RUST_TOOLS } from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 
 const SUITES = {
-  integration: "test:integration",
-  api: "test:api",
-  "api-rust": "test:api:rust",
-  e2e: "test:e2e",
-  falsify: "test:falsify",
-  rust: "test:rust:all",
-  holder: "test:holder",
-  mutants: "test:mutants:holder",
-  soak: "test:soak",
+  integration: "test-integration",
+  api: "test-api",
+  "api-rust": "test-api-rust",
+  e2e: "test-e2e",
+  falsify: "test-falsify",
+  rust: "test-rust-all",
+  holder: "test-holder",
+  mutants: "test-mutants-holder",
+  soak: "test-soak",
 } as const;
 type Suite = keyof typeof SUITES;
 const DEFAULT_SUITES: Suite[] = ["integration", "api", "e2e", "holder", "rust"];
@@ -78,12 +79,24 @@ export function suiteCommand(suite: Suite, mutants?: MutantsPart): string[] {
     if (mutants === undefined) throw new Error(`the mutants suite needs --group; ${USAGE}`);
     const shard = mutants.shard === undefined ? [] : ["--shard", mutants.shard];
     const only = mutants.only === undefined ? [] : ["--only", mutants.only];
-    return ["pnpm", SUITES.mutants, "--group", mutants.group, ...shard, ...only];
+    return moonRun(SUITES.mutants, "--group", mutants.group, ...shard, ...only);
   }
-  if (suite !== "falsify") return ["pnpm", SUITES[suite]];
+  if (suite !== "falsify") return moonRun(SUITES[suite]);
   const base = `--base ${BASE_REF}`;
-  return ["sh", "-c", `pnpm ${SUITES.falsify} ${base} && pnpm test:falsify:base ${base}`];
+  return [
+    "sh",
+    "-c",
+    `moon run :${SUITES.falsify} -- ${base} && moon run :test-falsify-base -- ${base}`,
+  ];
 }
+
+/** `moon run` of a task, with the arguments its command takes after `--`. */
+const moonRun = (task: string, ...args: string[]): string[] => [
+  "moon",
+  "run",
+  `:${task}`,
+  ...(args.length === 0 ? [] : ["--", ...args]),
+];
 
 /** Why `text` isn't a JavaScript regex, as holder-mutants reads `--only`, or nothing. */
 function regexError(text: string): string | undefined {
@@ -151,6 +164,15 @@ export function parseArgs(args: readonly string[]): {
   };
 }
 
+/** The moon version .prototools pins, which every host runs. */
+export function moonVersion(read: (path: string) => string): string {
+  const moon = parseToml(read(".prototools"))["moon"];
+  if (typeof moon !== "string" || !/^\d+\.\d+\.\d+$/.test(moon)) {
+    throw new Error(".prototools pins no exact moon version");
+  }
+  return moon;
+}
+
 /** The image's build arguments: the repository's own pins, and the Rust tools falsify runs. */
 export function pins(read: (path: string) => string): Record<string, string> {
   const pkg = (path: string): Record<string, unknown> => JSON.parse(read(path));
@@ -166,6 +188,7 @@ export function pins(read: (path: string) => string): Record<string, string> {
   return {
     NODE_VERSION: read(".nvmrc").trim(),
     PNPM_VERSION: manager.slice("pnpm@".length),
+    MOON_VERSION: moonVersion(read),
     PLAYWRIGHT_VERSION: playwright,
     NEXTEST_VERSION: RUST_TOOLS["cargo-nextest"],
     CARGO_MUTANTS_VERSION: RUST_TOOLS["cargo-mutants"],

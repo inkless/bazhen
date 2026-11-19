@@ -143,8 +143,9 @@ const runFiles: RunFiles = (files) => {
   const dir = mkdtempSync(join(tmpdir(), "bz-rust-daemon-"));
   const out = join(dir, "report.json");
   try {
+    // By its path: moon puts nothing of node_modules/.bin on a task's PATH.
     const run = spawnSync(
-      "vitest",
+      join(root, "node_modules/.bin/vitest"),
       [
         "run",
         "--project",
