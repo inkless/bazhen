@@ -2452,6 +2452,48 @@ export const CARGO_CONFIG = [
     `"target.'cfg(all())'.runner=['env']", "--config", "build.rustc-wrapper=''", ` +
     `"--config", "build.rustc-workspace-wrapper=''", "--config", "build.rustc='rustc'", "--", ]`,
 ];
+// scripts/xtask.sh, which every Rust gate script runs through, less its comments and blank lines:
+// it is what fails a gate run that xtask didn't make, or didn't make with these arguments.
+export const XTASK_WRAPPER = [
+  "#!/bin/sh",
+  "set -u",
+  "receipt=$(mktemp) || exit 1",
+  'asked=$(mktemp) || { rm -f "$receipt"; exit 1; }',
+  `trap 'rm -f "$receipt" "$asked"' EXIT`,
+  "nonce=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')",
+  '[ -n "$nonce" ] || exit 1',
+  'for arg in "$@"; do',
+  `  printf '%s' "$arg" | od -An -v -tx1 | tr -d ' \\n'`,
+  "  echo",
+  'done >"$asked"',
+  'BAZHEN_XTASK_RECEIPT=$receipt BAZHEN_XTASK_NONCE=$nonce cargo xtask "$@"',
+  "status=$?",
+  'if [ "$(sed -n 1p "$receipt")" != "$nonce" ]; then',
+  '  echo "scripts/xtask.sh: cargo xtask exited $status, but xtask never ran: a target runner stood" \\',
+  '    "in for it. Unset CARGO_TARGET_<triple>_RUNNER, or move the cargo config that sets it out" \\',
+  `    "of this repository's parent directories." >&2`,
+  "  exit 1",
+  "fi",
+  'if ! tail -n +3 "$receipt" | cmp -s - "$asked"; then',
+  '  echo "scripts/xtask.sh: xtask ran with other arguments than these: a target runner or an" \\',
+  '    "alias for xtask in the environment changed them. Unset it, or move the cargo config that" \\',
+  `    "sets it out of this repository's parent directories." >&2`,
+  "  exit 1",
+  "fi",
+  'code=$(sed -n 2p "$receipt")',
+  "case $code in",
+  "'' | *[!0-9]*)",
+  `  echo "scripts/xtask.sh: xtask's receipt names no exit code." >&2`,
+  "  exit 1",
+  "  ;;",
+  "esac",
+  'exit "$code"',
+];
+
+/** A shell script's lines, less its comments and blank lines. */
+const shellLines = (text: string): string[] =>
+  text.split("\n").filter((line) => line.trim() !== "" && !/^\s*#(?!!)/.test(line));
+
 export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 
 // What starts tests: vitest, playwright, nextest, cargo-mutants, cargo-fuzz, cargo test and bench,
@@ -3021,6 +3063,11 @@ export function rustFailures(
   pinned("clippy.toml", CLIPPY_CONFIG, "CLIPPY_CONFIG");
   pinned(".cargo/config.toml", CARGO_CONFIG, "CARGO_CONFIG");
   pinned(".cargo/mutants.toml", MUTANTS_CONFIG, "MUTANTS_CONFIG");
+  if (!paths.includes("scripts/xtask.sh")) {
+    out.push("scripts/xtask.sh is missing; the Rust gates need it.");
+  } else if (shellLines(read("scripts/xtask.sh")).join("\n") !== XTASK_WRAPPER.join("\n")) {
+    out.push("scripts/xtask.sh: differs from XTASK_WRAPPER in scripts/check-standards.ts.");
+  }
   out.push(
     ...decoderFailures(
       paths,

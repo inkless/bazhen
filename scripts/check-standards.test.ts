@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CARGO_CONFIG,
+  XTASK_WRAPPER,
   CLIPPY_CONFIG,
   MAX_CAP,
   MUTANTS_CONFIG,
@@ -1226,6 +1227,7 @@ describe("rustFailures on the gates' own configuration", () => {
     "rust-toolchain.toml": TOOLCHAIN_CONFIG.join("\n"),
     ".cargo/config.toml": CARGO_CONFIG.join("\n"),
     ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
+    "scripts/xtask.sh": `#!/bin/sh\n# Why.\n\n${XTASK_WRAPPER.slice(1).join("\n  # and\n")}\n`,
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
     "scripts/cargo-config.medium.test.ts": "RUSTFLAGS",
     "scripts/rust-gate.ts": "RUSTFLAGS",
@@ -1267,6 +1269,14 @@ describe("rustFailures on the gates' own configuration", () => {
     ]).toEqual([
       [expect.stringContaining("rust-toolchain.toml: differs from TOOLCHAIN_CONFIG")],
       [expect.stringContaining("rust-toolchain.toml is missing")],
+    ]);
+  });
+
+  it("refuses a gate wrapper that differs from the pinned one but in comments, or none", () => {
+    const edited = XTASK_WRAPPER.join("\n").replace('exit "$code"', "exit 0");
+    expect([failures({ "scripts/xtask.sh": edited }), failures({}, ["scripts/xtask.sh"])]).toEqual([
+      ["scripts/xtask.sh: differs from XTASK_WRAPPER in scripts/check-standards.ts."],
+      ["scripts/xtask.sh is missing; the Rust gates need it."],
     ]);
   });
 

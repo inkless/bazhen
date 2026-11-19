@@ -210,15 +210,20 @@ in `RUST_FLAG_EXEMPT` that names a flag or variable able to switch lints off (`R
 ones included, whether it arrives through `RUSTFLAGS`, a cargo config in any parent directory, or an
 argument, and a cargo alias can replace `cargo clippy` with a command that passes. So each gate
 script runs `scripts/xtask.sh gate`, which runs `cargo xtask gate` (`crates/bazhen-xtask/src/gate.rs`)
-and fails unless xtask itself ran and handed back the nonce it was given: a runner set for the
-host's target triple outranks the one the alias names, and could stand in for xtask and pass. xtask
-holds the gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
+and exits as xtask itself did: a runner set for the host's target triple outranks the one the alias
+names, and could stand in for xtask, start it with other arguments, or hide its exit. So xtask
+writes back the nonce it was given, its exit code and its arguments, and the script fails a run
+whose receipt is missing or names other arguments. `scripts/check-standards.ts` pins the script's
+text. xtask holds the gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses any option after the gate (`pnpm test:rust
 <name>` may name tests), removes the variables that change flags, tools or the test runner, sets
 `CARGO_ENCODED_RUSTFLAGS` empty (which outranks every other source of rustflags), and overrides any
 configured compiler or wrapper. A cargo config outside the repository may still set what the gate
 can't override: a test runner, a `rustdoc` or a linker, `[env]` (which can hand clippy its flags), a
 profile (which can turn off overflow checks and debug assertions in the tests) or an `include` of
-another file. The lint and test gates refuse to run under one. A global `RUSTFLAGS` or a wrapper
+another file. Every gate refuses to run under one, fmt and deny too: cargo starts xtask under the
+config's `[env]`, which can put another `cargo-fmt` first on its `PATH`. A config is parsed as TOML
+and its keys read as cargo reads them, so no quoting or escaping hides one, and a config that
+doesn't parse is refused. A global `RUSTFLAGS` or a wrapper
 such as sccache is ignored by the gates, not an error. xtask's own build overrides a wrapper or
 compiler a cargo config names; one in the caller's environment (`RUSTC`, `RUSTC_WRAPPER`,
 `RUSTC_WORKSPACE_WRAPPER`) outranks that and still builds it, which only a deliberate one would

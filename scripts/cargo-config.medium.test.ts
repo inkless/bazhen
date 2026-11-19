@@ -1,7 +1,7 @@
 // Runs `cargo xtask` as a caller does, with a logging `env` first on PATH: the alias names `env` as
 // the runner in place of the capping one, so the log shows which runner cargo really started. And
 // runs scripts/xtask.sh, which the gate scripts call, under the runners that outrank the alias's
-// own, to show it fails a run xtask never saw.
+// own, to show it exits as xtask did, and fails a run xtask never saw or saw other arguments for.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -32,11 +32,14 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+/** PATH with `folder` first. */
+const firstOnPath = (folder: string): string => `${folder}:${process.env.PATH ?? ""}`;
+
 function xtask(args: string[]) {
   const run = spawnSync("cargo", ["xtask", ...args], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ""}` },
+    env: { ...process.env, PATH: firstOnPath(dir) },
   });
   const log = existsSync(join(dir, "log")) ? readFileSync(join(dir, "log"), "utf8") : "";
   return { status: run.status, log };
@@ -59,21 +62,31 @@ const host = (): string =>
 /** The variable that sets a runner for the host's triple, which outranks a `cfg()` runner. */
 const hostRunner = () => `CARGO_TARGET_${host().toUpperCase().replaceAll("-", "_")}_RUNNER`;
 
-/** `cargo xtask help` run directly, and through scripts/xtask.sh, under `env`. */
-function both(env: Record<string, string>) {
-  const start = (command: string, args: string[]) => {
-    const run = spawnSync(command, args, {
+/** A runner script in the test's folder, made of `body`. */
+function runner(name: string, body: string): string {
+  writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+  chmodSync(join(dir, name), 0o755);
+  return join(dir, name);
+}
+
+/** `cargo xtask <args>` run directly, and through scripts/xtask.sh, under `env`. */
+function both(env: Record<string, string>, args = ["help"]) {
+  const start = (command: string, argv: string[]) => {
+    const run = spawnSync(command, argv, {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, ...env },
     });
     return { status: run.status, stderr: run.stderr };
   };
-  const wrapped = start(WRAPPER, ["help"]);
+  const wrapped = start(WRAPPER, args);
+  const said = ["xtask never ran", "xtask ran with other arguments"].find((why) =>
+    wrapped.stderr.includes(why),
+  );
   return {
-    direct: start("cargo", ["xtask", "help"]).status,
+    direct: start("cargo", ["xtask", ...args]).status,
     wrapped: wrapped.status,
-    refused: wrapped.stderr.includes("but xtask never ran"),
+    said: said ?? "",
   };
 }
 
@@ -90,13 +103,17 @@ function cargoHome(config: string): string {
 describe("scripts/xtask.sh", () => {
   it("passes xtask's own exit on when xtask ran", () => {
     expect({ help: both({}), nope: spawnSync(WRAPPER, ["nope"], { cwd: root }).status }).toEqual({
-      help: { direct: 0, wrapped: 0, refused: false },
+      help: { direct: 0, wrapped: 0, said: "" },
       nope: 2,
     });
   }, 300_000);
 
   it("fails a run that a runner for the host's triple, set in the environment, stood in for", () => {
-    expect(both({ [hostRunner()]: "true" })).toEqual({ direct: 0, wrapped: 1, refused: true });
+    expect(both({ [hostRunner()]: "true" })).toEqual({
+      direct: 0,
+      wrapped: 1,
+      said: "xtask never ran",
+    });
   }, 300_000);
 
   it("fails a run that a runner for the host's triple, set in a cargo config, stood in for", () => {
@@ -104,16 +121,47 @@ describe("scripts/xtask.sh", () => {
     expect(both({ CARGO_HOME: cargoHome(config) })).toEqual({
       direct: 0,
       wrapped: 1,
+      said: "xtask never ran",
+    });
+  }, 300_000);
+
+  it("exits as xtask did, under a runner that runs it but hides its exit", () => {
+    const hides = runner("hides", '"$@"\nexit 0');
+    expect(both({ [hostRunner()]: hides }, ["nope"])).toEqual({ direct: 0, wrapped: 2, said: "" });
+  }, 300_000);
+
+  it("fails a run that a runner started xtask for with other arguments", () => {
+    const swaps = runner("swaps", 'exec "$1" help');
+    expect(both({ [hostRunner()]: swaps }, ["nope"])).toEqual({
+      direct: 0,
+      wrapped: 1,
+      said: "xtask ran with other arguments",
+    });
+  }, 300_000);
+
+  // cargo starts xtask under a config's [env], so it reaches xtask's own PATH, which fmt and deny
+  // find their tools on.
+  it("refuses to format under a config whose [env] puts another cargo-fmt first on PATH", () => {
+    runner("cargo-fmt", "exit 0");
+    const path = JSON.stringify(firstOnPath(dir));
+    const config = `[env]\nPATH = { value = ${path}, force = true }\n`;
+    const run = spawnSync(WRAPPER, ["gate", "fmt"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, CARGO_HOME: cargoHome(config) },
+    });
+    expect({ status: run.status, refused: run.stderr.includes("sets a test runner") }).toEqual({
+      status: 1,
       refused: true,
     });
   }, 300_000);
 
   // cargo appends an alias from the environment to the configured one, after its `--`.
-  it("still runs xtask under an alias in the environment, which only adds what xtask refuses", () => {
+  it("fails a run that an alias in the environment added arguments to", () => {
     expect(both({ CARGO_ALIAS_XTASK: "version" })).toEqual({
       direct: 2,
-      wrapped: 2,
-      refused: false,
+      wrapped: 1,
+      said: "xtask ran with other arguments",
     });
   }, 300_000);
 });

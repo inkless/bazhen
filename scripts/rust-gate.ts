@@ -6,6 +6,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { parse } from "smol-toml";
 
 /**
  * The test gate's build options (workspace, features, lockfile, wrapper overrides), so the tests
@@ -102,15 +103,36 @@ export function gateEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 // What a cargo config can set that the gate can't override from the command line: a runner that
-// stands in for the test binaries, a rustdoc or a linker, environment variables for the tools
-// (`[env]`, which can hand clippy `--cap-lints`), a profile (which can turn off overflow checks
-// and debug assertions in the tests), or another config file to read (`include`), which this
-// check wouldn't. Rustflags, rustc and the wrappers the gate overrides itself, so a wrapper such as
-// sccache is fine. Matched in any TOML spelling: under a table, dotted, quoted or inline.
-const UNSAFE_CONFIG = [
-  /(?:^|[\s.{,"'])(?:runner|rustdoc|include|linker)["']?\s*=/m,
-  /^\s*\[\s*["']?(?:env|profile)["']?\s*[\].]|(?:^|[\s{,])["']?(?:env|profile)["']?\s*[.=]/m,
-];
+// stands in for the test binaries or for xtask itself, a rustdoc or a linker, environment variables
+// (`[env]`, which can hand clippy `--cap-lints` or put another `cargo-fmt` first on PATH), a
+// profile (which can turn off overflow checks and debug assertions in the tests), or another config
+// file to read (`include`), which this check wouldn't. Rustflags, rustc and the wrappers the gate
+// overrides itself, so a wrapper such as sccache is fine. A config is parsed as TOML and each key
+// read as cargo reads it, quoted, escaped, dotted or inline; one that doesn't parse is refused, as
+// cargo's reading of it can't be vouched for.
+const REFUSED_KEYS = new Set(["runner", "rustdoc", "linker", "include", "env", "profile"]);
+
+/** Whether a parsed config value, or any table within it, sets a key the gate refuses. */
+function setsRefusedKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(setsRefusedKey);
+  if (value === null || typeof value !== "object" || value instanceof Date) return false;
+  return Object.entries(value).some(
+    ([key, inner]) => REFUSED_KEYS.has(key) || setsRefusedKey(inner),
+  );
+}
+
+/** Why a config's text could change what a gate runs, if it could. */
+function refusal(text: string): string | undefined {
+  let table: unknown;
+  try {
+    table = parse(text);
+  } catch {
+    return "isn't TOML that cargo's reading of could be vouched for";
+  }
+  return setsRefusedKey(table)
+    ? "sets a test runner, a rustdoc, a linker, [env], a profile or include"
+    : undefined;
+}
 
 /**
  * The cargo configs outside the repository that cargo would read for a run in `dir`: one in each
@@ -130,13 +152,12 @@ export function outsideConfigs(dir: string, cargoHome: string): string[] {
 export function configFailures(paths: string[], read: (path: string) => string | undefined) {
   return paths.flatMap((path) => {
     const text = read(path);
-    const code = text?.replaceAll(/(?:^|\s)#.*$/gm, "");
-    return code !== undefined && UNSAFE_CONFIG.some((key) => key.test(code))
-      ? [
-          `${path} sets a test runner, a rustdoc, a linker, [env], a profile or include, which ` +
-            "the Rust gates can't override and which could change what they run. Remove it, or " +
-            "move it out of this repository's parent directories.",
-        ]
-      : [];
+    const why = text === undefined ? undefined : refusal(text);
+    return why === undefined
+      ? []
+      : [
+          `${path} ${why}, which the Rust gates can't override and which could change what ` +
+            "they run. Remove it, or move it out of this repository's parent directories.",
+        ];
   });
 }

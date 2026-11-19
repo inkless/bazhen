@@ -85,6 +85,12 @@ describe("configFailures", () => {
     "/k/.cargo/config.toml": '[target.x86_64-unknown-linux-gnu]\nlinker = "/fake/cc"\n',
     "/l/.cargo/config.toml": "[profile.test]\noverflow-checks = false\n",
     "/m/.cargo/config.toml": "profile.dev.debug-assertions = false\n",
+    "/o/.cargo/config.toml": '["\\u0065nv"]\nPATH = { value = "/fake", force = true }\n',
+    "/p/.cargo/config.toml": '[target.x86_64-unknown-linux-gnu]\n"r\\u0075nner" = "true"\n',
+    "/q/.cargo/config.toml":
+      'target = { x86_64-unknown-linux-gnu = { rustflags = [" #"], runner = "true" } }\n',
+    "/r/.cargo/config.toml": '[env\nPATH = "/fake"\n',
+    "/s/.cargo/config.toml": '[[target.x.y]]\nrunner = "true"\n',
   };
   const accepted: Record<string, string> = {
     "/h/.cargo/config.toml": '[build]\nrustc-wrapper = "/usr/bin/sccache"\n',
@@ -99,5 +105,16 @@ describe("configFailures", () => {
 
   it("names a config with a runner, rustdoc, linker, [env], profile or include, in any spelling", () => {
     expect(failures.map((f) => f.split(" ")[0])).toEqual(Object.keys(refused));
+  });
+
+  it("says which configs set a refused key and which aren't TOML", () => {
+    const [set, unparsed] = configFailures(
+      ["/a/.cargo/config.toml", "/r/.cargo/config.toml"],
+      (p) => configs[p],
+    );
+    expect([set, unparsed]).toEqual([
+      expect.stringContaining(" sets a test runner"),
+      expect.stringContaining(" isn't TOML"),
+    ]);
   });
 });

@@ -156,10 +156,6 @@ impl Gate {
         }
     }
 
-    fn compiles(self) -> bool {
-        matches!(self, Self::Lint | Self::Test | Self::TestAll)
-    }
-
     fn takes_tests(self) -> bool {
         matches!(self, Self::Test | Self::TestAll)
     }
@@ -306,14 +302,14 @@ pub(crate) fn run(
         return Exit::Usage;
     }
     let env = gate_env(env);
-    if gate.compiles() {
-        let configs = cargo_config::outside_configs(&places.root, &places.cargo_home);
-        let read: Read<'_> = &|path| host.read(path);
-        let failures = cargo_config::config_failures(&configs, read);
-        if !failures.is_empty() {
-            let _ = writeln!(err, "{}", failures.join("\n"));
-            return Exit::Failed;
-        }
+    // Every gate, as cargo started xtask: an outside config's [env] reaches xtask itself, and could
+    // put another cargo-fmt or cargo-deny first on its PATH.
+    let configs = cargo_config::outside_configs(&places.root, &places.cargo_home);
+    let read: Read<'_> = &|path| host.read(path);
+    let failures = cargo_config::config_failures(&configs, read);
+    if !failures.is_empty() {
+        let _ = writeln!(err, "{}", failures.join("\n"));
+        return Exit::Failed;
     }
     if !matches!(host.run(gate.probe(), &env, true), Ok(Some(0))) {
         let _ = writeln!(err, "{}", gate.hint());
@@ -660,22 +656,13 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_lint_or_test_under_a_config_it_cant_override_and_runs_nothing() {
-        for name in ["lint", "test"] {
+    fn refuses_every_gate_under_a_config_it_cant_override_and_runs_nothing() {
+        for name in ["fmt", "lint", "deny", "test"] {
             let mut host = Fake::new(false);
-            host.config = Some("[env]\nCLIPPY_ARGS = \"--cap-lints=allow\"\n");
+            host.config = Some("[env]\nPATH = { value = \"/fake:/usr/bin\", force = true }\n");
             let (exit, runs, err) = ran(&mut host, name, &[]);
             assert_eq!((exit, runs), (Exit::Failed, vec![]), "{name}");
             assert!(err.contains("sets a test runner"), "{err}");
-        }
-    }
-
-    #[test]
-    fn formats_and_checks_dependencies_under_such_a_config_since_neither_compiles() {
-        for name in ["fmt", "deny"] {
-            let mut host = Fake::new(false);
-            host.config = Some("[env]\nCLIPPY_ARGS = \"--cap-lints=allow\"\n");
-            assert_eq!(ran(&mut host, name, &[]).0, Exit::Done, "{name}");
         }
     }
 

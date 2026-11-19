@@ -169,21 +169,17 @@ describe("cargo xtask gate", () => {
     expect({ status, runs: logged.length }).toEqual({ status: 1, runs: 1 });
   });
 
-  it("refuses to lint or test under a config it can't override, and runs nothing", () => {
+  // cargo starts xtask under an outside config's [env], which could put another cargo-fmt or
+  // cargo-deny first on its PATH, so no gate runs under one.
+  it("refuses every gate under a config it can't override, and runs nothing", () => {
     writeFileSync(join(home, "config.toml"), '[env]\nCLIPPY_ARGS = "--cap-lints=allow"\n');
-    const refused = ["lint", "test"].map((g) => {
+    const refused = ["fmt", "lint", "deny", "test"].map((g) => {
       const { status, stderr, logged } = rust([g]);
       return { status, refused: stderr.includes("sets a test runner"), runs: logged.length };
     });
-    expect(refused).toEqual([
-      { status: 1, refused: true, runs: 0 },
-      { status: 1, refused: true, runs: 0 },
-    ]);
-  });
-
-  it("formats and checks dependencies under such a config, since neither compiles", () => {
-    writeFileSync(join(home, "config.toml"), '[env]\nCLIPPY_ARGS = "--cap-lints=allow"\n');
-    expect(["fmt", "deny"].map((g) => rust([g]).status)).toEqual([0, 0]);
+    expect(refused).toEqual(
+      ["fmt", "lint", "deny", "test"].map(() => ({ status: 1, refused: true, runs: 0 })),
+    );
   });
 
   it("names the install command when a tool is missing", () => {
