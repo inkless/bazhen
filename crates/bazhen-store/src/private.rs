@@ -64,8 +64,6 @@ pub(crate) fn keep_private(path: &Path, uid: u32) -> Result<(), OpenError> {
 mod tests {
     use std::os::unix::fs::symlink;
 
-    use rustix::fs::{FileType, Mode};
-
     use super::*;
 
     /// A directory of the test's own, removed when the test ends, whether or not it passed.
@@ -147,14 +145,12 @@ mod tests {
     fn refuses_a_fifo_a_directory_or_a_device_at_once() {
         let dir = TempDir::new("kinds");
         let fifo = dir.0.join("f.db-wal");
-        rustix::fs::mknodat(
-            rustix::fs::CWD,
-            &fifo,
-            FileType::Fifo,
-            Mode::from_raw_mode(0o600),
-            0,
-        )
-        .unwrap();
+        // mkfifo(1), which every Unix has, where macOS's rustix has no mknodat.
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
         std::fs::create_dir(dir.0.join("d.db")).unwrap();
         assert_eq!(
             [
