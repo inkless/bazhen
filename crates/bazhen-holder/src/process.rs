@@ -91,16 +91,55 @@ pub fn environ(pid: Pid) -> io::Result<Vec<OsString>> {
     }
 }
 
+/// A process's uids and its gids, each real, effective, saved and filesystem, in that order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Credentials {
+    pub uids: [u32; 4],
+    pub gids: [u32; 4],
+}
+
+/// `pid`'s uids and gids.
+///
+/// # Errors
+///
+/// When `pid` has gone, or its status doesn't name all eight.
+#[cfg(target_os = "linux")]
+pub fn credentials(pid: Pid) -> io::Result<Credentials> {
+    let status = std::fs::read(format!("/proc/{}/status", pid.as_raw_pid()))?;
+    status_credentials(&status)
+        .ok_or_else(|| io::Error::other(format!("process {pid:?} names no whole credentials")))
+}
+
+/// The uids and gids in a `/proc/<pid>/status`: the four numbers on each of its `Uid:` and `Gid:`
+/// lines.
+pub fn status_credentials(status: &[u8]) -> Option<Credentials> {
+    Some(Credentials {
+        uids: status_ids(status, b"Uid:")?,
+        gids: status_ids(status, b"Gid:")?,
+    })
+}
+
 /// The effective uid in a `/proc/<pid>/status`: the second number on its `Uid:` line.
 pub fn status_uid(status: &[u8]) -> Option<u32> {
+    status_ids(status, b"Uid:").map(|[_, effective, _, _]| effective)
+}
+
+/// The four numbers on the line of a `/proc/<pid>/status` that starts with `name`.
+fn status_ids(status: &[u8], name: &[u8]) -> Option<[u32; 4]> {
     let line = status
         .split(|&b| b == b'\n')
-        .find_map(|line| line.strip_prefix(b"Uid:"))?;
-    let effective = line
+        .find_map(|line| line.strip_prefix(name))?;
+    let mut fields = line
         .split(u8::is_ascii_whitespace)
         .filter(|field| !field.is_empty())
-        .nth(1)?;
-    std::str::from_utf8(effective).ok()?.parse().ok()
+        .map(|field| std::str::from_utf8(field).ok()?.parse().ok());
+    let ids = [
+        fields.next()??,
+        fields.next()??,
+        fields.next()??,
+        fields.next()??,
+    ];
+    fields.next().is_none().then_some(ids)
 }
 
 /// The arguments in a `/proc/<pid>/cmdline`, or the variables in a `/proc/<pid>/environ`: each
@@ -256,6 +295,48 @@ mod tests {
         ] {
             assert_eq!(status_uid(status), None, "{status:?}");
         }
+    }
+
+    #[test]
+    fn takes_each_uid_and_gid_in_order_from_their_status_lines() {
+        let status =
+            b"Name:\tfish\nUid:\t1000\t1001\t1002\t1003\nGid:\t141\t142\t143\t144\nGroups:\t4 27\n";
+        assert_eq!(
+            status_credentials(status),
+            Some(Credentials {
+                uids: [1000, 1001, 1002, 1003],
+                gids: [141, 142, 143, 144],
+            }),
+        );
+    }
+
+    #[test]
+    fn names_no_credentials_from_a_status_without_four_of_each() {
+        let uid = b"Uid:\t1000\t1000\t1000\t1000\n".as_slice();
+        for gid in [
+            b"".as_slice(),
+            b"Gid:\t141\t141\t141\n",
+            b"Gid:\t141\t141\t141\t141\t141\n",
+            b"Gid:\t141\t141\tx\t141\n",
+            b"NotGid:\t141\t141\t141\t141\n",
+        ] {
+            let status = [uid, gid].concat();
+            assert_eq!(status_credentials(&status), None, "{gid:?}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reads_this_process_s_real_and_effective_uid_and_gid() {
+        use rustix::process::{getegid, getgid, getuid};
+        let ours = credentials(getpid()).unwrap();
+        assert_eq!(
+            ([ours.uids[0], ours.uids[1]], [ours.gids[0], ours.gids[1]]),
+            (
+                [getuid().as_raw(), geteuid().as_raw()],
+                [getgid().as_raw(), getegid().as_raw()],
+            ),
+        );
     }
 
     #[test]

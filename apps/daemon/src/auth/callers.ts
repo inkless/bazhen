@@ -230,7 +230,8 @@ export const LATE_REASON = "the caller's process wasn't read in time; try again"
  * peer's job. A Codex tool call runs out of the agent's terminal, under the Codex app-server, so
  * only the thread it names says which agent it is: the live agent bound to that thread, or refused.
  * Any agent's command can name any thread, so this tells Codex agents apart only as far as they
- * keep to their own.
+ * keep to their own. A caller whose environment couldn't be read for the mark (`withheld`) is
+ * marked by the thread it presents instead, which can only make it an agent or refuse it.
  */
 export function identify(
   credentials: AgentCredentials,
@@ -246,6 +247,9 @@ export function identify(
       return asCodex(credentials, presented, peer.via);
     case "agent":
       return asPeer(credentials, presented, peer.agentId);
+    case "withheld":
+      if (presented.thread !== undefined) return asCodex(credentials, presented, "environment");
+      break;
     case "outside":
       break;
   }

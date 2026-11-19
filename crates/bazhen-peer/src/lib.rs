@@ -12,6 +12,11 @@
 //! It also names the Codex app-server above the caller, if there is one. Codex runs an agent's tool
 //! commands in that server, which is in no terminal, so without it the daemon would take them for
 //! the human's.
+//!
+//! The caller's environment is read for `CODEX_THREAD_ID` only, which the caller sets for itself.
+//! One the kernel withholds only because the caller runs as another of this user's groups, as a
+//! `newgrp` or `sg` shell does, is said to be withheld rather than refused: that says nothing of
+//! Codex, and the daemon takes the thread the call presents instead.
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -20,6 +25,7 @@ use std::iter;
 use std::os::fd::BorrowedFd;
 use std::path::Path;
 
+use bazhen_holder::process::Credentials;
 use bazhen_holder::{process, start_time};
 use rustix::process::{Pid, geteuid};
 
@@ -27,25 +33,32 @@ use rustix::process::{Pid, geteuid};
 pub const MAX_ANCESTORS: usize = 256;
 
 /// The process at the other end of a connection, the session it is in (`None` for one led from
-/// outside the daemon's PID namespace, which no terminal the daemon runs can lead), the nearest
-/// Codex app-server among it and its ancestors, and every ancestor it has, nearest first, through
-/// init or the first process of its PID namespace.
+/// outside the daemon's PID namespace, which no terminal the daemon runs can lead), what its line
+/// says of Codex (`codex_of`), and every ancestor it has, nearest first, through init or the first
+/// process of its PID namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Peer {
     pub pid: Pid,
     pub session: Option<Pid>,
     pub codex_server: Option<Pid>,
+    pub environment_withheld: bool,
     pub ancestors: Vec<Pid>,
 }
 
-/// One line of decimals: the pid, the session or 0, the Codex app-server or 0, then each ancestor. The
-/// app-server comes before the ancestors, so a reader that expects no such field reads one of them
-/// as it, which refuses the call rather than passing it as the human's.
+/// One line of decimals: the pid, the session or 0, the Codex app-server or 0, 1 when the caller's
+/// environment was withheld or else 0, then each ancestor. The app-server and the environment come
+/// before the ancestors, so a reader that expects neither reads an ancestor as one, which refuses
+/// the call rather than passing it as the human's.
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let session = self.session.map_or(0, Pid::as_raw_pid);
         let codex_server = self.codex_server.map_or(0, Pid::as_raw_pid);
-        write!(f, "{} {session} {codex_server}", self.pid.as_raw_pid())?;
+        let withheld = u8::from(self.environment_withheld);
+        write!(
+            f,
+            "{} {session} {codex_server} {withheld}",
+            self.pid.as_raw_pid()
+        )?;
         for ancestor in &self.ancestors {
             write!(f, " {}", ancestor.as_raw_pid())?;
         }
@@ -90,10 +103,12 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     let started = started(pid, accepted)?;
     let ancestors = ancestors(pid, process::parent)?;
     let line: Vec<Pid> = iter::once(pid).chain(ancestors.iter().copied()).collect();
+    let codex = codex_of(&line, own_args, own_environ)?;
     let peer = Peer {
         pid,
         session: bazhen_pid::session(Some(pid))?,
-        codex_server: codex_of(&line, own_args, process::environ)?,
+        codex_server: codex.server,
+        environment_withheld: codex.environment_withheld,
         ancestors,
     };
     if self::started(pid, accepted)? != started {
@@ -175,9 +190,18 @@ pub fn codex_server(
     Ok(None)
 }
 
+/// What a caller's line says of Codex: the app-server nearest the caller, or else the caller
+/// itself when its environment names a Codex thread; and whether its environment was withheld.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codex {
+    pub server: Option<Pid>,
+    pub environment_withheld: bool,
+}
+
 /// The Codex app-server nearest the caller on `line` (`codex_server`), or else the caller itself
 /// when the environment it started with, as `environ` reads it, names a Codex thread: a command
-/// Codex ran that left the server's tree, as one backgrounded by a shell that has exited.
+/// Codex ran that left the server's tree, as one backgrounded by a shell that has exited. An
+/// environment `environ` reads as `None` was withheld, and marks no caller.
 ///
 /// # Errors
 ///
@@ -186,20 +210,89 @@ pub fn codex_server(
 pub fn codex_of(
     line: &[Pid],
     args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
-    environ: impl Fn(Pid) -> io::Result<Vec<OsString>>,
-) -> Result<Option<Pid>, Refused> {
+    environ: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
+) -> Result<Codex, Refused> {
     let Some(&caller) = line.first() else {
-        return Ok(None);
+        return Ok(Codex {
+            server: None,
+            environment_withheld: false,
+        });
     };
     // First: a caller that exits after it is read leaves a zombie whose environment is empty and
     // whose arguments are too, which the walk then refuses.
-    let marked = environ(caller)?
+    let environment = environ(caller)?;
+    let marked = environment
         .iter()
+        .flatten()
         .any(|var| var.as_encoded_bytes().starts_with(b"CODEX_THREAD_ID="));
-    if let Some(server) = codex_server(line, args)? {
-        return Ok(Some(server));
+    let server = codex_server(line, args)?.or(marked.then_some(caller));
+    Ok(Codex {
+        server,
+        environment_withheld: environment.is_none(),
+    })
+}
+
+/// Whether the kernel withholds a process's environment from a reader running as `uid` and `gid`
+/// for the process's group alone. The kernel shows it only to a reader whose filesystem uid is the
+/// process's real, effective and saved uid, whose filesystem gid is its real, effective and saved
+/// gid, and only while the process is dumpable (`__ptrace_may_access`), and a process that isn't
+/// dumpable has its `environ` owned by root. So: its `environ` is `owner`'s and that is `uid`, all
+/// four of its uids are `uid`, and all four of its gids are one group that isn't `gid`, as a
+/// `newgrp` or `sg` shell's are. Gids that differ among themselves are a set-group-id program's,
+/// and are not taken for this.
+fn withheld_for_group(owner: u32, theirs: Credentials, uid: u32, gid: u32) -> bool {
+    let [group, ..] = theirs.gids;
+    owner == uid && theirs.uids == [uid; 4] && theirs.gids == [group; 4] && group != gid
+}
+
+/// `read`, or `None` when it was denied and `withholds` says the denial is the group's
+/// (`withheld_for_group`). Any other error stays one.
+///
+/// # Errors
+///
+/// `read`'s error, unless it was withheld; or `withholds`'s.
+fn withheld_or(
+    read: io::Result<Vec<OsString>>,
+    withholds: impl FnOnce() -> io::Result<bool>,
+) -> io::Result<Option<Vec<OsString>>> {
+    match read {
+        Ok(vars) => Ok(Some(vars)),
+        Err(denied) if denied.kind() == io::ErrorKind::PermissionDenied => {
+            if withholds()? {
+                Ok(None)
+            } else {
+                Err(denied)
+            }
+        }
+        Err(other) => Err(other),
     }
-    Ok(marked.then_some(caller))
+}
+
+/// `pid`'s environment, or `None` when the kernel withholds it for `pid`'s group alone.
+fn own_environ(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
+    withheld_or(process::environ(pid), || group_withholds(pid))
+}
+
+/// Whether the kernel withholds `pid`'s environment from this process for `pid`'s group alone.
+#[cfg(target_os = "linux")]
+fn group_withholds(pid: Pid) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    use rustix::process::getegid;
+    let owner = std::fs::metadata(format!("/proc/{}/environ", pid.as_raw_pid()))?.uid();
+    let theirs = process::credentials(pid)?;
+    Ok(withheld_for_group(
+        owner,
+        theirs,
+        geteuid().as_raw(),
+        getegid().as_raw(),
+    ))
+}
+
+/// macOS denies another process's environment by rules of its own, none of them taken for this.
+#[cfg(not(target_os = "linux"))]
+fn group_withholds(_: Pid) -> io::Result<bool> {
+    Ok(false)
 }
 
 /// `pid`'s arguments when it runs as this user, else `None`.
@@ -310,14 +403,15 @@ mod tests {
     }
 
     #[test]
-    fn prints_one_line_of_the_pid_the_session_no_codex_server_and_each_ancestor() {
+    fn prints_one_line_of_the_pid_the_session_no_codex_server_no_withholding_and_each_ancestor() {
         let peer = Peer {
             pid: pid(50),
             session: Some(pid(45)),
             codex_server: None,
+            environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
         };
-        assert_eq!(peer.to_string(), "50 45 0 40 1");
+        assert_eq!(peer.to_string(), "50 45 0 0 40 1");
     }
 
     #[test]
@@ -326,9 +420,10 @@ mod tests {
             pid: pid(50),
             session: None,
             codex_server: Some(pid(40)),
+            environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
         };
-        assert_eq!(peer.to_string(), "50 0 40 40 1");
+        assert_eq!(peer.to_string(), "50 0 40 0 40 1");
     }
 
     #[test]
@@ -337,9 +432,22 @@ mod tests {
             pid: pid(50),
             session: Some(pid(50)),
             codex_server: Some(pid(40)),
+            environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
         };
-        assert_eq!(peer.to_string(), "50 50 40 40 1");
+        assert_eq!(peer.to_string(), "50 50 40 0 40 1");
+    }
+
+    #[test]
+    fn prints_1_after_the_codex_server_for_a_withheld_environment() {
+        let peer = Peer {
+            pid: pid(50),
+            session: Some(pid(45)),
+            codex_server: None,
+            environment_withheld: true,
+            ancestors: vec![pid(40), pid(1)],
+        };
+        assert_eq!(peer.to_string(), "50 45 0 1 40 1");
     }
 
     fn os(args: &[&str]) -> Vec<OsString> {
@@ -476,14 +584,20 @@ mod tests {
     fn marks_a_caller_whose_environment_names_a_codex_thread_though_no_server_is_above_it() {
         let line = [pid(50), pid(1)];
         let table = || argv(&[(50, Some(&["bazhen", "devices"])), (1, None)]);
-        let env = |vars: &'static [&'static str]| move |_: Pid| Ok(os(vars));
+        let env = |vars: &'static [&'static str]| move |_: Pid| Ok(Some(os(vars)));
         assert_eq!(
             codex_of(&line, table(), env(&["HOME=/h", "CODEX_THREAD_ID=thr-1"])).unwrap(),
-            Some(pid(50)),
+            Codex {
+                server: Some(pid(50)),
+                environment_withheld: false
+            },
         );
         assert_eq!(
             codex_of(&line, table(), env(&["HOME=/h", "CODEX_HOME=/c"])).unwrap(),
-            None
+            Codex {
+                server: None,
+                environment_withheld: false
+            },
         );
     }
 
@@ -495,14 +609,14 @@ mod tests {
             argv(&[(50, Some(&["bazhen", "devices"])), (1, None)])(p)
         };
         let environ = |_: Pid| {
-            Ok(if exited.get() {
+            Ok(Some(if exited.get() {
                 Vec::new()
             } else {
                 os(&["CODEX_THREAD_ID=thr-1"])
-            })
+            }))
         };
         assert_eq!(
-            codex_of(&[pid(50), pid(1)], args, environ).unwrap(),
+            codex_of(&[pid(50), pid(1)], args, environ).unwrap().server,
             Some(pid(50))
         );
     }
@@ -511,8 +625,118 @@ mod tests {
     fn names_the_server_over_the_caller_s_own_environment() {
         let line = [pid(50), pid(40), pid(1)];
         let table = argv(&[(50, Some(&["bazhen"])), (40, Some(SERVER)), (1, None)]);
-        let marked = |_: Pid| Ok(os(&["CODEX_THREAD_ID=thr-1"]));
-        assert_eq!(codex_of(&line, table, marked).unwrap(), Some(pid(40)));
+        let marked = |_: Pid| Ok(Some(os(&["CODEX_THREAD_ID=thr-1"])));
+        assert_eq!(
+            codex_of(&line, table, marked).unwrap().server,
+            Some(pid(40))
+        );
+    }
+
+    #[test]
+    fn says_a_withheld_environment_marks_no_caller_and_leaves_the_server_named() {
+        let withheld = |_: Pid| Ok(None);
+        let alone = argv(&[(50, Some(&["bazhen"])), (1, None)]);
+        let served = argv(&[(50, Some(&["bazhen"])), (40, Some(SERVER)), (1, None)]);
+        assert_eq!(
+            [
+                codex_of(&[pid(50), pid(1)], alone, withheld).unwrap(),
+                codex_of(&[pid(50), pid(40), pid(1)], served, withheld).unwrap(),
+            ],
+            [
+                Codex {
+                    server: None,
+                    environment_withheld: true
+                },
+                Codex {
+                    server: Some(pid(40)),
+                    environment_withheld: true
+                },
+            ],
+        );
+    }
+
+    const READER_UID: u32 = 1000;
+    const READER_GID: u32 = 1000;
+
+    /// A `newgrp libvirt` shell's credentials: every uid the reader's, every gid group 141.
+    const GROUP_SHELL: Credentials = Credentials {
+        uids: [READER_UID; 4],
+        gids: [141; 4],
+    };
+
+    fn group_withheld(owner: u32, theirs: Credentials) -> bool {
+        withheld_for_group(owner, theirs, READER_UID, READER_GID)
+    }
+
+    #[test]
+    fn takes_a_denial_for_the_group_s_when_every_uid_is_the_reader_s_and_every_gid_one_other() {
+        assert!(group_withheld(READER_UID, GROUP_SHELL));
+    }
+
+    #[test]
+    fn takes_no_denial_for_the_group_s_from_a_process_that_isn_t_dumpable() {
+        assert!(!group_withheld(0, GROUP_SHELL));
+    }
+
+    #[test]
+    fn takes_no_denial_for_the_group_s_when_any_uid_isn_t_the_reader_s() {
+        for slot in 0..4 {
+            let mut theirs = GROUP_SHELL;
+            theirs.uids[slot] = 0;
+            assert!(!group_withheld(READER_UID, theirs), "uid {slot}");
+        }
+    }
+
+    #[test]
+    fn takes_no_denial_for_the_group_s_when_the_gids_differ_among_themselves() {
+        for slot in 0..4 {
+            let mut theirs = GROUP_SHELL;
+            theirs.gids[slot] = READER_GID;
+            assert!(!group_withheld(READER_UID, theirs), "gid {slot}");
+        }
+    }
+
+    #[test]
+    fn takes_no_denial_for_the_group_s_when_every_gid_is_the_reader_s() {
+        let theirs = Credentials {
+            gids: [READER_GID; 4],
+            ..GROUP_SHELL
+        };
+        assert!(!group_withheld(READER_UID, theirs));
+    }
+
+    fn denied(kind: io::ErrorKind) -> io::Result<Vec<OsString>> {
+        Err(io::Error::from(kind))
+    }
+
+    #[test]
+    fn withholds_only_a_denied_read_that_the_group_explains() {
+        let read = [
+            withheld_or(denied(io::ErrorKind::PermissionDenied), || Ok(true)),
+            withheld_or(Ok(os(&["HOME=/h"])), || Ok(true)),
+        ];
+        assert_eq!(read.map(Result::unwrap), [None, Some(os(&["HOME=/h"]))]);
+    }
+
+    #[test]
+    fn keeps_a_denial_the_group_doesn_t_explain_and_every_other_error() {
+        let kept = [
+            withheld_or(denied(io::ErrorKind::PermissionDenied), || Ok(false)),
+            withheld_or(denied(io::ErrorKind::PermissionDenied), || {
+                Err(io::Error::other("gone"))
+            }),
+            withheld_or(denied(io::ErrorKind::NotFound), || Ok(true)),
+            withheld_or(Err(io::Error::other("ESRCH")), || Ok(true)),
+        ];
+        assert!(kept.iter().all(Result::is_err), "{kept:?}");
+    }
+
+    #[test]
+    fn reads_this_process_s_own_environment_whole() {
+        let path = std::env::var_os("PATH").unwrap();
+        let mut entry = OsString::from("PATH=");
+        entry.push(path);
+        assert!(own_environ(getpid()).unwrap().unwrap().contains(&entry));
     }
 
     #[test]

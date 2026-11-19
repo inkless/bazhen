@@ -26,6 +26,8 @@ const credentials: AgentCredentials = {
 /** A Codex tool call, by the app-server above it or by its own environment only. */
 const underServer = { kind: "codex", via: "server" } as const;
 const markedOnly = { kind: "codex", via: "environment" } as const;
+/** A caller outside every terminal whose environment the kernel withheld. */
+const withheld = { kind: "withheld" } as const;
 
 const who = (token: string | undefined, said: string | undefined) =>
   identify(credentials, { token, said });
@@ -190,6 +192,30 @@ describe("identify, with the caller's process read", () => {
       outside: { kind: "agent", agentId: tokened },
       unread: { kind: "agent", agentId: tokened },
     });
+  });
+
+  it("takes a caller whose environment was withheld, and that names a thread, as that thread marks it", () => {
+    const named = { token: undefined, said: undefined, thread: THREAD };
+    expect([
+      identify(credentials, named, withheld),
+      identify(credentials, { ...named, thread: "01a1e0f0-0000-7000-8000-0" }, withheld).kind,
+      identify(credentials, { ...named, thread: "not a thread" }, withheld).kind,
+      identify(credentials, { token: TOKEN, said: undefined, thread: CODER_THREAD }, withheld).kind,
+    ]).toEqual([{ kind: "agent", agentId: tokened }, "refused", "refused", "refused"]);
+  });
+
+  it("takes a caller whose environment was withheld, and that names no thread, by what else it presents", () => {
+    expect([
+      identify(credentials, { token: undefined, said: undefined }, withheld),
+      identify(credentials, { token: TOKEN, said: undefined }, withheld),
+      identify(credentials, { token: undefined, said: other }, withheld),
+      identify(credentials, { token: undefined, said: tokened }, withheld).kind,
+    ]).toEqual([
+      { kind: "human" },
+      { kind: "agent", agentId: tokened },
+      { kind: "agent", agentId: other },
+      "refused",
+    ]);
   });
 
   it("refuses a caller whose process the reading refused, whatever it presents", () => {

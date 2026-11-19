@@ -19,25 +19,39 @@ const chain = (pid: number, session: number, ...ancestors: number[]) => ({
   pid,
   session,
   codexServer: undefined as number | undefined,
+  environmentWithheld: false,
   ancestors,
 });
 
 /** `line` with a Codex app-server at `server`, as `bazhen-peer` marks one. */
 const via = (server: number, line: ReturnType<typeof chain>) => ({ ...line, codexServer: server });
 
+/** `line` with the caller's environment withheld, as `bazhen-peer` marks one. */
+const withheld = (line: ReturnType<typeof chain>) => ({ ...line, environmentWithheld: true });
+
 describe("parsePeer", () => {
   it("reads the pid, the session and each ancestor bazhen-peer prints", () => {
-    expect(parsePeer("50 40 0 40 1\n")).toEqual(chain(50, 40, 40, 1));
+    expect(parsePeer("50 40 0 0 40 1\n")).toEqual(chain(50, 40, 40, 1));
   });
 
   it("reads the Codex app-server bazhen-peer names before the ancestors", () => {
-    expect(parsePeer("50 50 40 40 1\n")).toEqual(via(40, chain(50, 50, 40, 1)));
+    expect(parsePeer("50 50 40 0 40 1\n")).toEqual(via(40, chain(50, 50, 40, 1)));
+  });
+
+  it("reads a withheld environment from the 1 bazhen-peer prints after the Codex app-server", () => {
+    expect(parsePeer("50 40 0 1 40 1\n")).toEqual(withheld(chain(50, 40, 40, 1)));
   });
 
   it("reads nothing from a line that isn't one", () => {
-    expect(
-      ["", "50", "50 40", "50 x 0 1", "-5 1 0", "50 40 0 1 x"].map((line) => parsePeer(line)),
-    ).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+    const lines = ["", "50", "50 40", "50 40 0", "50 x 0 0 1", "-5 1 0 0", "50 40 0 0 1 x"];
+    expect(lines.map((line) => parsePeer(line))).toEqual(lines.map(() => undefined));
+  });
+
+  it("reads nothing from a line whose environment is neither withheld nor read", () => {
+    expect(["50 40 0 2 1", "50 40 0 10 1"].map((line) => parsePeer(line))).toEqual([
+      undefined,
+      undefined,
+    ]);
   });
 });
 
@@ -105,5 +119,23 @@ describe("readingOf", () => {
 
   it("refuses a caller the runtime runs in no terminal, as tmux run-shell starts one", () => {
     expect(readingOf(chain(15, 15, 10, 1), terminals).kind).toBe("refused");
+  });
+
+  it("reads a caller whose environment was withheld as withheld only outside every agent's terminal", () => {
+    expect([
+      readingOf(withheld(chain(950, 950, 900, 1)), terminals),
+      readingOf(withheld(chain(350, 300, 300, 10, 1)), terminals),
+      readingOf(withheld(chain(150, 150, 100, 10, 1)), terminals),
+      readingOf(withheld(chain(150, 100, 1)), terminals),
+      readingOf(withheld(via(900, chain(950, 950, 900, 1))), terminals),
+      readingOf(withheld(chain(15, 15, 10, 1)), terminals).kind,
+    ]).toEqual([
+      { kind: "withheld" },
+      { kind: "withheld" },
+      { kind: "agent", agentId: agent },
+      { kind: "agent", agentId: agent },
+      { kind: "codex", via: "server" },
+      "refused",
+    ]);
   });
 });
