@@ -14,6 +14,13 @@ bazhen-protocol = { path = ".." }
 libfuzzer-sys = "=0.4.13"
 
 [[bin]]
+name = "detach_keys"
+path = "fuzz_targets/detach_keys.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "input"
 path = "fuzz_targets/input.rs"
 test = false

@@ -77,7 +77,7 @@ describe("bazhen terminals attach", () => {
     ]);
   });
 
-  it("takes exactly one target, and no option but --direct and --home", async () => {
+  it("takes exactly one target, and no option but --direct, --detach-keys and --home", async () => {
     const ran = await Promise.all([
       s.bazhen(["terminals", "attach"]),
       s.bazhen(["terminals", "attach", "a", "b"]),
@@ -86,15 +86,15 @@ describe("bazhen terminals attach", () => {
     expect(ran.map((r) => [r.code, r.stderr.split("\n")[0]])).toEqual([
       [
         2,
-        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and --home",
+        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct, --detach-keys and --home",
       ],
       [
         2,
-        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and --home",
+        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct, --detach-keys and --home",
       ],
       [
         2,
-        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and --home",
+        "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct, --detach-keys and --home",
       ],
     ]);
   });

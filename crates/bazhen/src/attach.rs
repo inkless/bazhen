@@ -1,16 +1,18 @@
 //! `bazhen terminals attach <agent|shell|terminal>`: the person's own terminal on one of Bazhen's, through
 //! the daemon's socket, as an interactive view like the web app's; or with `--direct`, straight to
-//! a terminal's holder when the daemon is down. `Ctrl-\ Ctrl-\` detaches.
+//! a terminal's holder when the daemon is down. `Ctrl-] Ctrl-]` detaches, or the keys `--detach-keys`
+//! or `config.toml` names.
 //!
 //! Its attachment state is public so the fuzz targets in `fuzz/` can reach it.
 
 pub mod attachment;
 pub mod direct;
+mod keys;
 mod link;
 pub(crate) mod tty;
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bazhen_client::Caller;
@@ -22,6 +24,7 @@ use serde::Deserialize;
 
 use self::attachment::{Attachment, Ending};
 use self::direct::Direct;
+use self::keys::Detach;
 use self::link::Outcome;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
@@ -62,18 +65,25 @@ pub(crate) fn run(
 ) -> Result<Exit, Failed> {
     let stray: Vec<&str> = p
         .given()
-        .filter(|o| *o != "home" && *o != "direct")
+        .filter(|o| !["home", "direct", "detach-keys"].contains(o))
         .collect();
     let (Some(target), None, true) = (p.word(1), p.word(2), stray.is_empty()) else {
         out.err(&format!(
-            "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct and \
-             --home\n{TERMINALS_USAGE}"
+            "bazhen terminals attach takes one agent, shell or terminal, and no option but --direct, \
+             --detach-keys and --home\n{TERMINALS_USAGE}"
         ));
         return Ok(Exit::Usage);
     };
+    let detach = match keys::detach(p.value("detach-keys"), config_dir(p).as_deref()) {
+        Ok(detach) => detach,
+        Err(why) => {
+            out.err(&format!("bazhen terminals attach {why}\n{TERMINALS_USAGE}"));
+            return Ok(Exit::Usage);
+        }
+    };
     let holders = socket.parent().unwrap_or(socket).join("holders");
     if p.has("direct") {
-        return straight(&holders, socket, daemon, target, out);
+        return straight(&holders, socket, daemon, target, &detach, out);
     }
     match daemon.get::<Answering>("/v1/health", CALL) {
         Ok(health) if health.protocol_id != PROTOCOL_ID => {
@@ -90,7 +100,7 @@ pub(crate) fn run(
                 return Ok(Exit::NotRunning);
             }
             out.err("bazhen is not running: attaching straight to the terminal's holder");
-            return straight(&holders, socket, daemon, target, out);
+            return straight(&holders, socket, daemon, target, &detach, out);
         }
         Err(e) => return Err(e),
     }
@@ -110,11 +120,12 @@ pub(crate) fn run(
     let size =
         tty::size().map_err(|e| Failed::Refused(format!("can't read the terminal's size: {e}")))?;
     let mut ws = link::open(socket, &terminal, &caller, &Attachment::hello(size))?;
+    starting(target, &detach, out);
     let (resizes, stops, raw) = take_over()?;
     let mut notes = Vec::new();
     let mut rejoined = false;
     let outcome = loop {
-        let mut attachment = Attachment::sized(tty::size().unwrap_or(size));
+        let mut attachment = Attachment::sized(tty::size().unwrap_or(size), detach.keys.clone());
         let outcome = link::pump(&mut ws, &mut attachment, &resizes, &stops, &mut notes);
         if !matches!(outcome, Ok(Outcome::Ended(Ending::Evicted))) || rejoined {
             break outcome;
@@ -192,6 +203,7 @@ fn straight(
     socket: &Path,
     daemon: &Daemon,
     target: &str,
+    detach: &Detach,
     out: &mut Out,
 ) -> Result<Exit, Failed> {
     if !is_id("term", target) {
@@ -219,7 +231,8 @@ fn straight(
                 .to_owned(),
         );
     }
-    let mut direct = Direct::new(asks && hello.writer);
+    let mut direct = Direct::new(asks && hello.writer, detach.keys.clone());
+    starting(target, detach, out);
     let (resizes, stops, raw) = take_over()?;
     let outcome = direct::pump(
         &mut stream,
@@ -241,6 +254,23 @@ fn straight(
     let left = exited_agent(&done, daemon, target);
     let (done, after) = read_as(done, left);
     Ok(report(done, target, after.as_ref(), &notes, out))
+}
+
+/// The config directory of the home `--home`, `BAZHEN_HOME` or the XDG variables name.
+fn config_dir(p: &Parsed) -> Option<PathBuf> {
+    let inputs =
+        bazhen_client::paths::Inputs::current(p.value("home"), rustix::process::getuid().as_raw());
+    bazhen_client::paths::resolve(&inputs)
+        .ok()
+        .map(|paths| PathBuf::from(paths.config))
+}
+
+/// Says which keys detach, as the attachment takes over the person's terminal, on either path.
+fn starting(target: &str, detach: &Detach, out: &mut Out) {
+    if let Some(why) = &detach.passed_over {
+        out.err(&format!("bazhen: {why}, so the default keys detach"));
+    }
+    out.err(&format!("attaching to {target}: {} detaches", detach.keys));
 }
 
 /// The person's terminal, raw, with its resizes and the signals to stop watched.

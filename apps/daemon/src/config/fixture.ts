@@ -268,6 +268,12 @@ export const LEAVES: readonly Leaf[] = [
     ['"50%"', '"-1"', '"1k"', '"inf"', '""', '"8192T"'],
   ),
   count("terminals", "history_lines", 0, 100_000),
+  text(
+    "attach",
+    "detach_keys",
+    ['"ctrl-],ctrl-]"', '"CTRL-P,Ctrl-q"', '"x"', '"ctrl-@,ctrl-\\\\,a,~"', '"a,b,c,d,e,f,g,h"'],
+    ['""', '"ctrl-[,x"', '"ctrl-1"', '","', '"a,,b"', '"ctrl-]  "', '"a,b,c,d,e,f,g,h,i"', '"é"'],
+  ),
   choice("runtime", "default", ["tmux", "holder"]),
   strings("web", "external_origins", ORIGINS_GOOD, ORIGINS_BAD),
   flag("web", "allow_insecure_origins"),
@@ -297,6 +303,7 @@ const TABLES = [
   "agents",
   "agents.env",
   "terminals",
+  "attach",
   "runtime",
   "web",
 ];
@@ -340,6 +347,8 @@ memory_max = "64M"
 total_memory_max = "100%"
 swap_max = "infinity"
 history_lines = 0
+[attach]
+detach_keys = "ctrl-p,ctrl-q"
 [runtime]
 default = "tmux"
 [web]

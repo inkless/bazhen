@@ -713,11 +713,15 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen/src/reply.rs::decode": "reply",
   "crates/bazhen/src/attach/attachment.rs::Attachment::keys": "attach",
   "crates/bazhen/src/attach/attachment.rs::Attachment::frame": "attach",
-  "crates/bazhen/src/attach/attachment.rs::DetachKeys::scan": "attach",
+  "crates/bazhen/src/attach/attachment.rs::DetachScan::new": "attach",
+  "crates/bazhen/src/attach/attachment.rs::DetachScan::scan": "attach",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::new": "attach",
+  "crates/bazhen/src/attach/direct.rs::Direct::new": "attach",
   "crates/bazhen/src/attach/direct.rs::Direct::keys": "attach",
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
+  "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
@@ -932,6 +936,17 @@ const NOT_DECODERS: Record<string, string> = {
     "hands the keys Attachment::keys held over, whole; parses nothing",
   "crates/bazhen/src/attach/attachment.rs::Attachment::engage":
     "asks for the lease when keys are held for it; reads no bytes",
+  "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::fmt":
+    "writes the keys DetachKeys::parse has read as a person reads them; parses nothing",
+  "crates/bazhen/src/attach/keys.rs::detach":
+    "reads config.toml with the toml crate and passes its keys to DetachKeys::parse, which the protocol's detach_keys target fuzzes",
+  "crates/bazhen/src/attach.rs::straight":
+    "takes the keys DetachKeys::parse read, for Direct::new, which the attach target fuzzes",
+  "crates/bazhen/src/attach.rs::starting": "shows the keys DetachKeys::parse read; parses nothing",
+  "crates/bazhen/src/attach/attachment.rs::DetachScan::push":
+    "reached only through DetachScan::scan, which the attach target fuzzes",
+  "crates/bazhen/src/attach/attachment.rs::Attachment::sized":
+    "keeps a size and a sequence DetachKeys::parse has read; reads no bytes",
   "crates/bazhen/src/attach/link.rs::drain":
     "reads the daemon's frames through tungstenite, and their text through Attachment::frame, which the attach target fuzzes",
   "crates/bazhen/src/attach/link.rs::act": "writes frames and keys this build made; reads nothing",

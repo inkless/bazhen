@@ -95,6 +95,9 @@ retype_last_command = false # keep each shell's last line to type back; see docs
 [runtime]
 default = "holder" # or "tmux"; a terminal already open stays on the runtime it was made on
 
+[attach]
+detach_keys = "ctrl-],ctrl-]" # what detaches `bazhen terminals attach`, as ctrl-p,ctrl-q; or --detach-keys
+
 [terminals]
 max_open = 100 # agents' and shells' terminals open at once
 history_lines = 10000 # lines of history each new terminal keeps, up to 100000; see below

@@ -66,7 +66,7 @@ describe("the command line", () => {
       expect.arrayContaining([
         "usage: bazhen <start|stop|status|doctor|env refresh> [--home <dir>] [--port <port>]",
         "usage: bazhen devices [list | pair | revoke <id> | dismiss <id>]",
-        "  bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
+        "  bazhen terminals attach <agent|shell|terminal> [--direct] [--detach-keys <keys>] [--home <dir>]",
         "  bazhen terminals screen <agent|shell|terminal> [--history <n>] [--json] [--home <dir>]",
         "  bazhen agents [list] [--json]",
         "  bazhen agents send <agent> (<text> | --file <path>) [--wait | --reply] [--timeout <seconds>] [--json]",
@@ -151,7 +151,7 @@ describe("the command line", () => {
         [
           "terminals needs a verb",
           "usage:",
-          "  bazhen terminals attach <agent|shell|terminal> [--direct] [--home <dir>]",
+          "  bazhen terminals attach <agent|shell|terminal> [--direct] [--detach-keys <keys>] [--home <dir>]",
         ],
       ],
     ]);
