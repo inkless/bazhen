@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  crateBinaries,
+  failedInTest,
   onBothDaemons,
   unrunReason,
   failureLine,
@@ -1439,5 +1441,107 @@ describe("why a listed test has no result on the Rust daemon", () => {
       "its run has no result for it",
       "the api run: it wrote no report",
     ]);
+  });
+});
+
+const binaries = (tree: Record<string, string>) =>
+  [...crateBinaries(new Set(Object.keys(tree)), (path) => tree[path])].toSorted();
+
+describe("the binaries a workspace's crates build", () => {
+  it("takes a crate's own for a src/main.rs, and none for a library", () => {
+    expect(
+      binaries({
+        "crates/d/Cargo.toml": '[package]\nname = "bazhen-daemon"\n',
+        "crates/d/src/main.rs": "",
+        "crates/s/Cargo.toml": '[package]\nname = "store"\n',
+        "crates/s/src/lib.rs": "",
+      }),
+    ).toEqual(["bazhen-daemon"]);
+  });
+
+  it("takes one for each file and folder under src/bin", () => {
+    expect(
+      binaries({
+        "crates/t/Cargo.toml": '[package]\nname = "t"\n',
+        "crates/t/src/bin/one.rs": "",
+        "crates/t/src/bin/two/main.rs": "",
+        "crates/t/src/bin/two/util.rs": "",
+      }),
+    ).toEqual(["one", "two"]);
+  });
+
+  it("takes a [[bin]] whose name follows an array", () => {
+    expect(
+      binaries({
+        "crates/t/Cargo.toml":
+          '[package]\nname = "t"\n\n[[bin]]\nrequired-features = ["x"]\nname = "spawned"\npath = "src/spawned.rs"\n',
+      }),
+    ).toEqual(["spawned"]);
+  });
+
+  it("infers none with autobins off, and keeps each [[bin]]", () => {
+    expect(
+      binaries({
+        "crates/t/Cargo.toml":
+          '[package]\nname = "t"\nautobins = false\n\n[[bin]]\nname = "kept"\npath = "src/kept.rs"\n',
+        "crates/t/src/main.rs": "",
+        "crates/t/src/bin/other.rs": "",
+      }),
+    ).toEqual(["kept"]);
+  });
+
+  it("drops a binary cargo would infer from a path a [[bin]] takes", () => {
+    expect(
+      binaries({
+        "crates/t/Cargo.toml":
+          '[package]\nname = "t"\n\n[[bin]]\nname = "tool"\npath = "./src/main.rs"\n',
+        "crates/t/src/main.rs": "",
+      }),
+    ).toEqual(["tool"]);
+  });
+
+  it("takes none from a manifest that doesn't parse, or one outside a crate's folder", () => {
+    expect(
+      binaries({
+        "crates/t/Cargo.toml": '[package\nname = "t"\n',
+        "crates/t/src/main.rs": "",
+        "Cargo.toml": '[package]\nname = "root"\n',
+        "src/main.rs": "",
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("whether a failure failed in the test file itself", () => {
+  const file = "tests/api/r.test.ts";
+
+  it("is so for an expect in the test, past the frames of node and node_modules", () => {
+    expect(
+      [
+        "AssertionError: expected 200 to be 421\n" +
+          "    at Proxy.<anonymous> (/w/node_modules/.pnpm/vitest/dist/index.js:9:1)\n" +
+          "    at node:internal/process/task_queues:95:5\n" +
+          `    at /w/${file}:3:5`,
+        "Error: expected [Function] to throw\n" +
+          "    at async node:internal/process/task_queues:95:5\n" +
+          `    at async /w/${file}:7:5`,
+        `AssertionError: no\n    at async Object.check (/w/my repo/${file}:7:5)`,
+        `AssertionError: no\n    at file:///w/my%20repo/${file}:7:5`,
+      ].map((m) => failedInTest(m, file)),
+    ).toEqual([true, true, true, true]);
+  });
+
+  it("isn't for a throw from a helper, a stack with no place of its own, or none", () => {
+    expect(
+      [
+        "Error: the daemon exited\n" +
+          "    at async Promise.all (index 0)\n" +
+          "    at Daemon.start (/w/tests/api/daemon.ts:9:3)\n" +
+          `    at /w/${file}:3:5`,
+        "Error: Hook timed out\n    at /w/node_modules/.pnpm/vitest/dist/index.js:9:1",
+        "Error: no stack",
+        `AssertionError: no\n    at /w/tests/api/other-${file.slice("tests/api/".length)}:3:5`,
+      ].map((m) => failedInTest(m, file)),
+    ).toEqual([false, false, false, false]);
   });
 });

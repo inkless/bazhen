@@ -101,6 +101,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseToml } from "smol-toml";
 import { stripVTControlCharacters } from "node:util";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
 import { KILLS_ENV } from "./capped.ts";
@@ -870,8 +871,17 @@ export function unrunReason(
   return `it was ${test.status}`;
 }
 
-// A frame of a stack: `at name (path:line:col)` or `at path:line:col`, the path maybe a file URL.
-const FRAME = /^\s*at (?:[^\n]*\()?(?:file:\/\/)?([^\s()]+):\d+:\d+\)?\s*$/gm;
+/**
+ * The file a stack's line is at: `at name (path:line:col)`, `at path:line:col`, either maybe
+ * `async`, the path maybe a file URL, kept as written. Undefined for a line that isn't a frame or has no place, as
+ * `at async Promise.all (index 0)`.
+ */
+export function framePath(line: string): string | undefined {
+  const frame = /^\s*at (.+?)\s*$/.exec(line)?.[1];
+  if (frame === undefined) return undefined;
+  const where = /\(([^()]*)\)$/.exec(frame)?.[1] ?? frame.replace(/^async /, "");
+  return /^(.+):\d+:\d+$/.exec(where)?.[1];
+}
 
 /**
  * Whether a failure message failed in the test file itself: the first frame of its stack outside
@@ -879,9 +889,12 @@ const FRAME = /^\s*at (?:[^\n]*\()?(?:file:\/\/)?([^\s()]+):\d+:\d+\)?\s*$/gm;
  * as a daemon that never started or a wait that gave up, isn't.
  */
 export function failedInTest(message: string, file: string): boolean {
-  const own = [...message.matchAll(FRAME)]
-    .map(([, path = ""]) => path)
-    .find((path) => !path.startsWith("node:") && !path.includes("/node_modules/"));
+  const own = message
+    .split("\n")
+    .map(framePath)
+    .find(
+      (path) => path !== undefined && !path.startsWith("node:") && !path.includes("/node_modules/"),
+    );
   return own !== undefined && (own === file || own.endsWith(`/${file}`));
 }
 
@@ -1104,29 +1117,69 @@ export function namedBinaries(path: string, source: string): string[] {
 export const manifestNames = (manifest: string): string[] =>
   [...manifest.matchAll(/^name\s*=\s*"([^"]+)"/gm)].map(([, name = ""]) => name);
 
+const isTable = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const asTable = (value: unknown) => (isTable(value) ? value : undefined);
+
 /**
- * The binaries the crates among `files` build, as cargo names them: a crate's package with a
- * src/main.rs, each src/bin/<name>.rs or src/bin/<name>/main.rs, and each `[[bin]]` its manifest
- * names. `read` returns a file's text.
+ * The binaries the crates among `files` build, as cargo infers them: each `[[bin]]` the manifest
+ * names, and, unless `[package] autobins = false`, the package's own for a src/main.rs and one
+ * for each src/bin/<name>.rs or src/bin/<name>/main.rs, less those a `[[bin]]` takes by its name
+ * or its path. A manifest that doesn't parse builds none: cargo would build nothing from it.
+ * `read` returns a file's text.
  */
 export function crateBinaries(
   files: ReadonlySet<string>,
   read: (path: string) => string | undefined,
 ): Set<string> {
   const names = new Set<string>();
-  for (const path of files) {
-    const crate = /^crates\/([^/]+)\/Cargo\.toml$/.exec(path)?.[1];
-    if (crate === undefined) continue;
-    const manifest = read(path) ?? "";
-    const [own] = manifestNames(manifest);
-    if (own !== undefined && files.has(`crates/${crate}/src/main.rs`)) names.add(own);
-    for (const [, name = ""] of manifest.matchAll(/^\[\[bin\]\][^[]*?^name\s*=\s*"([^"]+)"/gm)) {
-      names.add(name);
+  for (const manifestPath of files) {
+    const dir = /^(crates\/[^/]+)\/Cargo\.toml$/.exec(manifestPath)?.[1];
+    if (dir === undefined) continue;
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = parseToml(read(manifestPath) ?? "");
+    } catch {
+      continue;
     }
-  }
-  for (const path of files) {
-    const bin = /^crates\/[^/]+\/src\/bin\/([^/]+?)(?:\.rs|\/main\.rs)$/.exec(path)?.[1];
-    if (bin !== undefined) names.add(bin);
+    const pkg = asTable(manifest["package"]);
+    const own = typeof pkg?.["name"] === "string" ? pkg["name"] : undefined;
+    const has = (path: string) => files.has(`${dir}/${path}`);
+    const bins = Array.isArray(manifest["bin"]) ? (manifest["bin"] as unknown[]) : [];
+    const explicit = bins.flatMap((bin) => {
+      const name = asTable(bin)?.["name"];
+      if (typeof name !== "string") return [];
+      const path = asTable(bin)?.["path"];
+      const at =
+        typeof path === "string"
+          ? posix.normalize(path)
+          : [
+              `src/bin/${name}.rs`,
+              `src/bin/${name}/main.rs`,
+              ...(name === own ? ["src/main.rs"] : []),
+            ].find(has);
+      return [{ name, path: at }];
+    });
+    const binDir = `${dir}/src/bin/`;
+    const inferred =
+      pkg?.["autobins"] === false
+        ? []
+        : [
+            ...(own !== undefined && has("src/main.rs")
+              ? [{ name: own, path: "src/main.rs" }]
+              : []),
+            ...[...files].flatMap((file) => {
+              if (!file.startsWith(binDir)) return [];
+              const [, single, folder] =
+                /^([^/]+)\.rs$|^([^/]+)\/main\.rs$/.exec(file.slice(binDir.length)) ?? [];
+              const name = single ?? folder;
+              return name === undefined ? [] : [{ name, path: file.slice(dir.length + 1) }];
+            }),
+          ];
+    for (const { name } of explicit) names.add(name);
+    for (const { name, path } of inferred) {
+      if (!explicit.some((e) => e.name === name || e.path === path)) names.add(name);
+    }
   }
   return names;
 }
