@@ -439,8 +439,8 @@ const swallow = () => true;
 /**
  * For browser tests, per view: the screen as text, the top line in view, whether the view is at
  * the bottom (not scrolled back into the page's own scrollback), whether the program is on its
- * alternate screen, the background it paints, and the colours a program wrote text
- * in, whichever renderer draws.
+ * alternate screen, the background it paints, the colours a program wrote text in, whichever
+ * renderer draws, and the font family it draws in.
  */
 function exposeForTests(
   terminalId: string,
@@ -458,6 +458,7 @@ function exposeForTests(
     gliding,
     background: () => term.options.theme?.background,
     foregrounds: () => foregrounds(term),
+    fontFamily: () => term.options.fontFamily,
   };
   return () => delete views[terminalId];
 }
