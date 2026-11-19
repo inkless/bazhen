@@ -58,6 +58,10 @@ describe("the daemon's Unix socket", () => {
     }
   });
 
+  it("serves stop on the socket only, never over HTTP", async () => {
+    expect((await daemon.request("/v1/daemon/stop", { method: "POST" })).status).toBe(404);
+  });
+
   it("refuses an approval answer from a caller that says it is an agent", async () => {
     const path = "/v1/attention/attn_0190a0b0c0d07e0f8a9b0c1d2e3f4a5b/answer";
     const body = { idempotencyKey: "k", decision: "allow" };

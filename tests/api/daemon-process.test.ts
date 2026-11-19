@@ -1,4 +1,4 @@
-// The daemon as a process, whichever one runs: one per home, and stopped only over its socket.
+// The daemon as a process, whichever one runs: one per home, and stopping none succeeds.
 // Both daemons pass it.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -11,12 +11,6 @@ describe("a daemon on its own home", () => {
   });
   afterAll(async () => {
     await daemon?.stop();
-  });
-
-  it("serves stop on the socket only, never over HTTP", async () => {
-    const overHttp = await daemon.request("/v1/daemon/stop", { method: "POST", cookie: null });
-    expect(overHttp.status).toBe(404);
-    expect((await overSocket(daemon.socket, "GET", "/v1/health")).status).toBe(200);
   });
 
   it("exits already running when a second starts, and leaves the first answering", async () => {
