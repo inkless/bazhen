@@ -388,9 +388,10 @@ libvirt, follow the steps by hand:
    enough. Keep its host from sleeping for the run's length.
 2. In the VM, install git, a C toolchain, tmux, Node at the version `.nvmrc` pins, pnpm at the
    version `packageManager` in `package.json` pins (`npm install -g pnpm@<version>`: Node 25 and
-   later ship no corepack), moon at the version `.prototools` pins
-   (`npm install -g @moonrepo/cli@<version>`, or `proto install` in the clone), and rustup. Clone
-   the repository at the commit under test, and run `pnpm install --frozen-lockfile`.
+   later ship no corepack), and rustup. Clone the repository at the commit under test, and run
+   `pnpm install --frozen-lockfile`, which installs moon at the version `.prototools` pins: link
+   its native binary onto PATH, as the soak VM's provisioning does, or run `proto install` in the
+   clone.
 3. Mark the VM disposable, in the VM and nowhere else: `sudo touch /etc/bazhen-disposable-host`.
    The soak refuses to start without the root-owned marker.
 4. Start the run so it outlives the login session:

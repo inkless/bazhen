@@ -1,7 +1,7 @@
 # The only place the real-tmux suites run besides CI: a Linux host that exists to be thrown away.
 # Nothing of the host is mounted, so no tmux command, signal or agent in here can reach the
-# host's own servers or processes. Built by `moon run :test-real` (scripts/test-real.ts), which passes
-# the pins below from the repository.
+# host's own servers or processes. Built by `moon run :test-real` (scripts/test-real.ts), which
+# passes the pins below from the repository.
 
 ARG NODE_VERSION
 # Exact, so a tmux upgrade is a change someone makes and the defect pins are re-run against.
@@ -48,7 +48,8 @@ RUN cd /tmp/rust-tools \
 FROM node:${NODE_VERSION}-trixie
 
 ARG PNPM_VERSION
-# The moon .prototools pins, which runs each suite's task (moon.toml).
+# The moon .prototools pins, which runs each suite's task (moon.toml): the lockfile's native binary,
+# which `pnpm install` puts in node_modules, linked from /usr/local/bin/moon through ~/moon-bin.
 ARG MOON_VERSION
 ARG PLAYWRIGHT_VERSION
 ARG TMUX_VERSION
@@ -75,7 +76,8 @@ RUN echo "man-db man-db/auto-update boolean false" | debconf-set-selections \
     "htop=${HTOP_VERSION}" "rustup=${RUSTUP_VERSION}" \
   && npx -y "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g "pnpm@${PNPM_VERSION}" "@moonrepo/cli@${MOON_VERSION}" \
+  && npm install -g "pnpm@${PNPM_VERSION}" \
+  && ln -s /home/node/moon-bin/moon /usr/local/bin/moon \
   && touch /etc/bazhen-disposable-host
 
 COPY --from=tmux-build /tmux-root/usr/local /usr/local
@@ -104,8 +106,13 @@ COPY --chown=node crates crates
 RUN cargo fetch --locked
 COPY --chown=node . .
 RUN pnpm install --offline --frozen-lockfile
+# The native binary, not @moonrepo/cli's node wrapper: Ctrl-C would end the wrapper before moon
+# reports the tasks it interrupted.
+RUN mkdir -p /home/node/moon-bin \
+  && ln -s "$(node -p 'require("@moonrepo/cli/utils").findMoonExe()')" /home/node/moon-bin/moon
 # moon fetches the plugins its tasks run with on first use, into its home (~/.moon); the suites'
-# containers have no network, so they are fetched here, and the build proves it has the pinned moon.
+# containers have no network, so they are fetched here, and the build proves the lockfile's moon is
+# the one .prototools pins.
 RUN moon tasks > /dev/null && test "$(moon --version)" = "moon ${MOON_VERSION}"
 # Falsify lists the Rust tests at the merge base, and judges a branch that changes falsify with
 # the base's falsify too: both need what the base's lockfiles name, which HEAD's may not. They

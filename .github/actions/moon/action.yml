@@ -1,10 +1,14 @@
-# Installs the moon .prototools pins, the version every host runs through proto, so a job's
-# `moon run` runs the same moon as a developer's. Needs node (actions/setup-node) and a checkout.
+# Puts the moon the lockfile pins on PATH for the steps after it: `@moonrepo/cli` at the version
+# .prototools pins (check-standards holds the two equal), so a job's `moon run` runs a developer's
+# moon, from packages the lockfile hashes. Runs after `pnpm install --frozen-lockfile`. Only moon
+# goes on PATH, not node_modules/.bin, so a task finds no tool in CI that it wouldn't on a host,
+# and it is the native binary, not the package's node wrapper, which Ctrl-C would end before moon
+# reports the tasks it interrupted.
 # On a pull request moon compares against GitHub's base ref, not .moon/workspace.toml's
 # defaultBranch, and fails when the checkout lacks it, as a shallow one does: MOON_BASE, for every
 # later step, gives it HEAD.
 name: moon
-description: Install the moon version .prototools pins.
+description: Put the moon the lockfile pins on PATH.
 runs:
   using: composite
   steps:
@@ -12,6 +16,9 @@ runs:
       run: |
         version=$(sed -n 's/^moon = "\([0-9][0-9.]*\)"$/\1/p' .prototools)
         [ -n "$version" ] || { echo ".prototools pins no exact moon version" >&2; exit 1; }
-        npm install -g "@moonrepo/cli@${version}"
-        test "$(moon --version)" = "moon ${version}"
+        bin="$RUNNER_TEMP/moon-bin"
+        mkdir -p "$bin"
+        ln -s "$(node -p 'require("@moonrepo/cli/utils").findMoonExe()')" "$bin/moon"
+        test "$("$bin/moon" --version)" = "moon ${version}"
+        echo "$bin" >> "$GITHUB_PATH"
         echo "MOON_BASE=HEAD" >> "$GITHUB_ENV"

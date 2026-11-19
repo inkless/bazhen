@@ -1435,7 +1435,7 @@ describe("moonFailures", () => {
     "moon.toml": root,
     "apps/web/moon.toml": task("build", `command = "vite build"\n${uncached}`),
     ".prototools": 'moon = "2.6.5"\n',
-    "package.json": JSON.stringify({ scripts: { prepare: "husky" } }),
+    "package.json": packageJson({ prepare: "husky" }, { "@moonrepo/cli": "2.6.5" }),
     "apps/web/package.json": JSON.stringify({ dependencies: { vite: "1.0.0" } }),
   };
   const failures = (extra: Record<string, string>, drop: string[] = []) => {
@@ -1564,17 +1564,29 @@ describe("moonFailures", () => {
     ]);
   });
 
-  it("keeps package.json to pnpm's install hook, and off moon's own packages", () => {
+  it("keeps package.json to pnpm's install hook, and moon to the lockfile's, at the pinned version", () => {
+    const cli = { "@moonrepo/cli": "2.6.5" };
+    const rootPackage = (scripts: Record<string, string>, dev: Record<string, string> = cli) => ({
+      "package.json": packageJson(scripts, dev),
+    });
     expect([
-      failures({ "package.json": packageJson({ prepare: "husky", check: "moon run :check" }) }),
-      failures({ "package.json": packageJson({ prepare: "husky --x" }) }),
+      failures(rootPackage({ prepare: "husky", check: "moon run :check" })),
+      failures(rootPackage({ prepare: "husky --x" })),
       failures({ "apps/web/package.json": packageJson({ dev: "vite" }) }),
-      failures({ "package.json": packageJson({ prepare: "husky" }, { "@moonrepo/cli": "2.6.5" }) }),
+      failures(rootPackage({ prepare: "husky" }, {})),
+      failures(rootPackage({ prepare: "husky" }, { "@moonrepo/cli": "2.6.4" })),
+      failures(
+        rootPackage({ prepare: "husky" }, { ...cli, "@moonrepo/core-linux-x64-gnu": "2.6.5" }),
+      ),
+      failures({ "apps/web/package.json": packageJson({}, cli) }),
     ]).toEqual([
       [expect.stringContaining('package.json: the "check" script belongs in a moon task')],
       ['package.json: the "prepare" script must be `husky`.'],
       [expect.stringContaining('apps/web/package.json: the "dev" script belongs in a moon task')],
-      [expect.stringContaining("package.json: depends on @moonrepo/cli")],
+      [expect.stringContaining('package.json: needs "@moonrepo/cli": "2.6.5" in devDependencies')],
+      [expect.stringContaining("package.json: depends on @moonrepo/cli 2.6.4")],
+      [expect.stringContaining("package.json: depends on @moonrepo/core-linux-x64-gnu 2.6.5")],
+      [expect.stringContaining("apps/web/package.json: depends on @moonrepo/cli 2.6.5")],
     ]);
   });
 });

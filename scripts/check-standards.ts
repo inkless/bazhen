@@ -2642,7 +2642,10 @@ const LINT_FLAG =
 const MOON_WORKSPACE = ".moon/workspace.toml";
 const PROTOTOOLS = ".prototools";
 const MOON_CONFIG = /^\.moon\/|(?:^|\/)moon\.(?:ya?ml|json5?|jsonc|pkl|hcl|toml)$/;
-const MOON_PACKAGE = /^@moonrepo\/(?:cli|core-)/;
+const MOON_PACKAGE = /^@moonrepo\//;
+// The moon CI and the test image run: the lockfile's, which pnpm installs from hashed packages
+// without running an install script, at the version .prototools pins for every host's proto.
+const MOON_CLI = "@moonrepo/cli";
 const ROOT_PROJECT = "root";
 // The keys of a task, and of its options, this check reads; any other could change what it runs
 // or let it pass unrun (`extends`, `options.allowFailure`, `options.envFile`, …).
@@ -2816,6 +2819,7 @@ export function moonFailures(paths: readonly string[], read: (path: string) => s
     }
   }
   out.push(...prototoolsFailures(paths, read));
+  const pin = prototoolsMoon(paths, read);
   for (const file of paths.filter((p) => fileName(p) === "package.json")) {
     const pkg: unknown = JSON.parse(read(file));
     const scripts = packageScripts(read, file);
@@ -2829,32 +2833,52 @@ export function moonFailures(paths: readonly string[], read: (path: string) => s
           : `${file}: the "${name}" script must be \`${allowed[name]}\`.`,
       );
     }
+    const pinned = `"${MOON_CLI}": "${pin ?? "<the moon version>"}"`;
     for (const field of ["dependencies", "devDependencies", "optionalDependencies"]) {
-      const deps = isTable(pkg) && isTable(pkg[field]) ? Object.keys(pkg[field]) : [];
-      for (const dep of deps.filter((d) => MOON_PACKAGE.test(d))) {
+      const deps = isTable(pkg) && isTable(pkg[field]) ? pkg[field] : {};
+      for (const [dep, version] of Object.entries(deps).filter(([d]) => MOON_PACKAGE.test(d))) {
+        const rootCli = file === "package.json" && field === "devDependencies" && dep === MOON_CLI;
+        if (rootCli && (pin === undefined || version === pin)) continue;
         out.push(
-          `${file}: depends on ${dep}; the moon every host runs is the one ${PROTOTOOLS} pins.`,
+          `${file}: depends on ${dep} ${String(version)}; the one moon package is ${pinned} in ` +
+            `package.json's devDependencies, at the version ${PROTOTOOLS} pins.`,
         );
       }
+    }
+    const dev = isTable(pkg) && isTable(pkg["devDependencies"]) ? pkg["devDependencies"] : {};
+    if (file === "package.json" && !(MOON_CLI in dev)) {
+      out.push(
+        `package.json: needs ${pinned} in devDependencies: CI and the test image run the moon ` +
+          `the lockfile pins, at the version ${PROTOTOOLS} pins.`,
+      );
     }
   }
   return out;
 }
 
-/** Why .prototools doesn't pin moon to one exact version, or pins something this doesn't read. */
-function prototoolsFailures(paths: readonly string[], read: (path: string) => string): string[] {
-  const why = `${PROTOTOOLS}: must pin moon to one exact version (\`moon = "x.y.z"\`) and nothing else.`;
-  if (!paths.includes(PROTOTOOLS))
-    return [`${PROTOTOOLS} is missing; it pins the moon every host runs.`];
+/** The one exact moon version .prototools pins, alone; undefined if it pins anything else. */
+function prototoolsMoon(paths: readonly string[], read: (path: string) => string) {
+  if (!paths.includes(PROTOTOOLS)) return undefined;
   try {
     const pins = parseToml(read(PROTOTOOLS));
     const moon = pins["moon"];
-    const ok =
-      Object.keys(pins).length === 1 && typeof moon === "string" && /^\d+\.\d+\.\d+$/.test(moon);
-    return ok ? [] : [why];
+    return Object.keys(pins).length === 1 &&
+      typeof moon === "string" &&
+      /^\d+\.\d+\.\d+$/.test(moon)
+      ? moon
+      : undefined;
   } catch {
-    return [why];
+    return undefined;
   }
+}
+
+/** Why .prototools doesn't pin moon to one exact version, or pins something this doesn't read. */
+function prototoolsFailures(paths: readonly string[], read: (path: string) => string): string[] {
+  if (!paths.includes(PROTOTOOLS))
+    return [`${PROTOTOOLS} is missing; it pins the moon every host runs.`];
+  return prototoolsMoon(paths, read) === undefined
+    ? [`${PROTOTOOLS}: must pin moon to one exact version (\`moon = "x.y.z"\`) and nothing else.`]
+    : [];
 }
 
 const TOML_HEADER = /^\[\[?[^\]]*\]\]?$/;

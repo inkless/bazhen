@@ -528,15 +528,15 @@ if [[ "$(pnpm --version 2>/dev/null || true)" != "$pnpm_version" ]]; then
   say "pnpm $pnpm_version"
   sudo npm install -g --silent "pnpm@$pnpm_version"
 fi
-moon_version=$(sed -n 's/^moon = "\([0-9][0-9.]*\)"$/\1/p' .prototools)
-[[ -n "$moon_version" ]] || { echo "no exact moon version in .prototools" >&2; exit 1; }
-if [[ "$(moon --version 2>/dev/null || true)" != "moon $moon_version" ]]; then
-  say "moon $moon_version"
-  sudo npm install -g --silent "@moonrepo/cli@$moon_version"
-fi
 
 say "pnpm install --frozen-lockfile"
 pnpm install --frozen-lockfile
+# moon is the lockfile's native binary, at the version .prototools pins, linked onto PATH.
+moon_version=$(sed -n 's/^moon = "\([0-9][0-9.]*\)"$/\1/p' .prototools)
+[[ -n "$moon_version" ]] || { echo "no exact moon version in .prototools" >&2; exit 1; }
+sudo ln -sf "$(node -p 'require("@moonrepo/cli/utils").findMoonExe()')" /usr/local/bin/moon
+[[ "$(moon --version)" == "moon $moon_version" ]] \
+  || { echo "moon is $(moon --version), not $moon_version" >&2; exit 1; }
 # moon run :soak builds these too; building now fails provisioning, not the run, on a broken build.
 say "building the hook, the CLI and the release holder"
 moon run :build-hook
