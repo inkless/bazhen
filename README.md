@@ -127,6 +127,24 @@ must be an absolute path), so your rc files run again at every launch, like a ne
   guard such lines on it, for example `[ -z "$TMUX" ] && [ -z "$BAZHEN_AGENT_ID" ] && exec tmux`
   (fish: `set -q BAZHEN_AGENT_ID`).
 
+### On each device
+
+The web terminal's own settings stay in the browser that sets them, in its local storage, and
+nothing syncs them: set them from the page's developer console, then reload.
+
+- `bazhen.fontFamily`: a CSS family list, such as `"Iosevka Term", monospace`, to draw terminals
+  in a font installed on that device. Quote a name that isn't only letters, digits, `-` and `_`.
+  Terminals are drawn in JetBrainsMono Nerd Font Mono, which the page bundles, so Nerd Font icons
+  work with nothing installed, and it still draws whatever glyph and icon the family you name
+  lacks, or the whole terminal if the device doesn't have that family.
+- `bazhen.keyMap`: keys over the defaults, as JSON, such as `{"shift+enter": "\u001b\r"}`; `null`
+  unbinds a key.
+- `bazhen.optionIsMeta`: `true` for a Mac's Option key to send Alt+letter rather than type the
+  characters it puts on keys.
+
+For example: `localStorage.setItem("bazhen.fontFamily", '"Iosevka Term", monospace')`. A value
+the page can't use is shown above the terminal, which goes on without it.
+
 ### Reaching Bazhen from another device
 
 On your home network, Bazhen can serve HTTPS itself: set `web.listen = "lan"` and the address

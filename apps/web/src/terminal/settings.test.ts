@@ -6,11 +6,15 @@ const storage = (entries: Record<string, string>) => ({
   read: (key: string) => entries[key] ?? null,
 });
 
+const notAName = (entry: string) =>
+  `${entry} is not a family name; put a name in quotes, as "Iosevka Term"`;
+
 describe("a device's terminal settings", () => {
   it("keeps the defaults on a device that stored nothing: Shift+Enter, and Option typing characters", () => {
     expect(loadSettings(storage({}))).toEqual({
       keyMap: DEFAULT_KEY_MAP,
       optionIsMeta: false,
+      fontFamily: null,
       problem: null,
     });
   });
@@ -37,5 +41,64 @@ describe("a device's terminal settings", () => {
       DEFAULT_KEY_MAP,
       "Your key map was not applied: a key map is an object of chord to text.",
     ]);
+  });
+
+  it.each([
+    ['  "Iosevka Term", monospace ', '"Iosevka Term", monospace'],
+    ["Iosevka Term, Monospace", '"Iosevka Term", monospace'],
+    ["'Fira Code',ui-monospace", '"Fira Code", ui-monospace'],
+    ['"  Two  Spaces  "', '"Two  Spaces"'],
+    ['"monospace"', '"monospace"'],
+    ["inherit", '"inherit"'],
+    ["-Mono_2, 等宽", '"-Mono_2", "等宽"'],
+  ])("applies a stored family list, each name quoted unless it is generic: %j", (value, family) => {
+    expect(loadSettings(storage({ [SETTINGS_KEYS.fontFamily]: value }))).toMatchObject({
+      fontFamily: family,
+      problem: null,
+    });
+  });
+
+  it.each([
+    ["", "it is empty"],
+    ["   ", "it is empty"],
+    ["a".repeat(201), "it is longer than 200 characters"],
+    ["Iosevka /*", "it may not contain a comment"],
+    ['"Iosevka */"', "it may not contain a comment"],
+    ["Iosevka,", "it has an empty name between its commas"],
+    ["Iosevka,, monospace", "it has an empty name between its commas"],
+    ['"Iosevka', notAName('"Iosevka')],
+    ["'Iosevka\"", notAName("'Iosevka\"")],
+    ["url(x)", notAName("url(x)")],
+    ["1Mono", notAName("1Mono")],
+    ["Iosevka -2", notAName("Iosevka -2")],
+    ["Iosevka; color: red", notAName("Iosevka; color: red")],
+    ['"Iosevka; color: red"', notAName('"Iosevka; color: red"')],
+    ['"Iosevka}"', notAName('"Iosevka}"')],
+    ['"Iose\\vka"', notAName('"Iose\\vka"')],
+    ['"Iosevka\nTerm"', notAName('"Iosevka\nTerm"')],
+    ['"</style>"', notAName('"</style>"')],
+  ])("draws the bundled font and says why for a stored family it can't use: %j", (value, why) => {
+    const settings = loadSettings(storage({ [SETTINGS_KEYS.fontFamily]: value }));
+    expect([settings.fontFamily, settings.problem]).toEqual([
+      null,
+      `Your terminal font was not applied: ${why}.`,
+    ]);
+  });
+
+  it("takes a family of exactly 200 characters", () => {
+    const family = "a".repeat(200);
+    expect(loadSettings(storage({ [SETTINGS_KEYS.fontFamily]: family })).fontFamily).toBe(
+      `"${family}"`,
+    );
+  });
+
+  it("says what is wrong with both the key map and the font when neither is usable", () => {
+    const settings = loadSettings(
+      storage({ [SETTINGS_KEYS.keyMap]: "not a map", [SETTINGS_KEYS.fontFamily]: "" }),
+    );
+    expect(settings.problem).toBe(
+      "Your key map was not applied: a key map is an object of chord to text. " +
+        "Your terminal font was not applied: it is empty.",
+    );
   });
 });

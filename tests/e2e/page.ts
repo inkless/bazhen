@@ -86,7 +86,9 @@ type Hook =
   | "alternate"
   | "gliding"
   | "background"
-  | "foregrounds";
+  | "foregrounds"
+  | "fontFamily"
+  | "grid";
 
 /**
  * Reads one of a terminal view's test hooks: `terminalId`'s, or with none the page's first, as
@@ -143,6 +145,25 @@ export const gliding = async (page: Page, terminalId?: string) =>
 /** Whether the daemon has told the page the program is on its alternate screen. */
 export const onAlternateScreen = async (page: Page, terminalId?: string) =>
   (await read(page, "alternate", terminalId)) === true;
+
+/** The font family the terminal draws in, as xterm.js was given it. */
+export async function terminalFontFamily(page: Page): Promise<string | null> {
+  const family = await read(page, "fontFamily");
+  return typeof family === "string" ? family : null;
+}
+
+/** The terminal's columns and rows, `120x40`, which follow the cell its font measures. */
+export async function terminalGrid(page: Page): Promise<string | null> {
+  const grid = await read(page, "grid");
+  return typeof grid === "string" ? grid : null;
+}
+
+/** Each of the page's bundled terminal faces, with whether it has loaded, failed or not started. */
+export const bundledFaces = (page: Page): Promise<string[]> =>
+  page.evaluate<string[]>(`[...document.fonts]
+    .map((face) => [face, face.family.replaceAll('"', "")])
+    .filter(([, family]) => family.startsWith("JetBrainsMono NFM"))
+    .map(([face, family]) => family + " " + face.weight + " " + face.style + ": " + face.status)`);
 
 /** The background the terminal paints, as xterm.js's theme sets it. */
 export async function terminalBackground(page: Page): Promise<string | null> {
