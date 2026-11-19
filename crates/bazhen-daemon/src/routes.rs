@@ -286,6 +286,18 @@ mod tests {
         );
     }
 
+    /// Health says the version both daemons are: the TypeScript one's `APP_VERSION` and this crate's
+    /// own, held equal here, so a bump to one alone fails.
+    #[test]
+    fn health_says_the_version_the_typescript_daemon_says() {
+        let main = include_str!("../../../apps/daemon/src/main.ts");
+        let theirs = main
+            .lines()
+            .find_map(|line| line.strip_prefix("const APP_VERSION = \""))
+            .and_then(|rest| rest.strip_suffix("\";"));
+        assert_eq!(theirs, Some(env!("CARGO_PKG_VERSION")));
+    }
+
     #[test]
     fn a_stop_over_the_socket_answers_then_stops_and_the_first_reason_stands() {
         let shared = shared();
