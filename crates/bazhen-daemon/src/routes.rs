@@ -9,7 +9,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
@@ -123,15 +123,23 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .with_state(shared)
 }
 
-/// The loopback HTTP listener's routes, behind the guard and then the pairing gate.
+/// The loopback HTTP listener's routes, behind the guard. The API is a router nested at `/v1`,
+/// and the pairing gate is on it, so whatever axum routes there, its fallback included, is gated:
+/// no test of the path's text can miss one.
 pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let gate = Arc::new(gate);
-    Router::new()
-        .route("/v1/health", get(health))
+    let api = Router::new()
+        .route("/health", get(health))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
-        .layer(middleware::from_fn_with_state(Arc::clone(&gate), pairing))
+        .layer(middleware::from_fn_with_state(Arc::clone(&gate), pairing));
+    // The nest takes `/v1` and `/v1/<rest>` but not `/v1/` itself, which Hono's `/v1/*` gates.
+    let bare = any(not_found).layer(middleware::from_fn_with_state(Arc::clone(&gate), pairing));
+    Router::new()
+        .nest("/v1", api)
+        .route("/v1/", bare)
+        .fallback(not_found)
         .layer(middleware::from_fn_with_state(gate, guarded))
 }
 
@@ -187,9 +195,6 @@ async fn guarded(State(gate): State<Arc<Gate>>, request: Request, next: Next) ->
 /// paired device, and this daemon pairs none yet, so it refuses every one, pairing itself included:
 /// it fails closed rather than let one through. A page elsewhere can't even read.
 async fn pairing(State(gate): State<Arc<Gate>>, request: Request, next: Next) -> Response {
-    if !request.uri().path().starts_with("/v1/") {
-        return next.run(request).await;
-    }
     let headers = request.headers();
     let required = guard::must_pair(
         gate.pairing_required,
@@ -444,6 +449,18 @@ mod tests {
                 ),
                 send(
                     http(false),
+                    raw_request("GET", &[host, ("x-forwarded-for", b"\x85")])
+                ),
+                send(
+                    http(false),
+                    raw_request("GET", &[host, ("x-forwarded-for", b"127.0.0.1\x85")])
+                ),
+                send(
+                    http(false),
+                    raw_request("GET", &[host, ("forwarded", b"for=\x85")])
+                ),
+                send(
+                    http(false),
                     raw_request("POST", &[host, ("origin", b"http://evil\xe9")])
                 ),
                 send(
@@ -453,16 +470,50 @@ mod tests {
             ],
             [
                 unpaired.clone(),
+                unpaired.clone(),
+                unpaired.clone(),
+                unpaired.clone(),
+                unpaired.clone(),
                 unpaired,
-                (
-                    401,
-                    refused("unpaired", "pair this browser: run `bazhen devices pair`")
-                ),
                 (403, refused("origin_not_allowed", "http://evil\u{e9}")),
                 (
                     421,
                     refused("host_not_allowed", "127.0.0.1:7900, evil.example")
                 ),
+            ]
+        );
+    }
+
+    /// The gate is on the router the API is nested in, not a test of the path's text, so a path
+    /// that only looks like the API reaches no route, and every one the API matches is gated.
+    #[test]
+    fn a_path_that_only_looks_like_the_api_reaches_no_route_and_the_api_is_gated_whole() {
+        let unpaired = (
+            401,
+            refused("unpaired", "pair this browser: run `bazhen devices pair`"),
+        );
+        let get = |path: &str| send(http(true), request("GET", path, &[("host", HOST)]));
+        assert_eq!(
+            [
+                get("//v1/health").0,
+                get("/V1/health").0,
+                get("/%761/health").0,
+                get("/v1health").0,
+            ],
+            [404; 4]
+        );
+        assert_eq!(
+            [
+                get("/v1"),
+                get("/v1/"),
+                get("/v1/health"),
+                get("/v1/nothing/here")
+            ],
+            [
+                unpaired.clone(),
+                unpaired.clone(),
+                unpaired.clone(),
+                unpaired
             ]
         );
     }
