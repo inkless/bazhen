@@ -202,21 +202,25 @@ Every new test must be shown to fail without the code it covers.
   § Tests). Never bypass a hook with `--no-verify`.
 
 - **Listed tests run on both daemons.** A new test in a file `tests/rust-daemon.txt` names at HEAD
-  holds both daemons, and the change it comes with may land in either, so it is judged on each.
-  It runs on the TypeScript daemon as any api test does, and again on the Rust daemon's release
-  build, built from the base with the binaries above and named by `BAZHEN_TEST_DAEMON_BIN`. It is KILLED when either run fails it, printed with
-  `(on the Rust daemon)` when only that one did; SURVIVED when either passes it while related to
-  the change; else INVALID. The Rust run happens only when the branch reverted a file that the
-  daemon, or a binary the test names, was built from, as cargo's dep-info lists them: otherwise
-  the base's daemon is HEAD's, and the test's verdict is its TypeScript run's. Falsify fails
-  without judging anything when the base builds no Rust daemon, and when the Rust run leaves a
-  listed test without a pass or a fail (skipped, not collected, unfinished, or a run that left no
-  report). An INVALID listed test takes a `Control:` that breaks the Rust daemon by hand and
-  watches the test fail on its assertion under `pnpm test:api:rust`. So a test written after the
-  change it covers, as when a surface lands in one pull request and its listed tests in the next,
-  goes in on a branch that changes nothing it is related to, where it is INVALID, with such a
-  control; on a branch that changes the CLI, say, it passes on both bases while related to the
-  change, and is SURVIVED.
+  holds both daemons, and the change it comes with may land in either, so it is judged on each. It
+  runs on the TypeScript daemon as any api test does, and again on the Rust daemon's release build,
+  built from the base with the binaries above and named by `BAZHEN_TEST_DAEMON_BIN`. It is KILLED
+  when either run fails it, printed with `(on the Rust daemon)` when only that one did; SURVIVED
+  when either passes it while related to the change; else INVALID. A base that ports the daemon only
+  in part fails tests for reasons that aren't the change, so the Rust run kills a test only on an
+  assertion in the test file (the first frame of its stack outside node_modules), and only when the
+  base builds every binary the test reaches and every one the branch adds, which the daemon may
+  start; any other failure there is INVALID, with the reason printed. The Rust run happens only when
+  the branch reverted a file that the daemon, or a binary the test names, was built from, as cargo's
+  dep-info lists them, or a Cargo manifest or the lockfile: otherwise the base's daemon is HEAD's,
+  and the test's verdict is its TypeScript run's. Falsify fails without judging anything when the
+  base builds no Rust daemon, and when the Rust run leaves a listed test without a pass or a fail
+  (skipped, not collected, unfinished, or a run that left no report). An INVALID listed test takes a
+  `Control:` that breaks the Rust daemon by hand and watches the test fail on its assertion under
+  `pnpm test:api:rust`. So a test written after the change it covers, as when a surface lands in one
+  pull request and its listed tests in the next, goes in on a branch that changes nothing it is
+  related to, where it is INVALID, with such a control; on a branch that changes the CLI, say, it
+  passes on both bases while related to the change, and is SURVIVED.
 
 - **Renamed and moved tests.** A test given a truer title, or moved to another test file, and
   nothing else isn't new. Read by title in its file, it looks new, and passing on the base it

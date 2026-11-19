@@ -1365,6 +1365,7 @@ describe("counterparts", () => {
 const onRust = (outcome: "KILLED" | "SURVIVED" | "INVALID") => ({
   outcome,
   failure: outcome === "SURVIVED" ? undefined : "expected 421, got 200",
+  ...(outcome === "INVALID" && { why: "timed out on the Rust daemon" }),
 });
 
 describe("a listed test's verdict from both daemons", () => {

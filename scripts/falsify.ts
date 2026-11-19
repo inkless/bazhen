@@ -37,8 +37,10 @@
 //
 // A new test in a file tests/rust-daemon.txt names at HEAD holds both daemons, so it also runs
 // against the Rust daemon built from the base (BAZHEN_TEST_DAEMON_BIN), when the branch reverted a
-// file that daemon or a binary the test names was built from. It is KILLED when either run fails
-// it, SURVIVED when either passes it while related to the change, else INVALID. A base with no
+// file that daemon or a binary the test names was built from, or a Cargo manifest or the
+// lockfile. It is KILLED when either run fails it, SURVIVED when either passes it while related
+// to the change, else INVALID; the Rust run kills only on an assertion in the test, with every
+// binary the test reaches or the branch adds built at the base. A base with no
 // Rust daemon, or a Rust run that leaves such a test without a pass or a fail, fails falsify
 // with no verdict: the TypeScript daemon alone can't see a change to the Rust one.
 //
@@ -142,6 +144,8 @@ const REVERTIBLE = /^(?:(?:apps|packages)\/[^/]+\/src\/|scripts\/.+\.tsx?$)/;
 // What can change the set of Rust tests, or what a Rust binary does: a crate's files, or the
 // workspace's manifest and lockfile.
 const RUST_INPUT = /^(?:crates\/|Cargo\.(?:toml|lock)$)/;
+// The workspace's manifests and lockfile, and each crate's manifest.
+const CARGO_MANIFEST = /^(?:Cargo\.(?:toml|lock)|crates\/[^/]+\/Cargo\.toml)$/;
 // The target folders a test runs a binary from, each with the cargo profile that fills it.
 const PROFILES: Readonly<Record<string, string>> = {
   debug: "dev",
@@ -209,9 +213,14 @@ const GIT_LOCATION_VARS = [
   "GIT_COMMON_DIR",
 ];
 
+/**
+ * The caller's environment without what would point a command elsewhere: git's location
+ * variables, and the daemon the api suite starts, which only the Rust daemon's run sets.
+ */
 export function isolatedEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const name of GIT_LOCATION_VARS) delete env[name];
+  delete env[SELECTOR];
   return env;
 }
 
@@ -861,16 +870,69 @@ export function unrunReason(
   return `it was ${test.status}`;
 }
 
+// A frame of a stack: `at name (path:line:col)` or `at path:line:col`, the path maybe a file URL.
+const FRAME = /^\s*at (?:[^\n]*\()?(?:file:\/\/)?([^\s()]+):\d+:\d+\)?\s*$/gm;
+
+/**
+ * Whether a failure message failed in the test file itself: the first frame of its stack outside
+ * node and node_modules is `file`'s, as an `expect` in the test's body is. A throw from a helper,
+ * as a daemon that never started or a wait that gave up, isn't.
+ */
+export function failedInTest(message: string, file: string): boolean {
+  const own = [...message.matchAll(FRAME)]
+    .map(([, path = ""]) => path)
+    .find((path) => !path.startsWith("node:") && !path.includes("/node_modules/"));
+  return own !== undefined && (own === file || own.endsWith(`/${file}`));
+}
+
+/** A listed test's run on the Rust daemon: its verdict, and why, when that is no verdict. */
+export interface RustRun {
+  outcome: Outcome;
+  failure: string | undefined;
+  why?: string;
+}
+
+/**
+ * A listed test's verdict from its run on the Rust daemon. A base that is the Rust daemon half
+ * ported fails a test for many reasons that aren't the change, so, as a Rust test's mutant must,
+ * the run kills a test only on an assertion in it, and only with every binary it may run the
+ * base's: `unbuilt` are those the base doesn't build.
+ */
+export function onRustDaemon(
+  report: VitestReport,
+  t: TestRef,
+  unbuilt: readonly string[],
+): RustRun {
+  const outcome = classify(report, t.file, t.title);
+  const failure = outcome === "SURVIVED" ? undefined : failureLine(report, t.file, t.title);
+  if (outcome === "SURVIVED") return { outcome, failure };
+  if (outcome === "INVALID") return { outcome, failure, why: "timed out on the Rust daemon" };
+  if (unbuilt.length > 0) {
+    const none = unbuilt.map((b) => `target/${b}`).join(", ");
+    return {
+      outcome: "INVALID",
+      failure,
+      why: `failed on the Rust daemon; the base builds no ${none}`,
+    };
+  }
+  const messages = resultOf(report, t.file, t.title)?.failureMessages ?? [];
+  if (!messages.some((m) => failedInTest(m, t.file))) {
+    return {
+      outcome: "INVALID",
+      failure,
+      why: "failed on the Rust daemon, but not on an assertion in the test",
+    };
+  }
+  return { outcome, failure };
+}
+
 /**
  * A listed test's verdict from its run on each daemon, both judged with the base's code. It is
  * KILLED when either failed it, and SURVIVED when either is related to the change and passed it:
  * the change it accompanies may land in either daemon. `onTypeScript` is judged as an unlisted
  * test is; the Rust run is made only for a test related to what it reverted.
  */
-export function onBothDaemons(
-  onTypeScript: Judged,
-  onRust: { outcome: Outcome; failure: string | undefined },
-): Judged {
+export function onBothDaemons(onTypeScript: Judged, onRust: RustRun): Judged {
   const t = { file: onTypeScript.file, title: onTypeScript.title };
   if (onTypeScript.outcome === "KILLED") return onTypeScript;
   if (onRust.outcome === "KILLED") {
@@ -885,7 +947,7 @@ export function onBothDaemons(
     ...t,
     outcome: "INVALID",
     failure: onRust.failure,
-    note: " (timed out on the Rust daemon)",
+    note: ` (${onRust.why ?? "no verdict on the Rust daemon"})`,
   };
 }
 
@@ -1041,6 +1103,33 @@ export function namedBinaries(path: string, source: string): string[] {
  */
 export const manifestNames = (manifest: string): string[] =>
   [...manifest.matchAll(/^name\s*=\s*"([^"]+)"/gm)].map(([, name = ""]) => name);
+
+/**
+ * The binaries the crates among `files` build, as cargo names them: a crate's package with a
+ * src/main.rs, each src/bin/<name>.rs or src/bin/<name>/main.rs, and each `[[bin]]` its manifest
+ * names. `read` returns a file's text.
+ */
+export function crateBinaries(
+  files: ReadonlySet<string>,
+  read: (path: string) => string | undefined,
+): Set<string> {
+  const names = new Set<string>();
+  for (const path of files) {
+    const crate = /^crates\/([^/]+)\/Cargo\.toml$/.exec(path)?.[1];
+    if (crate === undefined) continue;
+    const manifest = read(path) ?? "";
+    const [own] = manifestNames(manifest);
+    if (own !== undefined && files.has(`crates/${crate}/src/main.rs`)) names.add(own);
+    for (const [, name = ""] of manifest.matchAll(/^\[\[bin\]\][^[]*?^name\s*=\s*"([^"]+)"/gm)) {
+      names.add(name);
+    }
+  }
+  for (const path of files) {
+    const bin = /^crates\/[^/]+\/src\/bin\/([^/]+?)(?:\.rs|\/main\.rs)$/.exec(path)?.[1];
+    if (bin !== undefined) names.add(bin);
+  }
+  return names;
+}
 
 /**
  * The file each workspace package specifier names, from each package's `exports` map, as
@@ -2014,6 +2103,17 @@ async function main(args: string[]): Promise<number> {
       .flatMap((path) => manifestNames(atHead(path) ?? "")),
   );
   const isBinary = (binary: string) => crateNames.has(binary.slice(binary.indexOf("/") + 1));
+  // A binary the branch adds may be one the Rust daemon starts, from beside itself: the base
+  // builds none, so a failure on the Rust daemon may be only its absence.
+  const baseFiles = new Set(
+    git(["ls-tree", "-r", "-z", "--name-only", "--full-tree", base]).split("\0"),
+  );
+  const atBase = (path: string) =>
+    baseFiles.has(path) ? git(["cat-file", "blob", `${base}:${path}`]) : undefined;
+  const baseBinaries = crateBinaries(baseFiles, atBase);
+  const addedBinaries = [...crateBinaries(headFiles, atHead)]
+    .filter((name) => !baseBinaries.has(name))
+    .map((name) => `release/${name}`);
   const exports = workspaceExports(
     [...headFiles]
       .filter((path) => /^(?:apps|packages)\/[^/]+\/package\.json$/.test(path))
@@ -2241,8 +2341,11 @@ async function main(args: string[]): Promise<number> {
         ...(built.get(RUST_DAEMON) ?? []),
         ...(binaries.get(t.file)?.direct ?? []).flatMap((b) => built.get(b) ?? []),
       ];
+      // Cargo's dep-info lists sources, not the manifests and lockfile that choose dependencies
+      // and features, so a change to one is taken to change every binary.
+      const manifestReverted = revertedPaths.some((p) => CARGO_MANIFEST.test(p));
       const onDaemon = listedTargets.filter(
-        (t) => builtFromReverts(revertedPaths, builtFrom(t)).length > 0,
+        (t) => manifestReverted || builtFromReverts(revertedPaths, builtFrom(t)).length > 0,
       );
       const daemonFiles = new Set(onDaemon.map((t) => t.file));
       const daemonRuns = [...projects].flatMap(([project, files]): [string, string[]][] => {
@@ -2303,10 +2406,13 @@ async function main(args: string[]): Promise<number> {
         results.push(
           onRust === undefined || !onDaemon.includes(t)
             ? judged
-            : onBothDaemons(judged, {
-                outcome: classify(onRust.report, t.file, t.title),
-                failure: failureLine(onRust.report, t.file, t.title),
-              }),
+            : onBothDaemons(
+                judged,
+                onRustDaemon(onRust.report, t, [
+                  ...(binaries.get(t.file)?.reached ?? []).filter((b) => !built.has(b)),
+                  ...addedBinaries,
+                ]),
+              ),
         );
       }
     } finally {

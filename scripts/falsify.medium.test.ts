@@ -154,6 +154,8 @@ case "$1" in
       echo "DAEMON: $${SELECTOR}: $("$${SELECTOR}")" >> "$STUB_LOG"
       STUB_STATUS="\${STUB_RUST_STATUS:-$STUB_STATUS}"
       STUB_VITEST_REPORT="\${STUB_RUST_REPORT:-\${STUB_VITEST_REPORT:-}}"
+      STUB_FAILURE="\${STUB_RUST_FAILURE:-\${STUB_FAILURE:-}}"
+      STUB_TITLE="\${STUB_RUST_TITLE:-\${STUB_TITLE:-}}"
     fi
     if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
       # What falsify's reporter records of a run stopped while its second test ran, mid-write.
@@ -213,7 +215,7 @@ case "$1" in
     printf '{"testResults":[' > "$out"
     sep=""
     for file in $files; do
-      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"caps","status":"%s","failureMessages":[%s]}]}' "$sep" "$(pwd)" "$file" "$status" "$messages" >> "$out"
+      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"%s","status":"%s","failureMessages":[%s]}]}' "$sep" "$(pwd)" "$file" "\${STUB_TITLE:-caps}" "$status" "$messages" >> "$out"
       sep=","
     done
     printf ']}' >> "$out"
@@ -1934,10 +1936,10 @@ const DAEMON_MANIFEST = {
 };
 
 /**
- * Commits the Rust daemon's crate (unless `daemonAtBase` is false), another crate, and an api
- * helper, with `tests/rust-daemon.txt` naming LISTED_TEST (unless `listed` is false), then a
- * change to `changed` and the files `added` with LISTED_TEST's new test, and runs falsify
- * against the first commit.
+ * Commits the Rust daemon's crate (unless `daemonAtBase` is false), another crate, an api helper
+ * and the files `atBase`, with `tests/rust-daemon.txt` naming LISTED_TEST (unless `listed` is
+ * false), then a change to `changed` and the files `added` with LISTED_TEST's new test, whose
+ * head is `imports`, and runs falsify against the first commit.
  */
 function changeDaemon(
   changed: string,
@@ -1946,9 +1948,18 @@ function changeDaemon(
     listed = true,
     daemonAtBase = true,
     added = {},
-  }: { listed?: boolean; daemonAtBase?: boolean; added?: Record<string, string> } = {},
+    atBase = {},
+    imports = 'import { d } from "./daemon.ts";\n',
+  }: {
+    listed?: boolean;
+    daemonAtBase?: boolean;
+    added?: Record<string, string>;
+    atBase?: Record<string, string>;
+    imports?: string;
+  } = {},
 ) {
   const tree: Record<string, string> = {
+    ...atBase,
     ...(daemonAtBase && { [DAEMON_MAIN]: "fn main() { old daemon }\n", ...DAEMON_MANIFEST }),
     [OTHER_CRATE]: "pub fn f() { old }\n",
     "crates/holder/Cargo.toml": '[package]\nname = "holder"\n',
@@ -1961,11 +1972,17 @@ function changeDaemon(
   const base = git(fx.linked, "rev-parse", "HEAD").trim();
   write(fx.linked, changed, "fn main() { new }\n");
   for (const [path, text] of Object.entries(added)) write(fx.linked, path, text);
-  write(fx.linked, LISTED_TEST, branchTest('import { d } from "./daemon.ts";\n'));
+  write(fx.linked, LISTED_TEST, branchTest(imports));
   git(fx.linked, "add", changed, ...Object.keys(added), LISTED_TEST);
   git(fx.linked, "commit", "--quiet", "-m", "feat: daemon2");
   return falsify(["--base", base], { STUB_SOURCE: DAEMON_MAIN, STUB_TEST: LISTED_TEST, ...extra });
 }
+
+// A failure on an assertion in the listed test, and one thrown from a helper it calls.
+const ON_ASSERTION = `AssertionError: expected 200 to be 421\\n    at /w/${LISTED_TEST}:3:5`;
+const IN_HELPER =
+  "Error: the daemon exited before it answered\\n" +
+  `    at Daemon.start (/w/tests/api/daemon.ts:9:3)\\n    at /w/${LISTED_TEST}:3:5`;
 
 const ranOnDaemon = () => /^DAEMON: /m.test(stubLog());
 const builtDaemon = () =>
@@ -1973,7 +1990,11 @@ const builtDaemon = () =>
 
 describe("falsify on a branch with a new test in a file the Rust daemon's list names", () => {
   it("runs it against the Rust daemon built from the base too, and kills it on a failure there", () => {
-    const result = changeDaemon(DAEMON_MAIN, { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed" });
+    const result = changeDaemon(DAEMON_MAIN, {
+      STUB_STATUS: "passed",
+      STUB_RUST_STATUS: "failed",
+      STUB_RUST_FAILURE: ON_ASSERTION,
+    });
     const worktree = `${fx.tmp}/bz-falsify-[^/\n]+`;
     expect({
       status: result.status,
@@ -2036,6 +2057,76 @@ describe("falsify on a branch with a new test in a file the Rust daemon's list n
     }).toEqual({ status: 0, killed: true, built: true, ran: false });
   });
 
+  it("runs it on the Rust daemon when the branch changed a binary the test runs", () => {
+    const result = changeDaemon(
+      "crates/holder/src/main.rs",
+      { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed", STUB_RUST_FAILURE: ON_ASSERTION },
+      {
+        atBase: { "crates/holder/src/main.rs": "fn main() { old }\n" },
+        imports: 'const holder = "target/release/holder";\n',
+      },
+    );
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${LISTED_TEST} › caps (on the Rust daemon)`),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 0, killed: true, ran: true });
+  });
+
+  it("runs it on the Rust daemon when the branch changed the workspace's lockfile", () => {
+    const result = changeDaemon(
+      "Cargo.lock",
+      { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed", STUB_RUST_FAILURE: ON_ASSERTION },
+      { atBase: { "Cargo.lock": "# old\n" } },
+    );
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${LISTED_TEST} › caps (on the Rust daemon)`),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 0, killed: true, ran: true });
+  });
+
+  it("runs the TypeScript daemon's run without a daemon the caller's environment names", () => {
+    const result = changeDaemon(SOURCE, { STUB_STATUS: "failed", [SELECTOR]: "/bin/true" });
+    expect({
+      status: result.status,
+      killed: new RegExp(`^ {2}KILLED {3}${escape(LISTED_TEST)} › caps$`, "m").test(result.output),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 0, killed: true, ran: false });
+  });
+
+  it.each([
+    [
+      "a binary the branch adds, which the base doesn't build",
+      ON_ASSERTION,
+      {
+        "crates/spawned/Cargo.toml": '[package]\nname = "spawned"\n',
+        "crates/spawned/src/main.rs": "fn main() {}\n",
+      },
+      "failed on the Rust daemon; the base builds no target/release/spawned",
+    ],
+    [
+      "a throw from a helper",
+      IN_HELPER,
+      {},
+      "failed on the Rust daemon, but not on an assertion in the test",
+    ],
+  ])(
+    "takes a failure on the Rust daemon for no verdict when it may be %s",
+    (_, failure, added, why) => {
+      const result = changeDaemon(
+        DAEMON_MAIN,
+        { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed", STUB_RUST_FAILURE: failure },
+        { added },
+      );
+      expect({
+        status: result.status,
+        invalid: result.output.includes(`INVALID  ${LISTED_TEST} › caps (${why})`),
+        ran: ranOnDaemon(),
+      }).toEqual({ status: 1, invalid: true, ran: true });
+    },
+  );
+
   it("fails without a verdict when the base builds no Rust daemon", () => {
     const result = changeDaemon(
       DAEMON_MAIN,
@@ -2053,6 +2144,8 @@ describe("falsify on a branch with a new test in a file the Rust daemon's list n
   it.each([
     ["skips it", { STUB_RUST_STATUS: "skipped" }, "skipped"],
     ["leaves no report", { STUB_RUST_REPORT: "none" }, "it wrote no report"],
+    ["doesn't collect it", { STUB_RUST_TITLE: "other" }, "its run has no result for it"],
+    ["leaves it unfinished", { STUB_RUST_STATUS: "pending" }, "its run has no result for it"],
   ])("fails without a verdict when the Rust daemon's run %s", (_, extra, reason) => {
     const result = changeDaemon(DAEMON_MAIN, { STUB_STATUS: "passed", ...extra });
     expect({
