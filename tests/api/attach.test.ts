@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { attachInScript, Daemon, DETACH } from "./daemon.ts";
+import { closeWhileAttached } from "./attach-close.ts";
 
 const state = async (daemon: Daemon) =>
   StateSnapshot.parse((await daemon.request("/v1/state")).body);
@@ -112,6 +113,10 @@ describe("bazhen terminals attach, on a holder terminal", () => {
       body: { idempotencyKey: "respawn-after-exit", generation: 0 },
     });
     expect(respawned.status).toBe(200);
+  });
+
+  it("ends saying the terminal closed when its agent is closed, offering no respawn", async () => {
+    expect(await closeWhileAttached(daemon, "close-attached")).toEqual([200, 0, false]);
   });
 
   it("with --direct, ends after an agent's last output when its harness exits", async () => {

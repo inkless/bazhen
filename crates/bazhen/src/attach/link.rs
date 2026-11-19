@@ -316,12 +316,12 @@ mod tests {
     fn sent_then_closed(frames: &[&str]) -> WebSocket<UnixStream> {
         let mut messages: Vec<Message> = frames.iter().map(|f| Message::text(*f)).collect();
         messages.push(Message::Close(None));
-        sent(messages)
+        sent(messages).0
     }
 
-    /// The client end of a stream the daemon wrote `messages` to in one go, and the server end,
-    /// kept open.
-    fn sent(messages: Vec<Message>) -> WebSocket<UnixStream> {
+    /// The client end of a stream the daemon wrote `messages` to in one go, and the daemon's,
+    /// which keeps the stream open while it is held, as a view's is past an exit.
+    fn sent(messages: Vec<Message>) -> (WebSocket<UnixStream>, WebSocket<UnixStream>) {
         let (client, server) = UnixStream::pair().unwrap();
         let mut daemon =
             WebSocket::from_raw_socket(server, tungstenite::protocol::Role::Server, None);
@@ -329,10 +329,9 @@ mod tests {
             daemon.write(message).unwrap();
         }
         daemon.flush().unwrap();
-        // The daemon's end stays open as long as the client's, as a view's does past an exit.
-        std::mem::forget(daemon);
         client.set_nonblocking(true).unwrap();
-        WebSocket::from_raw_socket(client, tungstenite::protocol::Role::Client, None)
+        let client = WebSocket::from_raw_socket(client, tungstenite::protocol::Role::Client, None);
+        (client, daemon)
     }
 
     /// What one wake-up makes of what the daemon sent: drained, then acted on, as `pump` does.
@@ -374,7 +373,7 @@ mod tests {
 
     #[test]
     fn ends_on_its_programs_exit_after_the_output_before_it_and_shows_none_after() {
-        let mut ws = sent(vec![
+        let (mut ws, _daemon) = sent(vec![
             Message::binary(b"last words".to_vec()),
             Message::text(r#"{"type":"exited","generation":0,"exit":{"type":"exited","code":0}}"#),
             Message::binary(b"a respawn's output".to_vec()),

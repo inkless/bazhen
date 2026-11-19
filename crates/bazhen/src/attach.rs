@@ -11,11 +11,13 @@ pub(crate) mod tty;
 
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use bazhen_client::Caller;
-use bazhen_protocol::agents::{Agent, ExitStatus, HarnessId, StateSnapshot};
+use bazhen_protocol::agents::{Agent, AgentState, ExitStatus, HarnessId, StateSnapshot};
 use bazhen_protocol::id::PROTOCOL_ID;
 use bazhen_protocol::ids::is_id;
+use bazhen_protocol::waits::{AgentCondition, WaitCondition, WaitRequest, WaitResponse};
 use serde::Deserialize;
 
 use self::attachment::{Attachment, Ending};
@@ -26,6 +28,9 @@ use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
 use crate::target::{Named, agent_named, named, unknown};
 use crate::{Exit, TERMINALS_USAGE};
+
+/// How long an attachment that ended on its program's exit waits for the daemon to record it.
+const RECORDED_WITHIN: Duration = Duration::from_secs(2);
 
 const NOT_A_TERMINAL: &str =
     "bazhen terminals attach takes over a terminal: run it in one, not from a pipe or a script";
@@ -68,7 +73,7 @@ pub(crate) fn run(
     };
     let holders = socket.parent().unwrap_or(socket).join("holders");
     if p.has("direct") {
-        return straight(&holders, socket, target, out);
+        return straight(&holders, socket, daemon, target, out);
     }
     match daemon.get::<Answering>("/v1/health", CALL) {
         Ok(health) if health.protocol_id != PROTOCOL_ID => {
@@ -85,7 +90,7 @@ pub(crate) fn run(
                 return Ok(Exit::NotRunning);
             }
             out.err("bazhen is not running: attaching straight to the terminal's holder");
-            return straight(&holders, socket, target, out);
+            return straight(&holders, socket, daemon, target, out);
         }
         Err(e) => return Err(e),
     }
@@ -136,24 +141,59 @@ pub(crate) fn run(
         Ok(Outcome::Gone) => Done::DaemonGone,
         Err(e) => Done::Broke(e),
     };
-    let after = exited_agent(&done, daemon, target);
+    let left = exited_agent(&done, daemon, target);
+    let (done, after) = read_as(done, left);
     Ok(report(done, target, after.as_ref(), &notes, out))
 }
 
-/// The agent `target` names, once its program's exit ended the attachment, for what to do next;
-/// none for any other ending, a shell or a terminal, or a daemon that can't say. The daemon may
-/// not have recorded the exit yet, so only what the exit doesn't change is read from it.
+/// The agent `target` names, once its program's exit ended the attachment, as the daemon has
+/// recorded the exit; none for any other ending, a shell or a terminal, or no daemon to say. A
+/// direct attachment hears of the exit from the holder alongside the daemon, and may be first.
 fn exited_agent(done: &Done, daemon: &Daemon, target: &str) -> Option<Agent> {
     if !matches!(done, Done::Ended(Ending::ProgramExited(_))) {
         return None;
     }
     let state: StateSnapshot = daemon.get("/v1/state", CALL).ok()?;
-    agent_named(&state, target).cloned()
+    let agent = agent_named(&state, target)?.clone();
+    if !matches!(agent.state, AgentState::Starting | AgentState::Running) {
+        return Some(agent);
+    }
+    let request = WaitRequest {
+        condition: WaitCondition::Agent {
+            agent_id: agent.id.clone(),
+            until: AgentCondition::Exited,
+        },
+        timeout_ms: u64::try_from(RECORDED_WITHIN.as_millis()).unwrap_or(u64::MAX),
+        resumed: None,
+    };
+    match daemon.post::<WaitResponse>("/v1/waits", &request, RECORDED_WITHIN + CALL) {
+        Ok(WaitResponse {
+            agent: Some(after), ..
+        }) => Some(after),
+        _ => Some(agent),
+    }
+}
+
+/// How the person should read `done`, given the agent its program's exit left: an exit a close
+/// caused is the close, with nothing to start again.
+fn read_as(done: Done, agent: Option<Agent>) -> (Done, Option<Agent>) {
+    match agent {
+        Some(a) if matches!(a.state, AgentState::Closing | AgentState::Closed) => {
+            (Done::Ended(Ending::Closed), None)
+        }
+        agent => (done, agent),
+    }
 }
 
 /// Attaches straight to `target`'s holder, in `holders`. It asks to type only when no daemon
 /// answers, and says so when it can't.
-fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Result<Exit, Failed> {
+fn straight(
+    holders: &Path,
+    socket: &Path,
+    daemon: &Daemon,
+    target: &str,
+    out: &mut Out,
+) -> Result<Exit, Failed> {
     if !is_id("term", target) {
         out.err("bazhen terminals attach --direct takes a terminal id: names are the daemon's to resolve");
         return Ok(Exit::Usage);
@@ -198,7 +238,9 @@ fn straight(holders: &Path, socket: &Path, target: &str, out: &mut Out) -> Resul
         Ok(None) => Done::HolderGone,
         Err(e) => Done::Broke(e),
     };
-    Ok(report(done, target, None, &notes, out))
+    let left = exited_agent(&done, daemon, target);
+    let (done, after) = read_as(done, left);
+    Ok(report(done, target, after.as_ref(), &notes, out))
 }
 
 /// The person's terminal, raw, with its resizes and the signals to stop watched.
@@ -339,6 +381,27 @@ mod tests {
                  `bazhen agents relaunch scout --fresh` starts it on a new one; `bazhen agents \
                  close scout` ends it.",
             ]
+        );
+    }
+
+    #[test]
+    fn reads_an_exit_a_close_caused_as_the_close() {
+        let exited = || Done::Ended(Ending::ProgramExited(ExitStatus::Exited { code: 0 }));
+        let at = |state| {
+            let mut agent = codex("scout", true);
+            agent.state = state;
+            read_as(exited(), Some(agent))
+        };
+        let read = [
+            at(AgentState::Closing),
+            at(AgentState::Closed),
+            at(AgentState::Exited),
+            read_as(exited(), None),
+        ]
+        .map(|(done, agent)| (matches!(done, Done::Ended(Ending::Closed)), agent.is_some()));
+        assert_eq!(
+            read,
+            [(true, false), (true, false), (false, true), (false, false)]
         );
     }
 
