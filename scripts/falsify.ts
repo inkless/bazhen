@@ -24,9 +24,9 @@
 // none of. When a judged test, or anything it reaches through its imports (relative, or a
 // workspace package's exports) or the source paths it names, names one as
 // `target/<profile>/<name>`, the branch's Rust changes are reverted in the worktree too, each
-// binary reached that the base has is built there with `pnpm run build:bins`, and each one this
+// binary reached that the base has is built there with `cargo build`, and each one this
 // run built is copied to the worktree's target/: the test runs the base's binaries, built with
-// HEAD's script, toolchain and .cargo config. Only a name a crate's manifest declares counts. A
+// HEAD's toolchain and .cargo config. Only a name a crate's manifest declares counts. A
 // test is related to a reverted file that a binary it names, or a file it imports directly names,
 // was built from, as cargo's dep-info for it lists, or to that binary's crates' manifests. A test
 // that fails while it reaches a binary the base doesn't build is INVALID: the binary's absence
@@ -1582,9 +1582,9 @@ export function workspaceBins(metadata: unknown): Map<string, string> {
 
 /**
  * Builds `wanted` (`<profile>/<name>`) in the worktree `dir`, those the base's workspace has, with
- * its own `build:bins` script, copies each one to the worktree's own target/, and returns them
- * with what each was built from; or undefined, with the reason printed, so no test is judged
- * against a binary that isn't the base's.
+ * `cargo build`, copies each one to the worktree's own target/, and returns them with what each
+ * was built from; or undefined, with the reason printed, so no test is judged against a binary
+ * that isn't the base's.
  */
 async function buildBinaries(
   dir: string,
@@ -1626,8 +1626,9 @@ async function buildBinaries(
     requested.push(...names.map((name) => `${folder}/${name}`));
     const packages = [...new Set(names.map((name) => bins.get(name) ?? ""))];
     const args = [
-      "run",
-      "build:bins",
+      "build",
+      "--quiet",
+      "--locked",
       "--profile",
       profile,
       ...packages.flatMap((p) => ["-p", p]),
@@ -1637,7 +1638,7 @@ async function buildBinaries(
     const fd = openSync(log, "w");
     let ran: Ran;
     try {
-      ran = await run("pnpm", args, dir, CARGO_TIMEOUT_MS, { env: rustEnv(top), stderr: fd });
+      ran = await run("cargo", args, dir, CARGO_TIMEOUT_MS, { env: rustEnv(top), stderr: fd });
     } finally {
       closeSync(fd);
     }
@@ -1650,7 +1651,7 @@ async function buildBinaries(
           ? `cargo said:\n${errors.map((line) => `  ${line}`).join("\n")}`
           : "it named no cargo error";
       console.error(
-        `falsify: \`pnpm ${args.join(" ")}\` failed in the temporary worktree, so the tests that ` +
+        `falsify: \`cargo ${args.join(" ")}\` failed in the temporary worktree, so the tests that ` +
           `run a binary can't be judged against the base's: ${why}\nThe end of what it said:\n` +
           indentedTail(said),
       );

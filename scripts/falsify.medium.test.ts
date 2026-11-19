@@ -1,8 +1,8 @@
 // Runs scripts/falsify.ts against a branch in a linked worktree of a throwaway repository, with a
 // bogus GIT_DIR and GIT_INDEX_FILE in its environment that must never reach git or the tests. A
-// stub `pnpm` stands in for install, the binaries' build and vitest, and logs what it saw: its
-// build makes a binary of each crate with a src/main.rs, in the profile it is given, that prints
-// that file. A stub `cargo-nextest` lists the Rust tests named in the tree's rust-tests.txt and
+// stub `pnpm` stands in for install and vitest, and a stub `cargo` for the binaries' build and
+// their listing, each logging what it saw: the build makes a binary of each crate with a
+// src/main.rs, in the profile it is given, that prints that file. A stub `cargo-nextest` lists the Rust tests named in the tree's rust-tests.txt and
 // runs them, failing each on the line of kills.txt whose marker the Rust source holds; a stub
 // `cargo-mutants` lists mutants.json.
 
@@ -71,46 +71,6 @@ case "$1" in
       exit 1
     fi
     : > .stub-deps-built
-    exit 0
-    ;;
-  run)
-    shift
-    echo "BUILD: $* in $(pwd) to $CARGO_TARGET_DIR" >> "$STUB_LOG"
-    if [ "\${STUB_FAIL_BUILD:-}" = 1 ]; then
-      echo "   Compiling bazhen v0.1.0" >&2
-      echo "error[E0425]: cannot find value \\\`x\\\` in this scope" >&2
-      i=1
-      while [ $i -le 25 ]; do echo "  context line $i" >&2; i=$((i + 1)); done
-      exit 101
-    fi
-    # Cargo takes every folder under crates/ for a workspace member, and needs its manifest.
-    for member in crates/*/; do
-      [ -d "$member" ] || continue
-      if [ ! -e "\${member}Cargo.toml" ]; then
-        echo "error: failed to load manifest for workspace member $member" >&2
-        exit 101
-      fi
-    done
-    folder="$3"
-    [ "$folder" = dev ] && folder=debug
-    mkdir -p "$CARGO_TARGET_DIR/$folder"
-    names=""
-    previous=""
-    for arg in "$@"; do
-      [ "$previous" = --bin ] && names="$names $arg"
-      previous="$arg"
-    done
-    for name in $names; do
-      main="crates/$name/src/main.rs"
-      bin="$CARGO_TARGET_DIR/$folder/$name"
-      printf '#!/bin/sh\\necho "BUILT FROM: %s"\\n' "$(cat "$main")" > "$bin"
-      chmod +x "$bin"
-      if [ "\${STUB_RELATIVE_DEPINFO:-}" = 1 ]; then
-        printf '%s: %s\\n' "$bin" "$main" > "$bin.d"
-      elif [ "\${STUB_NO_DEPINFO:-}" != 1 ]; then
-        printf '%s: %s/%s\\n' "$bin" "$(pwd)" "$main" > "$bin.d"
-      fi
-    done
     exit 0
     ;;
   exec)
@@ -295,6 +255,50 @@ printf '}}'
 // binary of that name when it has a src/main.rs.
 const STUB_CARGO = `#!/bin/sh
 echo "CARGO: $*" >> "$STUB_LOG"
+if [ "$1" = build ]; then
+  echo "BUILD: $* in $(pwd) to $CARGO_TARGET_DIR" >> "$STUB_LOG"
+  if [ "\${STUB_FAIL_BUILD:-}" = 1 ]; then
+    echo "   Compiling bazhen v0.1.0" >&2
+    echo "error[E0425]: cannot find value \\\`x\\\` in this scope" >&2
+    i=1
+    while [ $i -le 25 ]; do echo "  context line $i" >&2; i=$((i + 1)); done
+    exit 101
+  fi
+  # Cargo takes every folder under crates/ for a workspace member, and needs its manifest.
+  for member in crates/*/; do
+    [ -d "$member" ] || continue
+    if [ ! -e "\${member}Cargo.toml" ]; then
+      echo "error: failed to load manifest for workspace member $member" >&2
+      exit 101
+    fi
+  done
+  folder=""
+  previous=""
+  for arg in "$@"; do
+    [ "$previous" = --profile ] && folder="$arg"
+    previous="$arg"
+  done
+  [ "$folder" = dev ] && folder=debug
+  mkdir -p "$CARGO_TARGET_DIR/$folder"
+  names=""
+  previous=""
+  for arg in "$@"; do
+    [ "$previous" = --bin ] && names="$names $arg"
+    previous="$arg"
+  done
+  for name in $names; do
+    main="crates/$name/src/main.rs"
+    bin="$CARGO_TARGET_DIR/$folder/$name"
+    printf '#!/bin/sh\\necho "BUILT FROM: %s"\\n' "$(cat "$main")" > "$bin"
+    chmod +x "$bin"
+    if [ "\${STUB_RELATIVE_DEPINFO:-}" = 1 ]; then
+      printf '%s: %s\\n' "$bin" "$main" > "$bin.d"
+    elif [ "\${STUB_NO_DEPINFO:-}" != 1 ]; then
+      printf '%s: %s/%s\\n' "$bin" "$(pwd)" "$main" > "$bin.d"
+    fi
+  done
+  exit 0
+fi
 [ "$1" = metadata ] || exit 1
 [ "\${STUB_FAIL_METADATA:-}" = 1 ] && exit 101
 printf '{"packages":['
@@ -1828,7 +1832,7 @@ describe("falsify on a branch with a new CLI test", () => {
       status: result.status,
       killed: result.output.includes(`KILLED   ${CLI_TEST} › caps`),
       built: new RegExp(
-        `^BUILD: build:bins --profile release -p bazhen --bin bazhen in ${worktree} to ` +
+        `^BUILD: build --quiet --locked --profile release -p bazhen --bin bazhen in ${worktree} to ` +
           `${fx.linked}/target/falsify$`,
         "m",
       ).test(stubLog()),
@@ -1986,7 +1990,9 @@ const IN_HELPER =
 
 const ranOnDaemon = () => /^DAEMON: /m.test(stubLog());
 const builtDaemon = () =>
-  /^BUILD: build:bins --profile release -p bazhen-daemon --bin bazhen-daemon in /m.test(stubLog());
+  /^BUILD: build --quiet --locked --profile release -p bazhen-daemon --bin bazhen-daemon in /m.test(
+    stubLog(),
+  );
 
 describe("falsify on a branch with a new test in a file the Rust daemon's list names", () => {
   it("runs it against the Rust daemon built from the base too, and kills it on a failure there", () => {
@@ -2320,7 +2326,7 @@ describe("falsify on a branch with a new test that runs a binary", () => {
       ),
     }).toEqual({
       status: 0,
-      builds: ["BUILD: build:bins --profile dev -p bazhen-hook --bin bazhen-hook in "],
+      builds: ["BUILD: build --quiet --locked --profile dev -p bazhen-hook --bin bazhen-hook in "],
       ranBase: true,
     });
   });
@@ -2333,7 +2339,9 @@ describe("falsify on a branch with a new test that runs a binary", () => {
       ranPeer: stubLog().includes("RAN target/release/bazhen-peer"),
     }).toEqual({
       status: 0,
-      builds: ["BUILD: build:bins --profile release -p bazhen-hook --bin bazhen-hook in "],
+      builds: [
+        "BUILD: build --quiet --locked --profile release -p bazhen-hook --bin bazhen-hook in ",
+      ],
       ranPeer: false,
     });
   });
