@@ -27,7 +27,7 @@ import {
   type TerminalKind,
 } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
-import { terminalFontFamily, terminalFontLoaded } from "./font.ts";
+import { terminalFont, terminalFontFamily } from "./font.ts";
 import { loadSettings, type TerminalSettings } from "./settings.ts";
 import { deviceStorage } from "../storage.ts";
 import { attachTakeover } from "./takeover.ts";
@@ -61,8 +61,10 @@ export function TerminalView({
     const settings = loadSettings(deviceStorage, isApple(navigator.userAgent));
     let live = true;
     let teardown: (() => void) | undefined;
-    void terminalFontLoaded(settings.fontFamily).then(() => {
-      if (live) teardown = connect(element, terminalId, kind, scheme, settings, setReport);
+    const font = terminalFont();
+    void font.ready.then((inTime) => {
+      const late = inTime ? null : font.settled;
+      if (live) teardown = connect(element, terminalId, kind, scheme, settings, late, setReport);
     });
     return () => {
       live = false;
@@ -102,13 +104,16 @@ function connect(
   kind: TerminalKind,
   scheme: TuiTheme,
   settings: TerminalSettings,
+  /** Settles when a font the terminal opened without has arrived, or null if it opened with it. */
+  lateFont: Promise<void> | null,
   onReport: (report: Report) => void,
 ) {
   const page = pageTheme();
+  const family = terminalFontFamily(settings.fontFamily);
   const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
     theme: colours(),
-    fontFamily: terminalFontFamily(settings.fontFamily),
+    fontFamily: family,
     // Bold is weight, not colour: bright white in light, or bright black in dark, is another
     // colour a program didn't ask for.
     drawBoldTextInBrightColors: false,
@@ -362,7 +367,12 @@ function connect(
   const unfollow = page.subscribe(() => {
     term.options.theme = colours();
   });
+  let closed = false;
+  void lateFont?.then(() => {
+    if (!closed) remeasure(term, fit, family);
+  });
   return () => {
+    closed = true;
     over = true;
     unfollow();
     clearTimeout(retry);
@@ -383,6 +393,18 @@ function connect(
     term.dispose();
     unhook();
   };
+}
+
+/**
+ * Measures the cell and draws every glyph again, for a font that arrived after the terminal
+ * opened. xterm.js measures only when its family changes, and the WebGL renderer would keep the
+ * glyphs it drew in the fallback font, so the family is changed and changed back.
+ */
+function remeasure(term: Xterm, fit: FitAddon, family: string): void {
+  term.options.fontFamily = "monospace";
+  term.options.fontFamily = family;
+  term.clearTextureAtlas();
+  fit.fit();
 }
 
 /**
@@ -440,7 +462,7 @@ const swallow = () => true;
  * For browser tests, per view: the screen as text, the top line in view, whether the view is at
  * the bottom (not scrolled back into the page's own scrollback), whether the program is on its
  * alternate screen, the background it paints, the colours a program wrote text in, whichever
- * renderer draws, and the font family it draws in.
+ * renderer draws, the font family it draws in, and its columns and rows.
  */
 function exposeForTests(
   terminalId: string,
@@ -459,6 +481,7 @@ function exposeForTests(
     background: () => term.options.theme?.background,
     foregrounds: () => foregrounds(term),
     fontFamily: () => term.options.fontFamily,
+    grid: () => `${term.cols}x${term.rows}`,
   };
   return () => delete views[terminalId];
 }

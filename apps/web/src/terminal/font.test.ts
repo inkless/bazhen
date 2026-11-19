@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FACES, facesFor, fontsSettled, terminalFontFamily } from "./font.ts";
+import { FACES, fontsSettled, inTime, terminalFontFamily } from "./font.ts";
 
 const never = new Promise<void>(() => undefined);
 const loaded = { load: () => Promise.resolve() };
@@ -31,39 +31,42 @@ describe("the terminal's font", () => {
     );
   });
 
-  it("bundles regular, bold, italic and bold italic text faces, and one symbols face", () => {
+  it("bundles regular, bold, italic and bold italic text faces, and symbols for every style", () => {
     expect(FACES.map((f) => [f.family, f.weight, f.style])).toEqual([
       ["JetBrainsMono NFM", "400", "normal"],
       ["JetBrainsMono NFM", "700", "normal"],
       ["JetBrainsMono NFM", "400", "italic"],
       ["JetBrainsMono NFM", "700", "italic"],
-      ["JetBrainsMono NFM Symbols", "400", "normal"],
+      ["JetBrainsMono NFM Symbols", "400 700", "normal"],
+      ["JetBrainsMono NFM Symbols", "400 700", "italic"],
     ]);
     expect(FACES.map((f) => f.url).every((url) => url.endsWith(".woff2"))).toBe(true);
   });
 
-  it("waits for every bundled face, or only the symbols when the device names its own family", () => {
-    expect([facesFor(null), facesFor("Iosevka Term").map((f) => f.family)]).toEqual([
-      FACES,
-      ["JetBrainsMono NFM Symbols"],
-    ]);
+  it("draws an icon in every style from the one symbols file", () => {
+    const symbols = FACES.filter((f) => f.family === "JetBrainsMono NFM Symbols");
+    expect(new Set(symbols.map((f) => f.url)).size).toBe(1);
   });
 });
 
 describe("waiting for the terminal's font", () => {
-  it("is ready once every face has loaded", async () => {
-    expect(await settledNow(fontsSettled([loaded, loaded], never))).toBe(true);
+  it("settles once every face has loaded", async () => {
+    expect(await settledNow(fontsSettled([loaded, loaded]))).toBe(true);
   });
 
-  it("is not ready while a face is still loading and the deadline hasn't passed", async () => {
-    expect(await settledNow(fontsSettled([loaded, hanging], never))).toBe(false);
+  it("is not settled while a face is still loading", async () => {
+    expect(await settledNow(fontsSettled([loaded, hanging]))).toBe(false);
   });
 
-  it("is ready, never failed, when a face can't load, so the terminal opens on the fallback", async () => {
-    expect(await settledNow(fontsSettled([failing, throwing, loaded], never))).toBe(true);
+  it("settles, never failed, when a face can't load, so the terminal opens on the fallback", async () => {
+    expect(await settledNow(fontsSettled([failing, throwing, loaded]))).toBe(true);
   });
 
-  it("is ready at the deadline though a face is still loading", async () => {
-    expect(await settledNow(fontsSettled([hanging], Promise.resolve()))).toBe(true);
+  it("is in time when the faces settle before the deadline", async () => {
+    expect(await inTime(fontsSettled([loaded]), never)).toBe(true);
+  });
+
+  it("is late at the deadline though a face is still loading", async () => {
+    expect(await inTime(fontsSettled([hanging]), Promise.resolve())).toBe(false);
   });
 });

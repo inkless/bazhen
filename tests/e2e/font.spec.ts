@@ -1,12 +1,21 @@
 import type { Page } from "@playwright/test";
-import { bundledFaces, expect, launch, screen, terminalFontFamily, test } from "./page.ts";
+import {
+  bundledFaces,
+  expect,
+  launch,
+  screen,
+  terminalFontFamily,
+  terminalGrid,
+  test,
+} from "./page.ts";
 
 const FACES = [
   "JetBrainsMono NFM 400 normal",
   "JetBrainsMono NFM 700 normal",
   "JetBrainsMono NFM 400 italic",
   "JetBrainsMono NFM 700 italic",
-  "JetBrainsMono NFM Symbols 400 normal",
+  "JetBrainsMono NFM Symbols 400 700 normal",
+  "JetBrainsMono NFM Symbols 400 700 italic",
 ];
 const withStatus = (status: string) => FACES.map((face) => `${face}: ${status}`);
 
@@ -48,4 +57,19 @@ test("opens a terminal once it has waited 5 s for a font that never arrives", as
   await launch(page);
   expect(Date.now() - start).toBeGreaterThanOrEqual(5_000);
   expect(await bundledFaces(page)).toEqual(withStatus("loading"));
+});
+
+test("measures a terminal again when its font arrives after it has opened", async ({ page }) => {
+  await launch(page);
+  const measured = await terminalGrid(page);
+  // Past the 5 s the terminal waits, with time to see it open on the fallback first.
+  await page.route("**/*.woff2", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    await route.continue();
+  });
+  await launch(page);
+  expect(await bundledFaces(page)).toEqual(withStatus("loading"));
+  expect(await terminalGrid(page)).not.toBe(measured);
+  await expect.poll(() => bundledFaces(page), { timeout: 15_000 }).toEqual(withStatus("loaded"));
+  await expect.poll(() => terminalGrid(page)).toBe(measured);
 });
