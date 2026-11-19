@@ -27,7 +27,8 @@ import {
   type TerminalKind,
 } from "./scroll.ts";
 import { attachScrollInput } from "./scroll-input.ts";
-import { loadSettings } from "./settings.ts";
+import { terminalFontFamily, terminalFontLoaded } from "./font.ts";
+import { loadSettings, type TerminalSettings } from "./settings.ts";
 import { deviceStorage } from "../storage.ts";
 import { attachTakeover } from "./takeover.ts";
 import { terminalTheme } from "./theme.ts";
@@ -56,7 +57,17 @@ export function TerminalView({
 
   useEffect(() => {
     const element = host.current;
-    return element === null ? undefined : connect(element, terminalId, kind, scheme, setReport);
+    if (element === null) return undefined;
+    const settings = loadSettings(deviceStorage, isApple(navigator.userAgent));
+    let live = true;
+    let teardown: (() => void) | undefined;
+    void terminalFontLoaded(settings.fontFamily).then(() => {
+      if (live) teardown = connect(element, terminalId, kind, scheme, settings, setReport);
+    });
+    return () => {
+      live = false;
+      teardown?.();
+    };
   }, [terminalId, kind, scheme]);
 
   const { status, notice } = report;
@@ -90,13 +101,14 @@ function connect(
   terminalId: string,
   kind: TerminalKind,
   scheme: TuiTheme,
+  settings: TerminalSettings,
   onReport: (report: Report) => void,
 ) {
-  const settings = loadSettings(deviceStorage, isApple(navigator.userAgent));
   const page = pageTheme();
   const colours = () => terminalTheme(scheme, page.moreContrast());
   const term = new Xterm({
     theme: colours(),
+    fontFamily: terminalFontFamily(settings.fontFamily),
     // Bold is weight, not colour: bright white in light, or bright black in dark, is another
     // colour a program didn't ask for.
     drawBoldTextInBrightColors: false,
