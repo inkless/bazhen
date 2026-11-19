@@ -3,6 +3,7 @@ import { assert, describe, expect, it, vi } from "vitest";
 import {
   newId,
   type AttachmentId,
+  type ProgramExit,
   type RuntimeRef,
   type Snapshot,
   type TerminalId,
@@ -1443,6 +1444,20 @@ describe("terminal hub: a snapshot stream that closes", () => {
   });
 });
 
+/**
+ * A runtime whose streams go on reporting the first exit they told after a respawn, as tmux's
+ * may until it sees the next process run.
+ */
+class StaleExits extends FakeRuntime {
+  override async attach(...args: Parameters<FakeRuntime["attach"]>) {
+    const attached = await super.attach(...args);
+    let first: ProgramExit | null = null;
+    attached.stream.onExit((exit) => (first ??= exit));
+    Object.defineProperty(attached.stream, "exited", { get: () => first });
+    return attached;
+  }
+}
+
 /** The exits a view was told of. */
 const exitsOf = (view: { frames: StreamServerFrame[] }) =>
   view.frames.filter((f) => f.type === "exited");
@@ -1496,6 +1511,52 @@ describe("terminal hub: a process's exit", () => {
       [`exited ${rt.ref.terminalId} 0`, "views told: 0"],
       [exitFrame(0)],
     ]);
+  });
+
+  it("has an exit told before a view opened recorded as that view is told", async () => {
+    const rt = await fakeRuntime();
+    const { log } = memoryLog();
+    const recorded: string[] = [];
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: (t, exit) => recorded.push(`${t} ${exit.generation}`),
+    });
+    await hub.join(rt.ref, viewer().v, size);
+    rt.runtime.exitProcess(rt.ref);
+    recorded.length = 0;
+    const late = viewer();
+    await hub.join(rt.ref, late.v, size);
+    expect([recorded, exitsOf(late)]).toEqual([[`${rt.ref.terminalId} 0`], [exitFrame(0)]]);
+  });
+
+  it("still tells its views of an exit that could not be recorded, and says why", async () => {
+    const rt = await fakeRuntime();
+    const { log } = memoryLog();
+    const failed = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hub = new Hub(rt.runtime, {
+      ...log,
+      exited: () => {
+        throw new Error("the store is read-only");
+      },
+    });
+    const view = viewer();
+    await hub.join(rt.ref, view.v, size);
+    rt.runtime.exitProcess(rt.ref);
+    expect([exitsOf(view), failed.mock.calls.map((c) => String(c[1]))]).toEqual([
+      [exitFrame(0)],
+      ["Error: the store is read-only"],
+    ]);
+    failed.mockRestore();
+  });
+
+  it("never tells a view whose snapshot is of a respawned process an exit its runtime still reports", async () => {
+    const o = await snapshotTerminal(new StaleExits({ attach: "snapshot" }));
+    o.r.exitProcess(o.ref);
+    await o.r.respawn(o.ref, { ...o.r.specOf(o.ref), generation: 1 });
+    o.emit("next");
+    const late = viewer();
+    await o.hub.join(o.ref, late.v, size);
+    expect([exitsOf(o.first), exitsOf(late)]).toEqual([[exitFrame(0)], []]);
   });
 
   it("holds it for a view whose snapshot is on its way, behind the output before it", async () => {

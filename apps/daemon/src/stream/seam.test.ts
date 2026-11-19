@@ -132,7 +132,7 @@ describe("the seam between a snapshot and the output held while it was taken", (
     const exit = { generation: 0, status: { type: "exited", code: 0 } } as const;
     const held: Held[] = [
       { kind: "data", at: from, bytes: Uint8Array.of(1, 2) },
-      { kind: "exited", at: { generation: 0, offset: 6 }, exit },
+      { kind: "exited", exit },
       { kind: "data", at: { generation: 0, offset: 6 }, bytes: Uint8Array.of(3) },
       { kind: "reset", generation: 1, bytes: Uint8Array.of(RESET) },
     ];

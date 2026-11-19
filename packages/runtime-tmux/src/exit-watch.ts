@@ -41,7 +41,10 @@ export class ExitWatch {
   /** A process of `generation` replaced the one before it. */
   respawned(generation: number): void {
     this.floor = Math.max(this.floor, generation);
-    if (this.pending !== null && this.pending.generation < this.floor) this.pending = null;
+    if (this.pending !== null && this.pending.generation < this.floor) {
+      this.pending = null;
+      this.settle.reset();
+    }
     if (this.told !== null && this.told.generation < this.floor) this.told = null;
   }
 

@@ -246,9 +246,14 @@ export class TerminalHub {
       resumeDigest: digest(resumeToken),
     };
     watched.viewers.set(id, entry);
-    // An exit told before this view opened still ends it, unless its snapshot is of a later process.
+    // An exit told before this view opened still ends it, unless its snapshot is of a later
+    // process. A history client's positions carry no generation, so there its runtime's word that
+    // the exit is of the process running now is all there is.
     const { exited } = watched.stream;
-    if (exited !== null) entry.queue?.push({ kind: "exited", at: from, exit: exited });
+    if (exited !== null) {
+      this.recordExit(watched.terminal, exited);
+      entry.queue?.push({ kind: "exited", exit: exited });
+    }
     const taking = watched.screen.snapshot(from);
     this.log.started(id, watched.terminal, viewer.mode);
     const shown = await taking.catch((err: unknown) => {
@@ -304,6 +309,19 @@ export class TerminalHub {
       resize: (next) => this.resize(watched, id, next),
       leave: (reason = "client_closed") => this.end(watched, id, reason),
     };
+  }
+
+  /**
+   * Records an exit a stream told, before any view is told of it. A record that fails is reported
+   * and the views told all the same: their program has ended either way, and the environment's
+   * next report records it.
+   */
+  private recordExit(terminal: TerminalId, exit: ProgramExit): void {
+    try {
+      this.log.exited(terminal, exit);
+    } catch (err) {
+      console.error(`recording the exit of ${terminal}'s process failed`, err);
+    }
   }
 
   private async watch(
@@ -362,8 +380,8 @@ export class TerminalHub {
         deliver({ kind: "reset", generation, bytes: RESPAWN_BYTES });
       });
       stream.onExit((exit) => {
-        this.log.exited(ref.terminalId, exit);
-        deliver({ kind: "exited", at: watched.at, exit });
+        this.recordExit(ref.terminalId, exit);
+        deliver({ kind: "exited", exit });
       });
       stream.onClose((why) => {
         this.unpark(ref.terminalId, stream)?.cancel();

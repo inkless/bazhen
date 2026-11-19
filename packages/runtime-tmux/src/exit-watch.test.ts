@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExitWatch } from "./exit-watch.ts";
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const sleep = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 const code = (n: number) => ({ type: "exited", code: n }) as const;
 
 function watching(quietMs: number, maxWaitMs: number, generation = 0) {
@@ -45,6 +52,7 @@ describe("a tmux client's exits", () => {
     watch.report(0, code(1));
     await sleep(30);
     watch.report(0, code(1));
+    await sleep(30);
     watch.respawned(1);
     watch.report(1, code(2));
     await sleep(30);
@@ -71,6 +79,22 @@ describe("a tmux client's exits", () => {
     watch.report(0, code(1));
     await sleep(30);
     expect([told, watch.exited]).toEqual([[0], null]);
+    watch.dispose();
+  });
+
+  it("waits out the quiet after a respawned process's exit, whatever its predecessor's timers", async () => {
+    const { watch, told } = watching(200, 300);
+    watch.report(0, code(0));
+    watch.output();
+    await sleep(150);
+    watch.output();
+    await sleep(100);
+    watch.respawned(1);
+    watch.report(1, code(1));
+    await sleep(100);
+    const pastTheOldDeadline = [...told];
+    await sleep(150);
+    expect([pastTheOldDeadline, told]).toEqual([[], [1]]);
     watch.dispose();
   });
 

@@ -710,6 +710,10 @@ export class TmuxRuntime implements RuntimeAdapter {
     // tmux runs one client's command list without another client's commands in between. Were it
     // ever split, the number going first means a stale ref is refused rather than acting on the
     // new process.
+    // Its process's exit is retired first, so no client opening meanwhile is told it: a respawn
+    // that then fails leaves the agent exited all the same, as recorded.
+    for (const watch of this.exitWatches.get(ref.terminalId) ?? [])
+      watch.respawned(spec.generation);
     const location = await this.tmux(
       ...sequence([
         generationCommand(target, spec.generation),
@@ -720,8 +724,6 @@ export class TmuxRuntime implements RuntimeAdapter {
         ["display-message", "-p", "-t", target, LOCATION.format],
       ]),
     );
-    for (const watch of this.exitWatches.get(ref.terminalId) ?? [])
-      watch.respawned(spec.generation);
     return { ...ref, locator: this.locator(LOCATION.parse(location)) };
   }
 
