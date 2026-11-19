@@ -1,7 +1,16 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FONT_DIR, recorded, sha256, SYMBOLS_FILE, TEXT_FACES, textFile } from "./terminal-font.ts";
+import {
+  FONT_DIR,
+  metrics,
+  offCell,
+  recorded,
+  sha256,
+  SYMBOLS_FILE,
+  TEXT_FACES,
+  textFile,
+} from "./terminal-font.ts";
 
 describe("the committed terminal font", () => {
   const files = recorded(readFileSync(join(FONT_DIR, "README.md"), "utf8"));
@@ -21,5 +30,13 @@ describe("the committed terminal font", () => {
       return { name, bytes: bytes.length, sha256: sha256(bytes) };
     });
     expect(actual).toEqual(files);
+  });
+
+  it("draws every glyph of every face, icons included, one cell wide: 600 of a 1000-unit em", () => {
+    const faces = files.map(({ name }) => readFileSync(join(FONT_DIR, name)));
+    expect(faces.map((face) => [metrics(face).unitsPerEm, offCell(face)])).toEqual(
+      faces.map(() => [1000, []]),
+    );
+    expect(metrics(readFileSync(join(FONT_DIR, SYMBOLS_FILE))).advances).toHaveLength(10_611);
   });
 });

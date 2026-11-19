@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { brotliDecompressSync } from "node:zlib";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./is-main.ts";
@@ -101,6 +102,73 @@ export function notice(ofl: string, icons: string): string {
 }
 
 /** A file the README records, as `readme` writes it and `recorded` reads it back. */
+/** Every glyph's advance a cell font has, out of a 1000-unit em: a letter's, and so an icon's. */
+export const CELL_ADVANCE = 600;
+
+/** WOFF2's known-table index (its spec's table 5.1) of the tables `metrics` reads, or transforms. */
+const TABLE = { head: 1, hhea: 2, hmtx: 3, maxp: 4, glyf: 10, loca: 11 } as const;
+const ARBITRARY_TAG = 63;
+
+/**
+ * A WOFF2 font's em and each glyph's advance, read from its `head`, `hhea`, `maxp` and `hmtx`
+ * tables, so the committed files can be held to one cell without fontTools.
+ */
+export function metrics(woff2: Uint8Array): { unitsPerEm: number; advances: number[] } {
+  const file = new DataView(woff2.buffer, woff2.byteOffset, woff2.byteLength);
+  if (file.getUint32(0) !== 0x774f4632) throw new Error("not a WOFF2 file");
+  const numTables = file.getUint16(12);
+  const compressedSize = file.getUint32(20);
+  let at = 48;
+  const base128 = () => {
+    let value = 0;
+    for (let i = 0; i < 5; i++) {
+      const byte = file.getUint8(at++);
+      value = value * 128 + (byte & 0x7f);
+      if ((byte & 0x80) === 0) return value;
+    }
+    throw new Error("UIntBase128 longer than 5 bytes");
+  };
+  const tables = new Map<number, { offset: number; transformed: boolean }>();
+  let offset = 0;
+  for (let t = 0; t < numTables; t++) {
+    const flags = file.getUint8(at++);
+    const index = flags & 0x3f;
+    const version = flags >> 6;
+    if (index === ARBITRARY_TAG) at += 4;
+    const length = base128();
+    const nullTransform =
+      index === TABLE.glyf || index === TABLE.loca ? version === 3 : version === 0;
+    const stored = nullTransform ? length : base128();
+    tables.set(index, { offset, transformed: !nullTransform });
+    offset += stored;
+  }
+  const data = brotliDecompressSync(woff2.subarray(at, at + compressedSize));
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const table = (index: number) => {
+    const found = tables.get(index);
+    if (found === undefined) throw new Error(`no table ${index}`);
+    return found;
+  };
+  const unitsPerEm = view.getUint16(table(TABLE.head).offset + 18);
+  const numberOfHMetrics = view.getUint16(table(TABLE.hhea).offset + 34);
+  const numGlyphs = view.getUint16(table(TABLE.maxp).offset + 4);
+  // A transformed hmtx starts with a flags byte, then the advances alone; a plain one interleaves
+  // each advance with its left side bearing.
+  const hmtx = table(TABLE.hmtx);
+  const [start, stride] = hmtx.transformed ? [hmtx.offset + 1, 2] : [hmtx.offset, 4];
+  const advances = Array.from({ length: numGlyphs }, (_, glyph) =>
+    view.getUint16(start + Math.min(glyph, numberOfHMetrics - 1) * stride),
+  );
+  return { unitsPerEm, advances };
+}
+
+/** The advances in `woff2` that aren't one cell's. */
+export function offCell(woff2: Uint8Array): number[] {
+  const { unitsPerEm, advances } = metrics(woff2);
+  const cell = (CELL_ADVANCE * unitsPerEm) / 1000;
+  return [...new Set(advances.filter((advance) => advance !== cell))];
+}
+
 export interface Recorded {
   readonly name: string;
   readonly bytes: number;
@@ -218,6 +286,10 @@ async function main(): Promise<void> {
       throw new Error(`${SYMBOLS_FILE} doesn't hold exactly ${SYMBOLS_SOURCE}'s icons`);
     }
     outputs.push(symbolsOut);
+    for (const out of outputs) {
+      const off = offCell(readFileSync(out));
+      if (off.length > 0) throw new Error(`${out} has glyphs ${off.join(", ")} wide, not one cell`);
+    }
 
     const symbolRuns = runs(symbols);
     writeFileSync(
