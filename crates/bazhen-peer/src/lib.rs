@@ -25,6 +25,7 @@ use std::iter;
 use std::os::fd::BorrowedFd;
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
 use bazhen_holder::process::Credentials;
 use bazhen_holder::{process, start_time};
 use rustix::process::{Pid, geteuid};
@@ -240,6 +241,7 @@ pub fn codex_of(
 /// So: `owner` is our filesystem uid, all four of its uids are that uid, and all four of its gids
 /// are one group that isn't our filesystem gid, as a `newgrp` or `sg` shell's are. Gids that
 /// differ among themselves are a set-group-id program's, and are not taken for this.
+#[cfg(target_os = "linux")]
 fn withheld_for_group(owner: u32, theirs: Credentials, ours: Credentials) -> bool {
     let [.., uid] = ours.uids;
     let [.., gid] = ours.gids;
@@ -253,6 +255,7 @@ fn withheld_for_group(owner: u32, theirs: Credentials, ours: Credentials) -> boo
 /// # Errors
 ///
 /// `read`'s error, unless it was withheld; or `withholds`'s.
+#[cfg(target_os = "linux")]
 fn withheld_or(
     read: io::Result<Vec<OsString>>,
     withholds: impl FnOnce() -> io::Result<bool>,
@@ -271,8 +274,16 @@ fn withheld_or(
 }
 
 /// `pid`'s environment, or `None` when the kernel withholds it for `pid`'s group alone.
+#[cfg(target_os = "linux")]
 fn own_environ(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
     withheld_or(process::environ(pid), || group_withholds(pid))
+}
+
+/// `pid`'s environment. macOS denies another process's environment by rules of its own, none of
+/// them taken for withholding.
+#[cfg(target_os = "macos")]
+fn own_environ(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
+    process::environ(pid).map(Some)
 }
 
 /// Whether the kernel withholds `pid`'s environment from this process for `pid`'s group alone.
@@ -288,12 +299,6 @@ fn withholds_from(pid: Pid, ours: Credentials) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt as _;
     let owner = std::fs::metadata(format!("/proc/{}/environ", pid.as_raw_pid()))?.uid();
     Ok(withheld_for_group(owner, process::credentials(pid)?, ours))
-}
-
-/// macOS denies another process's environment by rules of its own, none of them taken for this.
-#[cfg(target_os = "macos")]
-fn group_withholds(_: Pid) -> io::Result<bool> {
-    Ok(false)
 }
 
 /// `pid`'s arguments when it runs as this user, else `None`.
@@ -657,34 +662,45 @@ mod tests {
     }
 
     /// The reader's uid and gid, apart so that a rule reading one for the other is told apart.
+    #[cfg(target_os = "linux")]
     const READER_UID: u32 = 1000;
+    #[cfg(target_os = "linux")]
     const READER_GID: u32 = 2000;
+    #[cfg(target_os = "linux")]
     const READER: Credentials = Credentials {
         uids: [READER_UID; 4],
         gids: [READER_GID; 4],
     };
 
     /// A `newgrp libvirt` shell's credentials: every uid the reader's, every gid group 141.
+    #[cfg(target_os = "linux")]
     const GROUP_SHELL: Credentials = Credentials {
         uids: [READER_UID; 4],
         gids: [141; 4],
     };
 
+    #[cfg(target_os = "linux")]
     fn group_withheld(owner: u32, theirs: Credentials) -> bool {
         withheld_for_group(owner, theirs, READER)
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn takes_a_denial_for_the_group_s_when_every_uid_is_the_reader_s_and_every_gid_one_other() {
         assert!(group_withheld(READER_UID, GROUP_SHELL));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn takes_no_denial_for_the_group_s_from_a_process_that_isn_t_dumpable() {
         assert!(!group_withheld(0, GROUP_SHELL));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn takes_no_denial_for_the_group_s_when_any_uid_isn_t_the_reader_s() {
         for slot in 0..4 {
             let mut theirs = GROUP_SHELL;
@@ -693,7 +709,9 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn takes_no_denial_for_the_group_s_when_the_gids_differ_among_themselves() {
         for slot in 0..4 {
             let mut theirs = GROUP_SHELL;
@@ -702,7 +720,9 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn compares_with_the_reader_s_filesystem_uid_and_gid() {
         let reader = |uid: u32, gid: u32| Credentials {
             uids: [1, 1, 1, uid],
@@ -718,7 +738,9 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn takes_no_denial_for_the_group_s_when_every_gid_is_the_reader_s() {
         let theirs = Credentials {
             gids: [READER_GID; 4],
@@ -727,11 +749,14 @@ mod tests {
         assert!(!group_withheld(READER_UID, theirs));
     }
 
+    #[cfg(target_os = "linux")]
     fn denied(kind: io::ErrorKind) -> io::Result<Vec<OsString>> {
         Err(io::Error::from(kind))
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn withholds_only_a_denied_read_that_the_group_explains() {
         let read = [
             withheld_or(denied(io::ErrorKind::PermissionDenied), || Ok(true)),
@@ -740,7 +765,9 @@ mod tests {
         assert_eq!(read.map(Result::unwrap), [None, Some(os(&["HOME=/h"]))]);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
+    #[cfg(target_os = "linux")]
     fn keeps_a_denial_the_group_doesn_t_explain_and_every_other_error() {
         let kept = [
             withheld_or(denied(io::ErrorKind::PermissionDenied), || Ok(false)),
