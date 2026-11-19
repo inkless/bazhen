@@ -45,6 +45,24 @@ describe("gateEnv", () => {
     });
   });
 
+  it("keeps the build jobs and test threads a shared host caps", () => {
+    expect(
+      gateEnv({
+        CARGO_BUILD_JOBS: "4",
+        NEXTEST_TEST_THREADS: "4",
+        CARGO_BUILD_JOBSX: "4",
+        NEXTEST_TEST_THREADS_X: "4",
+        NEXTEST_RETRIES: "3",
+      }),
+    ).toEqual({
+      CARGO_BUILD_JOBS: "4",
+      NEXTEST_TEST_THREADS: "4",
+      CARGO_ENCODED_RUSTFLAGS: "",
+      CARGO_ENCODED_RUSTDOCFLAGS: "",
+      PROPTEST_RNG_SEED: "1",
+    });
+  });
+
   it("fixes proptest's seed, unless the caller gave one it reads as a seed", () => {
     expect([undefined, "", "random", "-1", "1e3", "18446744073709551616"].map(seed)).toEqual(
       Array(6).fill(PROPTEST_SEED),

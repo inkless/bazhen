@@ -206,10 +206,18 @@ const REMOVED: [&str; 13] = [
     "CLIPPY_ARGS",
 ];
 
+/// The variables a gate keeps although their prefix is removed: how many jobs cargo builds with and
+/// how many tests nextest runs at once, which a shared host caps. Neither changes what is built or
+/// run, or with which flags.
+const KEPT: [&str; 2] = ["CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS"];
+
 /// Whether a variable is one a gate removes: those in `REMOVED`, and each with a prefix cargo,
-/// rustc or nextest read flags from, but for the target directory.
+/// rustc or nextest read flags from, but for the target directory and those in `KEPT`.
 fn removed(name: &OsStr) -> bool {
     let bytes = name.as_encoded_bytes();
+    if KEPT.iter().any(|k| k.as_bytes() == bytes) {
+        return false;
+    }
     let except = |prefix: &[u8], kept: &[u8]| bytes.starts_with(prefix) && bytes != kept;
     REMOVED.iter().any(|r| r.as_bytes() == bytes)
         || except(b"CARGO_BUILD_", b"CARGO_BUILD_TARGET_DIR")
@@ -392,6 +400,27 @@ mod tests {
                 ("CARGO_TARGET_DIR", "/tmp/target"),
                 ("CARGO_BUILD_TARGET_DIR", "/tmp/build-target"),
                 ("CARGO_HOME", "/home/u/.cargo"),
+                ("CARGO_ENCODED_RUSTFLAGS", ""),
+                ("CARGO_ENCODED_RUSTDOCFLAGS", ""),
+                ("PROPTEST_RNG_SEED", "1"),
+            ])
+        );
+    }
+
+    #[test]
+    fn keeps_the_build_jobs_and_test_threads_a_shared_host_caps() {
+        let got = gate_env(env(&[
+            ("CARGO_BUILD_JOBS", "4"),
+            ("NEXTEST_TEST_THREADS", "4"),
+            ("CARGO_BUILD_JOBSX", "4"),
+            ("NEXTEST_TEST_THREADS_X", "4"),
+            ("NEXTEST_RETRIES", "3"),
+        ]));
+        assert_eq!(
+            got,
+            env(&[
+                ("CARGO_BUILD_JOBS", "4"),
+                ("NEXTEST_TEST_THREADS", "4"),
                 ("CARGO_ENCODED_RUSTFLAGS", ""),
                 ("CARGO_ENCODED_RUSTDOCFLAGS", ""),
                 ("PROPTEST_RNG_SEED", "1"),
