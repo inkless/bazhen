@@ -113,7 +113,12 @@ impl DetachScan {
         let sequence = self.sequence.bytes();
         if sequence.get(self.matched) == Some(&key) {
             self.matched += 1;
-            return self.matched == sequence.len();
+            if self.matched < sequence.len() {
+                return false;
+            }
+            // The sequence is complete: nothing is held, and keys scanned after start afresh.
+            self.matched = 0;
+            return true;
         }
         let Some((&first, rest)) = sequence.get(..self.matched).and_then(<[u8]>::split_first)
         else {
@@ -383,6 +388,29 @@ mod tests {
                 DetachScan::new(keys("a,a,b")).scan(b"xaac"),
             ],
             [(b"xa".to_vec(), true), (b"xaac".to_vec(), false)]
+        );
+    }
+
+    #[test]
+    fn scans_afresh_after_a_detach_never_sending_the_sequence() {
+        let keys = |text| DetachKeys::parse(text).unwrap();
+        let mut one = DetachScan::new(keys("q"));
+        let mut two = DetachScan::new(keys("ctrl-],ctrl-]"));
+        assert_eq!(
+            [
+                one.scan(b"q"),
+                one.scan(b"xy"),
+                one.scan(b"q"),
+                two.scan(b"\x1d\x1d"),
+                two.scan(b"x\x1d"),
+            ],
+            [
+                (vec![], true),
+                (b"xy".to_vec(), false),
+                (vec![], true),
+                (vec![], true),
+                (b"x".to_vec(), false),
+            ]
         );
     }
 
