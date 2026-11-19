@@ -1,0 +1,20 @@
+[package]
+name = "bazhen-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bazhen-protocol = { workspace = true }
+jiff = { workspace = true }
+libc = { workspace = true }
+rusqlite = { workspace = true }
+rustix = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

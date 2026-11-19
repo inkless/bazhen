@@ -1,0 +1,1 @@
+ALTER TABLE agent_sessions ADD COLUMN compact_window INTEGER;

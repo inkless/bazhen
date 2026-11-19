@@ -1,0 +1,257 @@
+//! The daemon's SQLite seam: the one database a home has, opened privately and migrated to the
+//! schema the TypeScript daemon gives it (`apps/daemon/src/store/store.ts`), so either daemon opens
+//! the other's database. Blocking, as `SQLite` is: an async caller runs it on a thread of its own.
+
+#[cfg(test)]
+mod fixture;
+mod migrations;
+mod private;
+
+use std::collections::BTreeSet;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use bazhen_protocol::ids::HostId;
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+
+pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
+
+/// What `schema_version` holds once migrations are named: past every version a build that
+/// numbered them supports, so such a build refuses the database rather than re-run its first.
+pub const NAMED_MIGRATIONS_VERSION: i64 = 1000;
+
+/// Each pragma the store sets on opening a database, as store.ts sets them, and why: NORMAL loses
+/// only what an OS crash would, a shell's last command is zeroed in its page once replaced, and the
+/// WAL is truncated after each checkpoint rather than keep old frames.
+const PRAGMAS: [(&str, &str); 6] = [
+    ("journal_mode", "WAL"),
+    ("synchronous", "NORMAL"),
+    ("foreign_keys", "ON"),
+    ("busy_timeout", "5000"),
+    ("secure_delete", "FAST"),
+    ("journal_size_limit", "0"),
+];
+
+/// Why a database wasn't opened.
+#[derive(Debug, thiserror::Error)]
+pub enum OpenError {
+    /// The database or a journal beside it is something this user mustn't take over.
+    #[error("refusing to open {} as Bazhen's database: {reason}", path.display())]
+    Unsafe { path: PathBuf, reason: String },
+    /// The database has run migrations this build doesn't know, so a newer build wrote it.
+    #[error("database has migrations this build doesn't know, from a newer one: {}", .0.join(", "))]
+    SchemaTooNew(Vec<String>),
+    /// The database's host id isn't one, so whatever wrote it wasn't a Bazhen daemon.
+    #[error("database's host id isn't one: {0:?}")]
+    HostId(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+/// An open database, migrated, with this installation's host id. Dropping it closes the database,
+/// checkpointing its WAL.
+#[derive(Debug)]
+pub struct Store {
+    db: Connection,
+    host: Option<HostId>,
+    missed: Vec<String>,
+}
+
+impl Store {
+    /// The database at `path`, made private and migrated through every migration.
+    ///
+    /// # Errors
+    ///
+    /// [`OpenError`]: a file this user mustn't take over, a newer build's database, or `SQLite`'s.
+    pub fn open(path: &Path) -> Result<Self, OpenError> {
+        Self::open_with(path, MIGRATIONS)
+    }
+
+    /// The database at `path`, migrated through `migrations` only.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::open`].
+    pub fn open_with(path: &Path, migrations: &[Migration]) -> Result<Self, OpenError> {
+        private::keep_private(path, rustix::process::getuid().as_raw())?;
+        let db = Connection::open(path)?;
+        for (pragma, value) in PRAGMAS {
+            db.pragma_update_and_check(None, pragma, value, |_| Ok(()))
+                .optional()?;
+        }
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL) STRICT",
+        )?;
+        let mut store = Self {
+            db,
+            host: None,
+            missed: Vec::new(),
+        };
+        store.migrate(migrations)?;
+        store.host = store.ensure_host()?;
+        Ok(store)
+    }
+
+    /// This installation's host id, minted on first open; none while the schema has no host.
+    pub fn host_id(&self) -> Option<&HostId> {
+        self.host.as_ref()
+    }
+
+    /// The migrations this open ran after later ones the database had already run, which the
+    /// daemon says it did.
+    pub fn missed(&self) -> &[String] {
+        &self.missed
+    }
+
+    /// The names of the migrations the database has run.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn applied_migrations(&self) -> Result<BTreeSet<String>, rusqlite::Error> {
+        applied(&self.db)
+    }
+
+    fn migrate(&mut self, migrations: &[Migration]) -> Result<(), OpenError> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        name_numbered_migrations(&tx)?;
+        tx.commit()?;
+        let done = applied(&self.db)?;
+        let unknown: Vec<String> = done
+            .iter()
+            .filter(|name| !migrations.iter().any(|m| m.name == name.as_str()))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            return Err(OpenError::SchemaTooNew(unknown));
+        }
+        self.missed = hole_fills(migrations, &done);
+        for m in migrations.iter().filter(|m| !done.contains(m.name)) {
+            let tx = self
+                .db
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch(m.sql)?;
+            if let Some(run) = m.run {
+                run(&tx)?;
+            }
+            tx.execute(
+                "INSERT INTO migrations (name, applied_at) VALUES (?, ?)",
+                (m.name, now()),
+            )?;
+            tx.commit()?;
+        }
+        Ok(())
+    }
+
+    fn ensure_host(&self) -> Result<Option<HostId>, OpenError> {
+        let has_table = self
+            .db
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'host'",
+                (),
+                |_| Ok(()),
+            )
+            .optional()?;
+        if has_table.is_none() {
+            return Ok(None);
+        }
+        let existing: Option<String> = self
+            .db
+            .query_row("SELECT id FROM host LIMIT 1", (), |row| row.get(0))
+            .optional()?;
+        if let Some(id) = existing {
+            return HostId::parse(&id).map(Some).ok_or(OpenError::HostId(id));
+        }
+        let id = HostId::mint(now_ms(), urandom()?);
+        self.db.execute(
+            "INSERT INTO host (id, created_at) VALUES (?, ?)",
+            (id.as_str(), now()),
+        )?;
+        Ok(Some(id))
+    }
+}
+
+fn applied(db: &Connection) -> Result<BTreeSet<String>, rusqlite::Error> {
+    db.prepare("SELECT name FROM migrations")?
+        .query_map((), |row| row.get(0))?
+        .collect()
+}
+
+/// Records, by name, the migrations a database the numbering runner left at version n has run:
+/// the first n. Then marks `schema_version` so that runner refuses it.
+fn name_numbered_migrations(db: &Connection) -> Result<(), OpenError> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL) STRICT",
+    )?;
+    let version: i64 = db.query_row(
+        "SELECT coalesce(max(version), 0) FROM schema_version",
+        (),
+        |row| row.get(0),
+    )?;
+    if version == NAMED_MIGRATIONS_VERSION {
+        return Ok(());
+    }
+    let numbered = usize::try_from(version)
+        .ok()
+        .and_then(|v| NUMBERED_MIGRATIONS.get(..v))
+        .ok_or_else(|| OpenError::SchemaTooNew(vec![format!("version {version}")]))?;
+    let at = now();
+    for name in numbered {
+        db.execute(
+            "INSERT OR IGNORE INTO migrations (name, applied_at) VALUES (?, ?)",
+            (name, &at),
+        )?;
+    }
+    db.execute("DELETE FROM schema_version", ())?;
+    db.execute(
+        "INSERT INTO schema_version (version) VALUES (?)",
+        [NAMED_MIGRATIONS_VERSION],
+    )?;
+    Ok(())
+}
+
+/// The migrations a database hasn't run that come before one it has: run now, they follow
+/// migrations a fresh database runs after them, which is safe only because parallel migrations
+/// commute.
+fn hole_fills(migrations: &[Migration], done: &BTreeSet<String>) -> Vec<String> {
+    let last = migrations.iter().rposition(|m| done.contains(m.name));
+    migrations
+        .get(..last.unwrap_or(0))
+        .unwrap_or_default()
+        .iter()
+        .filter(|m| !done.contains(m.name))
+        .map(|m| m.name.to_owned())
+        .collect()
+}
+
+/// 16 random bytes from the kernel.
+fn urandom() -> std::io::Result<[u8; 16]> {
+    let mut random = [0u8; 16];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+    Ok(random)
+}
+
+/// Now, as `new Date().toISOString()` writes it.
+fn now() -> String {
+    format!("{:.3}", jiff::Timestamp::now())
+}
+
+fn now_ms() -> u64 {
+    u64::try_from(jiff::Timestamp::now().as_millisecond()).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_is_written_as_javascripts_iso_string() {
+        let at = now();
+        assert_eq!(at.len(), "2026-11-18T01:02:03.456Z".len(), "{at}");
+        assert!(at.ends_with('Z') && at.get(19..20) == Some("."), "{at}");
+    }
+}

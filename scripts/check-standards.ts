@@ -1076,6 +1076,10 @@ const NOT_DECODERS: Record<string, string> = {
     "hands stdin's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
   "crates/bazhen/src/attach/direct.rs::open":
     "reads the holder's socket into FrameDecoder::push, which the proto crate's frame target fuzzes",
+  "crates/bazhen-protocol/src/ids.rs::Id::mint":
+    "writes 16 bytes its caller drew at random as an id's hex; parses nothing",
+  "crates/bazhen-store/src/lib.rs::urandom":
+    "reads 16 random bytes from /dev/urandom for an id; parses nothing",
   "crates/bazhen/src/fmt.rs::uuid":
     "reads 16 random bytes from /dev/urandom and formats them; parses nothing",
   "crates/bazhen/src/tasks.rs::read_file":
@@ -2727,7 +2731,9 @@ export const HEAVY_CRATES = [
 
 // The members that may reach a crate in HEAVY_CRATES, each with why. A member that depends on
 // one of them reaches the heavy crate too, so it needs its own entry.
-const HEAVY_ALLOWED: Record<string, string> = {};
+const HEAVY_ALLOWED: Record<string, string> = {
+  "bazhen-store": "the daemon's SQLite seam: it builds SQLite, which only the daemon needs",
+};
 
 /** Each package's dependencies, by name, as Cargo.lock records them. */
 export function lockGraph(lock: string): Map<string, string[]> {
