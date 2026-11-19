@@ -27,26 +27,68 @@ export interface TerminalSettings {
   readonly problem: string | null;
 }
 
+/** The CSS generic families, which a family list names bare; every other name it quotes. */
+const GENERIC_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "math",
+  "emoji",
+  "fangsong",
+]);
+/** One word of an unquoted family name: a CSS identifier, which doesn't start with a digit. */
+const IDENT = /^-?[\p{L}_][\p{L}\p{N}_-]*$/u;
+/** A quoted family name, with nothing in it that could end the string or the rule around it. */
+const QUOTED = /^(?:"([^"'\\;{}<>\p{Cc}]*)"|'([^"'\\;{}<>\p{Cc}]*)')$/u;
+
+/** `entry` of a family list as a family a CSS `font-family` takes, quoted unless generic. */
+function familyName(entry: string): string | null {
+  const quoted = QUOTED.exec(entry);
+  if (quoted !== null) {
+    const name = (quoted[1] ?? quoted[2] ?? "").trim();
+    return name === "" ? null : `"${name}"`;
+  }
+  const words = entry.split(/\s+/u);
+  if (!words.every((word) => IDENT.test(word))) return null;
+  const name = words.join(" ");
+  return GENERIC_FAMILIES.has(name.toLowerCase()) ? name.toLowerCase() : `"${name}"`;
+}
+
 /**
- * The stored family, trimmed, or why it isn't one. A family is only ever a CSS `font-family`; the
- * refusal keeps a typo from turning the font off without a word.
+ * The stored family list, each name re-quoted, or why it isn't one. xterm.js puts the list in a
+ * canvas's `font` and in a style sheet, where one broken name would drop the whole list, bundled
+ * font and all, or turn the rules after it into a comment.
  */
 function storedFontFamily(stored: string | null): {
   family: string | null;
   problem: string | null;
 } {
   if (stored === null) return { family: null, problem: null };
-  const family = stored.trim();
+  const list = stored.trim();
+  const entries = list.split(",").map((entry) => entry.trim());
+  const names = entries.map(familyName);
+  const bad = entries.find((_, i) => names[i] === null);
   const why =
-    family === ""
+    list === ""
       ? "it is empty"
-      : family.length > FONT_FAMILY_MAX
+      : list.length > FONT_FAMILY_MAX
         ? `it is longer than ${FONT_FAMILY_MAX} characters`
-        : /[;{}\\\n\r]/.test(family)
-          ? "it may not contain ; { } \\ or a line break"
-          : null;
+        : list.includes("/*") || list.includes("*/")
+          ? "it may not contain a comment"
+          : bad === ""
+            ? "it has an empty name between its commas"
+            : bad === undefined
+              ? null
+              : `${bad} is not a family name; put a name in quotes, as "Iosevka Term"`;
   return why === null
-    ? { family, problem: null }
+    ? { family: names.join(", "), problem: null }
     : { family: null, problem: `Your terminal font was not applied: ${why}.` };
 }
 
