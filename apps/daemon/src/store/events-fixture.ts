@@ -9,11 +9,24 @@ import { builtinRoles } from "../roles/roles.ts";
 import { type Launcher, Tasks } from "../tasks/tasks.ts";
 import { type SnapshotView, Store } from "./store.ts";
 
+/** Schema kinds that make a value other than the one stored, which a stream passing it on can't. */
+const REWRITES = new Set(["pipe", "transform", "default", "prefault", "catch"]);
+
+/** Whether `schema`, under any optional or nullable, rewrites the value it parses. */
+function rewrites(schema: z.core.$ZodType): boolean {
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
+    return rewrites(schema.unwrap());
+  }
+  return !(schema instanceof z.ZodType) || REWRITES.has(schema.def.type);
+}
+
 /**
  * Each event type with the entity it is about and the payload keys a client is sent, in the
- * order the stream sends them. A payload is filtered by these keys alone, so every type's
- * streamed shape must be its payload's with top-level keys left out and nothing else changed:
- * a nested omission or a transform would stream what the key filter can't redact.
+ * order the stream sends them. A payload is filtered by these keys alone, and its values passed
+ * on as stored, so every type's streamed shape must be its payload's with top-level keys left
+ * out and nothing else changed, and no kept key may rewrite its value: a nested omission or a
+ * transform would stream what the key filter can't redact or reproduce. A string's `trim` is the
+ * one rewrite left, since a title is stored trimmed.
  */
 export function eventRegistry(
   events: Readonly<
@@ -25,7 +38,9 @@ export function eventRegistry(
       throw new Error(`${type}: a payload or its streamed shape is not an object`);
     }
     const kept = Object.keys(streamed.shape);
-    const changed = kept.filter((key) => streamed.shape[key] !== payload.shape[key]);
+    const changed = kept.filter(
+      (key) => streamed.shape[key] !== payload.shape[key] || rewrites(streamed.shape[key]),
+    );
     if (changed.length > 0 || streamed.def.catchall !== payload.def.catchall) {
       throw new Error(`${type}: streams ${changed.join(", ") || "its unknown keys"} differently`);
     }

@@ -23,6 +23,22 @@ describe("the event registry the Rust daemon redacts by", () => {
     }
   });
 
+  it("refuses a kept key whose schema, payload and stream alike, rewrites the value stored", () => {
+    for (const title of [
+      z.string().transform((t) => t.slice(0, 3)),
+      z.string().default("untitled").optional(),
+      z.string().catch("untitled").nullable(),
+      z.string().pipe(z.coerce.number()),
+    ]) {
+      const rewriting = payload.extend({ title });
+      expect(() => eventRegistry({ "x.made": { entity: "x", payload: rewriting } })).toThrow(
+        /x\.made: streams title differently/,
+      );
+    }
+    const trimmed = payload.extend({ title: z.string().trim().min(1) });
+    expect(eventRegistry({ "x.made": { entity: "x", payload: trimmed } })).toHaveLength(1);
+  });
+
   it("refuses a payload that isn't an object, whose keys can't be listed", () => {
     expect(() => eventRegistry({ "x.made": { entity: "x", payload: z.string() } })).toThrow(
       /not an object/,

@@ -23,7 +23,9 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-pub use events::{AppendError, FrameError, NewEvent, OnceError, Reads, StoredEvent, Writer};
+/// Every event type, with the payload keys a frame of it keeps.
+pub use bazhen_protocol::events::EVENT_KINDS;
+pub use events::{AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, Writer};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::SnapshotError;
 
@@ -162,17 +164,16 @@ impl Store {
         })
     }
 
-    /// Retires up to `limit` events recorded before `cutoff`, an ISO timestamp, and answers
-    /// whether more may wait.
+    /// Retires up to `limit` events recorded before `cutoff`, and answers whether more may wait.
     ///
     /// # Errors
     ///
     /// `SQLite`'s; nothing is retired then.
-    pub fn prune_batch(&mut self, cutoff: &str, limit: u32) -> rusqlite::Result<bool> {
+    pub fn prune_batch(&mut self, cutoff: jiff::Timestamp, limit: u32) -> rusqlite::Result<bool> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let more = events::prune_batch(&tx, &self.referenced, cutoff, limit)?;
+        let more = events::prune_batch(&tx, &self.referenced, &iso(cutoff), limit)?;
         tx.commit()?;
         Ok(more)
     }
@@ -347,7 +348,13 @@ fn urandom() -> std::io::Result<[u8; 16]> {
 
 /// Now, as `new Date().toISOString()` writes it.
 pub(crate) fn now() -> String {
-    format!("{:.3}", jiff::Timestamp::now())
+    iso(jiff::Timestamp::now())
+}
+
+/// `at` as `Date.prototype.toISOString` writes it, which is how every stored time is written, so
+/// two compare as text as they do as times.
+fn iso(at: jiff::Timestamp) -> String {
+    format!("{at:.3}")
 }
 
 fn now_ms() -> u64 {

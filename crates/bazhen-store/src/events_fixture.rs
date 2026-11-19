@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use bazhen_protocol::events::{EVENT_KINDS, TaskCreated};
 use bazhen_protocol::ids::TaskId;
+use bazhen_protocol::tasks::CreateTaskResponse;
 use rusqlite::Connection;
 use serde_json::Value;
 
@@ -211,4 +212,32 @@ fn refuses_a_snapshot_that_would_leave_out_rows_this_build_cant_describe() {
         matches!(&refused, Err(crate::SnapshotError::Unported(s)) if s == &["environments", "notices"]),
         "{refused:?}"
     );
+}
+
+#[test]
+fn records_an_answer_byte_for_byte_as_the_typescript_daemon_does() {
+    let dir = TempDir::new("events-answer");
+    let mut store = written_by_typescript(&dir.db("bazhen.db"));
+    let key = "SELECT response FROM idempotency_keys WHERE key = 'create parent'";
+    let theirs = row(&store, key)[0][0].as_str().unwrap().to_owned();
+    let request = serde_json::from_str::<Value>(&theirs).unwrap()["request"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    store
+        .db
+        .execute("DELETE FROM idempotency_keys", ())
+        .unwrap();
+    let response: CreateTaskResponse =
+        serde_json::from_value(fixture()["log"]["responses"][0].clone()).unwrap();
+    let answered = response.clone();
+    let first = store
+        .once(
+            "create parent",
+            &request,
+            move |_| -> Result<_, OnceError> { Ok(answered) },
+        )
+        .unwrap();
+    assert_eq!(first, response);
+    assert_eq!(row(&store, key)[0][0].as_str().unwrap(), theirs);
 }

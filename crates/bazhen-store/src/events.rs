@@ -74,7 +74,9 @@ impl Writer<'_> {
     ///
     /// # Errors
     ///
-    /// [`AppendError`]; the caller's transaction then records none of it.
+    /// [`AppendError`]. The event's row may already be written: returned out of
+    /// [`Store::write`](crate::Store::write), the error rolls the whole transaction back, so a
+    /// caller that swallows it instead commits an event without its projection.
     pub fn append(&self, event: &NewEvent) -> Result<u64, AppendError> {
         let host = self.host.ok_or(AppendError::NoHost)?;
         let kind = event_kind(event.name()).ok_or_else(|| AppendError::Refused {
@@ -162,8 +164,10 @@ struct Envelope<'a> {
 impl StoredEvent {
     /// The `event` frame the stream sends for it. Its payload keeps only the keys its type
     /// streams, in their order, so what a client mustn't see never leaves, whatever the values
-    /// hold. Unlike the TypeScript daemon, which also checks each value's type and fails the
-    /// stream on one it doesn't expect, a value is sent as stored: only a corrupt row differs.
+    /// hold. Unlike the TypeScript daemon, which parses each value with its schema, a value is
+    /// sent as stored: only a row no daemon would have written differs, one whose value has
+    /// another type, which TypeScript fails the stream on, or a title stored untrimmed, which it
+    /// sends trimmed.
     ///
     /// # Errors
     ///
@@ -206,6 +210,15 @@ impl StoredEvent {
             },
         })?)
     }
+}
+
+/// What a stream sends next from a cursor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Page {
+    /// The cursor can't resume here: the client must start again from a snapshot.
+    Reset(ResetReason),
+    /// The events after the cursor, oldest first; none when it is at the newest.
+    Events(Vec<StoredEvent>),
 }
 
 /// Reads of the log, on any connection to it.
@@ -260,6 +273,24 @@ impl Reads<'_> {
                 })
             })?
             .collect()
+    }
+
+    /// The page a stream sends after `after` in `epoch`: up to `limit` events, unless the cursor
+    /// can't resume. Read in one transaction, so retention can't retire what the page should
+    /// hold between the check and the read.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn page(self, epoch: &str, after: u64, limit: u32) -> rusqlite::Result<Page> {
+        let tx = self.0.unchecked_transaction()?;
+        let reads = Reads(&tx);
+        let page = match reads.cursor_fault(epoch, after)? {
+            Some(reason) => Page::Reset(reason),
+            None => Page::Events(reads.events(after, limit)?),
+        };
+        tx.finish()?;
+        Ok(page)
     }
 
     /// Why a stream can't resume after `after` in `epoch`, if it can't: the cursor names another
@@ -451,6 +482,10 @@ mod tests {
 
     const OLD: &str = "2000-01-01T00:00:00.000Z";
     const CUTOFF: &str = "2020-01-01T00:00:00.000Z";
+
+    fn at(iso: &str) -> jiff::Timestamp {
+        iso.parse().unwrap()
+    }
 
     fn task(n: u8) -> TaskId {
         TaskId::mint(1, [n; 16])
@@ -669,7 +704,7 @@ mod tests {
         let ended = visit(&store);
         age(&store);
         let young = visit(&store);
-        assert!(!store.prune_batch(CUTOFF, 1000).unwrap());
+        assert!(!store.prune_batch(at(CUTOFF), 1000).unwrap());
         assert_eq!(ids(&store), [kept, young]);
         let epoch = store.reads().epoch().unwrap();
         let reads = store.reads();
@@ -683,13 +718,89 @@ mod tests {
     }
 
     #[test]
+    fn retires_an_event_recorded_before_the_cutoff_and_keeps_one_recorded_at_it() {
+        let dir = TempDir::new("cutoff");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let ids = [visit(&store), visit(&store), visit(&store)];
+        let times = [
+            "2019-12-31T23:59:59.999Z",
+            CUTOFF,
+            "2000-01-01T00:00:00.000Z",
+        ];
+        for (id, ts) in ids.iter().zip(times) {
+            store
+                .db
+                .execute(
+                    "UPDATE events SET ts = ? WHERE id = ?",
+                    (ts, int(*id).unwrap()),
+                )
+                .unwrap();
+        }
+        store.prune_batch(at(CUTOFF), 1000).unwrap();
+        assert_eq!(super::tests::ids(&store), [ids[1], ids[2]]);
+    }
+
+    #[test]
+    fn pages_from_a_cursor_or_says_why_it_cant_in_one_read() {
+        let dir = TempDir::new("page");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let first = visit(&store);
+        let second = visit(&store);
+        let newest = append(&mut store, &created(task(1), None));
+        let epoch = store.reads().epoch().unwrap();
+        let page = |after| match store.reads().page(&epoch, after, 1).unwrap() {
+            Page::Events(events) => Ok(events.iter().map(|e| e.id).collect::<Vec<_>>()),
+            Page::Reset(reason) => Err(reason),
+        };
+        assert_eq!(
+            [page(0), page(second), page(newest), page(newest + 1)],
+            [
+                Ok(vec![first]),
+                Ok(vec![newest]),
+                Ok(vec![]),
+                Err(ResetReason::Foreign)
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_a_task_whose_title_or_brief_the_typescript_projection_would_refuse() {
+        let dir = TempDir::new("refused-title");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let with = |title: &str, brief: &str| {
+            let NewEvent::TaskCreated {
+                task,
+                actor,
+                mut payload,
+            } = created(task(1), None);
+            payload.title = title.to_owned();
+            payload.brief = brief.to_owned();
+            NewEvent::TaskCreated {
+                task,
+                actor,
+                payload,
+            }
+        };
+        for event in [with(" Ship", "b"), with("", "b"), with("Ship", "")] {
+            let refused = store.write(|w| w.append(&event));
+            assert!(
+                matches!(refused, Err(AppendError::Refused { .. })),
+                "{event:?}"
+            );
+        }
+        assert_eq!(store.reads().latest_event_id().unwrap(), 0);
+    }
+
+    #[test]
     fn never_retires_the_newest_event_so_later_ids_stay_above_what_retention_passed() {
         let dir = TempDir::new("newest");
         let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
         visit(&store);
         let newest = visit(&store);
         age(&store);
-        store.prune_batch("2100-01-01T00:00:00.000Z", 1000).unwrap();
+        store
+            .prune_batch(at("2100-01-01T00:00:00.000Z"), 1000)
+            .unwrap();
         assert_eq!(ids(&store), [newest]);
         assert_eq!(append(&mut store, &created(task(1), None)), newest + 1);
         let epoch = store.reads().epoch().unwrap();
@@ -705,7 +816,7 @@ mod tests {
         let epoch = store.reads().epoch().unwrap();
         let watched = ids[5];
         let mut faults = Vec::new();
-        while store.prune_batch(CUTOFF, 2).unwrap() {
+        while store.prune_batch(at(CUTOFF), 2).unwrap() {
             faults.push(store.reads().cursor_fault(&epoch, watched).unwrap());
         }
         let stale = Some(ResetReason::Stale);
@@ -777,5 +888,57 @@ mod tests {
         assert!(failed.is_err());
         let ran: Result<u64, OnceError> = store.once("k", "{}", |_| Ok(5));
         assert_eq!(ran.unwrap(), 5);
+    }
+
+    mod any_row {
+        use bazhen_protocol::events::EVENT_KINDS;
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// A payload of keys a type streams and keys it doesn't, with any JSON values.
+        fn payload() -> impl Strategy<Value = String> {
+            let key = prop_oneof![
+                Just("title"),
+                Just("brief"),
+                Just("body"),
+                Just("text"),
+                Just("note"),
+                Just("agentId"),
+                Just("path"),
+                Just("secret"),
+                Just("ti\\u0074le"),
+            ];
+            let value = prop_oneof![
+                Just("null"),
+                Just("7"),
+                Just("\"s\""),
+                Just("[1,{\"a\":2}]"),
+                Just("{\"x\":\"y\"}"),
+            ];
+            prop::collection::vec((key, value), 0..8).prop_map(|pairs| {
+                let fields: Vec<String> =
+                    pairs.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect();
+                format!("{{{}}}", fields.join(","))
+            })
+        }
+
+        proptest! {
+            #[test]
+            fn sends_only_the_keys_its_type_streams_whatever_a_row_holds(
+                kind in prop::sample::select(EVENT_KINDS.to_vec()),
+                payload in payload(),
+            ) {
+                let event = StoredEvent { kind: kind.name.to_owned(), entity_type: kind.entity.to_owned(), ..stored("", "", &payload) };
+                let frame: serde_json::Value = serde_json::from_str(&event.frame().unwrap()).unwrap();
+                let sent = frame["event"]["payload"].as_object().unwrap();
+                prop_assert!(sent.keys().all(|k| kind.streamed.contains(&k.as_str())), "{frame}");
+            }
+
+            #[test]
+            fn refuses_or_frames_any_text_without_panicking(payload in ".{0,40}") {
+                let _ = stored("task.created", "task", &payload).frame();
+            }
+        }
     }
 }
