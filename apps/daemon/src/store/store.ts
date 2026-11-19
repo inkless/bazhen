@@ -499,6 +499,7 @@ export class SchemaTooNew extends Error {
  */
 function holeFills(migrations: readonly Migration[], applied: ReadonlySet<string>): string[] {
   const last = migrations.findLastIndex((m) => applied.has(m.name));
+  if (last < 0) return [];
   return migrations.slice(0, last).flatMap((m) => (applied.has(m.name) ? [] : [m.name]));
 }
 
