@@ -45,7 +45,8 @@
     "test:rust": "node scripts/capped.ts --memory 4G --time 30m -- node scripts/cargo-gate.ts test",
     "test:rust:all": "node scripts/capped.ts --memory 4G --time 30m -- node scripts/cargo-gate.ts test-all",
     "capped": "node scripts/capped.ts --memory 8G --time 120m --",
-    "deny": "node scripts/cargo-gate.ts deny"
+    "deny": "node scripts/cargo-gate.ts deny",
+    "font:terminal": "node scripts/terminal-font.ts"
   },
   "devDependencies": {
     "@bazhen/core": "workspace:*",
