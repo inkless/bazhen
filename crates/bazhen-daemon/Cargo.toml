@@ -10,6 +10,8 @@ axum = { workspace = true }
 bazhen-client = { workspace = true }
 bazhen-protocol = { workspace = true }
 bazhen-store = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
 jiff = { workspace = true }
 rustix = { workspace = true }
 serde = { workspace = true }
@@ -18,11 +20,12 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 toml = { workspace = true }
+tower = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-tower = { workspace = true }
+bazhen-test-signal = { workspace = true }
 
 [lints]
 workspace = true

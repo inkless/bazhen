@@ -1,6 +1,7 @@
 //! The Rust daemon: it owns a home's terminals and serves the API on the home's Unix socket and on
 //! loopback HTTP, as `apps/daemon` does, which it is to replace.
 
+mod accept;
 pub mod config;
 mod detach;
 mod env;
