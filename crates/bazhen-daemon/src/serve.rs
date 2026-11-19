@@ -386,8 +386,15 @@ mod tests {
             held.write_all(b"GET /v1/health HTTP/1.1\r\n")
                 .await
                 .unwrap();
-            let answer = ask(&socket, STOP).await;
+            let mut stopping = connect(&socket).await;
+            // Before the stop is sent, so before the drain can start, however late its answer is
+            // read: here 100 ms late, as a test held off the CPU may read it.
             let asked = Instant::now();
+            stopping.write_all(STOP).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let mut answer = Vec::new();
+            stopping.read_to_end(&mut answer).await.unwrap();
+            let answer = String::from_utf8_lossy(&answer).into_owned();
             let reason = tokio::time::timeout(Duration::from_secs(5), serving).await;
             let took = asked.elapsed();
             assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
