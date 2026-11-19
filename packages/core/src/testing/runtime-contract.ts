@@ -110,6 +110,20 @@ async function snapshotClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
   };
 }
 
+/**
+ * A client and the exits its stream told, each with all the output the stream had carried by then,
+ * closed when the test ends.
+ */
+async function exitClient(runtime: RuntimeAdapter, ref: RuntimeRef) {
+  const attached = await runtime.attach(ref, null);
+  onTestFinished(() => attached.stream.close());
+  let live = attached.kind === "snapshot" ? decode(attached.vt) : "";
+  attached.stream.onData((chunk) => (live += decode(chunk)));
+  const told: { generation: number; status: ExitStatus; after: string }[] = [];
+  attached.stream.onExit((exit) => told.push({ ...exit, after: live }));
+  return { stream: attached.stream, told, live: () => live };
+}
+
 type SnapshotClient = Awaited<ReturnType<typeof snapshotClient>> & { readonly ref: RuntimeRef };
 
 /** Every report of `terminalId`'s process, live ones with a null exit, collected until the test ends. */
@@ -458,6 +472,65 @@ export function runtimeContract(name: string, harness: ContractHarness): void {
         .poll(() => exits.at(-1), { timeout: harness.waitMs })
         .toMatchObject({ generation: "1" });
       expect(exits.at(-1)?.status).toBeOneOf(causes({ type: "exited", code: 2 }));
+    });
+
+    it("tells a stream its process's exit once, after the output the process printed", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(["cat"]));
+      const client = await exitClient(runtime, ref);
+      client.stream.write(encode("last words\r"));
+      await expect.poll(() => client.live(), { timeout: harness.waitMs }).toContain("last words");
+      await runtime.signal(ref, "SIGTERM");
+      await expect.poll(() => client.told.length, { timeout: harness.waitMs }).toBe(1);
+      await delay(300);
+      expect(client.told).toEqual([
+        {
+          generation: 0,
+          status: expect.toBeOneOf(causes({ type: "signalled", signal: "SIGTERM" })),
+          after: expect.stringContaining("last words"),
+        },
+      ]);
+      expect(client.stream.exited).toEqual({ generation: 0, status: client.told[0]?.status });
+    });
+
+    it("tells a stream that attached after its process exited of that exit", async () => {
+      const runtime = fresh();
+      const ref = await runtime.create(spec(exiting(3)));
+      await deadOf(runtime, ref);
+      const client = await exitClient(runtime, ref);
+      await expect.poll(() => client.told.length, { timeout: harness.waitMs }).toBe(1);
+      expect(client.told[0]).toMatchObject({
+        generation: 0,
+        status: expect.toBeOneOf(causes({ type: "exited", code: 3 })),
+      });
+    });
+
+    it("forgets an exit once a respawn replaces its process, and never tells it again", async () => {
+      const runtime = fresh();
+      const s = spec(exiting(1));
+      const ref = await runtime.create(s);
+      const client = await exitClient(runtime, ref);
+      await expect.poll(() => client.told.length, { timeout: harness.waitMs }).toBe(1);
+      await runtime.respawn(ref, { ...s, generation: 1, argv: [...sleeping] });
+      await expect.poll(() => client.stream.exited, { timeout: harness.waitMs }).toBeNull();
+      await delay(500);
+      expect([client.told.map((e) => e.generation), client.stream.exited]).toEqual([[0], null]);
+    });
+
+    it("tells each process's exit under its own generation when a respawned one exits at once", async () => {
+      const runtime = fresh();
+      const s = spec(exiting(1));
+      const ref = await runtime.create(s);
+      const client = await exitClient(runtime, ref);
+      await expect.poll(() => client.told.length, { timeout: harness.waitMs }).toBe(1);
+      await runtime.respawn(ref, { ...s, generation: 1, argv: [...exiting(2)] });
+      await expect.poll(() => client.told.length, { timeout: harness.waitMs }).toBe(2);
+      await delay(300);
+      expect(client.told.map(({ generation, status }) => ({ generation, status }))).toEqual([
+        { generation: 0, status: expect.toBeOneOf(causes({ type: "exited", code: 1 })) },
+        { generation: 1, status: expect.toBeOneOf(causes({ type: "exited", code: 2 })) },
+      ]);
+      expect(client.stream.exited).toMatchObject({ generation: 1 });
     });
 
     it("refuses to respawn a terminal whose process is still running, and leaves it running", async () => {

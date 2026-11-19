@@ -796,6 +796,8 @@ async function attachable(
 
 const data = (offset: number, text: string) =>
   ({ type: "data", offset, bytes: Buffer.from(text) }) as const;
+const exitedAt = (generation: number) =>
+  ({ type: "exited", body: { generation, status: { type: "exited", code: 0 } } }) as const;
 
 const agentSpec = (): TerminalSpec => spec({ tags: { kind: "agent", agentId: newId("agent") } });
 const sleep = (ms: number) => new Promise((wait) => setTimeout(wait, ms));
@@ -1251,6 +1253,29 @@ describe("HolderRuntime: streams", () => {
     attached.stream.onRespawn((generation) => seen.push(generation));
     await expect.poll(() => seen).toEqual(["new"]);
     expect([attached.generation, "alternate" in attached]).toEqual([1, false]);
+    attached.stream.close();
+  });
+
+  it("tells a stream its process's exit in order with the output, once, and never a replaced one's", async () => {
+    let reader: FakeHolder | undefined;
+    const { runtime, ref } = await attachable(0, (holder) => (reader = holder));
+    const attached = await runtime.attach(ref, null);
+    const seen: unknown[] = [];
+    attached.stream.onData((bytes) => seen.push(Buffer.from(bytes).toString()));
+    attached.stream.onExit((exit) => seen.push(exit));
+    attached.stream.onRespawn((generation) => seen.push(generation));
+    const respawned = { generation: 1, childPid: FAKE_PID, childStart: FAKE_START };
+    reader!.send(data(0, "last"), exitedAt(0), data(4, "left"), exitedAt(0));
+    await expect.poll(() => seen).toHaveLength(3);
+    const whileExited = attached.stream.exited;
+    reader!.send({ type: "respawned", body: respawned }, exitedAt(0), data(0, "next"));
+    await expect.poll(() => seen).toHaveLength(5);
+    const exit = { generation: 0, status: { type: "exited", code: 0 } };
+    expect([seen, whileExited, attached.stream.exited]).toEqual([
+      ["last", exit, "left", 1, "next"],
+      exit,
+      null,
+    ]);
     attached.stream.close();
   });
 

@@ -33,9 +33,10 @@ import {
   type RuntimeStream,
   type Size,
   type ProcessSpec,
+  type ProgramExit,
   type TerminalSpec,
 } from "../runtime.ts";
-import { concat, decode, encode } from "./platform.ts";
+import { concat, decode, delay, encode } from "./platform.ts";
 import type { ContractHarness } from "./runtime-contract.ts";
 
 /** A CSI sequence, as a program colours or moves on its screen with. */
@@ -103,6 +104,10 @@ interface Client {
   emit(bytes: Uint8Array): void;
   switched(alternate: boolean): void;
   respawned(generation: number): void;
+  /** The terminal's process exited. */
+  exited(exit: ProgramExit): void;
+  /** A respawn replaced the terminal's process, whichever way the client attached. */
+  replaced(): void;
   fail(failure: StreamFailure): void;
   end(why?: StreamEnd): void;
 }
@@ -217,6 +222,8 @@ export class FakeRuntime implements RuntimeAdapter {
     const data: ((bytes: Uint8Array) => void)[] = [];
     const switches: ((alternate: boolean) => void)[] = [];
     const respawns: ((generation: number) => void)[] = [];
+    const exits: ((exit: ProgramExit) => void)[] = [];
+    let exited: ProgramExit | null = null;
     const failures: ((failure: StreamFailure) => void)[] = [];
     const closed: ((why: StreamEnd) => void)[] = [];
     const snapshots = new Set<(err: Error) => void>();
@@ -233,10 +240,24 @@ export class FakeRuntime implements RuntimeAdapter {
       emit: (bytes) => data.forEach((cb) => cb(bytes)),
       switched: (alternate) => switches.forEach((cb) => cb(alternate)),
       respawned: (generation) => respawns.forEach((cb) => cb(generation)),
+      exited: (exit) => {
+        if (ended !== null || exited?.generation === exit.generation) return;
+        exited = exit;
+        exits.forEach((cb) => cb(exit));
+      },
+      replaced: () => (exited = null),
       fail: (failure) => failures.forEach((cb) => cb(failure)),
       end,
     };
     t.streams.add(client);
+    // As a holder does, an exit before the attach is told once its consumer has had a turn.
+    const before = t.pane.exit;
+    if (before !== null) {
+      const { generation } = t.pane;
+      void delay(0).then(() => {
+        if (t.pane.generation === generation) client.exited({ generation, status: before });
+      });
+    }
     const stream: RuntimeStream = {
       size: t.size,
       onData: (cb) => void data.push(cb),
@@ -252,6 +273,10 @@ export class FakeRuntime implements RuntimeAdapter {
       },
       onFailure: (cb) => void failures.push(cb),
       onRespawn: (cb) => void respawns.push(cb),
+      onExit: (cb) => void exits.push(cb),
+      get exited() {
+        return exited;
+      },
       close: () => {
         t.clients.closes++;
         end();
@@ -271,7 +296,8 @@ export class FakeRuntime implements RuntimeAdapter {
             void Promise.resolve().then(() => settle(taken));
           } else t.held.asked.push(settle);
         });
-      const snapshotStream: SnapshotStream = { ...stream, snapshot };
+      // Assigned onto the stream, not spread, which would copy `exited` once instead of its getter.
+      const snapshotStream: SnapshotStream = Object.assign(stream, { snapshot });
       return {
         ...this.snapshotOf(t),
         stream: snapshotStream,
@@ -279,10 +305,9 @@ export class FakeRuntime implements RuntimeAdapter {
       };
     }
     const history = t.alternate ? "" : t.history;
-    const historyStream: HistoryStream = {
-      ...stream,
-      onAlternate: (cb) => void switches.push(cb),
-    };
+    const historyStream: HistoryStream = Object.assign(stream, {
+      onAlternate: (cb: (alternate: boolean) => void) => void switches.push(cb),
+    });
     return {
       kind: "history",
       stream: historyStream,
@@ -322,6 +347,7 @@ export class FakeRuntime implements RuntimeAdapter {
     t.printed = concat(t.printed, encode(RESPAWN_RESET));
     t.offset = 0;
     t.title = "";
+    for (const client of t.streams) client.replaced();
     if (this.attachKind === "snapshot") {
       for (const client of t.streams) client.respawned(spec.generation);
     }
@@ -329,6 +355,7 @@ export class FakeRuntime implements RuntimeAdapter {
       t.alternate = false;
       for (const client of t.streams) client.switched(false);
     }
+    this.tellExit(t);
     this.reportIfExited(t);
     return this.refOf(t);
   }
@@ -338,6 +365,7 @@ export class FakeRuntime implements RuntimeAdapter {
     if (t.pane.exit !== null) throw new ProcessState(ref.terminalId, "running");
     assertSameGeneration(ref, String(t.pane.generation));
     t.pane.exit = { type: "signalled", signal };
+    this.tellExit(t);
     this.reportIfExited(t);
   }
 
@@ -474,6 +502,7 @@ export class FakeRuntime implements RuntimeAdapter {
   exitProcess(ref: RuntimeRef, status: ExitStatus = { type: "exited", code: 0 }): void {
     const t = this.terminalOf(ref);
     t.pane.exit = status;
+    this.tellExit(t);
     this.reportIfExited(t);
   }
 
@@ -492,6 +521,7 @@ export class FakeRuntime implements RuntimeAdapter {
     const t = this.terminalOf(ref);
     t.pane = { ...this.pane(t.spec), id: t.pane.id, generation: t.pane.generation + 1, exit: null };
     t.title = "";
+    for (const client of t.streams) client.replaced();
     if (this.attachKind === "snapshot") {
       for (const client of t.streams) client.respawned(t.pane.generation);
     }
@@ -593,6 +623,13 @@ export class FakeRuntime implements RuntimeAdapter {
       offset: t.offset,
       generation: t.pane.generation,
     };
+  }
+
+  /** Tells the terminal's streams its process exited, after everything it printed. */
+  private tellExit(t: Terminal): void {
+    const status = t.pane.exit;
+    if (status === null) return;
+    for (const client of t.streams) client.exited({ generation: t.pane.generation, status });
   }
 
   private reportIfExited(t: Terminal): void {

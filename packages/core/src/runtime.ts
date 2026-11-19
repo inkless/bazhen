@@ -258,8 +258,22 @@ export interface RuntimeStream {
    * A client that redraws, as tmux's does, is never told: its runtime redraws it instead.
    */
   onRespawn(cb: (generation: number) => void): void;
+  /**
+   * The terminal's process exited; the terminal and the stream go on. Told once per process,
+   * after the output it printed reached `onData`, and never for one a respawn has replaced. A
+   * runtime that learns of an exit only by asking bounds that order instead, as it says.
+   */
+  onExit(cb: (exit: ProgramExit) => void): void;
+  /** The exit `onExit` last told, until a respawn replaces its process; null while it runs. */
+  readonly exited: ProgramExit | null;
   /** Must release every OS handle the stream holds. */
   close(): void;
+}
+
+/** How a terminal's process ended, and which of its processes it was. */
+export interface ProgramExit {
+  readonly generation: number;
+  readonly status: ExitStatus;
 }
 
 /**
