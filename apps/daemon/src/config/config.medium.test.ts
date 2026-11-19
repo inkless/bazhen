@@ -31,6 +31,8 @@ describe("readConfigFile", () => {
         'external_origins = ["https://bazhen.example.com"]',
         "allow_insecure_origins = false",
         'pairing = "always"',
+        "[attach]",
+        'detach_keys = "ctrl-p,ctrl-q"',
       ].join("\n"),
     );
     expect(readConfigFile(file)).toEqual({
@@ -42,6 +44,7 @@ describe("readConfigFile", () => {
         allow_insecure_origins: false,
         pairing: "always",
       },
+      attach: { detach_keys: "ctrl-p,ctrl-q" },
     });
   });
 
@@ -97,6 +100,11 @@ describe("readConfigFile", () => {
     ["a fraction of a percent", '[terminals]\ntotal_memory_max = "12.345%"', "whole percentage"],
     ["a swap cap as a percentage", '[terminals]\nswap_max = "10%"', "terminals.swap_max:"],
     ["a runtime it doesn't run", '[runtime]\ndefault = "screen"', "runtime.default:"],
+    [
+      "detach keys that start with Escape",
+      '[attach]\ndetach_keys = "ctrl-[,x"',
+      "attach.detach_keys: can't start with ctrl-[",
+    ],
     ["broken TOML", "[daemon\nport = 1", "config.toml:"],
   ])("refuses %s, naming the file and the key", (_what, text, message) => {
     const file = write(text);

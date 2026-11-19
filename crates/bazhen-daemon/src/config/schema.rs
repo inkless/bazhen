@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::text::is_origin;
 use toml::de::{DeTable, DeValue};
 use toml::value::Datetime;
@@ -345,6 +346,13 @@ fn lan_allow(value: &DeValue<'_>, path: &str) -> Checked<Vec<String>> {
     })
 }
 
+/// Keys `bazhen terminals attach` detaches on, which it reads from the file itself.
+fn detach_keys(value: &DeValue<'_>, path: &str) -> Checked<String> {
+    string(value, path, |text| {
+        DetachKeys::parse(text).err().map(|why| why.to_string())
+    })
+}
+
 fn absolute(value: &DeValue<'_>, path: &str) -> Checked<String> {
     string(value, path, |text| {
         (!text.starts_with('/')).then(|| "Invalid string: must start with \"/\"".to_owned())
@@ -487,6 +495,10 @@ fn read(top: &Table<'_, '_>) -> Checked<FileConfig> {
             "history_lines",
         ])?;
     }
+    if let Some(attach) = top.table("attach")? {
+        attach.field("detach_keys", detach_keys)?;
+        attach.strict(&["detach_keys"])?;
+    }
     if let Some(runtime) = top.table("runtime")? {
         out.default_runtime = runtime.field("default", |v, p| choice(v, p, &RUNTIMES))?;
         runtime.strict(&["default"])?;
@@ -514,6 +526,7 @@ fn read(top: &Table<'_, '_>) -> Checked<FileConfig> {
         "shells",
         "agents",
         "terminals",
+        "attach",
         "runtime",
         "web",
     ])?;

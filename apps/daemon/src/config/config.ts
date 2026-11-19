@@ -6,6 +6,7 @@ import { ENV_RULE, type EnvRules } from "@bazhen/core";
 import { memoryMaxRefusal, swapMaxRefusal, type TerminalCaps } from "@bazhen/host-guard";
 import {
   HISTORY_LINES,
+  readDetachKeys,
   HOLDER_MAX_HISTORY_LINES,
   isOrigin,
   originList,
@@ -30,6 +31,10 @@ const checkedBy = (refusal: (value: string) => string | undefined) =>
   });
 const MemoryMax = checkedBy(memoryMaxRefusal);
 const SwapMax = checkedBy(swapMaxRefusal);
+const DetachKeys = z.string().superRefine((text, ctx) => {
+  const read = readDetachKeys(text);
+  if ("problem" in read) ctx.addIssue({ code: "custom", message: read.problem });
+});
 const Range = z.string().superRefine((text, ctx) => {
   const parsed = parseRange(text);
   if ("problem" in parsed) ctx.addIssue({ code: "custom", message: `${text} ${parsed.problem}` });
@@ -77,6 +82,8 @@ export const ConfigFile = z.strictObject({
     /** How many lines of history above its screen each new terminal keeps. */
     history_lines: z.int().min(0).max(HOLDER_MAX_HISTORY_LINES).optional(),
   }).optional(),
+  /** `bazhen terminals attach` reads these itself; the daemon only checks them. */
+  attach: table({ detach_keys: DetachKeys.optional() }).optional(),
   /** Where new terminals run; each one already made stays on the runtime it was made on. */
   runtime: table({ default: RuntimeKind.optional() }).optional(),
   web: table({
