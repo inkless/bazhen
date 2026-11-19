@@ -168,14 +168,17 @@ function targetOf(copy: string): string {
   return named;
 }
 
-/** scripts/xtask.sh's `help`, from a temporary folder under `tmp`: its exit and what it said. */
-function helpFrom(tmp: string) {
-  mkdirSync(tmp, { recursive: true });
-  const run = spawnSync(WRAPPER, ["help"], {
-    encoding: "utf8",
-    env: { ...process.env, TMPDIR: tmp },
-  });
-  return { status: run.status, stderr: run.stderr };
+/** A `cargo` first on PATH that removes nothing and builds nothing, but prints `executables`. */
+function fakeCargo(executables: string[]): Record<string, string> {
+  mkdirSync(join(dir, "fake-cargo"));
+  const lines = executables.map((path) => JSON.stringify({ reason: "x", executable: path }));
+  writeFileSync(join(dir, "fake-cargo", "printed"), lines.map((l) => `${l}\n`).join(""));
+  writeFileSync(
+    join(dir, "fake-cargo", "cargo"),
+    `#!/bin/sh\n[ "$1" = clean ] && exit 0\ncat "${join(dir, "fake-cargo", "printed")}"\n`,
+  );
+  chmodSync(join(dir, "fake-cargo", "cargo"), 0o755);
+  return { ...process.env, PATH: firstOnPath(join(dir, "fake-cargo")) };
 }
 
 /** What genuine xtask says of a config it refuses; a forged one says nothing. */
@@ -365,24 +368,44 @@ describe("scripts/xtask.sh", () => {
 });
 
 describe("scripts/xtask.sh's own build", () => {
-  it("refuses to build under a cargo config above the folder it builds from", () => {
-    const refused = ["config", "config.toml"].map((name) => {
-      mkdirSync(join(dir, name, ".cargo"), { recursive: true });
-      const config = join(dir, name, ".cargo", name);
-      writeFileSync(config, "[build]\njobs = 1\n");
-      const { status, stderr } = helpFrom(join(dir, name, "tmp"));
-      return { status, refused: stderr.includes(`cargo would read ${config} while it builds`) };
-    });
-    expect(refused).toEqual([0, 1].map(() => ({ status: 1, refused: true })));
-  });
+  // cargo would read the configs above its own folder, which a symlink can hide from a walk of
+  // the names; xtask is built from `/`, wherever the caller and TMPDIR are.
+  it("reads no config above the caller's folder or TMPDIR, through a symlink or not", () => {
+    const logs = runner("logs", `echo "$*" >> "${dir}/log"\nexit 1`);
+    mkdirSync(join(dir, "real", ".cargo"), { recursive: true });
+    mkdirSync(join(dir, "real", "tmp"));
+    writeFileSync(
+      join(dir, "real", ".cargo", "config.toml"),
+      `[build]\nrustc-wrapper = ${JSON.stringify(logs)}\n`,
+    );
+    symlinkSync(join(dir, "real", "tmp"), join(dir, "link"));
+    const runs = [join(dir, "real", "tmp"), join(dir, "link")].map(
+      (folder) =>
+        spawnSync(WRAPPER, ["help"], { cwd: folder, env: { ...process.env, TMPDIR: folder } })
+          .status,
+    );
+    expect({ runs, ran: existsSync(join(dir, "log")) }).toEqual({ runs: [0, 0], ran: false });
+  }, 600_000);
 
-  it("refuses to build under a .cargo above it that it can't search", () => {
-    writeFileSync(join(dir, ".cargo"), "");
-    const { status, stderr } = helpFrom(join(dir, "tmp"));
-    expect({ status, refused: stderr.includes(`can't search ${dir}/.cargo`) }).toEqual({
-      status: 1,
-      refused: true,
+  it("builds xtask afresh, so a binary forged in its place is replaced on the next run", () => {
+    const copy = workspace();
+    const wrapper = join(copy, "scripts", "xtask.sh");
+    const built = spawnSync(wrapper, ["help"]).status;
+    writeFileSync(join(targetOf(copy), "xtask", "debug", "bazhen-xtask"), "#!/bin/sh\nexit 0\n");
+    expect({ built, next: spawnSync(wrapper, ["nope"]).status }).toEqual({ built: 0, next: 2 });
+  }, 600_000);
+
+  it("runs only the one executable cargo names, and refuses none or two", () => {
+    const runs = [[], ["/bin/true", "/bin/false"], ["/bin/true"]].map((executables) => {
+      const run = spawnSync(WRAPPER, ["help"], { encoding: "utf8", env: fakeCargo(executables) });
+      rmSync(join(dir, "fake-cargo"), { recursive: true, force: true });
+      return { status: run.status, refused: run.stderr.includes("no single executable") };
     });
+    expect(runs).toEqual([
+      { status: 1, refused: true },
+      { status: 1, refused: true },
+      { status: 0, refused: false },
+    ]);
   });
 
   it("refuses to build with a config in its own cargo home", () => {

@@ -217,16 +217,21 @@ cargo uses no runner to build. And xtask can only check the configs once it runs
 built it under them: a config's linker, `[env]`, `paths` or source replacement could build
 another xtask that passes. So the script builds xtask where no cargo config reaches it:
 
-- from a new, empty folder, since cargo reads configs from the folder it runs in and those above
-  it, refusing if one of those has a cargo config, named `config` or `config.toml` in its
-  `.cargo` folder, or can't be searched;
+- from `/`, since cargo reads configs from the folder it runs in and those above it, refusing if
+  `/.cargo` has a cargo config, named `config` or `config.toml`. Only root can write there, where
+  a temporary folder could sit under a symlink, or in `/tmp`, where any user can plant one;
 - with a cargo home of its own, in `target/xtask/cargo-home`, which shares the caller's downloads
   and has no config;
 - with no variable from the caller but `PATH`, `HOME` and `RUSTUP_HOME`, so no `CARGO_*`, `RUSTC*`
   or `RUSTFLAGS` reaches it, and with the toolchain `rust-toolchain.toml` pins.
 
-It builds into `target/xtask`, apart from the gates' builds. It takes no shared compiler cache,
-so its first build in a checkout costs a few seconds; later runs find it built.
+It builds into `target/xtask`, apart from the gates' builds, and runs the one executable cargo
+names. It removes xtask's own crate's build first, so cargo builds it afresh each run and a binary
+put in its place is never taken for a built one; that costs about a third of a second. It takes no
+shared compiler cache, so its first build in a checkout costs a few seconds. The dependencies it
+built stay built: a library forged in `target/xtask` by something else that builds there would
+outlive the run, and `cargo clean` removes it.
+
 `scripts/check-standards.ts` pins the script's text. xtask holds the
 gate's command, calls the subcommand's own binary (`cargo-clippy`, not `cargo clippy`), refuses
 any option after the gate (`pnpm test:rust <name>` may name tests), removes the variables that
