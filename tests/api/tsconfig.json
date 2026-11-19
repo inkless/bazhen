@@ -13,6 +13,7 @@
     "../support/holder-close.ts",
     "../support/log-tail.ts",
     "../support/programs.ts",
+    "../support/test-daemon.ts",
     "../support/transcript.ts",
     "../support/key-*.ts"
   ],

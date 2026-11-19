@@ -130,14 +130,20 @@ jobs:
       - run: pnpm test:api
 
   # The api test files tests/rust-daemon.txt lists, against the Rust daemon, which is to replace the
-  # TypeScript one: each passes on both. On a pull request it also fails when the list lost a line
-  # against the base's, so a file leaves only at the cutover, with this job and the selector.
+  # TypeScript one: each passes on both, running every test it has. It also fails when the list lost
+  # a line against the base's, so a file leaves only at the cutover, with this job and the selector.
+  # On a pull request the base is HEAD^1, the base branch the merge commit was made on, fixed for a
+  # rerun. On a push to main it is what main was before the push, so a force-push or a push of
+  # several commits is held to that. There is no merge queue: pull requests are squash-merged and
+  # must be up to date with main first, so main before a merge is the base it was checked against.
   api-rust-daemon:
     name: api (rust daemon)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@v7
         with:
@@ -150,15 +156,15 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      - name: Fetch the base's list
-        if: github.event_name == 'pull_request'
+      - name: Fetch what main was before the push
+        if: github.event_name == 'push'
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: git fetch --depth=1 origin "$BASE_REF"
+          BEFORE: ${{ github.event.before }}
+        run: git fetch --depth=1 origin "$BEFORE"
       - name: Run the listed files against the Rust daemon
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || '' }}
-        run: pnpm test:api:rust ${BASE_REF:+--base "origin/$BASE_REF"}
+          BASE: ${{ github.event_name == 'push' && github.event.before || 'HEAD^1' }}
+        run: pnpm test:api:rust --base "$BASE"
 
   # The tmux runtime's own suite, against a private real tmux. tmux is an opt-in runtime, so this
   # job runs on every pull request but isn't a required check.

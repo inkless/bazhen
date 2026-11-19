@@ -451,6 +451,13 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
 - **The Rust daemon serves only what it has.** A `/v1` path it has no route for answers 404, and
   until it can pair a device, a request that must come from a paired one is refused as unpaired,
   whatever its path: a surface that isn't ported is closed, never open.
+- **What it passes only grows.** `tests/rust-daemon.txt` lists the api test files the Rust daemon
+  passes, and the `api (rust daemon)` job runs each against it, every test of each: a file that
+  runs none, or skips one or leaves one to do, fails the job. The job also fails a list that lost a
+  file against its base: on a pull request `HEAD^1`, the base the merge commit was made on, and on a
+  push to `main` what `main` was before it. A file git sees renamed counts under its new name. There
+  is no merge queue: pull requests are squash-merged and must be up to date with `main`, so `main`
+  before a merge is the base its pull request was checked against.
 
 ## Dependencies
 

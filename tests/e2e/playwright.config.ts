@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { agentHomes, loginEnv } from "../support/agent-env.ts";
 import { programsOnPath } from "../support/programs.ts";
 import { requireDisposableHost } from "../support/disposable-host.ts";
+import { testDaemonBin } from "../support/test-daemon.ts";
 import {
   e2eDaemons,
   portVariable,
@@ -103,10 +104,10 @@ const clean = (env: Record<string, string>, command: string) =>
     .join(" ")} ${command}`;
 
 /**
- * The daemon each web server runs: `BAZHEN_DAEMON_BIN`, the Rust daemon's binary, while both
+ * The daemon each web server runs: `BAZHEN_TEST_DAEMON_BIN`, the Rust daemon's binary, while both
  * daemons are built, else the TypeScript one. The selector goes at the cutover.
  */
-const daemonBin = process.env["BAZHEN_DAEMON_BIN"] || undefined;
+const daemonBin = testDaemonBin();
 const daemonCommand =
   daemonBin === undefined
     ? "node ../../apps/daemon/src/main.ts"

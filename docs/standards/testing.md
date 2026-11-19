@@ -103,13 +103,16 @@ against the daemon's public surfaces, never its TypeScript internals.
 - `tests/api` is that suite. It starts the daemon under a temporary `BAZHEN_HOME` and runs the
   real harness CLIs pinned in its `package.json`. No agent reaches a real model, and the daemon
   never sees the developer's own credentials: its environment is built from a short allowlist.
-- **Either daemon runs it.** `BAZHEN_DAEMON_BIN` names the Rust daemon's binary, and the suite,
-  the e2e config and `bazhen start` then start it in place of `apps/daemon`; without it they start
-  the TypeScript one. `tests/rust-daemon.txt` lists the api test files the Rust daemon passes, and
-  `pnpm test:api:rust` runs them against its release build. The `api (rust daemon)` job runs that on
-  every pull request, and fails when the list lost a line against the base's: a file joins the list
-  in the pull request that makes it pass, and leaves only at the cutover, with the job and the
-  variable. A change to a listed file's behaviour lands in both daemons, as the job holds.
+- **Either daemon runs it.** `BAZHEN_TEST_DAEMON_BIN`, an absolute path, names the Rust daemon's
+  binary, and the suite, the e2e config and `bazhen start` then start it in place of `apps/daemon`,
+  `bazhen start` saying which it started; without it they start the TypeScript one.
+  `tests/rust-daemon.txt` lists the api test files the Rust daemon passes, and `pnpm test:api:rust`
+  runs them against its release build. The `api (rust daemon)` job runs that on every pull request
+  and push to `main`, and fails when a listed file runs no test or skips one or leaves one to do, or
+  when the list lost a file against the base's (rust.md § While both daemons are built): a file
+  joins the list in the pull request that makes every test of it pass, and leaves only at the
+  cutover, with the job and the variable. A change to a listed file's behaviour lands in both
+  daemons, as the job holds.
 - `tests/cli` is the CLI's own, held to the same rule: it runs the `bazhen` binary `BAZHEN_CLI`
   names (without it, the release build `pnpm build:cli` makes) against a fake daemon on the socket
   the CLI looks for, and asserts what the CLI sent, printed and exited with. It needs no tmux, so it

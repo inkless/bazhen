@@ -49,6 +49,7 @@ import { giveTranscript } from "../support/transcript.ts";
 import { LogTail } from "../support/log-tail.ts";
 import { programsOnPath, runAsNextAgent } from "../support/programs.ts";
 import { replay } from "./fixtures/browser.ts";
+import { testDaemonBin } from "../support/test-daemon.ts";
 
 const run = promisify(execFile);
 
@@ -161,10 +162,10 @@ function absentTmux(home: string): string {
 }
 
 /**
- * The Rust daemon's binary, when the run names one: `BAZHEN_DAEMON_BIN` swaps it in for the
+ * The Rust daemon's binary, when the run names one: `BAZHEN_TEST_DAEMON_BIN` swaps it in for the
  * TypeScript daemon everywhere a test starts one, while both are built. It goes at the cutover.
  */
-const daemonBin = process.env["BAZHEN_DAEMON_BIN"] || undefined;
+const daemonBin = testDaemonBin();
 
 /** The command that runs the daemon under test in the foreground: its program, then its args. */
 function daemonCommand(): [string, ...string[]] {
@@ -182,7 +183,7 @@ export function homeEnv(home: string): Record<string, string> {
     ...loginEnv(),
     PATH: process.env["PATH"] ?? "/usr/bin:/bin",
     BAZHEN_HOME: home,
-    ...(daemonBin !== undefined && { BAZHEN_DAEMON_BIN: daemonBin }),
+    ...(daemonBin !== undefined && { BAZHEN_TEST_DAEMON_BIN: daemonBin }),
   };
 }
 
