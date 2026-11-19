@@ -290,7 +290,7 @@ fn group_withholds(pid: Pid) -> io::Result<bool> {
 }
 
 /// macOS denies another process's environment by rules of its own, none of them taken for this.
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn group_withholds(_: Pid) -> io::Result<bool> {
     Ok(false)
 }

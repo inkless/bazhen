@@ -733,6 +733,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/start_time.rs::has_exited": "proc_stat",
   "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
   "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
+  "crates/bazhen-holder/src/process.rs::status_credentials": "proc_args",
   "crates/bazhen-holder/src/process.rs::cmdline_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
@@ -1041,6 +1042,10 @@ const NOT_DECODERS: Record<string, string> = {
     "reads stdin only to wait for its end, and discards it",
   "crates/bazhen-holder/src/process.rs::uid":
     "reads /proc/<pid>/status for status_uid, which proc_args fuzzes",
+  "crates/bazhen-holder/src/process.rs::credentials":
+    "reads /proc/<pid>/status for status_credentials, which proc_args fuzzes",
+  "crates/bazhen-holder/src/process.rs::status_ids":
+    "reached only through status_uid and status_credentials, which proc_args fuzzes",
   "crates/bazhen-holder/src/process.rs::args":
     "reads /proc/<pid>/cmdline for cmdline_args, which proc_args fuzzes",
   "crates/bazhen-holder/src/process.rs::environ":
