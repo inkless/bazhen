@@ -6,6 +6,12 @@ import { closeWhileAttached } from "./attach-close.ts";
 const state = async (daemon: Daemon) =>
   StateSnapshot.parse((await daemon.request("/v1/state")).body);
 
+/** What an attach says once an agent's harness exits with code 0, on a thread it resumes. */
+const nextSteps = (name: string) =>
+  `${name}: Claude Code exited (code 0); its terminal and thread are kept. ` +
+  `\`bazhen agents respawn ${name}\` starts it again on the same thread; ` +
+  `\`bazhen agents close ${name}\` ends it.`;
+
 describe("bazhen terminals attach, on a holder terminal", () => {
   let daemon: Daemon;
   let left: (() => void)[] = [];
@@ -92,10 +98,7 @@ describe("bazhen terminals attach, on a holder terminal", () => {
     left.push(attached.leave);
     await attached.shows("ready", "the harness's first output");
     attached.type("/exit\r");
-    const said =
-      `${name}: Claude Code exited (code 0); its terminal and thread are kept. ` +
-      `\`bazhen agents respawn ${name}\` starts it again on the same thread; ` +
-      `\`bazhen agents close ${name}\` ends it.`;
+    const said = nextSteps(name);
     await attached.shows(said, "the attach saying how to start the agent again");
     const code = await attached.exited;
     const shown = attached.shown();
@@ -120,15 +123,15 @@ describe("bazhen terminals attach, on a holder terminal", () => {
   });
 
   it("with --direct, ends after an agent's last output when its harness exits", async () => {
-    const { terminalId } = await quitting();
+    const { terminalId, name } = await quitting();
     const direct = attachInScript(daemon, `${terminalId} --direct`);
     left.push(direct.leave);
     await direct.shows("ready", "the harness's first output");
     const view = await daemon.socketView(terminalId, "interactive");
     await view.drive();
     view.type("/exit\r");
-    const said = `${terminalId}: its program exited (code 0)`;
-    await direct.shows(said, "the attach saying the program exited");
+    const said = nextSteps(name);
+    await direct.shows(said, "the attach saying how to start the agent again");
     const code = await direct.exited;
     view.close();
     const shown = direct.shown();
