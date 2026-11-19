@@ -437,6 +437,10 @@ function checkAgentContext(): void {
 // The modules that may hold `unsafe` code, each with why it must (docs/standards/rust.md § Unsafe).
 // Each may set `#![expect(unsafe_code, reason = "...")]`, and nothing else in crates/ may.
 const UNSAFE_MODULES: Record<string, string> = {
+  "crates/bazhen-daemon/src/session.rs":
+    "Command::pre_exec, to make the detached daemon a session leader between fork and exec, as " +
+    "Node's detached does, so no signal to the starting terminal reaches it; std's process_group " +
+    "would leave it a group leader, which can't then call setsid",
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +

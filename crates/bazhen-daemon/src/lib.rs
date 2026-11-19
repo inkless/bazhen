@@ -11,5 +11,6 @@ mod probe;
 mod routes;
 mod run;
 mod serve;
+mod session;
 
 pub use run::run;

@@ -9,8 +9,10 @@ use std::time::{Duration, Instant};
 
 use crate::env::{Env, EnvRules, hand_off};
 use crate::probe::{Answer, probe};
+use crate::session::in_own_session;
 
-/// The argument the started daemon is run with, which makes it a session leader before it serves.
+/// The argument the started daemon is run with: it serves only as the leader of the session it
+/// was started in.
 pub(crate) const SESSION_ARG: &str = "--session";
 
 const READY_WITHIN: Duration = Duration::from_secs(10);
@@ -69,13 +71,13 @@ pub(crate) fn detach(o: &Detach<'_>, out: &mut dyn Write, err: &mut dyn Write) -
 }
 
 /// The daemon, run with its output appended to `log`, from `/` rather than the starting shell's
-/// directory, which it would otherwise hold open, and with the environment handed off. It is
-/// left to run: it outlives this process.
+/// directory, which it would otherwise hold open, in a session of its own from the fork, and with
+/// the environment handed off. It is left to run: it outlives this process.
 fn spawn(o: &Detach<'_>, log: &PathBuf) -> std::io::Result<()> {
     let out = OpenOptions::new().create(true).append(true).open(log)?;
     let err = out.try_clone()?;
     let at = jiff::Timestamp::now();
-    Command::new(o.exe)
+    in_own_session(&mut Command::new(o.exe))
         .arg(SESSION_ARG)
         .current_dir("/")
         .stdin(Stdio::null())
@@ -97,7 +99,34 @@ fn tail(text: &str, lines: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Stdio;
+
+    use rustix::process::{Pid, getsid};
+
     use super::*;
+
+    /// The session `command`'s child is in, read while it waits on its stdin, then let end by
+    /// closing that.
+    fn session_of(command: &mut Command) -> (Pid, Pid) {
+        let mut child = command
+            .args(["-c", "read line || true"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_child(&child);
+        let sid = getsid(Some(pid)).unwrap();
+        drop(child.stdin.take());
+        assert!(child.wait().unwrap().success());
+        (sid, pid)
+    }
+
+    #[test]
+    fn the_daemon_leads_a_session_of_its_own_from_the_fork_and_a_plain_child_does_not() {
+        let (session, leader) = session_of(in_own_session(&mut Command::new("/bin/sh")));
+        let (inherited, child) = session_of(&mut Command::new("/bin/sh"));
+        assert_eq!(session, leader);
+        assert_ne!(inherited, child);
+    }
 
     #[test]
     fn the_log_tail_is_its_last_lines_without_trailing_newlines() {

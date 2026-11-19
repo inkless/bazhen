@@ -13,14 +13,17 @@ use crate::detach::{Detach, SESSION_ARG, detach};
 use crate::env::Env;
 use crate::private_dir::ensure_private_dir;
 use crate::serve::{Startup, serve};
+use crate::session::leads_own_session;
 
 const USAGE: &str = "usage: bazhen-daemon [start]";
+const NOT_DETACHED: &str = "bazhen-daemon --session serves only as the daemon `bazhen-daemon start` starts, which leads a \
+     session of its own";
 
 /// What the arguments ask for.
 #[derive(Debug, PartialEq, Eq)]
 enum Verb {
     Serve,
-    /// Serve as the daemon `start` detached, which leads a session of its own.
+    /// Serve as the daemon `start` detached, which leads a session of its own from the fork.
     Detached,
     Start,
 }
@@ -54,12 +57,11 @@ pub fn run(args: &[OsString]) -> ExitCode {
     };
     match verb {
         Verb::Start => start(&settings, uid, &mut err),
-        Verb::Detached => {
-            // Already one when its parent made it one, which is no failure.
-            let _ = rustix::process::setsid();
-            serve(&startup(settings, uid))
+        Verb::Detached if !leads_own_session() => {
+            let _ = writeln!(err, "{NOT_DETACHED}");
+            ExitCode::FAILURE
         }
-        Verb::Serve => serve(&startup(settings, uid)),
+        Verb::Detached | Verb::Serve => serve(&startup(settings, uid)),
     }
 }
 
