@@ -3106,10 +3106,11 @@ function closingBrace(code: string, from: number): number {
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
 // nothing. An ending signals only through a `Session` it was given, so what is matched is any
 // mention of `Session`, however one is made or named, and `Ending::start`, which takes one. Not
-// `Ending::new` on its own, which a test gives a stand-in that signals nothing.
+// `Ending::new` on its own, which a test gives a stand-in that signals nothing. Nor a `tracker`'s
+// close, which is a tokio TaskTracker's: it only stops the tracker taking tasks.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
+  /(?<!\btracker\s*)\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];

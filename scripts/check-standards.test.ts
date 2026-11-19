@@ -3229,6 +3229,16 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("needn't be marked for closing a task tracker, which signals nothing", () => {
+    const source = [
+      "fn drained(tracker: &TaskTracker) { tracker.close(); }",
+      "#[test]\nfn a() { drained(&tracker); }",
+      "#[test]\nfn b() { self.tracker.close(); }",
+      "#[test]\nfn c() { tracker.child.close(group, now); }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/serve.rs": source })).toEqual(["crates/h/src/serve.rs:6"]);
+  });
+
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
     const source = [
       "fn end(r: &mut Running) { r.child.close(group, now); }",
