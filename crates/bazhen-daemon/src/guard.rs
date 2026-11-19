@@ -2,6 +2,8 @@
 //! a request must come from a paired device (`auth/devices.ts`'s `mustPair`, over
 //! `auth/forwarded.ts`). Pure: the HTTP layers apply them.
 
+use bazhen_protocol::text::{is_js_space, trim};
+
 /// The daemon's own loopback name; it never listens anywhere else.
 pub(crate) const LOOPBACK: &str = "127.0.0.1";
 
@@ -100,7 +102,8 @@ pub(crate) fn forwarded_from_elsewhere(
 }
 
 /// Each `for=` value in a `Forwarded` header, as `/for=("[^"]*"|[^;,\s]*)/gi` finds them: a
-/// quoted string whole, or what runs up to the next `;`, `,` or space.
+/// quoted string whole, or what runs up to the next `;`, `,` or white space as JavaScript's `\s`
+/// takes it, which isn't U+0085.
 fn forwarded_for(header: &str) -> impl Iterator<Item = &str> {
     let lower = header.to_ascii_lowercase();
     let mut values = Vec::new();
@@ -113,7 +116,7 @@ fn forwarded_for(header: &str) -> impl Iterator<Item = &str> {
             .and_then(|inner| inner.find('"'))
             .map(|close| close + 2);
         let len = quoted.unwrap_or_else(|| {
-            rest.find(|c: char| c == ';' || c == ',' || c.is_whitespace())
+            rest.find(|c: char| c == ';' || c == ',' || is_js_space(c))
                 .unwrap_or(rest.len())
         });
         values.push(rest.get(..len).unwrap_or_default());
@@ -122,9 +125,10 @@ fn forwarded_for(header: &str) -> impl Iterator<Item = &str> {
     values.into_iter()
 }
 
-/// An address without the quotes, brackets and port a header may wrap it in.
+/// An address without the white space JavaScript's `trim` takes off, and the quotes, brackets and
+/// port a header may wrap it in.
 fn bare_address(raw: &str) -> String {
-    let trimmed = raw.trim();
+    let trimmed = trim(raw);
     let unquoted = trimmed.strip_prefix('"').unwrap_or(trimmed);
     let unquoted = unquoted.strip_suffix('"').unwrap_or(unquoted);
     if let Some(inner) = bracketed(unquoted) {

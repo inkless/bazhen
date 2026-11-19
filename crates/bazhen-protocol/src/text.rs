@@ -65,7 +65,10 @@ pub fn trim(text: &str) -> &str {
     text.trim_matches(is_js_space)
 }
 
-fn is_js_space(c: char) -> bool {
+/// Whether JavaScript takes `c` for white space, in `trim` and in a regex's `\s`: Unicode's
+/// white space with the byte-order mark and without U+0085.
+#[must_use]
+pub fn is_js_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
