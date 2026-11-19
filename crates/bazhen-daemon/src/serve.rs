@@ -207,8 +207,7 @@ async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Re
 }
 
 /// Waits for the listeners' connections to end, for no longer than `within`, and no longer at all
-/// once `hurry` is cancelled. A connection that won't finish, such as a stream, is left to the
-/// exit.
+/// once `hurry` is cancelled. A connection that won't finish is left to the exit.
 async fn drain(tracker: &TaskTracker, within: Duration, hurry: &CancellationToken) {
     let _ = tokio::time::timeout(within, hurry.run_until_cancelled(tracker.wait())).await;
 }

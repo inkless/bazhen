@@ -4,20 +4,27 @@
 
 use std::sync::{Arc, OnceLock};
 
-use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::rejection::QueryRejection;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::ws::rejection::WebSocketUpgradeRejection;
+use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
+use axum::{Extension, Router};
 use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
+use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
 use bazhen_store::SnapshotError;
 use tokio_util::sync::CancellationToken;
 
+use crate::accept::Held;
+use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
+use crate::heartbeat::{HEARTBEAT, Heartbeat};
 use crate::writer::Writer;
 
 /// Why the daemon stopped, as its last line says.
@@ -67,6 +74,7 @@ pub(crate) struct Shared {
     pub(crate) health: Arc<HealthResponse>,
     pub(crate) stop: Stop,
     pub(crate) store: Writer,
+    pub(crate) heartbeat: Heartbeat,
 }
 
 impl Shared {
@@ -81,6 +89,7 @@ impl Shared {
             }),
             stop,
             store,
+            heartbeat: HEARTBEAT,
         }
     }
 }
@@ -139,6 +148,33 @@ async fn state(State(shared): State<Shared>) -> Response {
     }
 }
 
+/// The event stream, from the cursor its query names. A request that isn't an upgrade reaches no
+/// route, as on the TypeScript daemon, where only an upgrade is routed here.
+async fn stream(
+    State(shared): State<Shared>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    held: Option<Extension<Held>>,
+) -> Response {
+    let Ok(upgrade) = upgrade else {
+        return not_found().await;
+    };
+    let Some(cursor) = query.ok().and_then(|Query(query)| events::cursor(&query)) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let how = Streaming {
+        store: shared.store,
+        stop: shared.stop.token().clone(),
+        heartbeat: shared.heartbeat,
+    };
+    upgrade
+        .max_message_size(EVENT_FRAME_MAX_BYTES)
+        .max_frame_size(EVENT_FRAME_MAX_BYTES)
+        .on_upgrade(move |socket| {
+            events::stream(socket, cursor, how, held.map(|Extension(held)| held))
+        })
+}
+
 async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
@@ -149,6 +185,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
     Router::new()
         .route("/v1/health", get(health))
         .route("/v1/state", get(state))
+        .route("/v1/events", get(stream))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
@@ -163,6 +200,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/state", get(state))
+        .route("/events", get(stream))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)

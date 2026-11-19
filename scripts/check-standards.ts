@@ -778,6 +778,11 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-daemon/src/events.rs::stream":
+    "splits the socket for follow and write; decodes nothing itself",
+  "crates/bazhen-daemon/src/events.rs::write": "sends frames the daemon made; reads none",
+  "crates/bazhen-daemon/src/events.rs::follow":
+    "takes frames tungstenite has already bounded to 1 KiB, and reads one only as serde's derive for a tag and a bool, dropping it either way",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
     "wraps its connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/config.rs::read_config_file":
