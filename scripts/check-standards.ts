@@ -2433,7 +2433,7 @@ export const DENY_CONFIG = [
 // The package.json scripts that run the Rust gates, exactly, and `check` runs each of them. The
 // commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the tests run under a cap like
 // any.
-const GATE = "cargo xtask gate";
+const GATE = "scripts/xtask.sh gate";
 export const RUST_GATE_SCRIPTS: Record<string, string> = {
   "format:check": `${GATE} fmt && oxfmt --check`,
   "lint:rust": `${GATE} lint`,
@@ -2458,7 +2458,7 @@ export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 // and the scripts that run one of those. A script step that does runs under scripts/capped.ts, at
 // most at these caps.
 const TEST_RUNNER =
-  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|cargo xtask gate test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
+  /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|(?:cargo xtask|xtask\.sh) gate test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
 const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
 export const MAX_CAP = { gib: 24, minutes: 120 };
 
@@ -2502,6 +2502,8 @@ const RUST_FLAG_EXEMPT: Record<string, string> = {
   "crates/bazhen-xtask/src/gate.rs":
     "removes them from every gate's environment, and tests it does",
   "crates/bazhen-xtask/src/cargo_config.rs": "plants them in configs to check they are refused",
+  "scripts/cargo-config.medium.test.ts":
+    "sets a host runner and CARGO_ALIAS_XTASK to show scripts/xtask.sh fails a run xtask never saw",
   "scripts/rust-gate.ts":
     "removes them from the environment falsify and holder-mutants run cargo in",
   "scripts/rust-gate.test.ts": "sets them to check gateEnv removes them",

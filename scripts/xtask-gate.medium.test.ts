@@ -20,7 +20,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RUST_TOOLS, type RustTool, TEST_BUILD, configFailures, gateEnv } from "./rust-gate.ts";
-import { SANDBOX_RULE, SIGNALS_IGNORE } from "./signal-paths.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -99,10 +98,14 @@ function parseLog(text: string): Logged[] {
     });
 }
 
-/** The environment a gate is started in: the stubs on PATH, and the caller's own variables. */
+/**
+ * The environment a gate is started in: the stubs on PATH, the crate's directory as `cargo run`
+ * names it, and the caller's own variables.
+ */
 const startEnv = (env: Record<string, string>) => ({
   PATH: bin,
   CARGO_HOME: home,
+  CARGO_MANIFEST_DIR: join(root, "crates", "bazhen-xtask"),
   STUB_LOG: log,
   ...env,
 });
@@ -153,6 +156,12 @@ describe("cargo xtask gate", () => {
       argv: [[...TEST_COMMAND, "tests::a", "b"].join(" ")],
     });
     expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
+  });
+
+  it("runs nothing unless cargo names the crate's directory, as `cargo xtask` does", () => {
+    const { status, stderr, logged } = rust(["fmt"], { CARGO_MANIFEST_DIR: "" });
+    expect({ status, runs: logged.length }).toEqual({ status: 2, runs: 0 });
+    expect(stderr).toContain("run it as `cargo xtask`");
   });
 
   it("fails when the tool does, and starts nothing after it", () => {
@@ -230,12 +239,6 @@ describe("the rules the TypeScript rails share with the Rust gate", () => {
       const env = { ...CALLER, PROPTEST_RNG_SEED: seed };
       expect(gateVars(rust(["fmt"], env).logged[0]?.env)).toEqual(gateEnv(startEnv(env)));
     }
-  });
-
-  it("refuse test-all off a sandbox in the words the signal scan uses", () => {
-    const { status, stderr, logged } = rust(["test-all"]);
-    expect({ status, runs: logged.length }).toEqual({ status: 2, runs: 0 });
-    expect(stderr).toContain(`"${SIGNALS_IGNORE}": ${SANDBOX_RULE}.`);
   });
 
   it("build the tests falsify lists as the test gate builds them", () => {

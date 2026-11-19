@@ -193,7 +193,7 @@ fn is_test_name(name: &str) -> bool {
 }
 
 /// Variables that change what cargo, rustc, clippy, nextest or proptest run, or with which flags.
-const REMOVED: [&str; 11] = [
+const REMOVED: [&str; 12] = [
     "PROPTEST_CASES",
     "RUSTFLAGS",
     "RUSTDOCFLAGS",
@@ -201,6 +201,7 @@ const REMOVED: [&str; 11] = [
     "RUSTC_WRAPPER",
     "RUSTC_WORKSPACE_WRAPPER",
     "RUSTDOC",
+    "RUSTFMT",
     "RUSTUP_TOOLCHAIN",
     "CARGO",
     "CLIPPY_CONF_DIR",
@@ -375,6 +376,7 @@ mod tests {
             ("RUSTC_WRAPPER", "/bin/true"),
             ("RUSTC_WORKSPACE_WRAPPER", "/bin/true"),
             ("RUSTDOC", "/fake/rustdoc"),
+            ("RUSTFMT", "/bin/true"),
             ("RUSTUP_TOOLCHAIN", "nightly"),
             ("CARGO", "/fake/cargo"),
             ("CLIPPY_CONF_DIR", "/tmp"),
@@ -607,7 +609,9 @@ mod tests {
         let (exit, runs, err) = ran(&mut Fake::new(false), "test-all", &[]);
         assert_eq!((exit, runs), (Exit::Usage, vec![]));
         assert!(
-            err.starts_with("Refusing to run: ") && err.contains("pnpm test:real"),
+            err.starts_with("Refusing to run: ")
+                && err.contains(&format!("\"{SIGNALS_IGNORE}\""))
+                && err.contains("pnpm test:real"),
             "{err}"
         );
     }

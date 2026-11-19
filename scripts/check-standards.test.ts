@@ -1227,6 +1227,7 @@ describe("rustFailures on the gates' own configuration", () => {
     ".cargo/config.toml": CARGO_CONFIG.join("\n"),
     ".cargo/mutants.toml": MUTANTS_CONFIG.join("\n"),
     "package.json": JSON.stringify({ scripts: { ...RUST_GATE_SCRIPTS, check: CHECK } }),
+    "scripts/cargo-config.medium.test.ts": "RUSTFLAGS",
     "scripts/rust-gate.ts": "RUSTFLAGS",
     "scripts/rust-gate.test.ts": "RUSTFLAGS",
     "scripts/xtask-gate.medium.test.ts": "RUSTFLAGS",
@@ -1349,7 +1350,7 @@ describe("cappedScriptFailures", () => {
         test: `${cap} vitest run --project unit`,
         "test:medium": `pnpm run build:hook && ${cap} vitest run --project medium`,
         check: "pnpm run lint && pnpm run test:rust",
-        "lint:rust": "cargo xtask gate lint",
+        "lint:rust": "scripts/xtask.sh gate lint",
       }),
     ).toEqual([]);
   });
@@ -1372,7 +1373,7 @@ describe("cappedScriptFailures", () => {
         "cargo bench",
         "cargo +nightly-2026-11-01 fuzz run parse_reply",
         "cargo xtask gate test",
-        "cargo xtask gate test-all",
+        "scripts/xtask.sh gate test-all",
         "node scripts/falsify.ts",
         "node scripts/hook-bench.ts",
         "node scripts/test-real.ts",

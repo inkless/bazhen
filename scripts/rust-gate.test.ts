@@ -24,6 +24,7 @@ describe("gateEnv", () => {
       RUSTC_WRAPPER: "/bin/true",
       RUSTC_WORKSPACE_WRAPPER: "/bin/true",
       RUSTDOC: "/fake/rustdoc",
+      RUSTFMT: "/bin/true",
       RUSTUP_TOOLCHAIN: "nightly",
       CARGO: "/fake/cargo",
       CLIPPY_CONF_DIR: "/tmp",
