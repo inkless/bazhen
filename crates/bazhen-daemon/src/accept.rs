@@ -30,8 +30,8 @@ pub(crate) struct Limits {
     /// included, before it is answered 408. `None` for none, as the TypeScript daemon's socket
     /// sets it to 0.
     pub(crate) request: Option<Duration>,
-    /// Node's `maxHeaderSize`: a request whose head is longer is answered 431. hyper takes no
-    /// less than 8 KiB.
+    /// Node's `maxHeaderSize`: a request whose head, its start line included, is longer is
+    /// answered 431.
     pub(crate) head_bytes: usize,
     /// How many connections are served at once. A later one waits in the backlog until one
     /// ends, so connections to one listener can't take the descriptors the other needs.
@@ -80,7 +80,7 @@ pub(crate) async fn serve_on<L: Listener>(
         let connection = http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(limits.head)
-            .max_buf_size(limits.head_bytes)
+            .max_header_size(limits.head_bytes)
             .serve_connection(TokioIo::new(io), service);
         let connection = graceful.watch(connection);
         tracker.spawn(async move {
