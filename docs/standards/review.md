@@ -13,7 +13,9 @@ already checked (listed at the end).
    that isn't real yet?
 4. **Tests.** For each new test, ask _what change to the source would make this fail?_ Then check
    the falsify result, or the `Control:` trailer naming the test, says the same, and that the
-   break the trailer records would fail that test on its assertion. Is each test the
+   break the trailer records would fail that test on its assertion. For a test KILLED
+   `(on the Rust daemon)`, does the line under it fail on what the test asserts, not on a surface
+   the base's daemon didn't serve at all? Is each test the
    smallest size that can fail for the right reason (`testing.md` § Sizes)? Does each test
    falsify prints as RENAMED have a new title that says what its unchanged body does? For one
    that moved to another file or into a `describe`, do the names its body uses still mean what

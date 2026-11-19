@@ -458,6 +458,9 @@ and a migration always does (testing.md § Black-box behaviour tests says how th
   push to `main` what `main` was before it. A file git sees renamed counts under its new name. There
   is no merge queue: pull requests are squash-merged and must be up to date with `main`, so `main`
   before a merge is the base its pull request was checked against.
+- **A slice's tests are judged on the Rust daemon.** Falsify runs a new test in a listed file on the
+  Rust daemon built from the base as well as on the TypeScript daemon, so a test that fails without
+  the slice's Rust change is KILLED there with no control (testing.md § Falsification).
 
 ## Dependencies
 

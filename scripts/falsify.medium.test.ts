@@ -29,6 +29,9 @@ import { binariesOf, manifestNames, namedBinaries } from "./falsify.ts";
 import { inSignalSandbox } from "./signal-paths.ts";
 
 const FALSIFY = fileURLToPath(new URL("falsify.ts", import.meta.url));
+// The variable naming the daemon the api suite starts, which falsify sets to run a test on the Rust
+// daemon.
+const SELECTOR = "BAZHEN_TEST_DAEMON_BIN";
 const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
 const SOURCE = "packages/a/src/x.ts";
 const CLI_MAIN = "crates/bazhen/src/main.rs";
@@ -145,6 +148,12 @@ case "$1" in
     if [ -n "\${BAZHEN_CLI:-}" ]; then
       echo "CLI: $BAZHEN_CLI" >> "$STUB_LOG"
       "$BAZHEN_CLI" >> "$STUB_LOG"
+    fi
+    # A run against the Rust daemon has a status and a report of its own.
+    if [ -n "\${${SELECTOR}:-}" ]; then
+      echo "DAEMON: $${SELECTOR}: $("$${SELECTOR}")" >> "$STUB_LOG"
+      STUB_STATUS="\${STUB_RUST_STATUS:-$STUB_STATUS}"
+      STUB_VITEST_REPORT="\${STUB_RUST_REPORT:-\${STUB_VITEST_REPORT:-}}"
     fi
     if [ "\${STUB_HANG_VITEST:-}" = 1 ]; then
       # What falsify's reporter records of a run stopped while its second test ran, mid-write.
@@ -1915,6 +1924,144 @@ describe("falsify on a branch with a new CLI test", () => {
       said: result.output.includes("cargo wrote no dep-info"),
       verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
     }).toEqual({ status: 1, said: true, verdict: false });
+  });
+});
+
+const DAEMON_MAIN = "crates/bazhen-daemon/src/main.rs";
+const LISTED_TEST = "tests/api/r.test.ts";
+const DAEMON_MANIFEST = {
+  "crates/bazhen-daemon/Cargo.toml": '[package]\nname = "bazhen-daemon"\n',
+};
+
+/**
+ * Commits the Rust daemon's crate (unless `daemonAtBase` is false), another crate, and an api
+ * helper, with `tests/rust-daemon.txt` naming LISTED_TEST (unless `listed` is false), then a
+ * change to `changed` and the files `added` with LISTED_TEST's new test, and runs falsify
+ * against the first commit.
+ */
+function changeDaemon(
+  changed: string,
+  extra: Record<string, string> = {},
+  {
+    listed = true,
+    daemonAtBase = true,
+    added = {},
+  }: { listed?: boolean; daemonAtBase?: boolean; added?: Record<string, string> } = {},
+) {
+  const tree: Record<string, string> = {
+    ...(daemonAtBase && { [DAEMON_MAIN]: "fn main() { old daemon }\n", ...DAEMON_MANIFEST }),
+    [OTHER_CRATE]: "pub fn f() { old }\n",
+    "crates/holder/Cargo.toml": '[package]\nname = "holder"\n',
+    "tests/api/daemon.ts": "export const d = 1;\n",
+    "tests/rust-daemon.txt": listed ? `# listed\n${LISTED_TEST}\n` : "# none yet\n",
+  };
+  for (const [path, text] of Object.entries(tree)) write(fx.linked, path, text);
+  git(fx.linked, "add", ...Object.keys(tree));
+  git(fx.linked, "commit", "--quiet", "-m", "feat: daemon1");
+  const base = git(fx.linked, "rev-parse", "HEAD").trim();
+  write(fx.linked, changed, "fn main() { new }\n");
+  for (const [path, text] of Object.entries(added)) write(fx.linked, path, text);
+  write(fx.linked, LISTED_TEST, branchTest('import { d } from "./daemon.ts";\n'));
+  git(fx.linked, "add", changed, ...Object.keys(added), LISTED_TEST);
+  git(fx.linked, "commit", "--quiet", "-m", "feat: daemon2");
+  return falsify(["--base", base], { STUB_SOURCE: DAEMON_MAIN, STUB_TEST: LISTED_TEST, ...extra });
+}
+
+const ranOnDaemon = () => /^DAEMON: /m.test(stubLog());
+const builtDaemon = () =>
+  /^BUILD: build:bins --profile release -p bazhen-daemon --bin bazhen-daemon in /m.test(stubLog());
+
+describe("falsify on a branch with a new test in a file the Rust daemon's list names", () => {
+  it("runs it against the Rust daemon built from the base too, and kills it on a failure there", () => {
+    const result = changeDaemon(DAEMON_MAIN, { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed" });
+    const worktree = `${fx.tmp}/bz-falsify-[^/\n]+`;
+    expect({
+      status: result.status,
+      killed: result.output.includes(`KILLED   ${LISTED_TEST} › caps (on the Rust daemon)`),
+      built: builtDaemon(),
+      ran: new RegExp(
+        `^DAEMON: ${worktree}/target/release/bazhen-daemon: BUILT FROM: fn main\\(\\) \\{ old daemon \\}$`,
+        "m",
+      ).test(stubLog()),
+      sawNewSource: stubLog().includes("{ new }"),
+      suiteReads: readFileSync(
+        fileURLToPath(new URL("../tests/support/test-daemon.ts", import.meta.url)),
+        "utf8",
+      ).includes(`env["${SELECTOR}"]`),
+    }).toEqual({
+      status: 0,
+      killed: true,
+      built: true,
+      ran: true,
+      sawNewSource: false,
+      suiteReads: true,
+    });
+  });
+
+  it("fails when it passes on the base's Rust daemon, built without the change", () => {
+    expect(changeDaemon(DAEMON_MAIN, { STUB_STATUS: "passed" })).toEqual({
+      status: 1,
+      output: expect.stringContaining(`SURVIVED ${LISTED_TEST} › caps (passed on the Rust daemon)`),
+    });
+  });
+
+  it("kills it on the TypeScript daemon whatever the Rust daemon does", () => {
+    const result = changeDaemon(DAEMON_MAIN, { STUB_STATUS: "failed", STUB_RUST_STATUS: "passed" });
+    expect({
+      status: result.status,
+      killed: new RegExp(`^ {2}KILLED {3}${escape(LISTED_TEST)} › caps$`, "m").test(result.output),
+    }).toEqual({ status: 0, killed: true });
+  });
+
+  it("runs it on the Rust daemon only when the daemon is built from Rust the branch changed", () => {
+    // It would fail there: a run would kill it.
+    const other = changeDaemon(OTHER_CRATE, { STUB_STATUS: "passed", STUB_RUST_STATUS: "failed" });
+    expect({
+      status: other.status,
+      unrelated: other.output.includes(
+        `INVALID  ${LISTED_TEST} › caps (passed; unrelated to the source change)`,
+      ),
+      built: builtDaemon(),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 1, unrelated: true, built: true, ran: false });
+  });
+
+  it("judges it on the TypeScript daemon alone when the daemon's build shows no Rust changed", () => {
+    const result = changeDaemon(SOURCE, { STUB_STATUS: "failed", STUB_RUST_STATUS: "passed" });
+    expect({
+      status: result.status,
+      killed: new RegExp(`^ {2}KILLED {3}${escape(LISTED_TEST)} › caps$`, "m").test(result.output),
+      built: builtDaemon(),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 0, killed: true, built: true, ran: false });
+  });
+
+  it("fails without a verdict when the base builds no Rust daemon", () => {
+    const result = changeDaemon(
+      DAEMON_MAIN,
+      { STUB_RUST_STATUS: "failed" },
+      { daemonAtBase: false, added: DAEMON_MANIFEST },
+    );
+    expect({
+      status: result.status,
+      said: result.output.includes("the base builds no target/release/bazhen-daemon"),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 1, said: true, verdict: false, ran: false });
+  });
+
+  it.each([
+    ["skips it", { STUB_RUST_STATUS: "skipped" }, "skipped"],
+    ["leaves no report", { STUB_RUST_REPORT: "none" }, "it wrote no report"],
+  ])("fails without a verdict when the Rust daemon's run %s", (_, extra, reason) => {
+    const result = changeDaemon(DAEMON_MAIN, { STUB_STATUS: "passed", ...extra });
+    expect({
+      status: result.status,
+      said: result.output.includes(`${LISTED_TEST} › caps didn't run to an end on the Rust daemon`),
+      reason: result.output.includes(reason),
+      verdict: /KILLED|SURVIVED|INVALID/.test(result.output),
+      ran: ranOnDaemon(),
+    }).toEqual({ status: 1, said: true, reason: true, verdict: false, ran: true });
   });
 });
 

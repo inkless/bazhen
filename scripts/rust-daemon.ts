@@ -16,8 +16,11 @@ import { isMain } from "./is-main.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 export const LIST = "tests/rust-daemon.txt";
-/** The daemon the files run against: the release build `pnpm build:daemon` makes. */
-export const DAEMON_BIN = join(root, "target/release/bazhen-daemon");
+/** The variable naming the daemon binary the api suite starts in place of the TypeScript one. */
+export const SELECTOR = "BAZHEN_TEST_DAEMON_BIN";
+/** The daemon the files run against, in target/: the release build `pnpm build:daemon` makes. */
+export const DAEMON = "target/release/bazhen-daemon";
+export const DAEMON_BIN = join(root, DAEMON);
 
 /** The files a list names, one per line, blank lines and `#` comments aside. */
 export function listed(text: string): string[] {
@@ -151,7 +154,7 @@ const runFiles: RunFiles = (files) => {
         `--outputFile.json=${out}`,
         ...files,
       ],
-      { cwd: root, stdio: "inherit", env: { ...process.env, BAZHEN_TEST_DAEMON_BIN: DAEMON_BIN } },
+      { cwd: root, stdio: "inherit", env: { ...process.env, [SELECTOR]: DAEMON_BIN } },
     );
     const read: unknown = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : undefined;
     const report = isReport(read) ? read : undefined;

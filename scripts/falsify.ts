@@ -35,6 +35,13 @@
 // The judged tests run once per vitest project, as each project's pnpm script runs them: two
 // projects' global setups in one process clash.
 //
+// A new test in a file tests/rust-daemon.txt names at HEAD holds both daemons, so it also runs
+// against the Rust daemon built from the base (BAZHEN_TEST_DAEMON_BIN), when the branch reverted a
+// file that daemon or a binary the test names was built from. It is KILLED when either run fails
+// it, SURVIVED when either passes it while related to the change, else INVALID. A base with no
+// Rust daemon, or a Rust run that leaves such a test without a pass or a fail, fails falsify
+// with no verdict: the TypeScript daemon alone can't see a change to the Rust one.
+//
 // A Rust test under crates/ lives in the file it tests, so reverting the source would revert the
 // test with it. When the branch touches the Rust workspace, nextest lists the tests at the base and
 // at HEAD, so a test is found however it is declared (`#[test]`, proptest, a macro of the crate's
@@ -105,6 +112,7 @@ import {
 import { isMain } from "./is-main.ts";
 import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
+import { DAEMON, LIST, SELECTOR, listed as listedFiles } from "./rust-daemon.ts";
 import { testCalls, type TestCall } from "./test-calls.ts";
 import {
   failedOnAssertion,
@@ -824,6 +832,63 @@ export function classify(report: VitestReport, file: string, title: string): Out
   return test.status === "failed" ? "KILLED" : "INVALID";
 }
 
+/** A judged test's verdict, with what is printed beside it. */
+export type Judged = TestRef & {
+  outcome: Outcome;
+  unrelated?: boolean;
+  unbuilt?: string[];
+  note?: string;
+  noReport?: string | undefined;
+  failure?: string | undefined;
+};
+
+/** The Rust daemon's binary, as `<profile>/<name>` under target/. */
+const RUST_DAEMON = DAEMON.slice("target/".length);
+
+/**
+ * Why a listed test has no pass or fail in its run on the Rust daemon: the run left it unfinished
+ * or without a result, or it ended another way, as skipped. Undefined when it passed or failed.
+ */
+export function unrunReason(
+  daemonRun: { report: VitestReport; unreported: ReadonlyMap<string, string> },
+  t: TestRef,
+): string | undefined {
+  const test = resultOf(daemonRun.report, t.file, t.title);
+  if (test?.status === "passed" || test?.status === "failed") return undefined;
+  if (test === undefined || test.status === UNFINISHED) {
+    return daemonRun.unreported.get(t.file) ?? "its run has no result for it";
+  }
+  return `it was ${test.status}`;
+}
+
+/**
+ * A listed test's verdict from its run on each daemon, both judged with the base's code. It is
+ * KILLED when either failed it, and SURVIVED when either is related to the change and passed it:
+ * the change it accompanies may land in either daemon. `onTypeScript` is judged as an unlisted
+ * test is; the Rust run is made only for a test related to what it reverted.
+ */
+export function onBothDaemons(
+  onTypeScript: Judged,
+  onRust: { outcome: Outcome; failure: string | undefined },
+): Judged {
+  const t = { file: onTypeScript.file, title: onTypeScript.title };
+  if (onTypeScript.outcome === "KILLED") return onTypeScript;
+  if (onRust.outcome === "KILLED") {
+    return { ...t, outcome: "KILLED", failure: onRust.failure, note: " (on the Rust daemon)" };
+  }
+  if (onRust.outcome === "SURVIVED") {
+    const on = onTypeScript.outcome === "SURVIVED" ? "both daemons" : "the Rust daemon";
+    return { ...t, outcome: "SURVIVED", note: ` (passed on ${on})` };
+  }
+  if (onTypeScript.outcome === "SURVIVED") return onTypeScript;
+  return {
+    ...t,
+    outcome: "INVALID",
+    failure: onRust.failure,
+    note: " (timed out on the Rust daemon)",
+  };
+}
+
 const PRINTED_LINE_MAX = 300;
 
 /**
@@ -915,6 +980,10 @@ export function harnessFiles(
 
 const HARNESS = "scripts/falsify.ts";
 
+/** The reverted paths among `ranFrom`, what the binaries a test runs were built from. */
+export const builtFromReverts = (revertedPaths: string[], ranFrom: readonly string[]): string[] =>
+  revertedPaths.filter((r) => ranFrom.includes(r));
+
 /**
  * The reverted paths a test file imports directly: a relative specifier resolved against the
  * test's folder (with `.ts`, `.tsx` or `/index.ts` tried when it has no extension), or a
@@ -931,7 +1000,7 @@ export function relatedReverts(
   packages: Record<string, string>,
   ranFrom: readonly string[] = [],
 ): string[] {
-  const related = new Set<string>(revertedPaths.filter((r) => ranFrom.includes(r)));
+  const related = new Set<string>(builtFromReverts(revertedPaths, ranFrom));
   for (const [, url = ""] of testSource.matchAll(FILE_URL)) {
     const path = posix.join(posix.dirname(testPath), url);
     if (revertedPaths.includes(path)) related.add(path);
@@ -1956,10 +2025,16 @@ async function main(args: string[]): Promise<number> {
       return [t.file, { direct: direct.filter(isBinary), reached: reached.filter(isBinary) }];
     }),
   );
+  // A test in a file the Rust daemon's list names holds both daemons, so it runs on each.
+  const onList = new Set(listedFiles(atHead(LIST) ?? ""));
+  const listedTargets = targets.filter((t) => onList.has(t.file));
   // Only the binaries a judged test may run are built: a release build links each with LTO.
-  const wanted = [...new Set([...binaries.values()].flatMap((b) => b.reached))].filter(
-    (binary) => PROFILES[binary.slice(0, binary.indexOf("/"))] !== undefined,
-  );
+  const wanted = [
+    ...new Set([
+      ...[...binaries.values()].flatMap((b) => b.reached),
+      ...(listedTargets.length > 0 ? [RUST_DAEMON] : []),
+    ]),
+  ].filter((binary) => PROFILES[binary.slice(0, binary.indexOf("/"))] !== undefined);
   const runsBinaries = wanted.length > 0;
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
   const reverts = revertsOf(changes, { rust: runsBinaries });
@@ -2001,16 +2076,7 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const results: {
-    file: string;
-    title: string;
-    outcome: Outcome;
-    unrelated?: boolean;
-    unbuilt?: string[];
-    note?: string;
-    noReport?: string | undefined;
-    failure?: string | undefined;
-  }[] = [];
+  const results: Judged[] = [];
 
   results.push(...rustTests);
   if (targets.length === 0) {
@@ -2049,6 +2115,14 @@ async function main(args: string[]): Promise<number> {
         const made = await buildBinaries(dir, top, wanted);
         if (made === undefined) return 1;
         built = made;
+      }
+      if (listedTargets.length > 0 && !built.has(RUST_DAEMON)) {
+        console.error(
+          `falsify: the base builds no ${DAEMON}, so the new tests in files ${LIST} names can't ` +
+            `be judged on the Rust daemon, and none is judged:\n` +
+            listedTargets.map((t) => `  ${t.file} › ${t.title}`).join("\n"),
+        );
+        return 1;
       }
       // A CLI test runs the binary BAZHEN_CLI names: the base's, never the caller's own build.
       const vitestEnv = runsBinaries
@@ -2095,64 +2169,113 @@ async function main(args: string[]): Promise<number> {
       }
       // One run per project, as its own pnpm script runs it: two projects' global setups in one
       // process clash (one sets the home the other refuses, or puts a refusing tmux on PATH).
-      const report: VitestReport = { testResults: [] };
-      // What the reporter recorded of each run that left no report, read after every report so a
-      // file another project's run judged in full keeps that run's verdict.
-      const stopped: VitestReport["testResults"] = [];
-      const unreported = new Map<string, string>();
-      for (const [index, [project, inProject]] of [...projects].entries()) {
-        const reportFile = join(dir, `falsify-report-${index}.json`);
-        const resultsFile = join(dir, `falsify-results-${index}.jsonl`);
-        const ran = await logged(
-          "pnpm",
-          [
-            "exec",
-            "vitest",
-            "run",
-            "--project",
-            project,
-            ...inProject,
-            `--reporter=${REPORTER}`,
-            "--reporter=json",
-            `--outputFile=${reportFile}`,
-          ],
-          dir,
-          `falsify-vitest-${index}.log`,
-          VITEST_TIMEOUT_MS,
-          { ...(vitestEnv ?? isolatedEnv()), [RESULTS_FILE_ENV]: resultsFile },
-        );
-        const written = readWritten(reportFile);
-        if (written.kind === "json" && isReport(written.value)) {
-          report.testResults.push(...written.value.testResults);
-          continue;
+      const runProjects = async (
+        runs: [string, string[]][],
+        env: NodeJS.ProcessEnv,
+        { tag, on }: { tag: string; on: string },
+      ) => {
+        const report: VitestReport = { testResults: [] };
+        // What the reporter recorded of each run that left no report, read after every report so a
+        // file another project's run judged in full keeps that run's verdict.
+        const stopped: VitestReport["testResults"] = [];
+        const unreported = new Map<string, string>();
+        for (const [index, [project, inProject]] of runs.entries()) {
+          const reportFile = join(dir, `falsify-report-${tag}${index}.json`);
+          const resultsFile = join(dir, `falsify-results-${tag}${index}.jsonl`);
+          const ran = await logged(
+            "pnpm",
+            [
+              "exec",
+              "vitest",
+              "run",
+              "--project",
+              project,
+              ...inProject,
+              `--reporter=${REPORTER}`,
+              "--reporter=json",
+              `--outputFile=${reportFile}`,
+            ],
+            dir,
+            `falsify-vitest-${tag}${index}.log`,
+            VITEST_TIMEOUT_MS,
+            { ...env, [RESULTS_FILE_ENV]: resultsFile },
+          );
+          const written = readWritten(reportFile);
+          if (written.kind === "json" && isReport(written.value)) {
+            report.testResults.push(...written.value.testResults);
+            continue;
+          }
+          // The run's tests that finished are judged from what the reporter recorded; each of its
+          // targets that didn't is INVALID: say why once, and name it on each.
+          const recorded = partialReport(readRecorded(resultsFile)).testResults;
+          stopped.push(...recorded);
+          const collected = recorded.flatMap((suite) => suite.assertionResults);
+          const finished = collected.filter((t) => t.status !== UNFINISHED).length;
+          const reason = noOutputReason(ran, written, "report", VITEST_TIMEOUT_MS);
+          const files = `${inProject.length} file${inProject.length === 1 ? "" : "s"}`;
+          const judged =
+            collected.length === 0
+              ? ""
+              : ` ${finished} of the ${collected.length} tests it collected finished, and are judged ` +
+                "from what falsify's reporter recorded as each ended.";
+          console.error(
+            `falsify: the ${project} run${on} (${files}) left no report: ${reason}.${judged} The end of ` +
+              `what it printed:\n${indentedTail(ran.said)}`,
+          );
+          for (const file of inProject) {
+            unreported.set(file, `the ${project} run${on}: ${reason}`);
+          }
         }
-        // The run's tests that finished are judged from what the reporter recorded; each of its
-        // targets that didn't is INVALID: say why once, and name it on each.
-        const recorded = partialReport(readRecorded(resultsFile)).testResults;
-        stopped.push(...recorded);
-        const collected = recorded.flatMap((suite) => suite.assertionResults);
-        const finished = collected.filter((t) => t.status !== UNFINISHED).length;
-        const reason = noOutputReason(ran, written, "report", VITEST_TIMEOUT_MS);
-        const files = `${inProject.length} file${inProject.length === 1 ? "" : "s"}`;
-        const judged =
-          collected.length === 0
-            ? ""
-            : ` ${finished} of the ${collected.length} tests it collected finished, and are judged ` +
-              "from what falsify's reporter recorded as each ended.";
+        report.testResults.push(...stopped);
+        return { report, unreported };
+      };
+      const { report, unreported } = await runProjects([...projects], vitestEnv ?? isolatedEnv(), {
+        tag: "",
+        on: "",
+      });
+      // A listed test runs on the base's Rust daemon too, when the branch reverted something it or
+      // the binaries it runs were built from: otherwise that daemon is HEAD's, and the run would
+      // only repeat HEAD.
+      const revertedPaths = reverts.flatMap(pathsOf);
+      const builtFrom = (t: TestRef) => [
+        ...(built.get(RUST_DAEMON) ?? []),
+        ...(binaries.get(t.file)?.direct ?? []).flatMap((b) => built.get(b) ?? []),
+      ];
+      const onDaemon = listedTargets.filter(
+        (t) => builtFromReverts(revertedPaths, builtFrom(t)).length > 0,
+      );
+      const daemonFiles = new Set(onDaemon.map((t) => t.file));
+      const daemonRuns = [...projects].flatMap(([project, files]): [string, string[]][] => {
+        const inProject = files.filter((file) => daemonFiles.has(file));
+        return inProject.length > 0 ? [[project, inProject]] : [];
+      });
+      const onRust =
+        daemonRuns.length === 0
+          ? undefined
+          : await runProjects(
+              daemonRuns,
+              { ...(vitestEnv ?? isolatedEnv()), [SELECTOR]: join(dir, "target", RUST_DAEMON) },
+              { tag: "rust-", on: " on the Rust daemon" },
+            );
+      // A listed test with no pass or fail on the Rust daemon would leave its verdict to the
+      // TypeScript daemon alone, which can't see a change to the Rust one.
+      const unrun = onDaemon.flatMap((t) => {
+        const reason = onRust === undefined ? "it wasn't run" : unrunReason(onRust, t);
+        return reason === undefined
+          ? []
+          : [`  ${t.file} › ${t.title} didn't run to an end on the Rust daemon (${reason})`];
+      });
+      if (unrun.length > 0) {
         console.error(
-          `falsify: the ${project} run (${files}) left no report: ${reason}.${judged} The end of ` +
-            `what it printed:\n${indentedTail(ran.said)}`,
+          `falsify: these new tests in files ${LIST} names have no result on the Rust daemon, so ` +
+            `none is judged:\n${unrun.join("\n")}`,
         );
-        for (const file of inProject) {
-          unreported.set(file, `the ${project} run: ${reason}`);
-        }
+        return 1;
       }
-      report.testResults.push(...stopped);
       // A passing test that imports none of the reverted files is a test of code the branch didn't
       // change (a characterization or property test): no verdict, so it needs a control.
-      const revertedPaths = reverts.flatMap(pathsOf);
       const packages = workspacePackages(dir);
-      for (const t of targets) {
+      const onTypeScript = (t: TestRef): Judged => {
         const outcome = classify(report, t.file, t.title);
         const failure = outcome === "SURVIVED" ? undefined : failureLine(report, t.file, t.title);
         const source = readFileSync(join(dir, t.file), "utf8");
@@ -2163,17 +2286,28 @@ async function main(args: string[]): Promise<number> {
           outcome === "SURVIVED" &&
           relatedReverts(t.file, source, revertedPaths, packages, inputs).length === 0
         ) {
-          results.push({ ...t, outcome: "INVALID", unrelated: true });
-        } else if (outcome === "KILLED" && unbuilt.length > 0) {
-          results.push({ ...t, outcome: "INVALID", unbuilt, failure });
-        } else {
-          // Keyed by file: a file in two projects may have its verdict from the other's report.
-          const noReport =
-            outcome === "INVALID" && !finishedIn(report, t.file, t.title)
-              ? unreported.get(t.file)
-              : undefined;
-          results.push({ ...t, outcome, failure, noReport });
+          return { ...t, outcome: "INVALID", unrelated: true };
         }
+        if (outcome === "KILLED" && unbuilt.length > 0) {
+          return { ...t, outcome: "INVALID", unbuilt, failure };
+        }
+        // Keyed by file: a file in two projects may have its verdict from the other's report.
+        const noReport =
+          outcome === "INVALID" && !finishedIn(report, t.file, t.title)
+            ? unreported.get(t.file)
+            : undefined;
+        return { ...t, outcome, failure, noReport };
+      };
+      for (const t of targets) {
+        const judged = onTypeScript(t);
+        results.push(
+          onRust === undefined || !onDaemon.includes(t)
+            ? judged
+            : onBothDaemons(judged, {
+                outcome: classify(onRust.report, t.file, t.title),
+                failure: failureLine(onRust.report, t.file, t.title),
+              }),
+        );
       }
     } finally {
       cleanup?.();

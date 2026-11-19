@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   classify,
+  onBothDaemons,
+  unrunReason,
   failureLine,
   harnessFiles,
   indentedTail,
@@ -1356,6 +1358,85 @@ describe("counterparts", () => {
       "a.test.ts",
       "c.ts",
       "c.ts",
+    ]);
+  });
+});
+
+const onRust = (outcome: "KILLED" | "SURVIVED" | "INVALID") => ({
+  outcome,
+  failure: outcome === "SURVIVED" ? undefined : "expected 421, got 200",
+});
+
+describe("a listed test's verdict from both daemons", () => {
+  const t = { file: "tests/api/r.test.ts", title: "caps" };
+
+  it("keeps the TypeScript daemon's kill, whatever the Rust daemon did", () => {
+    const onTs = { ...t, outcome: "KILLED" as const, failure: "ts" };
+    expect(onBothDaemons(onTs, onRust("SURVIVED"))).toBe(onTs);
+  });
+
+  it("takes the Rust daemon's kill over a TypeScript pass, and says where it came from", () => {
+    expect(onBothDaemons({ ...t, outcome: "INVALID", unrelated: true }, onRust("KILLED"))).toEqual({
+      ...t,
+      outcome: "KILLED",
+      failure: "expected 421, got 200",
+      note: " (on the Rust daemon)",
+    });
+  });
+
+  it("survives when either daemon passed it while related to the change", () => {
+    expect([
+      onBothDaemons({ ...t, outcome: "INVALID", unrelated: true }, onRust("SURVIVED")).note,
+      onBothDaemons({ ...t, outcome: "SURVIVED" }, onRust("SURVIVED")).note,
+      onBothDaemons({ ...t, outcome: "SURVIVED" }, onRust("INVALID")).outcome,
+    ]).toEqual([" (passed on the Rust daemon)", " (passed on both daemons)", "SURVIVED"]);
+  });
+
+  it("has no verdict when the Rust daemon's run timed out and the TypeScript one didn't kill it", () => {
+    expect(onBothDaemons({ ...t, outcome: "INVALID", unrelated: true }, onRust("INVALID"))).toEqual(
+      {
+        ...t,
+        outcome: "INVALID",
+        failure: "expected 421, got 200",
+        note: " (timed out on the Rust daemon)",
+      },
+    );
+  });
+});
+
+describe("why a listed test has no result on the Rust daemon", () => {
+  const t = { file: "tests/api/r.test.ts", title: "caps" };
+  const run = (status?: string, unreported = new Map<string, string>()) => ({
+    report: {
+      testResults: [
+        {
+          name: `/w/${t.file}`,
+          assertionResults:
+            status === undefined ? [] : [{ title: t.title, status, failureMessages: [] }],
+        },
+      ],
+    },
+    unreported,
+  });
+
+  it("is none when the test passed or failed", () => {
+    expect([unrunReason(run("passed"), t), unrunReason(run("failed"), t)]).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("names how it ended otherwise, or why its run left no result", () => {
+    expect([
+      unrunReason(run("skipped"), t),
+      unrunReason(run("todo"), t),
+      unrunReason(run(), t),
+      unrunReason(run(undefined, new Map([[t.file, "the api run: it wrote no report"]])), t),
+    ]).toEqual([
+      "it was skipped",
+      "it was todo",
+      "its run has no result for it",
+      "the api run: it wrote no report",
     ]);
   });
 });
