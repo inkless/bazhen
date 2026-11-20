@@ -6,6 +6,7 @@ import {
   type ProgramExit,
   type RuntimeRef,
   type Snapshot,
+  type Size,
   type TerminalId,
 } from "@bazhen/core";
 import { FakeRuntime, type FakeRuntimeOptions } from "@bazhen/core/testing";
@@ -1209,6 +1210,30 @@ class AlteredRuntime extends FakeRuntime {
   }
 }
 
+/** A holder reader reports the applied grid independently of the writer's resize request. */
+class ReportingRuntime extends FakeRuntime {
+  reportSize: (actual: Size) => void = () => {};
+  constructor() {
+    super({ attach: "snapshot" });
+  }
+  override async attach(...args: Parameters<FakeRuntime["attach"]>) {
+    const attached = await super.attach(...args);
+    assert(attached.kind === "snapshot");
+    return {
+      ...attached,
+      stream: {
+        ...attached.stream,
+        onResized: (cb: (actual: Size) => void) => {
+          this.reportSize = cb;
+        },
+        resize: async () => {
+          throw new Error("writer lost");
+        },
+      },
+    };
+  }
+}
+
 /** A terminal on a snapshot runtime with one view open. */
 async function snapshotTerminal(
   runtime = new FakeRuntime({ attach: "snapshot" }),
@@ -1245,6 +1270,61 @@ async function openHeld(
 }
 
 describe("terminal hub: snapshot streams", () => {
+  it("attaches with a notice and the applied grid when the writer refuses a resize", async () => {
+    const o = await snapshotTerminal(new ReportingRuntime());
+    const late = viewer();
+    await o.hub.join(o.ref, late.v, { cols: 120, rows: 48 });
+    expect(late.frames).toContainEqual({ type: "notice", message: "resize failed: writer lost" });
+    expect(late.frames).toContainEqual({ type: "geometry", ...size });
+    expect(late.frames.at(-1)?.type).toBe("attached");
+  });
+
+  it("takes a fresh snapshot when the reader reports new geometry mid-capture", async () => {
+    const runtime = new ReportingRuntime();
+    const o = await snapshotTerminal(runtime);
+    const { late, joined, hold } = await openHeld(o);
+    hold.take();
+    const next = { cols: 64, rows: 12 };
+    runtime.reportSize(next);
+    o.emit("after resize");
+    hold.release();
+    await joined;
+    expect(late.seen).toHaveLength(1);
+    expect(await screenOf(late.seen)).toContain("after resize");
+    expect(late.frames.filter((f) => f.type === "geometry")).toEqual([
+      { type: "geometry", ...next },
+    ]);
+  });
+
+  it("delivers applied geometry between the surrounding bytes while a snapshot is in flight", async () => {
+    const runtime = new ReportingRuntime();
+    const o = await snapshotTerminal(runtime);
+    const late = slowViewer();
+    const wire: string[] = [];
+    const joined = o.hub.join(
+      o.ref,
+      {
+        ...late.v,
+        notify: (frame) => {
+          wire.push(frame.type);
+          late.v.notify(frame);
+        },
+        send: (bytes, done) => {
+          wire.push(Buffer.from(bytes).toString());
+          late.v.send(bytes, done);
+        },
+      },
+      size,
+    );
+    await vi.waitFor(() => expect(late.inFlight()).toBe(1));
+    o.emit("before");
+    runtime.reportSize({ cols: 60, rows: 40 });
+    o.emit("after");
+    late.write();
+    await joined;
+    expect(wire.slice(-4)).toEqual(["before", "geometry", "after", "attached"]);
+  });
+
   it("sizes the runtime before asking where a taller view's snapshot ends", async () => {
     const o = await snapshotTerminal();
     const hold = o.r.holdSnapshots(o.ref);

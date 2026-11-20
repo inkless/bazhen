@@ -479,7 +479,7 @@ export class HolderStream implements SnapshotStream {
     this.applied.set(observed, applied.reject);
     const timeout = setTimeout(
       () => applied.reject(new Error("holder did not apply the resize")),
-      DRAIN_MS,
+      1000,
     ).unref();
     try {
       await Promise.all([this.control.resize(size), applied.promise]);

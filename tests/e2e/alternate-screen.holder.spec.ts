@@ -227,3 +227,65 @@ test("a passive web view follows wrapped and scrolled cells through a driver res
     await expect.poll(() => screen(page, id)).toMatch(PROMPT);
   }
 });
+
+test("a passive window opens at the live bottom and scrolls into history past the grid edge", async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  const id = await shell(page);
+  await run(page, "seq 1 200");
+  await expect.poll(() => screen(page, id)).toContain("199\n200");
+  const context = await browser.newContext({
+    hasTouch: true,
+    reducedMotion: "reduce",
+    storageState: await page.context().storageState(),
+  });
+  const passive = await context.newPage();
+  await passive.setViewportSize({ width: 390, height: 540 });
+  await passive.goto(page.url());
+  const host = passive.locator(".terminal-host").first();
+  await expect.poll(() => terminalGrid(passive, id)).toEqual(await terminalGrid(page, id));
+  await expect
+    .poll(() =>
+      host.evaluate((el) => [
+        el.scrollTop > 0,
+        el.scrollHeight - el.clientHeight - el.scrollTop <= 1,
+      ]),
+    )
+    .toEqual([true, true]);
+  await host.hover({ position: { x: 15, y: 15 } });
+  await passive.mouse.wheel(0, -1600);
+  await expect.poll(() => atBottom(passive, id)).toBe(false);
+  await expect(status(page)).toHaveText("Driving");
+
+  // With room for every row, a vertical gesture goes straight to history.
+  await passive.setViewportSize({ width: 390, height: 1500 });
+  await expect
+    .poll(() =>
+      host.evaluate((el) => [el.scrollHeight <= el.clientHeight, el.scrollWidth > el.clientWidth]),
+    )
+    .toEqual([true, true]);
+  await host.hover({ position: { x: 15, y: 15 } });
+  await passive.mouse.wheel(0, 1600);
+  await expect.poll(() => atBottom(passive, id)).toBe(true);
+  await passive.mouse.wheel(0, -200);
+  await expect.poll(() => atBottom(passive, id)).toBe(false);
+  const before = await viewportTop(passive, id);
+  const grid = await terminalGrid(passive, id);
+  const rows = Number(grid!.split("x")[1]);
+  const box = await passive.locator(".xterm-screen").first().boundingBox();
+  expect(box).not.toBeNull();
+  const cell = box!.height / rows;
+  const touch = await context.newCDPSession(passive);
+  const point = (dy: number) => [{ x: box!.x + 25, y: Math.max(0, box!.y) + 25 + dy }];
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(0) });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: point(6.5 * cell),
+  });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(() => viewportTop(passive, id)).toBe(before - 6);
+  await expect(status(page)).toHaveText("Driving");
+  await context.close();
+});

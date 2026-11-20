@@ -223,8 +223,10 @@ function connect(
     epoch = undefined;
     heartbeat = new Heartbeat();
     socket.binaryType = "arraybuffer";
+    let requested = viewport;
     socket.addEventListener("open", () => {
-      const { cols, rows } = viewport;
+      requested = viewport;
+      const { cols, rows } = requested;
       send({
         type: "hello",
         protocolId: PAGE_PROTOCOL,
@@ -254,7 +256,7 @@ function connect(
       else if (f.type === "screen") daemonSaidAlternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
-        send({ type: "resize", ...viewport });
+        if (requested !== viewport) send({ type: "resize", ...viewport });
         declare();
         // A view focused before its socket opened saw no focus event to claim the lease with.
         // One coming back from a lost socket doesn't take the lease from a view that took it
@@ -322,19 +324,16 @@ function connect(
     event.preventDefault();
     return false;
   });
+  const clipped = () => !driving && (term.cols > viewport.cols || term.rows > viewport.rows);
   const route = () =>
-    wheelAction({
-      mouseTracking: term.modes.mouseTrackingMode !== "none",
-      alternate: alternate(),
-      kind,
-    });
-  const scroll = attachScrollInput(
-    element,
-    term,
-    route,
-    (bytes) => input(bytes, false),
-    () => !driving && (term.cols > viewport.cols || term.rows > viewport.rows),
-  );
+    clipped()
+      ? "local"
+      : wheelAction({
+          mouseTracking: term.modes.mouseTrackingMode !== "none",
+          alternate: alternate(),
+          kind,
+        });
+  const scroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false), clipped);
   const target: BarTarget = {
     kind,
     press: (key) =>

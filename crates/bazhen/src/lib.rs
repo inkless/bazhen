@@ -144,11 +144,11 @@ const DEVICES_USAGE: &str = "usage: bazhen devices [list | pair | revoke <id> | 
 pub(crate) const TERMINALS_USAGE: &str = r"usage:
   bazhen terminals attach <agent|shell|terminal> [--direct] [--detach-keys <keys>] [--home <dir>]
   bazhen terminals screen <agent|shell|terminal> [--history <n>] [--json] [--home <dir>]
-A passive CLI view with a different grid size can wrap and scroll differently from the holder.
 attach: Ctrl-] Ctrl-] detaches, or the keys --detach-keys or attach.detach_keys in config.toml
 name, such as ctrl-p,ctrl-q; a second kill ends it at once, after which `reset` repairs the
 terminal. --direct types only while no daemon is there, and lets go of the input once one is
-back. screen prints the screen shown as text, after the newest <n> rows of its history (0 unless
+back. A passive CLI view with a different grid size can wrap and scroll differently from the holder.
+screen prints the screen shown as text, after the newest <n> rows of its history (0 unless
 given, at most 10000), and reads a terminal whose program has exited too.";
 
 /// The usage of every verb.

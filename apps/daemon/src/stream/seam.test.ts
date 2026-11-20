@@ -82,6 +82,13 @@ function scenario(
 const bytesOf = (item: Held) => ("bytes" in item ? [...item.bytes] : []);
 
 describe("the seam between a snapshot and the output held while it was taken", () => {
+  it("keeps only geometry after capture starts even when the byte offset is unchanged", () => {
+    const at = { generation: 0, offset: 4 };
+    const before: Held = { kind: "geometry", size: { cols: 80, rows: 24 } };
+    const after: Held = { kind: "geometry", size: { cols: 60, rows: 40 } };
+    expect(seam([before, after], at, at, at, 1)).toEqual([after]);
+  });
+
   it("gives a view that replays the snapshot exactly the rest of the stream", () => {
     fc.assert(
       fc.property(

@@ -262,12 +262,6 @@ export class TerminalHub {
         while (watched.resizing !== undefined) await watched.resizing;
         if (!watched.viewers.has(id)) throw new ViewEnded();
         const geometry = watched.size;
-        if (
-          sizeSetter(watched, replacing) === entry &&
-          (geometry.cols !== size.cols || geometry.rows !== size.rows)
-        ) {
-          throw new ViewRefused("the terminal could not apply this view’s size; reopen it");
-        }
         const queued = entry.queue?.length ?? 0;
         const shown = await watched.screen.snapshot(watched.at);
         if (geometry === watched.size && watched.resizing === undefined)
