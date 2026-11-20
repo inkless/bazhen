@@ -620,6 +620,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_full_scroll_region_fills_a_taller_view() {
+        let mut original = after("\x1b[?1049h");
+        let mut vt = String::new();
+        original.snapshot(usize::MAX, &mut vt).unwrap();
+        let mut viewer = Engine::new(Size { rows: 10, ..SIZE }, HistoryRows(0));
+        viewer.advance(vt.as_bytes());
+        assert_eq!(viewer.modes().screen.region, 0..10);
+    }
+
+    #[test]
     fn the_primary_s_line_drawing_comes_back_under_the_alternate_screen_s_ascii() {
         assert_restores("\x1b(0lqqk\r\n\x1b[?1049h\x1b(Bvim\x1b[2;3H");
     }

@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 use std::ops::Range;
 
-use alacritty_terminal::grid::Cursor;
+use alacritty_terminal::grid::{Cursor, Dimensions};
 use alacritty_terminal::index::Column;
 use alacritty_terminal::term::cell::Cell;
 use alacritty_terminal::term::{Term, TermMode};
@@ -241,6 +241,7 @@ impl Tracker {
             }
         };
         Modes {
+            rows: to_u16(term.screen_lines()),
             keys: Keys {
                 cursor_keys: key_mode(TermMode::APP_CURSOR),
                 keypad: key_mode(TermMode::APP_KEYPAD),
@@ -360,6 +361,7 @@ fn to_u16(value: usize) -> u16 {
 /// Every mode a program set that a snapshot restores or a client acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Modes {
+    rows: u16,
     pub keys: Keys,
     pub mouse: Mouse,
     pub cursor: CursorModes,
@@ -569,11 +571,16 @@ impl Modes {
         let newline = self.screen.line_feed == LineFeed::NewLine;
         let _ = write!(out, "\x1b[20{}", if newline { 'h' } else { 'l' });
         let region = &self.screen.region;
-        // DECSTBM ignores a region of fewer than two rows: one that is empty, or a row, came from
-        // a bottom past the screen, which is clamped to it, and comes back from one again.
-        let top = region.start.saturating_add(1);
-        let bottom = region.end.max(top.saturating_add(1));
-        let _ = write!(out, "\x1b[{top};{bottom}r");
+        if *region == (0..self.rows) {
+            // A viewer may already be taller than the snapshot. Let its own height set the margin.
+            out.push_str("\x1b[r");
+        } else {
+            // DECSTBM ignores regions shorter than two rows. Restore one that was clamped by
+            // writing a bottom beyond the screen, so it is clamped again.
+            let top = region.start.saturating_add(1);
+            let bottom = region.end.max(top.saturating_add(1));
+            let _ = write!(out, "\x1b[{top};{bottom}r");
+        }
         flag(out, 6, self.screen.origin == Origin::Region);
         out.push_str("\x1b[3g");
         for stop in &self.screen.tab_stops {
@@ -989,7 +996,7 @@ mod tests {
         after("").write(&mut out);
         for mode in [
             "?1l", "?1000l", "?1002l", "?1003l", "?1005l", "?1006l", "?1007h", "?1004l", "?2004l",
-            "?1042h", "?25h", "0 q", "?7h", "4l", "20l", "1;5r", "?6l", "3g",
+            "?1042h", "?25h", "0 q", "?7h", "4l", "20l", "r", "?6l", "3g",
         ] {
             assert!(out.contains(&format!("\x1b[{mode}")), "{mode} in {out:?}");
         }
