@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOLDER_SOCKET_MAX_BYTES, holderSocket } from "@bazhen/host-guard";
 import { resolvePaths, type PathInputs } from "./paths.ts";
 
 const linux: PathInputs = { platform: "linux", env: {}, home: "/home/u", tmp: "/tmp", uid: 1000 };
@@ -46,9 +47,8 @@ describe("resolvePaths", () => {
   });
 
   it("keeps the runtime directory in XDG_RUNTIME_DIR on Linux and in TMPDIR on macOS", () => {
-    expect(resolvePaths({ ...linux, env: { XDG_RUNTIME_DIR: "/run/user/1000" } }).run).toBe(
-      "/run/user/1000/bazhen",
-    );
+    const p = resolvePaths({ ...linux, env: { XDG_RUNTIME_DIR: "/run/user/1000" } });
+    expect([p.run, p.holderRun]).toEqual(["/run/user/1000/bazhen", "/run/user/1000/bazhen"]);
     expect(resolvePaths(mac).socket).toBe("/var/folders/xy/T/bazhen/bazhen.sock");
   });
 
@@ -61,6 +61,28 @@ describe("resolvePaths", () => {
     const p = resolvePaths({ ...linux, env: { BAZHEN_HOME: deep } });
     expect(p.run).toMatch(/^\/tmp\/bazhen-1000-[0-9a-f]{8}$/);
     expect(Buffer.byteLength(p.socket)).toBeLessThanOrEqual(103);
+  });
+
+  it("moves the holders when a macOS runtime directory fits only the daemon socket", () => {
+    const tmp = `/var/folders/xy/${"d".repeat(30)}/T`;
+    const p = resolvePaths({ ...mac, tmp });
+    const terminal = "term_01a1f67bfc13789caade029e6d1b6582";
+    expect(Buffer.byteLength(holderSocket(p.holderRun, terminal))).toBeLessThanOrEqual(
+      HOLDER_SOCKET_MAX_BYTES,
+    );
+    expect(p.holderRun).toBe("/tmp/bazhen-holders-501-a71017ba");
+    expect(p.socket).toBe(`${tmp}/bazhen/bazhen.sock`);
+    expect(p.tmuxSocket).toBe(`${tmp}/bazhen/tmux.sock`);
+    const atLimit = resolvePaths({ ...mac, tmp: `/var/folders/xy/${"d".repeat(27)}/T` });
+    expect(atLimit.holderRun).toBe(atLimit.run);
+  });
+
+  it("keeps Linux daemon and tmux sockets reachable with a long XDG_RUNTIME_DIR", () => {
+    const runtime = `/run/user/1000/${"d".repeat(38)}`;
+    const p = resolvePaths({ ...linux, env: { XDG_RUNTIME_DIR: runtime } });
+    expect(p.socket).toBe(`${runtime}/bazhen/bazhen.sock`);
+    expect(p.tmuxSocket).toBe(`${runtime}/bazhen/tmux.sock`);
+    expect(p.holderRun).toMatch(/^\/tmp\/bazhen-holders-1000-[0-9a-f]{8}$/);
   });
 
   it("relocates everything under BAZHEN_HOME", () => {

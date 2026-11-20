@@ -4,7 +4,7 @@
 //! socket with it, and the Rust daemon puts it there.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::sha256::{hex, sha256};
 
@@ -179,6 +179,24 @@ fn default_run(i: &Inputs) -> String {
     match i.xdg_runtime_dir.as_deref() {
         Some(runtime) if runtime.starts_with('/') => normalize(&format!("{runtime}/bazhen")),
         _ => format!("/tmp/bazhen-{}", i.uid),
+    }
+}
+
+/// The directory containing terminal holder sockets for the daemon with this runtime directory,
+/// as resolved by the TypeScript daemon in `apps/daemon/src/config/paths.ts`.
+pub fn holders_dir(run: &Path, uid: u32) -> PathBuf {
+    let holders = run.join("holders");
+    let Some(run) = run.to_str() else {
+        return holders;
+    };
+    let sample = holders.join("term_00000000000000000000000000000000.sock");
+    if sample.as_os_str().len() > MAX_SOCKET_PATH {
+        PathBuf::from(format!(
+            "/tmp/bazhen-holders-{uid}-{}/holders",
+            short_hash(run)
+        ))
+    } else {
+        holders
     }
 }
 
@@ -433,6 +451,20 @@ mod tests {
                 format!("/tmp/bazhen-1000-{hash}"),
                 format!("/tmp/bazhen-1000-{hash}/bazhen.sock")
             ])
+        );
+    }
+
+    #[test]
+    fn a_holder_socket_path_too_long_moves_only_the_holders() {
+        let run = format!("/var/folders/xy/{}/T/bazhen", "d".repeat(30));
+        let at_limit = format!("/var/folders/xy/{}/T/bazhen", "d".repeat(27));
+        assert_eq!(
+            holders_dir(Path::new(&run), 501),
+            PathBuf::from("/tmp/bazhen-holders-501-a71017ba/holders")
+        );
+        assert_eq!(
+            holders_dir(Path::new(&at_limit), 501),
+            Path::new(&at_limit).join("holders")
         );
     }
 
