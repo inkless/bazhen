@@ -45,6 +45,7 @@ export function attachScrollInput(
   term: Terminal,
   route: () => WheelAction,
   input: (bytes: Uint8Array<ArrayBuffer>) => void,
+  panViewport: () => boolean = () => false,
 ): ScrollInput {
   const arrow = (up: boolean) => {
     const keys = term.modes.applicationCursorKeysMode ? ARROWS.application : ARROWS.normal;
@@ -57,6 +58,10 @@ export function attachScrollInput(
   // scrolls the scrollback, which under tmux's alternate screen isn't the program's. On a real
   // alternate buffer, xterm.js would send arrow keys as typed input, taking the lease.
   const wheel = (event: WheelEvent) => {
+    if (panViewport()) {
+      event.stopPropagation();
+      return;
+    }
     const action = route();
     if (action === "app" || action === "local") return;
     event.preventDefault();
@@ -141,6 +146,9 @@ export function attachScrollInput(
     lastY = null;
     fling.reset();
   };
+  const nativePan = (event: TouchEvent) => {
+    if (panViewport()) event.stopPropagation();
+  };
   const touchStart = (e: TouchEvent) => {
     stopGlide();
     const touch = e.touches[0];
@@ -180,6 +188,8 @@ export function attachScrollInput(
     if (e.isTrusted) stopGlide();
   };
 
+  element.addEventListener("touchstart", nativePan, { capture: true, passive: true });
+  element.addEventListener("touchmove", nativePan, { capture: true, passive: true });
   element.addEventListener("wheel", wheel, { capture: true, passive: false });
   screen.addEventListener("touchstart", touchStart, { passive: true });
   screen.addEventListener("touchmove", touchMove, { passive: false });
@@ -194,6 +204,8 @@ export function attachScrollInput(
       stopGlide();
       element.removeEventListener("wheel", interrupt, { capture: true });
       element.removeEventListener("keydown", interrupt, { capture: true });
+      element.removeEventListener("touchstart", nativePan, { capture: true });
+      element.removeEventListener("touchmove", nativePan, { capture: true });
       element.removeEventListener("wheel", wheel, { capture: true });
       screen.removeEventListener("touchstart", touchStart);
       screen.removeEventListener("touchmove", touchMove);

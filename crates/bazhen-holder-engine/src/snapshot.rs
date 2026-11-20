@@ -96,6 +96,8 @@ impl Out for Bounded<'_> {
 impl Engine {
     /// Appends the terminal's state to `out` for a viewer (an emulator Bazhen owns, never the
     /// user's own terminal) of the engine's size, freshly reset, in no more than `most` bytes.
+    /// A full scroll region uses the viewer's full height. A passive native CLI at a different
+    /// size can wrap and scroll differently from the holder.
     /// History gives way first, its oldest lines. Returns how many rows of history were left out,
     /// counted as [`Stats::history_rows`](crate::Stats) counts them: rows, not logical lines,
     /// which a holder reporting `dropped_lines` must say or convert.

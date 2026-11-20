@@ -10,6 +10,8 @@ import {
   onAlternateScreen,
   screen,
   status,
+  terminalCursor,
+  terminalGrid,
   test,
   viewportTop,
 } from "./page.ts";
@@ -197,4 +199,31 @@ test("opens a late view on the alternate screen, with the history to scroll afte
   await expect.poll(() => screen(late, id)).toMatch(PROMPT);
   await scrollsBackToHistory(late, id);
   await late.close();
+});
+
+test("a passive web view follows wrapped and scrolled cells through a driver resize", async ({
+  page,
+  context,
+}) => {
+  const id = await shell(page);
+  const passive = await context.newPage();
+  await passive.setViewportSize({ width: 600, height: 500 });
+  await passive.goto(page.url());
+  await expect(status(passive)).toContainText("Viewing");
+  for (const width of [880, 1050]) {
+    const before = await terminalGrid(page, id);
+    await page.setViewportSize({ width, height: 720 });
+    await expect.poll(() => terminalGrid(page, id)).not.toBe(before);
+    await run(page, "seq 1 100; printf '%0300d\\n' 1; printf '\\033[3;7Hmarker'; read -r next");
+    await expect.poll(() => terminalGrid(passive, id)).toEqual(await terminalGrid(page, id));
+    await expect.poll(() => terminalCursor(passive, id)).toEqual([12, 2]);
+    const holder = await page.evaluate(async (terminal) => {
+      const response = await fetch(`/v1/terminals/${terminal}/screen`);
+      return String(Reflect.get(Object(await response.json()), "text")).trimEnd();
+    }, id);
+    const top = await viewportTop(passive, id);
+    expect((await screen(passive, id)).split("\n").slice(top).join("\n").trimEnd()).toEqual(holder);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => screen(page, id)).toMatch(PROMPT);
+  }
 });

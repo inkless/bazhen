@@ -1180,6 +1180,27 @@ describe("HolderRuntime: streams", () => {
     await expect.poll(() => whys.toSorted()).toEqual(["behind", "ended"]);
   });
 
+  it("waits for the reader to report the applied size after the writer accepts a resize", async () => {
+    const { runtime, ref, fake } = await attachable();
+    const { stream } = await runtime.attach(ref, null);
+    const reader = fake.connections.find((c) => c.requests.some((r) => r.type === "subscribe"))!;
+    const next = { cols: 90, rows: 35 };
+    let applied = false;
+    const resize = stream.resize(next).then(() => {
+      applied = true;
+    });
+    await expect
+      .poll(() => fake.connections.flatMap((c) => c.requests).map((r) => r.type))
+      .toContain("resize");
+    // The writer has consumed its ok by the time it has answered the following snapshot.
+    await stream.snapshot();
+    expect(applied).toBe(false);
+    reader.holder.send({ type: "resized", body: { ...next, offset: 5 } });
+    await resize;
+    expect(stream.size).toEqual(next);
+    stream.close();
+  });
+
   it("sends every stream's input and resize on one writer connection, apart from its reader", async () => {
     const { runtime, ref, fake } = await attachable();
     const first = await runtime.attach(ref, { cols: 90, rows: 30 });

@@ -340,6 +340,7 @@ describe("terminal hub", () => {
     await hub.join(rt.ref, late, size);
     expect(order).toEqual([
       "snapshot_start",
+      "geometry",
       "lease",
       "bytes",
       "snapshot_end",
@@ -686,7 +687,7 @@ describe("terminal hub", () => {
     const before = leaseFrames();
     laptop.leave();
     await expect.poll(() => rt.sizes.at(-1)).toEqual({ cols: 60, rows: 50 });
-    expect([leaseFrames() - before, phone.frames.at(-1)]).toEqual([
+    expect([leaseFrames() - before, phone.frames.findLast((f) => f.type === "lease")]).toEqual([
       1,
       { type: "lease", driver: false, driven: false, epoch: 5 },
     ]);
@@ -1244,6 +1245,19 @@ async function openHeld(
 }
 
 describe("terminal hub: snapshot streams", () => {
+  it("sizes the runtime before asking where a taller view's snapshot ends", async () => {
+    const o = await snapshotTerminal();
+    const hold = o.r.holdSnapshots(o.ref);
+    const taller = { cols: 80, rows: 40 };
+    const joined = o.hub.join(o.ref, viewer().v, taller);
+    await vi.waitFor(() => expect(hold.asked()).toBe(1));
+    const sizesAtSnapshot = [...o.r.clients(o.ref).resizes];
+    hold.take();
+    hold.release();
+    await joined;
+    expect(sizesAtSnapshot).toEqual([taller]);
+  });
+
   it("opens a view on output from both sides of the point its snapshot was taken at", async () => {
     const o = await snapshotTerminal();
     o.emit("one ");

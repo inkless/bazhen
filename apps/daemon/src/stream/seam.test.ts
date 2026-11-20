@@ -79,7 +79,7 @@ function scenario(
   };
 }
 
-const bytesOf = (item: Held) => (item.kind === "exited" ? [] : [...item.bytes]);
+const bytesOf = (item: Held) => ("bytes" in item ? [...item.bytes] : []);
 
 describe("the seam between a snapshot and the output held while it was taken", () => {
   it("gives a view that replays the snapshot exactly the rest of the stream", () => {

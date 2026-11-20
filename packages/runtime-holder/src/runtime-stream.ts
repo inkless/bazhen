@@ -284,6 +284,8 @@ export class HolderStream implements SnapshotStream {
   private readonly early: HolderEvent[] = [];
   private ended: StreamEnd | null = null;
   private readonly held = new Set<Held>();
+  private readonly resizeListeners: ((size: Size) => void)[] = [];
+  private readonly applied = new Map<(size: Size) => void, (error: Error) => void>();
   private readonly dataListeners: ((bytes: Uint8Array) => void)[] = [];
   private readonly closeListeners: ((why: StreamEnd) => void)[] = [];
   private readonly respawnListeners: ((generation: number) => void)[] = [];
@@ -382,6 +384,8 @@ export class HolderStream implements SnapshotStream {
       }
       case "resized":
         this.size = { cols: event.body.cols, rows: event.body.rows };
+        for (const listener of this.resizeListeners) listener(this.size);
+        for (const listener of this.applied.keys()) listener(this.size);
         return;
       case "gap":
         this.end("behind");
@@ -410,6 +414,7 @@ export class HolderStream implements SnapshotStream {
     this.release();
     for (const listener of this.closeListeners) listener(why);
     const error = new Error(`the stream ${why === "behind" ? "fell behind" : "ended"}`);
+    for (const reject of this.applied.values()) reject(error);
     for (const hold of this.held) hold.reject(error);
     this.held.clear();
   }
@@ -456,10 +461,32 @@ export class HolderStream implements SnapshotStream {
     this.control.write(bytes);
   }
 
+  onResized(cb: (size: Size) => void): void {
+    this.resizeListeners.push(cb);
+  }
+
   async resize(size: Size): Promise<void> {
     if (this.ended !== null) throw new Error("the stream has closed");
-    await this.control.resize(size);
-    this.size = size;
+    if (this.reader === null) {
+      await this.control.resize(size);
+      this.size = size;
+      return;
+    }
+    const applied = Promise.withResolvers<void>();
+    const observed = (actual: Size) => {
+      if (actual.cols === size.cols && actual.rows === size.rows) applied.resolve();
+    };
+    this.applied.set(observed, applied.reject);
+    const timeout = setTimeout(
+      () => applied.reject(new Error("holder did not apply the resize")),
+      DRAIN_MS,
+    ).unref();
+    try {
+      await Promise.all([this.control.resize(size), applied.promise]);
+    } finally {
+      clearTimeout(timeout);
+      this.applied.delete(observed);
+    }
   }
 
   /**

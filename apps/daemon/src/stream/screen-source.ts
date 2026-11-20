@@ -58,7 +58,7 @@ export function runtimeScreen(attached: SnapshotAttached): ScreenSource {
       const taken = usable ? first : await stream.snapshot();
       return { vt: taken.vt, at: { generation: taken.generation, offset: taken.offset } };
     },
-    resize: () => {},
+    resize: () => (opened = undefined),
     dispose: () => (opened = undefined),
   };
 }

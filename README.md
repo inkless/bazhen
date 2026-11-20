@@ -121,6 +121,8 @@ total_memory_max = "80%" # every holder terminal's together: at least 64M, a who
 swap_max = "0" # each holder terminal's swap: bytes, "0" for none, or "infinity"
 ```
 
+`bazhen terminals attach` uses the local terminal grid. When another view drives at a different size, lines in a passive CLI view can wrap and scroll differently. Web views use the holder’s grid.
+
 A runtime that isn't the default and has no terminal open on it isn't read: `bazhen status` and
 `bazhen doctor` show it as `unused`, and it can't fail doctor. Without tmux installed, a holder
 daemon runs as usual.

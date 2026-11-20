@@ -92,6 +92,10 @@ pub enum StreamServerFrame {
         history_lines: Option<u64>,
     },
     SnapshotEnd,
+    Geometry {
+        cols: u16,
+        rows: u16,
+    },
     /// Input from a view that wasn't driving was dropped.
     InputDropped,
     Screen {

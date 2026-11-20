@@ -44,6 +44,31 @@ async function numbers(view: View): Promise<number[]> {
 }
 
 describe("what a view shows when it opens", () => {
+  it.each([
+    ["a full region", ""],
+    ["a partial region", "\\033[2;4r"],
+  ])("restores %s after a taller interactive view sizes an existing stream", async (_, region) => {
+    const { agentId, terminalId } = await daemon.program([
+      "sh",
+      "-c",
+      `while [ "$(stty size)" != "5 40" ]; do sleep 0.05; done; stty -echo; seq 20; printf '${region}\\033[5;1Hready'; read -r line; printf '\\033[1A\\rredraw\\033[2B\\r\\ninput\\033[4;1H\\r\\nfinished'; sleep 600`,
+    ]);
+    const first = await opened(terminalId, "interactive", { cols: 40, rows: 5 });
+    await expect.poll(() => daemon.screen(agentId)).toContain("ready");
+    const taller = { cols: 40, rows: 10 };
+    const driver = await opened(terminalId, "interactive", taller);
+    await driver.drive();
+    driver.type("\r");
+    await expect.poll(() => driver.output()).toContain("finished");
+    const shown = await replay(driver.received(), taller);
+    expect([shown.screen, shown.cursor]).toEqual([
+      captured(await daemon.screen(agentId)),
+      await daemon.cursor(agentId),
+    ]);
+    first.close();
+    driver.close();
+  });
+
   it("shows all the history the terminal holds above the screen, with the cursor where it is", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",

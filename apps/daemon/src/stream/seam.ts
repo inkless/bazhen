@@ -1,4 +1,4 @@
-import type { ProgramExit } from "@bazhen/core";
+import type { ProgramExit, Size } from "@bazhen/core";
 
 /** Where a stream is: the next byte the process of `generation` prints is at `offset`. */
 export interface Position {
@@ -12,12 +12,14 @@ export interface Position {
  * is held in order with the output around it, and takes up none either.
  */
 export type Held =
+  | { readonly kind: "geometry"; readonly size: Size }
   | { readonly kind: "data"; readonly at: Position; readonly bytes: Uint8Array }
   | { readonly kind: "reset"; readonly generation: number; readonly bytes: Uint8Array }
   | { readonly kind: "exited"; readonly exit: ProgramExit };
 
 /** The bytes a held item adds to what the view lags by. */
-export const heldBytes = (item: Held) => (item.kind === "exited" ? 0 : item.bytes.length);
+export const heldBytes = (item: Held) =>
+  item.kind === "geometry" || item.kind === "exited" ? 0 : item.bytes.length;
 
 const compare = (a: Position, b: Position) => a.generation - b.generation || a.offset - b.offset;
 
@@ -37,9 +39,12 @@ export function seam(
   from: Position,
   now: Position,
   taken: Position,
+  queuedBeforeSnapshot = 0,
 ): Held[] | null {
   if (!seamable(from, now, taken)) return null;
-  return held.flatMap((item): Held[] => {
+  return held.flatMap((item, index): Held[] => {
+    // The snapshot was taken after the latest applied geometry.
+    if (item.kind === "geometry") return index >= queuedBeforeSnapshot ? [item] : [];
     if (item.kind === "reset") return item.generation > taken.generation ? [item] : [];
     // A snapshot shows no exit, so one of its own process still follows it; a respawn's is newer.
     if (item.kind === "exited") return item.exit.generation >= taken.generation ? [item] : [];

@@ -478,9 +478,14 @@ body {
 .terminal-host {
   flex: 1;
   min-height: 6rem;
+  overflow: auto;
   /* xterm.js stacks its layers up to z-index 11; kept in here, they stay under the key bar. */
   isolation: isolate;
   background: var(--color-terminal-bg);
+}
+
+.terminal-host > .xterm {
+  width: max-content;
 }
 
 .workspace-info {

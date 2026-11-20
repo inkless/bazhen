@@ -94,58 +94,52 @@
   {
     "name": "example 9",
     "wire": {
-      "type": "input_dropped"
+      "type": "geometry",
+      "cols": 120,
+      "rows": 40
     },
     "parsed": {
-      "type": "input_dropped"
+      "type": "geometry",
+      "cols": 120,
+      "rows": 40
     }
   },
   {
     "name": "example 10",
     "wire": {
-      "type": "screen",
-      "alternate": true
+      "type": "input_dropped"
     },
     "parsed": {
-      "type": "screen",
-      "alternate": true
+      "type": "input_dropped"
     }
   },
   {
     "name": "example 11",
     "wire": {
-      "type": "exited",
-      "generation": 2,
-      "exit": {
-        "type": "exited",
-        "code": 0
-      }
+      "type": "screen",
+      "alternate": true
     },
     "parsed": {
-      "type": "exited",
-      "generation": 2,
-      "exit": {
-        "type": "exited",
-        "code": 0
-      }
+      "type": "screen",
+      "alternate": true
     }
   },
   {
     "name": "example 12",
     "wire": {
       "type": "exited",
-      "generation": 0,
+      "generation": 2,
       "exit": {
-        "type": "signalled",
-        "signal": "SIGHUP"
+        "type": "exited",
+        "code": 0
       }
     },
     "parsed": {
       "type": "exited",
-      "generation": 0,
+      "generation": 2,
       "exit": {
-        "type": "signalled",
-        "signal": "SIGHUP"
+        "type": "exited",
+        "code": 0
       }
     }
   },
@@ -153,6 +147,25 @@
     "name": "example 13",
     "wire": {
       "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP"
+      }
+    },
+    "parsed": {
+      "type": "exited",
+      "generation": 0,
+      "exit": {
+        "type": "signalled",
+        "signal": "SIGHUP"
+      }
+    }
+  },
+  {
+    "name": "example 14",
+    "wire": {
+      "type": "exited",
       "generation": 1,
       "exit": {
         "type": "unknown"
@@ -167,28 +180,28 @@
     }
   },
   {
-    "name": "example 14",
-    "wire": {
-      "type": "closed"
-    },
-    "parsed": {
-      "type": "closed"
-    }
-  },
-  {
     "name": "example 15",
     "wire": {
-      "type": "ended",
-      "reason": "evicted_slow"
+      "type": "closed"
     },
     "parsed": {
-      "type": "ended",
-      "reason": "evicted_slow"
+      "type": "closed"
     }
   },
   {
     "name": "example 16",
     "wire": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    },
+    "parsed": {
+      "type": "ended",
+      "reason": "evicted_slow"
+    }
+  },
+  {
+    "name": "example 17",
+    "wire": {
       "type": "error",
       "message": "no such terminal"
     },
@@ -198,7 +211,7 @@
     }
   },
   {
-    "name": "example 17",
+    "name": "example 18",
     "wire": {
       "type": "notice",
       "message": "the runtime refused the resize"
@@ -365,6 +378,24 @@
   {
     "name": "example 9, with a field no version defines in each of its objects",
     "wire": {
+      "type": "geometry",
+      "cols": 120,
+      "rows": 40,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "geometry",
+      "cols": 120,
+      "rows": 40
+    }
+  },
+  {
+    "name": "example 10, with a field no version defines in each of its objects",
+    "wire": {
       "type": "input_dropped",
       "fieldFromANewerDaemon": {
         "any": [
@@ -377,7 +408,7 @@
     }
   },
   {
-    "name": "example 10, with a field no version defines in each of its objects",
+    "name": "example 11, with a field no version defines in each of its objects",
     "wire": {
       "type": "screen",
       "alternate": true,
@@ -393,7 +424,7 @@
     }
   },
   {
-    "name": "example 11, with a field no version defines in each of its objects",
+    "name": "example 12, with a field no version defines in each of its objects",
     "wire": {
       "type": "exited",
       "generation": 2,
@@ -422,7 +453,7 @@
     }
   },
   {
-    "name": "example 12, with a field no version defines in each of its objects",
+    "name": "example 13, with a field no version defines in each of its objects",
     "wire": {
       "type": "exited",
       "generation": 0,
@@ -451,7 +482,7 @@
     }
   },
   {
-    "name": "example 13, with a field no version defines in each of its objects",
+    "name": "example 14, with a field no version defines in each of its objects",
     "wire": {
       "type": "exited",
       "generation": 1,
@@ -478,7 +509,7 @@
     }
   },
   {
-    "name": "example 14, with a field no version defines in each of its objects",
+    "name": "example 15, with a field no version defines in each of its objects",
     "wire": {
       "type": "closed",
       "fieldFromANewerDaemon": {
@@ -492,7 +523,7 @@
     }
   },
   {
-    "name": "example 15, with a field no version defines in each of its objects",
+    "name": "example 16, with a field no version defines in each of its objects",
     "wire": {
       "type": "ended",
       "reason": "evicted_slow",
@@ -508,7 +539,7 @@
     }
   },
   {
-    "name": "example 16, with a field no version defines in each of its objects",
+    "name": "example 17, with a field no version defines in each of its objects",
     "wire": {
       "type": "error",
       "message": "no such terminal",
@@ -524,7 +555,7 @@
     }
   },
   {
-    "name": "example 17, with a field no version defines in each of its objects",
+    "name": "example 18, with a field no version defines in each of its objects",
     "wire": {
       "type": "notice",
       "message": "the runtime refused the resize",
