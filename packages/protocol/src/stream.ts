@@ -95,7 +95,11 @@ export const StreamServerFrame = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("snapshot_end") }),
   /** Applied grid, ordered with the binary output that uses it. */
-  z.object({ type: z.literal("geometry"), ...Size }),
+  z.object({
+    type: z.literal("geometry"),
+    cols: z.int().min(1).max(1000),
+    rows: z.int().min(1).max(MAX_ROWS),
+  }),
   /** Input from a view that wasn't the driver was dropped, never queued. */
   z.object({ type: z.literal("input_dropped") }),
   /**

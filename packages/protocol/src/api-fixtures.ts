@@ -855,7 +855,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       { type: "snapshot_start", historyLines: 10_000 },
       { type: "snapshot_start" },
       { type: "snapshot_end" },
-      { type: "geometry", cols: 120, rows: 40 },
+      { type: "geometry", cols: 1, rows: 1 },
       { type: "input_dropped" },
       { type: "screen", alternate: true },
       { type: "exited", generation: 2, exit: { type: "exited", code: 0 } },

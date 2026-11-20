@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  MAX_ROWS,
   parseJson,
   StreamServerFrame,
   withoutEventReports,
@@ -129,7 +130,13 @@ function connect(
   term.open(element);
   notAFormField(term);
   loadRenderer(term);
-  let viewport = fit.proposeDimensions() ?? { cols: term.cols, rows: term.rows };
+  const measureViewport = () => {
+    const dimensions = fit.proposeDimensions();
+    if (dimensions === undefined) return undefined;
+    const { cols, rows } = dimensions;
+    return { cols: Math.max(2, Math.min(1000, cols)), rows: Math.max(2, Math.min(MAX_ROWS, rows)) };
+  };
+  let viewport = measureViewport() ?? { cols: term.cols, rows: term.rows };
   swallowReplies(term);
 
   let status: Status = { kind: "connecting" };
@@ -358,7 +365,7 @@ function connect(
   // Only X10 mouse reports come this way.
   const binary = term.onBinary((data) => input(latin1(data), false));
   const measure = () => {
-    const next = fit.proposeDimensions();
+    const next = measureViewport();
     if (!next || (next.cols === viewport.cols && next.rows === viewport.rows)) return;
     viewport = next;
     if (attached) send({ type: "resize", ...viewport });

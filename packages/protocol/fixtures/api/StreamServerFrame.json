@@ -95,13 +95,13 @@
     "name": "example 9",
     "wire": {
       "type": "geometry",
-      "cols": 120,
-      "rows": 40
+      "cols": 1,
+      "rows": 1
     },
     "parsed": {
       "type": "geometry",
-      "cols": 120,
-      "rows": 40
+      "cols": 1,
+      "rows": 1
     }
   },
   {
@@ -379,8 +379,8 @@
     "name": "example 9, with a field no version defines in each of its objects",
     "wire": {
       "type": "geometry",
-      "cols": 120,
-      "rows": 40,
+      "cols": 1,
+      "rows": 1,
       "fieldFromANewerDaemon": {
         "any": [
           1
@@ -389,8 +389,8 @@
     },
     "parsed": {
       "type": "geometry",
-      "cols": 120,
-      "rows": 40
+      "cols": 1,
+      "rows": 1
     }
   },
   {
