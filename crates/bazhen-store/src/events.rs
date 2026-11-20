@@ -1,6 +1,8 @@
 //! The event log: every change is an event appended with its projection in one transaction, read
 //! back in id order from a cursor, and retired once old unless a projection still points at it.
 
+use std::num::NonZeroU32;
+
 use bazhen_protocol::events::{ResetReason, TaskCreated, event_kind};
 use bazhen_protocol::ids::TaskId;
 use bazhen_protocol::record::Record;
@@ -166,8 +168,9 @@ impl StoredEvent {
     /// streams, in their order, so what a client mustn't see never leaves, whatever the values
     /// hold. Unlike the TypeScript daemon, which parses each value with its schema, a value is
     /// sent as stored: only a row no daemon would have written differs, one whose value has
-    /// another type, which TypeScript fails the stream on, or a title stored untrimmed, which it
-    /// sends trimmed.
+    /// another type, which TypeScript fails the stream on, a payload missing a key its type
+    /// streams, as `{"brief":"x"}` for `task.created`, which TypeScript fails the stream on and
+    /// this sends as `{}`, or a title stored untrimmed, which it sends trimmed.
     ///
     /// # Errors
     ///
@@ -342,7 +345,6 @@ struct Answer<'a, R> {
 struct Kept {
     #[serde(default)]
     request: Option<serde_json::Value>,
-    #[serde(default)]
     response: serde_json::Value,
 }
 
@@ -430,14 +432,14 @@ pub(crate) fn prune_batch(
     tx: &Transaction<'_>,
     referenced: &str,
     cutoff: &str,
-    limit: u32,
+    limit: NonZeroU32,
 ) -> rusqlite::Result<bool> {
     let from = tx.query_row("SELECT pruned_through FROM event_log", (), |row| {
         unsigned(row, 0)
     })?;
     let rows: Vec<(u64, String)> = tx
         .prepare("SELECT id, ts FROM events WHERE id > ? ORDER BY id LIMIT ?")?
-        .query_map((int(from)?, limit), |row| {
+        .query_map((int(from)?, limit.get()), |row| {
             Ok((unsigned(row, 0)?, row.get(1)?))
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -452,7 +454,7 @@ pub(crate) fn prune_batch(
         [int(through)?],
     )?;
     tx.execute("UPDATE event_log SET pruned_through = ?", [int(through)?])?;
-    Ok(young.is_none() && rows.len() == usize::try_from(limit).unwrap_or(usize::MAX))
+    Ok(young.is_none() && rows.len() == usize::try_from(limit.get()).unwrap_or(usize::MAX))
 }
 
 /// Column `idx` of `row`, an integer the schema keeps at zero or above.
@@ -704,7 +706,11 @@ mod tests {
         let ended = visit(&store);
         age(&store);
         let young = visit(&store);
-        assert!(!store.prune_batch(at(CUTOFF), 1000).unwrap());
+        assert!(
+            !store
+                .prune_batch(at(CUTOFF), NonZeroU32::new(1000).unwrap())
+                .unwrap()
+        );
         assert_eq!(ids(&store), [kept, young]);
         let epoch = store.reads().epoch().unwrap();
         let reads = store.reads();
@@ -736,7 +742,9 @@ mod tests {
                 )
                 .unwrap();
         }
-        store.prune_batch(at(CUTOFF), 1000).unwrap();
+        store
+            .prune_batch(at(CUTOFF), NonZeroU32::new(1000).unwrap())
+            .unwrap();
         assert_eq!(super::tests::ids(&store), [ids[1], ids[2]]);
     }
 
@@ -799,7 +807,10 @@ mod tests {
         let newest = visit(&store);
         age(&store);
         store
-            .prune_batch(at("2100-01-01T00:00:00.000Z"), 1000)
+            .prune_batch(
+                at("2100-01-01T00:00:00.000Z"),
+                NonZeroU32::new(1000).unwrap(),
+            )
             .unwrap();
         assert_eq!(ids(&store), [newest]);
         assert_eq!(append(&mut store, &created(task(1), None)), newest + 1);
@@ -816,7 +827,10 @@ mod tests {
         let epoch = store.reads().epoch().unwrap();
         let watched = ids[5];
         let mut faults = Vec::new();
-        while store.prune_batch(at(CUTOFF), 2).unwrap() {
+        while store
+            .prune_batch(at(CUTOFF), NonZeroU32::new(2).unwrap())
+            .unwrap()
+        {
             faults.push(store.reads().cursor_fault(&epoch, watched).unwrap());
         }
         let stale = Some(ResetReason::Stale);
@@ -888,6 +902,25 @@ mod tests {
         assert!(failed.is_err());
         let ran: Result<u64, OnceError> = store.once("k", "{}", |_| Ok(5));
         assert_eq!(ran.unwrap(), 5);
+    }
+
+    #[test]
+    fn refuses_to_replay_a_kept_answer_that_holds_no_response() {
+        let dir = TempDir::new("once-unanswered");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        store
+            .db
+            .execute(
+                "INSERT INTO idempotency_keys (key, response) VALUES ('k', '{\"request\":\"{}\"}')",
+                (),
+            )
+            .unwrap();
+        let replayed: Result<Option<u64>, OnceError> =
+            store.once("k", "{}", |_| panic!("a repeat runs nothing"));
+        assert!(
+            matches!(replayed, Err(OnceError::Unreadable { ref key, .. }) if key == "k"),
+            "{replayed:?}"
+        );
     }
 
     mod any_row {

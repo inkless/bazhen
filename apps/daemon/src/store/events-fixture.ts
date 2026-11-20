@@ -12,12 +12,32 @@ import { type SnapshotView, Store } from "./store.ts";
 /** Schema kinds that make a value other than the one stored, which a stream passing it on can't. */
 const REWRITES = new Set(["pipe", "transform", "default", "prefault", "catch"]);
 
-/** Whether `schema`, under any optional or nullable, rewrites the value it parses. */
-function rewrites(schema: z.core.$ZodType): boolean {
-  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
-    return rewrites(schema.unwrap());
+/** The schemas `schema` holds: a wrapper's inner one, an object's keys, an array's elements. */
+function members(schema: z.ZodType): readonly unknown[] {
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodNonOptional ||
+    schema instanceof z.ZodReadonly
+  ) {
+    return [schema.def.innerType];
   }
-  return !(schema instanceof z.ZodType) || REWRITES.has(schema.def.type);
+  if (schema instanceof z.ZodObject) return [...Object.values(schema.shape), schema.def.catchall];
+  if (schema instanceof z.ZodArray) return [schema.element];
+  if (schema instanceof z.ZodUnion) return schema.options;
+  if (schema instanceof z.ZodRecord) return [schema.keyType, schema.valueType];
+  if (schema instanceof z.ZodTuple) return [...schema.def.items, schema.def.rest];
+  if (schema instanceof z.ZodIntersection) return [schema.def.left, schema.def.right];
+  if (schema instanceof z.ZodLazy) return [schema.unwrap()];
+  return [];
+}
+
+/** Whether `schema`, or any schema it holds however deep, rewrites the value it parses. */
+function rewrites(schema: unknown, seen = new Set<unknown>()): boolean {
+  if (schema === undefined || seen.has(schema)) return false;
+  if (!(schema instanceof z.ZodType)) return true;
+  seen.add(schema);
+  return REWRITES.has(schema.def.type) || members(schema).some((m) => rewrites(m, seen));
 }
 
 /**

@@ -2,6 +2,7 @@
 //! and hourly after, a batch per writer job so writes aren't held behind a long first pass.
 
 use std::future::Future;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
@@ -12,7 +13,7 @@ use crate::writer::Writer;
 
 const KEPT: SignedDuration = SignedDuration::from_hours(30 * 24);
 const EVERY: Duration = Duration::from_hours(1);
-const BATCH: u32 = 1000;
+const BATCH: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 /// Runs `prune` now and every hour after until `stop`.
 pub(crate) async fn every_hour<F: Future<Output = ()>>(
@@ -124,14 +125,17 @@ mod tests {
     #[test]
     fn retires_every_event_past_30_days_across_batches_and_none_younger() {
         let dir = TempDir::new("retire");
-        let (writer, thread) = aged(&dir, 2 * BATCH + 1);
+        let (writer, thread) = aged(&dir, 2 * BATCH.get() + 1);
         let runtime = runtime();
         runtime.block_on(prune(
             &writer,
             Timestamp::now() - SignedDuration::from_hours(1),
             &CancellationToken::new(),
         ));
-        assert_eq!(remaining(&writer), usize::try_from(2 * BATCH + 2).unwrap());
+        assert_eq!(
+            remaining(&writer),
+            usize::try_from(2 * BATCH.get() + 2).unwrap()
+        );
         runtime.block_on(prune(&writer, Timestamp::now(), &CancellationToken::new()));
         assert_eq!(remaining(&writer), 1);
         thread.finish();

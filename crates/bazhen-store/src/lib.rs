@@ -169,7 +169,11 @@ impl Store {
     /// # Errors
     ///
     /// `SQLite`'s; nothing is retired then.
-    pub fn prune_batch(&mut self, cutoff: jiff::Timestamp, limit: u32) -> rusqlite::Result<bool> {
+    pub fn prune_batch(
+        &mut self,
+        cutoff: jiff::Timestamp,
+        limit: std::num::NonZeroU32,
+    ) -> rusqlite::Result<bool> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;

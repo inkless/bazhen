@@ -432,7 +432,10 @@ mod tests {
         assert_eq!(ids(&feed.next(store.reads()).unwrap()), [1, 2]);
         feed.written();
         store
-            .prune_batch("2020-01-01T00:00:00Z".parse().unwrap(), 1000)
+            .prune_batch(
+                "2020-01-01T00:00:00Z".parse().unwrap(),
+                std::num::NonZeroU32::new(1000).unwrap(),
+            )
             .unwrap();
         assert_eq!(
             feed.next(store.reads()).unwrap(),
