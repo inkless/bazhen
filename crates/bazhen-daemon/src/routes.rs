@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, OnceLock};
 
+use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
@@ -18,13 +19,15 @@ use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
 use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
-use bazhen_store::SnapshotError;
+use bazhen_protocol::ids::is_id;
+use bazhen_store::{CreateTaskError, OnceError, SnapshotError};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
 use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
 use crate::heartbeat::{HEARTBEAT, Heartbeat};
+use crate::tasks::{self, Refused};
 use crate::writer::Writer;
 
 /// Why the daemon stopped, as its last line says.
@@ -175,6 +178,78 @@ async fn stream(
         })
 }
 
+/// A task for the human, made once per idempotency key.
+async fn create_task(State(shared): State<Shared>, body: Bytes) -> Response {
+    let task = match tasks::asked(&body) {
+        Ok(task) => task,
+        Err(Refused::Invalid(message)) => {
+            return fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message);
+        }
+        Err(Refused::Assigns) => {
+            return fail(
+                StatusCode::BAD_REQUEST,
+                ErrorCode::Unsupported,
+                "this daemon can't assign a task yet",
+            );
+        }
+    };
+    match shared
+        .store
+        .run(move |store| store.create_task(&task))
+        .await
+    {
+        Ok(Ok(made)) => axum::Json(made).into_response(),
+        Ok(Err(err @ CreateTaskError::NoParent(_))) => {
+            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &err.to_string())
+        }
+        Ok(Err(err @ CreateTaskError::ParentClosed(_))) => {
+            fail(StatusCode::CONFLICT, ErrorCode::Conflict, &err.to_string())
+        }
+        Ok(Err(CreateTaskError::Once(OnceError::Conflict(key)))) => fail(
+            StatusCode::CONFLICT,
+            ErrorCode::Conflict,
+            &format!("idempotency key {key} was first used for a different request"),
+        ),
+        Ok(Err(err)) => internal(&err),
+        Err(err) => internal(&err),
+    }
+}
+
+/// What refuses a socket request for the credentials it presents, as `guardCallers` refuses one
+/// while no agent is live: this daemon runs none, so no token or agent id it is shown holds, and
+/// a caller that presents neither is the human. A Codex thread alone is ignored, as it is from a
+/// process outside every terminal.
+fn presented(headers: &HeaderMap) -> Option<String> {
+    if header(headers, "bazhen-agent-token").is_some() {
+        return Some("the agent token is no live agent's".to_owned());
+    }
+    let said = header(headers, "bazhen-agent-id").filter(|said| !said.is_empty())?;
+    Some(if is_id("agent", &said) {
+        format!("agent {said} must present its agent token")
+    } else {
+        format!("not an agent id: {said}")
+    })
+}
+
+/// Identifies every socket request under `/v1`, and every upgrade, before any route sees it, and
+/// refuses one whose credentials don't hold. Stop is the human's, so its refusal says so.
+async fn identified(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let upgrade = request.headers().contains_key("upgrade");
+    if !upgrade && path != "/v1" && !path.starts_with("/v1/") {
+        return next.run(request).await;
+    }
+    let Some(refusal) = presented(request.headers()) else {
+        return next.run(request).await;
+    };
+    let message = if !upgrade && path == "/v1/daemon/stop" {
+        format!("an agent can't stop the daemon: {refusal}")
+    } else {
+        refusal
+    };
+    fail(StatusCode::FORBIDDEN, ErrorCode::Forbidden, &message)
+}
+
 async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
@@ -186,10 +261,12 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/state", get(state))
         .route("/v1/events", get(stream))
+        .route("/v1/tasks", post(create_task))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
+        .layer(middleware::from_fn(identified))
 }
 
 /// The loopback HTTP listener's routes, behind the guard. The API is a router nested at `/v1`,
@@ -201,6 +278,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/health", get(health))
         .route("/state", get(state))
         .route("/events", get(stream))
+        .route("/tasks", post(create_task))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
@@ -677,5 +755,210 @@ mod tests {
             send(http(true), request("GET", "/", &[("host", HOST)])).0,
             404
         );
+    }
+
+    /// A socket router and an HTTP one over one store of their own, with what to finish them by.
+    fn over_a_store() -> (Router, Router, std::path::PathBuf, Finish) {
+        let dir = crate::testing::TempDir::new("routes-tasks");
+        let path = dir.path().join("bazhen.db");
+        let (store, thread) =
+            crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store);
+        let gate = Gate {
+            allow: guard::allowlists(7900, None, &[]),
+            pairing_required: false,
+        };
+        let http = http_router(shared.clone(), gate);
+        (
+            socket_router(shared),
+            http,
+            path,
+            Finish {
+                thread: Some(thread),
+                _dir: dir,
+            },
+        )
+    }
+
+    /// Finishes the writer, then removes its directory.
+    struct Finish {
+        thread: Option<crate::writer::Thread>,
+        _dir: crate::testing::TempDir,
+    }
+
+    impl Drop for Finish {
+        fn drop(&mut self) {
+            if let Some(thread) = self.thread.take() {
+                thread.finish();
+            }
+        }
+    }
+
+    fn post(path: &str, headers: &[(&str, &str)], body: &Value) -> Request {
+        let mut request = request("POST", path, headers);
+        *request.body_mut() = Body::from(serde_json::to_vec(body).unwrap());
+        request
+    }
+
+    const LOCAL: [(&str, &str); 2] = [("host", HOST), ("origin", "http://127.0.0.1:7900")];
+
+    #[test]
+    fn makes_a_task_for_the_human_once_per_key_on_either_listener() {
+        let (socket, http, _, _finish) = over_a_store();
+        let ask = json!({ "idempotencyKey": "a", "title": " Ship ", "brief": "b" });
+        let (status, made) = send(socket.clone(), post("/v1/tasks", &[], &ask));
+        assert_eq!(status, 200, "{made}");
+        let task = made["taskId"].as_str().unwrap().to_owned();
+        assert!(
+            bazhen_protocol::ids::TaskId::parse(&task).is_some(),
+            "{task}"
+        );
+        assert_eq!(
+            made,
+            json!({ "taskId": task, "assignmentId": null, "eventIds": [1] })
+        );
+        assert_eq!(
+            send(socket.clone(), post("/v1/tasks", &[], &ask)),
+            (200, made)
+        );
+        let child =
+            json!({ "idempotencyKey": "b", "title": "C", "brief": "b", "parentTaskId": task });
+        let (status, under) = send(http, post("/v1/tasks", &LOCAL, &child));
+        assert_eq!((status, &under["eventIds"]), (200, &json!([2])), "{under}");
+        let other = json!({ "idempotencyKey": "a", "title": "Ship", "brief": "else" });
+        assert_eq!(
+            send(socket, post("/v1/tasks", &[], &other)),
+            (
+                409,
+                refused(
+                    "conflict",
+                    "idempotency key a was first used for a different request"
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_task_it_cant_make_as_the_typescript_daemon_does() {
+        let (socket, _, path, _finish) = over_a_store();
+        let missing = "task_01900000000070008000000000000009";
+        let ask = |key: &str, more: Value| {
+            let mut body = json!({ "idempotencyKey": key, "title": "T", "brief": "b" });
+            body.as_object_mut()
+                .unwrap()
+                .extend(more.as_object().unwrap().clone());
+            post("/v1/tasks", &[], &body)
+        };
+        assert_eq!(
+            send(socket.clone(), ask("a", json!({ "parentTaskId": missing }))),
+            (404, refused("not_found", &format!("no task {missing}")))
+        );
+        let (_, made) = send(socket.clone(), ask("b", json!({})));
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("UPDATE tasks SET state = 'cancelled'", ())
+            .unwrap();
+        let under = json!({ "parentTaskId": made["taskId"] });
+        assert_eq!(
+            send(socket.clone(), ask("c", under)),
+            (409, refused("conflict", "the parent task is cancelled"))
+        );
+        let grant = json!({ "assign": { "agentId": "reviewer-1", "role": "worker" } });
+        assert_eq!(
+            send(socket.clone(), ask("d", grant)),
+            (
+                400,
+                refused("unsupported", "this daemon can't assign a task yet")
+            )
+        );
+        let (status, invalid) = send(socket, ask("e", json!({ "brief": "" })));
+        assert_eq!(
+            (status, &invalid["error"]),
+            (400, &json!("invalid_request"))
+        );
+    }
+
+    #[test]
+    fn refuses_on_the_socket_whoever_presents_an_agents_credentials_and_takes_the_rest_as_human() {
+        let agent = "agent_01900000000070008000000000000002";
+        let cases = [
+            (
+                "bazhen-agent-token",
+                "t".to_owned(),
+                "the agent token is no live agent's".to_owned(),
+            ),
+            (
+                "bazhen-agent-token",
+                String::new(),
+                "the agent token is no live agent's".to_owned(),
+            ),
+            (
+                "bazhen-agent-id",
+                agent.to_owned(),
+                format!("agent {agent} must present its agent token"),
+            ),
+            (
+                "bazhen-agent-id",
+                "me".to_owned(),
+                "not an agent id: me".to_owned(),
+            ),
+        ];
+        for (name, value, reason) in cases {
+            let presenting = [(name, value.as_str())];
+            for (method, path) in [
+                ("GET", "/v1/health"),
+                ("GET", "/v1/state"),
+                ("GET", "/v1/nowhere"),
+            ] {
+                assert_eq!(
+                    send(socket_router(shared()), request(method, path, &presenting)),
+                    (403, refused("forbidden", &reason)),
+                    "{name}: {value} on {path}"
+                );
+            }
+            let upgrade = [(name, value.as_str()), ("upgrade", "websocket")];
+            assert_eq!(
+                send(
+                    socket_router(shared()),
+                    request("GET", "/v1/events", &upgrade)
+                ),
+                (403, refused("forbidden", &reason))
+            );
+            assert_eq!(
+                send(
+                    socket_router(shared()),
+                    request("POST", "/v1/daemon/stop", &presenting)
+                ),
+                (
+                    403,
+                    refused(
+                        "forbidden",
+                        &format!("an agent can't stop the daemon: {reason}")
+                    )
+                )
+            );
+            assert_eq!(
+                send(
+                    socket_router(shared()),
+                    request("GET", "/elsewhere", &presenting)
+                )
+                .0,
+                404
+            );
+        }
+        for human in [
+            vec![],
+            vec![("bazhen-agent-id", "")],
+            vec![("bazhen-codex-thread", "0199-thread")],
+        ] {
+            assert_eq!(
+                send(
+                    socket_router(shared()),
+                    request("GET", "/v1/health", &human)
+                )
+                .0,
+                200
+            );
+        }
     }
 }

@@ -16,6 +16,7 @@ mod routes;
 mod run;
 mod serve;
 mod session;
+pub mod tasks;
 #[cfg(test)]
 mod testing;
 mod writer;
