@@ -240,6 +240,18 @@ describe("a viewer given the engine's snapshot draws what it would have drawn fr
     expect(await differencesInAViewer(stream, 80, 24)).toEqual(SAME);
   });
 
+  it("draws live input past the old scroll margin after a taller viewer attaches", async () => {
+    const viewer = terminal(80, 94);
+    try {
+      await written(viewer, snapshot(text("\x1b[?1049h"), 80, 48));
+      await written(viewer, "\x1b[H\x1b[90Btyped\x1b[91;6H");
+      const screen = viewer.buffer.active;
+      expect([screen.getLine(90)?.translateToString(true), screen.cursorY]).toEqual(["typed", 90]);
+    } finally {
+      viewer.dispose();
+    }
+  });
+
   it("for text drawn in DEC line drawing, with G1 still shifted in", async () => {
     const box = "\x1b(0lqqk\r\nx  x\r\nmqqj\x1b(B\r\n";
     const stream = text(`${box}\x1b)0\x0eabc\x0fdef\x0e`);
