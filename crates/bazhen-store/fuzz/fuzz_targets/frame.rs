@@ -1,7 +1,22 @@
 #![no_main]
 
+use std::collections::BTreeMap;
+
 use bazhen_store::{EVENT_KINDS, StoredEvent};
 use libfuzzer_sys::fuzz_target;
+use serde::de::IgnoredAny;
+use serde_derive::Deserialize;
+
+#[derive(Deserialize)]
+struct Frame {
+    event: Event,
+}
+
+#[derive(Deserialize)]
+struct Event {
+    // The store preserves raw JSON values. Only the top-level keys determine what is streamed.
+    payload: BTreeMap<String, IgnoredAny>,
+}
 
 // A stored row of any registered type holding any payload text, as a database another daemon or a
 // fault left could: framing it never panics, and a frame sends only the keys its type streams.
@@ -24,12 +39,13 @@ fuzz_target!(|bytes: &[u8]| {
         payload: String::from_utf8_lossy(payload).into_owned(),
     };
     if let Ok(frame) = event.frame() {
-        let frame: serde_json::Value = serde_json::from_str(&frame).expect("a frame is JSON");
-        let sent = frame["event"]["payload"]
-            .as_object()
-            .expect("a payload is an object");
+        let decoded: Frame = serde_json::from_str(&frame).expect("a frame has a payload object");
         assert!(
-            sent.keys().all(|k| kind.streamed.contains(&k.as_str())),
+            decoded
+                .event
+                .payload
+                .keys()
+                .all(|k| kind.streamed.contains(&k.as_str())),
             "{frame}"
         );
     }

@@ -36,6 +36,8 @@ version = "0.0.0"
 dependencies = [
  "bazhen-store",
  "libfuzzer-sys",
+ "serde",
+ "serde_derive",
  "serde_json",
 ]
 
