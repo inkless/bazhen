@@ -10,6 +10,8 @@ import {
   onAlternateScreen,
   screen,
   status,
+  terminalCursor,
+  terminalGrid,
   test,
   viewportTop,
 } from "./page.ts";
@@ -197,4 +199,125 @@ test("opens a late view on the alternate screen, with the history to scroll afte
   await expect.poll(() => screen(late, id)).toMatch(PROMPT);
   await scrollsBackToHistory(late, id);
   await late.close();
+});
+
+test("a passive web view follows wrapped and scrolled cells through a driver resize", async ({
+  page,
+  context,
+}) => {
+  const id = await shell(page);
+  const passive = await context.newPage();
+  await passive.setViewportSize({ width: 600, height: 500 });
+  await passive.goto(page.url());
+  await expect(status(passive)).toContainText("Viewing");
+  for (const width of [880, 1050]) {
+    const before = await terminalGrid(page, id);
+    await page.setViewportSize({ width, height: 720 });
+    await expect.poll(() => terminalGrid(page, id)).not.toBe(before);
+    await run(page, "seq 1 100; printf '%0300d\\n' 1; printf '\\033[3;7Hmarker'; read -r next");
+    await expect.poll(() => terminalGrid(passive, id)).toEqual(await terminalGrid(page, id));
+    await expect.poll(() => terminalCursor(passive, id)).toEqual([12, 2]);
+    const holder = await page.evaluate(async (terminal) => {
+      const response = await fetch(`/v1/terminals/${terminal}/screen`);
+      return String(Reflect.get(Object(await response.json()), "text")).trimEnd();
+    }, id);
+    const top = await viewportTop(passive, id);
+    expect((await screen(passive, id)).split("\n").slice(top).join("\n").trimEnd()).toEqual(holder);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => screen(page, id)).toMatch(PROMPT);
+  }
+});
+
+test("a passive window opens at the live bottom and scrolls into history past the grid edge", async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  const id = await shell(page);
+  await run(page, "seq 1 200");
+  await expect.poll(() => screen(page, id)).toContain("199\n200");
+  const context = await browser.newContext({
+    hasTouch: true,
+    reducedMotion: "reduce",
+    storageState: await page.context().storageState(),
+  });
+  const passive = await context.newPage();
+  await passive.setViewportSize({ width: 390, height: 540 });
+  await passive.goto(page.url());
+  const host = passive.locator(".terminal-host").first();
+  await expect.poll(() => terminalGrid(passive, id)).toEqual(await terminalGrid(page, id));
+  await expect
+    .poll(() =>
+      host.evaluate((el) => [
+        el.scrollTop > 0,
+        el.scrollHeight - el.clientHeight - el.scrollTop <= 1,
+      ]),
+    )
+    .toEqual([true, true]);
+  await host.hover({ position: { x: 15, y: 15 } });
+  await passive.mouse.wheel(0, -1600);
+  await expect.poll(() => atBottom(passive, id)).toBe(false);
+  await expect(status(page)).toHaveText("Driving");
+
+  // With room for every row, a vertical gesture goes straight to history.
+  await passive.setViewportSize({ width: 390, height: 1500 });
+  await expect
+    .poll(() =>
+      host.evaluate((el) => [el.scrollHeight <= el.clientHeight, el.scrollWidth > el.clientWidth]),
+    )
+    .toEqual([true, true]);
+  const zoomAllowed = await host.evaluate((el) => {
+    el.tabIndex = 0;
+    el.focus();
+    const view = el.ownerDocument.defaultView!;
+    view.dispatchEvent(new view.Event("focus"));
+    const bounds = el.getBoundingClientRect();
+    el.dispatchEvent(
+      new view.PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: bounds.right,
+        clientY: bounds.top + 10,
+      }),
+    );
+    el.querySelector(".scrollbar")!.dispatchEvent(
+      new view.PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: bounds.left + 10,
+        clientY: bounds.top + 10,
+      }),
+    );
+    return el.dispatchEvent(
+      new view.WheelEvent("wheel", {
+        ctrlKey: true,
+        deltaY: -100,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  expect(zoomAllowed).toBe(true);
+  await host.hover({ position: { x: 15, y: 15 } });
+  await passive.mouse.wheel(0, 1600);
+  await expect.poll(() => atBottom(passive, id)).toBe(true);
+  await passive.mouse.wheel(0, -200);
+  await expect.poll(() => atBottom(passive, id)).toBe(false);
+  const before = await viewportTop(passive, id);
+  const grid = await terminalGrid(passive, id);
+  const rows = Number(grid!.split("x")[1]);
+  const box = await passive.locator(".xterm-screen").first().boundingBox();
+  expect(box).not.toBeNull();
+  const cell = box!.height / rows;
+  const touch = await context.newCDPSession(passive);
+  const point = (dy: number) => [{ x: box!.x + 25, y: Math.max(0, box!.y) + 25 + dy }];
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(0) });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: point(6.5 * cell),
+  });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(() => viewportTop(passive, id)).toBe(before - 6);
+  await expect(status(page)).toHaveText("Driving");
+  await context.close();
 });

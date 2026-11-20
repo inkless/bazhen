@@ -284,6 +284,7 @@ export class HolderStream implements SnapshotStream {
   private readonly early: HolderEvent[] = [];
   private ended: StreamEnd | null = null;
   private readonly held = new Set<Held>();
+  private readonly resizeListeners: ((size: Size) => void)[] = [];
   private readonly dataListeners: ((bytes: Uint8Array) => void)[] = [];
   private readonly closeListeners: ((why: StreamEnd) => void)[] = [];
   private readonly respawnListeners: ((generation: number) => void)[] = [];
@@ -382,6 +383,7 @@ export class HolderStream implements SnapshotStream {
       }
       case "resized":
         this.size = { cols: event.body.cols, rows: event.body.rows };
+        for (const listener of this.resizeListeners) listener(this.size);
         return;
       case "gap":
         this.end("behind");
@@ -456,10 +458,27 @@ export class HolderStream implements SnapshotStream {
     this.control.write(bytes);
   }
 
+  onResized(cb: (size: Size) => void): void {
+    this.resizeListeners.push(cb);
+  }
+
   async resize(size: Size): Promise<void> {
     if (this.ended !== null) throw new Error("the stream has closed");
     await this.control.resize(size);
-    this.size = size;
+    if (this.reader === null) {
+      this.size = size;
+      return;
+    }
+    // The holder applies the resize before flushing the writer's ok. A subsequent
+    // stats reply on the reader follows its resized event and all output before it,
+    // even when the byte offset stays the same. A failed ioctl produces no event.
+    await this.reader.stats();
+    if (!this.flowing) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (this.size.cols !== size.cols || this.size.rows !== size.rows) {
+      throw new Error(
+        `holder reports ${this.size.cols}x${this.size.rows} after resize to ${size.cols}x${size.rows}`,
+      );
+    }
   }
 
   /**

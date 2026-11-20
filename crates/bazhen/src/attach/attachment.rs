@@ -269,6 +269,7 @@ impl Attachment {
             StreamServerFrame::Error { message } => vec![Effect::End(Ending::Failed(message))],
             StreamServerFrame::Notice { message } => vec![Effect::Note(message)],
             StreamServerFrame::Pong
+            | StreamServerFrame::Geometry { .. }
             | StreamServerFrame::SnapshotStart { .. }
             | StreamServerFrame::SnapshotEnd
             | StreamServerFrame::InputDropped

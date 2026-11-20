@@ -104,7 +104,8 @@ function useAppViewport(): void {
     const root = document.documentElement;
     const focus = {
       events: document,
-      inTerminal: () => document.activeElement?.closest(".terminal-host") != null,
+      inTerminal: () =>
+        document.activeElement?.matches(".terminal-host .xterm-helper-textarea") === true,
     };
     return followViewport(window, focus, (viewport) => {
       root.style.setProperty("--app-top", `${viewport.top}px`);

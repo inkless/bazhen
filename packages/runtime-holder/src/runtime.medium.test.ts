@@ -769,6 +769,7 @@ async function attachable(
     readonly hello?: Partial<HolderHelloReply>;
     /** Sent ahead of the attach's snapshot, as events the holder had queued first. */
     readonly beforeSnapshot?: (holder: FakeHolder) => void;
+    readonly holdStats?: boolean;
   } = {},
 ) {
   const root = privateRoot();
@@ -782,6 +783,8 @@ async function attachable(
     } else if (request.type === "subscribe") {
       ok(holder, request);
       after(holder);
+    } else if (request.type === "stats") {
+      if (!options.holdStats) holder.send({ type: "stats", id: request.id, body: FAKE_STATS });
     } else if (request.type !== "input") ok(holder, request);
   };
   const { runtime, terminals } = startingFakes(
@@ -1178,6 +1181,44 @@ describe("HolderRuntime: streams", () => {
       stream.onClose((why) => whys.push(why));
     }
     await expect.poll(() => whys.toSorted()).toEqual(["behind", "ended"]);
+  });
+
+  it("waits for the reader to report the applied size after the writer accepts a resize", async () => {
+    const { runtime, ref, fake } = await attachable(5, () => {}, 0, { holdStats: true });
+    const { stream } = await runtime.attach(ref, null);
+    const reader = fake.connections.find((c) => c.requests.some((r) => r.type === "subscribe"))!;
+    const next = { cols: 90, rows: 35 };
+    let applied = false;
+    const resize = stream.resize(next).then(() => {
+      applied = true;
+    });
+    await expect
+      .poll(() => fake.connections.flatMap((c) => c.requests).map((r) => r.type))
+      .toContain("resize");
+    // The writer has consumed its ok by the time it has answered the following snapshot.
+    await stream.snapshot();
+    expect(applied).toBe(false);
+    await expect.poll(() => reader.requests.map((r) => r.type)).toContain("stats");
+    const barrier = reader.requests.find((r) => r.type === "stats")!;
+    reader.holder.send(
+      { type: "resized", body: { ...next, offset: 5 } },
+      { type: "stats", id: barrier.id, body: FAKE_STATS },
+    );
+
+    await resize;
+    expect(stream.size).toEqual(next);
+    stream.close();
+  });
+
+  it("reports the confirmed reader geometry if an accepted resize produced no change", async () => {
+    const { runtime, ref } = await attachable();
+    const { stream } = await runtime.attach(ref, null);
+    const previous = stream.size;
+    await expect(stream.resize({ cols: 90, rows: 35 })).rejects.toThrow(
+      `holder reports ${previous.cols}x${previous.rows} after resize to 90x35`,
+    );
+    expect(stream.size).toEqual(previous);
+    stream.close();
   });
 
   it("sends every stream's input and resize on one writer connection, apart from its reader", async () => {

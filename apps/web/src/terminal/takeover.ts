@@ -11,6 +11,13 @@ const TAP_SLOP_PX = 10;
 export function attachTakeover(element: HTMLElement, engage: () => void): () => void {
   let touchStart: { x: number; y: number } | null = null;
   const down = (event: PointerEvent) => {
+    const bounds = element.getBoundingClientRect();
+    if (
+      event.clientX >= bounds.left + element.clientLeft + element.clientWidth ||
+      event.clientY >= bounds.top + element.clientTop + element.clientHeight ||
+      (event.target instanceof Element && event.target.closest(".scrollbar"))
+    )
+      return;
     if (event.pointerType !== "touch") engage();
     else touchStart = { x: event.clientX, y: event.clientY };
   };
@@ -24,13 +31,19 @@ export function attachTakeover(element: HTMLElement, engage: () => void): () => 
   element.addEventListener("pointerdown", down);
   element.addEventListener("pointerup", up);
   element.addEventListener("pointercancel", cancel);
-  element.addEventListener("focusin", engage);
-  window.addEventListener("focus", engage);
+  const focused = (event: FocusEvent) => {
+    if (event.target !== element) engage();
+  };
+  element.addEventListener("focusin", focused);
+  const windowFocused = () => {
+    if (document.activeElement !== element) engage();
+  };
+  window.addEventListener("focus", windowFocused);
   return () => {
     element.removeEventListener("pointerdown", down);
     element.removeEventListener("pointerup", up);
     element.removeEventListener("pointercancel", cancel);
-    element.removeEventListener("focusin", engage);
-    window.removeEventListener("focus", engage);
+    element.removeEventListener("focusin", focused);
+    window.removeEventListener("focus", windowFocused);
   };
 }

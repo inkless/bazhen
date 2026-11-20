@@ -238,6 +238,8 @@ export class ProcessState extends Error {
 export interface RuntimeStream {
   /** The size the client attached at; the runtime picks it when none was asked for. */
   readonly size: Size;
+  /** Applied geometry, in output order, for runtimes that publish resize events. */
+  onResized?(cb: (size: Size) => void): void;
   onData(cb: (bytes: Uint8Array) => void): void;
   /**
    * The stream is over: its consumer closed it, the terminal ended, or the runtime lost its

@@ -6,6 +6,7 @@ import {
   type ProgramExit,
   type RuntimeRef,
   type Snapshot,
+  type Size,
   type TerminalId,
 } from "@bazhen/core";
 import { FakeRuntime, type FakeRuntimeOptions } from "@bazhen/core/testing";
@@ -16,6 +17,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
+import { runtimeScreen } from "./screen-source.ts";
 import { replay } from "../testing/browser-terminal.ts";
 import {
   HUB_DEFAULTS,
@@ -340,6 +342,7 @@ describe("terminal hub", () => {
     await hub.join(rt.ref, late, size);
     expect(order).toEqual([
       "snapshot_start",
+      "geometry",
       "lease",
       "bytes",
       "snapshot_end",
@@ -686,7 +689,7 @@ describe("terminal hub", () => {
     const before = leaseFrames();
     laptop.leave();
     await expect.poll(() => rt.sizes.at(-1)).toEqual({ cols: 60, rows: 50 });
-    expect([leaseFrames() - before, phone.frames.at(-1)]).toEqual([
+    expect([leaseFrames() - before, phone.frames.findLast((f) => f.type === "lease")]).toEqual([
       1,
       { type: "lease", driver: false, driven: false, epoch: 5 },
     ]);
@@ -1208,6 +1211,32 @@ class AlteredRuntime extends FakeRuntime {
   }
 }
 
+/** A holder reader reports the applied grid independently of the writer's resize request. */
+class ReportingRuntime extends FakeRuntime {
+  reportSize: (actual: Size) => void = () => {};
+  private readonly appliedSize: Size | undefined;
+  constructor(appliedSize?: Size) {
+    super({ attach: "snapshot" });
+    this.appliedSize = appliedSize;
+  }
+  override async attach(...args: Parameters<FakeRuntime["attach"]>) {
+    const attached = await super.attach(...args);
+    assert(attached.kind === "snapshot");
+    return {
+      ...attached,
+      stream: Object.assign(attached.stream, {
+        onResized: (cb: (actual: Size) => void) => {
+          this.reportSize = cb;
+        },
+        resize: async () => {
+          if (!this.appliedSize) throw new Error("writer lost");
+          this.reportSize(this.appliedSize);
+        },
+      }),
+    };
+  }
+}
+
 /** A terminal on a snapshot runtime with one view open. */
 async function snapshotTerminal(
   runtime = new FakeRuntime({ attach: "snapshot" }),
@@ -1244,6 +1273,84 @@ async function openHeld(
 }
 
 describe("terminal hub: snapshot streams", () => {
+  it("attaches with a notice and the applied grid when the writer refuses a resize", async () => {
+    const o = await snapshotTerminal(new ReportingRuntime());
+    const late = viewer();
+    await o.hub.join(o.ref, late.v, { cols: 120, rows: 48 });
+    expect(late.frames).toContainEqual({ type: "notice", message: "resize failed: writer lost" });
+    expect(late.frames).toContainEqual({ type: "geometry", ...size });
+    expect(late.frames.at(-1)?.type).toBe("attached");
+  });
+
+  it("announces the reader's applied geometry once when the writer accepts a resize", async () => {
+    const next = { cols: 120, rows: 48 };
+    const o = await snapshotTerminal(new ReportingRuntime(next));
+    await o.hub.join(o.ref, viewer().v, next);
+    expect(o.first.frames.filter((f) => f.type === "geometry")).toEqual([
+      { type: "geometry", ...size },
+      { type: "geometry", ...next },
+    ]);
+  });
+
+  it("takes a fresh snapshot when the reader reports new geometry mid-capture", async () => {
+    const runtime = new ReportingRuntime();
+    const o = await snapshotTerminal(runtime);
+    const { late, joined, hold } = await openHeld(o);
+    hold.take();
+    const next = { cols: 64, rows: 12 };
+    runtime.reportSize(next);
+    o.emit("after resize");
+    hold.release();
+    await joined;
+    expect(late.seen).toHaveLength(1);
+    expect(await screenOf(late.seen)).toContain("after resize");
+    expect(late.frames.filter((f) => f.type === "geometry")).toEqual([
+      { type: "geometry", ...next },
+    ]);
+  });
+
+  it("delivers applied geometry between the surrounding bytes while a snapshot is in flight", async () => {
+    const runtime = new ReportingRuntime();
+    const o = await snapshotTerminal(runtime);
+    const late = slowViewer();
+    const wire: string[] = [];
+    const joined = o.hub.join(
+      o.ref,
+      {
+        ...late.v,
+        notify: (frame) => {
+          wire.push(frame.type);
+          late.v.notify(frame);
+        },
+        send: (bytes, done) => {
+          wire.push(Buffer.from(bytes).toString());
+          late.v.send(bytes, done);
+        },
+      },
+      size,
+    );
+    await vi.waitFor(() => expect(late.inFlight()).toBe(1));
+    o.emit("before");
+    runtime.reportSize({ cols: 60, rows: 40 });
+    o.emit("after");
+    late.write();
+    await joined;
+    expect(wire.slice(-4)).toEqual(["before", "geometry", "after", "attached"]);
+  });
+
+  it("sizes the runtime before asking where a taller view's snapshot ends", async () => {
+    const o = await snapshotTerminal();
+    const hold = o.r.holdSnapshots(o.ref);
+    const taller = { cols: 80, rows: 40 };
+    const joined = o.hub.join(o.ref, viewer().v, taller);
+    await vi.waitFor(() => expect(hold.asked()).toBe(1));
+    const sizesAtSnapshot = [...o.r.clients(o.ref).resizes];
+    hold.take();
+    hold.release();
+    await joined;
+    expect(sizesAtSnapshot).toEqual([taller]);
+  });
+
   it("opens a view on output from both sides of the point its snapshot was taken at", async () => {
     const o = await snapshotTerminal();
     o.emit("one ");
@@ -1303,6 +1410,20 @@ describe("terminal hub: snapshot streams", () => {
     }
     await expect.poll(() => history.written.length).toBe(2);
     expect(snapshot.written).toEqual([]);
+  });
+
+  it("discards the opening snapshot on resize at an unchanged byte offset", async () => {
+    const rt = await fakeRuntime("history", { attach: "snapshot" });
+    const attached = await rt.runtime.attach(rt.ref, size);
+    assert(attached.kind === "snapshot");
+    const source = runtimeScreen({ ...attached, vt: Buffer.from("old geometry") });
+    source.resize({ cols: 120, rows: 48 });
+    const shown = await source.snapshot({
+      generation: attached.generation,
+      offset: attached.offset,
+    });
+    expect(shown.vt).toEqual(attached.vt);
+    attached.stream.close();
   });
 
   it("opens the first view on the snapshot it attached on, asking for no other", async () => {

@@ -88,6 +88,7 @@ type Hook =
   | "background"
   | "foregrounds"
   | "fontFamily"
+  | "cursor"
   | "grid";
 
 /**
@@ -153,10 +154,12 @@ export async function terminalFontFamily(page: Page): Promise<string | null> {
 }
 
 /** The terminal's columns and rows, `120x40`, which follow the cell its font measures. */
-export async function terminalGrid(page: Page): Promise<string | null> {
-  const grid = await read(page, "grid");
+export async function terminalGrid(page: Page, terminalId?: string): Promise<string | null> {
+  const grid = await read(page, "grid", terminalId);
   return typeof grid === "string" ? grid : null;
 }
+
+export const terminalCursor = (page: Page, terminalId: string) => read(page, "cursor", terminalId);
 
 /** Each of the page's bundled terminal faces, with whether it has loaded, failed or not started. */
 export const bundledFaces = (page: Page): Promise<string[]> =>

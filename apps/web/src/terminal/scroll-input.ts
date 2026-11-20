@@ -45,18 +45,61 @@ export function attachScrollInput(
   term: Terminal,
   route: () => WheelAction,
   input: (bytes: Uint8Array<ArrayBuffer>) => void,
+  clipped: () => boolean,
 ): ScrollInput {
   const arrow = (up: boolean) => {
     const keys = term.modes.applicationCursorKeysMode ? ARROWS.application : ARROWS.normal;
     return up ? keys.up : keys.down;
   };
-  const rowHeight = () => element.clientHeight / term.rows;
+  const screen = element.querySelector<HTMLElement>(".xterm-screen") ?? element;
+  const rowHeight = () => Math.max(1, screen.getBoundingClientRect().height / term.rows);
+  let pinned = true;
+  const rememberPosition = () => {
+    pinned = element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+  };
+  const follow = new ResizeObserver(() => {
+    if (pinned) element.scrollTop = element.scrollHeight;
+  });
+  follow.observe(screen);
+  follow.observe(element);
+  element.addEventListener("scroll", rememberPosition);
+
+  // The outer viewport shows part of one grid. At its edge the remaining travel
+  // scrolls xterm's history. On the way back, show the live grid before panning down it.
+  const pan = (dx: number, dy: number) => {
+    if (!clipped()) return dy;
+    element.scrollLeft += dx;
+    const buffer = term.buffer.active;
+    const history = (buffer.baseY - buffer.viewportY) * rowHeight();
+    if (dy > 0 && history > 0) {
+      if (dy < history) return dy;
+      term.scrollToBottom();
+      dy -= history;
+    }
+    const before = element.scrollTop;
+    element.scrollTop += dy;
+    rememberPosition();
+    return dy - (element.scrollTop - before);
+  };
 
   const wheelSteps = new ScrollSteps();
   // Caught before xterm.js sees it, which its own wheel hook can't: returning false there still
   // scrolls the scrollback, which under tmux's alternate screen isn't the program's. On a real
   // alternate buffer, xterm.js would send arrow keys as typed input, taking the lease.
   const wheel = (event: WheelEvent) => {
+    if (clipped()) {
+      if (event.ctrlKey) {
+        event.stopPropagation();
+        return;
+      }
+      const row = rowHeight();
+      const unit = pixelsPerUnit(event.deltaMode, row, element.clientHeight / row);
+      const remaining = pan(event.deltaX * unit, event.deltaY * unit);
+      term.scrollLines(-wheelSteps.add(-remaining, row));
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const action = route();
     if (action === "app" || action === "local") return;
     event.preventDefault();
@@ -69,7 +112,6 @@ export function attachScrollInput(
   };
 
   // xterm.js 6 does nothing on a swipe: finger travel becomes the same steps a wheel makes.
-  const screen = element.querySelector<HTMLElement>(".xterm-screen") ?? element;
   const touchSteps = new ScrollSteps();
   const fling = new Fling();
   let lastY: number | null = null;
@@ -124,12 +166,16 @@ export function attachScrollInput(
     };
     const frame = (now: number) => {
       // Every frame, not only one that moves a row: a glide at the edge with speed to spare ends.
-      if (action === "local" && atEdge()) {
+      if (
+        action === "local" &&
+        atEdge() &&
+        !(clipped() && element.scrollHeight > element.clientHeight)
+      ) {
         gliding = null;
         return;
       }
       const { pixels, done } = motion.advance(now);
-      const steps = glideSteps(touchSteps.add(pixels, rowHeight()), action);
+      const steps = glideSteps(touchSteps.add(-pan(0, -pixels), rowHeight()), action);
       const going = !done && route() === action && scrollBy(steps, action, clientY);
       gliding = going ? requestAnimationFrame(frame) : null;
     };
@@ -155,7 +201,8 @@ export function attachScrollInput(
   const touchMove = (e: TouchEvent) => {
     const touch = e.touches[0];
     if (lastY === null || touch === undefined || e.touches.length !== 1) return;
-    const steps = touchSteps.add(touch.clientY - lastY, rowHeight());
+    const remaining = pan(lastX - touch.clientX, lastY - touch.clientY);
+    const steps = touchSteps.add(-remaining, rowHeight());
     lastY = touch.clientY;
     lastX = touch.clientX;
     fling.track(e.timeStamp, touch.clientY);
@@ -194,6 +241,8 @@ export function attachScrollInput(
       stopGlide();
       element.removeEventListener("wheel", interrupt, { capture: true });
       element.removeEventListener("keydown", interrupt, { capture: true });
+      follow.disconnect();
+      element.removeEventListener("scroll", rememberPosition);
       element.removeEventListener("wheel", wheel, { capture: true });
       screen.removeEventListener("touchstart", touchStart);
       screen.removeEventListener("touchmove", touchMove);

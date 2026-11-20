@@ -43,7 +43,41 @@ async function numbers(view: View): Promise<number[]> {
   });
 }
 
+/** Replays a taller attachment and compares its relative redraw with the live holder. */
+async function tallerAttach(region: string) {
+  const { agentId, terminalId } = await daemon.program([
+    "sh",
+    "-c",
+    `while [ "$(stty size)" != "5 40" ]; do sleep 0.05; done; stty -echo; seq 20; printf '${region}\\033[5;1Hready'; read -r line; printf '\\033[1A\\rredraw\\033[2B\\r\\ninput\\033[4;1H\\r\\nfinished'; sleep 600`,
+  ]);
+  const first = await opened(terminalId, "interactive", { cols: 40, rows: 5 });
+  await expect.poll(() => daemon.screen(agentId)).toContain("ready");
+  const taller = { cols: 40, rows: 10 };
+  const driver = await opened(terminalId, "interactive", taller);
+  await driver.drive();
+  driver.type("\r");
+  await expect.poll(() => driver.output()).toContain("finished");
+  const shown = await replay(driver.received(), taller);
+  const holder = {
+    screen: captured(await daemon.screen(agentId)),
+    cursor: await daemon.cursor(agentId),
+  };
+  first.close();
+  driver.close();
+  return { view: { screen: shown.screen, cursor: shown.cursor }, holder };
+}
+
 describe("what a view shows when it opens", () => {
+  it("restores a full scroll region after a taller interactive view sizes an existing stream", async () => {
+    const { view, holder } = await tallerAttach("");
+    expect(view).toEqual(holder);
+  });
+
+  it("restores a resized partial scroll region when a taller interactive view joins", async () => {
+    const { view, holder } = await tallerAttach("\\033[2;4r");
+    expect(view).toEqual(holder);
+  });
+
   it("shows all the history the terminal holds above the screen, with the cursor where it is", async () => {
     const { agentId, terminalId } = await daemon.program([
       "sh",

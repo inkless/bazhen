@@ -100,6 +100,9 @@ impl Engine {
     /// counted as [`Stats::history_rows`](crate::Stats) counts them: rows, not logical lines,
     /// which a holder reporting `dropped_lines` must say or convert.
     ///
+    /// A full scroll region uses the viewer's full height. A passive native CLI at a different
+    /// size can wrap and scroll differently from the holder.
+    ///
     /// Divergences a snapshot can't avoid, from state no VT sets in a fresh terminal or a reflow
     /// leaves behind:
     /// - A cursor outside the scroll region under DECOM comes back clamped into it.

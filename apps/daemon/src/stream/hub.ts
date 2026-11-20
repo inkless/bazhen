@@ -185,6 +185,7 @@ interface Watched {
   /** A resize in flight, and the latest size asked for while it runs. */
   resizing?: Promise<void>;
   wanted?: Size;
+  readonly applied: (size: Size) => void;
 }
 
 /**
@@ -254,7 +255,20 @@ export class TerminalHub {
       this.recordExit(watched.terminal, exited);
       entry.queue?.push({ kind: "exited", exit: exited });
     }
-    const taking = watched.screen.snapshot(from);
+    const replacing = resumed ? resumes.attachmentId : undefined;
+    if (!opened) this.fitTo(watched, replacing);
+    const snapshot = async () => {
+      for (;;) {
+        while (watched.resizing !== undefined) await watched.resizing;
+        if (!watched.viewers.has(id)) throw new ViewEnded();
+        const geometry = watched.size;
+        const queued = entry.queue?.length ?? 0;
+        const shown = await watched.screen.snapshot(watched.at);
+        if (geometry === watched.size && watched.resizing === undefined)
+          return { ...shown, geometry, queued };
+      }
+    };
+    const taking = snapshot();
     this.log.started(id, watched.terminal, viewer.mode);
     const shown = await taking.catch((err: unknown) => {
       if (!watched.viewers.has(id)) throw new ViewEnded();
@@ -262,7 +276,7 @@ export class TerminalHub {
       throw err;
     });
     if (!watched.viewers.has(id)) throw new ViewEnded();
-    const rest = seam(entry.queue ?? [], from, watched.at, shown.at);
+    const rest = seam(entry.queue ?? [], from, watched.at, shown.at, shown.queued);
     if (rest === null) {
       this.end(watched, id, "attach_failed");
       throw new ViewRefused("this terminal's screen could not be read; reopen it");
@@ -282,6 +296,7 @@ export class TerminalHub {
     }
     // Not before: a view clears its screen for a snapshot, and one turned away would lose it.
     viewer.notify({ type: "snapshot_start", historyLines: watched.historyLines });
+    viewer.notify({ type: "geometry", ...shown.geometry });
     viewer.notify(leaseFrame(watched, id));
     await this.sendSnapshot(watched, id, entry, shown.vt);
     // The view may have left, or the terminal closed, while its snapshot was sent.
@@ -292,8 +307,6 @@ export class TerminalHub {
     for (const item of entry.queue ?? []) pass(viewer, item);
     delete entry.queue;
     entry.held = 0;
-    // The most recent interactive view sizes the terminal while nobody drives it.
-    if (!opened) this.fitTo(watched);
     // Last: a view may send input and engage as soon as it is told, and they need the handle
     // returned below.
     viewer.notify({
@@ -340,6 +353,7 @@ export class TerminalHub {
           attached.kind === "history"
             ? emulatorScreen(attached, () => TERMINAL_COLOURS[this.log.theme(ref.terminalId)])
             : runtimeScreen(attached),
+        applied: (actual) => deliver({ kind: "geometry", size: { ...actual } }),
         historyLines: attached.historyLines,
         at:
           attached.kind === "history"
@@ -351,7 +365,10 @@ export class TerminalHub {
         lease: { holder: null, epoch: this.log.epoch(ref.terminalId) },
       };
       const deliver = (item: Held) => {
-        if (item.kind !== "exited") watched.screen.write(item.bytes);
+        if (item.kind === "geometry") {
+          watched.size = item.size;
+          watched.screen.resize(item.size);
+        } else if (item.kind !== "exited") watched.screen.write(item.bytes);
         for (const [id, entry] of watched.viewers) {
           if (entry.queue) {
             entry.queue.push(item);
@@ -363,6 +380,7 @@ export class TerminalHub {
           }
         }
       };
+      stream.onResized?.(watched.applied);
       let sent = false;
       stream.onData((bytes) => {
         // Its first output shows the client works; parked ones before it may go. It may be
@@ -582,11 +600,8 @@ export class TerminalHub {
   }
 
   /** The driver's size, or with no driver the most recent interactive view's (§5.4). */
-  private fitTo(watched: Watched): void {
-    const views = [...watched.viewers.entries()];
-    const driver = views.find(([id]) => id === watched.lease.holder)?.[1];
-    const latest = views.findLast(([, e]) => e.viewer.mode === "interactive")?.[1];
-    const target = driver ?? latest;
+  private fitTo(watched: Watched, replaced?: AttachmentId): void {
+    const target = sizeSetter(watched, replaced);
     if (target !== undefined) this.applySize(watched, target.size);
   }
 
@@ -613,8 +628,7 @@ export class TerminalHub {
       // Before the client's redraw at the new size: the PTY resize that prompts it is the last
       // step of the stream's resize, and no output is delivered before this continuation runs.
       .then(() => {
-        watched.size = next;
-        watched.screen.resize(next);
+        if (watched.stream.onResized === undefined) watched.applied(next);
       })
       .catch((err: unknown) => {
         for (const entry of watched.viewers.values()) {
@@ -643,6 +657,15 @@ export class TerminalHub {
   }
 }
 
+/** The driver or, once a resumed attachment leaves, the newest interactive view. */
+function sizeSetter(watched: Watched, replaced?: AttachmentId): Entry | undefined {
+  const views = [...watched.viewers.entries()].filter(([id]) => id !== replaced);
+  return (
+    views.find(([id]) => id === watched.lease.holder)?.[1] ??
+    views.findLast(([, entry]) => entry.viewer.mode === "interactive")?.[1]
+  );
+}
+
 const RESPAWN_BYTES = Buffer.from(RESPAWN_RESET);
 
 /** A held item, to a view whose snapshot is done: output as its bytes, an exit as its frame. */
@@ -650,7 +673,8 @@ function pass(viewer: Viewer, item: Held): void {
   if (item.kind === "exited") {
     const { generation, status } = item.exit;
     viewer.notify({ type: "exited", generation, exit: status });
-  } else viewer.send(item.bytes);
+  } else if (item.kind === "geometry") viewer.notify({ type: "geometry", ...item.size });
+  else viewer.send(item.bytes);
 }
 
 const digest = (token: string) => createHash("sha256").update(token).digest();

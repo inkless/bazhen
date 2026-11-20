@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  MAX_ROWS,
   parseJson,
   StreamServerFrame,
   withoutEventReports,
@@ -129,7 +130,13 @@ function connect(
   term.open(element);
   notAFormField(term);
   loadRenderer(term);
-  fit.fit();
+  const measureViewport = () => {
+    const dimensions = fit.proposeDimensions();
+    if (dimensions === undefined) return undefined;
+    const { cols, rows } = dimensions;
+    return { cols: Math.max(2, Math.min(1000, cols)), rows: Math.max(2, Math.min(MAX_ROWS, rows)) };
+  };
+  let viewport = measureViewport() ?? { cols: term.cols, rows: term.rows };
   swallowReplies(term);
 
   let status: Status = { kind: "connecting" };
@@ -216,8 +223,10 @@ function connect(
     epoch = undefined;
     heartbeat = new Heartbeat();
     socket.binaryType = "arraybuffer";
+    let requested = viewport;
     socket.addEventListener("open", () => {
-      const { cols, rows } = term;
+      requested = viewport;
+      const { cols, rows } = requested;
       send({
         type: "hello",
         protocolId: PAGE_PROTOCOL,
@@ -240,16 +249,19 @@ function connect(
       if (f.type === "snapshot_start") {
         // The view is redrawn from the top: a glide would carry on through the new screen.
         scroll.stopGlide();
-        startSnapshot(term, f);
+        term.write("", () => startSnapshot(term, f));
+      } else if (f.type === "geometry") {
+        term.write("", () => term.resize(f.cols, f.rows));
       } else if (f.type === "snapshot_end") backoff.reset();
       else if (f.type === "screen") daemonSaidAlternate = f.alternate;
       else if (f.type === "attached") {
         attached = true;
+        if (requested !== viewport) send({ type: "resize", ...viewport });
         declare();
         // A view focused before its socket opened saw no focus event to claim the lease with.
         // One coming back from a lost socket doesn't take the lease from a view that took it
         // meanwhile: only the user's next deliberate input does.
-        const claims = wantsToDrive || element.contains(document.activeElement);
+        const claims = wantsToDrive || term.textarea === document.activeElement;
         if (claims && !(returning && driven)) engage();
         wantsToDrive = returning = false;
         const token = f.resumeToken;
@@ -312,13 +324,16 @@ function connect(
     event.preventDefault();
     return false;
   });
+  const clipped = () => !driving && (term.cols > viewport.cols || term.rows > viewport.rows);
   const route = () =>
-    wheelAction({
-      mouseTracking: term.modes.mouseTrackingMode !== "none",
-      alternate: alternate(),
-      kind,
-    });
-  const scroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false));
+    clipped()
+      ? "local"
+      : wheelAction({
+          mouseTracking: term.modes.mouseTrackingMode !== "none",
+          alternate: alternate(),
+          kind,
+        });
+  const scroll = attachScrollInput(element, term, route, (bytes) => input(bytes, false), clipped);
   const target: BarTarget = {
     kind,
     press: (key) =>
@@ -330,7 +345,7 @@ function connect(
         }),
       ),
     focus: () => term.focus(),
-    holdsFocus: () => element.contains(document.activeElement),
+    holdsFocus: () => term.textarea === document.activeElement,
   };
   const unregister = bar.register(target);
   const unguard = offersInstall(thisPlatform())
@@ -348,8 +363,13 @@ function connect(
   });
   // Only X10 mouse reports come this way.
   const binary = term.onBinary((data) => input(latin1(data), false));
-  const resize = term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
-  const observer = new ResizeObserver(() => fit.fit());
+  const measure = () => {
+    const next = measureViewport();
+    if (!next || (next.cols === viewport.cols && next.rows === viewport.rows)) return;
+    viewport = next;
+    if (attached) send({ type: "resize", ...viewport });
+  };
+  const observer = new ResizeObserver(measure);
   observer.observe(element);
   const detachTakeover = attachTakeover(element, engage);
   // The bar types into the terminal the user last touched, not one the window's focus reached.
@@ -369,7 +389,10 @@ function connect(
   });
   let closed = false;
   void lateFont?.then(() => {
-    if (!closed) remeasure(term, fit, family);
+    if (!closed) {
+      remeasure(term, family);
+      measure();
+    }
   });
   return () => {
     closed = true;
@@ -388,7 +411,6 @@ function connect(
     observer.disconnect();
     typed.dispose();
     binary.dispose();
-    resize.dispose();
     ws?.close();
     term.dispose();
     unhook();
@@ -400,11 +422,10 @@ function connect(
  * opened. xterm.js measures only when its family changes, and the WebGL renderer would keep the
  * glyphs it drew in the fallback font, so the family is changed and changed back.
  */
-function remeasure(term: Xterm, fit: FitAddon, family: string): void {
+function remeasure(term: Xterm, family: string): void {
   term.options.fontFamily = "monospace";
   term.options.fontFamily = family;
   term.clearTextureAtlas();
-  fit.fit();
 }
 
 /**
@@ -481,6 +502,7 @@ function exposeForTests(
     background: () => term.options.theme?.background,
     foregrounds: () => foregrounds(term),
     fontFamily: () => term.options.fontFamily,
+    cursor: () => [term.buffer.active.cursorX, term.buffer.active.cursorY],
     grid: () => `${term.cols}x${term.rows}`,
   };
   return () => delete views[terminalId];
