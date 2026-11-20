@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 
 use bazhen_store::{EVENT_KINDS, StoredEvent};
 use libfuzzer_sys::fuzz_target;
-use serde::de::IgnoredAny;
-use serde_derive::Deserialize;
+use serde::{Deserialize, de::IgnoredAny};
 
 #[derive(Deserialize)]
 struct Frame {
