@@ -257,6 +257,10 @@ it yourself: `tmux -S "$TMPDIR/bazhen/tmux.sock" ls` on macOS,
 under a relocated home. A runtime directory whose socket path would be too long moves to
 `/tmp/bazhen-<uid>-<hash>`.
 
+If the runtime directory fits the daemon socket but is too long for a terminal holder socket,
+holders use a private directory at `/tmp/bazhen-holders-<uid>-<hash>/holders`. The daemon and
+tmux sockets keep their usual paths.
+
 Every agent and shell Bazhen opens gets the daemon's socket as `BAZHEN_SOCKET`, and every
 `bazhen` verb run there but `start` reaches that daemon. It wins over `BAZHEN_HOME` without a
 word, as both come from the environment. A `--home` naming another daemon is refused instead

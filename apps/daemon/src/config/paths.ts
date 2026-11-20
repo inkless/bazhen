@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { HOLDER_SOCKET_MAX_BYTES, holderSocket } from "@bazhen/host-guard";
 
 export interface BazhenPaths {
   readonly config: string;
@@ -10,6 +11,8 @@ export interface BazhenPaths {
   readonly cache: string;
   /** Holds the daemon's Unix socket and instance lock; mode 0700. */
   readonly run: string;
+  /** Root of the private holders directory, short enough to bind terminal sockets. */
+  readonly holderRun: string;
   readonly socket: string;
   /** The private tmux server's socket, in `run`, so every instance has a server of its own. */
   readonly tmuxSocket: string;
@@ -29,6 +32,7 @@ export interface PathInputs {
 const MAX_SOCKET_PATH = 103;
 const SOCKET_NAME = "bazhen.sock";
 const TMUX_SOCKET_NAME = "tmux.sock";
+const SAMPLE_TERMINAL_ID = "term_00000000000000000000000000000000";
 
 const shortHash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 8);
 const absolute = (value: string | undefined) => (value?.startsWith("/") ? value : undefined);
@@ -69,9 +73,15 @@ export function resolvePaths(i: PathInputs): BazhenPaths {
     Buffer.byteLength(join(base.run, SOCKET_NAME)) > MAX_SOCKET_PATH
       ? `/tmp/bazhen-${i.uid}-${shortHash(base.run)}`
       : base.run;
+  // Keep the daemon and its tmux server reachable at their existing addresses.
+  const holderRun =
+    Buffer.byteLength(holderSocket(run, SAMPLE_TERMINAL_ID)) > HOLDER_SOCKET_MAX_BYTES
+      ? `/tmp/bazhen-holders-${i.uid}-${shortHash(run)}`
+      : run;
   return {
     ...base,
     run,
+    holderRun,
     socket: join(run, SOCKET_NAME),
     bank: i.flags?.bank ?? i.env.BAZHEN_BANK ?? i.configBank ?? join(base.data, "bank"),
     tmuxSocket: join(run, TMUX_SOCKET_NAME),

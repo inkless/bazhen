@@ -124,6 +124,7 @@ const { port } = config;
 for (const dir of [paths.config, paths.data, paths.bank, paths.state, paths.cache])
   mkdirSync(dir, { recursive: true });
 ensurePrivateDir(paths.run, inputs.uid);
+if (paths.holderRun !== paths.run) ensurePrivateDir(paths.holderRun, inputs.uid);
 // Its socket is about to be replaced; a daemon still answering on it would be orphaned, with its
 // store and tmux server shared. (A lock that also covers two starts racing comes later.)
 if (await answers(paths.socket)) {
@@ -271,7 +272,7 @@ if (config.defaultRuntime === "holder") void containment.decide();
 // Built with or without an installed build: holders made earlier are served either way, and only
 // a new terminal needs one.
 const holderRuntime = new HolderRuntime({
-  root: paths.run,
+  root: paths.holderRun,
   binary: holderInstall.installed?.binary ?? null,
   ...(holderInstall.installed === null && { unavailable: holderInstall.reason }),
   installDir: holderDir,

@@ -56,7 +56,7 @@ enum Done {
 }
 
 /// Attaches to the terminal `p` names, through the daemon at `socket` or, with `--direct` or no
-/// daemon to answer, straight to its holder beside it.
+/// daemon to answer, straight to its holder.
 pub(crate) fn run(
     p: &Parsed,
     socket: &Path,
@@ -81,7 +81,10 @@ pub(crate) fn run(
             return Ok(Exit::Usage);
         }
     };
-    let holders = socket.parent().unwrap_or(socket).join("holders");
+    let holders = bazhen_client::paths::holders_dir(
+        socket.parent().unwrap_or(socket),
+        rustix::process::getuid().as_raw(),
+    );
     if p.has("direct") {
         return straight(&holders, socket, daemon, target, &detach, out);
     }
