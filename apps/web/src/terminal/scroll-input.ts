@@ -88,10 +88,14 @@ export function attachScrollInput(
   // alternate buffer, xterm.js would send arrow keys as typed input, taking the lease.
   const wheel = (event: WheelEvent) => {
     if (clipped()) {
+      if (event.ctrlKey) {
+        event.stopPropagation();
+        return;
+      }
       const row = rowHeight();
       const unit = pixelsPerUnit(event.deltaMode, row, element.clientHeight / row);
       const remaining = pan(event.deltaX * unit, event.deltaY * unit);
-      term.scrollLines(wheelSteps.add(remaining, row));
+      term.scrollLines(-wheelSteps.add(-remaining, row));
       event.preventDefault();
       event.stopPropagation();
       return;

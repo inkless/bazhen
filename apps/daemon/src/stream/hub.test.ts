@@ -17,6 +17,7 @@ import {
   type StreamServerFrame,
   type TuiTheme,
 } from "@bazhen/protocol";
+import { runtimeScreen } from "./screen-source.ts";
 import { replay } from "../testing/browser-terminal.ts";
 import {
   HUB_DEFAULTS,
@@ -1213,23 +1214,25 @@ class AlteredRuntime extends FakeRuntime {
 /** A holder reader reports the applied grid independently of the writer's resize request. */
 class ReportingRuntime extends FakeRuntime {
   reportSize: (actual: Size) => void = () => {};
-  constructor() {
+  private readonly appliedSize: Size | undefined;
+  constructor(appliedSize?: Size) {
     super({ attach: "snapshot" });
+    this.appliedSize = appliedSize;
   }
   override async attach(...args: Parameters<FakeRuntime["attach"]>) {
     const attached = await super.attach(...args);
     assert(attached.kind === "snapshot");
     return {
       ...attached,
-      stream: {
-        ...attached.stream,
+      stream: Object.assign(attached.stream, {
         onResized: (cb: (actual: Size) => void) => {
           this.reportSize = cb;
         },
         resize: async () => {
-          throw new Error("writer lost");
+          if (!this.appliedSize) throw new Error("writer lost");
+          this.reportSize(this.appliedSize);
         },
-      },
+      }),
     };
   }
 }
@@ -1277,6 +1280,16 @@ describe("terminal hub: snapshot streams", () => {
     expect(late.frames).toContainEqual({ type: "notice", message: "resize failed: writer lost" });
     expect(late.frames).toContainEqual({ type: "geometry", ...size });
     expect(late.frames.at(-1)?.type).toBe("attached");
+  });
+
+  it("announces the reader's applied geometry once when the writer accepts a resize", async () => {
+    const next = { cols: 120, rows: 48 };
+    const o = await snapshotTerminal(new ReportingRuntime(next));
+    await o.hub.join(o.ref, viewer().v, next);
+    expect(o.first.frames.filter((f) => f.type === "geometry")).toEqual([
+      { type: "geometry", ...size },
+      { type: "geometry", ...next },
+    ]);
   });
 
   it("takes a fresh snapshot when the reader reports new geometry mid-capture", async () => {
@@ -1397,6 +1410,20 @@ describe("terminal hub: snapshot streams", () => {
     }
     await expect.poll(() => history.written.length).toBe(2);
     expect(snapshot.written).toEqual([]);
+  });
+
+  it("discards the opening snapshot on resize at an unchanged byte offset", async () => {
+    const rt = await fakeRuntime("history", { attach: "snapshot" });
+    const attached = await rt.runtime.attach(rt.ref, size);
+    assert(attached.kind === "snapshot");
+    const source = runtimeScreen({ ...attached, vt: Buffer.from("old geometry") });
+    source.resize({ cols: 120, rows: 48 });
+    const shown = await source.snapshot({
+      generation: attached.generation,
+      offset: attached.offset,
+    });
+    expect(shown.vt).toEqual(attached.vt);
+    attached.stream.close();
   });
 
   it("opens the first view on the snapshot it attached on, asking for no other", async () => {

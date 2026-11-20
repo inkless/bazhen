@@ -266,6 +266,38 @@ test("a passive window opens at the live bottom and scrolls into history past th
       host.evaluate((el) => [el.scrollHeight <= el.clientHeight, el.scrollWidth > el.clientWidth]),
     )
     .toEqual([true, true]);
+  const zoomAllowed = await host.evaluate((el) => {
+    el.tabIndex = 0;
+    el.focus();
+    const view = el.ownerDocument.defaultView!;
+    view.dispatchEvent(new view.Event("focus"));
+    const bounds = el.getBoundingClientRect();
+    el.dispatchEvent(
+      new view.PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: bounds.right,
+        clientY: bounds.top + 10,
+      }),
+    );
+    el.querySelector(".scrollbar")!.dispatchEvent(
+      new view.PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "mouse",
+        clientX: bounds.left + 10,
+        clientY: bounds.top + 10,
+      }),
+    );
+    return el.dispatchEvent(
+      new view.WheelEvent("wheel", {
+        ctrlKey: true,
+        deltaY: -100,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  expect(zoomAllowed).toBe(true);
   await host.hover({ position: { x: 15, y: 15 } });
   await passive.mouse.wheel(0, 1600);
   await expect.poll(() => atBottom(passive, id)).toBe(true);

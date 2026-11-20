@@ -261,7 +261,7 @@ function connect(
         // A view focused before its socket opened saw no focus event to claim the lease with.
         // One coming back from a lost socket doesn't take the lease from a view that took it
         // meanwhile: only the user's next deliberate input does.
-        const claims = wantsToDrive || element.contains(document.activeElement);
+        const claims = wantsToDrive || term.textarea === document.activeElement;
         if (claims && !(returning && driven)) engage();
         wantsToDrive = returning = false;
         const token = f.resumeToken;
@@ -345,7 +345,7 @@ function connect(
         }),
       ),
     focus: () => term.focus(),
-    holdsFocus: () => element.contains(document.activeElement),
+    holdsFocus: () => term.textarea === document.activeElement,
   };
   const unregister = bar.register(target);
   const unguard = offersInstall(thisPlatform())

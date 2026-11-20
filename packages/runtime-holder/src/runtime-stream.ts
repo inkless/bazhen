@@ -285,7 +285,6 @@ export class HolderStream implements SnapshotStream {
   private ended: StreamEnd | null = null;
   private readonly held = new Set<Held>();
   private readonly resizeListeners: ((size: Size) => void)[] = [];
-  private readonly applied = new Map<(size: Size) => void, (error: Error) => void>();
   private readonly dataListeners: ((bytes: Uint8Array) => void)[] = [];
   private readonly closeListeners: ((why: StreamEnd) => void)[] = [];
   private readonly respawnListeners: ((generation: number) => void)[] = [];
@@ -385,7 +384,6 @@ export class HolderStream implements SnapshotStream {
       case "resized":
         this.size = { cols: event.body.cols, rows: event.body.rows };
         for (const listener of this.resizeListeners) listener(this.size);
-        for (const listener of this.applied.keys()) listener(this.size);
         return;
       case "gap":
         this.end("behind");
@@ -414,7 +412,6 @@ export class HolderStream implements SnapshotStream {
     this.release();
     for (const listener of this.closeListeners) listener(why);
     const error = new Error(`the stream ${why === "behind" ? "fell behind" : "ended"}`);
-    for (const reject of this.applied.values()) reject(error);
     for (const hold of this.held) hold.reject(error);
     this.held.clear();
   }
@@ -467,25 +464,20 @@ export class HolderStream implements SnapshotStream {
 
   async resize(size: Size): Promise<void> {
     if (this.ended !== null) throw new Error("the stream has closed");
+    await this.control.resize(size);
     if (this.reader === null) {
-      await this.control.resize(size);
       this.size = size;
       return;
     }
-    const applied = Promise.withResolvers<void>();
-    const observed = (actual: Size) => {
-      if (actual.cols === size.cols && actual.rows === size.rows) applied.resolve();
-    };
-    this.applied.set(observed, applied.reject);
-    const timeout = setTimeout(
-      () => applied.reject(new Error("holder did not apply the resize")),
-      1000,
-    ).unref();
-    try {
-      await Promise.all([this.control.resize(size), applied.promise]);
-    } finally {
-      clearTimeout(timeout);
-      this.applied.delete(observed);
+    // The holder applies the resize before flushing the writer's ok. A subsequent
+    // stats reply on the reader follows its resized event and all output before it,
+    // even when the byte offset stays the same. A failed ioctl produces no event.
+    await this.reader.stats();
+    if (!this.flowing) await new Promise<void>((resolve) => setImmediate(resolve));
+    if (this.size.cols !== size.cols || this.size.rows !== size.rows) {
+      throw new Error(
+        `holder reports ${this.size.cols}x${this.size.rows} after resize to ${size.cols}x${size.rows}`,
+      );
     }
   }
 

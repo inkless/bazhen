@@ -35,12 +35,15 @@ export function attachTakeover(element: HTMLElement, engage: () => void): () => 
     if (event.target !== element) engage();
   };
   element.addEventListener("focusin", focused);
-  window.addEventListener("focus", engage);
+  const windowFocused = () => {
+    if (document.activeElement !== element) engage();
+  };
+  window.addEventListener("focus", windowFocused);
   return () => {
     element.removeEventListener("pointerdown", down);
     element.removeEventListener("pointerup", up);
     element.removeEventListener("pointercancel", cancel);
     element.removeEventListener("focusin", focused);
-    window.removeEventListener("focus", engage);
+    window.removeEventListener("focus", windowFocused);
   };
 }
