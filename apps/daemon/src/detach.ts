@@ -5,7 +5,7 @@ import type { EnvRules } from "@bazhen/core";
 import { heard } from "@bazhen/host-guard";
 import { handOff } from "./env/capture.ts";
 import { protocolId } from "@bazhen/protocol/id";
-import { ANOTHER_BUILD, answers, spokenProtocol } from "./socket/client.ts";
+import { ANOTHER_BUILD, probe, silence } from "./socket/probe.ts";
 
 export interface DetachOptions {
   /** The daemon's own entry point, run again without `--detach`. */
@@ -25,11 +25,15 @@ const LOG_TAIL_LINES = 20;
  * its output in the state directory. Resolves with the exit code for the starting process.
  */
 export async function detach(o: DetachOptions): Promise<number> {
-  if (await answers(o.socket)) {
+  const found = await probe(o.socket);
+  if (found.kind === "silent") {
+    console.error(silence(o.socket, found.seen));
+    return 1;
+  }
+  if (found.kind === "daemon") {
     console.log(`bazhen is already running at ${o.url}`);
     // A daemon that answers health with nothing readable is no build this one can talk to.
-    const theirs = await spokenProtocol(o.socket).catch(() => null);
-    if (theirs !== (await protocolId())) {
+    if (found.protocolId !== (await protocolId())) {
       console.log(`  warning: ${ANOTHER_BUILD}`);
     }
     return 0;
@@ -50,7 +54,7 @@ export async function detach(o: DetachOptions): Promise<number> {
     closeSync(log);
   }
   for (const start = Date.now(); Date.now() - start < READY_WITHIN_MS;) {
-    if (await answers(o.socket)) {
+    if ((await probe(o.socket)).kind === "daemon") {
       console.log(`bazhen is running at ${o.url}`);
       return 0;
     }

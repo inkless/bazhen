@@ -53,11 +53,12 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/store/projections.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/mailbox/ingress.ts": "tests/api/mail.test.ts",
-  "apps/daemon/src/auth/agent-token.ts": "apps/daemon/src/socket/client.medium.test.ts",
+  "apps/daemon/src/auth/agent-token.ts": "apps/daemon/src/auth/callers.test.ts",
   "apps/daemon/src/testing/fixtures.ts": "apps/daemon/src/mailbox/mailbox.medium.test.ts",
   "apps/daemon/src/testing/browser-terminal.ts": "apps/daemon/src/stream/snapshot-contract.test.ts",
   "apps/daemon/src/stream/screen-source.ts": "apps/daemon/src/stream/hub.test.ts",
   "apps/daemon/src/testing/fake-app-server.ts": "apps/daemon/src/codex/app-server.medium.test.ts",
+  "apps/daemon/src/testing/full-backlog.ts": "apps/daemon/src/socket/probe.medium.test.ts",
   "packages/runtime-holder/src/testing/fake-holder.ts":
     "packages/runtime-holder/src/client.test.ts",
   "packages/runtime-tmux/src/testing/fake-tmux.ts":
@@ -1171,6 +1172,9 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/probe.rs::spoken":
     "reads a health answer only through bazhen-client's split_head, status and body, which its " +
     "framing fuzz target drives, and serde_json; it decodes nothing of its own",
+  "crates/bazhen-daemon/src/probe.rs::answer_of":
+    "sorts an exchange's outcome by its error variant and hands a reply's bytes to spoken; it " +
+    "reads none of them itself",
   "crates/bazhen-daemon/src/detach.rs::detach":
     "reads the daemon's own log only to print its last lines, lossily as text; parses nothing",
   "crates/bazhen-daemon/src/env.rs::matches":
