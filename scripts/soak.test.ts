@@ -5,6 +5,7 @@ import { GATE } from "./soak-judge.ts";
 import {
   attachMarkers,
   closedUnder,
+  leastFds,
   main,
   parseSoakArgs,
   profile,
@@ -27,6 +28,41 @@ const bytes = (text: string) => Buffer.from(text, "utf8");
 const pty = (text: string) => text.replaceAll("\r\n", "\r\r\n");
 /** How often `p` restarts the daemon; zero for one that never does. */
 const restartEvery = (p: Profile) => p.restart?.everyMs ?? 0;
+
+const PID = 7;
+/** How long the daemon's once-a-second poll of every holder keeps their connections open. */
+const BURST_MS = 5;
+/**
+ * A process at `steady` fds but for one connection per holder, 25 of them, during the first
+ * `BURST_MS` of every second, read on a clock that only the reads' sleeps move. It starts in a burst.
+ */
+function polled(steady: number) {
+  let now = 0;
+  return {
+    use: () => ({ fds: now % 1_000 < BURST_MS ? steady + 25 : steady, ptys: 0 }),
+    sleep: (ms: number) => {
+      now += ms;
+      return Promise.resolve();
+    },
+  };
+}
+/** Park–Miller: the same sequence in [0, 1) every run. */
+function seeded(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 48_271) % 2_147_483_647;
+    return state / 2_147_483_647;
+  };
+}
+/** The fds `leastFds` reports for a polled process at `steady`, once for each of `runs`. */
+async function leastOfPolled(steady: number, random: () => number, runs: number) {
+  const reported: (number | undefined)[] = [];
+  for (let run = 0; run < runs; run++) {
+    const fds = await leastFds([PID], 5, { ...polled(steady), random });
+    reported.push(fds.get(PID)?.fds);
+  }
+  return reported;
+}
 
 describe("profile", () => {
   it("runs the gate's load at §12.4's rates, judged on the gate's bars over the hours asked", () => {
@@ -256,6 +292,30 @@ describe("sleepUntil", () => {
     const timer = vi.spyOn(globalThis, "setTimeout");
     await sleepUntil(1_010, () => 1_000);
     expect(timer.mock.calls.map(([, ms]) => ms)).toEqual([10]);
+  });
+});
+
+describe("leastFds", () => {
+  it("keeps a connection the daemon opens every second when its reads are a second apart", async () => {
+    // The control: a random source stuck at the middle of its range gives gaps of exactly 1 s.
+    expect(await leastOfPolled(34, () => 0.5, 1)).toEqual([59]);
+  });
+
+  it("drops a connection the daemon opens every second, reading at random phases of it", async () => {
+    const reported = await leastOfPolled(34, seeded(1), 200);
+    expect(reported.filter((fds) => fds !== 34)).toEqual([]);
+  });
+
+  it("still reports a leaked fd, which is open at every read", async () => {
+    const reported = await leastOfPolled(35, seeded(1), 200);
+    expect(reported.filter((fds) => fds !== 35)).toEqual([]);
+  });
+
+  it("keeps each read's fds, in the order read, so a reader can tell a burst from a leak", async () => {
+    const fds = await leastFds([PID], 5, { ...polled(34), random: () => 0.5 });
+    expect(fds.get(PID)?.reads).toEqual([59, 59, 59, 59, 59]);
+    const spread = await leastFds([PID], 5, { ...polled(34), random: seeded(1) });
+    expect(spread.get(PID)?.reads).toEqual([59, 34, 34, 34, 34]);
   });
 });
 
