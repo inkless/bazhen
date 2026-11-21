@@ -7,10 +7,9 @@ use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use bazhen_protocol::events::{ClientEventFrame, EventFrame, ResetReason};
 use bazhen_store::{FrameError, Page, Reads, StoredEvent};
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::sync::{Notify, mpsc};
-use tokio::time::Instant;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
@@ -135,7 +134,8 @@ struct Out {
     ends_page: bool,
 }
 
-/// How a stream ended: with frames still to send, or with nothing more to say.
+/// How a stream ended: with frames still to send or a close to answer, or with no one to say
+/// anything to.
 #[derive(Debug, PartialEq, Eq)]
 enum Ending {
     Close,
@@ -145,8 +145,19 @@ enum Ending {
 /// Streams the log on `socket` from `cursor` until the client goes, the cursor can't resume, or
 /// the daemon stops. `held` keeps the connection's place under its listener's cap and drain.
 pub(crate) async fn stream(socket: WebSocket, cursor: Cursor, how: Streaming, held: Option<Held>) {
-    let _held = held;
     let (sink, heard) = socket.split();
+    over(sink, heard, cursor, how, held).await;
+}
+
+/// [`stream`], sending on `sink` what the client is sent and hearing from `heard` what it sends.
+async fn over<E>(
+    sink: impl Sink<Message>,
+    heard: impl Stream<Item = Result<Message, E>>,
+    cursor: Cursor,
+    how: Streaming,
+    held: Option<Held>,
+) {
+    let _held = held;
     let (out, queued) = mpsc::unbounded_channel();
     let unsent = Arc::new(AtomicUsize::new(0));
     let written = Arc::new(Notify::new());
@@ -166,13 +177,15 @@ pub(crate) async fn stream(socket: WebSocket, cursor: Cursor, how: Streaming, he
     }
 }
 
-/// Sends what is queued, in order, saying when each page's last frame is written.
+/// Sends what is queued, in order, saying when each page's last frame is written, then flushes
+/// `sink`, which sends the answer the socket queued to a client's close.
 async fn write(
-    mut sink: SplitSink<WebSocket, Message>,
+    sink: impl Sink<Message>,
     mut queued: mpsc::UnboundedReceiver<Out>,
     unsent: Arc<AtomicUsize>,
     written: Arc<Notify>,
 ) {
+    let mut sink = std::pin::pin!(sink);
     while let Some(Out { message, ends_page }) = queued.recv().await {
         let counted = matches!(message, Message::Text(_));
         let closing = matches!(message, Message::Close(_));
@@ -187,6 +200,7 @@ async fn write(
             written.notify_one();
         }
     }
+    let _ = sink.flush().await;
 }
 
 fn closing(code: u16, reason: &'static str) -> Message {
@@ -197,8 +211,8 @@ fn closing(code: u16, reason: &'static str) -> Message {
 }
 
 /// Feeds the log to the writer and listens to the client, until the stream ends.
-async fn follow(
-    mut heard: SplitStream<WebSocket>,
+async fn follow<E>(
+    heard: impl Stream<Item = Result<Message, E>>,
     out: &mpsc::UnboundedSender<Out>,
     cursor: Cursor,
     how: &Streaming,
@@ -226,6 +240,10 @@ async fn follow(
     let mut pulse = Pulse::new(how.heartbeat.patience);
     let every = how.heartbeat.every;
     let mut beat = tokio::time::interval_at(Instant::now() + every, every);
+    // A stall doesn't fire the beats it missed back to back, a ping then at once its verdict, which
+    // would find a peer gone that had no turn to answer; the next beat is a whole beat on.
+    beat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut heard = std::pin::pin!(heard);
     let mut pump = true;
     loop {
         if pump {
@@ -267,7 +285,8 @@ async fn follow(
                 return Ending::Close;
             }
             message = heard.next() => match message {
-                None | Some(Err(_) | Ok(Message::Close(_))) => return Ending::Gone,
+                None | Some(Err(_)) => return Ending::Gone,
+                Some(Ok(Message::Close(_))) => return Ending::Close,
                 Some(Ok(message)) => {
                     pulse.heard();
                     // Presence is read here once the daemon keeps it; a frame this build doesn't
@@ -304,8 +323,10 @@ mod tests {
 
     use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
 
+    use tokio_util::task::TaskTracker;
+
     use super::*;
-    use crate::testing::TempDir;
+    use crate::testing::{TempDir, paused};
 
     fn pairs(query: &[(&str, &str)]) -> Vec<(String, String)> {
         query
@@ -461,7 +482,7 @@ mod tests {
         );
     }
 
-    /// The socket's routes on loopback TCP, over a store of their own, beating every 200 ms.
+    /// The socket's routes on loopback TCP, over a store of their own.
     struct Daemon {
         address: std::net::SocketAddr,
         stop: crate::routes::Stop,
@@ -470,11 +491,6 @@ mod tests {
         runtime: tokio::runtime::Runtime,
         dir: TempDir,
     }
-
-    const BEAT: Heartbeat = Heartbeat {
-        every: std::time::Duration::from_millis(200),
-        patience: 3,
-    };
 
     impl Daemon {
         fn start(name: &str) -> Self {
@@ -487,8 +503,7 @@ mod tests {
                 .build()
                 .unwrap();
             let stop = crate::routes::Stop::default();
-            let mut shared = crate::routes::Shared::new("f", stop.clone(), store.clone());
-            shared.heartbeat = BEAT;
+            let shared = crate::routes::Shared::new("f", stop.clone(), store.clone());
             let listener = runtime
                 .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
                 .unwrap();
@@ -665,48 +680,191 @@ mod tests {
     }
 
     #[test]
-    fn ends_a_client_that_stops_answering_pings() {
-        let daemon = Daemon::start("stream-silent");
+    fn answers_a_client_that_closes_with_a_close_of_its_own() {
+        let daemon = Daemon::start("stream-client-close");
         let mut ws = daemon.follow(0);
-        std::thread::sleep(BEAT.every * 5);
-        assert_eq!(heard(&mut ws), None);
+        ws.send(tungstenite::Message::Close(None)).unwrap();
+        let ended = loop {
+            match ws.read() {
+                Ok(_) => {}
+                Err(err) => break err,
+            }
+        };
+        assert!(
+            matches!(ended, tungstenite::Error::ConnectionClosed),
+            "{ended}"
+        );
+    }
+
+    /// Beating every 200 ms of a paused clock, patient for three beats.
+    const BEAT: Heartbeat = Heartbeat {
+        every: std::time::Duration::from_millis(200),
+        patience: 3,
+    };
+
+    /// A stream to a client in this process, on a paused clock: what the client gets, what it
+    /// says, and the stream's task, which ends when the stream does.
+    struct Peer {
+        gets: mpsc::UnboundedReceiver<Message>,
+        says: mpsc::UnboundedSender<Message>,
+        ended: tokio::task::JoinHandle<()>,
+        tasks: TaskTracker,
+    }
+
+    fn peer(store: &Writer) -> Peer {
+        let epoch = store.reader().unwrap().reads().epoch().unwrap();
+        let (to_peer, gets) = mpsc::unbounded_channel();
+        let (says, from_peer) = mpsc::unbounded_channel::<Message>();
+        let sink = futures_util::sink::unfold(to_peer, |to: mpsc::UnboundedSender<Message>, m| {
+            let sent = to.send(m).map(|()| to);
+            async move { sent }
+        });
+        let heard = futures_util::stream::unfold(from_peer, |mut from| async move {
+            let message = from.recv().await?;
+            Some((Ok::<_, std::convert::Infallible>(message), from))
+        });
+        let how = Streaming {
+            store: store.clone(),
+            stop: CancellationToken::new(),
+            heartbeat: BEAT,
+        };
+        let tasks = TaskTracker::new();
+        let ended = tasks.spawn(over(sink, heard, Cursor { epoch, after: 0 }, how, None));
+        Peer {
+            gets,
+            says,
+            ended,
+            tasks,
+        }
+    }
+
+    impl Peer {
+        /// Answers each ping as a browser does, handing on the ids of the events it is sent.
+        fn answering(self) -> (mpsc::UnboundedReceiver<u64>, tokio::task::JoinHandle<()>) {
+            let Self {
+                mut gets,
+                says,
+                ended,
+                tasks,
+            } = self;
+            let (ids, events) = mpsc::unbounded_channel();
+            tasks.spawn(async move {
+                while let Some(message) = gets.recv().await {
+                    match message {
+                        Message::Ping(_) => {
+                            let _ = says.send(Message::Pong(Bytes::new()));
+                        }
+                        Message::Text(text) => {
+                            let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            let _ = ids.send(frame["event"]["id"].as_u64().unwrap());
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            (events, ended)
+        }
+    }
+
+    fn writer(dir: &TempDir) -> (Writer, crate::writer::Thread) {
+        let path = dir.path().join("bazhen.db");
+        crate::writer::start(Store::open(&path).unwrap(), &path).unwrap()
+    }
+
+    async fn appended(store: &Writer, n: u8) -> u64 {
+        store
+            .run(move |store| store.write(|w| w.append(&created(n))))
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn ends_a_client_that_stops_answering_pings() {
+        let dir = TempDir::new("stream-silent");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let mut peer = peer(&store);
+            let start = Instant::now();
+            tokio::time::sleep(BEAT.every * 3 / 2).await;
+            assert!(matches!(peer.gets.try_recv(), Ok(Message::Ping(_))));
+            assert!(
+                !peer.ended.is_finished(),
+                "ended before its ping was due an answer"
+            );
+            peer.ended.await.unwrap();
+            assert_eq!(start.elapsed(), BEAT.every * 2);
+            drop(peer.says);
+        });
+        thread.finish();
     }
 
     #[test]
     fn keeps_a_client_that_answers_pings() {
-        let daemon = Daemon::start("stream-answering");
-        let mut ws = daemon.follow(0);
-        ws.get_ref().set_read_timeout(Some(BEAT.every / 4)).unwrap();
-        let until = std::time::Instant::now() + BEAT.every * 5;
-        while std::time::Instant::now() < until {
-            match ws.read() {
-                Ok(_) => {}
-                Err(tungstenite::Error::Io(err))
-                    if err.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(err) => panic!("ended: {err}"),
-            }
-        }
-        ws.get_ref()
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-        let id = daemon.append(1);
-        assert_eq!(event_id(heard(&mut ws)), id);
+        let dir = TempDir::new("stream-answering");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let (mut events, ended) = peer(&store).answering();
+            tokio::time::sleep(BEAT.every * 10).await;
+            assert!(!ended.is_finished(), "ended a client that answers");
+            let id = appended(&store, 1).await;
+            assert_eq!(events.recv().await, Some(id));
+        });
+        thread.finish();
+    }
+
+    #[test]
+    fn keeps_a_client_that_answers_after_the_daemon_stalls_for_beats() {
+        let dir = TempDir::new("stream-stalled");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let first = appended(&store, 1).await;
+            let (mut events, ended) = peer(&store).answering();
+            assert_eq!(events.recv().await, Some(first));
+            // The clock jumps three beats while no task runs, as a daemon stalled would find it.
+            tokio::time::advance(BEAT.every * 3).await;
+            tokio::time::sleep(BEAT.every * 5).await;
+            assert!(
+                !ended.is_finished(),
+                "ended a client that had no turn to answer"
+            );
+            let id = appended(&store, 2).await;
+            assert_eq!(events.recv().await, Some(id));
+        });
+        thread.finish();
     }
 
     #[test]
     fn keeps_a_client_that_sends_no_pongs_while_it_keeps_reporting() {
-        let daemon = Daemon::start("stream-reporting");
-        let mut ws = daemon.follow(0);
-        let until = std::time::Instant::now() + BEAT.every * 5;
-        while std::time::Instant::now() < until {
-            ws.send(tungstenite::Message::text(
-                r#"{"type":"visibility","visible":true}"#,
-            ))
-            .unwrap();
-            std::thread::sleep(BEAT.every / 4);
-        }
-        let id = daemon.append(1);
-        assert_eq!(event_id(heard(&mut ws)), id);
+        let dir = TempDir::new("stream-reporting");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let mut peer = peer(&store);
+            let says = peer.says.clone();
+            // It reports a quarter-beat apart for as long as it is heard, never answering a ping.
+            peer.tasks.spawn(async move {
+                let report = r#"{"type":"visibility","visible":true}"#;
+                while says.send(Message::text(report)).is_ok() {
+                    tokio::time::sleep(BEAT.every / 4).await;
+                }
+            });
+            tokio::time::sleep(BEAT.every * 10).await;
+            assert!(
+                !peer.ended.is_finished(),
+                "ended a client that keeps reporting"
+            );
+            let id = appended(&store, 1).await;
+            let sent = loop {
+                match peer.gets.recv().await {
+                    Some(Message::Text(text)) => break text,
+                    Some(_) => {}
+                    None => panic!("ended a client that keeps reporting"),
+                }
+            };
+            let frame: serde_json::Value = serde_json::from_str(&sent).unwrap();
+            assert_eq!(frame["event"]["id"].as_u64(), Some(id));
+        });
+        thread.finish();
     }
 
     #[test]

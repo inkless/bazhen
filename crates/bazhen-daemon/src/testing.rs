@@ -32,3 +32,12 @@ pub(crate) fn runtime() -> tokio::runtime::Runtime {
         .build()
         .unwrap()
 }
+
+/// A runtime whose clock moves only as its timers come due, once nothing else can run.
+pub(crate) fn paused() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .unwrap()
+}

@@ -54,16 +54,8 @@ mod tests {
     use bazhen_store::Store;
 
     use super::*;
-    use crate::testing::{TempDir, runtime};
+    use crate::testing::{TempDir, paused, runtime};
     use crate::writer;
-
-    fn paused() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .start_paused(true)
-            .build()
-            .unwrap()
-    }
 
     #[test]
     fn retires_at_start_then_hourly_and_not_once_stopped() {
