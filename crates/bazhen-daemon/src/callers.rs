@@ -60,9 +60,6 @@ impl Stored<'_> {
 
 impl Credentials for Stored<'_> {
     fn agent_of(&mut self, token: &str) -> rusqlite::Result<Option<AgentId>> {
-        if !crate::tokens::is_token(token) {
-            return Ok(None);
-        }
         crate::tokens::agent_of(self.reads()?, token)
     }
 

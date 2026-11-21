@@ -3,7 +3,7 @@
 // daemon written in another language.
 
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { hostname, tmpdir } from "node:os";
+import { hostname } from "node:os";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -117,34 +117,30 @@ export function overSocket(
 
 /**
  * One GET over a daemon's socket from under a `codex app-server`, by a child of its own, as Codex
- * runs a tool call, presenting nothing.
+ * runs a tool call, presenting nothing. The server is a shell named `codex`; its `exit` keeps it
+ * from exec'ing the child in its place.
  */
 export function overSocketUnderCodex(socket: string, path: string): unknown {
-  const dir = mkdtempSync(join(tmpdir(), "bz-codex-"));
-  try {
-    const ask = join(dir, "ask.mjs");
-    writeFileSync(
-      ask,
-      `import { request } from "node:http";
+  const ask = `import { request } from "node:http";
 const req = request({ socketPath: ${JSON.stringify(socket)}, method: "GET", path: ${JSON.stringify(path)} }, (res) => {
   let text = "";
   res.on("data", (d) => (text += d));
   res.on("end", () => console.log(JSON.stringify({ status: res.statusCode, body: JSON.parse(text) })));
 });
 req.end();
-`,
-    );
-    const codex = join(dir, "codex");
-    // Not exec'd: the asking child runs under the server, not as it.
-    writeFileSync(codex, `#!/bin/sh\n"${process.execPath}" "${ask}"\nexit $?\n`);
-    chmodSync(codex, 0o755);
-    const asked = spawnSync(codex, ["app-server"], { encoding: "utf8" });
-    if (asked.status !== 0) throw new Error(`the fake codex app-server failed: ${asked.stderr}`);
-    const reply: unknown = JSON.parse(asked.stdout);
-    return reply;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+`;
+  const asked = spawnSync(
+    "/bin/sh",
+    ["-c", '"$BZ_NODE" --input-type=module -e "$BZ_ASK"; exit $?', "app-server"],
+    {
+      argv0: "codex",
+      env: { ...process.env, BZ_NODE: process.execPath, BZ_ASK: ask },
+      encoding: "utf8",
+    },
+  );
+  if (asked.status !== 0) throw new Error(`the fake codex app-server failed: ${asked.stderr}`);
+  const reply: unknown = JSON.parse(asked.stdout);
+  return reply;
 }
 
 /** This checkout's CLI, which `moon run :test-api` builds. */

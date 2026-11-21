@@ -56,7 +56,9 @@ pub(crate) enum PeerRead {
 type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync;
 
 /// Reads peers, at most `MAX_READING` at once, each on a blocking thread that holds its turn until
-/// it ends: one given up on still counts, so a slow `/proc` can't take every thread.
+/// it ends: one given up on still counts, so a slow `/proc` can't take every thread. A read is late
+/// at its deadline whether it was reading or still waiting for a turn. One given up on keeps its
+/// own copy of the connection's fd until it ends, so the peer sees the close no sooner.
 #[derive(Clone)]
 pub(crate) struct Peers {
     turns: Arc<Semaphore>,
@@ -96,20 +98,25 @@ impl Peers {
             Ok(fd) => Arc::clone(fd),
             Err(why) => return PeerRead::Unread(why.clone()),
         };
-        let Ok(turn) = Arc::clone(&self.turns).acquire_owned().await else {
-            return PeerRead::Late;
-        };
+        let turns = Arc::clone(&self.turns);
         let read = Arc::clone(&self.read);
         let accepted = socket.accepted;
-        let reading = tokio::task::spawn_blocking(move || {
-            let _turn = turn;
-            read(fd.as_fd(), accepted)
-        });
+        // One deadline for the turn and the read: a read given up on keeps its turn until it ends.
+        let reading = async move {
+            let turn = turns.acquire_owned().await.ok()?;
+            Some(
+                tokio::task::spawn_blocking(move || {
+                    let _turn = turn;
+                    read(fd.as_fd(), accepted)
+                })
+                .await,
+            )
+        };
         match tokio::time::timeout(self.deadline, reading).await {
-            Err(_) => PeerRead::Late,
-            Ok(Err(_)) => PeerRead::Unread("the reader panicked".to_owned()),
-            Ok(Ok(Err(refused))) => PeerRead::Unread(refused.to_string()),
-            Ok(Ok(Ok(peer))) => PeerRead::Read(peer),
+            Err(_) | Ok(None) => PeerRead::Late,
+            Ok(Some(Err(_))) => PeerRead::Unread("the reader panicked".to_owned()),
+            Ok(Some(Ok(Err(refused)))) => PeerRead::Unread(refused.to_string()),
+            Ok(Some(Ok(Ok(peer)))) => PeerRead::Read(peer),
         }
     }
 }
@@ -567,7 +574,10 @@ mod tests {
         }
 
         fn open(&self) {
-            *self.open.lock().unwrap() = true;
+            *self
+                .open
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
             self.opened.notify_all();
         }
 
@@ -579,6 +589,15 @@ mod tests {
                 tokio::task::yield_now().await;
                 std::thread::sleep(Duration::from_millis(1));
             }
+        }
+    }
+
+    /// Opens its gate when dropped, so a test that fails with readings still waiting ends.
+    struct Opens(Arc<Gate>);
+
+    impl Drop for Opens {
+        fn drop(&mut self) {
+            self.0.open();
         }
     }
 
@@ -618,7 +637,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_no_more_than_eight_at_once_counting_one_given_up_on_until_it_ends() {
+    fn reads_no_more_than_eight_at_once_and_answers_late_one_still_waiting_for_a_turn_at_its_deadline()
+     {
         let gate = Arc::new(Gate::default());
         let waiting = Arc::clone(&gate);
         let reader = Peers::with(Duration::from_millis(10), move |_, _| {
@@ -626,7 +646,9 @@ mod tests {
             Err(Refused::Endless)
         });
         let (peer, _theirs) = socket();
-        runtime().block_on(async {
+        let runtime = runtime();
+        let _opens = Opens(Arc::clone(&gate));
+        runtime.block_on(async {
             let tasks = tokio_util::task::TaskTracker::new();
             let reads: Vec<_> = (0..=MAX_READING)
                 .map(|_| {
@@ -636,16 +658,21 @@ mod tests {
                 })
                 .collect();
             gate.started_by(MAX_READING).await;
-            // Past every deadline: the first eight are given up on, and still hold their turns.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert_eq!(gate.started.load(Ordering::SeqCst), MAX_READING);
-            gate.open();
-            gate.started_by(MAX_READING + 1).await;
-            let mut late = 0;
+            // The eight given up on still hold their turns; the ninth never had one.
             for read in reads {
-                late += usize::from(read.await.unwrap() == PeerRead::Late);
+                let read = tokio::time::timeout(Duration::from_secs(5), read).await;
+                assert_eq!(read.map(Result::unwrap), Ok(PeerRead::Late));
             }
-            assert!(late >= MAX_READING, "{late}");
+            assert_eq!(gate.started.load(Ordering::SeqCst), MAX_READING);
+            assert_eq!(reader.read(&peer).await, PeerRead::Late);
+            gate.open();
+            let by = std::time::Instant::now() + Duration::from_secs(10);
+            let mut read = reader.read(&peer).await;
+            while read == PeerRead::Late && std::time::Instant::now() < by {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                read = reader.read(&peer).await;
+            }
+            assert_eq!(read, PeerRead::Unread(Refused::Endless.to_string()));
         });
     }
 

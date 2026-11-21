@@ -12,7 +12,7 @@ use sha2::{Digest as _, Sha256};
 use crate::private_dir::{UnsafePrivateDir, ensure_private_dir};
 
 /// A token as the daemon mints it: 32 bytes, base64url. Anything else is never one.
-pub(crate) fn is_token(text: &str) -> bool {
+fn is_token(text: &str) -> bool {
     text.len() == 43
         && text
             .bytes()

@@ -1170,7 +1170,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":
     "opens the store's reader connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::agent_of":
-    "checks a token's shape and looks its hash up in the store; parses no bytes",
+    "looks a token's hash up in the store through tokens::agent_of; parses no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::untokened":
     "looks an agent id up in the store; parses no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::codex_agent":
