@@ -57,7 +57,7 @@ type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync
 
 /// Reads peers, at most `MAX_READING` at once, each on a blocking thread that holds its turn until
 /// it ends: one given up on still counts, so a slow `/proc` can't take every thread. A read is late
-/// at its deadline whether it was reading or still waiting for a turn. One given up on keeps its
+/// when it waits its deadline for a turn, or then reads for its deadline, as in TypeScript. One given up on keeps its
 /// own copy of the connection's fd until it ends, so the peer sees the close no sooner.
 #[derive(Clone)]
 pub(crate) struct Peers {
@@ -101,22 +101,18 @@ impl Peers {
         let turns = Arc::clone(&self.turns);
         let read = Arc::clone(&self.read);
         let accepted = socket.accepted;
-        // One deadline for the turn and the read: a read given up on keeps its turn until it ends.
-        let reading = async move {
-            let turn = turns.acquire_owned().await.ok()?;
-            Some(
-                tokio::task::spawn_blocking(move || {
-                    let _turn = turn;
-                    read(fd.as_fd(), accepted)
-                })
-                .await,
-            )
+        let Ok(Ok(turn)) = tokio::time::timeout(self.deadline, turns.acquire_owned()).await else {
+            return PeerRead::Late;
         };
+        let reading = tokio::task::spawn_blocking(move || {
+            let _turn = turn;
+            read(fd.as_fd(), accepted)
+        });
         match tokio::time::timeout(self.deadline, reading).await {
-            Err(_) | Ok(None) => PeerRead::Late,
-            Ok(Some(Err(_))) => PeerRead::Unread("the reader panicked".to_owned()),
-            Ok(Some(Ok(Err(refused)))) => PeerRead::Unread(refused.to_string()),
-            Ok(Some(Ok(Ok(peer)))) => PeerRead::Read(peer),
+            Err(_) => PeerRead::Late,
+            Ok(Err(_)) => PeerRead::Unread("the reader panicked".to_owned()),
+            Ok(Ok(Err(refused))) => PeerRead::Unread(refused.to_string()),
+            Ok(Ok(Ok(peer))) => PeerRead::Read(peer),
         }
     }
 }
@@ -634,6 +630,63 @@ mod tests {
                 PeerRead::Unread(Refused::Endless.to_string())
             );
         });
+    }
+
+    #[test]
+    fn gives_a_read_that_waited_for_its_turn_its_whole_deadline_to_read() {
+        let first = Arc::new(Gate::default());
+        let ninth = Arc::new(Gate::default());
+        let (holding, reading) = (Arc::clone(&first), Arc::clone(&ninth));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reader = Peers::with(READ, move |_, _| {
+            if calls.fetch_add(1, Ordering::SeqCst) < MAX_READING {
+                holding.wait();
+            } else {
+                reading.wait();
+            }
+            Err(Refused::Endless)
+        });
+        let (peer, _theirs) = socket();
+        let runtime = paused();
+        let _opens = (Opens(Arc::clone(&first)), Opens(Arc::clone(&ninth)));
+        runtime.block_on(async {
+            let tasks = tokio_util::task::TaskTracker::new();
+            let read = |reader: &Peers| {
+                let reader = reader.clone();
+                let peer = peer.clone();
+                tasks.spawn(async move { reader.read(&peer).await })
+            };
+            let held: Vec<_> = (0..MAX_READING).map(|_| read(&reader)).collect();
+            first.started_by(MAX_READING).await;
+            let waiting = read(&reader);
+            settle().await;
+            tokio::time::advance(Duration::from_millis(1500)).await;
+            first.open();
+            ninth.started_by(1).await;
+            for held in held {
+                assert_eq!(
+                    held.await.unwrap(),
+                    PeerRead::Unread(Refused::Endless.to_string())
+                );
+            }
+            // Past two seconds from the request, but one into the read: it reads in time.
+            tokio::time::advance(Duration::from_secs(1)).await;
+            settle().await;
+            assert!(!waiting.is_finished());
+            ninth.open();
+            assert_eq!(
+                waiting.await.unwrap(),
+                PeerRead::Unread(Refused::Endless.to_string())
+            );
+        });
+    }
+
+    /// Lets every task the runtime has woken run.
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]
