@@ -33,6 +33,15 @@ echo >> "$STUB_LOG"
 exit "\${STUB_EXIT:-0}"
 `;
 
+// `cargo metadata`, which `lint` asks for the crates to lint alone: two crates, named out of order.
+const CARGO_STUB = `#!/bin/sh
+echo "ARGV: $*" >> "$STUB_LOG"
+echo "ENV:" >> "$STUB_LOG"
+env -0 >> "$STUB_LOG"
+echo >> "$STUB_LOG"
+echo '{"packages":[{"name":"two"},{"name":"one"}]}'
+`;
+
 let xtask: string;
 let dir: string;
 let bin: string;
@@ -71,6 +80,8 @@ beforeEach(() => {
     writeFileSync(join(bin, tool), STUB);
     chmodSync(join(bin, tool), 0o755);
   }
+  writeFileSync(join(bin, "cargo"), CARGO_STUB);
+  chmodSync(join(bin, "cargo"), 0o755);
   // `env`, which the stubs run to log what they were started with: PATH holds only this folder.
   const env = spawnSync("sh", ["-c", "command -v env"], { encoding: "utf8" }).stdout.trim();
   writeFileSync(join(bin, "env"), `#!/bin/sh\nexec ${env} "$@"\n`);
@@ -147,6 +158,9 @@ const CALLER = {
   CARGO_TARGET_DIR: "/tmp/target",
 };
 
+const alone = (name: string) =>
+  expect.stringMatching(new RegExp(`^clippy --quiet -p ${name} --all-targets --locked `));
+
 describe("cargo xtask gate", () => {
   it("hands the tool its fixed command, the tests named after it, and no caller's flags", () => {
     const { status, logged } = rust(["test", "tests::a", "b"], CALLER);
@@ -155,6 +169,18 @@ describe("cargo xtask gate", () => {
       argv: [[...TEST_COMMAND, "tests::a", "b"].join(" ")],
     });
     expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
+  });
+
+  it("lints the workspace, the holder as it ships, then each crate cargo metadata names alone", () => {
+    const { status, logged } = rust(["lint"]);
+    expect(status).toBe(0);
+    expect(logged.map((l) => l.argv)).toEqual([
+      expect.stringContaining("--workspace --all-targets --all-features"),
+      expect.stringContaining("-p bazhen-holder --lib --bins"),
+      "metadata --no-deps --format-version 1 --locked",
+      alone("one"),
+      alone("two"),
+    ]);
   });
 
   it("runs nothing unless it is named a root at a full path, or cargo names the crate's directory", () => {

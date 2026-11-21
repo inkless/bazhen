@@ -126,7 +126,7 @@ fn attach(home: &Path) -> Res<(Child, OwnedFd)> {
 
 /// What the attach writes to its terminal, read until it has been quiet for `quiet`.
 fn shown(master: &OwnedFd, quiet: Duration) -> String {
-    let wait = rustix::time::Timespec {
+    let wait = rustix::event::Timespec {
         tv_sec: 0,
         tv_nsec: i64::from(quiet.subsec_nanos()),
     };

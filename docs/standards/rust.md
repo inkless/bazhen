@@ -11,6 +11,7 @@ a review asks for something no check covers.
 | Every target is built and tested from where Cargo looks by default; no build script or proc macro of ours                               | `moon run :check` (`scripts/check-standards.ts`)    |
 | The lint levels, test allowances, `deny.toml` and the gate tasks are the ones below, with nothing beside them to loosen them            | `moon run :check` (`scripts/check-standards.ts`)    |
 | Clippy's pedantic group and the restriction lints below fail the build                                                                  | `moon run :lint-rust` (`-D warnings`)               |
+| Every crate builds, tests and all, on its own, with only the features it declares                                                       | `moon run :lint-rust` (a pass per crate)            |
 | No named lint can be lowered by any attribute, however it is written                                                                    | the compiler (`forbid`)                             |
 | No lint is suppressed in source, except `unsafe_code` in an unsafe module; no code comes from a file the scan doesn't read              | `moon run :check` (`scripts/check-standards.ts`)    |
 | The gates run with no flag, alias, wrapper or runner from the caller                                                                    | `scripts/xtask.sh gate`, which every gate task runs |
@@ -142,6 +143,14 @@ On top of pedantic:
 - `allow_attributes` and `allow_attributes_without_reason`: when the workspace's allow-list
   doesn't cover a case, the fix is in the code. AGENTS.md's rule holds: a failing check is fixed
   in the code, never by a suppression.
+
+**Each crate is linted alone too.** `moon run :lint-rust` lints the workspace with every feature,
+the holder as it ships, and then each crate on its own (`cargo clippy -p <crate> --all-targets`,
+the crates named by `cargo metadata`, so a new crate is covered with no list to keep). The
+workspace pass unifies features across every crate, so a crate that uses a dependency's feature it
+never declared builds there, because a neighbour enabled it, and fails only when built alone, as
+`cargo test -p <crate>` does. A `-p` build resolves features for that crate only, so the pass fails
+on it.
 
 **The groups are guarded by the scan, not by forbid.** A forbidden group (`pedantic`,
 `rust_2018_idioms`) only warns when an attribute lowers one of its lints, which `-D warnings`

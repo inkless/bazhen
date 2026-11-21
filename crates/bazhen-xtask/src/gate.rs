@@ -69,6 +69,33 @@ const SHIPPED_LINT: &[&str] = &[
     "-D",
     "warnings",
 ];
+// Each crate of the workspace on its own, which `lint` checks last: with `-p`, cargo resolves
+// features over that crate alone, so a feature it takes from a neighbour in the workspace pass is
+// missing here, and its build fails. The crate's name goes between the two halves.
+const ALONE_LINT_HEAD: &[&str] = &["cargo-clippy", "clippy", "--quiet", "-p"];
+const ALONE_LINT_TAIL: &[&str] = &[
+    "--all-targets",
+    "--locked",
+    "--config",
+    "build.rustc-wrapper=\"\"",
+    "--config",
+    "build.rustc-workspace-wrapper=\"\"",
+    "--config",
+    "build.rustc=\"rustc\"",
+    "--",
+    "-D",
+    "warnings",
+];
+// The workspace's crates, as cargo lists them: `--no-deps` leaves out every dependency, so each
+// package it prints is a member.
+pub(crate) const MEMBERS: &[&str] = &[
+    "cargo",
+    "metadata",
+    "--no-deps",
+    "--format-version",
+    "1",
+    "--locked",
+];
 const DENY: &[&str] = &["cargo-deny", "deny", "--locked", "check"];
 const TEST: &[&str] = &[
     "cargo-nextest",
@@ -290,6 +317,27 @@ pub(crate) trait Host {
     fn read(&self, path: &Path) -> Result<Option<String>, String>;
     /// Runs `argv` in `env`, from the repository's root, its output discarded when `quiet`.
     fn run(&mut self, argv: &[&str], env: &Env, quiet: bool) -> std::io::Result<Status>;
+    /// What `argv` printed to stdout, run as `run` does, `None` when it did not exit 0.
+    fn output(&mut self, argv: &[&str], env: &Env) -> std::io::Result<Option<String>>;
+}
+
+/// The names of the crates `cargo metadata --no-deps` printed as `json`.
+pub(crate) fn member_names(json: &str) -> Result<Vec<String>, String> {
+    let metadata: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let packages = metadata
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("no `packages` list")?;
+    let mut names = packages
+        .iter()
+        .map(|p| p.get("name").and_then(serde_json::Value::as_str))
+        .map(|name| name.map(str::to_owned).ok_or("a package with no name"))
+        .collect::<Result<Vec<_>, _>>()?;
+    if names.is_empty() {
+        return Err("no crate".to_owned());
+    }
+    names.sort();
+    Ok(names)
 }
 
 /// Where a run looks for cargo configs: the repository, and the cargo home.
@@ -332,20 +380,52 @@ pub(crate) fn run(
             .copied()
             .chain(tests.iter().map(String::as_str))
             .collect();
-        match host.run(&argv, &env, false) {
-            Ok(Some(0)) => {}
-            Ok(_) => return Exit::Failed,
-            Err(error) => {
-                let _ = writeln!(
-                    err,
-                    "{}: {error}",
-                    argv.first().copied().unwrap_or_default()
-                );
+        if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
+            return exit;
+        }
+    }
+    if gate == Gate::Lint {
+        let members = match host.output(MEMBERS, &env) {
+            Ok(Some(json)) => member_names(&json),
+            Ok(None) => Err("it failed".to_owned()),
+            Err(error) => Err(error.to_string()),
+        };
+        let members = match members {
+            Ok(members) => members,
+            Err(why) => {
+                let _ = writeln!(err, "cargo metadata, which names the crates to lint: {why}");
                 return Exit::Failed;
+            }
+        };
+        for member in &members {
+            let argv: Vec<&str> = ALONE_LINT_HEAD
+                .iter()
+                .copied()
+                .chain([member.as_str()])
+                .chain(ALONE_LINT_TAIL.iter().copied())
+                .collect();
+            if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
+                return exit;
             }
         }
     }
     Exit::Done
+}
+
+/// How a command that did not exit 0 ends the gate, `None` when it did.
+fn failed(ran: std::io::Result<Status>, argv: &[&str], err: &mut impl Write) -> Option<Exit> {
+    match ran {
+        Ok(Some(0)) => None,
+        Ok(_) => Some(Exit::Failed),
+        Err(error) => {
+            let _ = writeln!(
+                err,
+                "{}: {error}",
+                argv.first().copied().unwrap_or_default()
+            );
+            Some(Exit::Failed)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -585,6 +665,7 @@ mod tests {
         shadow: bool,
         probe: Status,
         status: Status,
+        metadata: Option<&'static str>,
         runs: Vec<Vec<String>>,
     }
 
@@ -596,6 +677,7 @@ mod tests {
                 shadow: false,
                 probe: Some(0),
                 status: Some(0),
+                metadata: Some(r#"{"packages":[{"name":"b"},{"name":"a"}]}"#),
                 runs: Vec::new(),
             }
         }
@@ -616,6 +698,11 @@ mod tests {
             self.runs
                 .push(argv.iter().map(|a| (*a).to_owned()).collect());
             Ok(if quiet { self.probe } else { self.status })
+        }
+        fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
+            self.runs
+                .push(argv.iter().map(|a| (*a).to_owned()).collect());
+            Ok(self.metadata.map(str::to_owned))
         }
     }
 
@@ -663,15 +750,74 @@ mod tests {
     }
 
     #[test]
-    fn lints_the_workspace_then_the_holder_as_it_ships() {
+    fn lints_the_workspace_then_the_holder_as_it_ships_then_each_crate_alone() {
         let mut host = Fake::new(false);
         let (exit, runs, _) = ran(&mut host, "lint", &[]);
         assert_eq!(
             (exit, runs),
-            (Exit::Done, vec!["cargo-clippy".to_owned(); 3])
+            (
+                Exit::Done,
+                ["cargo-clippy", "cargo-clippy", "cargo-clippy", "cargo"]
+                    .into_iter()
+                    .chain(["cargo-clippy"; 2])
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            )
         );
         assert_eq!(host.runs[1], LINT);
         assert_eq!(host.runs[2], SHIPPED_LINT);
+        assert_eq!(host.runs[3], MEMBERS);
+        for (run, name) in host.runs[4..].iter().zip(["a", "b"]) {
+            let (head, rest) = run.split_at(ALONE_LINT_HEAD.len());
+            assert_eq!(head, ALONE_LINT_HEAD);
+            assert_eq!(rest[0], name);
+            assert_eq!(&rest[1..], ALONE_LINT_TAIL);
+        }
+    }
+
+    #[test]
+    fn lints_each_crate_with_no_feature_but_its_own_so_one_it_takes_from_a_neighbour_fails() {
+        for part in ["--workspace", "--all-features", "--exclude"] {
+            assert!(
+                !ALONE_LINT_HEAD
+                    .iter()
+                    .chain(ALONE_LINT_TAIL)
+                    .any(|a| *a == part),
+                "{part}"
+            );
+        }
+        assert!(ALONE_LINT_TAIL.contains(&"--all-targets"));
+        assert_eq!(
+            ALONE_LINT_TAIL[ALONE_LINT_TAIL.len() - 3..],
+            ["--", "-D", "warnings"]
+        );
+        assert!(ALONE_LINT_TAIL.join(" ").contains(
+            "--config build.rustc-wrapper=\"\" --config build.rustc-workspace-wrapper=\"\" \
+                 --config build.rustc=\"rustc\""
+        ));
+    }
+
+    #[test]
+    fn names_the_crates_cargo_metadata_lists_in_order() {
+        assert_eq!(
+            member_names(r#"{"packages":[{"name":"b"},{"name":"a","x":1}],"y":2}"#),
+            Ok(vec!["a".to_owned(), "b".to_owned()])
+        );
+        for bad in ["", "{}", r#"{"packages":[]}"#, r#"{"packages":[{}]}"#] {
+            assert!(member_names(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn fails_lint_without_linting_a_crate_when_cargo_metadata_gives_no_crates() {
+        for metadata in [None, Some("{"), Some(r#"{"packages":[]}"#)] {
+            let mut host = Fake::new(false);
+            host.metadata = metadata;
+            let (exit, runs, err) = ran(&mut host, "lint", &[]);
+            assert_eq!(exit, Exit::Failed, "{metadata:?}");
+            assert_eq!(runs.len(), 4, "{metadata:?}");
+            assert!(err.starts_with("cargo metadata"), "{err}");
+        }
     }
 
     #[test]

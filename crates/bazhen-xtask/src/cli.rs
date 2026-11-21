@@ -118,6 +118,9 @@ mod tests {
         fn run(&mut self, _: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
             Ok(Some(1))
         }
+        fn output(&mut self, _: &[&str], _: &Env) -> std::io::Result<Option<String>> {
+            Ok(None)
+        }
     }
 
     fn call(args: &[&str]) -> (Exit, String, String) {
