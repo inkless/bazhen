@@ -473,11 +473,14 @@ function upTo(events: readonly HolderEvent[], type: HolderEvent["type"]) {
 describe("a holder's terminal engine", () => {
   it("attaches mid-stream to a snapshot that, with the output after it, draws what all of it does", async () => {
     const lines = "i=0; while [ $i -lt 4000 ]; do i=$((i+1)); echo line $i; done";
-    const holder = await started("attach", gated(lines));
+    // The child exits only once let go again, after the attach: a connection past `hello` gets
+    // an exit published before its attach is served ahead of the attach's snapshot.
+    const holder = await started("attach", gated(`${lines}; read _`));
     const live = await letGo(holder);
     await until(() => outputEnd(live.events) > 4000, "some of the output");
     const attached = await listen(holder);
     await attached.client.attach();
+    live.client.input(encode("\n"));
     await live.exit;
     await attached.exit;
     const { snapshot, after } = attachedTo(attached.events);
