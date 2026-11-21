@@ -80,7 +80,7 @@ import { observeSend } from "./mailbox/observed.ts";
 import { InvalidConfig, loadSettings } from "./config/config.ts";
 import { agentCli } from "./env/agent-cli.ts";
 import { capture } from "./env/capture.ts";
-import { probe, silence } from "./socket/probe.ts";
+import { refusal } from "./socket/probe.ts";
 import { currentInputs } from "./config/paths.ts";
 import { ensurePrivateDir } from "./config/private-dir.ts";
 import { createApp, type AppDeps, type TaskCommands } from "./http/app.ts";
@@ -127,13 +127,9 @@ ensurePrivateDir(paths.run, inputs.uid);
 if (paths.holderRun !== paths.run) ensurePrivateDir(paths.holderRun, inputs.uid);
 // Its socket is about to be replaced; a daemon still answering on it would be orphaned, with its
 // store and tmux server shared. (A lock that also covers two starts racing comes later.)
-const found = await probe(paths.socket);
-if (found.kind !== "nothing") {
-  console.error(
-    found.kind === "silent"
-      ? silence(paths.socket)
-      : `bazhen is already running on ${paths.socket}`,
-  );
+const taken = await refusal(paths.socket);
+if (taken !== null) {
+  console.error(taken);
   process.exit(1);
 }
 // Captured once: agents get what a new terminal tab would, minus Bazhen's and the launching

@@ -27,7 +27,7 @@ const LOG_TAIL_LINES = 20;
 export async function detach(o: DetachOptions): Promise<number> {
   const found = await probe(o.socket);
   if (found.kind === "silent") {
-    console.error(silence(o.socket));
+    console.error(silence(o.socket, found.seen));
     return 1;
   }
   if (found.kind === "daemon") {

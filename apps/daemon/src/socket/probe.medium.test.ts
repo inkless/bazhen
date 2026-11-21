@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import { connect } from "node:net";
+import { type Socket, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
-import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
-import { probe } from "./probe.ts";
+import { fullBacklog } from "../testing/full-backlog.ts";
+import { probe, refusal } from "./probe.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -36,44 +36,38 @@ async function daemon(reply: { body: string; status?: number } | "never"): Promi
   return socket;
 }
 
-// Listens with a backlog of one, as `backlog: 0` is taken for Node's default, then blocks its
-// thread so it never accepts, until the test lets it go.
-const NEVER_ACCEPTS = `
-const { parentPort, workerData } = require("node:worker_threads");
-const server = require("node:net").createServer();
-server.listen({ path: workerData.socket, backlog: 1 }, () => {
-  parentPort.postMessage("listening");
-  Atomics.wait(workerData.gate, 0, 0, 30_000);
-  server.close();
-});
-`;
-
-/** A socket whose listener never accepts, its backlog taken by connections of the test's own. */
 async function stuck(): Promise<string> {
   const socket = socketPath();
-  const gate = new Int32Array(new SharedArrayBuffer(4));
-  const worker = new Worker(NEVER_ACCEPTS, { eval: true, workerData: { socket, gate } });
-  const queued: ReturnType<typeof connect>[] = [];
-  cleanups.push(async () => {
-    Atomics.store(gate, 0, 1);
-    Atomics.notify(gate, 0);
-    for (const conn of queued) conn.destroy();
-    await worker.terminate();
-  });
-  await new Promise((resolve, reject) => {
-    worker.once("message", resolve);
-    worker.once("error", reject);
-  });
-  for (let i = 0; i < 2; i++) {
-    const conn = connect(socket);
-    queued.push(conn);
-    await new Promise((resolve, reject) => {
-      conn.once("connect", resolve);
-      conn.once("error", reject);
-    });
-  }
+  const backlog = await fullBacklog(socket);
+  cleanups.push(() => backlog.close());
   return socket;
 }
+
+/** A socket whose peer starts a reply and adds a byte to its head every 50 ms, never ending it. */
+async function trickling(): Promise<string> {
+  const socket = socketPath();
+  const conns = new Set<Socket>();
+  const server = createNetServer((conn) => {
+    conns.add(conn);
+    conn.on("error", () => {});
+    conn.write("HTTP/1.1 200 OK\r\nx-slow: ");
+    const drip = setInterval(() => conn.write("a"), 50);
+    conn.on("close", () => clearInterval(drip));
+  });
+  await new Promise<void>((resolve) => server.listen(socket, resolve));
+  cleanups.push(
+    () =>
+      new Promise<void>((resolve) => {
+        for (const conn of conns) conn.destroy();
+        server.close(() => resolve());
+      }),
+  );
+  return socket;
+}
+
+const STILL_WAITING = "still waiting";
+const within = <T>(ms: number, p: Promise<T>) =>
+  Promise.race([p, new Promise<string>((r) => setTimeout(() => r(STILL_WAITING), ms))]);
 
 describe("probe", () => {
   it("finds nothing where no socket is", async () => {
@@ -81,15 +75,25 @@ describe("probe", () => {
   });
 
   it("finds a daemon that takes the connection but never answers silent", async () => {
-    expect(await probe(await daemon("never"), 200)).toEqual({ kind: "silent" });
+    expect(await probe(await daemon("never"), 200)).toEqual({
+      kind: "silent",
+      seen: "no answer within 200 ms",
+    });
   });
 
   it.runIf(process.platform === "linux")(
     "finds a daemon whose backlog is full silent",
     async () => {
-      expect(await probe(await stuck(), 200)).toEqual({ kind: "silent" });
+      expect((await probe(await stuck(), 200)).kind).toBe("silent");
     },
   );
+
+  it("gives up on a peer that trickles its reply, in its time as a whole", async () => {
+    expect(await within(2000, probe(await trickling(), 300))).toEqual({
+      kind: "silent",
+      seen: "no answer within 300 ms",
+    });
+  });
 
   it("reads the protocol a daemon speaks, and none from one before ids or from a refusal", async () => {
     const answers = [
@@ -107,4 +111,21 @@ describe("probe", () => {
       { kind: "daemon", protocolId: null },
     ]);
   });
+});
+
+describe("refusal", () => {
+  it.runIf(process.platform === "linux")(
+    "refuses a socket something holds without answering, and one a daemon answers on",
+    async () => {
+      const held = await stuck();
+      const answered = await daemon({ body: JSON.stringify({ status: "ok" }) });
+      expect([await refusal(socketPath()), await refusal(held), await refusal(answered)]).toEqual([
+        null,
+        expect.stringMatching(
+          new RegExp(`^bazhen won't start over ${held}: something may hold it`),
+        ),
+        `bazhen is already running on ${answered}`,
+      ]);
+    },
+  );
 });

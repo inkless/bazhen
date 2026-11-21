@@ -58,8 +58,8 @@ pub(crate) struct Startup {
 pub(crate) enum Refused {
     #[error("bazhen is already running on {0}")]
     Running(String),
-    #[error("{}", silence(.0))]
-    Silent(String),
+    #[error("{}", silence(.socket, .seen))]
+    Silent { socket: String, seen: String },
     #[error("{0}")]
     Said(String),
 }
@@ -91,7 +91,12 @@ fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
     // its store shared.
     match probe(Path::new(&p.socket)) {
         Answer::Nothing => {}
-        Answer::Silent => return Err(Refused::Silent(p.socket.clone())),
+        Answer::Silent { seen } => {
+            return Err(Refused::Silent {
+                socket: p.socket.clone(),
+                seen,
+            });
+        }
         Answer::Daemon { .. } => return Err(Refused::Running(p.socket.clone())),
     }
     let path = PathBuf::from(&p.data).join("bazhen.db");
@@ -520,7 +525,7 @@ mod tests {
         let _stuck = crate::testing::FullBacklog::at(Path::new(&startup.paths.socket));
         let refused = prepare(&startup);
         assert!(
-            matches!(&refused, Err(Refused::Silent(at)) if *at == startup.paths.socket),
+            matches!(&refused, Err(Refused::Silent { socket, .. }) if *socket == startup.paths.socket),
             "{refused:?}"
         );
     }
