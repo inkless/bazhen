@@ -32,13 +32,7 @@ impl Host for Real {
     }
 
     fn run(&mut self, argv: &[&str], env: &Env, quiet: bool) -> io::Result<Status> {
-        let (program, rest) = argv.split_first().ok_or(io::ErrorKind::InvalidInput)?;
-        let mut command = Command::new(program);
-        command
-            .args(rest)
-            .current_dir(&self.root)
-            .env_clear()
-            .envs(env);
+        let mut command = self.command(argv, env)?;
         if quiet {
             command
                 .stdin(Stdio::null())
@@ -46,6 +40,33 @@ impl Host for Real {
                 .stderr(Stdio::null());
         }
         Ok(command.status()?.code())
+    }
+
+    fn output(&mut self, argv: &[&str], env: &Env) -> io::Result<Option<String>> {
+        let output = self
+            .command(argv, env)?
+            .stdin(Stdio::null())
+            .stderr(Stdio::inherit())
+            .output()?;
+        if output.status.code() != Some(0) {
+            return Ok(None);
+        }
+        String::from_utf8(output.stdout)
+            .map(Some)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+}
+
+impl Real {
+    fn command(&self, argv: &[&str], env: &Env) -> io::Result<Command> {
+        let (program, rest) = argv.split_first().ok_or(io::ErrorKind::InvalidInput)?;
+        let mut command = Command::new(program);
+        command
+            .args(rest)
+            .current_dir(&self.root)
+            .env_clear()
+            .envs(env);
+        Ok(command)
     }
 }
 

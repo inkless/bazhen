@@ -515,7 +515,7 @@ const CFG_ALLOWED: Record<string, string> = {
   feature:
     "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
     "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
-    "which lint checks too (SHIPPED_LINT in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds it to that one",
+    "which lint checks too, in each crate's as-shipped pass (`alone_as_shipped` in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds it to that one",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
