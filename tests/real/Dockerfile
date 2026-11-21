@@ -53,8 +53,10 @@ ARG PNPM_VERSION
 ARG MOON_VERSION
 ARG PLAYWRIGHT_VERSION
 ARG TMUX_VERSION
-# What the shell-terminal suite runs in a shell, pinned as tmux is.
-ARG NEOVIM_VERSION=0.10.4-8
+# What the shell-terminal suite runs in a shell, pinned as tmux is. Debian drops a package's old
+# version from trixie when it ships a new one, a security update included, and apt then fails the
+# build: refresh a pin from `apt-cache madison <package>` in a node:<NODE_VERSION>-trixie container.
+ARG NEOVIM_VERSION=0.10.4-8+deb13u1
 ARG LESS_VERSION=668-1
 ARG MAN_DB_VERSION=2.13.1-1
 ARG HTOP_VERSION=3.4.1-5
