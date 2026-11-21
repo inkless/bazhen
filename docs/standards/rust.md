@@ -592,10 +592,13 @@ What differs:
   - A crate with a decoder needs a library target, because a fuzz crate can call only a
     library. The decoder is `pub` there; the binary, if any, is a `main` that calls the
     library, as `crates/bazhen-hook/src/main.rs` is.
-  - `.github/workflows/fuzz.yml` runs every target nightly, and for a minute on a pull request that
-    changes the Rust. Its `fuzz` job alone builds on nightly, pinned there as `NIGHTLY`, because
-    libFuzzer's instrumentation needs it; everything else builds on the pinned toolchain. Its
-    `properties` job runs the property tests (above), not the targets. To run a target locally,
+  - `.github/workflows/fuzz.yml` runs every target nightly, and for a minute on a pull request
+    that changes the Rust, one job per crate side by side, each with its own build cache. A pull
+    request runs every crate, not only those its change reaches: its `paths` filter decides
+    whether the workflow runs at all. The `fuzz` check passes when every crate's job did. The
+    fuzz jobs alone build on nightly, pinned there as `NIGHTLY`, because libFuzzer's
+    instrumentation needs it; everything else builds on the pinned toolchain. Its `properties`
+    job runs the property tests (above), not the targets. To run a target locally,
     install that nightly and `cargo install --locked cargo-fuzz@0.13.2` once, then run
     `moon run :capped -- cargo +nightly-2026-11-01 fuzz run <target> -- -rss_limit_mb=2048
     -max_total_time=600` from the crate's directory. cargo-fuzz starts its target without cargo's

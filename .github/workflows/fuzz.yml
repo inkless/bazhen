@@ -1,9 +1,10 @@
 name: Fuzz
 
-# Runs every cargo-fuzz target in crates/*/fuzz (docs/standards/rust.md § Tests): nightly for long,
-# building on the corpus earlier runs kept, and briefly on a pull request that changes the Rust, so
-# a broken target or a decoder it breaks is seen before it merges. Nightly, it also runs the
-# property tests on random seeds: everywhere else they run on fixed ones.
+# Runs the cargo-fuzz targets in crates/*/fuzz (docs/standards/rust.md § Tests), one job per crate,
+# side by side: nightly for long, building on the corpus earlier runs kept; on a pull request that
+# changes the Rust, briefly, so a broken target or a decoder it breaks is seen before it merges.
+# Which pull requests run it is the `paths` filter below, not a choice of crates: every crate runs.
+# Nightly, it also runs the property tests on random seeds: everywhere else they run on fixed ones.
 on:
   schedule:
     - cron: "17 3 * * *"
@@ -13,7 +14,13 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - ".cargo/**"
       - ".github/workflows/fuzz.yml"
+      - ".nvmrc"
+      # capped.ts and what it imports.
+      - "scripts/capped.ts"
+      - "scripts/is-main.ts"
+      - "packages/host-guard/src/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -23,19 +30,46 @@ permissions:
   contents: read
 
 env:
-  # libFuzzer's instrumentation needs nightly; this job alone uses it, pinned to one date.
+  # libFuzzer's instrumentation needs nightly; these jobs alone use it, pinned to one date.
   NIGHTLY: nightly-2026-11-01
+  CARGO_FUZZ: 0.13.2
   SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '60' || '600' }}
   # What a target's build takes inside its time cap: the slowest one measured on CI took 37 s.
   BUILD_MINUTES: 2
 
 jobs:
-  fuzz:
+  crates:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 5
+    outputs:
+      crates: ${{ steps.list.outputs.crates }}
     steps:
       - uses: actions/checkout@v7
-      # scripts/capped.ts caps each target's memory and time, and needs only Node's built-ins.
+      # Every crate with a fuzz crate, so one added later runs without editing this file. `ls`
+      # fails when none match, which fails the job instead of passing with nothing fuzzed.
+      - name: List the crates with a fuzz crate
+        id: list
+        run: |
+          set -euo pipefail
+          crates=$(ls crates/*/fuzz/Cargo.toml | cut -d/ -f2 | jq -Rnc '[inputs]')
+          echo "crates=$crates" | tee -a "$GITHUB_OUTPUT"
+
+  targets:
+    needs: crates
+    name: fuzz ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    # The most a crate takes nightly: 3 targets, each capped at 17 minutes, is 51.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.crates.outputs.crates) }}
+    env:
+      CRATE: crates/${{ matrix.crate }}
+    steps:
+      - uses: actions/checkout@v7
+      # scripts/capped.ts caps each target's memory and time, and needs only Node and the source it
+      # imports.
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
@@ -44,45 +78,78 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-fuzz
-          key: cargo-fuzz-0.13.2-${{ runner.os }}
+          key: cargo-fuzz-${{ env.CARGO_FUZZ }}-${{ runner.os }}
       - name: Install cargo-fuzz
-        run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked cargo-fuzz@0.13.2
+        run: command -v cargo-fuzz || cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ"
+      # The build, saved once per lockfile by a run off a pull request, so a pull request starts
+      # from it and rebuilds only the workspace's own crates; a pull request's own save would be
+      # seen by that pull request alone. Restored on an exact key only, so a build saved for an
+      # older lockfile never carries its artifacts into the next. Keys separate the crate with
+      # `.`, which a package name can't hold, so one crate's key is never a prefix of another's.
+      - uses: actions/cache/restore@v6
+        id: target
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/target
+          key: fuzz-target.${{ matrix.crate }}.${{ env.NIGHTLY }}.cargo-fuzz-${{ env.CARGO_FUZZ }}.${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
       # Each run starts from the corpus the last one left, so the nightly runs add up.
       - uses: actions/cache@v6
         with:
-          path: crates/*/fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}
-          restore-keys: fuzz-corpus-
-      - name: Run every target
+          path: crates/${{ matrix.crate }}/fuzz/corpus
+          key: fuzz-corpus.${{ matrix.crate }}.${{ github.run_id }}
+          restore-keys: fuzz-corpus.${{ matrix.crate }}.
+      - name: Run the crate's targets
+        id: run
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          for manifest in crates/*/fuzz/Cargo.toml; do
-            crate=$(dirname "$(dirname "$manifest")")
-            # Listed first, so a crate whose targets can't be listed fails the job.
-            targets=$(cd "$crate" && cargo "+$NIGHTLY" fuzz list)
-            if [ -z "$targets" ]; then
-              echo "$crate/fuzz has no targets" >&2
-              exit 1
-            fi
-            for target in $targets; do
-              echo "::group::$crate $target"
-              mkdir -p "$crate/fuzz/corpus/$target" "$crate/fuzz/seeds/$target"
-              # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
-              (cd "$crate" && node ../../scripts/capped.ts --memory 4G \
-                --time "$((SECONDS_PER_TARGET / 60 + BUILD_MINUTES + 5))m" -- \
-                cargo "+$NIGHTLY" fuzz run "$target" \
-                "fuzz/corpus/$target" "fuzz/seeds/$target" \
-                -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048)
-              echo "::endgroup::"
-            done
+          cd "$CRATE"
+          # Listed first, so a crate whose targets can't be listed fails the job.
+          targets=$(cargo "+$NIGHTLY" fuzz list)
+          if [ -z "$targets" ]; then
+            echo "$CRATE/fuzz has no targets" >&2
+            exit 1
+          fi
+          for target in $targets; do
+            echo "::group::$target"
+            mkdir -p "fuzz/corpus/$target" "fuzz/seeds/$target"
+            # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
+            node ../../scripts/capped.ts --memory 4G \
+              --time "$((SECONDS_PER_TARGET / 60 + BUILD_MINUTES + 5))m" -- \
+              cargo "+$NIGHTLY" fuzz run "$target" \
+              "fuzz/corpus/$target" "fuzz/seeds/$target" \
+              -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048
+            echo "::endgroup::"
           done
+      # Saved once the targets ran, even when one crashed, since the build itself is still good.
+      - if: >-
+          !cancelled() && github.event_name != 'pull_request' &&
+          steps.target.outputs.cache-hit != 'true' &&
+          (steps.run.outcome == 'success' || steps.run.outcome == 'failure')
+        uses: actions/cache/save@v6
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/target
+          key: ${{ steps.target.outputs.cache-primary-key }}
       - name: Keep what crashed
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-artifacts
-          path: crates/*/fuzz/artifacts/
+          name: fuzz-artifacts-${{ matrix.crate }}
+          path: crates/${{ matrix.crate }}/fuzz/artifacts/
+
+  # The one check that stands for every crate's job, so its name stays the same as crates come and
+  # go. It runs even when they failed, since a job skipped for a failure before it reads as a pass.
+  fuzz:
+    needs: [crates, targets]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every crate's targets passed
+        env:
+          CRATES: ${{ needs.crates.result }}
+          TARGETS: ${{ needs.targets.result }}
+        run: |
+          echo "crates: $CRATES; targets: $TARGETS"
+          [ "$CRATES" = success ] && [ "$TARGETS" = success ]
 
   # A pull request runs every property test on one fixed seed (`cargo xtask gate` and
   # tests/support/fast-check-seed.ts), so it fails only for what it changed. This job draws new
