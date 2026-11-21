@@ -32,6 +32,9 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
   "crates/bazhen-holder/src/guard.rs":
     "every holder signal: to its own unreaped child's group, or to a process held and checked to " +
     "be in the session that child leads; never ≤ 1, the holder, its group, session or ancestors",
+  "crates/bazhen-host-guard/src/lib.rs":
+    "every Rust signal outside the holder and the tests: to a group whose leader this process " +
+    "started and hasn't reaped; never init, this process, its ancestors or its own group",
   "crates/bazhen-test-signal/src/lib.rs":
     "every Rust test's signals: to a process it started or checked is still the one it started, " +
     "never 0, ±1, the test, its parent or its own group",

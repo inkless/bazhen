@@ -220,6 +220,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bazhen-host-guard"
+version = "0.1.0"
+dependencies = [
+ "bazhen-holder",
+ "bazhen-peer",
+ "bazhen-pid",
+ "bazhen-test-signal",
+ "futures-util",
+ "rustix",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "bazhen-peer"
 version = "0.1.0"
 dependencies = [
