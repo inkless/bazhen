@@ -753,6 +753,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-store/src/events.rs::StoredEvent::frame": "frame",
+  "crates/bazhen-daemon/src/tasks.rs::asked": "tasks",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::push": "frame",
@@ -778,6 +779,10 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-daemon/src/events.rs::stream":
+    "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
+  "crates/bazhen-daemon/src/routes.rs::create_task":
+    "hands its body to tasks::asked, which its tasks target fuzzes; decodes nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
     "wraps its connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/config.rs::read_config_file":

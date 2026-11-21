@@ -35,6 +35,18 @@ describe("the event registry the Rust daemon redacts by", () => {
         /x\.made: streams title differently/,
       );
     }
+    const nested = payload.extend({
+      detail: z.object({ text: z.string().default("none"), at: z.number() }),
+    });
+    const listed = payload.extend({ tags: z.array(z.string().transform((t) => t.trim())) });
+    const either = payload.extend({
+      at: z.union([z.number(), z.string().pipe(z.coerce.number())]),
+    });
+    for (const deep of [nested, listed, either]) {
+      expect(() => eventRegistry({ "x.made": { entity: "x", payload: deep } })).toThrow(
+        /x\.made: streams (detail|tags|at) differently/,
+      );
+    }
     const trimmed = payload.extend({ title: z.string().trim().min(1) });
     expect(eventRegistry({ "x.made": { entity: "x", payload: trimmed } })).toHaveLength(1);
   });

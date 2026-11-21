@@ -99,7 +99,15 @@ export function overSocket(
       (res) => {
         let text = "";
         res.on("data", (d: Buffer) => (text += d.toString()));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }));
+        // A body that isn't JSON, as a daemon's plain 404, comes back as its text, for the test to
+        // judge, rather than throwing where nothing awaits it.
+        res.on("end", () => {
+          let body: unknown = text;
+          try {
+            body = JSON.parse(text);
+          } catch {}
+          resolve({ status: res.statusCode ?? 0, body });
+        });
       },
     );
     req.on("error", reject);
@@ -729,13 +737,27 @@ export class Daemon {
     return client;
   }
 
+  /** Opens the event stream over the daemon's socket, as `bazhen events` does, resuming after `cursor`. */
+  async socketEvents(
+    cursor: { epoch: string; eventId: number },
+    opts: { path?: string } = {},
+  ): Promise<EventClient> {
+    const query = new URLSearchParams({ epoch: cursor.epoch, after: String(cursor.eventId) });
+    const ws = new WebSocket(`ws+unix://${this.socket}:${opts.path ?? "/v1/events"}?${query}`);
+    const client = new EventClient(ws, cursor.eventId);
+    await opened(ws);
+    return client;
+  }
+
   /**
    * Resolves once `stream` has delivered every event the store holds now. The store goes on
    * recording (agents report as they start, a stream's next page waits on its last write), so a
    * stream is never compared with a snapshot at one instant: it is waited for to reach one.
    */
   async caughtUp(stream: EventClient): Promise<void> {
-    const { eventId } = StateSnapshot.parse((await this.request("/v1/state")).body);
+    const { eventId } = StateSnapshot.parse(
+      (await overSocket(this.socket, "GET", "/v1/state")).body,
+    );
     try {
       await waitUntil(() => stream.last() >= eventId, "the event stream");
     } catch (cause) {

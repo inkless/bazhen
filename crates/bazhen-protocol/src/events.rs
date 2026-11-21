@@ -255,6 +255,17 @@ pub enum EventFrame {
     },
 }
 
+/// A text frame a client sends on `/v1/events`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ClientEventFrame {
+    /// Whether the client's page is in sight.
+    Visibility { visible: bool },
+}
+
+/// The largest frame a client sends on `/v1/events`, which carries only whether its page is seen.
+pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
+
 /// The payload of `task.created`, in the order the TypeScript daemon writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

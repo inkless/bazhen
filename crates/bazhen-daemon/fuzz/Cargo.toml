@@ -12,10 +12,18 @@ cargo-fuzz = true
 [dependencies]
 bazhen-daemon = { path = ".." }
 libfuzzer-sys = "=0.4.13"
+serde_json = "=1.0.154"
 
 [[bin]]
 name = "config"
 path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tasks"
+path = "fuzz_targets/tasks.rs"
 test = false
 doc = false
 bench = false

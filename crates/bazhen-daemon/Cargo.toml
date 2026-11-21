@@ -10,9 +10,11 @@ axum = { workspace = true }
 bazhen-client = { workspace = true }
 bazhen-protocol = { workspace = true }
 bazhen-store = { workspace = true }
+futures-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 jiff = { workspace = true }
+rusqlite = { workspace = true }
 rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,7 +27,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 bazhen-test-signal = { workspace = true }
+tungstenite = { workspace = true }
 
 [lints]
 workspace = true

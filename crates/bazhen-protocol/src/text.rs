@@ -1,4 +1,5 @@
-//! Text the protocol checks before it takes it: a task note's, and how a note is quoted.
+//! Text the protocol checks before it takes it: a task note's, a new task's title, and how a note
+//! is quoted.
 
 /// The most UTF-8 bytes a task note has.
 pub const TASK_NOTE_MAX_BYTES: usize = 4000;
@@ -57,6 +58,23 @@ pub fn task_note_text(text: &str) -> Result<String, NoteRefused> {
     } else {
         Err(NoteRefused(broken))
     }
+}
+
+/// The most UTF-16 units a task's title has, and its brief.
+pub const TASK_TITLE_MAX_UNITS: usize = 200;
+pub const TASK_BRIEF_MAX_UNITS: usize = 20_000;
+
+/// A title a request gives a task, trimmed, if it is 1 to 200 UTF-16 units and holds nothing that
+/// could end or disguise the line of mail it goes on: no control character, bidirectional
+/// override, invisible or tag character.
+pub fn new_task_title(text: &str) -> Option<&str> {
+    let text = trim(text);
+    let units = text.encode_utf16().count();
+    ((1..=TASK_TITLE_MAX_UNITS).contains(&units)
+        && !text
+            .chars()
+            .any(|c| unshowable(c) || invisible(c) || tag(c)))
+    .then_some(text)
 }
 
 /// `text` without the white space JavaScript's `trim` takes off each end, which isn't quite

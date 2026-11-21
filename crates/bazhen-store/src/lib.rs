@@ -11,6 +11,7 @@ mod migrations;
 mod private;
 mod projections;
 mod snapshot;
+mod tasks;
 #[cfg(test)]
 mod testing;
 
@@ -28,6 +29,7 @@ pub use bazhen_protocol::events::EVENT_KINDS;
 pub use events::{AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, Writer};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::SnapshotError;
+pub use tasks::{CreateTaskError, NewTask};
 
 /// What `schema_version` holds once migrations are named: past every version a build that
 /// numbered them supports, so such a build refuses the database rather than re-run its first.
@@ -169,7 +171,11 @@ impl Store {
     /// # Errors
     ///
     /// `SQLite`'s; nothing is retired then.
-    pub fn prune_batch(&mut self, cutoff: jiff::Timestamp, limit: u32) -> rusqlite::Result<bool> {
+    pub fn prune_batch(
+        &mut self,
+        cutoff: jiff::Timestamp,
+        limit: std::num::NonZeroU32,
+    ) -> rusqlite::Result<bool> {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
