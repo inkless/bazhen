@@ -670,16 +670,20 @@ fn text_of(cells: &[Cell]) -> String {
 
 /// Whether `term` holds a wide char whose spacer was erased. alacritty's reflow moves such a
 /// char as if it were narrow, and can lose it; the engine gave the rows back rewrapped from
-/// text, where the spacer is whole again.
+/// text, where the spacer is whole again. The reflow can also leave it in a row's last cell,
+/// where nothing follows it, and the engine writes it into history as the blank it has room to
+/// draw: a wide char is only there without its spacer, since one written there wraps first.
 fn has_a_wide_char_without_its_spacer(term: &Term<Sink>) -> bool {
     let grid = term.grid();
     let scrolled = grid.history_size();
     (0..scrolled + grid.screen_lines()).any(|n| {
         let row = &grid[scrollback_line(scrolled, n)];
         let cells: Vec<&Cell> = row.into_iter().collect();
-        cells.windows(2).any(|pair| {
-            pair[0].flags.contains(Flags::WIDE_CHAR)
-                && !pair[1].flags.contains(Flags::WIDE_CHAR_SPACER)
+        cells.iter().enumerate().any(|(column, cell)| {
+            cell.flags.contains(Flags::WIDE_CHAR)
+                && !cells
+                    .get(column + 1)
+                    .is_some_and(|next| next.flags.contains(Flags::WIDE_CHAR_SPACER))
         })
     })
 }
@@ -796,6 +800,28 @@ fn a_spacer_a_resize_leaves_in_another_colour_parts_the_two_at_the_resize() {
         difference(&engine, &full).is_some_and(|d| d.starts_with("newest history row's spacer")),
         "{:?}",
         difference(&engine, &full)
+    );
+}
+
+#[test]
+fn a_wide_char_a_reflow_leaves_in_a_row_s_last_cell_without_its_spacer_may_be_lost() {
+    // The shrunk case CI found. The erase starts in the spacer of the 中 ending its row, which
+    // stays wide; the narrowing to 2 columns moves it as if it were narrow, into the last cell of
+    // a row, which the engine writes into history as a blank. The reference keeps it, and the
+    // next reflow brings it back.
+    run(
+        Size { cols: 7, rows: 7 },
+        &[
+            Action::Text("\t abc".to_owned()),
+            Action::Text(
+                " bc中    中 xyzzy\txyzzy 中aaadef aaaa文字def xyzzybcabcdef 中".to_owned(),
+            ),
+            Action::MoveTo(0, 7),
+            Action::EraseLine,
+            Action::Resize(1, 2),
+            Action::Resize(3, 1),
+        ],
+        &[1],
     );
 }
 
