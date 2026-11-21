@@ -20,7 +20,7 @@ use tokio_util::task::TaskTracker;
 use crate::accept::{self, Limits, serve_on};
 use crate::guard;
 use crate::private_dir::ensure_private_dir;
-use crate::probe::{Answer, probe};
+use crate::probe::{Answer, probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 
 /// How the daemon serves: each listener's limits, and how long its connections get to finish once
@@ -58,6 +58,8 @@ pub(crate) struct Startup {
 pub(crate) enum Refused {
     #[error("bazhen is already running on {0}")]
     Running(String),
+    #[error("{}", silence(.0))]
+    Silent(String),
     #[error("{0}")]
     Said(String),
 }
@@ -87,8 +89,10 @@ fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
     ensure_private_dir(Path::new(&p.run), startup.uid).map_err(|e| Refused::Said(e.to_string()))?;
     // Its socket is about to be replaced; a daemon still answering on it would be orphaned, with
     // its store shared.
-    if probe(Path::new(&p.socket)) != Answer::Nothing {
-        return Err(Refused::Running(p.socket.clone()));
+    match probe(Path::new(&p.socket)) {
+        Answer::Nothing => {}
+        Answer::Silent => return Err(Refused::Silent(p.socket.clone())),
+        Answer::Daemon { .. } => return Err(Refused::Running(p.socket.clone())),
     }
     let path = PathBuf::from(&p.data).join("bazhen.db");
     let store = Store::open(&path).map_err(|err| match err {
@@ -484,6 +488,12 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&startup.paths.socket).unwrap();
         let answering = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            let mut asked = Vec::new();
+            while !asked.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                std::io::Read::read_exact(&mut stream, &mut byte).unwrap();
+                asked.push(byte[0]);
+            }
             std::io::Write::write_all(
                 &mut stream,
                 b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
@@ -495,6 +505,22 @@ mod tests {
         drop(answering);
         assert!(
             matches!(&refused, Err(Refused::Running(at)) if *at == startup.paths.socket),
+            "{refused:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn refuses_to_start_over_a_daemon_that_holds_its_socket_without_answering() {
+        let home = TempDir::new("silent");
+        let startup = startup(home.path());
+        std::fs::create_dir(&startup.paths.run).unwrap();
+        std::fs::set_permissions(&startup.paths.run, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let _stuck = crate::testing::FullBacklog::at(Path::new(&startup.paths.socket));
+        let refused = prepare(&startup);
+        assert!(
+            matches!(&refused, Err(Refused::Silent(at)) if *at == startup.paths.socket),
             "{refused:?}"
         );
     }

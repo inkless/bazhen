@@ -8,7 +8,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::env::{Env, EnvRules, hand_off};
-use crate::probe::{Answer, probe};
+use crate::probe::{Answer, probe, silence};
 use crate::session::in_own_session;
 
 /// The argument the started daemon is run with: it serves only as the leader of the session it
@@ -39,12 +39,19 @@ pub(crate) struct Detach<'a> {
 /// Starts the daemon unless one answers already, and says whether it came up. Output that can't
 /// be written has no one to tell.
 pub(crate) fn detach(o: &Detach<'_>, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
-    if let Answer::Daemon { protocol_id } = probe(o.socket) {
-        let _ = writeln!(out, "bazhen is already running at {}", o.url);
-        if protocol_id.as_deref() != Some(o.protocol_id) {
-            let _ = writeln!(out, "  warning: {ANOTHER_BUILD}");
+    match probe(o.socket) {
+        Answer::Nothing => {}
+        Answer::Silent => {
+            let _ = writeln!(err, "{}", silence(&o.socket.display().to_string()));
+            return ExitCode::FAILURE;
         }
-        return ExitCode::SUCCESS;
+        Answer::Daemon { protocol_id } => {
+            let _ = writeln!(out, "bazhen is already running at {}", o.url);
+            if protocol_id.as_deref() != Some(o.protocol_id) {
+                let _ = writeln!(out, "  warning: {ANOTHER_BUILD}");
+            }
+            return ExitCode::SUCCESS;
+        }
     }
     let log = o.state.join("daemon.log");
     if let Err(e) = spawn(o, &log) {
@@ -53,7 +60,7 @@ pub(crate) fn detach(o: &Detach<'_>, out: &mut dyn Write, err: &mut dyn Write) -
     }
     let begun = Instant::now();
     while begun.elapsed() < READY_WITHIN {
-        if probe(o.socket) != Answer::Nothing {
+        if matches!(probe(o.socket), Answer::Daemon { .. }) {
             let _ = writeln!(out, "bazhen is running at {}", o.url);
             return ExitCode::SUCCESS;
         }
