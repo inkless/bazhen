@@ -53,7 +53,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/store/projections.ts": "apps/daemon/src/store/store.medium.test.ts",
   "apps/daemon/src/mailbox/ingress.ts": "tests/api/mail.test.ts",
-  "apps/daemon/src/auth/agent-token.ts": "apps/daemon/src/socket/client.medium.test.ts",
+  "apps/daemon/src/auth/agent-token.ts": "apps/daemon/src/auth/callers.test.ts",
   "apps/daemon/src/testing/fixtures.ts": "apps/daemon/src/mailbox/mailbox.medium.test.ts",
   "apps/daemon/src/testing/browser-terminal.ts": "apps/daemon/src/stream/snapshot-contract.test.ts",
   "apps/daemon/src/stream/screen-source.ts": "apps/daemon/src/stream/hub.test.ts",
