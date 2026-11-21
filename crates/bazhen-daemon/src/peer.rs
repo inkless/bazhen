@@ -57,8 +57,9 @@ type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync
 
 /// Reads peers, at most `MAX_READING` at once, each on a blocking thread that holds its turn until
 /// it ends: one given up on still counts, so a slow `/proc` can't take every thread. A read is late
-/// when it waits its deadline for a turn, or then reads for its deadline, as in TypeScript. One given up on keeps its
-/// own copy of the connection's fd until it ends, so the peer sees the close no sooner.
+/// when it waits its deadline for a turn, which TypeScript doesn't bound, or then reads past its
+/// deadline. One given up on keeps its own copy of the connection's fd until it ends, so the peer
+/// sees the close no sooner.
 #[derive(Clone)]
 pub(crate) struct Peers {
     turns: Arc<Semaphore>,
