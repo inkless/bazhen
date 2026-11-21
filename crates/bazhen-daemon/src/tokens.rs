@@ -5,14 +5,14 @@
 
 use std::path::Path;
 
-use bazhen_protocol::ids::is_id;
+use bazhen_protocol::ids::AgentId;
 use bazhen_store::Reads;
 use sha2::{Digest as _, Sha256};
 
 use crate::private_dir::{UnsafePrivateDir, ensure_private_dir};
 
 /// A token as the daemon mints it: 32 bytes, base64url. Anything else is never one.
-fn is_token(text: &str) -> bool {
+pub(crate) fn is_token(text: &str) -> bool {
     text.len() == 43
         && text
             .bytes()
@@ -20,7 +20,7 @@ fn is_token(text: &str) -> bool {
 }
 
 /// The hash the store keeps of `token`: its SHA-256, in lowercase hex.
-fn hash_of(token: &str) -> String {
+pub(crate) fn hash_of(token: &str) -> String {
     Sha256::digest(token.as_bytes())
         .iter()
         .fold(String::with_capacity(64), |mut hex, b| {
@@ -35,12 +35,12 @@ fn hash_of(token: &str) -> String {
 /// # Errors
 ///
 /// `SQLite`'s.
-pub(crate) fn agent_of(reads: Reads<'_>, token: &str) -> rusqlite::Result<Option<String>> {
+pub(crate) fn agent_of(reads: Reads<'_>, token: &str) -> rusqlite::Result<Option<AgentId>> {
     if !is_token(token) {
         return Ok(None);
     }
     let agent = reads.agent_by_token_hash(&hash_of(token))?;
-    Ok(agent.filter(|id| is_id("agent", id)))
+    Ok(agent.as_deref().and_then(AgentId::parse))
 }
 
 /// A token file's agent, and whether a mint left it half written (`.tmp`): its name is the agent,
@@ -61,7 +61,7 @@ fn token_file(name: &str) -> Option<(&str, bool)> {
 
 /// Why the sweep couldn't run.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum SweepError {
+pub(crate) enum ForgetError {
     #[error(transparent)]
     Unsafe(#[from] UnsafePrivateDir),
     #[error(transparent)]
@@ -76,7 +76,7 @@ pub(crate) enum SweepError {
 /// # Errors
 ///
 /// A `dir` that can't be made private, or `SQLite`'s.
-pub(crate) fn sweep(dir: &Path, uid: u32, reads: Reads<'_>) -> Result<(), SweepError> {
+pub(crate) fn forget_ended(dir: &Path, uid: u32, reads: Reads<'_>) -> Result<(), ForgetError> {
     ensure_private_dir(dir, uid)?;
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Ok(());
@@ -151,7 +151,11 @@ mod tests {
     fn knows_a_live_agent_by_its_token_and_none_by_an_ended_ones_or_a_malformed_one() {
         let dir = TempDir::new("agent-of");
         let store = store(dir.path());
-        let of = |token: &str| agent_of(store.reads(), token).unwrap();
+        let of = |token: &str| {
+            agent_of(store.reads(), token)
+                .unwrap()
+                .map(|id| id.as_str().to_owned())
+        };
         assert_eq!(of(TOKEN), Some(LIVE.to_owned()));
         for token in [
             TOKEN.replace('A', "B"),
@@ -186,7 +190,7 @@ mod tests {
         for name in kept.iter().chain(&swept) {
             std::fs::write(tokens.join(name), "x").unwrap();
         }
-        sweep(&tokens, rustix::process::getuid().as_raw(), store.reads()).unwrap();
+        forget_ended(&tokens, rustix::process::getuid().as_raw(), store.reads()).unwrap();
         let mut left: Vec<String> = std::fs::read_dir(&tokens)
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -203,14 +207,14 @@ mod tests {
         let dir = TempDir::new("sweep-dir");
         let store = store(dir.path());
         let tokens = dir.path().join("run/agents");
-        sweep(&tokens, rustix::process::getuid().as_raw(), store.reads()).unwrap();
+        forget_ended(&tokens, rustix::process::getuid().as_raw(), store.reads()).unwrap();
         let mode = std::fs::metadata(&tokens).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&tokens, &link).unwrap();
         assert!(matches!(
-            sweep(&link, rustix::process::getuid().as_raw(), store.reads()),
-            Err(SweepError::Unsafe(_))
+            forget_ended(&link, rustix::process::getuid().as_raw(), store.reads()),
+            Err(ForgetError::Unsafe(_))
         ));
     }
 }

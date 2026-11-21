@@ -2,6 +2,7 @@
 //! loopback HTTP, as `apps/daemon` does, which it is to replace.
 
 mod accept;
+mod callers;
 pub mod config;
 mod detach;
 mod env;

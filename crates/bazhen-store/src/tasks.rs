@@ -2,16 +2,18 @@
 //! under a parent that isn't there or isn't open.
 
 use bazhen_protocol::events::TaskCreated;
-use bazhen_protocol::ids::TaskId;
+use bazhen_protocol::ids::{AgentId, TaskId};
 use bazhen_protocol::tasks::CreateTaskResponse;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
 use crate::{AppendError, NewEvent, OnceError, Store};
 
-/// A task the human asks for, each field already held to the protocol's rules, its title trimmed.
+/// A task the caller asks for, each field already held to the protocol's rules, its title
+/// trimmed: the human's, or an agent's, which owns it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTask {
+    pub caller: Option<AgentId>,
     pub key: String,
     pub title: String,
     pub brief: String,
@@ -39,7 +41,7 @@ impl NewTask {
     /// `serde_json`'s, which a struct of strings never meets.
     pub fn request_text(&self) -> serde_json::Result<String> {
         serde_json::to_string(&Kept {
-            caller: None,
+            caller: self.caller.as_ref().map(AgentId::as_str),
             title: &self.title,
             brief: &self.brief,
             parent_task_id: self.parent.as_ref().map(TaskId::as_str),
@@ -52,6 +54,9 @@ impl NewTask {
 pub enum CreateTaskError {
     #[error("no task {0}")]
     NoParent(String),
+    /// The calling agent is gone, or was never there.
+    #[error("no agent {0} that is open")]
+    NoCaller(String),
     /// The parent is done or cancelled.
     #[error("the parent task is {0}")]
     ParentClosed(String),
@@ -68,13 +73,30 @@ pub enum CreateTaskError {
 }
 
 impl Store {
-    /// Makes `task` for the human, or answers what its key was first answered.
+    /// Makes `task` for its caller, or answers what its key was first answered. An agent that
+    /// can't act, closing or gone, makes none.
     ///
     /// # Errors
     ///
     /// [`CreateTaskError`]; nothing is recorded then.
     pub fn create_task(&mut self, task: &NewTask) -> Result<CreateTaskResponse, CreateTaskError> {
         self.once(&task.key, &task.request_text()?, |w| {
+            if let Some(caller) = &task.caller {
+                let state: Option<String> = w
+                    .connection()
+                    .query_row(
+                        "SELECT state FROM agent_sessions WHERE id = ?",
+                        [caller.as_str()],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if state
+                    .as_deref()
+                    .is_none_or(|s| matches!(s, "closing" | "closed" | "failed" | "lost"))
+                {
+                    return Err(CreateTaskError::NoCaller(caller.as_str().to_owned()));
+                }
+            }
             if let Some(parent) = &task.parent {
                 let state: Option<String> = w
                     .connection()
@@ -93,11 +115,15 @@ impl Store {
             let id = TaskId::mint(crate::now_ms(), crate::urandom()?);
             let created = w.append(&NewEvent::TaskCreated {
                 task: id.clone(),
-                actor: "human".to_owned(),
+                actor: task
+                    .caller
+                    .as_ref()
+                    .map_or("human", AgentId::as_str)
+                    .to_owned(),
                 payload: TaskCreated {
                     title: task.title.clone(),
                     brief: task.brief.clone(),
-                    owner_agent_id: None,
+                    owner_agent_id: task.caller.clone(),
                     parent_task_id: task.parent.clone(),
                     delegated_from: None,
                 },
@@ -126,6 +152,7 @@ mod tests {
 
     fn asked(request: &Value) -> NewTask {
         NewTask {
+            caller: None,
             key: request["idempotencyKey"].as_str().unwrap().to_owned(),
             title: request["title"].as_str().unwrap().trim().to_owned(),
             brief: request["brief"].as_str().unwrap().to_owned(),
@@ -207,6 +234,7 @@ mod tests {
             .unwrap()
             .task_id;
         let under = |key: &str, parent: &TaskId| NewTask {
+            caller: None,
             key: key.to_owned(),
             title: "Child".to_owned(),
             brief: "b".to_owned(),
@@ -237,5 +265,66 @@ mod tests {
             })
             .unwrap();
         assert_eq!(keys, 1);
+    }
+
+    #[test]
+    fn makes_an_agents_task_owned_by_it_and_none_for_an_agent_that_cant_act() {
+        let dir = TempDir::new("tasks-agent");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let agent =
+            |n: char| AgentId::parse(&format!("agent_0190a1b2c3d47abc8def0123456789a{n}")).unwrap();
+        store
+            .db
+            .execute_batch(&format!(
+                "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'x', 'x', 'x', 'system', '{{}}' FROM host;
+                 INSERT INTO environments (id, kind, created_event_id) VALUES ('env_local', 'local', 1);
+                 INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   created_event_id, updated_event_id) VALUES
+                   ('{}', 'env_local', 'claude-code', 'p', '/', 'running', 1, 1),
+                   ('{}', 'env_local', 'claude-code', 'p', '/', 'closing', 1, 1),
+                   ('{}', 'env_local', 'claude-code', 'p', '/', 'lost', 1, 1);",
+                agent('1'),
+                agent('2'),
+                agent('3'),
+            ))
+            .unwrap();
+        let task = |key: &str, caller| NewTask {
+            caller: Some(caller),
+            key: key.to_owned(),
+            title: "T".to_owned(),
+            brief: "b".to_owned(),
+            parent: None,
+        };
+        let made = store.create_task(&task("mine", agent('1'))).unwrap();
+        let (actor, owner): (String, String) = store
+            .db
+            .query_row(
+                "SELECT e.actor, t.owner_agent_id FROM tasks t JOIN events e ON e.id = t.created_event_id
+                 WHERE t.id = ?",
+                [made.task_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!([actor.as_str(), owner.as_str()], [agent('1').as_str(); 2]);
+        assert_eq!(
+            kept_request(&store, "mine"),
+            format!(
+                r#"{{"caller":"{}","title":"T","brief":"b"}}"#,
+                agent('1').as_str()
+            )
+        );
+        for (key, caller) in [
+            ("closing", agent('2')),
+            ("lost", agent('3')),
+            ("unknown", agent('4')),
+        ] {
+            let refused = store.create_task(&task(key, caller.clone()));
+            assert!(
+                matches!(&refused, Err(CreateTaskError::NoCaller(id)) if id == caller.as_str()),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(store.reads().latest_event_id().unwrap(), 2);
     }
 }

@@ -429,7 +429,7 @@ mod tests {
                 let Some(Extension(peer)) = peer else {
                     return "none".to_owned();
                 };
-                match crate::peer::Reader::default().read(&peer).await {
+                match crate::peer::Peers::default().read(&peer).await {
                     crate::peer::PeerRead::Read(read) => read.pid.as_raw_pid().to_string(),
                     other => format!("{other:?}"),
                 }

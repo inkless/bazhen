@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_peer::{Peer, Refused};
-use bazhen_protocol::ids::is_id;
+use bazhen_protocol::ids::AgentId;
 use bazhen_store::LiveTerminal;
 use serde_json::Value;
 use tokio::sync::Semaphore;
@@ -58,28 +58,28 @@ type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync
 /// Reads peers, at most `MAX_READING` at once, each on a blocking thread that holds its turn until
 /// it ends: one given up on still counts, so a slow `/proc` can't take every thread.
 #[derive(Clone)]
-pub(crate) struct Reader {
+pub(crate) struct Peers {
     turns: Arc<Semaphore>,
     deadline: Duration,
     read: Arc<ReadFn>,
 }
 
-impl std::fmt::Debug for Reader {
+impl std::fmt::Debug for Peers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Reader")
+        f.debug_struct("Peers")
             .field("deadline", &self.deadline)
             .finish_non_exhaustive()
     }
 }
 
-impl Default for Reader {
+impl Default for Peers {
     fn default() -> Self {
         Self::with(READ, bazhen_peer::of)
     }
 }
 
-impl Reader {
-    fn with(
+impl Peers {
+    pub(crate) fn with(
         deadline: Duration,
         read: impl Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync + 'static,
     ) -> Self {
@@ -118,7 +118,7 @@ impl Reader {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalPids {
     /// Each live agent terminal's root process: a tmux pane's, or a holder's child.
-    pub(crate) agents: HashMap<i32, String>,
+    pub(crate) agents: HashMap<i32, AgentId>,
     /// Each live shell terminal's root process.
     pub(crate) shells: HashSet<i32>,
     /// The processes that run terminals: tmux servers and holders.
@@ -141,8 +141,8 @@ pub(crate) fn terminal_pids(terminals: &[LiveTerminal]) -> TerminalPids {
         let Some(root) = root else { continue };
         if terminal.kind == "shell" {
             pids.shells.insert(root);
-        } else if let Some(agent) = terminal.agent_id.as_ref().filter(|id| is_id("agent", id)) {
-            pids.agents.insert(root, agent.clone());
+        } else if let Some(agent) = terminal.agent_id.as_deref().and_then(AgentId::parse) {
+            pids.agents.insert(root, agent);
         }
     }
     pids
@@ -186,7 +186,7 @@ pub(crate) enum Via {
 /// with its environment unread, so only the thread the call presents can say it is Codex's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reading {
-    Agent(String),
+    Agent(AgentId),
     Codex(Via),
     Outside,
     Withheld,
@@ -246,14 +246,21 @@ pub(crate) fn reading_of(peer: &Peer, terminals: &TerminalPids) -> Reading {
 
 /// The reading the guard takes: a peer that can't be read for sure is refused, never the human's,
 /// and one not read in time is late.
-pub(crate) fn reading(read: PeerRead, terminals: impl FnOnce() -> TerminalPids) -> Reading {
-    match read {
+///
+/// # Errors
+///
+/// `terminals`'.
+pub(crate) fn reading<E>(
+    read: PeerRead,
+    terminals: impl FnOnce() -> Result<TerminalPids, E>,
+) -> Result<Reading, E> {
+    Ok(match read {
         PeerRead::Late => Reading::Late,
         PeerRead::Unread(why) => Reading::Refused(format!(
             "the caller's process can't be read for sure: {why}"
         )),
-        PeerRead::Read(peer) => reading_of(&peer, &terminals()),
-    }
+        PeerRead::Read(peer) => reading_of(&peer, &terminals()?),
+    })
 }
 
 #[cfg(test)]
@@ -273,10 +280,14 @@ mod tests {
     /// `AGENT`'s pane runs pid 100 and `OTHER`'s 200, a shell's 300, on a tmux server of pid 10.
     fn terminals() -> TerminalPids {
         TerminalPids {
-            agents: HashMap::from([(100, AGENT.to_owned()), (200, OTHER.to_owned())]),
+            agents: HashMap::from([(100, id(AGENT)), (200, id(OTHER))]),
             shells: HashSet::from([300]),
             runtimes: HashSet::from([10]),
         }
+    }
+
+    fn id(text: &str) -> AgentId {
+        AgentId::parse(text).unwrap()
     }
 
     fn pid(raw: i32) -> Pid {
@@ -316,7 +327,7 @@ mod tests {
     const ENVIRONMENT: Reading = Reading::Codex(Via::Environment);
 
     fn agent() -> Reading {
-        Reading::Agent(AGENT.to_owned())
+        Reading::Agent(id(AGENT))
     }
 
     #[test]
@@ -327,7 +338,7 @@ mod tests {
                 chain(150, 150, &[140, 100, 10, 1]),
                 chain(250, 250, &[200, 100, 10, 1]),
             ]),
-            [agent(), agent(), Reading::Agent(OTHER.to_owned())]
+            [agent(), agent(), Reading::Agent(id(OTHER))]
         );
     }
 
@@ -452,11 +463,7 @@ mod tests {
         assert_eq!(
             pids,
             TerminalPids {
-                agents: HashMap::from([
-                    (100, AGENT.to_owned()),
-                    (701, OTHER.to_owned()),
-                    (800, OTHER.to_owned())
-                ]),
+                agents: HashMap::from([(100, id(AGENT)), (701, id(OTHER)), (800, id(OTHER))]),
                 shells: HashSet::from([300]),
                 runtimes: HashSet::from([10, 700, 702]),
             }
@@ -522,17 +529,22 @@ mod tests {
 
     #[test]
     fn refuses_a_peer_it_cant_read_for_sure_never_taking_it_for_the_human() {
+        let read = |read| reading(read, || Ok::<_, ()>(terminals())).unwrap();
         assert_eq!(
             [
-                reading(PeerRead::Unread("why".into()), TerminalPids::default),
-                reading(PeerRead::Late, TerminalPids::default),
-                reading(PeerRead::Read(chain(100, 100, &[1])), terminals),
+                read(PeerRead::Unread("why".into())),
+                read(PeerRead::Late),
+                read(PeerRead::Read(chain(100, 100, &[1]))),
             ],
             [
                 Reading::Refused("the caller's process can't be read for sure: why".into()),
                 Reading::Late,
                 agent(),
             ]
+        );
+        assert_eq!(
+            reading(PeerRead::Read(chain(100, 100, &[1])), || Err("store")),
+            Err("store")
         );
     }
 
@@ -578,7 +590,7 @@ mod tests {
     fn reads_a_reading_still_running_at_its_deadline_as_late_and_one_done_by_then_as_read() {
         let gate = Arc::new(Gate::default());
         let waiting = Arc::clone(&gate);
-        let reader = Reader::with(READ, move |_, _| {
+        let reader = Peers::with(READ, move |_, _| {
             waiting.wait();
             Err(Refused::Endless)
         });
@@ -607,7 +619,7 @@ mod tests {
     fn reads_no_more_than_eight_at_once_counting_one_given_up_on_until_it_ends() {
         let gate = Arc::new(Gate::default());
         let waiting = Arc::clone(&gate);
-        let reader = Reader::with(Duration::from_millis(10), move |_, _| {
+        let reader = Peers::with(Duration::from_millis(10), move |_, _| {
             waiting.wait();
             Err(Refused::Endless)
         });
@@ -637,8 +649,8 @@ mod tests {
     #[test]
     fn says_why_it_read_nobody_when_a_reading_refuses_or_panics_or_the_socket_wasnt_kept() {
         let (peer, _theirs) = socket();
-        let refusing = Reader::with(READ, |_, _| Err(Refused::Foreign { uid: 7 }));
-        let panicking = Reader::with(READ, |_, _| panic!("lost"));
+        let refusing = Peers::with(READ, |_, _| Err(Refused::Foreign { uid: 7 }));
+        let panicking = Peers::with(READ, |_, _| panic!("lost"));
         let unkept = PeerSocket {
             fd: Err("no descriptor".to_owned()),
             accepted: 0,
@@ -662,7 +674,7 @@ mod tests {
     #[test]
     fn reads_this_process_at_the_other_end_of_its_own_socket_pair() {
         let (peer, _theirs) = socket();
-        let read = runtime().block_on(Reader::default().read(&peer));
+        let read = runtime().block_on(Peers::default().read(&peer));
         let PeerRead::Read(read) = read else {
             panic!("{read:?}");
         };

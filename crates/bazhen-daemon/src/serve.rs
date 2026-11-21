@@ -117,7 +117,7 @@ fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
             store.missed().join(", ")
         );
     }
-    tokens::sweep(
+    tokens::forget_ended(
         &Path::new(&p.run).join("agents"),
         startup.uid,
         store.reads(),
