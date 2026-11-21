@@ -6,13 +6,15 @@
 //! or to its own group, and nothing goes to any group while this process can't read which group is
 //! its own or which processes it descends from. A process group is reached only while this process
 //! holds its leader unreaped (`group`), so the group's number can't since have become another's.
+//! That holds only while SIGCHLD keeps its default disposition: ignored, or with `SA_NOCLDWAIT`,
+//! the kernel reaps children itself, and a group is then refused once its leader has exited.
 
 mod group;
 
 use std::fmt;
 
 use rustix::io::Errno;
-use rustix::process::{Pid, Signal};
+use rustix::process::{Pid, RawPid, Signal};
 
 pub use group::{Ended, run_bounded};
 
@@ -31,8 +33,8 @@ impl fmt::Display for Target {
 /// Why a target is one no signal from here may reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Unsafe {
-    #[error("it is init's, which names every process")]
-    Init,
+    #[error("it is init's or no process's, and kill reads each as many processes")]
+    NotAboveInit,
     #[error("it is this process's")]
     This,
     #[error("it is a process this one descends from")]
@@ -78,23 +80,24 @@ impl Own {
     }
 }
 
-/// Why the group `leader` leads may not be signalled by `own`, if it may not.
-fn floor(leader: Pid, own: &Own) -> Result<(), Unsafe> {
-    if leader.is_init() {
-        return Err(Unsafe::Init);
+/// Why the group `leader` leads may not be signalled by `own`, if it may not. Raw, since a `Pid`
+/// can hold a negative number, which `kill_process_group` would negate into a process's own.
+fn floor(leader: RawPid, own: &Own) -> Result<(), Unsafe> {
+    if leader <= 1 {
+        return Err(Unsafe::NotAboveInit);
     }
-    if leader == own.pid {
+    if leader == own.pid.as_raw_pid() {
         return Err(Unsafe::This);
     }
     let Some(ancestors) = &own.ancestors else {
         return Err(Unsafe::AncestryUnread);
     };
-    if ancestors.contains(&leader) {
+    if ancestors.iter().any(|a| a.as_raw_pid() == leader) {
         return Err(Unsafe::Ancestor);
     }
     match own.group {
         None => Err(Unsafe::OwnGroupUnknown),
-        Some(group) if group == leader => Err(Unsafe::OwnGroup),
+        Some(group) if group.as_raw_pid() == leader => Err(Unsafe::OwnGroup),
         Some(_) => Ok(()),
     }
 }
@@ -103,7 +106,7 @@ fn floor(leader: Pid, own: &Own) -> Result<(), Unsafe> {
 /// still there.
 fn send(leader: Pid, signal: Signal) -> Result<bool, Error> {
     let target = Target { leader };
-    floor(leader, &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
+    floor(leader.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
     match rustix::process::kill_process_group(leader, signal) {
         Ok(()) => Ok(true),
         Err(Errno::SRCH) => Ok(false),
@@ -132,23 +135,27 @@ mod tests {
         }
     }
 
+    /// Kill reads 0 as this process's group, -1 as every process, and below that the group of
+    /// the pid negated.
     #[test]
-    fn refuses_init_whose_group_is_every_process() {
-        assert_eq!(floor(pid(1), &own()), Err(Unsafe::Init));
+    fn refuses_init_and_every_number_kill_reads_as_many_processes() {
+        for leader in [1, 0, -1, -2, -500, i32::MIN] {
+            assert_eq!(floor(leader, &own()), Err(Unsafe::NotAboveInit), "{leader}");
+        }
     }
 
     #[test]
     fn refuses_this_process_and_its_own_group() {
-        assert_eq!(floor(pid(500), &own()), Err(Unsafe::This));
-        assert_eq!(floor(pid(200), &own()), Err(Unsafe::OwnGroup));
+        assert_eq!(floor(500, &own()), Err(Unsafe::This));
+        assert_eq!(floor(200, &own()), Err(Unsafe::OwnGroup));
     }
 
     /// TypeScript's floor refuses only the parent. A grandparent's group is as much the work that
     /// started this process, so the walk goes all the way up.
     #[test]
     fn refuses_every_process_this_one_descends_from_not_only_its_parent() {
-        assert_eq!(floor(pid(400), &own()), Err(Unsafe::Ancestor));
-        assert_eq!(floor(pid(300), &own()), Err(Unsafe::Ancestor));
+        assert_eq!(floor(400, &own()), Err(Unsafe::Ancestor));
+        assert_eq!(floor(300, &own()), Err(Unsafe::Ancestor));
     }
 
     #[test]
@@ -162,15 +169,15 @@ mod tests {
             ..own()
         };
         for leader in [2, 201, 401, 600] {
-            assert_eq!(floor(pid(leader), &unread), Err(Unsafe::AncestryUnread));
-            assert_eq!(floor(pid(leader), &ungrouped), Err(Unsafe::OwnGroupUnknown));
+            assert_eq!(floor(leader, &unread), Err(Unsafe::AncestryUnread));
+            assert_eq!(floor(leader, &ungrouped), Err(Unsafe::OwnGroupUnknown));
         }
     }
 
     #[test]
     fn passes_any_other_group() {
         for leader in [2, 199, 201, 301, 401, 501, i32::MAX] {
-            assert_eq!(floor(pid(leader), &own()), Ok(()), "{leader}");
+            assert_eq!(floor(leader, &own()), Ok(()), "{leader}");
         }
     }
 

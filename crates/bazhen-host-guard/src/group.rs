@@ -5,7 +5,7 @@ use std::io;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use rustix::process::{Pid, Signal};
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions};
 use tokio::io::AsyncRead;
 use tokio::process::{Child, Command};
 use tokio::time::{Instant, timeout, timeout_at};
@@ -14,10 +14,12 @@ use crate::{Error, Target, Unsafe, send};
 
 /// How long a killed group's leader is waited for before it is left to tokio to reap.
 const REAP_GRACE: Duration = Duration::from_secs(1);
+/// The deadline of a run whose limit is past what an `Instant` can hold.
+const FAR: Duration = Duration::from_hours(100 * 365 * 24);
 
 /// A child leading a process group of its own. Its group is reached only through `signal`, and
-/// only while the child is unreaped: until then its pid is held, so no other group can take the
-/// number.
+/// only while the kernel says the child is unreaped: until then its pid is held, so no other group
+/// can take the number. Dropped, as a run given up on is, it kills its group.
 struct OwnGroup {
     child: Child,
     leader: Pid,
@@ -34,9 +36,20 @@ impl OwnGroup {
         Ok(Self { child, leader })
     }
 
-    /// Whether the group was still there.
+    /// Whether the group was still there. A floor that couldn't read this process's ancestry or
+    /// group, as when an ancestor exits mid-walk, is asked once more.
     fn signal(&self, signal: Signal) -> Result<bool, Error> {
-        if self.child.id().is_none() {
+        match self.signal_once(signal) {
+            Err(Error::Unsafe {
+                why: Unsafe::AncestryUnread | Unsafe::OwnGroupUnknown,
+                ..
+            }) => self.signal_once(signal),
+            sent => sent,
+        }
+    }
+
+    fn signal_once(&self, signal: Signal) -> Result<bool, Error> {
+        if self.child.id().is_none() || !unreaped(self.leader) {
             return Err(Error::Unsafe {
                 target: Target {
                     leader: self.leader,
@@ -56,6 +69,20 @@ impl OwnGroup {
     }
 }
 
+impl Drop for OwnGroup {
+    fn drop(&mut self) {
+        // Refused for a leader already reaped, which is every run that ended.
+        let _ = self.signal(Signal::KILL);
+    }
+}
+
+/// Whether the kernel holds `leader` as this process's child, running or exited, and not yet
+/// reaped. Anything else, a leader reaped by something but its `Child` included, is no.
+fn unreaped(leader: Pid) -> bool {
+    let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    rustix::process::waitid(WaitId::Pid(leader), unreaped).is_ok()
+}
+
 /// How a bounded run ended.
 #[derive(Debug)]
 pub enum Ended {
@@ -65,7 +92,8 @@ pub enum Ended {
     TimedOut,
     /// It couldn't be started: most often, there is no such command.
     Unstarted(io::Error),
-    /// It was started but couldn't be waited for, and its group was killed.
+    /// It was started but couldn't be waited for: something else reaped it, so its group, whose
+    /// number may now be another's, was left alone.
     Unwaited(io::Error),
 }
 
@@ -73,22 +101,25 @@ pub enum Ended {
 /// hasn't ended by `limit`: the command, its output closed, and its exit. Its output is read and
 /// dropped, so a member of its group that holds the output open is still within the limit. The
 /// command's program, arguments and environment are its caller's; nothing is run through a shell
-/// unless the caller names one.
+/// unless the caller names one. A member that closes its output and outlives its leader's exit is
+/// left running, as in TypeScript: once its leader is reaped, the group's number is free.
 ///
 /// # Errors
 ///
-/// Only when the group can't be killed: a fault, since its leader is this process's own unreaped
-/// child. How the command itself ended is never an error.
+/// Only when the group of a run past its limit couldn't be killed: the floor refused it twice
+/// running, or the kill failed. The group is then left running. How the command itself ended is
+/// never an error.
 pub async fn run_bounded(mut command: Command, limit: Duration) -> Result<Ended, Error> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let start = Instant::now();
+    let deadline = start.checked_add(limit).unwrap_or(start + FAR);
     let mut group = match OwnGroup::spawn(&mut command) {
         Ok(group) => group,
         Err(e) => return Ok(Ended::Unstarted(e)),
     };
-    let deadline = Instant::now() + limit;
     let out = group.child.stdout.take();
     let err = group.child.stderr.take();
     // The output is read to its end before the leader is waited for, so a leader that has exited
@@ -101,10 +132,7 @@ pub async fn run_bounded(mut command: Command, limit: Duration) -> Result<Ended,
     }
     Ok(match timeout_at(deadline, group.child.wait()).await {
         Ok(Ok(status)) => Ended::Exited(status),
-        Ok(Err(e)) => {
-            group.end().await?;
-            Ended::Unwaited(e)
-        }
+        Ok(Err(e)) => Ended::Unwaited(e),
         Err(_) => {
             group.end().await?;
             Ended::TimedOut
@@ -126,7 +154,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    use rustix::process::{Pid, Signal};
+    use rustix::process::{Pid, Signal, WaitOptions};
     use tokio::process::Command;
 
     use super::{Ended, OwnGroup, run_bounded};
@@ -226,7 +254,7 @@ mod tests {
             "sleep 30 >/dev/null 2>&1 & echo $! > '{}'; exec >&- 2>&-; wait",
             file.display()
         );
-        let run = ran(sh(&script), Duration::from_millis(500));
+        let run = ran(sh(&script), Duration::from_secs(2));
         assert!(matches!(run, Ended::TimedOut), "{run:?}");
         assert!(ends_soon(pid_in(&file)));
     }
@@ -239,9 +267,53 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let file = pid_file("holds");
         let script = format!("sleep 30 & echo $! > '{}'", file.display());
-        let run = ran(sh(&script), Duration::from_millis(500));
+        let run = ran(sh(&script), Duration::from_secs(2));
         assert!(matches!(run, Ended::TimedOut), "{run:?}");
         assert!(ends_soon(pid_in(&file)));
+    }
+
+    /// A run given up on, as a handler's future dropped when its client goes, still ends its
+    /// group.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn kills_the_group_of_a_run_given_up_on() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let file = pid_file("dropped");
+        let script = format!(
+            "sleep 30 >/dev/null 2>&1 & echo $! > '{}'; exec >&- 2>&-; wait",
+            file.display()
+        );
+        block_on(async {
+            let run = run_bounded(sh(&script), Duration::from_secs(600));
+            assert!(
+                tokio::time::timeout(Duration::from_secs(2), run)
+                    .await
+                    .is_err()
+            );
+        });
+        assert!(ends_soon(pid_in(&file)));
+    }
+
+    /// Reaped by something other than its `Child`, which still names its pid, the leader's pid is
+    /// free: the kernel is asked, not the `Child`.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_nothing_to_a_group_whose_leader_something_else_reaped() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        block_on(async {
+            let group = OwnGroup::spawn(&mut Command::new("true")).unwrap();
+            rustix::process::waitpid(Some(group.leader), WaitOptions::empty()).unwrap();
+            assert!(group.child.id().is_some());
+            assert_eq!(
+                group.signal(Signal::KILL),
+                Err(Error::Unsafe {
+                    target: Target {
+                        leader: group.leader
+                    },
+                    why: Unsafe::Reaped,
+                })
+            );
+        });
     }
 
     /// Reaped, the leader's pid is free, and the group's number can become another's.

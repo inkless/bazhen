@@ -330,9 +330,10 @@ the chokepoint for its role, which each failure of `moon run :check` names:
 - tests': the `bazhen-test-signal` crate, a dev-dependency only;
 - everything else's: `crates/bazhen-host-guard/src/lib.rs`, listed in `SIGNAL_CHOKEPOINTS` in
   `scripts/signal-paths.ts`. It checks what `packages/host-guard/src/signal.ts` checks, and more:
-  never 0, ±1 or any pid ≤ 1, never itself, any of its ancestors or its own group, a group only
-  while it holds the leader unreaped, and a holder only once its command and start time match. A
-  new way to signal goes into that crate, with its rules re-proved there.
+  never 0, ±1 or any pid ≤ 1, never itself, any of its ancestors or its own group, and a group
+  only while the kernel says it holds the leader unreaped. A new way to signal goes into that
+  crate, with its rules re-proved there: a holder's, once one is signalled from here, also checks
+  that the holder's command and start time match.
 
 The host-guard crate's file joins `PRODUCT_CHOKEPOINTS` in `scripts/check-standards.ts` too, which
 `moon run :check` requires of every Rust chokepoint outside the tests' crate: its product code is
