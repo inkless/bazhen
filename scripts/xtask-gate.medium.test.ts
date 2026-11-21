@@ -158,8 +158,10 @@ const CALLER = {
   CARGO_TARGET_DIR: "/tmp/target",
 };
 
-const alone = (name: string) =>
+const withTests = (name: string) =>
   expect.stringMatching(new RegExp(`^clippy --quiet -p ${name} --all-targets --locked `));
+const asShipped = (name: string) =>
+  expect.stringMatching(new RegExp(`^clippy --quiet -p ${name} --locked `));
 
 describe("cargo xtask gate", () => {
   it("hands the tool its fixed command, the tests named after it, and no caller's flags", () => {
@@ -171,15 +173,16 @@ describe("cargo xtask gate", () => {
     expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
   });
 
-  it("lints the workspace, the holder as it ships, then each crate cargo metadata names alone", () => {
+  it("lints the workspace, then each crate cargo metadata names alone, with its tests and as it ships", () => {
     const { status, logged } = rust(["lint"]);
     expect(status).toBe(0);
     expect(logged.map((l) => l.argv)).toEqual([
       expect.stringContaining("--workspace --all-targets --all-features"),
-      expect.stringContaining("-p bazhen-holder --lib --bins"),
       "metadata --no-deps --format-version 1 --locked",
-      alone("one"),
-      alone("two"),
+      withTests("one"),
+      asShipped("one"),
+      withTests("two"),
+      asShipped("two"),
     ]);
   });
 

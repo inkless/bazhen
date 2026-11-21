@@ -29,13 +29,9 @@ pub(crate) const NAMES: [&str; 5] = ["fmt", "lint", "deny", "test", "test-all"];
 // alias first, and an alias can name a command that passes. Every gate that compiles overrides
 // any rustc wrapper or compiler a cargo config names.
 const FMT: &[&str] = &["cargo-fmt", "--all", "--check"];
-const LINT: &[&str] = &[
-    "cargo-clippy",
-    "clippy",
-    "--quiet",
-    "--workspace",
-    "--all-targets",
-    "--all-features",
+// What every clippy pass ends with, so none runs without the lockfile, the compiler overrides or
+// `-D warnings`.
+const CLIPPY_TAIL: &[&str] = &[
     "--locked",
     "--config",
     "build.rustc-wrapper=\"\"",
@@ -47,45 +43,32 @@ const LINT: &[&str] = &[
     "-D",
     "warnings",
 ];
-// The holder as it ships, which `lint` checks after the workspace: the workspace pass builds it
-// with every feature, and its tests' dev-dependency on itself turns sandbox-tripwire on too, so
-// only a pass of its lib and binary alone sees it without.
-const SHIPPED_LINT: &[&str] = &[
-    "cargo-clippy",
-    "clippy",
-    "--quiet",
-    "-p",
-    "bazhen-holder",
-    "--lib",
-    "--bins",
-    "--locked",
-    "--config",
-    "build.rustc-wrapper=\"\"",
-    "--config",
-    "build.rustc-workspace-wrapper=\"\"",
-    "--config",
-    "build.rustc=\"rustc\"",
-    "--",
-    "-D",
-    "warnings",
-];
-// Each crate of the workspace on its own, which `lint` checks last: with `-p`, cargo resolves
-// features over that crate alone, so a feature it takes from a neighbour in the workspace pass is
-// missing here, and its build fails. The crate's name goes between the two halves.
-const ALONE_LINT_HEAD: &[&str] = &["cargo-clippy", "clippy", "--quiet", "-p"];
-const ALONE_LINT_TAIL: &[&str] = &[
-    "--all-targets",
-    "--locked",
-    "--config",
-    "build.rustc-wrapper=\"\"",
-    "--config",
-    "build.rustc-workspace-wrapper=\"\"",
-    "--config",
-    "build.rustc=\"rustc\"",
-    "--",
-    "-D",
-    "warnings",
-];
+// The workspace with every feature, which `lint` runs first.
+const WORKSPACE_SCOPE: &[&str] = &["--workspace", "--all-targets", "--all-features"];
+
+/// A clippy pass over what `scope` selects.
+fn clippy<'a>(scope: &[&'a str]) -> Vec<&'a str> {
+    ["cargo-clippy", "clippy", "--quiet"]
+        .into_iter()
+        .chain(scope.iter().copied())
+        .chain(CLIPPY_TAIL.iter().copied())
+        .collect()
+}
+
+// Each crate of the workspace on its own, which `lint` checks after the workspace pass. With `-p`,
+// cargo resolves features over that crate alone, so one it takes from a neighbour in the workspace
+// pass is missing and its build fails. Two passes, because `--all-targets` also unifies the
+// crate's dev-dependencies' features into its library and binaries: the first lints every target,
+// the second only the lib and bins (cargo's default targets, so a crate with no library is no
+// error), as they ship.
+fn alone_with_tests(member: &str) -> Vec<&str> {
+    clippy(&["-p", member, "--all-targets"])
+}
+
+fn alone_as_shipped(member: &str) -> Vec<&str> {
+    clippy(&["-p", member])
+}
+
 // The workspace's crates, as cargo lists them: `--no-deps` leaves out every dependency, so each
 // package it prints is a member.
 pub(crate) const MEMBERS: &[&str] = &[
@@ -152,13 +135,13 @@ impl Gate {
     }
 
     /// The commands the gate runs, in order.
-    pub(crate) fn commands(self) -> &'static [&'static [&'static str]] {
+    pub(crate) fn commands(self) -> Vec<Vec<&'static str>> {
         match self {
-            Self::Fmt => &[FMT],
-            Self::Lint => &[LINT, SHIPPED_LINT],
-            Self::Deny => &[DENY],
-            Self::Test => &[TEST],
-            Self::TestAll => &[TEST_ALL],
+            Self::Fmt => vec![FMT.to_vec()],
+            Self::Lint => vec![clippy(WORKSPACE_SCOPE)],
+            Self::Deny => vec![DENY.to_vec()],
+            Self::Test => vec![TEST.to_vec()],
+            Self::TestAll => vec![TEST_ALL.to_vec()],
         }
     }
 
@@ -376,8 +359,7 @@ pub(crate) fn run(
     }
     for command in gate.commands() {
         let argv: Vec<&str> = command
-            .iter()
-            .copied()
+            .into_iter()
             .chain(tests.iter().map(String::as_str))
             .collect();
         if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
@@ -398,14 +380,10 @@ pub(crate) fn run(
             }
         };
         for member in &members {
-            let argv: Vec<&str> = ALONE_LINT_HEAD
-                .iter()
-                .copied()
-                .chain([member.as_str()])
-                .chain(ALONE_LINT_TAIL.iter().copied())
-                .collect();
-            if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
-                return exit;
+            for argv in [alone_with_tests(member), alone_as_shipped(member)] {
+                if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
+                    return exit;
+                }
             }
         }
     }
@@ -593,7 +571,6 @@ mod tests {
             [
                 "cargo-fmt",
                 "cargo-clippy",
-                "cargo-clippy",
                 "cargo-deny",
                 "cargo-nextest",
                 "cargo-nextest"
@@ -614,8 +591,16 @@ mod tests {
 
     #[test]
     fn fails_clippy_on_any_warning_and_overrides_a_configured_wrapper_or_compiler() {
-        assert_eq!(LINT[LINT.len() - 3..], ["--", "-D", "warnings"]);
-        for gate in [LINT, SHIPPED_LINT, TEST, TEST_ALL] {
+        let clippy_passes = [
+            clippy(WORKSPACE_SCOPE),
+            alone_with_tests("x"),
+            alone_as_shipped("x"),
+        ];
+        for pass in &clippy_passes {
+            assert_eq!(pass[pass.len() - 3..], ["--", "-D", "warnings"]);
+        }
+        let others = [TEST.to_vec(), TEST_ALL.to_vec()];
+        for gate in clippy_passes.iter().chain(&others) {
             assert!(
                 gate.join(" ").contains(
                     "--config build.rustc-wrapper=\"\" --config build.rustc-workspace-wrapper=\"\" \
@@ -627,32 +612,9 @@ mod tests {
     }
 
     #[test]
-    fn lints_the_holder_again_as_it_ships_its_lib_and_binary_with_no_feature() {
-        assert_eq!(
-            SHIPPED_LINT[..7],
-            [
-                "cargo-clippy",
-                "clippy",
-                "--quiet",
-                "-p",
-                "bazhen-holder",
-                "--lib",
-                "--bins"
-            ]
-        );
-        assert!(SHIPPED_LINT.contains(&"--locked"));
-        assert!(!SHIPPED_LINT.contains(&"--all-targets"));
-        assert!(!SHIPPED_LINT.join(" ").contains("features"));
-        assert_eq!(
-            SHIPPED_LINT[SHIPPED_LINT.len() - 3..],
-            ["--", "-D", "warnings"]
-        );
-    }
-
-    #[test]
     fn lints_and_tests_every_feature_so_no_code_hides_behind_one() {
         assert!(
-            [LINT, TEST, TEST_ALL]
+            [clippy(WORKSPACE_SCOPE), TEST.to_vec(), TEST_ALL.to_vec()]
                 .iter()
                 .all(|g| g.contains(&"--all-features"))
         );
@@ -750,51 +712,50 @@ mod tests {
     }
 
     #[test]
-    fn lints_the_workspace_then_the_holder_as_it_ships_then_each_crate_alone() {
+    fn lints_the_workspace_then_each_crate_alone_with_its_tests_and_as_it_ships() {
         let mut host = Fake::new(false);
         let (exit, runs, _) = ran(&mut host, "lint", &[]);
+        let bins: Vec<&str> = runs.iter().map(String::as_str).collect();
         assert_eq!(
-            (exit, runs),
+            (exit, bins),
             (
                 Exit::Done,
-                ["cargo-clippy", "cargo-clippy", "cargo-clippy", "cargo"]
-                    .into_iter()
-                    .chain(["cargo-clippy"; 2])
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
+                vec![
+                    "cargo-clippy",
+                    "cargo-clippy",
+                    "cargo",
+                    "cargo-clippy",
+                    "cargo-clippy",
+                    "cargo-clippy",
+                    "cargo-clippy"
+                ]
             )
         );
-        assert_eq!(host.runs[1], LINT);
-        assert_eq!(host.runs[2], SHIPPED_LINT);
-        assert_eq!(host.runs[3], MEMBERS);
-        for (run, name) in host.runs[4..].iter().zip(["a", "b"]) {
-            let (head, rest) = run.split_at(ALONE_LINT_HEAD.len());
-            assert_eq!(head, ALONE_LINT_HEAD);
-            assert_eq!(rest[0], name);
-            assert_eq!(&rest[1..], ALONE_LINT_TAIL);
-        }
+        assert_eq!(host.runs[1], clippy(WORKSPACE_SCOPE));
+        assert_eq!(host.runs[2], MEMBERS);
+        assert_eq!(host.runs[3], alone_with_tests("a"));
+        assert_eq!(host.runs[4], alone_as_shipped("a"));
+        assert_eq!(host.runs[5], alone_with_tests("b"));
+        assert_eq!(host.runs[6], alone_as_shipped("b"));
     }
 
     #[test]
-    fn lints_each_crate_with_no_feature_but_its_own_so_one_it_takes_from_a_neighbour_fails() {
-        for part in ["--workspace", "--all-features", "--exclude"] {
-            assert!(
-                !ALONE_LINT_HEAD
-                    .iter()
-                    .chain(ALONE_LINT_TAIL)
-                    .any(|a| *a == part),
-                "{part}"
-            );
+    fn selects_the_workspace_features_in_no_per_crate_pass_and_the_tests_in_the_shipped_one() {
+        for pass in [alone_with_tests("x"), alone_as_shipped("x")] {
+            for widening in ["--workspace", "--all-features", "--features", "--exclude"] {
+                assert!(!pass.contains(&widening), "{pass:?}: {widening}");
+            }
         }
-        assert!(ALONE_LINT_TAIL.contains(&"--all-targets"));
-        assert_eq!(
-            ALONE_LINT_TAIL[ALONE_LINT_TAIL.len() - 3..],
-            ["--", "-D", "warnings"]
-        );
-        assert!(ALONE_LINT_TAIL.join(" ").contains(
-            "--config build.rustc-wrapper=\"\" --config build.rustc-workspace-wrapper=\"\" \
-                 --config build.rustc=\"rustc\""
-        ));
+        assert!(alone_with_tests("x").contains(&"--all-targets"));
+        for tests in [
+            "--all-targets",
+            "--tests",
+            "--benches",
+            "--examples",
+            "--all",
+        ] {
+            assert!(!alone_as_shipped("x").contains(&tests), "{tests}");
+        }
     }
 
     #[test]
@@ -815,7 +776,7 @@ mod tests {
             host.metadata = metadata;
             let (exit, runs, err) = ran(&mut host, "lint", &[]);
             assert_eq!(exit, Exit::Failed, "{metadata:?}");
-            assert_eq!(runs.len(), 4, "{metadata:?}");
+            assert_eq!(runs.len(), 3, "{metadata:?}");
             assert!(err.starts_with("cargo metadata"), "{err}");
         }
     }
