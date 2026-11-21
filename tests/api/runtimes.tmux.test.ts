@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeHolderAt, holderSockets } from "../support/holder-close.ts";
-import { Daemon } from "./daemon.ts";
+import { bazhen, Daemon } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
-import { openShell, runtimeStates, terminals } from "./runtime-states.ts";
+import { openShell, runtimeStates, snapshot, terminals } from "./runtime-states.ts";
 
 let model: FakeModel;
 
@@ -77,5 +77,46 @@ describe("a daemon running terminals on both runtimes", () => {
     await expect
       .poll(() => runtimeStates(daemon), { timeout: 15_000 })
       .toEqual(["tmux: unused", "holder: healthy"]);
+  });
+});
+
+describe("a holder daemon on a machine without tmux", () => {
+  let daemon: Daemon;
+
+  beforeAll(async () => {
+    daemon = await Daemon.start({ runtime: "holder", withoutTmux: true });
+  }, 60_000);
+  afterAll(async () => {
+    await daemon?.stop();
+  });
+
+  it("reports tmux unused, and passes doctor", async () => {
+    const doctor = await bazhen(["doctor"], daemon.env);
+    expect([
+      await runtimeStates(daemon),
+      doctor.code,
+      doctor.out.split("\n").filter((l) => l.startsWith("tmux")),
+    ]).toEqual([["tmux: unused", "holder: not-running"], 0, ["tmux: unused"]]);
+  });
+
+  it("runs no tmux while a holder shell runs, beyond asking its version at start", async () => {
+    const shell = await openShell(daemon, "no-tmux-shell");
+    await expect
+      .poll(async () => (await terminals(daemon))[shell], { timeout: 30_000 })
+      .toBe("running on holder");
+    const view = await daemon.view(shell, "interactive");
+    await view.drive();
+    view.type("sleep 300\r");
+    // The shell's foreground is read through every runtime that is read, so once it says sleep
+    // the foregrounds have been read at least once with tmux unused, and its process polls have run.
+    await expect
+      .poll(
+        async () =>
+          (await snapshot(daemon)).shells.find((s) => s.id === shell)?.foreground?.command,
+        { timeout: 15_000 },
+      )
+      .toBe("sleep");
+    view.close();
+    expect(daemon.tmuxRan()).toEqual([expect.stringMatching(/ -V$/)]);
   });
 });
