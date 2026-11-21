@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
 import { Daemon, waitUntil } from "./daemon.ts";
+import { open, shellOf } from "./shell-calls.ts";
 
 let daemon: Daemon;
 beforeAll(async () => {
@@ -10,16 +10,8 @@ afterAll(async () => {
   await daemon?.stop();
 });
 
+/** Idempotency keys for the calls the tests make themselves. */
 let keys = 0;
-const open = async (on: Daemon, body: Record<string, unknown> = {}) => {
-  const res = await on.request("/v1/shells", {
-    method: "POST",
-    body: { idempotencyKey: `open-${++keys}`, cwd: on.work, ...body },
-  });
-  return ShellCommandResponse.parse(res.body).terminalId;
-};
-const shellOf = async (on: Daemon, terminalId: string) =>
-  StateSnapshot.parse((await on.request("/v1/state")).body).shells.find((s) => s.id === terminalId);
 
 describe("shells beside an agent", () => {
   it("close with it, except the one kept, which runs on standalone", async () => {

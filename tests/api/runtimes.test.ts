@@ -38,8 +38,8 @@ describe("a holder daemon on a machine without tmux", () => {
     const view = await daemon.view(shell, "interactive");
     await view.drive();
     view.type("sleep 300\r");
-    // Once the shell's foreground says sleep, every runtime's foreground and process reads have
-    // run at least once.
+    // The shell's foreground is read through every runtime that is read, so once it says sleep
+    // the foregrounds have been read at least once, and the runtimes have watched its process.
     await expect
       .poll(
         async () =>
