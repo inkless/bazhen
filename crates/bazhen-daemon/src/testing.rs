@@ -41,3 +41,26 @@ pub(crate) fn paused() -> tokio::runtime::Runtime {
         .build()
         .unwrap()
 }
+
+/// A listener at a socket that never accepts, its one-place backlog taken by a connection of its
+/// own, so a connect there waits as it would on a daemon stuck with a full backlog. Linux only:
+/// macOS refuses such a connect, as it does one to a socket nothing listens on.
+#[cfg(target_os = "linux")]
+pub(crate) struct FullBacklog {
+    _listener: std::os::unix::net::UnixListener,
+    _queued: std::os::unix::net::UnixStream,
+}
+
+#[cfg(target_os = "linux")]
+impl FullBacklog {
+    pub(crate) fn at(socket: &Path) -> Self {
+        use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, bind, listen, socket as open};
+        let fd = open(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+        bind(&fd, &SocketAddrUnix::new(socket).unwrap()).unwrap();
+        listen(&fd, 0).unwrap();
+        Self {
+            _listener: std::os::unix::net::UnixListener::from(fd),
+            _queued: std::os::unix::net::UnixStream::connect(socket).unwrap(),
+        }
+    }
+}
