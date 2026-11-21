@@ -8,7 +8,8 @@
 //!   widening drops rows below the cursor when history runs short, so the cells down to the
 //!   cursor's row must agree as far as both go; a wide char whose spacer was erased, or that
 //!   an insert pushed into a row's last cell, can be lost anywhere, so no cell drawing its char
-//!   is compared.
+//!   is compared. That includes well-formed wide chars drawing the same char: while an orphan 中
+//!   is held, the engine losing any other 中 goes unseen.
 //! - With the alternate screen up, the engine reflows the primary screen without its history,
 //!   so the primary may differ on return: the alternate screen and cursor are compared until it
 //!   ends, and nothing after.
@@ -630,7 +631,9 @@ fn assert_same(engine: &Engine, full: &FullHistory) {
 /// and on the screen down to row `last`, the same and in the same order. When rows below the
 /// cursor may have been dropped, `last` is the cursor's row and one side may hold more above it
 /// than the other, so one side's cells need only start the other's. What follows would differ,
-/// so a case ends there. Cells that draw a char in `orphans` aren't compared, on either side.
+/// so a case ends there. Cells that draw a char in `orphans` aren't compared, on either side,
+/// orphan or not: drawn, an orphan reads as any other wide char, so a loss of the same char
+/// elsewhere goes unseen too.
 fn assert_same_visible_cells(
     engine: &Engine,
     full: &FullHistory,
