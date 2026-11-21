@@ -27,6 +27,44 @@ export interface ScrollInput {
   detach(): void;
 }
 
+/** A box that scrolls: how far down it is, how tall what it holds is, and how much of it shows. */
+export interface ScrollBox {
+  scrollTop: number;
+  readonly scrollHeight: number;
+  readonly clientHeight: number;
+}
+
+/**
+ * Keeps `box` at the bottom of what it holds as either changes size, until the user moves it away;
+ * back at the bottom, it is kept there again. A scroll event is told a frame late, so it may find a
+ * layout the resize observer hasn't reported yet: what it holds grew since the pin's own scroll, or
+ * shrank and the browser clamped the box. Only an event that finds the sizes last reported says
+ * where the user is; any other leaves the pin to the report that follows. So a user's scroll in
+ * the frame of a resize is ignored: scrolling up, they are taken back to the bottom once; scrolling
+ * back down, the view doesn't follow until they scroll again. A shrink and regrow to the reported
+ * sizes within one frame can still read a clamp as the user's, and unpin.
+ */
+export function bottomPin(box: ScrollBox) {
+  let pinned = true;
+  let reported: readonly [number, number] | undefined;
+  const moved = () => {
+    pinned = box.scrollTop + box.clientHeight >= box.scrollHeight - 1;
+  };
+  return {
+    /** The box, or what it holds, changed size. */
+    resized: () => {
+      reported = [box.scrollHeight, box.clientHeight];
+      if (pinned) box.scrollTop = box.scrollHeight;
+    },
+    /** The box told of a scroll, by the user, the pin, or the browser keeping it in range. */
+    scrolled: () => {
+      if (reported?.[0] === box.scrollHeight && reported[1] === box.clientHeight) moved();
+    },
+    /** The user moved the box. */
+    moved,
+  };
+}
+
 /**
  * The rows a glide moves this frame. A program fed arrow keys or mouse reports gets at most
  * GLIDE_STEPS_PER_FRAME, however fast the flick; the page's own scrollback takes them all.
@@ -53,16 +91,12 @@ export function attachScrollInput(
   };
   const screen = element.querySelector<HTMLElement>(".xterm-screen") ?? element;
   const rowHeight = () => Math.max(1, screen.getBoundingClientRect().height / term.rows);
-  let pinned = true;
-  const rememberPosition = () => {
-    pinned = element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
-  };
-  const follow = new ResizeObserver(() => {
-    if (pinned) element.scrollTop = element.scrollHeight;
-  });
+  const pin = bottomPin(element);
+  const follow = new ResizeObserver(() => pin.resized());
   follow.observe(screen);
   follow.observe(element);
-  element.addEventListener("scroll", rememberPosition);
+  const scrolled = () => pin.scrolled();
+  element.addEventListener("scroll", scrolled);
 
   // The outer viewport shows part of one grid. At its edge the remaining travel
   // scrolls xterm's history. On the way back, show the live grid before panning down it.
@@ -78,7 +112,7 @@ export function attachScrollInput(
     }
     const before = element.scrollTop;
     element.scrollTop += dy;
-    rememberPosition();
+    pin.moved();
     return dy - (element.scrollTop - before);
   };
 
@@ -242,7 +276,7 @@ export function attachScrollInput(
       element.removeEventListener("wheel", interrupt, { capture: true });
       element.removeEventListener("keydown", interrupt, { capture: true });
       follow.disconnect();
-      element.removeEventListener("scroll", rememberPosition);
+      element.removeEventListener("scroll", scrolled);
       element.removeEventListener("wheel", wheel, { capture: true });
       screen.removeEventListener("touchstart", touchStart);
       screen.removeEventListener("touchmove", touchMove);

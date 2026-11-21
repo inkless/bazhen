@@ -212,8 +212,14 @@ async function terminalShare(page: Page): Promise<number> {
   return covered / (await visibleBottom(page));
 }
 
-async function open(browser: Browser, options: BrowserContextOptions, hash: string) {
+async function open(
+  browser: Browser,
+  options: BrowserContextOptions,
+  hash: string,
+  before?: (page: Page) => Promise<void>,
+) {
   const page = await (await browser.newContext(options)).newPage();
+  await before?.(page);
   await page.goto(`/${hash}`);
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
   await dismissThemeNotice(page);
@@ -523,5 +529,99 @@ test("sits the dock beside the TUI on a desktop too short to stack them", async 
   );
   await expect(page.locator(".xterm-screen")).toHaveCount(2);
   expect([await dockBeside(page), await terminalsInView(page)]).toEqual([true, true]);
+  await page.context().close();
+});
+
+/** Each terminal view's grid, as `colsxrows`, in the order the page opened them. */
+const grids = (page: Page) =>
+  page.evaluate<string[]>(`Object.values(globalThis.bazhenViews ?? {}).map((v) => v.grid())`);
+
+/**
+ * Keeps every terminal stream the page opens from the daemon: its socket opens and nothing ever
+ * answers it. What the page sends on one is recorded, as it sends it, in `bazhenStreamSent`.
+ */
+async function holdStreams(page: Page): Promise<void> {
+  await page.routeWebSocket(/\/v1\/terminals\/[^/]+\/stream/, () => undefined);
+  await page.addInitScript(`(() => {
+    const sent = (globalThis.bazhenStreamSent = []);
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (this.url.includes("/v1/terminals/") && typeof data === "string")
+        sent.push(JSON.parse(data).type);
+      return send.call(this, data);
+    };
+  })()`);
+}
+
+/**
+ * Passes every terminal stream through to the daemon until the daemon says the terminal's size,
+ * then holds back the rest, so each view has the daemon's grid but never attaches. Each size said
+ * is pushed to `told` as a view's `grid()` shows it.
+ */
+async function holdAfterGeometry(page: Page, told: string[]): Promise<void> {
+  await page.routeWebSocket(/\/v1\/terminals\/[^/]+\/stream/, (ws) => {
+    const server = ws.connectToServer();
+    let holding = false;
+    server.onMessage((message) => {
+      if (holding) return;
+      ws.send(message);
+      const frame: unknown = typeof message === "string" ? JSON.parse(message) : null;
+      if (typeof frame !== "object" || frame === null) return;
+      if (Reflect.get(frame, "type") !== "geometry") return;
+      told.push(`${String(Reflect.get(frame, "cols"))}x${String(Reflect.get(frame, "rows"))}`);
+      holding = true;
+    });
+  });
+}
+
+const sorted = (values: readonly string[]) => values.toSorted((a, b) => a.localeCompare(b));
+
+/** Resolves once the page has drawn two frames, so a resize observer has seen what changed. */
+const twoFrames = (page: Page) =>
+  page.evaluate("new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))");
+
+test("draws each terminal at its pane's size until the daemon answers, and asks it for none", async ({
+  browser,
+}) => {
+  const page = await open(
+    browser,
+    { viewport: { width: 1280, height: 560 } },
+    `#/agent/${agentId}`,
+    holdStreams,
+  );
+  await expect(page.locator(".xterm-screen")).toHaveCount(2);
+  await expect
+    .poll(async () => [await dockBeside(page), await terminalsInView(page)])
+    .toEqual([true, true]);
+  const before = await grids(page);
+  // Still too short to stack them, so each pane only loses rows.
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await expect
+    .poll(async () => (await grids(page)).every((grid, i) => grid !== before[i]))
+    .toBe(true);
+  expect([await terminalsInView(page), await page.evaluate("globalThis.bazhenStreamSent")]).toEqual(
+    [true, ["hello", "hello"]],
+  );
+  await page.context().close();
+});
+
+test("keeps the daemon's grid through a pane resize before the view attaches", async ({
+  browser,
+}) => {
+  const told: string[] = [];
+  const page = await open(
+    browser,
+    { viewport: { width: 1280, height: 560 } },
+    `#/agent/${agentId}`,
+    (held) => holdAfterGeometry(held, told),
+  );
+  await expect.poll(() => told.length).toBe(2);
+  await expect.poll(async () => sorted(await grids(page))).toEqual(sorted(told));
+  const host = page.locator(".terminal-host").first();
+  const height = await host.evaluate((el) => el.clientHeight);
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await expect.poll(() => host.evaluate((el) => el.clientHeight)).not.toBe(height);
+  await twoFrames(page);
+  expect(sorted(await grids(page))).toEqual(sorted(told));
   await page.context().close();
 });

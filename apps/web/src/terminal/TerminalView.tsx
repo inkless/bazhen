@@ -134,9 +134,20 @@ function connect(
     const dimensions = fit.proposeDimensions();
     if (dimensions === undefined) return undefined;
     const { cols, rows } = dimensions;
+    // NaN where the host has no size, under a display: none ancestor, say.
+    if (!Number.isInteger(cols) || !Number.isInteger(rows)) return undefined;
     return { cols: Math.max(2, Math.min(1000, cols)), rows: Math.max(2, Math.min(MAX_ROWS, rows)) };
   };
   let viewport = measureViewport() ?? { cols: term.cols, rows: term.rows };
+  /**
+   * Whether the daemon has said what size the terminal is. Until it has, the grid is the size of
+   * the view's pane, and only from then the daemon's, which may be another view's.
+   */
+  let mirrored = false;
+  const fitPaneUntilMirrored = () => {
+    if (!mirrored) term.resize(viewport.cols, viewport.rows);
+  };
+  fitPaneUntilMirrored();
   swallowReplies(term);
 
   let status: Status = { kind: "connecting" };
@@ -251,6 +262,7 @@ function connect(
         scroll.stopGlide();
         term.write("", () => startSnapshot(term, f));
       } else if (f.type === "geometry") {
+        mirrored = true;
         term.write("", () => term.resize(f.cols, f.rows));
       } else if (f.type === "snapshot_end") backoff.reset();
       else if (f.type === "screen") daemonSaidAlternate = f.alternate;
@@ -368,6 +380,7 @@ function connect(
     if (!next || (next.cols === viewport.cols && next.rows === viewport.rows)) return;
     viewport = next;
     if (attached) send({ type: "resize", ...viewport });
+    else fitPaneUntilMirrored();
   };
   const observer = new ResizeObserver(measure);
   observer.observe(element);
