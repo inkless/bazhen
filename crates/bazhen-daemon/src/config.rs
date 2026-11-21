@@ -5,7 +5,7 @@
 //! `packages/protocol/fixtures/config/` holds what that daemon makes of each case, and this one is
 //! held to it.
 
-mod js;
+pub(crate) mod js;
 pub mod ranges;
 mod schema;
 mod sizes;

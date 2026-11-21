@@ -68,6 +68,7 @@ pub fn asked(body: &[u8]) -> Result<NewTask, Refused> {
     .collect();
     match (key, title, brief, parent, assigns) {
         (Some(key), Some(title), Some(brief), Some(parent), Some(false)) => Ok(NewTask {
+            caller: None,
             key: key.to_owned(),
             title: title.to_owned(),
             brief: brief.to_owned(),

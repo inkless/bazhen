@@ -22,6 +22,7 @@ use crate::guard;
 use crate::private_dir::ensure_private_dir;
 use crate::probe::{Answer, probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
+use crate::tokens;
 
 /// How the daemon serves: each listener's limits, and how long its connections get to finish once
 /// a stop is asked for.
@@ -116,6 +117,12 @@ fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
             store.missed().join(", ")
         );
     }
+    tokens::forget_ended(
+        &Path::new(&p.run).join("agents"),
+        startup.uid,
+        store.reads(),
+    )
+    .map_err(|err| Refused::Said(err.to_string()))?;
     writer::start(store, &path)
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))
 }
@@ -538,6 +545,38 @@ mod tests {
         let refused = prepare(&startup);
         assert!(
             matches!(&refused, Err(Refused::Said(said)) if said.contains("bazhen.db")),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn sweeps_the_token_files_no_agent_will_run_on_again_before_it_serves() {
+        let home = TempDir::new("sweep");
+        let startup = startup(home.path());
+        let agents = Path::new(&startup.paths.run).join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        let unknown = agents.join("agent_0190a1b2c3d47abc8def0123456789ad.0a.token");
+        std::fs::write(&unknown, "x").unwrap();
+        let (store, writer) = prepare(&startup).unwrap();
+        drop(store);
+        writer.finish();
+        assert!(!unknown.exists());
+    }
+
+    #[test]
+    fn refuses_to_start_on_a_token_directory_it_cant_keep_private() {
+        let home = TempDir::new("sweep-link");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(home.path().join("elsewhere")).unwrap();
+        std::fs::create_dir_all(&startup.paths.run).unwrap();
+        std::os::unix::fs::symlink(
+            home.path().join("elsewhere"),
+            Path::new(&startup.paths.run).join("agents"),
+        )
+        .unwrap();
+        let refused = prepare(&startup);
+        assert!(
+            matches!(&refused, Err(Refused::Said(said)) if said.contains("agents") && said.contains("symlink")),
             "{refused:?}"
         );
     }

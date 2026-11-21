@@ -115,6 +115,34 @@ export function overSocket(
   });
 }
 
+/**
+ * One GET over a daemon's socket from under a `codex app-server`, by a child of its own, as Codex
+ * runs a tool call, presenting nothing. The server is a shell named `codex`; its `exit` keeps it
+ * from exec'ing the child in its place.
+ */
+export function overSocketUnderCodex(socket: string, path: string): unknown {
+  const ask = `import { request } from "node:http";
+const req = request({ socketPath: ${JSON.stringify(socket)}, method: "GET", path: ${JSON.stringify(path)} }, (res) => {
+  let text = "";
+  res.on("data", (d) => (text += d));
+  res.on("end", () => console.log(JSON.stringify({ status: res.statusCode, body: JSON.parse(text) })));
+});
+req.end();
+`;
+  const asked = spawnSync(
+    "/bin/sh",
+    ["-c", '"$BZ_NODE" --input-type=module -e "$BZ_ASK"; exit $?', "app-server"],
+    {
+      argv0: "codex",
+      env: { ...process.env, BZ_NODE: process.execPath, BZ_ASK: ask },
+      encoding: "utf8",
+    },
+  );
+  if (asked.status !== 0) throw new Error(`the fake codex app-server failed: ${asked.stderr}`);
+  const reply: unknown = JSON.parse(asked.stdout);
+  return reply;
+}
+
 /** This checkout's CLI, which `moon run :test-api` builds. */
 const CLI = join(repo, "target/release/bazhen");
 

@@ -19,14 +19,15 @@ use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
 use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
-use bazhen_protocol::ids::is_id;
-use bazhen_store::{CreateTaskError, OnceError, SnapshotError};
+use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
+use crate::callers::{self, Caller};
 use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
 use crate::heartbeat::{HEARTBEAT, Heartbeat};
+use crate::peer::Peers;
 use crate::tasks::{self, Refused};
 use crate::writer::Writer;
 
@@ -78,6 +79,8 @@ pub(crate) struct Shared {
     pub(crate) stop: Stop,
     pub(crate) store: Writer,
     pub(crate) heartbeat: Heartbeat,
+    /// Who is at the other end of a socket connection.
+    pub(crate) peers: Peers,
 }
 
 impl Shared {
@@ -93,6 +96,7 @@ impl Shared {
             stop,
             store,
             heartbeat: HEARTBEAT,
+            peers: Peers::default(),
         }
     }
 }
@@ -127,7 +131,7 @@ async fn stop(State(shared): State<Shared>) -> axum::Json<StopResponse> {
 
 /// What a failure no route expects answers: the error is logged, and the client told nothing of
 /// it, as Hono answers one.
-fn internal(err: &dyn std::fmt::Display) -> Response {
+pub(crate) fn internal(err: &dyn std::fmt::Display) -> Response {
     tracing::error!("bazhen: {err}");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
 }
@@ -178,8 +182,13 @@ async fn stream(
         })
 }
 
-/// A task for the human, made once per idempotency key.
-async fn create_task(State(shared): State<Shared>, body: Bytes) -> Response {
+/// A task for its caller, made once per idempotency key. An agent's subtask is a delegation, which
+/// needs the assignments this daemon doesn't keep yet.
+async fn create_task(
+    State(shared): State<Shared>,
+    caller: Option<Extension<Caller>>,
+    body: Bytes,
+) -> Response {
     let task = match tasks::asked(&body) {
         Ok(task) => task,
         Err(Refused::Invalid(message)) => {
@@ -193,13 +202,22 @@ async fn create_task(State(shared): State<Shared>, body: Bytes) -> Response {
             );
         }
     };
+    let caller = callers::caller_of(caller);
+    if caller.is_some() && task.parent.is_some() {
+        return fail(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::Unsupported,
+            "this daemon can't make an agent's subtask yet",
+        );
+    }
+    let task = NewTask { caller, ..task };
     match shared
         .store
         .run(move |store| store.create_task(&task))
         .await
     {
         Ok(Ok(made)) => axum::Json(made).into_response(),
-        Ok(Err(err @ CreateTaskError::NoParent(_))) => {
+        Ok(Err(err @ (CreateTaskError::NoParent(_) | CreateTaskError::NoCaller(_)))) => {
             fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &err.to_string())
         }
         Ok(Err(err @ CreateTaskError::ParentClosed(_))) => {
@@ -215,41 +233,6 @@ async fn create_task(State(shared): State<Shared>, body: Bytes) -> Response {
     }
 }
 
-/// What refuses a socket request for the credentials it presents, as `guardCallers` refuses one
-/// while no agent is live: this daemon runs none, so no token or agent id it is shown holds, and
-/// a caller that presents neither is the human. A Codex thread alone is ignored, as it is from a
-/// process outside every terminal.
-fn presented(headers: &HeaderMap) -> Option<String> {
-    if header(headers, "bazhen-agent-token").is_some() {
-        return Some("the agent token is no live agent's".to_owned());
-    }
-    let said = header(headers, "bazhen-agent-id").filter(|said| !said.is_empty())?;
-    Some(if is_id("agent", &said) {
-        format!("agent {said} must present its agent token")
-    } else {
-        format!("not an agent id: {said}")
-    })
-}
-
-/// Identifies every socket request under `/v1`, and every upgrade, before any route sees it, and
-/// refuses one whose credentials don't hold. Stop is the human's, so its refusal says so.
-async fn identified(request: Request, next: Next) -> Response {
-    let path = request.uri().path();
-    let upgrade = request.headers().contains_key("upgrade");
-    if !upgrade && path != "/v1" && !path.starts_with("/v1/") {
-        return next.run(request).await;
-    }
-    let Some(refusal) = presented(request.headers()) else {
-        return next.run(request).await;
-    };
-    let message = if !upgrade && path == "/v1/daemon/stop" {
-        format!("an agent can't stop the daemon: {refusal}")
-    } else {
-        refusal
-    };
-    fail(StatusCode::FORBIDDEN, ErrorCode::Forbidden, &message)
-}
-
 async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
@@ -259,14 +242,15 @@ async fn not_found() -> Response {
 pub(crate) fn socket_router(shared: Shared) -> Router {
     Router::new()
         .route("/v1/health", get(health))
+        .route("/v1/caller", get(callers::caller))
         .route("/v1/state", get(state))
         .route("/v1/events", get(stream))
         .route("/v1/tasks", post(create_task))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
-        .with_state(shared)
-        .layer(middleware::from_fn(identified))
+        .with_state(shared.clone())
+        .layer(middleware::from_fn_with_state(shared, callers::guard))
 }
 
 /// The loopback HTTP listener's routes, behind the guard. The API is a router nested at `/v1`,
@@ -276,6 +260,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let gate = Arc::new(gate);
     let api = Router::new()
         .route("/health", get(health))
+        .route("/caller", get(callers::caller))
         .route("/state", get(state))
         .route("/events", get(stream))
         .route("/tasks", post(create_task))
@@ -295,7 +280,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
 /// A header as Node gives it to the TypeScript daemon: every line of it joined with ", ", each
 /// byte read as latin1. A value that isn't ASCII is still there, and a line ahead of a proxy's
 /// doesn't hide it.
-fn header(headers: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn header(headers: &HeaderMap, name: &str) -> Option<String> {
     let mut lines = headers.get_all(name).iter().peekable();
     lines.peek()?;
     let latin1 = lines.map(|line| {
@@ -880,6 +865,17 @@ mod tests {
 
     #[test]
     fn refuses_on_the_socket_whoever_presents_an_agents_credentials_and_takes_the_rest_as_human() {
+        let dir = crate::testing::TempDir::new("routes-callers");
+        let path = dir.path().join("bazhen.db");
+        let (store, thread) =
+            crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+        let router = || {
+            socket_router(Shared::new(
+                "f".repeat(64).as_str(),
+                Stop::default(),
+                store.clone(),
+            ))
+        };
         let agent = "agent_01900000000070008000000000000002";
         let cases = [
             (
@@ -911,24 +907,18 @@ mod tests {
                 ("GET", "/v1/nowhere"),
             ] {
                 assert_eq!(
-                    send(socket_router(shared()), request(method, path, &presenting)),
+                    send(router(), request(method, path, &presenting)),
                     (403, refused("forbidden", &reason)),
                     "{name}: {value} on {path}"
                 );
             }
             let upgrade = [(name, value.as_str()), ("upgrade", "websocket")];
             assert_eq!(
-                send(
-                    socket_router(shared()),
-                    request("GET", "/v1/events", &upgrade)
-                ),
+                send(router(), request("GET", "/v1/events", &upgrade)),
                 (403, refused("forbidden", &reason))
             );
             assert_eq!(
-                send(
-                    socket_router(shared()),
-                    request("POST", "/v1/daemon/stop", &presenting)
-                ),
+                send(router(), request("POST", "/v1/daemon/stop", &presenting)),
                 (
                     403,
                     refused(
@@ -938,11 +928,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                send(
-                    socket_router(shared()),
-                    request("GET", "/elsewhere", &presenting)
-                )
-                .0,
+                send(router(), request("GET", "/elsewhere", &presenting)).0,
                 404
             );
         }
@@ -951,14 +937,8 @@ mod tests {
             vec![("bazhen-agent-id", "")],
             vec![("bazhen-codex-thread", "0199-thread")],
         ] {
-            assert_eq!(
-                send(
-                    socket_router(shared()),
-                    request("GET", "/v1/health", &human)
-                )
-                .0,
-                200
-            );
+            assert_eq!(send(router(), request("GET", "/v1/health", &human)).0, 200);
         }
+        thread.finish();
     }
 }
