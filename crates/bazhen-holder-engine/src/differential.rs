@@ -6,8 +6,10 @@
 //!   that draw something, in the same order, with blank cells and line breaks free. Where
 //!   alacritty's own reflow may lose cells, in either, only what it can't touch is compared: a
 //!   widening drops rows below the cursor when history runs short, so the cells down to the
-//!   cursor's row must agree as far as both go; a wide char whose spacer was erased can be lost
-//!   anywhere, and nothing is compared.
+//!   cursor's row must agree as far as both go; a wide char whose spacer was erased, or that
+//!   an insert pushed into a row's last cell, can be lost anywhere, so no cell drawing its char
+//!   is compared. That includes well-formed wide chars drawing the same char: while an orphan 中
+//!   is held, the engine losing any other 中 goes unseen.
 //! - With the alternate screen up, the engine reflows the primary screen without its history,
 //!   so the primary may differ on return: the alternate screen and cursor are compared until it
 //!   ends, and nothing after.
@@ -593,20 +595,18 @@ fn run(size: Size, actions: &[Action], cuts: &[usize]) -> (Engine, FullHistory) 
                     continue;
                 }
                 let drop_below = may_drop_rows_below_the_cursor(&full.term, size);
-                let lose_wide = has_a_wide_char_without_its_spacer(&full.term);
+                let orphans = wide_chars_without_their_spacers(&full.term);
                 engine.resize(size);
                 full.resize(size);
                 if difference(&engine, &full).is_some() {
-                    if !lose_wide {
-                        let cursors = (&engine.term, &full.term);
-                        let last = if drop_below {
-                            let line = |term: &Term<Sink>| term.grid().cursor.point.line.0;
-                            line(cursors.0).min(line(cursors.1))
-                        } else {
-                            i32::MAX
-                        };
-                        assert_same_visible_cells(&engine, &full, last, drop_below, visible);
-                    }
+                    let cursors = (&engine.term, &full.term);
+                    let last = if drop_below {
+                        let line = |term: &Term<Sink>| term.grid().cursor.point.line.0;
+                        line(cursors.0).min(line(cursors.1))
+                    } else {
+                        i32::MAX
+                    };
+                    assert_same_visible_cells(&engine, &full, last, drop_below, visible, &orphans);
                     return (engine, full);
                 }
             }
@@ -631,26 +631,28 @@ fn assert_same(engine: &Engine, full: &FullHistory) {
 /// and on the screen down to row `last`, the same and in the same order. When rows below the
 /// cursor may have been dropped, `last` is the cursor's row and one side may hold more above it
 /// than the other, so one side's cells need only start the other's. What follows would differ,
-/// so a case ends there.
+/// so a case ends there. Cells that draw a char in `orphans` aren't compared, on either side,
+/// orphan or not: drawn, an orphan reads as any other wide char, so a loss of the same char
+/// elsewhere goes unseen too.
 fn assert_same_visible_cells(
     engine: &Engine,
     full: &FullHistory,
     last: i32,
     cut: bool,
     kept: fn(&[Cells]) -> Vec<Cell>,
+    orphans: &[char],
 ) {
     let mut history = String::new();
     engine.write_history(&mut history);
     let cols = engine.size.cols;
     let last = usize::try_from(last).unwrap_or(0);
-    let ours = kept(&drawn(
-        &history_and_screen(history, &engine.term, last),
-        cols,
-    ));
-    let theirs = kept(&drawn(
-        &history_and_screen(full.history(), &full.term, last),
-        cols,
-    ));
+    let compared = |text: String, term: &Term<Sink>| {
+        let mut cells = kept(&drawn(&history_and_screen(text, term, last), cols));
+        cells.retain(|cell| !orphans.contains(&cell.c));
+        cells
+    };
+    let ours = compared(history, &engine.term);
+    let theirs = compared(full.history(), &full.term);
     let same = if cut {
         ours.starts_with(&theirs) || theirs.starts_with(&ours)
     } else {
@@ -682,6 +684,28 @@ fn has_a_wide_char_without_its_spacer(term: &Term<Sink>) -> bool {
                 && !pair[1].flags.contains(Flags::WIDE_CHAR_SPACER)
         })
     })
+}
+
+/// The chars of the wide chars in `term` with no spacer after them, which a resize may lose: as
+/// [`has_a_wide_char_without_its_spacer`] says, and in a row's last cell, where an insert's shift
+/// or a reflow of such a char leaves it and the engine writes it into history as the blank it
+/// has room to draw.
+fn wide_chars_without_their_spacers(term: &Term<Sink>) -> Vec<char> {
+    let grid = term.grid();
+    let scrolled = grid.history_size();
+    let mut chars = Vec::new();
+    for n in 0..scrolled + grid.screen_lines() {
+        let cells: Vec<&Cell> = grid[scrollback_line(scrolled, n)].into_iter().collect();
+        for (column, cell) in cells.iter().enumerate() {
+            let spaced = cells
+                .get(column + 1)
+                .is_some_and(|next| next.flags.contains(Flags::WIDE_CHAR_SPACER));
+            if cell.flags.contains(Flags::WIDE_CHAR) && !spaced {
+                chars.push(cell.c);
+            }
+        }
+    }
+    chars
 }
 
 /// Whether `term` holds a row marked as wrapping in a cell but its last. alacritty leaves one when
@@ -750,7 +774,7 @@ fn cursor_stays_as_far_into_its_line(
         if let Some(typed) = typed {
             feed(&mut engine, &mut full, typed, cuts);
             assert_same_cursor_offset(&engine, &full);
-            assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
+            assert_same_visible_cells(&engine, &full, i32::MAX, false, visible, &[]);
         }
     }
 }
@@ -797,6 +821,47 @@ fn a_spacer_a_resize_leaves_in_another_colour_parts_the_two_at_the_resize() {
         "{:?}",
         difference(&engine, &full)
     );
+}
+
+#[test]
+fn a_wide_char_a_reflow_leaves_in_a_row_s_last_cell_without_its_spacer_may_be_lost() {
+    // The shrunk case CI found. The erase starts in the spacer of the 中 ending its row, which
+    // stays wide; the narrowing to 2 columns moves it as if it were narrow, into the last cell of
+    // a row, which the engine writes into history as a blank. The reference keeps it, and the
+    // next reflow brings it back.
+    run(
+        Size { cols: 7, rows: 7 },
+        &[
+            Action::Text("\t abc".to_owned()),
+            Action::Text(
+                " bc中    中 xyzzy\txyzzy 中aaadef aaaa文字def xyzzybcabcdef 中".to_owned(),
+            ),
+            Action::MoveTo(0, 7),
+            Action::EraseLine,
+            Action::Resize(1, 2),
+            Action::Resize(3, 1),
+        ],
+        &[1],
+    );
+}
+
+#[test]
+fn only_the_cells_drawing_a_char_a_resize_may_lose_go_uncompared() {
+    let size = Size { cols: 10, rows: 2 };
+    let fed = |ours: &str, theirs: &str| {
+        let mut engine = Engine::new(size, HistoryRows(ENGINE_ROWS));
+        let mut full = FullHistory::new(size);
+        engine.advance(ours.as_bytes());
+        full.advance(theirs.as_bytes());
+        (engine, full)
+    };
+    let (engine, full) = fed("a中b", "a中中b");
+    assert_same_visible_cells(&engine, &full, i32::MAX, false, visible, &['中']);
+    let (engine, full) = fed("a中b", "a中c");
+    let compared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_same_visible_cells(&engine, &full, i32::MAX, false, visible, &['中']);
+    }));
+    assert!(compared.is_err(), "b against c went uncompared");
 }
 
 proptest! {
@@ -862,7 +927,7 @@ proptest! {
                     engine.resize(Size { cols, rows });
                     full.resize(Size { cols, rows });
                     prop_assert_eq!(engine.stats().overflows, 0);
-                    assert_same_visible_cells(&engine, &full, i32::MAX, false, visible);
+                    assert_same_visible_cells(&engine, &full, i32::MAX, false, visible, &[]);
                 }
                 (None, _) => {}
             }
@@ -905,7 +970,7 @@ proptest! {
             engine.resize(Size { cols, rows });
             full.resize(Size { cols, rows });
             prop_assert_eq!(engine.stats().overflows, 0);
-            assert_same_visible_cells(&engine, &full, i32::MAX, false, coloured);
+            assert_same_visible_cells(&engine, &full, i32::MAX, false, coloured, &[]);
         }
     }
 
