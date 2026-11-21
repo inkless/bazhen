@@ -54,14 +54,11 @@ pub(crate) struct FullBacklog {
 #[cfg(target_os = "linux")]
 impl FullBacklog {
     pub(crate) fn at(socket: &Path) -> Self {
-        use rustix::net::{
-            AddressFamily, SocketAddrUnix, SocketType, bind, listen, socket as open,
-        };
-        let fd = open(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
-        bind(&fd, &SocketAddrUnix::new(socket).unwrap()).unwrap();
-        listen(&fd, 0).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+        // Linux takes a second listen as the backlog's new length.
+        rustix::net::listen(&listener, 0).unwrap();
         Self {
-            _listener: std::os::unix::net::UnixListener::from(fd),
+            _listener: listener,
             _queued: std::os::unix::net::UnixStream::connect(socket).unwrap(),
         }
     }
