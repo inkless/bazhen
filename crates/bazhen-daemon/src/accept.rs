@@ -459,7 +459,7 @@ mod tests {
             let unix = tokio::net::UnixListener::bind(&path).unwrap();
             let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = tcp.local_addr().unwrap();
-            tokio::spawn(serve_on(
+            tracker.spawn(serve_on(
                 unix,
                 peered(),
                 SOCKET,
@@ -467,7 +467,7 @@ mod tests {
                 tracker.clone(),
                 || {},
             ));
-            tokio::spawn(serve_on(
+            tracker.spawn(serve_on(
                 tcp,
                 peered(),
                 HTTP,

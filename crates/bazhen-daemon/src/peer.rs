@@ -201,13 +201,14 @@ pub(crate) enum Reading {
 pub(crate) fn reading_of(peer: &Peer, terminals: &TerminalPids) -> Reading {
     let line: Vec<i32> = std::iter::once(peer.pid)
         .chain(peer.ancestors.iter().copied())
-        .map(|pid| pid.as_raw_pid())
+        .map(rustix::process::Pid::as_raw_pid)
         .collect();
     let agent_at = line
         .iter()
         .position(|pid| terminals.agents.contains_key(pid));
     let agent = agent_at
-        .and_then(|at| terminals.agents.get(&line[at]))
+        .and_then(|at| line.get(at))
+        .and_then(|pid| terminals.agents.get(pid))
         .or_else(|| {
             peer.session
                 .and_then(|session| terminals.agents.get(&session.as_raw_pid()))
@@ -596,13 +597,14 @@ mod tests {
         });
         let (peer, _theirs) = socket();
         paused().block_on(async {
-            let read = tokio::spawn({
+            let tasks = tokio_util::task::TaskTracker::new();
+            let read = tasks.spawn({
                 let reader = reader.clone();
                 let peer = peer.clone();
                 async move { reader.read(&peer).await }
             });
             gate.started_by(1).await;
-            tokio::time::advance(READ - Duration::from_millis(1)).await;
+            tokio::time::advance(READ.saturating_sub(Duration::from_millis(1))).await;
             tokio::task::yield_now().await;
             assert!(!read.is_finished());
             tokio::time::advance(Duration::from_millis(1)).await;
@@ -625,11 +627,12 @@ mod tests {
         });
         let (peer, _theirs) = socket();
         runtime().block_on(async {
+            let tasks = tokio_util::task::TaskTracker::new();
             let reads: Vec<_> = (0..=MAX_READING)
                 .map(|_| {
                     let reader = reader.clone();
                     let peer = peer.clone();
-                    tokio::spawn(async move { reader.read(&peer).await })
+                    tasks.spawn(async move { reader.read(&peer).await })
                 })
                 .collect();
             gate.started_by(MAX_READING).await;

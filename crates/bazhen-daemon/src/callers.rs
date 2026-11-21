@@ -425,7 +425,7 @@ mod tests {
     }
 
     /// `tokened` was given TOKEN and is bound to THREAD; `other` runs from before agents had
-    /// tokens; `coder` is bound to CODER_THREAD. Without threads, no thread names an agent.
+    /// tokens; `coder` is bound to `CODER_THREAD`. Without threads, no thread names an agent.
     struct Fake {
         threads: HashMap<&'static str, AgentId>,
     }
@@ -998,7 +998,7 @@ mod tests {
 
         #[test]
         fn makes_an_agents_task_owned_by_it_and_refuses_its_subtask_or_one_from_an_agent_closing() {
-            let (_dir, store, thread) = daemon();
+            let (dir, store, thread) = daemon();
             let task = |key: &str| json!({ "idempotencyKey": key, "title": "T", "brief": "b" });
             let post = |token, body| {
                 ask(
@@ -1034,7 +1034,7 @@ mod tests {
                     })
                 )
             );
-            let owner: String = rusqlite::Connection::open(_dir.path().join("bazhen.db"))
+            let owner: String = rusqlite::Connection::open(dir.path().join("bazhen.db"))
                 .unwrap()
                 .query_row("SELECT owner_agent_id FROM tasks", (), |row| row.get(0))
                 .unwrap();

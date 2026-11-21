@@ -161,8 +161,8 @@ mod tests {
             TOKEN.replace('A', "B"),
             TOKEN.replace('A', "C"),
             format!("{TOKEN}A"),
-            TOKEN[1..].to_owned(),
-            format!("{}+", &TOKEN[1..]),
+            TOKEN.replacen('A', "", 1),
+            format!("{}+", TOKEN.replacen('A', "", 1)),
             String::new(),
         ] {
             assert_eq!(of(&token), None, "{token:?}");

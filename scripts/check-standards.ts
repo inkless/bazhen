@@ -1165,6 +1165,18 @@ const NOT_DECODERS: Record<string, string> = {
     "reads stdin to hand the user's command and report, parsing none of it",
   "crates/bazhen-peer/src/main.rs::main":
     "hands stdin's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
+  "crates/bazhen-daemon/src/peer.rs::Peers::read":
+    "hands a connection's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
+  "crates/bazhen-daemon/src/callers.rs::Stored::reads":
+    "opens the store's reader connection for queries; reads no bytes",
+  "crates/bazhen-daemon/src/callers.rs::Stored::agent_of":
+    "checks a token's shape and looks its hash up in the store; parses no bytes",
+  "crates/bazhen-daemon/src/callers.rs::Stored::untokened":
+    "looks an agent id up in the store; parses no bytes",
+  "crates/bazhen-daemon/src/callers.rs::Stored::codex_agent":
+    "looks a thread up in the store and checks the id it names; parses no bytes",
+  "crates/bazhen-daemon/src/callers.rs::who":
+    "reads the peer through Peers::read and the credentials through Stored; parses no bytes",
   "crates/bazhen/src/attach/direct.rs::open":
     "reads the holder's socket into FrameDecoder::push, which the proto crate's frame target fuzzes",
   "crates/bazhen-protocol/src/ids.rs::Id::mint":
