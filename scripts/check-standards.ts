@@ -780,7 +780,7 @@ const FUZZED_DECODERS: Record<string, string> = {
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/events.rs::stream":
-    "splits the socket for follow and write; decodes nothing itself",
+    "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
     "hands its body to tasks::asked, which its tasks target fuzzes; decodes nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":

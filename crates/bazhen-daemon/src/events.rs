@@ -193,8 +193,9 @@ async fn write(
         if counted {
             unsent.fetch_sub(1, Ordering::Relaxed);
         }
+        // Even a send that failed leaves the reply to a client's close queued, for the flush.
         if sent.is_err() || closing {
-            return;
+            break;
         }
         if ends_page {
             written.notify_one();
@@ -237,6 +238,8 @@ async fn follow<E>(
     };
     let mut feed = Feed::new(cursor, PAGE);
     let mut committed = how.store.committed();
+    // The first read below takes in every commit so far; only one after it calls for another.
+    committed.mark_unchanged();
     let mut pulse = Pulse::new(how.heartbeat.patience);
     let every = how.heartbeat.every;
     let mut beat = tokio::time::interval_at(Instant::now() + every, every);
@@ -682,6 +685,26 @@ mod tests {
     #[test]
     fn answers_a_client_that_closes_with_a_close_of_its_own() {
         let daemon = Daemon::start("stream-client-close");
+        let mut ws = daemon.follow(0);
+        ws.send(tungstenite::Message::Close(None)).unwrap();
+        let ended = loop {
+            match ws.read() {
+                Ok(_) => {}
+                Err(err) => break err,
+            }
+        };
+        assert!(
+            matches!(ended, tungstenite::Error::ConnectionClosed),
+            "{ended}"
+        );
+    }
+
+    #[test]
+    fn answers_a_client_that_closes_while_a_page_is_still_queued_for_it() {
+        let daemon = Daemon::start("stream-close-mid-page");
+        for n in 1..=200 {
+            daemon.append(n);
+        }
         let mut ws = daemon.follow(0);
         ws.send(tungstenite::Message::Close(None)).unwrap();
         let ended = loop {
