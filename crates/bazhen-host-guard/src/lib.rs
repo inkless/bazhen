@@ -10,6 +10,7 @@
 //! the kernel reaps children itself, and a group is then refused once its leader has exited.
 
 mod group;
+pub mod scope;
 
 use std::fmt;
 
