@@ -6,7 +6,7 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions};
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::{Child, Command};
 use tokio::time::{Instant, timeout, timeout_at};
 
@@ -97,6 +97,18 @@ pub enum Ended {
     Unwaited(io::Error),
 }
 
+/// The most bytes of each of a kept run's stdout and stderr that are kept; the rest is read and
+/// dropped.
+pub(crate) const OUTPUT_MAX: usize = 64 * 1024;
+
+/// A kept run: how it ended, and the first `OUTPUT_MAX` bytes of each of its stdout and stderr.
+#[derive(Debug)]
+pub(crate) struct Ran {
+    pub(crate) ended: Ended,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+}
+
 /// Runs `command` with no stdin, in a process group of its own, and kills that group if the run
 /// hasn't ended by `limit`: the command, its output closed, and its exit. Its output is read and
 /// dropped, so a member of its group that holds the output open is still within the limit. The
@@ -109,41 +121,73 @@ pub enum Ended {
 /// Only when the group of a run past its limit couldn't be killed: the floor refused it, twice
 /// where it couldn't read this process's ancestry, or the kill failed. The group is then left running. How the command itself ended is
 /// never an error.
-pub async fn run_bounded(mut command: Command, limit: Duration) -> Result<Ended, Error> {
+pub async fn run_bounded(command: Command, limit: Duration) -> Result<Ended, Error> {
+    Ok(run(command, limit, false).await?.ended)
+}
+
+/// `run_bounded`, keeping the first `OUTPUT_MAX` bytes of the command's stdout and stderr.
+pub(crate) async fn run_kept(command: Command, limit: Duration) -> Result<Ran, Error> {
+    run(command, limit, true).await
+}
+
+async fn run(mut command: Command, limit: Duration, keep: bool) -> Result<Ran, Error> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let start = Instant::now();
     let deadline = start.checked_add(limit).unwrap_or(start + FAR);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
     let mut group = match OwnGroup::spawn(&mut command) {
         Ok(group) => group,
-        Err(e) => return Ok(Ended::Unstarted(e)),
+        Err(e) => {
+            return Ok(Ran {
+                ended: Ended::Unstarted(e),
+                stdout,
+                stderr,
+            });
+        }
     };
     let out = group.child.stdout.take();
     let err = group.child.stderr.take();
     // The output is read to its end before the leader is waited for, so a leader that has exited
     // while a member of its group still holds the output is still unreaped when the deadline kills
     // that group.
-    let read = futures_util::future::join(drain(out), drain(err));
-    if timeout_at(deadline, read).await.is_err() {
+    let read = futures_util::future::join(
+        read_out(out, keep.then_some(&mut stdout)),
+        read_out(err, keep.then_some(&mut stderr)),
+    );
+    let ended = if timeout_at(deadline, read).await.is_err() {
         group.end().await?;
-        return Ok(Ended::TimedOut);
-    }
-    Ok(match timeout_at(deadline, group.child.wait()).await {
-        Ok(Ok(status)) => Ended::Exited(status),
-        Ok(Err(e)) => Ended::Unwaited(e),
-        Err(_) => {
-            group.end().await?;
-            Ended::TimedOut
+        Ended::TimedOut
+    } else {
+        match timeout_at(deadline, group.child.wait()).await {
+            Ok(Ok(status)) => Ended::Exited(status),
+            Ok(Err(e)) => Ended::Unwaited(e),
+            Err(_) => {
+                group.end().await?;
+                Ended::TimedOut
+            }
         }
+    };
+    Ok(Ran {
+        ended,
+        stdout,
+        stderr,
     })
 }
 
-/// Reads `pipe` to its end, keeping nothing. A read that fails ends it.
-async fn drain(pipe: Option<impl AsyncRead + Unpin>) {
-    if let Some(mut pipe) = pipe {
-        let _ = tokio::io::copy(&mut pipe, &mut tokio::io::sink()).await;
+/// Reads `pipe` to its end, keeping its first `OUTPUT_MAX` bytes in `into`, where there is one,
+/// and dropping the rest. A read that fails ends it.
+async fn read_out(pipe: Option<impl AsyncRead + Unpin>, mut into: Option<&mut Vec<u8>>) {
+    let Some(mut pipe) = pipe else { return };
+    let mut chunk = vec![0; 8192];
+    while let Ok(n @ 1..) = pipe.read(&mut chunk).await {
+        if let Some(into) = into.as_deref_mut() {
+            let room = OUTPUT_MAX.saturating_sub(into.len());
+            into.extend_from_slice(chunk.get(..n.min(room)).unwrap_or_default());
+        }
     }
 }
 
@@ -157,7 +201,7 @@ mod tests {
     use rustix::process::{Pid, Signal, WaitOptions};
     use tokio::process::Command;
 
-    use super::{Ended, OwnGroup, run_bounded};
+    use super::{Ended, OUTPUT_MAX, OwnGroup, run_bounded, run_kept};
     use crate::{Error, Target, Unsafe};
 
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -232,6 +276,41 @@ mod tests {
             panic!("{run:?}")
         };
         assert_eq!(status.code(), Some(3));
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn keeps_the_output_of_a_kept_run() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let run = block_on(run_kept(
+            sh("echo out; echo err >&2; exit 3"),
+            Duration::from_secs(10),
+        ))
+        .unwrap();
+        assert!(
+            matches!(&run.ended, Ended::Exited(s) if s.code() == Some(3)),
+            "{run:?}"
+        );
+        assert_eq!(run.stdout, b"out\n");
+        assert_eq!(run.stderr, b"err\n");
+    }
+
+    /// Past the cap the output is still read, so the command isn't held up writing it.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn keeps_no_more_output_than_its_cap_and_reads_the_rest() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let run = block_on(run_kept(
+            sh("head -c 1000000 /dev/zero; echo done >&2"),
+            Duration::from_secs(10),
+        ))
+        .unwrap();
+        assert!(
+            matches!(&run.ended, Ended::Exited(s) if s.success()),
+            "{run:?}"
+        );
+        assert_eq!(run.stdout.len(), OUTPUT_MAX);
+        assert_eq!(run.stderr, b"done\n");
     }
 
     #[test]
