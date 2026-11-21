@@ -25,6 +25,8 @@ pub const TERMINALS_SLICE: &str = "bazhen-terminals.slice";
 /// The least a memory cap may be: below it a terminal's own shell and holder can't start.
 pub const MIN_MEMORY_MAX: u64 = 64 * 1024 * 1024;
 const TERMINAL_UNIT_PREFIX: &str = "bazhen-terminal-";
+/// A probe scope's unit, named apart from a terminal's, so it is never taken for one.
+const PROBE_UNIT_PREFIX: &str = "bazhen-probe-";
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 const STDERR_MAX: usize = 2_000;
 /// The largest size a cap may name, as the TypeScript daemon reads the same config.
@@ -37,18 +39,20 @@ const PROBE_SHELL: &str = "/bin/sh";
 
 /// What a probe scope reads of its own caps and its slice's, one `name=value` line each, from
 /// inside, because a user manager without the memory controller takes `MemoryMax` and enforces
-/// nothing. A file it can't read writes no line.
+/// nothing. A file it can't read writes no line, and a cgroup at the root has no slice. `$1` and
+/// `$2`, the cgroup mount and the file naming the cgroup, are for its tests.
 pub const PROBE_SCRIPT: &str = r#"
+mount=${1:-/sys/fs/cgroup}
 cg=
 while IFS= read -r line; do
   case $line in 0::/*) cg=${line#0::} ;; esac
-done < /proc/self/cgroup
-scope=/sys/fs/cgroup${cg%/}
-slice=${scope%/*}
+done 2>/dev/null < "${2:-/proc/self/cgroup}"
+[ -n "$cg" ] || exit 0
+cg=${cg%/}
 at() { [ -r "$1" ] && { IFS= read -r v && printf '%s=%s\n' "$2" "$v"; } < "$1"; } 2>/dev/null
-at "$scope/memory.max" memory
-at "$scope/memory.swap.max" swap
-at "$slice/memory.max" slice
+at "$mount$cg/memory.max" memory
+at "$mount$cg/memory.swap.max" swap
+case $cg in /*) at "$mount${cg%/*}/memory.max" slice ;; esac
 exit 0
 "#;
 
@@ -414,10 +418,7 @@ async fn probe_caps(caps: &TerminalCaps, deps: &impl ProbeDeps) -> Containment {
     }
     let oom_policy = systemd >= MIN_SYSTEMD;
     let pid = rustix::process::getpid().as_raw_pid();
-    let unit = unique_unit(
-        &format!("{TERMINAL_UNIT_PREFIX}probe-{pid}"),
-        &deps.random(),
-    );
+    let unit = unique_unit(&format!("{PROBE_UNIT_PREFIX}{pid}"), &deps.random());
     let mut probe_args = scope_args(
         &unit,
         TERMINALS_SLICE,
@@ -549,9 +550,12 @@ fn in_terminal_scope_by(pid: Pid, read: impl Fn(&str) -> Option<Vec<u8>>) -> Opt
 /// The first executable named `command` on `path`.
 fn which(command: &str, path: Option<&OsStr>) -> Option<PathBuf> {
     std::env::split_paths(path?)
-        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(command))
-        .find(|file| rustix::fs::access(file, rustix::fs::Access::EXEC_OK).is_ok())
+        .find(|file| {
+            file.metadata().is_ok_and(|m| m.is_file())
+                && rustix::fs::access(file, rustix::fs::Access::EXEC_OK).is_ok()
+        })
 }
 
 /// A step as the probe reads it: what went wrong, where the command said nothing of it.
@@ -896,9 +900,7 @@ mod tests {
         );
         assert!(args.contains(&format!("--slice={TERMINALS_SLICE}")));
         let pid = rustix::process::getpid().as_raw_pid();
-        assert!(args.contains(&format!(
-            "--unit=bazhen-terminal-probe-{pid}-0123456789ab.scope"
-        )));
+        assert!(args.contains(&format!("--unit=bazhen-probe-{pid}-0123456789ab.scope")));
         assert_eq!(
             args[args.len() - 4..],
             ["--", "/bin/sh", "-c", PROBE_SCRIPT]
@@ -1307,36 +1309,115 @@ mod tests {
         }
     }
 
-    /// The cgroup a `/proc/self/cgroup` names, read here, apart from the script under test, which
-    /// a child started from here shares.
-    fn own_cgroup() -> PathBuf {
-        let cgroup = std::fs::read("/proc/self/cgroup").unwrap();
-        Path::new("/sys/fs/cgroup").join(cgroup_of(&cgroup).unwrap().trim_start_matches('/'))
+    /// A directory of the test's own, removed when the test ends, whether or not it passed.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir()
+                .join(format!("bz-host-guard-{name}-{}-{n}", std::process::id()));
+            std::fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn write(&self, file: &str, text: &str) {
+            let path = self.0.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
     }
 
-    /// The first line of `file` in `cgroup`, or `None` where it has none.
-    fn cap_in(cgroup: &Path, file: &str) -> Option<String> {
-        let text = std::fs::read_to_string(cgroup.join(file)).ok()?;
-        Some(text.lines().next()?.to_owned())
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            // A directory left in the temp dir costs nothing a test would see.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// The script a probe scope runs, run here by `/bin/sh` with no environment, as a scope would
-    /// run it: it reads the caps of the cgroup it was started in.
+    /// run it, against a cgroup mount of the test's own where every cap differs: a scope's, its
+    /// slice's, at the root and a level below it, with caps missing, and with no cgroup named.
     #[test]
-    fn reads_its_own_cgroups_caps_with_builtins_alone() {
-        let out = std::process::Command::new(super::PROBE_SHELL)
-            .args(["-c", PROBE_SCRIPT])
-            .env_clear()
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{out:?}");
-        let reading = parse_probe(&out.stdout).unwrap();
-        let cgroup = own_cgroup();
-        assert_eq!(reading.memory, cap_in(&cgroup, "memory.max"));
-        assert_eq!(reading.swap, cap_in(&cgroup, "memory.swap.max"));
-        let slice = cgroup.parent().unwrap();
-        assert_eq!(reading.slice, cap_in(slice, "memory.max"));
-        assert_eq!(out.stderr, b"");
+    fn reads_the_caps_of_the_cgroup_it_was_started_in_with_builtins_alone() {
+        let dir = TempDir::new("probe");
+        for (file, text) in [
+            ("mnt/memory.max", "1\n"),
+            ("mnt/a.slice/memory.max", "2\n"),
+            ("mnt/a.slice/s.scope/memory.max", "3\n"),
+            ("mnt/a.slice/s.scope/memory.swap.max", "4\n"),
+            ("mnt/r.scope/memory.max", "5\n"),
+            ("mnt/memory.swap.max", "6\n"),
+            ("mnt/b.slice/t.scope/memory.max", "7\n"),
+            ("no_slice_cap", "0::/b.slice/t.scope\n"),
+            ("nested", "1:name=x:/elsewhere\n0::/a.slice/s.scope\n"),
+            ("below_root", "0::/r.scope\n"),
+            ("root", "0::/\n"),
+            ("none", "1:name=x:/elsewhere\n"),
+        ] {
+            dir.write(file, text);
+        }
+        let mount = dir.0.join("mnt");
+        for (proc_file, expected) in [
+            ("nested", "memory=3\nswap=4\nslice=2\n"),
+            ("below_root", "memory=5\nslice=1\n"),
+            ("root", "memory=1\nswap=6\n"),
+            ("no_slice_cap", "memory=7\n"),
+            ("none", ""),
+            ("missing", ""),
+        ] {
+            let out = std::process::Command::new(super::PROBE_SHELL)
+                .arg("-c")
+                .arg(PROBE_SCRIPT)
+                .arg("probe")
+                .arg(&mount)
+                .arg(dir.0.join(proc_file))
+                .env_clear()
+                .output()
+                .unwrap();
+            assert_eq!(
+                (
+                    out.status.code(),
+                    out.stdout.as_slice(),
+                    out.stderr.as_slice()
+                ),
+                (Some(0), expected.as_bytes(), &b""[..]),
+                "{proc_file}"
+            );
+        }
+    }
+
+    /// Only an executable file in an absolute directory, as the scope's `systemd-run` is kept.
+    #[test]
+    fn finds_a_command_as_an_executable_file_in_an_absolute_directory_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = TempDir::new("which");
+        for (file, mode) in [
+            ("plain/cmd", 0o644),
+            ("good/cmd", 0o755),
+            ("later/cmd", 0o755),
+        ] {
+            dir.write(file, "");
+            std::fs::set_permissions(dir.0.join(file), std::fs::Permissions::from_mode(mode))
+                .unwrap();
+        }
+        std::fs::create_dir_all(dir.0.join("folder/cmd")).unwrap();
+        let path =
+            |dirs: &[&str]| std::env::join_paths(dirs.iter().map(|d| dir.0.join(d))).unwrap();
+        let all = path(&["plain", "folder", "good", "later"]);
+        assert_eq!(
+            super::which("cmd", Some(&all)),
+            Some(dir.0.join("good/cmd"))
+        );
+        assert_eq!(super::which("cmd", Some(&path(&["plain", "folder"]))), None);
+        // The same directory, named from here: it resolves, but a scope's directory may differ.
+        let up = std::env::current_dir().unwrap().components().count() - 1;
+        let relative =
+            "../".repeat(up) + dir.0.join("good").to_str().unwrap().trim_start_matches('/');
+        assert!(Path::new(&relative).join("cmd").is_file(), "{relative}");
+        assert_eq!(super::which("cmd", Some(OsStr::new(&relative))), None);
+        assert_eq!(super::which("cmd", None), None);
     }
 
     /// What a step says, where the command said nothing of it, and with nothing of this process's
