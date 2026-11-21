@@ -41,8 +41,8 @@ pub(crate) struct Detach<'a> {
 pub(crate) fn detach(o: &Detach<'_>, out: &mut dyn Write, err: &mut dyn Write) -> ExitCode {
     match probe(o.socket) {
         Answer::Nothing => {}
-        Answer::Silent => {
-            let _ = writeln!(err, "{}", silence(&o.socket.display().to_string()));
+        Answer::Silent { seen } => {
+            let _ = writeln!(err, "{}", silence(&o.socket.display().to_string(), &seen));
             return ExitCode::FAILURE;
         }
         Answer::Daemon { protocol_id } => {
@@ -133,6 +133,40 @@ mod tests {
         let (inherited, child) = session_of(&mut Command::new("/bin/sh"));
         assert_eq!(session, leader);
         assert_ne!(inherited, child);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn refuses_a_socket_something_holds_without_answering_and_starts_nothing() {
+        let dir = crate::testing::TempDir::new("detach-silent");
+        let socket = dir.path().join("bazhen.sock");
+        let _stuck = crate::testing::FullBacklog::at(&socket);
+        // A daemon started from here fails at once, and the wait for it says so.
+        let exe = dir.path().join("no-such-daemon");
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = detach(
+            &Detach {
+                exe: &exe,
+                socket: &socket,
+                state: dir.path(),
+                url: "http://127.0.0.1:1",
+                protocol_id: "this-build",
+                env: &Env::new(),
+                rules: &EnvRules::default(),
+            },
+            &mut out,
+            &mut err,
+        );
+        let err = String::from_utf8(err).unwrap();
+        assert_eq!(code, ExitCode::FAILURE);
+        assert!(
+            err.starts_with(&format!(
+                "bazhen won't start over {}: something may hold it",
+                socket.display()
+            )),
+            "{err}"
+        );
+        assert_eq!(out, b"");
     }
 
     #[test]

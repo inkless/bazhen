@@ -22,18 +22,17 @@ const LIMITS: Limits = Limits {
 pub(crate) enum Answer {
     /// Nothing listens: no socket, or one no process listens on, as a daemon that ended leaves.
     Nothing,
-    /// Something may hold the socket but gave no answer: a daemon stuck or busy, one whose backlog
-    /// is full, or one this process can't reach. Not this one's to replace either.
-    Silent,
+    /// Something may hold the socket, but no answer came: `seen` says what happened instead. Not
+    /// this one's to replace either.
+    Silent { seen: String },
     /// Something answered, with the protocol id its health names, if it names one a build can read.
     Daemon { protocol_id: Option<String> },
 }
 
 /// Why bazhen won't start over a socket that answered `Silent`.
-pub(crate) fn silence(socket: &str) -> String {
+pub(crate) fn silence(socket: &str, seen: &str) -> String {
     format!(
-        "something holds {socket} but gave no answer: a daemon there may be stuck or busy, so \
-         bazhen won't start over it"
+        "bazhen won't start over {socket}: something may hold it, but it gave no answer ({seen})"
     )
 }
 
@@ -65,7 +64,12 @@ fn answer_of(response: Result<Vec<u8>, Error>) -> Answer {
         {
             Answer::Nothing
         }
-        Err(Error::Unreachable { .. } | Error::Broken(_) | Error::Header { .. }) => Answer::Silent,
+        Err(Error::Unreachable { source, .. }) => Answer::Silent {
+            seen: source.to_string(),
+        },
+        Err(err @ (Error::Broken(_) | Error::Header { .. })) => Answer::Silent {
+            seen: err.to_string(),
+        },
         Err(Error::Truncated) => Answer::Daemon { protocol_id: None },
         Ok(response) => Answer::Daemon {
             protocol_id: spoken(&response),
@@ -92,6 +96,12 @@ mod tests {
 
     use super::*;
     use crate::testing::TempDir;
+
+    fn silent(seen: &str) -> Answer {
+        Answer::Silent {
+            seen: seen.to_owned(),
+        }
+    }
 
     fn response(status: &str, body: &str) -> Vec<u8> {
         format!(
@@ -139,11 +149,11 @@ mod tests {
             [
                 Answer::Nothing,
                 Answer::Nothing,
-                Answer::Silent,
-                Answer::Silent,
-                Answer::Silent,
-                Answer::Silent,
-                Answer::Silent,
+                silent("timed out"),
+                silent("operation would block"),
+                silent("permission denied"),
+                silent("the daemon stopped answering: timed out"),
+                silent("x holds a character outside printable ASCII"),
                 Answer::Daemon { protocol_id: None },
                 Answer::Daemon { protocol_id: None },
             ]
@@ -167,9 +177,12 @@ mod tests {
         let dir = TempDir::new("probe-full");
         let socket = dir.path().join("bazhen.sock");
         let _full = crate::testing::FullBacklog::at(&socket);
-        assert_eq!(
-            probe_within(&socket, Duration::from_millis(200)),
-            Answer::Silent
+        assert!(
+            matches!(
+                probe_within(&socket, Duration::from_millis(200)),
+                Answer::Silent { .. }
+            ),
+            "the probe took a full backlog for no daemon, or for one that answered"
         );
     }
 }

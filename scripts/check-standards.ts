@@ -58,6 +58,7 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/daemon/src/testing/browser-terminal.ts": "apps/daemon/src/stream/snapshot-contract.test.ts",
   "apps/daemon/src/stream/screen-source.ts": "apps/daemon/src/stream/hub.test.ts",
   "apps/daemon/src/testing/fake-app-server.ts": "apps/daemon/src/codex/app-server.medium.test.ts",
+  "apps/daemon/src/testing/full-backlog.ts": "apps/daemon/src/socket/probe.medium.test.ts",
   "packages/runtime-holder/src/testing/fake-holder.ts":
     "packages/runtime-holder/src/client.test.ts",
   "packages/runtime-tmux/src/testing/fake-tmux.ts":
