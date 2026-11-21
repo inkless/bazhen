@@ -1,0 +1,21 @@
+[package]
+name = "bazhen-host-guard"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bazhen-holder = { workspace = true }
+bazhen-peer = { workspace = true }
+bazhen-pid = { workspace = true }
+futures-util = { workspace = true }
+rustix = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+bazhen-test-signal = { workspace = true }
+
+[lints]
+workspace = true

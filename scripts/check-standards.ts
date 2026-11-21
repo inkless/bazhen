@@ -783,6 +783,10 @@ const NOT_DECODERS: Record<string, string> = {
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
     "hands its body to tasks::asked, which its tasks target fuzzes; decodes nothing itself",
+  "crates/bazhen-host-guard/src/group.rs::drain":
+    "reads a child's pipe to its end and drops every byte; parses nothing",
+  "crates/bazhen-host-guard/src/lib.rs::send":
+    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
     "wraps its connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/config.rs::read_config_file":
@@ -3121,6 +3125,9 @@ export const HEAVY_CRATES = [
 const HEAVY_ALLOWED: Record<string, string> = {
   "bazhen-daemon":
     "the Rust daemon: its async runtime and HTTP stack serve the API, and it opens the store",
+  "bazhen-host-guard":
+    "the daemon's signal chokepoint: its bounded runs wait on a child under tokio, as only the " +
+    "daemon does",
   "bazhen-store": "the daemon's SQLite seam: it builds SQLite, which only the daemon needs",
 };
 
@@ -3609,6 +3616,7 @@ const devTable = (name: string) => /(?:^|\.)dev-dependencies(?:\.|$)/.test(name)
 /** The chokepoints that are product code, whose test modules are checked like any test. */
 const PRODUCT_CHOKEPOINTS = new Set([
   "crates/bazhen-holder/src/guard.rs",
+  "crates/bazhen-host-guard/src/lib.rs",
   "crates/bazhen-holder/src/linux.rs",
 ]);
 

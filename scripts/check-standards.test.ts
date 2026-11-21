@@ -3033,6 +3033,7 @@ describe("the signal chokepoints", () => {
     "packages/host-guard/src/signal.ts",
     "crates/bazhen-holder/src/guard.rs",
     "crates/bazhen-holder/src/linux.rs",
+    "crates/bazhen-host-guard/src/lib.rs",
     "crates/bazhen-test-signal/src/lib.rs",
   ];
   const failures = (sources: Record<string, string>) =>
