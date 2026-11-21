@@ -612,7 +612,9 @@ mod tests {
             Err(Refused::Endless)
         });
         let (peer, _theirs) = socket();
-        paused().block_on(async {
+        let runtime = paused();
+        let _opens = Opens(Arc::clone(&gate));
+        runtime.block_on(async {
             let tasks = tokio_util::task::TaskTracker::new();
             let read = tasks.spawn({
                 let reader = reader.clone();
