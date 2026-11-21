@@ -1,6 +1,6 @@
 import { request } from "node:http";
 
-/** A daemon that is up answers its health at once; one that doesn't is treated as down. */
+/** How long a probe waits for the daemon's answer: one that is up answers its health at once. */
 const PROBE_MS = 2000;
 
 /** What a reply this build can't read, though the daemon gave it as a success, means. */
@@ -39,10 +39,12 @@ export function probe(socket: string, timeoutMs = PROBE_MS): Promise<Answer> {
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => (text += chunk));
-      res.on("error", () => resolve({ kind: "daemon", protocolId: null }));
       res.on("end", () =>
         resolve({ kind: "daemon", protocolId: res.statusCode === 200 ? spoken(text) : null }),
       );
+      // Close follows end, so this answers only for a reply cut short, whose error says no more.
+      res.on("error", () => {});
+      res.on("close", () => resolve({ kind: "daemon", protocolId: null }));
     });
     req.setTimeout(timeoutMs, () => req.destroy());
     req.on("error", (err) =>
