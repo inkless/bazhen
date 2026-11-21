@@ -11,6 +11,11 @@ const mac: PathInputs = {
   uid: 501,
 };
 
+const withRuntimeDir = (bytes: number) => {
+  const p = resolvePaths({ ...linux, env: { XDG_RUNTIME_DIR: `/${"a".repeat(bytes)}` } });
+  return { run: p.run, holderRun: p.holderRun };
+};
+
 const tmux = (home: string) => resolvePaths({ ...linux, env: { BAZHEN_HOME: home } }).tmuxSocket;
 
 describe("resolvePaths", () => {
@@ -75,6 +80,23 @@ describe("resolvePaths", () => {
     expect(p.tmuxSocket).toBe(`${tmp}/bazhen/tmux.sock`);
     const atLimit = resolvePaths({ ...mac, tmp: `/var/folders/xy/${"d".repeat(27)}/T` });
     expect(atLimit.holderRun).toBe(atLimit.run);
+  });
+
+  it("moves the holders at a 104-byte holder socket path and not at 103", () => {
+    const sample = "term_00000000000000000000000000000000";
+    const fits = withRuntimeDir(44);
+    expect(Buffer.byteLength(holderSocket(fits.run, sample))).toBe(103);
+    expect(fits.holderRun).toBe(fits.run);
+    const over = withRuntimeDir(45);
+    expect(Buffer.byteLength(holderSocket(over.run, sample))).toBe(104);
+    expect(over.holderRun).toMatch(/^\/tmp\/bazhen-holders-1000-[0-9a-f]{8}$/);
+  });
+
+  it("pins the holders directory of a long Linux runtime directory", () => {
+    const runtime = `/run/user/1000/${"d".repeat(38)}`;
+    expect(resolvePaths({ ...linux, env: { XDG_RUNTIME_DIR: runtime } }).holderRun).toBe(
+      "/tmp/bazhen-holders-1000-d76ecabd",
+    );
   });
 
   it("keeps Linux daemon and tmux sockets reachable with a long XDG_RUNTIME_DIR", () => {

@@ -183,17 +183,18 @@ fn default_run(i: &Inputs) -> String {
 }
 
 /// The directory containing terminal holder sockets for the daemon with this runtime directory,
-/// as resolved by the TypeScript daemon in `apps/daemon/src/config/paths.ts`.
+/// as resolved by the TypeScript daemon in `apps/daemon/src/config/paths.ts`, which hashes the
+/// normalised path: `run` is normalised the same way, whatever its spelling.
 pub fn holders_dir(run: &Path, uid: u32) -> PathBuf {
-    let holders = run.join("holders");
-    let Some(run) = run.to_str() else {
-        return holders;
+    let Some(run) = run.to_str().map(normalize) else {
+        return run.join("holders");
     };
+    let holders = Path::new(&run).join("holders");
     let sample = holders.join("term_00000000000000000000000000000000.sock");
     if sample.as_os_str().len() > MAX_SOCKET_PATH {
         PathBuf::from(format!(
             "/tmp/bazhen-holders-{uid}-{}/holders",
-            short_hash(run)
+            short_hash(&run)
         ))
     } else {
         holders
@@ -466,6 +467,46 @@ mod tests {
             holders_dir(Path::new(&at_limit), 501),
             Path::new(&at_limit).join("holders")
         );
+    }
+
+    #[test]
+    fn the_holders_move_at_a_104_byte_socket_path_and_not_at_103() {
+        let sample = "/holders/term_00000000000000000000000000000000.sock";
+        let fits = format!("/{}", "a".repeat(51));
+        let over = format!("/{}", "a".repeat(52));
+        assert_eq!(fits.len() + sample.len(), 103);
+        assert_eq!(over.len() + sample.len(), 104);
+        assert_eq!(
+            holders_dir(Path::new(&fits), 1000),
+            Path::new(&fits).join("holders")
+        );
+        assert!(
+            holders_dir(Path::new(&over), 1000)
+                .to_string_lossy()
+                .starts_with("/tmp/bazhen-holders-1000-"),
+            "a run directory one byte over moves the holders"
+        );
+    }
+
+    #[test]
+    fn the_holders_directory_for_a_long_linux_runtime_directory_is_pinned() {
+        let run = format!("/run/user/1000/{}/bazhen", "d".repeat(38));
+        assert_eq!(
+            holders_dir(Path::new(&run), 1000),
+            PathBuf::from("/tmp/bazhen-holders-1000-d76ecabd/holders")
+        );
+    }
+
+    #[test]
+    fn a_run_directory_spelled_unnormalised_names_the_same_holders_as_the_daemons() {
+        let run = format!("/run/user/1000/{}/bazhen", "d".repeat(38));
+        let spelled = format!("/run/./user//1000/x/../{}/bazhen/", "d".repeat(38));
+        assert_eq!(
+            holders_dir(Path::new(&spelled), 1000),
+            holders_dir(Path::new(&run), 1000)
+        );
+        let short = holders_dir(Path::new("/r/./run/"), 1000);
+        assert_eq!(short, Path::new("/r/run/holders"));
     }
 
     #[test]
