@@ -57,6 +57,7 @@ import { requireSignalSandbox } from "../tests/support/disposable-host.ts";
 import { ptysInUse } from "../tests/support/ptys.ts";
 import { isMain } from "./is-main.ts";
 import {
+  type DaemonSample,
   GATE,
   type HolderSample,
   type JudgeOptions,
@@ -397,26 +398,40 @@ export async function attachMarkers(
  * How many times a settled sample reads each process's fds, keeping the least: a connection
  * passing through, the daemon polling a holder say, isn't a leak, and a leak is there every time.
  */
-const SETTLED_READS = 3;
+const SETTLED_READS = 5;
 /** Longer than Node's HTTP server keeps an idle connection open, five seconds. */
 const KEEP_ALIVE_MS = 6 * SEC;
 
+/** How `leastFds` reads a process, waits between reads, and picks each wait. */
+export interface FdReading {
+  readonly use: (pid: number) => { fds: number | null; ptys: number | null };
+  readonly sleep: (ms: number) => Promise<unknown>;
+  readonly random: () => number;
+}
+
 /**
- * Each of `pids`' fewest open fds, and fewest PTY masters, over `reads` reads a second apart;
- * none for one unreadable.
+ * Each of `pids`' fewest open fds, and fewest PTY masters, over `reads` reads, with its fds at each
+ * read; none for one unreadable. The gaps between reads are random, from half a second to one and a half: at a fixed
+ * gap the reads keep the phase of whatever the processes do on a timer, so a read that catches
+ * the daemon's once-a-second poll of every holder has the next ones catch it too.
  */
-async function leastFds(
+export async function leastFds(
   pids: readonly number[],
   reads: number,
-): Promise<Map<number, { fds: number; ptys: number }>> {
-  const least = new Map<number, { fds: number; ptys: number }>();
+  { use = processUse, sleep: wait = sleep, random = Math.random }: Partial<FdReading> = {},
+): Promise<Map<number, { fds: number; ptys: number; reads: number[] }>> {
+  const least = new Map<number, { fds: number; ptys: number; reads: number[] }>();
   for (let i = 0; i < reads; i++) {
-    if (i > 0) await sleep(SEC);
+    if (i > 0) await wait(SEC / 2 + random() * SEC);
     for (const pid of pids) {
-      const { fds, ptys } = processUse(pid);
+      const { fds, ptys } = use(pid);
       if (fds === null || ptys === null) continue;
-      const was = least.get(pid) ?? { fds, ptys };
-      least.set(pid, { fds: Math.min(was.fds, fds), ptys: Math.min(was.ptys, ptys) });
+      const was = least.get(pid) ?? { fds, ptys, reads: [] };
+      least.set(pid, {
+        fds: Math.min(was.fds, fds),
+        ptys: Math.min(was.ptys, ptys),
+        reads: [...was.reads, fds],
+      });
     }
   }
   return least;
@@ -1238,8 +1253,13 @@ class Soak {
       await sleep(settled ? SEC : 500);
       const pids = [...answered.map((a) => a.pid), ...(daemonPid === undefined ? [] : [daemonPid])];
       const fds = await leastFds(pids, settled ? SETTLED_READS : 1);
+      const fdReads = (pid: number) => {
+        const reads = fds.get(pid)?.reads;
+        return settled && reads !== undefined ? { fdReads: reads } : {};
+      };
       return {
         daemonFds: daemonPid === undefined ? null : (fds.get(daemonPid)?.fds ?? null),
+        daemonFdReads: daemonPid === undefined ? {} : fdReads(daemonPid),
         // The soak's own: the machine's count, a kernel-wide one, counts every container's too.
         ptys: [...fds.values()].reduce((sum, use) => sum + use.ptys, 0),
         holders: answered.map(({ terminal, pid, stats }): HolderSample => ({
@@ -1248,6 +1268,7 @@ class Soak {
           load: terminal.load,
           rss: stats.rss ?? processUse(pid).rss,
           fds: fds.get(pid)?.fds ?? null,
+          ...fdReads(pid),
           engineBytes: stats.engineBytes,
           engineResets: stats.engineResets ?? 0,
         })),
@@ -1255,7 +1276,7 @@ class Soak {
     });
     const pid = daemonPid;
     let terminals: TerminalSample[] = [];
-    let daemon: { pid: number; rss: number; fds: number; ageMs: number } | null = null;
+    let daemon: DaemonSample | null = null;
     if (pid !== undefined) {
       try {
         const state = StateSnapshot.parse((await this.live.request("/v1/state")).body);
@@ -1271,7 +1292,13 @@ class Soak {
         });
         const rss = processUse(pid).rss;
         if (rss !== null && read.daemonFds !== null) {
-          daemon = { pid, rss, fds: read.daemonFds, ageMs: Date.now() - this.daemonStartedAt };
+          daemon = {
+            pid,
+            rss,
+            fds: read.daemonFds,
+            ...read.daemonFdReads,
+            ageMs: Date.now() - this.daemonStartedAt,
+          };
         }
       } catch (error) {
         this.log(`the daemon didn't answer a sample: ${String(error)}`);

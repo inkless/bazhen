@@ -28,6 +28,8 @@ export interface DaemonSample {
   readonly pid: number;
   readonly rss: number;
   readonly fds: number;
+  /** A settled sample's fd count at each of its reads, in order: `fds` is the least of them. */
+  readonly fdReads?: readonly number[];
   /** How long this daemon process has run. */
   readonly ageMs: number;
 }
@@ -39,6 +41,8 @@ export interface HolderSample {
   /** Null where the OS won't say. */
   readonly rss: number | null;
   readonly fds: number | null;
+  /** A settled sample's fd count at each of its reads, in order: `fds` is the least of them. */
+  readonly fdReads?: readonly number[];
   readonly engineBytes: number;
   readonly engineResets: number;
 }
