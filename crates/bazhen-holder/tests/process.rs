@@ -450,11 +450,16 @@ fn an_exit_status_is_exact() {
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_close_hangs_up_the_foreground_group_as_well_as_the_childs() {
     bazhen_test_signal::require_sandbox().unwrap();
-    let script = "trap : HUP; set -m; sleep 30; exit 4";
-    let mut running = start(&["sh", "-c", script]).unwrap();
+    let file = scratch("foreground").unwrap();
+    // The job says it is armed from a shell of its own: a fork of this one holds its `HUP` trap
+    // until it execs, and loses a hang-up that comes before, though the terminal is already its.
+    let script = r#"trap : HUP; set -m
+        sh -c 'echo armed > "$1"; exec sleep 30' sh "$0"; exit 4"#;
+    let mut running = start(&["sh", "-c", script, file.arg()]).unwrap();
     let pid = running.child.pid();
     wait_for(&mut running, |r| {
-        r.pty.foreground_group().is_some_and(|group| group != pid)
+        read_text(file.path()) == "armed\n"
+            && r.pty.foreground_group().is_some_and(|group| group != pid)
     })
     .unwrap();
     close_now(&mut running).unwrap();

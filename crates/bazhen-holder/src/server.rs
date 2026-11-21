@@ -2030,6 +2030,56 @@ mod tests {
         assert_eq!(f.server.accept_paused_until, None);
     }
 
+    impl Failing {
+        /// `count` connections, accepted together by the server at `now`, each with its id.
+        fn newcomers(&mut self, count: u64, now: Instant) -> Vec<(u64, UnixStream)> {
+            let peers: Vec<UnixStream> = (0..count)
+                .map(|_| UnixStream::connect(self.dir.join("t.sock")).unwrap())
+                .collect();
+            let first = self.server.next_id + 1;
+            self.server.accept(now);
+            assert_eq!(self.server.next_id, first + count - 1, "not all accepted");
+            (first..).zip(peers).collect()
+        }
+
+        fn replaced(&self, newcomers: &[(u64, UnixStream)]) -> Vec<u64> {
+            newcomers
+                .iter()
+                .map(|(id, _)| *id)
+                .filter(|id| {
+                    self.server
+                        .conns
+                        .iter()
+                        .any(|c| c.id() == *id && c.is_gone())
+                })
+                .collect()
+        }
+    }
+
+    /// A newcomer to a full holder is safe from the next for `NEW_GRACE`, read or not, whichever
+    /// turns the two arrive in, and no longer: then, unread, it is the first replaced.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn a_newcomer_is_safe_from_the_next_for_its_grace_and_no_longer() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut f = Failing::start("newcomer", "exec sleep 30");
+        let _open: Vec<UnixStream> = (0..MAX_CONNECTIONS)
+            .map(|_| f.peer(&[hello_request()]))
+            .collect();
+        f.until("every peer said hello", |f| {
+            f.server.conns.len() == MAX_CONNECTIONS
+                && !f.server.conns.iter().any(Connection::is_opening)
+        });
+        let t0 = Instant::now() + NEW_GRACE * 2;
+        let together = f.newcomers(2, t0);
+        assert_eq!(f.replaced(&together), Vec::<u64>::new(), "in one turn");
+        let later = f.newcomers(1, t0 + NEW_GRACE.saturating_sub(Duration::from_millis(1)));
+        assert_eq!(f.replaced(&together), Vec::<u64>::new(), "in a later turn");
+        f.newcomers(1, t0 + NEW_GRACE);
+        assert_eq!(f.replaced(&together).len(), 1, "once the grace was over");
+        assert_eq!(f.replaced(&later), Vec::<u64>::new());
+    }
+
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn the_writers_snapshot_is_answered_before_older_ones() {
