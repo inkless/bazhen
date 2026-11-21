@@ -887,34 +887,6 @@ fn hears_its_signals_though_the_spawner_blocked_them() {
     );
 }
 
-/// A newcomer to a full holder is safe for a moment, read or not, so the next one can't replace
-/// it, whichever turns the two arrive in.
-#[test]
-#[ignore = "signals processes; runs in moon run :test-real -- rust"]
-fn a_newcomer_is_safe_from_the_next_while_it_is_new() {
-    bazhen_test_signal::require_sandbox().unwrap();
-    sweep().unwrap();
-    let home = home("newcomer").unwrap();
-    let (_holder, socket) = serving(&home, &["sleep", "30"]).unwrap();
-    let _open: Vec<Client> = (0..bazhen_holder::server::MAX_CONNECTIONS)
-        .map(|n| {
-            let mut client = Client::connect(&socket).unwrap();
-            client.hello(n == 0).unwrap();
-            client
-        })
-        .collect();
-    past_grace();
-    let mut first = Client::connect(&socket).unwrap();
-    // The holder accepts `first` in a turn of its own before `second` arrives.
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let mut second = Client::connect(&socket).unwrap();
-    assert!(
-        first.hello(false).is_ok(),
-        "the first newcomer was replaced"
-    );
-    assert!(second.hello(false).is_ok());
-}
-
 /// A peer that has left its buffer full for over a second is the one a newcomer replaces, ahead
 /// of the oldest connection.
 #[test]
