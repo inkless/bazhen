@@ -5,7 +5,7 @@ use bazhen_protocol::text::trim;
 
 /// `Number(text)`: a decimal, `Infinity` or a `0x`, `0o` or `0b` literal, signed only in decimal,
 /// between any white space; 0 for none at all, and NaN for anything else.
-pub(super) fn number(text: &str) -> f64 {
+pub(crate) fn number(text: &str) -> f64 {
     let text = trim(text);
     if text.is_empty() {
         return 0.0;

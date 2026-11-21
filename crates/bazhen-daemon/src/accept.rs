@@ -20,6 +20,8 @@ use tokio_util::task::TaskTracker;
 use tokio_util::task::task_tracker::TaskTrackerToken;
 use tower::ServiceExt;
 
+use crate::peer::PeerSocket;
+
 /// What a listener allows each connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Limits {
@@ -60,18 +62,39 @@ pub(crate) struct Held {
     _place: Arc<(OwnedSemaphorePermit, TaskTrackerToken)>,
 }
 
+/// A connection's own socket, kept for its requests to read who is at the other end: a Unix
+/// socket's, which the kernel names the peer of; none for TCP, whose callers are paired instead.
+pub(crate) trait Connected {
+    fn peer(&self) -> Option<PeerSocket>;
+}
+
+impl Connected for tokio::net::TcpStream {
+    fn peer(&self) -> Option<PeerSocket> {
+        None
+    }
+}
+
+impl Connected for tokio::net::UnixStream {
+    fn peer(&self) -> Option<PeerSocket> {
+        Some(PeerSocket::accepted_now(std::os::fd::AsFd::as_fd(self)))
+    }
+}
+
 /// Serves `router` on `listener` until `stop`. Then it stops accepting, calls `stopped`, and asks
 /// each open connection to end once it has answered the request it is on; an upgraded one is its
-/// route's to end. Every connection is a
-/// task on `tracker`, so waiting on it waits on them.
-pub(crate) async fn serve_on<L: Listener>(
+/// route's to end. Every connection is a task on `tracker`, so waiting on it waits on them, and
+/// every request on a Unix connection carries its `PeerSocket`.
+pub(crate) async fn serve_on<L>(
     mut listener: L,
     router: Router,
     limits: Limits,
     stop: CancellationToken,
     tracker: TaskTracker,
     stopped: impl FnOnce(),
-) {
+) where
+    L: Listener,
+    L::Io: Connected,
+{
     let open = Arc::new(Semaphore::new(limits.connections));
     loop {
         let Some(Ok(permit)) = stop
@@ -87,8 +110,12 @@ pub(crate) async fn serve_on<L: Listener>(
         let held = Held {
             _place: Arc::new((permit, tracker.token())),
         };
+        let peer = io.peer();
         let service = service_fn(move |mut request: Request<Incoming>| {
             request.extensions_mut().insert(held.clone());
+            if let Some(peer) = &peer {
+                request.extensions_mut().insert(peer.clone());
+            }
             answer(router.clone(), limits.request, request)
         });
         let connection = http1::Builder::new()
@@ -391,6 +418,70 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(5), tracker.wait())
                 .await
                 .unwrap();
+        });
+    }
+
+    /// `/peer` answers who is at the other end of its connection, or `none` for no socket kept.
+    fn peered() -> Router {
+        Router::new().route(
+            "/peer",
+            get(|peer: Option<Extension<PeerSocket>>| async move {
+                let Some(Extension(peer)) = peer else {
+                    return "none".to_owned();
+                };
+                match crate::peer::Reader::default().read(&peer).await {
+                    crate::peer::PeerRead::Read(read) => read.pid.as_raw_pid().to_string(),
+                    other => format!("{other:?}"),
+                }
+            }),
+        )
+    }
+
+    async fn peer_said(
+        mut stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    ) -> String {
+        stream
+            .write_all(b"GET /peer HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).await.unwrap();
+        answer.rsplit("\r\n").next().unwrap_or_default().to_owned()
+    }
+
+    #[test]
+    fn gives_each_request_on_a_unix_connection_its_socket_to_read_the_peer_of_and_tcps_none() {
+        let dir = crate::testing::TempDir::new("peered");
+        let path = dir.path().join("s.sock");
+        runtime().block_on(async {
+            let stop = CancellationToken::new();
+            let tracker = TaskTracker::new();
+            let unix = tokio::net::UnixListener::bind(&path).unwrap();
+            let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = tcp.local_addr().unwrap();
+            tokio::spawn(serve_on(
+                unix,
+                peered(),
+                SOCKET,
+                stop.clone(),
+                tracker.clone(),
+                || {},
+            ));
+            tokio::spawn(serve_on(
+                tcp,
+                peered(),
+                HTTP,
+                stop.clone(),
+                tracker.clone(),
+                || {},
+            ));
+            let unix = tokio::net::UnixStream::connect(&path).await.unwrap();
+            let tcp = TcpStream::connect(address).await.unwrap();
+            assert_eq!(
+                [peer_said(unix).await, peer_said(tcp).await],
+                [std::process::id().to_string(), "none".to_owned()]
+            );
+            stop.cancel();
         });
     }
 }

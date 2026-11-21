@@ -9,6 +9,7 @@ mod events;
 mod guard;
 mod heartbeat;
 mod log;
+mod peer;
 mod private_dir;
 mod probe;
 mod retention;
@@ -19,6 +20,7 @@ mod session;
 pub mod tasks;
 #[cfg(test)]
 mod testing;
+mod tokens;
 mod writer;
 
 pub use run::run;
