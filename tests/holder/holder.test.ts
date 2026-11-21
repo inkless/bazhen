@@ -442,6 +442,14 @@ const dataOf = (events: readonly HolderEvent[]) =>
 /** A child that, once its terminal no longer echoes, prints R and waits for a line, then runs `then`. */
 const gated = (then: string) => ["sh", "-c", `stty -echo; echo R; read _; ${then}`] as const;
 
+/** A shell loop that echoes `line <i>` for each i after `from` up to `to`. */
+const echoLines = (from: number, to: number) =>
+  `i=${from}; while [ $i -lt ${to} ]; do i=$((i+1)); echo line $i; done`;
+
+/** Whether `events` hold the child's exit. */
+const hasExited = (events: readonly HolderEvent[]) =>
+  events.some((event) => event.type === "exited");
+
 /** A writer subscribed from 0 to a `gated` child, and the child let go. */
 async function letGo(holder: SpawnedHolder) {
   const writer = await listen(holder, true);
@@ -472,20 +480,21 @@ function upTo(events: readonly HolderEvent[], type: HolderEvent["type"]) {
 
 describe("a holder's terminal engine", () => {
   it("attaches mid-stream to a snapshot that, with the output after it, draws what all of it does", async () => {
-    const lines = "i=0; while [ $i -lt 4000 ]; do i=$((i+1)); echo line $i; done";
-    // The child exits only once let go again, after the attach: a connection past `hello` gets
-    // an exit published before its attach is served ahead of the attach's snapshot.
-    const holder = await started("attach", gated(`${lines}; read _`));
+    // The child waits halfway for the attach, so output follows the snapshot and the exit can't
+    // come before the attach is served, where it would come ahead of the snapshot.
+    const paused = `${echoLines(0, 2000)}; read _; ${echoLines(2000, 4000)}`;
+    const holder = await started("attach", gated(paused));
     const live = await letGo(holder);
     await until(() => outputEnd(live.events) > 4000, "some of the output");
     const attached = await listen(holder);
     await attached.client.attach();
     live.client.input(encode("\n"));
-    await live.exit;
-    await attached.exit;
+    await until(() => hasExited(live.events), "the child's exit");
+    await until(() => hasExited(attached.events), "the attached connection's exit");
     const { snapshot, after } = attachedTo(attached.events);
     expect(snapshot.offset).toBeGreaterThan(4000);
     const data = after.filter((event) => event.type === "data");
+    expect(output(data, snapshot.offset)).toContain("line 2001\r\n");
     expect(output(data, snapshot.offset)).toBe(output(live.events).slice(snapshot.offset));
     const restored = await drawn([snapshot.bytes, ...dataOf(data)]);
     expect(restored).toEqual(await drawn(dataOf(live.events)));
