@@ -767,6 +767,13 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::own_pid": "proc_stat",
+  "crates/bazhen-host-guard/src/scope.rs::parse_probe": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::systemd_version": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::cgroup_of": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::mem_total": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::memory_max_refusal": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::swap_max_refusal": "containment",
+  "crates/bazhen-host-guard/src/scope.rs::is_terminal_scope": "containment",
   "crates/bazhen-holder/src/start_time.rs::parent_field": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::session_field": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::has_exited": "proc_stat",
@@ -783,8 +790,20 @@ const NOT_DECODERS: Record<string, string> = {
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
     "hands its body to tasks::asked, which its tasks target fuzzes; decodes nothing itself",
-  "crates/bazhen-host-guard/src/group.rs::drain":
-    "reads a child's pipe to its end and drops every byte; parses nothing",
+  "crates/bazhen-host-guard/src/group.rs::read_out":
+    "copies at most OUTPUT_MAX bytes of a child's pipe into a buffer and drops the rest; parses nothing",
+  "crates/bazhen-host-guard/src/scope.rs::said":
+    "trims a step's stderr, already text, and keeps its first 2000 characters; parses nothing",
+  "crates/bazhen-host-guard/src/scope.rs::in_terminal_scope":
+    "reads /proc/<pid>/cgroup only to hand it to in_terminal_scope_by",
+  "crates/bazhen-host-guard/src/scope.rs::in_terminal_scope_by":
+    "hands a cgroup file to cgroup_of and is_terminal_scope, which its containment target fuzzes",
+  "crates/bazhen-host-guard/src/scope.rs::step_of":
+    "makes a step's stderr text, lossily, and passes its stdout on to parse_probe or systemd_version, which its containment target fuzzes",
+  "crates/bazhen-host-guard/src/scope.rs::Host::total_memory":
+    "reads /proc/meminfo only to hand it to mem_total, which its containment target fuzzes",
+  "crates/bazhen-host-guard/src/scope.rs::Host::random":
+    "writes six random bytes as hex; parses nothing",
   "crates/bazhen-host-guard/src/lib.rs::send":
     "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
