@@ -36,12 +36,12 @@ impl OwnGroup {
         Ok(Self { child, leader })
     }
 
-    /// Whether the group was still there. A floor that couldn't read this process's ancestry or
-    /// group, as when an ancestor exits mid-walk, is asked once more.
+    /// Whether the group was still there. A floor that couldn't read this process's ancestry, as
+    /// when an ancestor exits mid-walk, is asked once more; its own group, unknown, stays so.
     fn signal(&self, signal: Signal) -> Result<bool, Error> {
         match self.signal_once(signal) {
             Err(Error::Unsafe {
-                why: Unsafe::AncestryUnread | Unsafe::OwnGroupUnknown,
+                why: Unsafe::AncestryUnread,
                 ..
             }) => self.signal_once(signal),
             sent => sent,
@@ -106,8 +106,8 @@ pub enum Ended {
 ///
 /// # Errors
 ///
-/// Only when the group of a run past its limit couldn't be killed: the floor refused it twice
-/// running, or the kill failed. The group is then left running. How the command itself ended is
+/// Only when the group of a run past its limit couldn't be killed: the floor refused it, twice
+/// where it couldn't read this process's ancestry, or the kill failed. The group is then left running. How the command itself ended is
 /// never an error.
 pub async fn run_bounded(mut command: Command, limit: Duration) -> Result<Ended, Error> {
     command
@@ -195,16 +195,21 @@ mod tests {
     }
 
     /// Whether `pid` has ended: no process, or one exited and not yet reaped by whoever its
-    /// parent now is.
+    /// parent now is, as `ps` reads it on Linux and macOS alike. A `ps` that can't run fails the
+    /// test, rather than read as an end.
     fn ended(pid: Pid) -> bool {
-        match std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid())) {
-            Err(_) => true,
-            Ok(stat) => bazhen_holder::start_time::has_exited(&stat),
-        }
+        let out = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.as_raw_pid().to_string()])
+            .output()
+            .unwrap();
+        let state = String::from_utf8(out.stdout).unwrap();
+        let state = state.trim();
+        assert!(out.status.success() || state.is_empty(), "ps: {state}");
+        state.is_empty() || state.starts_with('Z')
     }
 
     /// Whether `pid` ends within a few seconds: the kernel delivers a group's SIGKILL at once, but
-    /// the process leaves `/proc` only once it is reaped.
+    /// the process is gone only once it is reaped.
     fn ends_soon(pid: Pid) -> bool {
         for _ in 0..100 {
             if ended(pid) {
