@@ -257,6 +257,8 @@ pub(crate) mod fake {
         pub(crate) unlinked: Vec<String>,
         /// How many reads of the foregrounds reached the runtime.
         pub(crate) foreground_reads: usize,
+        /// How many reads of the foregrounds the runtime answered.
+        pub(crate) foreground_answers: usize,
         /// What the runtime says of each terminal's compatibility.
         pub(crate) compatibility: Compatibility,
         /// The holders the host no longer shows, by pid.
@@ -510,7 +512,8 @@ pub(crate) mod fake {
                 if let Some(gate) = held {
                     gate.acquire().await.unwrap().forget();
                 }
-                let state = self.state.lock().unwrap();
+                let mut state = self.state.lock().unwrap();
+                state.foreground_answers += 1;
                 if let Some(refused) = &state.reads_refused {
                     return Err(refused.clone());
                 }
