@@ -8,9 +8,9 @@
 //! holds its leader unreaped (`group`), so the group's number can't since have become another's. A
 //! single process is reached only as a `bazhen-holder` checked by its name and start time
 //! (`holder`), or by signal 0, which sends nothing (`is_alive`). Holding a leader unreaped holds
-//! only while SIGCHLD keeps its default disposition: ignored, or with `SA_NOCLDWAIT`, the kernel
-//! reaps children itself, and a group is then refused once its leader has exited. A daemon gives
-//! SIGCHLD its default before it starts a child (`keep_exited_children`).
+//! only while SIGCHLD is neither ignored nor set with `SA_NOCLDWAIT`: either way the kernel reaps
+//! children itself, and a group is then refused once its leader has exited. A daemon undoes both
+//! before it starts a child (`keep_exited_children`), and keeps any handler already set.
 
 mod group;
 pub mod holder;
@@ -185,7 +185,7 @@ mod tests {
 
     use rustix::io::Errno;
 
-    use super::sigchld::{Careless, make_careless};
+    use super::sigchld::{Careless, handled, make_careless};
     use super::{
         Error, Own, Target, Unsafe, alive, children_kept, floor, is_alive, keep_exited_children,
         send,
@@ -299,6 +299,23 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// A handler already set, as tokio's is once a runtime waits on a child, is what its
+    /// `Child::wait` hears an exit by: replaced, every wait would hang.
+    #[test]
+    fn keeps_a_handler_already_set_for_sigchld() {
+        make_careless(Careless::Handled).unwrap();
+        keep_exited_children().unwrap();
+        assert_eq!((handled().unwrap(), children_kept().unwrap()), (true, true));
+    }
+
+    #[test]
+    fn keeps_a_handler_already_set_for_sigchld_but_drops_its_no_child_wait() {
+        make_careless(Careless::HandledNoChildWait).unwrap();
+        assert!(!children_kept().unwrap());
+        keep_exited_children().unwrap();
+        assert_eq!((handled().unwrap(), children_kept().unwrap()), (true, true));
     }
 
     /// Signal 0 sends nothing, and the floor refuses these before it would.

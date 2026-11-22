@@ -3,7 +3,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -159,14 +159,18 @@ fn ignoring_sigchld(program: &str) -> Command {
     command
 }
 
-/// What `ps` shows of `pid`: its name, and whether it ignores SIGCHLD.
+/// What `ps` shows of `pid`: the file name it runs, and whether it ignores SIGCHLD. macOS's `ps`
+/// names the path it was run by, where Linux's names the file alone.
 fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
     let out = Command::new("ps")
         .args(["-o", "comm=,sigignore=", "-p", &pid.to_string()])
         .output()?;
     let said = String::from_utf8(out.stdout)?;
-    let (name, mask) = said.trim().rsplit_once(' ').ok_or("ps showed no process")?;
-    Ok((name.trim().to_owned(), ignored_in(mask)?))
+    let (comm, mask) = said.trim().rsplit_once(' ').ok_or("ps showed no process")?;
+    let name = Path::new(comm.trim())
+        .file_name()
+        .ok_or("ps showed no name")?;
+    Ok((name.to_string_lossy().into_owned(), ignored_in(mask)?))
 }
 
 /// Whether `ps` shows SIGCHLD ignored by `pid`.

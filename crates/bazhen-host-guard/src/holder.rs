@@ -1160,8 +1160,10 @@ impl Run {
     }
 
     /// Kills a holder that never said `ready`, once the kernel shows it is the holder, as a
-    /// launcher that execs it soon does; one that exits meanwhile needs nothing. Whether it may
-    /// still run, and what to say of it.
+    /// launcher that execs it soon does; one that exits meanwhile needs nothing. One the kernel
+    /// never shows as the holder is ended through the child's own handle, which reaches it only
+    /// while it is unreaped and so still the process spawned here, whatever it runs now. Whether
+    /// it may still run, and what to say of it.
     async fn end_unready<D: StartDeps>(
         &mut self,
         holder: HolderProcess,
@@ -1180,9 +1182,21 @@ impl Run {
         }
         let pid = holder.pid.as_raw_pid();
         let Some(proof) = proof else {
-            let note =
-                format!("pid {pid} is left running, as the kernel doesn't show it is the holder");
-            return (true, Some(note));
+            return match self.child.end() {
+                Ok(true) => {
+                    let note = "the kernel doesn't show it is the holder, so it was killed through \
+                                its own handle";
+                    (false, Some(note.to_owned()))
+                }
+                Ok(false) => (false, None),
+                Err(e) => {
+                    let note = format!(
+                        "pid {pid} is left running, as the kernel doesn't show it is the holder \
+                         and it couldn't be sent SIGKILL: {e}"
+                    );
+                    (true, Some(note))
+                }
+            };
         };
         match deps.kill(proof) {
             Ok(true) => (false, Some("it was killed".to_owned())),
@@ -1287,7 +1301,7 @@ mod tests {
     use std::os::unix::process::ExitStatusExt as _;
     use std::path::{Path, PathBuf};
     use std::process::ExitStatus;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1311,7 +1325,14 @@ mod tests {
     const PID: RawPid = (1 << 22) + 1;
     const START: u64 = 1_794_630_000;
 
+    /// The fake holder's pid, which every fake takes from here, checked against this system's
+    /// limit first.
     fn pid() -> Pid {
+        assert!(
+            i64::from(PID) > pid_limit(),
+            "{PID} isn't above {}",
+            pid_limit()
+        );
         Pid::from_raw(PID).unwrap()
     }
 
@@ -1328,15 +1349,6 @@ mod tests {
             .ok()
             .and_then(|max| max.trim().parse().ok())
             .unwrap_or(99_999)
-    }
-
-    #[test]
-    fn the_fake_holder_s_pid_is_above_this_system_s_limit() {
-        assert!(
-            i64::from(PID) > pid_limit(),
-            "{PID} isn't above {}",
-            pid_limit()
-        );
     }
 
     fn running(comm: &str, start: u64) -> Reading {
@@ -1548,8 +1560,11 @@ mod tests {
             None
         );
         let over = PathBuf::from(format!("{}r", fits.display()));
-        let why = holder_socket_refusal(&holder_socket(&over, "x"), &over, "x").unwrap();
-        assert!(why.contains("103"), "{why}");
+        let why = holder_socket_refusal(&holder_socket(&over, "x"), &over, "x");
+        assert!(
+            why.as_deref().is_some_and(|why| why.contains("103")),
+            "{why:?}"
+        );
     }
 
     #[test]
@@ -1672,9 +1687,15 @@ mod tests {
         stderr: Option<DuplexStream>,
         exit: Arc<watch::Sender<Option<ExitStatus>>>,
         signalled: Arc<Mutex<Vec<Signal>>>,
+        reaped: Arc<AtomicBool>,
     }
 
     impl Far {
+        /// Has something other than its handle reap it, so its pid may be another's.
+        fn reaped_elsewhere(&self) {
+            self.reaped.store(true, Ordering::Relaxed);
+        }
+
         /// Everything written to its stdin, once that ends.
         async fn sent(&mut self) -> Vec<u8> {
             let mut sent = Vec::new();
@@ -1710,6 +1731,7 @@ mod tests {
     struct FakeChild {
         exit: watch::Receiver<Option<ExitStatus>>,
         signalled: Arc<Mutex<Vec<Signal>>>,
+        reaped: Arc<AtomicBool>,
     }
 
     impl OwnChild for FakeChild {
@@ -1731,7 +1753,14 @@ mod tests {
             })
         }
 
+        /// As `signal_child` does, it refuses a child something else reaped.
         fn end(&mut self) -> Result<bool, Error> {
+            if self.reaped.load(Ordering::Relaxed) {
+                return Err(Error::Unsafe {
+                    target: Target::Process(pid()),
+                    why: Unsafe::Reaped,
+                });
+            }
             self.signalled.lock().unwrap().push(Signal::KILL);
             Ok(true)
         }
@@ -1743,6 +1772,7 @@ mod tests {
         let (far_stderr, stderr) = tokio::io::duplex(1 << 16);
         let (exit, exited) = watch::channel(None);
         let signalled = Arc::new(Mutex::new(Vec::new()));
+        let reaped = Arc::new(AtomicBool::new(false));
         let spawned = Spawned {
             pid: pid(),
             stdin: Box::pin(stdin),
@@ -1751,6 +1781,7 @@ mod tests {
             child: Box::new(FakeChild {
                 exit: exited,
                 signalled: Arc::clone(&signalled),
+                reaped: Arc::clone(&reaped),
             }),
         };
         let far = Far {
@@ -1759,6 +1790,7 @@ mod tests {
             stderr: Some(far_stderr),
             exit: Arc::new(exit),
             signalled,
+            reaped,
         };
         (spawned, far)
     }
@@ -1847,7 +1879,6 @@ mod tests {
 
     /// A start's directories and options, with a 2 s wait for `ready`.
     fn setup() -> (Dirs, StartHolderOptions) {
-        assert!(i64::from(PID) > pid_limit());
         let root = TempDir::new();
         let bin = TempDir::new();
         let mut options = StartHolderOptions::new(
@@ -2002,11 +2033,33 @@ mod tests {
         assert_eq!((fakes.kills(), fakes.reads()), (vec![holder()], 2));
     }
 
+    /// Unreaped, its own child's pid is still its own, whatever the kernel shows it runs.
+    #[test]
+    fn ends_its_own_child_through_its_handle_when_the_kernel_shows_a_stranger_at_its_pid() {
+        let (_dirs, mut options) = setup();
+        options.ready = Duration::from_millis(50);
+        let (child, far) = fake();
+        let fakes = Fakes::new(Some(child), in_turn(vec![holder_at(START), stranger()]));
+        let (started, ()) = block_on(started(options, &fakes, async {}));
+        let failed = failed(started);
+        assert!(
+            failed.to_string().contains("killed through its own handle"),
+            "{failed}"
+        );
+        assert!(!failed.running);
+        assert_eq!(
+            (fakes.kills(), far.signalled()),
+            (vec![], vec![Signal::KILL])
+        );
+    }
+
+    /// Reaped by something else, its pid may be another process's, which nothing here reaches.
     #[test]
     fn leaves_a_stranger_at_the_holder_s_pid_alone_names_it_and_says_it_may_still_run() {
         let (_dirs, mut options) = setup();
         options.ready = Duration::from_millis(50);
-        let (child, _far) = fake();
+        let (child, far) = fake();
+        far.reaped_elsewhere();
         let fakes = Fakes::new(Some(child), in_turn(vec![holder_at(START), stranger()]));
         let (started, ()) = block_on(started(options, &fakes, async {}));
         let failed = failed(started);
@@ -2017,19 +2070,21 @@ mod tests {
             "{failed}"
         );
         assert!(failed.running);
-        assert_eq!(fakes.kills(), []);
+        assert_eq!((fakes.kills(), far.signalled()), (vec![], vec![]));
     }
 
+    /// A reused pid's start differs, and a pid is reused only once its child was reaped.
     #[test]
     fn leaves_a_holder_alone_whose_start_no_longer_matches_as_a_reused_pid_s_wouldn_t() {
         let (_dirs, mut options) = setup();
         options.ready = Duration::from_millis(50);
-        let (child, _far) = fake();
+        let (child, far) = fake();
+        far.reaped_elsewhere();
         let readings = in_turn(vec![holder_at(START), holder_at(START + 60)]);
         let fakes = Fakes::new(Some(child), readings);
         let (started, ()) = block_on(started(options, &fakes, async {}));
         assert!(failed(started).running);
-        assert_eq!(fakes.kills(), []);
+        assert_eq!((fakes.kills(), far.signalled()), (vec![], vec![]));
     }
 
     #[test]
@@ -2595,28 +2650,36 @@ mod tests {
         assert_eq!(child.wait().unwrap().signal(), Some(Signal::USR1.as_raw()));
     }
 
-    /// The real holder's start, through `Host`, needs no fake: a holder that says nothing is
-    /// killed once the kernel shows it is the holder.
+    /// The real start, through `Host`: a copy of `sleep` named as the holder, which the kernel
+    /// names so too, from the moment a launcher, here a shell, execs it with the seconds that it
+    /// needs, as the holder is run with none. It never says `ready`, so once its wait is up it is
+    /// killed by a proof for its pid and start. The shell can't stand in for it: run as a script,
+    /// the holder's name is the kernel's only until the script execs something else.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn kills_a_real_silent_holder_once_the_kernel_shows_it() {
         bazhen_test_signal::require_sandbox().unwrap();
         let root = TempDir::new();
         let bin = TempDir::new();
-        let binary = bin.path().join("bazhen-holder");
-        std::fs::write(&binary, "#!/bin/sh\nexec sleep 30\n").unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         let spec = spec_for(root.path(), &[]);
-        let mut options = StartHolderOptions::new(binary, root.path().to_owned(), spec);
+        let mut options = StartHolderOptions::new(sleeper(&bin), root.path().to_owned(), spec);
         options.ready = Duration::from_millis(200);
-        options.launch = Duration::from_millis(200);
+        options.launch = Duration::from_secs(5);
+        options.scope = Some(super::ScopeLaunch {
+            argv: argv(&["/bin/sh", "-c", r#"exec "$0" 10"#]),
+            env: vec![],
+        });
         let started = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()
             .block_on(super::start_holder(options, unrecorded));
-        // A script runs as its shell, so the kernel never shows it as the holder.
         let failed = failed(started);
-        assert_eq!(failed.ending, Ending::Unlaunched, "{failed}");
+        assert_eq!(
+            (failed.ending, failed.running),
+            (Ending::Silent, false),
+            "{failed}"
+        );
+        assert!(failed.detail.ends_with("; it was killed"), "{failed}");
     }
 }
