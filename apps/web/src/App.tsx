@@ -4,6 +4,7 @@ import { PAGE_PROTOCOL, noticeUnpaired, onAnotherBuild, onUnpaired } from "./api
 import { isAnotherBuild } from "./build.ts";
 import { Dashboard } from "./Dashboard.tsx";
 import { Pairing } from "./Pairing.tsx";
+import { inTerminal } from "./terminal/focus.ts";
 import { KeyBar } from "./terminal/KeyBar.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ThemeSwitch } from "./ui/ThemeSwitch.tsx";
@@ -104,8 +105,7 @@ function useAppViewport(): void {
     const root = document.documentElement;
     const focus = {
       events: document,
-      inTerminal: () =>
-        document.activeElement?.matches(".terminal-host .xterm-helper-textarea") === true,
+      inTerminal: () => inTerminal(document.activeElement),
     };
     return followViewport(window, focus, (viewport) => {
       root.style.setProperty("--app-top", `${viewport.top}px`);
