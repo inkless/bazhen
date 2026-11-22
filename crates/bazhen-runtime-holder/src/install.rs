@@ -1099,7 +1099,7 @@ mod tests {
     }
 
     /// A child the test started, killed through the test's chokepoint and reaped however the
-    /// test ends, so a failure leaves no `sleep` running.
+    /// test ends, so a failure leaves no sleeper running.
     struct Sleeper(std::process::Child);
 
     impl Sleeper {
@@ -1122,18 +1122,40 @@ mod tests {
         }
     }
 
-    /// The test container's: a copy of `sleep` named as the holder, installed and run from its
-    /// build while the next build installs beside it.
+    /// The tests' own sleeper (`bazhen-test-sleeper`), which the workspace's tests build into the
+    /// target directory this test binary is under, looked for no higher than that directory,
+    /// which cargo marks with `CACHEDIR.TAG`. Not `sleep`: where that is a multicall coreutils, it
+    /// runs nothing once copied under another name.
+    fn test_sleeper() -> PathBuf {
+        let exe = std::env::current_exe().unwrap();
+        let mut within = Vec::new();
+        for dir in exe.ancestors().skip(1) {
+            within.push(dir);
+            if dir.join("CACHEDIR.TAG").is_file() {
+                break;
+            }
+        }
+        within
+            .into_iter()
+            .map(|dir| dir.join("bazhen-test-sleeper"))
+            .find(|sleeper| sleeper.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no bazhen-test-sleeper in the target directory above {}: run the \
+                     workspace's tests, which build it",
+                    exe.display()
+                )
+            })
+    }
+
+    /// The test container's: a copy of the tests' sleeper named as the holder, installed and run
+    /// from its build while the next build installs beside it.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn keeps_a_build_a_live_holder_runs_while_the_next_installs_then_prunes_it_once_it_ends() {
         bazhen_test_signal::require_sandbox().unwrap();
         let home = home();
-        let sleep = ["/bin/sleep", "/usr/bin/sleep"]
-            .into_iter()
-            .find(|path| Path::new(path).exists())
-            .unwrap();
-        fs::copy(sleep, &home.source).unwrap();
+        fs::copy(test_sleeper(), &home.source).unwrap();
         let old = home.install();
         let mut sleeper = Sleeper(
             std::process::Command::new(&old.binary)
