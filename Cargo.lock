@@ -277,9 +277,11 @@ dependencies = [
  "bazhen-test-signal",
  "futures-util",
  "rustix",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

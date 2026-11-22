@@ -1343,6 +1343,22 @@ const NOT_DECODERS: Record<string, string> = {
     "encodes a request and queues it through ask; reads nothing",
   "crates/bazhen-runtime-holder/src/install.rs::build_of":
     "hashes the copy install_holder made of a build; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::unit_random":
+    "turns /dev/urandom's bytes into hex for a scope's unit name; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::Starting::start":
+    "starts a holder and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::listed":
+    "lists the holders' directory and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::health":
+    "reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::builds":
+    "reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes, and the stats a holder answers, decoded the same way; parses nothing",
+  "crates/bazhen-runtime-holder/src/watch.rs::next":
+    "hands on events HolderEvents::recv gives, made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/watch.rs::Watches::adopt":
+    "hands a connection and its events to a watch; parses nothing",
+  "crates/bazhen-runtime-holder/src/watch.rs::Watches::run":
+    "acts on events HolderEvents::recv gives, made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
 };
 
 // A carrier's bytes are found by the methods of its own crate that use the field holding them, so

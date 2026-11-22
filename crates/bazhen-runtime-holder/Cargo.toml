@@ -13,9 +13,11 @@ bazhen-host-guard = { workspace = true }
 bazhen-protocol = { workspace = true }
 futures-util = { workspace = true }
 rustix = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 bazhen-test-signal = { workspace = true }
