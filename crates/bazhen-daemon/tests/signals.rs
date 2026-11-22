@@ -3,7 +3,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -37,9 +37,31 @@ impl Drop for Home {
     }
 }
 
+/// The daemon, copied under `home` as `moon run :build` lays it out, with the holder the
+/// workspace's tests build beside it: a daemon whose default runtime is the holder refuses to
+/// start with no holder build, as `main.ts` does, and cargo builds none at `release-holder`.
+/// The holder is the one cargo built beside this daemon, in the same profile's directory.
+fn daemon_binary(home: &Home) -> Res<PathBuf> {
+    let holder = Path::new(env!("CARGO_BIN_EXE_bazhen-daemon")).with_file_name("bazhen-holder");
+    if !holder.is_file() {
+        return Err(format!(
+            "no {}: run the workspace's tests, which build it",
+            holder.display()
+        )
+        .into());
+    }
+    let build = home.0.join("target");
+    std::fs::create_dir_all(build.join("release"))?;
+    std::fs::create_dir_all(build.join("release-holder"))?;
+    let daemon = build.join("release/bazhen-daemon");
+    std::fs::copy(env!("CARGO_BIN_EXE_bazhen-daemon"), &daemon)?;
+    std::fs::copy(holder, build.join("release-holder/bazhen-holder"))?;
+    Ok(daemon)
+}
+
 /// The daemon on `home`, in the foreground with its output piped, once its socket answers.
 fn daemon(home: &Home) -> Res<Child> {
-    daemon_by(home, Command::new(env!("CARGO_BIN_EXE_bazhen-daemon")))
+    daemon_by(home, Command::new(daemon_binary(home)?))
 }
 
 /// `daemon`, run by `command`, which execs it.
@@ -223,10 +245,65 @@ fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
 fn started_with_sigchld_ignored_it_gives_sigchld_its_default() {
     bazhen_test_signal::require_sandbox().unwrap();
     let home = Home::new("sigchld").unwrap();
-    let child = daemon_by(&home, ignoring_sigchld(env!("CARGO_BIN_EXE_bazhen-daemon"))).unwrap();
+    let daemon = daemon_binary(&home).unwrap();
+    let child = daemon_by(&home, ignoring_sigchld(daemon.to_str().unwrap())).unwrap();
     let ignored = ignores_sigchld(child.id());
     bazhen_test_signal::signal(child.id(), Signal::TERM).unwrap();
     let (code, _) = ended_within_bound(child).unwrap();
     assert!(!ignored.unwrap());
     assert_eq!(code, Some(0));
+}
+
+/// With no holder build beside it, the daemon refuses to start, saying why and how to run its
+/// terminals on tmux instead, as `main.ts` does. It is run from a copy, so no holder built at
+/// `target/release-holder` is beside it. One that starts anyway is stopped through its socket.
+/// It runs only on a disposable host all the same: a daemon past its refusal would go on to its
+/// start-up steps, and nothing here can show those come after it.
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn refuses_to_start_with_no_holder_build_to_run_new_terminals_on() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let home = Home::new("no-holder").unwrap();
+    let daemon = home.0.join("target/release/bazhen-daemon");
+    std::fs::create_dir_all(daemon.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_bazhen-daemon"), &daemon).unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut child = Command::new(&daemon)
+        .env_clear()
+        .env("HOME", &home.0)
+        .env("BAZHEN_HOME", &home.0)
+        .env("BAZHEN_PORT", port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    while child.try_wait().unwrap().is_none() && started.elapsed() < BOUND {
+        if let Ok(mut socket) = UnixStream::connect(home.socket()) {
+            socket
+                .write_all(
+                    b"POST /v1/daemon/stop HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n",
+                )
+                .unwrap();
+            // Killed if the stop doesn't end it, so a failing run leaves no daemon behind.
+            let ended = ended_within_bound(child);
+            panic!("the daemon started with no holder build: {ended:?}");
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    // Killed if it is still starting at the bound, neither refused nor bound.
+    let (code, said) = ended_within_bound(child).unwrap();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("bazhen: no holder can be started for new terminals: ")
+            && said.contains("release-holder/bazhen-holder isn't built; run `moon run :build`")
+            && said.contains("set runtime.default = \"tmux\" in "),
+        "{said}"
+    );
+    assert!(!home.socket().exists());
 }

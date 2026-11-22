@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+bazhen-holder-proto = { workspace = true }
 bazhen-protocol = { workspace = true }
 jiff = { workspace = true }
 libc = { workspace = true }

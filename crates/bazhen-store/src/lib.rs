@@ -14,6 +14,7 @@ mod private;
 mod projections;
 mod snapshot;
 mod tasks;
+mod terminals;
 #[cfg(test)]
 mod testing;
 
@@ -33,10 +34,14 @@ pub use devices::{
     DeviceRow, DismissError, Dismissal, LOOPBACK_IDLE, NewDevice, PairError, Paired, RevokeError,
     Revoked, SECURE_IDLE, TOUCH_EVERY, Viewer,
 };
-pub use events::{AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, Writer};
+pub use events::{
+    Actor, AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, TerminalChange,
+    Writer,
+};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
-pub use snapshot::SnapshotError;
+pub use snapshot::{SnapshotError, SnapshotView};
 pub use tasks::{CreateTaskError, NewTask};
+pub use terminals::ShellRow;
 
 /// What `schema_version` holds once migrations are named: past every version a build that
 /// numbered them supports, so such a build refuses the database rather than re-run its first.

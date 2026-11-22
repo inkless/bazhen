@@ -48,7 +48,8 @@ pub fn run(args: &[OsString]) -> ExitCode {
     };
     let uid = rustix::process::getuid().as_raw();
     let lookup = |name: &str| std::env::var_os(name).as_deref().map(as_node_reads);
-    let settings = match load_settings(&Inputs::current(None, uid), &lookup) {
+    let inputs = Inputs::current(None, uid);
+    let settings = match load_settings(&inputs, &lookup) {
         Ok(settings) => settings,
         Err(InvalidConfig(message)) => {
             let _ = writeln!(err, "{message}");
@@ -61,7 +62,7 @@ pub fn run(args: &[OsString]) -> ExitCode {
             let _ = writeln!(err, "{NOT_DETACHED}");
             ExitCode::FAILURE
         }
-        Verb::Detached | Verb::Serve => serve(&startup(settings, uid)),
+        Verb::Detached | Verb::Serve => serve(&startup(settings, uid, inputs.home)),
     }
 }
 
@@ -79,10 +80,12 @@ fn as_node_reads(value: &OsStr) -> String {
 }
 
 /// What serving needs, from the settings and `BAZHEN_WEB_PORT`, an empty one unset.
-fn startup(settings: Settings, uid: u32) -> Startup {
-    let config = settings.config;
+fn startup(settings: Settings, uid: u32, home: String) -> Startup {
+    let config = settings.config.clone();
     Startup {
-        paths: settings.paths,
+        paths: settings.paths.clone(),
+        settings,
+        home,
         uid,
         port: config.port,
         web_port: std::env::var_os("BAZHEN_WEB_PORT")

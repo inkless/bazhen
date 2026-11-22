@@ -14,6 +14,7 @@
 
 mod group;
 pub mod holder;
+pub mod ptys;
 pub mod scope;
 mod sigchld;
 

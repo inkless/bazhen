@@ -77,6 +77,15 @@ pub enum EnvironmentKind {
     OpencodeServer,
 }
 
+impl EnvironmentKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::OpencodeServer => "opencode-server",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Environment {
     pub id: EnvironmentId,

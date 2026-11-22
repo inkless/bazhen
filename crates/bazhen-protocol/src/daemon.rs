@@ -277,6 +277,27 @@ pub struct MemoryCap {
     pub bytes: Option<u64>,
 }
 
+impl MemoryCap {
+    /// The cap as people read it: `50% (31.0 GiB)`, `0 (none)`, or `infinity (no cap)`
+    /// (`memoryCapText`).
+    pub fn text(&self) -> String {
+        let size = match self.bytes {
+            None => "no cap".to_owned(),
+            Some(0) => "none".to_owned(),
+            Some(bytes) => format!("{} GiB", gib(bytes)),
+        };
+        format!("{} ({size})", self.asked)
+    }
+}
+
+/// `bytes` in GiB to one decimal, rounded as JavaScript's `toFixed(1)` rounds: a tie upward, where
+/// Rust's `{:.1}` would round it to even.
+fn gib(bytes: u64) -> String {
+    let unit: u128 = 1 << 30;
+    let tenths = (u128::from(bytes) * 20 + unit) / (2 * unit);
+    format!("{}.{}", tenths / 10, tenths % 10)
+}
+
 /// Whether new holder terminals start in a systemd scope of their own, and with what caps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "lowercase")]

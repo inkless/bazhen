@@ -6,8 +6,22 @@ use bazhen_protocol::tasks::{is_task_brief, is_task_title};
 use rusqlite::{OptionalExtension, Transaction};
 
 use crate::events::{AppendError, NewEvent, int};
+use crate::terminals;
 
-pub(crate) fn project(tx: &Transaction<'_>, id: u64, event: &NewEvent) -> Result<(), AppendError> {
+/// The event being applied: its id, when it was recorded, and the host that recorded it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct At<'a> {
+    pub(crate) id: u64,
+    pub(crate) ts: &'a str,
+    pub(crate) host: &'a str,
+}
+
+pub(crate) fn project(
+    tx: &Transaction<'_>,
+    at: &At<'_>,
+    event: &NewEvent,
+) -> Result<(), AppendError> {
+    let id = at.id;
     match event {
         NewEvent::TaskCreated { task, payload, .. } => {
             // As the TypeScript projection parses it: a title or brief it would refuse is a bug in
@@ -93,6 +107,18 @@ pub(crate) fn project(tx: &Transaction<'_>, id: u64, event: &NewEvent) -> Result
                 ),
             )?;
         }
+        NewEvent::EnvironmentRegistered {
+            environment,
+            payload,
+        } => {
+            tx.execute(
+                "INSERT INTO environments (id, kind, created_event_id) VALUES (?, ?, ?)",
+                (environment.as_str(), payload.kind.as_str(), int(id)?),
+            )?;
+        }
+        NewEvent::Terminal {
+            terminal, change, ..
+        } => terminals::project(tx, at, terminal, change)?,
     }
     Ok(())
 }

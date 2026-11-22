@@ -19,7 +19,7 @@ use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
 use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
-use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError};
+use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotView};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
@@ -29,6 +29,8 @@ use crate::guard::{self, Allowlists, Arrival, Refusal};
 use crate::heartbeat::{HEARTBEAT, Heartbeat};
 use crate::paired::{self, Gated, Pairing, Viewer};
 use crate::peer::Peers;
+use crate::shell_routes;
+use crate::shells::Shells;
 use crate::tasks::{self, Refused};
 use crate::writer::Writer;
 
@@ -84,6 +86,12 @@ pub(crate) struct Shared {
     pub(crate) peers: Peers,
     /// The live pairing code, and the streams paired devices hold.
     pub(crate) pairing: Pairing,
+    /// The shells, where this daemon runs terminals.
+    pub(crate) shells: Option<Arc<Shells>>,
+    /// What doctor says that was settled at start.
+    pub(crate) doctor: Option<Arc<crate::doctor::Settled>>,
+    /// This machine's name, as the state names its environment's host.
+    pub(crate) host: Arc<str>,
 }
 
 impl Shared {
@@ -101,7 +109,21 @@ impl Shared {
             heartbeat: HEARTBEAT,
             peers: Peers::default(),
             pairing: Pairing::default(),
+            shells: None,
+            doctor: None,
+            host: Arc::from(hostname()),
         }
+    }
+
+    /// The same, running terminals as `shells` does, with what doctor says of them.
+    pub(crate) fn with_shells(
+        mut self,
+        shells: Arc<Shells>,
+        doctor: crate::doctor::Settled,
+    ) -> Self {
+        self.shells = Some(shells);
+        self.doctor = Some(Arc::new(doctor));
+        self
     }
 
     /// The same, where a pairing code may also be entered at `origins`.
@@ -128,8 +150,21 @@ pub(crate) fn fail(status: StatusCode, error: ErrorCode, message: &str) -> Respo
     (status, axum::Json(body)).into_response()
 }
 
+/// This machine's name, as `os.hostname()` gives it.
+fn hostname() -> String {
+    rustix::system::uname()
+        .nodename()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The daemon's health, with its runtime's read as it is asked.
 async fn health(State(shared): State<Shared>) -> axum::Json<HealthResponse> {
-    axum::Json(HealthResponse::clone(&shared.health))
+    let mut health = HealthResponse::clone(&shared.health);
+    if let Some(shells) = &shared.shells {
+        health.runtimes = crate::holder::routed(shells.terminals().health().await);
+    }
+    axum::Json(health)
 }
 
 /// Stops the daemon once this answer is written: the listeners stop taking connections and finish
@@ -149,8 +184,11 @@ pub(crate) fn internal(err: &dyn std::fmt::Display) -> Response {
 /// Every read model a client draws, with the cursor its event stream resumes from.
 async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) -> Response {
     let store = shared.store.clone();
+    let view = SnapshotView {
+        host: shared.host.to_string(),
+    };
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
-        store.reader()?.reads().snapshot()
+        store.reader()?.reads().snapshot(&view)
     })
     .await;
     match read {
@@ -280,6 +318,11 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/devices", get(paired::list))
         .route("/v1/devices/{id}/revoke", post(paired::revoke))
         .route("/v1/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/v1/shells", post(shell_routes::open))
+        .route("/v1/shells/{id}/close", post(shell_routes::close))
+        .route("/v1/shells/{id}/restart", post(shell_routes::restart))
+        .route("/v1/shells/{id}/rename", post(shell_routes::rename))
+        .route("/v1/daemon/doctor", get(crate::doctor::doctor))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
@@ -304,6 +347,10 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/tasks", post(create_task))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/shells", post(shell_routes::open))
+        .route("/shells/{id}/close", post(shell_routes::close))
+        .route("/shells/{id}/restart", post(shell_routes::restart))
+        .route("/shells/{id}/rename", post(shell_routes::rename))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
@@ -436,7 +483,10 @@ mod tests {
             "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
                VALUES ((SELECT id FROM host), '2026-11-01T00:00:00.000Z', 'environment.created',
                  'environment', 'env_1', 'system', '{}');
-             INSERT INTO environments (id, kind, created_event_id) VALUES ('env_1', 'local', 1);",
+             INSERT INTO environments (id, kind, created_event_id) VALUES ('env_1', 'local', 1);
+             INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+               created_event_id, updated_event_id)
+               VALUES ('agent_1', 'env_1', 'codex', 'p', '/', 'running', 1, 1);",
             socket_router,
             &[],
         );
@@ -444,7 +494,7 @@ mod tests {
             (status, body),
             (
                 503,
-                refused("unavailable", "this daemon can't describe environments yet")
+                refused("unavailable", "this daemon can't describe agents yet")
             )
         );
     }

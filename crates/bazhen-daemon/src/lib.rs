@@ -2,14 +2,17 @@
 //! loopback HTTP, as `apps/daemon` does, which it is to replace.
 
 mod accept;
+mod budget;
 mod callers;
 pub mod config;
 mod detach;
 mod devices;
+mod doctor;
 mod env;
 mod events;
 mod guard;
 mod heartbeat;
+mod holder;
 mod lock;
 mod log;
 mod paired;
@@ -20,9 +23,13 @@ mod probe;
 mod retention;
 mod routes;
 mod run;
+mod runner;
 mod serve;
 mod session;
+mod shell_routes;
+mod shells;
 pub mod tasks;
+mod terminals;
 #[cfg(test)]
 mod testing;
 mod tokens;
