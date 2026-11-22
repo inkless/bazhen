@@ -980,7 +980,7 @@ mod tests {
         let removed = prune_unused_with(
             &home.dir,
             me(),
-            Some(&home.install()),
+            Some(&installed),
             running,
             SystemTime::now(),
         );
