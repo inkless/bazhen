@@ -3,7 +3,7 @@
 //! which close when it is revoked or lapses. Tokens are 32 random bytes; the store keeps their
 //! hash only.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -284,7 +284,15 @@ pub(crate) fn standing(
 /// The streams each device holds open, and for each whether it had to pair to open.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Holds {
-    open: Arc<Mutex<HashMap<String, Streams>>>,
+    open: Arc<Mutex<Open>>,
+}
+
+#[derive(Debug, Default)]
+struct Open {
+    streams: HashMap<String, Streams>,
+    /// The devices revoked since the daemon started. The gate looks a device up before its
+    /// stream is held, so one revoked between the two is refused its hold here.
+    revoked: HashSet<String>,
 }
 
 /// A device's streams, each with whether it had to pair to open.
@@ -308,23 +316,28 @@ impl Holds {
     pub(crate) fn hold(&self, device: &str, until: &CancellationToken, required: bool) -> Hold {
         let token = until.child_token();
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        open.retain(|_, streams| {
+        if open.revoked.contains(device) {
+            token.cancel();
+            return Hold { token };
+        }
+        open.streams.retain(|_, streams| {
             streams.retain(|(t, _)| !t.is_cancelled());
             !streams.is_empty()
         });
-        open.entry(device.to_owned())
+        open.streams
+            .entry(device.to_owned())
             .or_default()
             .push((token.clone(), required));
         Hold { token }
     }
 
-    /// Ends every stream `device` holds.
-    pub(crate) fn end_all(&self, device: &str) {
-        let streams = self
-            .open
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(device);
+    /// Ends every stream `device` holds, and any it goes on to open.
+    pub(crate) fn revoke(&self, device: &str) {
+        let streams = {
+            let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+            open.revoked.insert(device.to_owned());
+            open.streams.remove(device)
+        };
         for (token, _) in streams.unwrap_or_default() {
             token.cancel();
         }
@@ -334,7 +347,7 @@ impl Holds {
     /// one does no good, since its browser would open it again unpaired.
     pub(crate) fn end_required(&self, device: &str) {
         let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        for (token, required) in open.get(device).into_iter().flatten() {
+        for (token, required) in open.streams.get(device).into_iter().flatten() {
             if *required {
                 token.cancel();
             }
@@ -344,7 +357,8 @@ impl Holds {
     /// The devices holding a stream open.
     pub(crate) fn devices(&self) -> Vec<String> {
         let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        open.iter()
+        open.streams
+            .iter()
             .filter(|(_, streams)| streams.iter().any(|(t, _)| !t.is_cancelled()))
             .map(|(id, _)| id.clone())
             .collect()
@@ -603,7 +617,7 @@ mod tests {
         let other = holds.hold("dev_b", &stop, true);
         holds.end_required("dev_a");
         let after_lapse = [needed.token().is_cancelled(), free.token().is_cancelled()];
-        holds.end_all("dev_a");
+        holds.revoke("dev_a");
         assert_eq!(
             (
                 after_lapse,
@@ -612,6 +626,24 @@ mod tests {
                 holds.devices()
             ),
             ([true, false], true, false, vec!["dev_b".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_stream_held_after_its_device_is_revoked_is_ended_as_it_opens() {
+        // The gate looked the device up before the revoke; its stream asks to be held after.
+        let holds = Holds::default();
+        let stop = CancellationToken::new();
+        holds.revoke("dev_a");
+        let late = holds.hold("dev_a", &stop, false);
+        let other = holds.hold("dev_b", &stop, false);
+        assert_eq!(
+            (
+                late.token().is_cancelled(),
+                other.token().is_cancelled(),
+                holds.devices()
+            ),
+            (true, false, vec!["dev_b".to_owned()])
         );
     }
 

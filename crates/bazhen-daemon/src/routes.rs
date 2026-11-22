@@ -198,9 +198,8 @@ async fn stream(
         _ => None,
     };
     let how = Streaming {
-        stop: device
-            .as_ref()
-            .map_or_else(|| shared.stop.token().clone(), |hold| hold.token().clone()),
+        stop: shared.stop.token().clone(),
+        device: device.as_ref().map(|hold| hold.token().clone()),
         store: shared.store,
         heartbeat: shared.heartbeat,
     };

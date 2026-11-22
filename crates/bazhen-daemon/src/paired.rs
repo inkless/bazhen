@@ -51,6 +51,13 @@ fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
+/// Milliseconds since the daemon first asked, on a clock that only runs forward.
+fn steady_ms() -> i64 {
+    static START: std::sync::LazyLock<std::time::Instant> =
+        std::sync::LazyLock::new(std::time::Instant::now);
+    i64::try_from(START.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
 fn iso(ms: i64) -> String {
     jiff::Timestamp::from_millisecond(ms).map_or_else(|_| String::new(), |at| format!("{at:.3}"))
 }
@@ -203,11 +210,11 @@ pub(crate) async fn issue(State(shared): State<Shared>) -> Response {
         .codes
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .issue(now_ms());
+        .issue(steady_ms());
     match issued {
-        Ok(issued) => Json(PairingCodeResponse {
-            code: issued.code,
-            expires_at: iso(issued.expires_at),
+        Ok(code) => Json(PairingCodeResponse {
+            code,
+            expires_at: iso(now_ms() + crate::pairing::CODE_LIFETIME_MS),
             origins: shared.pairing.origins.to_vec(),
             lan: None,
         })
@@ -266,7 +273,7 @@ pub(crate) async fn pair(State(shared): State<Shared>, request: Request) -> Resp
         .codes
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .attempt(&code, &origin, Bucket::Loopback, now_ms());
+        .attempt(&code, &origin, Bucket::Loopback, steady_ms());
     match attempt {
         Attempt::RateLimited {
             retry_after_seconds,
@@ -350,7 +357,7 @@ pub(crate) async fn revoke(State(shared): State<Shared>, Path(id): Path<String>)
         .await
     {
         Ok(Ok(Revoked::Now | Revoked::Already)) => {
-            shared.pairing.holds.end_all(&id);
+            shared.pairing.holds.revoke(&id);
             tracing::info!("bazhen: revoked device {id}");
             Json(RevokeDeviceResponse {}).into_response()
         }
@@ -443,7 +450,7 @@ async fn close_lapsed(shared: &Shared) {
     let now = now_ms();
     for id in holding {
         match live.iter().find(|d| d.id.as_str() == id) {
-            None => shared.pairing.holds.end_all(&id),
+            None => shared.pairing.holds.revoke(&id),
             Some(device) => {
                 let lapses = device.expires_at.parse::<jiff::Timestamp>().ok();
                 if lapses.is_some_and(|at| now >= at.as_millisecond()) {
@@ -472,6 +479,7 @@ mod tests {
     struct Daemon {
         socket: Router,
         http: Router,
+        shared: Shared,
         path: std::path::PathBuf,
         thread: Option<crate::writer::Thread>,
         _dir: crate::testing::TempDir,
@@ -502,7 +510,8 @@ mod tests {
         };
         Daemon {
             socket: socket_router(shared.clone()),
-            http: http_router(shared, gate),
+            http: http_router(shared.clone(), gate),
+            shared,
             path,
             thread: Some(thread),
             _dir: dir,
@@ -610,7 +619,8 @@ mod tests {
                     .map(|id| id.starts_with("dev_")),
                 cookie
                     .strip_prefix("bazhen_device=")
-                    .map(|rest| rest.len() > 43),
+                    .and_then(|rest| rest.split(';').next())
+                    .map(devices::well_formed),
                 cookie.ends_with("; Path=/v1; Max-Age=86400; HttpOnly; SameSite=Strict"),
                 (again.status, again.body),
                 daemon.get("/v1/state", &[("cookie", sent)]).status,
@@ -848,5 +858,193 @@ mod tests {
             ),
             (None, 401, (200, None), Some(true), None)
         );
+    }
+
+    /// Lets `device` lapse: last seen long ago, over loopback.
+    fn lapse(daemon: &Daemon, device: &str) {
+        rusqlite::Connection::open(&daemon.path)
+            .unwrap()
+            .execute(
+                "UPDATE devices SET last_seen_at = '2020-01-01T00:00:00.000Z' WHERE id = ?",
+                [device],
+            )
+            .unwrap();
+    }
+
+    type Client = tungstenite::WebSocket<std::net::TcpStream>;
+
+    /// The daemon's HTTP API served on a port of its own, until dropped.
+    struct Listening {
+        address: std::net::SocketAddr,
+        stop: CancellationToken,
+        runtime: tokio::runtime::Runtime,
+    }
+
+    impl Drop for Listening {
+        fn drop(&mut self) {
+            self.stop.cancel();
+        }
+    }
+
+    fn listen(daemon: &Daemon, pairing_required: bool) -> Listening {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let listener = runtime
+            .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let gate = Gate {
+            allow: guard::allowlists(address.port(), None, &[]),
+            pairing_required,
+        };
+        let stop = CancellationToken::new();
+        runtime.spawn(crate::accept::serve_on(
+            listener,
+            http_router(daemon.shared.clone(), gate),
+            crate::accept::HTTP,
+            stop.clone(),
+            tokio_util::task::TaskTracker::new(),
+            || {},
+        ));
+        Listening {
+            address,
+            stop,
+            runtime,
+        }
+    }
+
+    impl Listening {
+        /// The event stream a page holding `cookie` opens.
+        fn watch(&self, daemon: &Daemon, cookie: &str) -> Client {
+            use tungstenite::client::IntoClientRequest as _;
+            let epoch = daemon
+                .shared
+                .store
+                .reader()
+                .unwrap()
+                .reads()
+                .epoch()
+                .unwrap();
+            let url = format!("ws://{}/v1/events?epoch={epoch}&after=0", self.address);
+            let mut request = url.into_client_request().unwrap();
+            let origin = format!("http://{}", self.address);
+            request
+                .headers_mut()
+                .insert("origin", origin.parse().unwrap());
+            request
+                .headers_mut()
+                .insert("cookie", cookie.parse().unwrap());
+            let tcp = std::net::TcpStream::connect(self.address).unwrap();
+            tungstenite::client(request, tcp).unwrap().0
+        }
+    }
+
+    /// The code of the close frame `ws` is sent within `wait`, skipping every other frame;
+    /// `None` if it stays open.
+    fn closed_with(ws: &mut Client, wait: Duration) -> Option<u16> {
+        ws.get_ref().set_read_timeout(Some(wait)).unwrap();
+        loop {
+            match ws.read() {
+                Ok(tungstenite::Message::Close(frame)) => {
+                    return Some(frame.map_or(1005, |f| u16::from(f.code)));
+                }
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    }
+
+    const HEARD: Duration = Duration::from_secs(5);
+    const QUIET: Duration = Duration::from_millis(300);
+
+    #[test]
+    fn ends_a_revoked_devices_streams_as_a_policy_close() {
+        let daemon = over_a_store(true);
+        let (cookie, device) = daemon.paired();
+        let (other, _) = daemon.paired();
+        let listening = listen(&daemon, true);
+        let mut revoked = listening.watch(&daemon, &cookie);
+        let mut kept = listening.watch(&daemon, &other);
+        let open = closed_with(&mut revoked, QUIET);
+        send(
+            &daemon.socket,
+            "POST",
+            &format!("/v1/devices/{device}/revoke"),
+            &[],
+            None,
+        );
+        assert_eq!(
+            (
+                open,
+                closed_with(&mut revoked, HEARD),
+                closed_with(&mut kept, QUIET),
+            ),
+            (None, Some(1008), None)
+        );
+    }
+
+    #[test]
+    fn ends_a_lapsed_devices_streams_that_had_to_pair_and_keeps_those_that_needn_t() {
+        let daemon = over_a_store(true);
+        let (cookie, device) = daemon.paired();
+        let (required, free) = (listen(&daemon, true), listen(&daemon, false));
+        let mut needed = required.watch(&daemon, &cookie);
+        let mut kept = free.watch(&daemon, &cookie);
+        required.runtime.block_on(close_lapsed(&daemon.shared));
+        let fresh = closed_with(&mut needed, QUIET);
+        lapse(&daemon, &device);
+        required.runtime.block_on(close_lapsed(&daemon.shared));
+        assert_eq!(
+            (
+                fresh,
+                closed_with(&mut needed, HEARD),
+                closed_with(&mut kept, QUIET)
+            ),
+            (None, Some(1008), None)
+        );
+    }
+
+    #[test]
+    fn looks_for_lapsed_devices_a_minute_on_and_stops_when_told() {
+        let daemon = over_a_store(true);
+        let (_, device) = daemon.paired();
+        lapse(&daemon, &device);
+        let streams = CancellationToken::new();
+        let hold = daemon.shared.pairing.holds.hold(&device, &streams, true);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .build()
+            .unwrap();
+        // A blocking task holds paused time still, so each wait here lets the loop catch up.
+        let settle =
+            || tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(20)));
+        let stop = CancellationToken::new();
+        let tasks = tokio_util::task::TaskTracker::new();
+        let seen = runtime.block_on(async {
+            let looking = tasks.spawn(close_lapsed_every_minute(
+                daemon.shared.clone(),
+                stop.clone(),
+            ));
+            tokio::time::sleep(CLOSE_EVERY.saturating_sub(Duration::from_secs(1))).await;
+            settle().await.unwrap();
+            let early = hold.token().is_cancelled();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            for _ in 0..100 {
+                if hold.token().is_cancelled() {
+                    break;
+                }
+                settle().await.unwrap();
+            }
+            stop.cancel();
+            let stopped = tokio::time::timeout(Duration::from_secs(1), looking)
+                .await
+                .is_ok();
+            (early, hold.token().is_cancelled(), stopped)
+        });
+        assert_eq!(seen, (false, true, true));
     }
 }

@@ -62,15 +62,8 @@ struct Limits {
     per_key: HashMap<String, Window>,
 }
 
-/// A code as it was issued.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Issued {
-    pub(crate) code: String,
-    pub(crate) expires_at: i64,
-}
-
-/// The live code and its attempt windows. Times are milliseconds since the epoch, given by the
-/// caller.
+/// The live code and its attempt windows. Times are milliseconds on a clock that only runs
+/// forward, given by the caller, so stepping the wall clock stretches neither.
 #[derive(Debug, Default)]
 pub(crate) struct PairingCodes {
     live: Option<LiveCode>,
@@ -117,19 +110,18 @@ pub(crate) fn random_bytes<const N: usize>() -> std::io::Result<[u8; N]> {
 
 impl PairingCodes {
     /// A new code, replacing any earlier one.
-    pub(crate) fn issue(&mut self, now: i64) -> std::io::Result<Issued> {
+    pub(crate) fn issue(&mut self, now: i64) -> std::io::Result<String> {
         Ok(self.issue_from(now, random_bytes()?))
     }
 
-    fn issue_from(&mut self, now: i64, random: [u8; CODE_LENGTH]) -> Issued {
+    fn issue_from(&mut self, now: i64, random: [u8; CODE_LENGTH]) -> String {
         let code = code_from(random);
-        let expires_at = now + CODE_LIFETIME_MS;
         self.live = Some(LiveCode {
             hash: digest(&code),
-            expires_at,
+            expires_at: now + CODE_LIFETIME_MS,
             failures: HashMap::new(),
         });
-        Issued { code, expires_at }
+        code
     }
 
     /// Tries `typed` against the live code; a match uses it up. `key` is what attempts are
@@ -222,7 +214,7 @@ mod tests {
 
     fn issued() -> (PairingCodes, String) {
         let mut codes = PairingCodes::default();
-        let code = codes.issue_from(T0, [0, 1, 2, 3, 28, 29, 30, 31]).code;
+        let code = codes.issue_from(T0, [0, 1, 2, 3, 28, 29, 30, 31]);
         (codes, code)
     }
 
@@ -244,11 +236,11 @@ mod tests {
         let twice = codes.attempt(&code, ORIGIN, Bucket::Loopback, T0 + 1);
         let late = {
             let mut codes = PairingCodes::default();
-            let code = codes.issue_from(T0, [5; 8]).code;
+            let code = codes.issue_from(T0, [5; 8]);
             let at_end = codes.attempt(&code, "a", Bucket::Loopback, T0 + CODE_LIFETIME_MS);
             let just_before = {
                 let mut codes = PairingCodes::default();
-                let code = codes.issue_from(T0, [5; 8]).code;
+                let code = codes.issue_from(T0, [5; 8]);
                 codes.attempt(&code, "a", Bucket::Loopback, T0 + CODE_LIFETIME_MS - 1)
             };
             (at_end, just_before)
@@ -278,7 +270,7 @@ mod tests {
     #[test]
     fn a_new_code_replaces_the_old_one() {
         let (mut codes, old) = issued();
-        let new = codes.issue_from(T0, [9; 8]).code;
+        let new = codes.issue_from(T0, [9; 8]);
         assert_eq!(
             (
                 codes.attempt(&old, ORIGIN, Bucket::Loopback, T0),

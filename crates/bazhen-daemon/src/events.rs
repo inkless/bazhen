@@ -124,7 +124,17 @@ impl Feed {
 pub(crate) struct Streaming {
     pub(crate) store: Writer,
     pub(crate) stop: CancellationToken,
+    /// For a paired device's stream, cancelled once the device is revoked or lapses.
+    pub(crate) device: Option<CancellationToken>,
     pub(crate) heartbeat: Heartbeat,
+}
+
+/// Resolves once `device` is cancelled, and never for a stream that isn't a device's.
+async fn ended(device: Option<&CancellationToken>) {
+    match device {
+        Some(token) => token.cancelled().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// A frame for the writer, and whether it ends a page.
@@ -285,6 +295,12 @@ async fn follow<E>(
         tokio::select! {
             () = how.stop.cancelled() => {
                 send(closing(close_code::AWAY, ""), false);
+                return Ending::Close;
+            }
+            () = ended(how.device.as_ref()) => {
+                // A device's token is the daemon's child, so both end as the daemon stops.
+                let code = if how.stop.is_cancelled() { close_code::AWAY } else { close_code::POLICY };
+                send(closing(code, ""), false);
                 return Ending::Close;
             }
             message = heard.next() => match message {
@@ -749,6 +765,7 @@ mod tests {
         let how = Streaming {
             store: store.clone(),
             stop: CancellationToken::new(),
+            device: None,
             heartbeat: BEAT,
         };
         let tasks = TaskTracker::new();
