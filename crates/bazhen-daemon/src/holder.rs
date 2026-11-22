@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use bazhen_holder_proto::body::{Cols, Generation, HistoryLines, Rows, Size, Theme};
 use bazhen_host_guard::holder::{HolderProcess, is_vouchable};
@@ -292,18 +293,56 @@ fn theme(theme: TuiTheme) -> Theme {
 /// The runtime over every holder this daemon starts or finds.
 #[derive(Debug)]
 pub(crate) struct Holder {
-    runtime: HolderRuntime,
+    runtime: Arc<HolderRuntime>,
     history_lines: u32,
     /// Whether containment has been said, once the first start decided it.
     told_containment: AtomicBool,
+    /// What each receiver of its events keeps of the processes told running, which a close
+    /// forgets.
+    told: Mutex<Vec<Weak<Respawned>>>,
 }
 
 impl Holder {
     pub(crate) fn new(runtime: HolderRuntime, history_lines: u32) -> Self {
         Self {
-            runtime,
+            runtime: Arc::new(runtime),
             history_lines,
             told_containment: AtomicBool::new(false),
+            told: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Forgets `terminal_id` in what each receiver of its events keeps, once it is closed.
+    fn forget(&self, terminal_id: &TerminalId) {
+        let mut told = self.told.lock().unwrap_or_else(PoisonError::into_inner);
+        told.retain(|kept| {
+            kept.upgrade().is_some_and(|kept| {
+                kept.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(terminal_id);
+                true
+            })
+        });
+    }
+
+    /// A receiver of its events from now on.
+    fn told(&self) -> HolderTold {
+        let respawned = Arc::new(Mutex::new(HashMap::new()));
+        self.told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Arc::downgrade(&respawned));
+        let runtime = Arc::clone(&self.runtime);
+        HolderTold {
+            told: self.runtime.events(),
+            respawned,
+            reread: Reread(Box::new(move || {
+                let runtime = Arc::clone(&runtime);
+                Box::pin(async move {
+                    let found = runtime.inventory().await.map_err(|e| detail(&e))?;
+                    Ok(found.into_iter().map(|entry| entry.terminal).collect())
+                })
+            })),
         }
     }
 
@@ -346,23 +385,42 @@ impl Holder {
     }
 }
 
+/// The process each terminal was last told running since the daemon started it, or read running
+/// once a receiver fell behind, which an exit at that generation names.
+type Respawned = Mutex<HashMap<TerminalId, HolderRef>>;
+
+/// Reads again what runs in each terminal, for a receiver that fell behind what it was told.
+struct Reread(Box<dyn Fn() -> Answer<'static, Result<Vec<HolderRef>, String>> + Send>);
+
+impl std::fmt::Debug for Reread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Reread")
+    }
+}
+
 /// The events a holder runtime tells.
 #[derive(Debug)]
 struct HolderTold {
     told: broadcast::Receiver<RuntimeEvent>,
-    /// The process each terminal was last told running since the daemon started it, which an
-    /// exit at that generation names.
-    respawned: HashMap<TerminalId, HolderRef>,
+    respawned: Arc<Respawned>,
+    reread: Reread,
 }
 
 impl HolderTold {
+    fn respawned(&self) -> std::sync::MutexGuard<'_, HashMap<TerminalId, HolderRef>> {
+        self.respawned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The process of `generation` the terminal was told running, if it was.
-    fn ended(&mut self, terminal_id: &TerminalId, generation: Generation) -> Option<Recorded> {
-        let told = self.respawned.get(terminal_id)?;
+    fn ended(&self, terminal_id: &TerminalId, generation: Generation) -> Option<Recorded> {
+        let mut respawned = self.respawned();
+        let told = respawned.get(terminal_id)?;
         if told.locator.generation != Some(generation) {
             return None;
         }
-        recorded_of(&self.respawned.remove(terminal_id)?)
+        recorded_of(&respawned.remove(terminal_id)?)
     }
 }
 
@@ -385,21 +443,33 @@ impl Events for HolderTold {
                     }
                     Ok(RuntimeEvent::Respawned { terminal }) => {
                         if let Some(recorded) = recorded_of(&terminal) {
-                            self.respawned
+                            self.respawned()
                                 .insert(terminal.terminal_id.clone(), terminal);
                             return Some(Event::Respawned(recorded));
                         }
                     }
                     Ok(RuntimeEvent::Lost { terminal }) => {
-                        self.respawned.remove(&terminal.terminal_id);
+                        self.respawned().remove(&terminal.terminal_id);
                         if let Some(recorded) = recorded_of(&terminal) {
                             return Some(Event::Lost(recorded));
                         }
                     }
-                    // A title isn't followed yet. An event missed while behind is seen again by
-                    // what reads the terminal next: a close finds what is left of it.
-                    Ok(RuntimeEvent::Title { .. })
-                    | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    // What each terminal runs is read again, so an exit told after a respawn
+                    // missed while behind still names its process. Any other event missed is
+                    // seen again by what reads the terminal next: a close finds what is left of
+                    // it.
+                    Err(broadcast::error::RecvError::Lagged(_)) => match (self.reread.0)().await {
+                        Ok(found) => self.respawned().extend(
+                            found
+                                .into_iter()
+                                .map(|terminal| (terminal.terminal_id.clone(), terminal)),
+                        ),
+                        Err(err) => tracing::warn!(
+                            "bazhen: holder events were missed, and what runs each terminal couldn't be read again: {err}"
+                        ),
+                    },
+                    // A title isn't followed yet.
+                    Ok(RuntimeEvent::Title { .. }) => {}
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
             }
@@ -428,7 +498,9 @@ impl Terminals for Holder {
             self.runtime
                 .close(&terminal)
                 .await
-                .map_err(|e| terminal_error(&e))
+                .map_err(|e| terminal_error(&e))?;
+            self.forget(&terminal.terminal_id);
+            Ok(())
         })
     }
 
@@ -583,10 +655,7 @@ impl Terminals for Holder {
     }
 
     fn events(&self) -> Box<dyn Events> {
-        Box::new(HolderTold {
-            told: self.runtime.events(),
-            respawned: HashMap::new(),
-        })
+        Box::new(self.told())
     }
 
     fn shutdown(&self) -> Answer<'_, ()> {
@@ -876,26 +945,49 @@ mod tests {
         }
     }
 
-    #[test]
-    fn names_the_process_an_exit_ended_where_it_was_told_running_and_none_it_wasnt() {
-        let (tx, rx) = broadcast::channel(16);
-        let mut told = HolderTold {
-            told: rx,
-            respawned: HashMap::new(),
-        };
-        let exited = |generation| RuntimeEvent::Exited {
+    /// A receiver of `told` that reads `found` running whenever it falls behind.
+    fn told_of(told: broadcast::Receiver<RuntimeEvent>, found: Vec<HolderRef>) -> HolderTold {
+        HolderTold {
+            told,
+            respawned: Arc::default(),
+            reread: Reread(Box::new(move || {
+                let found = found.clone();
+                Box::pin(async move { Ok(found) })
+            })),
+        }
+    }
+
+    fn exited_at(generation: u64) -> RuntimeEvent {
+        RuntimeEvent::Exited {
             terminal_id: holder_at(0).terminal_id,
             generation: Generation::new(generation).unwrap(),
             status: bazhen_holder_proto::body::ExitStatus::Unknown,
-        };
+        }
+    }
+
+    /// Every event `told` tells until its sender is gone.
+    fn told_all(mut told: HolderTold) -> Vec<Event> {
+        crate::testing::runtime().block_on(async {
+            let mut seen = Vec::new();
+            while let Some(event) = told.next().await {
+                seen.push(event);
+            }
+            seen
+        })
+    }
+
+    #[test]
+    fn names_the_process_an_exit_ended_where_it_was_told_running_and_none_it_wasnt() {
+        let (tx, rx) = broadcast::channel(16);
+        let told = told_of(rx, Vec::new());
         for event in [
-            exited(0),
+            exited_at(0),
             RuntimeEvent::Respawned {
                 terminal: holder_at(1),
             },
-            exited(2),
-            exited(1),
-            exited(1),
+            exited_at(2),
+            exited_at(1),
+            exited_at(1),
             RuntimeEvent::Lost {
                 terminal: holder_at(1),
             },
@@ -903,13 +995,7 @@ mod tests {
             tx.send(event).unwrap();
         }
         drop(tx);
-        let seen = crate::testing::runtime().block_on(async {
-            let mut seen = Vec::new();
-            while let Some(event) = told.next().await {
-                seen.push(event);
-            }
-            seen
-        });
+        let seen = told_all(told);
         let at = |generation| recorded_of(&holder_at(generation)).unwrap();
         let exit = |generation, found| {
             Event::Exited(Exit {
@@ -929,6 +1015,51 @@ mod tests {
                 Event::Lost(at(1)),
             ]
         );
+    }
+
+    #[test]
+    fn names_the_process_an_exit_ended_where_it_fell_behind_the_respawn_that_started_it() {
+        let (tx, rx) = broadcast::channel(1);
+        let told = told_of(rx, vec![holder_at(1)]);
+        tx.send(RuntimeEvent::Respawned {
+            terminal: holder_at(1),
+        })
+        .unwrap();
+        tx.send(exited_at(1)).unwrap();
+        drop(tx);
+        assert_eq!(
+            told_all(told),
+            [Event::Exited(Exit {
+                terminal_id: holder_at(0).terminal_id,
+                generation: 1,
+                found: recorded_of(&holder_at(1)),
+            })]
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn forgets_the_process_told_running_in_a_terminal_once_it_is_closed() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let dir = crate::testing::TempDir::new("holder-forget");
+        let uid = rustix::process::getuid().as_raw();
+        let root = bazhen_runtime_holder::HolderRoot::of(&dir.path().join("run"), uid);
+        root.make_private(uid).unwrap();
+        let holder = Holder::new(
+            HolderRuntime::new(bazhen_runtime_holder::RuntimeOptions::new(root)),
+            1000,
+        );
+        let (told, gone) = (holder.told(), holder.told());
+        drop(gone);
+        let terminal = holder_at(1);
+        told.respawned()
+            .insert(terminal.terminal_id.clone(), terminal.clone());
+        // No holder answers for it, so it counts as closed, with nothing to end.
+        let closed =
+            crate::testing::runtime().block_on(holder.close(&recorded_of(&terminal).unwrap()));
+        assert_eq!(closed, Ok(()));
+        assert_eq!(told.respawned().len(), 0);
+        assert_eq!(holder.told.lock().unwrap().len(), 1);
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -1071,8 +1202,8 @@ mod tests {
             let (shells, store, thread) = shells(&dir, &quits.to_string_lossy());
             runtime().block_on(async {
                 let (tracker, stop) = (TaskTracker::new(), CancellationToken::new());
-                let exits = shells.terminals().events();
-                tracker.spawn(Arc::clone(&shells).watch(exits, tracker.clone(), stop.clone()));
+                let events = shells.terminals().events();
+                tracker.spawn(Arc::clone(&shells).watch(events, tracker.clone(), stop.clone()));
                 let id = shells.open(&opening("o"), None).await.unwrap().terminal_id;
                 let deadline = Instant::now() + Duration::from_secs(10);
                 while state_of(&store, id.as_str()) != Some(TerminalState::Closed)

@@ -1804,6 +1804,68 @@ pub(crate) mod tests {
         });
     }
 
+    /// Each event recorded, as its type and payload, oldest first.
+    fn events_of(h: &Harness) -> Vec<(String, String)> {
+        let reader = h.store.reader().unwrap();
+        let events = reader.reads().events(0, 1000).unwrap();
+        events.into_iter().map(|e| (e.kind, e.payload)).collect()
+    }
+
+    #[test]
+    fn closes_a_closing_shell_as_the_user_asked_once_its_holder_is_lost_and_gone() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            h.mark(&id, TerminalChange::Closing).await;
+            h.fake.gone(&id);
+            h.shells
+                .lost(&crate::terminals::fake::recorded_at(&id, 0))
+                .await;
+            assert_eq!(
+                (h.state_of(&id), events_of(&h).pop()),
+                (
+                    Some(TerminalState::Closed),
+                    Some((
+                        "terminal.closed".to_owned(),
+                        r#"{"reason":"user"}"#.to_owned()
+                    ))
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn ignores_a_lost_holder_of_a_shell_already_closed_or_lost_saying_nothing() {
+        let h = setup(100);
+        let said = Said::default();
+        let _logging = said.logging();
+        runtime().block_on(async {
+            let closed = h.open("closed").await.unwrap();
+            h.mark(&closed, TerminalChange::Closing).await;
+            h.mark(
+                &closed,
+                TerminalChange::Closed(TerminalClosed {
+                    reason: TerminalClosedReason::User,
+                }),
+            )
+            .await;
+            h.fake.gone(&closed);
+            let lost = h.lost(TuiTheme::Dark).await;
+            let before = events_of(&h);
+            for id in [&closed, &lost] {
+                h.shells
+                    .lost(&crate::terminals::fake::recorded_at(id, 0))
+                    .await;
+            }
+            assert_eq!(
+                (h.state_of(&closed), h.state_of(&lost)),
+                (Some(TerminalState::Closed), Some(TerminalState::Lost))
+            );
+            assert_eq!(events_of(&h), before);
+            assert_eq!(said.times("bazhen: shell"), 0);
+        });
+    }
+
     /// What the daemon logs while it is set as the thread's subscriber.
     #[derive(Debug, Clone, Default)]
     pub(crate) struct Said(Arc<StdMutex<Vec<u8>>>);

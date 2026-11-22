@@ -31,19 +31,21 @@ use crate::shells::{Shells, ShellsDeps};
 use crate::terminals::Events;
 use crate::tokens;
 
-/// How the daemon serves: each listener's limits, and how long its connections get to finish once
-/// a stop is asked for.
+/// How the daemon serves: each listener's limits, how long its connections get to finish once
+/// a stop is asked for, and how often it reads its shells again.
 #[derive(Debug, Clone, Copy)]
 struct Serving {
     http: Limits,
     socket: Limits,
     drain: Duration,
+    tick: Duration,
 }
 
 const SERVING: Serving = Serving {
     http: accept::HTTP,
     socket: accept::SOCKET,
     drain: DRAIN,
+    tick: TICK,
 };
 
 /// What serving needs from the settings.
@@ -233,19 +235,26 @@ async fn shells(
 /// TypeScript daemon's server watch's tick.
 const TICK: Duration = Duration::from_secs(5);
 
-/// Reads the running shells' foregrounds, and which terminals need a restart, each `TICK`, until
-/// `stop`. A restart read that fails is said once until one reads again.
-async fn every_tick(shells: Arc<Shells>, stop: CancellationToken) {
+/// Reads the running shells' foregrounds, and which terminals need a restart, `every` so often,
+/// until `stop`, which ends a tick midway: each of its writes to the store is whole on its own. A
+/// restart read that fails is said once until one reads again.
+async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToken) {
     let mut fault = None;
     while stop
-        .run_until_cancelled(tokio::time::sleep(TICK))
+        .run_until_cancelled(tokio::time::sleep(every))
         .await
         .is_some()
     {
-        shells.refresh_foregrounds().await;
-        match shells.sweep_restarts().await {
-            Ok(()) => fault = None,
-            Err(err) => {
+        let swept = stop
+            .run_until_cancelled(async {
+                shells.refresh_foregrounds().await;
+                shells.sweep_restarts().await
+            })
+            .await;
+        match swept {
+            None => return,
+            Some(Ok(())) => fault = None,
+            Some(Err(err)) => {
                 if fault.as_ref() != Some(&err) {
                     tracing::warn!(
                         "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -322,7 +331,11 @@ async fn listen(
     let retiring = token.clone();
     let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
     if let Some((running, events)) = watching {
-        tracker.spawn(every_tick(Arc::clone(&running), token.clone()));
+        tracker.spawn(every_tick(
+            Arc::clone(&running),
+            serving.tick,
+            token.clone(),
+        ));
         tracker.spawn(running.watch(events, tracker.clone(), token.clone()));
     }
     tracker.spawn(crate::paired::close_lapsed_every_minute(
@@ -712,6 +725,50 @@ mod tests {
                 ]),
                 "{health}"
             );
+        });
+        writer.finish();
+    }
+
+    #[test]
+    fn reads_its_shells_foregrounds_each_tick_and_stops_at_once_amid_a_read_that_hangs() {
+        let home = TempDir::new("tick");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let socket = PathBuf::from(&startup.paths.socket);
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let fake = crate::terminals::fake::Fake::default();
+        fake.set(|state| state.hold_reads = Some(Arc::new(tokio::sync::Semaphore::new(0))));
+        let runner = Runner {
+            terminals: Arc::new(fake.clone()),
+            ..faked(&startup)
+        };
+        let ticking = Serving {
+            tick: Duration::from_millis(20),
+            ..QUICK
+        };
+        let reads = || fake.state.lock().unwrap().foreground_reads;
+        runtime().block_on(async {
+            let tracker = TaskTracker::new();
+            let serving =
+                tracker.spawn(async move { listen(&startup, ticking, store, Some(runner)).await });
+            let open = b"POST /v1/shells HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: 22\r\nconnection: close\r\n\r\n{\"idempotencyKey\":\"o\"}";
+            ask(&socket, open).await;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while reads() == 0 {
+                assert!(Instant::now() < deadline, "no tick read the foregrounds");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let answer = ask(&socket, STOP).await;
+            let asked = Instant::now();
+            let reason = tokio::time::timeout(Duration::from_secs(5), serving).await;
+            let took = asked.elapsed();
+            assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
+            assert!(
+                matches!(reason, Ok(Ok(Ok(Reason::Requested)))),
+                "{reason:?}"
+            );
+            assert_eq!(reads(), 1);
+            assert!(took < QUICK.drain, "{took:?}");
         });
         writer.finish();
     }

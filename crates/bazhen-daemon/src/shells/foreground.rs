@@ -73,22 +73,32 @@ impl Shells {
             if !at_generation(found, shell.generation) {
                 continue;
             }
-            let found = found.clone();
+            let cwd = found.cwd.clone().filter(|cwd| *cwd != shell.current_cwd);
+            let command = found
+                .command
+                .as_deref()
+                .map(|c| whole(c, COMMAND_MAX).to_owned());
+            if cwd.is_none() && command == shell.foreground {
+                continue;
+            }
+            let generation = shell.generation;
             self.write(move |w| {
-                if let Some(cwd) = &found.cwd
-                    && *cwd != shell.current_cwd
-                {
-                    w.note_shell_cwd(shell.id.as_str(), cwd)?;
+                // And again as it is written, since other commands write between the two: a shell
+                // closed or replaced by then is left as it is.
+                let Some(now) = w.reads().shell(shell.id.as_str())? else {
+                    return Ok(());
+                };
+                if now.state != TerminalState::Running || now.generation != generation {
+                    return Ok(());
                 }
-                let command = found
-                    .command
-                    .as_deref()
-                    .map(|c| whole(c, COMMAND_MAX).to_owned());
-                if command == shell.foreground {
+                if let Some(cwd) = &cwd {
+                    w.note_shell_cwd(now.id.as_str(), cwd)?;
+                }
+                if command == now.foreground {
                     return Ok(());
                 }
                 w.append(&NewEvent::Terminal {
-                    terminal: shell.id,
+                    terminal: now.id,
                     actor: Actor::System,
                     change: TerminalChange::ForegroundChanged(TerminalForegroundChanged {
                         command,
@@ -114,6 +124,8 @@ fn at_generation(found: &ShellForeground, generation: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use bazhen_protocol::shells::{Foreground, TuiTheme};
 
     use super::*;
@@ -153,6 +165,106 @@ mod tests {
                 (running, h.foreground_shown()),
                 (Some("nvim".to_owned()), None)
             );
+        });
+    }
+
+    /// Polls `future` once, so the first job it sends the store's writer is queued behind those
+    /// sent before it, and says it hasn't ended.
+    async fn queue<F: Future + Unpin>(future: &mut F) {
+        tokio::select! {
+            biased;
+            _ = future => panic!("ended before its turn"),
+            () = std::future::ready(()) => {}
+        }
+    }
+
+    /// Drives `refresh` until its read of the foregrounds has reached the runtime: by then it has
+    /// sent the store its read of the shells again.
+    async fn past_the_read<F: Future + Unpin>(h: &Harness, refresh: &mut F) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        tokio::select! {
+            biased;
+            _ = refresh => panic!("ended before its turn"),
+            () = async {
+                while h.fake.state.lock().unwrap().foreground_reads == 0 {
+                    assert!(Instant::now() < deadline, "the foregrounds were never read");
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            } => {}
+        }
+    }
+
+    #[test]
+    fn records_nothing_of_a_shell_closed_after_it_was_read_again_but_before_its_write() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            h.fake.run_in_foreground(&id, "nvim");
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let mut refresh = std::pin::pin!(h.shells.refresh_foregrounds());
+            queue(&mut refresh).await;
+            let mut held = std::pin::pin!(h.store.run(move |_| gate.recv().is_ok()));
+            queue(&mut held).await;
+            past_the_read(&h, &mut refresh).await;
+            // Behind the writer's hold the shell is read again, then closed, before its write.
+            let terminal = bazhen_protocol::ids::TerminalId::parse(&id).unwrap();
+            let mut closed = std::pin::pin!(h.store.run(move |store| {
+                store.write(|w| {
+                    for change in [
+                        TerminalChange::Closing,
+                        TerminalChange::Closed(bazhen_protocol::events::TerminalClosed {
+                            reason: bazhen_protocol::events::TerminalClosedReason::User,
+                        }),
+                    ] {
+                        w.append(&NewEvent::Terminal {
+                            terminal: terminal.clone(),
+                            actor: Actor::User,
+                            change,
+                        })?;
+                    }
+                    Ok::<_, bazhen_store::AppendError>(())
+                })
+            }));
+            queue(&mut closed).await;
+            release.send(()).unwrap();
+            refresh.await;
+            closed.await.unwrap().unwrap();
+            held.await.unwrap();
+            let reader = h.store.reader().unwrap();
+            let kinds: Vec<String> = reader
+                .reads()
+                .events(0, 1000)
+                .unwrap()
+                .into_iter()
+                .map(|e| e.kind)
+                .skip_while(|kind| kind != "terminal.closed")
+                .collect();
+            assert_eq!(kinds, ["terminal.closed"]);
+        });
+    }
+
+    #[test]
+    fn writes_nothing_of_a_read_that_finds_what_was_recorded() {
+        let h = setup(100);
+        runtime().block_on(async {
+            h.open("open").await.unwrap();
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let (release_after, gate_after) = std::sync::mpsc::channel::<()>();
+            let mut refresh = std::pin::pin!(h.shells.refresh_foregrounds());
+            queue(&mut refresh).await;
+            let mut held = std::pin::pin!(h.store.run(move |_| gate.recv().is_ok()));
+            queue(&mut held).await;
+            past_the_read(&h, &mut refresh).await;
+            // Its read of the shells again is queued behind the first hold, and any write it made
+            // would wait behind the second.
+            let mut held_after = std::pin::pin!(h.store.run(move |_| gate_after.recv().is_ok()));
+            queue(&mut held_after).await;
+            release.send(()).unwrap();
+            let ended = tokio::time::timeout(Duration::from_secs(5), &mut refresh).await;
+            release_after.send(()).unwrap();
+            held.await.unwrap();
+            held_after.await.unwrap();
+            assert!(ended.is_ok(), "it waited for the store to write");
         });
     }
 

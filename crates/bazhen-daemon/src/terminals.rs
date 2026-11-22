@@ -249,6 +249,8 @@ pub(crate) mod fake {
         pub(crate) holders_ended: BTreeSet<u64>,
         /// Each create waits for a permit here before it starts anything.
         pub(crate) hold_creates: Option<Arc<Semaphore>>,
+        /// Each read of the foregrounds waits for a permit here once it has reached the runtime.
+        pub(crate) hold_reads: Option<Arc<Semaphore>>,
         /// Each create's process exits as it starts, told while the create has yet to answer.
         pub(crate) exit_as_created: bool,
         told: Vec<mpsc::UnboundedSender<Event>>,
@@ -486,8 +488,15 @@ pub(crate) mod fake {
             terminals: &'a [Recorded],
         ) -> Answer<'a, Result<Vec<ShellForeground>, TerminalError>> {
             Box::pin(async move {
-                let mut state = self.state.lock().unwrap();
-                state.foreground_reads += 1;
+                let held = {
+                    let mut state = self.state.lock().unwrap();
+                    state.foreground_reads += 1;
+                    state.hold_reads.clone()
+                };
+                if let Some(gate) = held {
+                    gate.acquire().await.unwrap().forget();
+                }
+                let state = self.state.lock().unwrap();
                 if let Some(refused) = &state.reads_refused {
                     return Err(refused.clone());
                 }
