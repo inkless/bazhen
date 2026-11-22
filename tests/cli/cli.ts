@@ -163,6 +163,7 @@ export class FakeDaemon {
   readonly received: Received[] = [];
   readonly #routes = new Map<string, (r: Received) => Reply | Promise<Reply>>();
   readonly #server: Server;
+  readonly #socket: string;
   readonly #hung: ServerResponse[] = [];
   readonly #sockets = new WebSocketServer({ noServer: true });
   /** Streams answered by hand, closed with the daemon. */
@@ -174,13 +175,14 @@ export class FakeDaemon {
   #serve: readonly ((stream: EventStream) => void)[] | undefined;
   #refuse = { status: 404, type: "text/plain", body: "404 Not Found" };
 
-  private constructor(server: Server) {
+  private constructor(server: Server, socket: string) {
     this.#server = server;
+    this.#socket = socket;
   }
 
   static async listen(socket: string): Promise<FakeDaemon> {
     const server = createServer();
-    const daemon = new FakeDaemon(server);
+    const daemon = new FakeDaemon(server, socket);
     server.on("request", (req, res) => {
       let text = "";
       req.setEncoding("utf8");
@@ -362,8 +364,13 @@ export class FakeDaemon {
     return this.received.map((r) => `${r.method} ${r.path}`);
   }
 
-  /** Stops answering: the socket refuses connections from now on, as a stopped daemon's does. */
+  /**
+   * Stops answering, as a stopped daemon does: the socket goes before the connections drop, so a
+   * client that sees one drop and looks for the daemon finds no socket, not one that is there and
+   * answers nothing.
+   */
   async close(): Promise<void> {
+    if (this.#server.listening) rmSync(this.#socket, { force: true });
     for (const res of this.#hung.splice(0)) res.destroy();
     for (const conn of this.#held.splice(0)) conn.destroy();
     for (const ws of this.#sockets.clients) ws.terminate();
