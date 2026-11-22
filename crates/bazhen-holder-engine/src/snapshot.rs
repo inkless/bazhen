@@ -396,13 +396,8 @@ fn write_cursor(
     };
     let waits = cursor.input_needs_wrap && point.column.0 + 1 == cols;
     let mut column = point.column.0;
-    // On a wide char's spacer, the char is printed from its first column; a spacer an erase left
-    // alone is printed as the blank it is.
-    if waits
-        && column > 0
-        && cell_at(column).flags.contains(Flags::WIDE_CHAR_SPACER)
-        && cell_at(column - 1).flags.contains(Flags::WIDE_CHAR)
-    {
+    // On a wide char's spacer, the char is printed from its first column.
+    if waits && column > 0 && cell_at(column).flags.contains(Flags::WIDE_CHAR_SPACER) {
         column -= 1;
     }
     let row = match region {
@@ -418,13 +413,8 @@ fn write_cursor(
             "\x1b(B"
         });
         Pen::of(cell).write(out);
-        if column + 1 == cols && cell.flags.contains(Flags::WIDE_CHAR) {
-            // No room for its spacer: printed, it would wrap (see `encode_row`).
-            out.push(' ');
-        } else {
-            out.push(drawable(cell.c));
-            out.extend(cell.zerowidth().unwrap_or_default());
-        }
+        out.push(drawable(cell.c));
+        out.extend(cell.zerowidth().unwrap_or_default());
     }
     Pen::of(&cursor.template).write(out);
     write_charsets(out, designations(cursor));
@@ -508,12 +498,11 @@ pub(crate) mod tests {
             .map(|n| {
                 let mut row = grid[Line(i32::try_from(n).unwrap())].clone();
                 // The cell a wide char didn't fit in, the last, is read as a blank in no colour,
-                // and so is a blank there, or a wide char with no room for its spacer.
+                // and so is a blank there.
                 if let Some(cell) = row.last_mut() {
                     let blank = matches!(cell.c, ' ' | '\t')
                         && !cell.flags.intersects(Flags::WIDE_CHAR_SPACER);
-                    let alone = Flags::LEADING_WIDE_CHAR_SPACER.union(Flags::WIDE_CHAR);
-                    if blank || cell.flags.intersects(alone) {
+                    if blank || cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
                         let wraps = cell.flags.contains(Flags::WRAPLINE);
                         *cell = Cell::default();
                         cell.flags.set(Flags::WRAPLINE, wraps);

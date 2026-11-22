@@ -45,6 +45,7 @@ fn play(engine: &mut Engine, actions: &[Action], cuts: &[usize]) -> Resized {
             }
             (None, _) => {}
         }
+        assert_whole("engine", &engine.term);
     }
     engine.take_replies();
     resized
@@ -163,34 +164,6 @@ fn outside_its_origin(engine: &Engine) -> bool {
             .contains(&line)
 }
 
-/// Whether either screen holds a wide char's spacer with no wide char before it, as an erase that
-/// ends on the char leaves: printed over, alacritty clears the char just written. A snapshot
-/// writes the spacer as the blank it draws, a named divergence.
-fn has_a_spacer_without_its_wide_char(engine: &mut Engine) -> bool {
-    let orphan = |grid: &Grid<Cell>| {
-        (0..grid.screen_lines()).any(|n| {
-            let cells: Vec<&Cell> = grid[scrollback_line(0, n)].into_iter().collect();
-            let first = cells
-                .first()
-                .is_some_and(|cell| cell.flags.contains(Flags::WIDE_CHAR_SPACER));
-            first
-                || cells.windows(2).any(|pair| {
-                    pair[1].flags.contains(Flags::WIDE_CHAR_SPACER)
-                        && !pair[0].flags.contains(Flags::WIDE_CHAR)
-                })
-        })
-    };
-    let primary = PrimaryShown::new(&mut engine.term).is_some_and(|shown| orphan(shown.grid()));
-    primary || orphan(engine.term.grid())
-}
-
-/// [`has_a_wide_char_without_its_spacer`] on either screen.
-fn loses_a_wide_char(engine: &mut Engine) -> bool {
-    let primary = PrimaryShown::new(&mut engine.term)
-        .is_some_and(|shown| has_a_wide_char_without_its_spacer(shown.term));
-    primary || has_a_wide_char_without_its_spacer(&engine.term)
-}
-
 /// Whether either screen's last row is marked as wrapping, which only a region past the bottom
 /// or a scroll down leaves: nothing follows it for the snapshot to wrap into, so the mark can't
 /// come back, a named divergence that a later scroll carries up the screen.
@@ -204,23 +177,6 @@ fn last_row_wraps(engine: &mut Engine) -> bool {
     };
     let primary = PrimaryShown::new(&mut engine.term).is_some_and(|shown| wraps(shown.grid()));
     primary || wraps(engine.term.grid())
-}
-
-/// Whether either screen holds a wide char in the last column with no room for its spacer, as an
-/// insert or a narrowing leaves it. A snapshot writes the blank it has room to draw, a named
-/// divergence that printing over the cell then shows: over the char, alacritty clears the cell
-/// before it too.
-fn has_a_wide_char_with_no_room(engine: &mut Engine) -> bool {
-    let alone = |grid: &Grid<Cell>| {
-        (0..grid.screen_lines()).any(|n| {
-            grid[scrollback_line(0, n)]
-                .into_iter()
-                .last()
-                .is_some_and(|cell| cell.flags.contains(Flags::WIDE_CHAR))
-        })
-    };
-    let primary = PrimaryShown::new(&mut engine.term).is_some_and(|shown| alone(shown.grid()));
-    primary || alone(engine.term.grid())
 }
 
 /// `actions` without the REPs that come before anything is printed: one repeats the last char vte
@@ -261,10 +217,6 @@ fn goes_on_as_its_source(
     prop_assume!(!waits_on_a_wrapped_row(&mut original));
     prop_assume!(!outside_its_origin(&original));
     prop_assume!(!last_row_wraps(&mut original));
-    prop_assume!(!has_a_wide_char_with_no_room(&mut original));
-    prop_assume!(!has_a_spacer_without_its_wide_char(&mut original));
-    // A reflow can lose such a char, in alacritty, as the module above says: not compared.
-    prop_assume!(!loses_a_wide_char(&mut original));
     let after = without_a_repeat_before_printing(after);
     let mut fresh = restored(&mut original);
     // A resize under the alternate screen reflows the primary with the one row of history
@@ -303,9 +255,6 @@ fn goes_on_as_its_source(
     let resized_after = play(&mut original, after, cuts);
     play(&mut fresh, after, cuts);
     let reflowed = reflowed || resized_after.at_all;
-    if loses_a_wide_char(&mut original) {
-        return Ok(());
-    }
     let (ours, theirs) = (
         compared(&mut fresh, true, reflowed),
         compared(&mut original, true, reflowed),

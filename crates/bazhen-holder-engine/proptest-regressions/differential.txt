@@ -1,3 +1,4 @@
 # Seeds for failure cases proptest has generated in the past.
 cc 5d728fba0a7c338d0951eaed262df2a8eb488bae786c0b3f04e8f293b2bf6169
 cc 774407f37f598233d8757e7eaa4c930be9919f0c28d3f7be978670d26b51af29 # shrinks to size = Size { cols: 7, rows: 7 }, actions = [Text("\t abc"), Text(" bc中    中 xyzzy\txyzzy 中aaadef aaaa文字def xyzzybcabcdef 中"), MoveTo(0, 7), EraseLine, Resize(1, 2), Resize(3, 1)], cuts = [1]
+cc 2a7baeb7812976c9ff6a87f1d94a0047223f0423ff4e5e485f53a74519d7a7b8 # shrinks to size = Size { cols: 2, rows: 1 }, actions = [AltOn, Resize(3, 3), Text("  e\u{301}def 中"), Resize(1, 1), Resize(3, 1)], cuts = [1]
