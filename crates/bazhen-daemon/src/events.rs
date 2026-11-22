@@ -129,6 +129,23 @@ pub(crate) struct Streaming {
     pub(crate) heartbeat: Heartbeat,
 }
 
+/// Whether the stream is a device's that has been revoked or has lapsed.
+fn device_ended(how: &Streaming) -> bool {
+    how.device
+        .as_ref()
+        .is_some_and(CancellationToken::is_cancelled)
+}
+
+/// The close a device's ended stream is sent: a policy close, so the page doesn't open it again,
+/// unless the daemon is stopping. A device's token is the daemon's child, so both end then.
+fn device_close(how: &Streaming) -> u16 {
+    if how.stop.is_cancelled() {
+        close_code::AWAY
+    } else {
+        close_code::POLICY
+    }
+}
+
 /// Resolves once `device` is cancelled, and never for a stream that isn't a device's.
 async fn ended(device: Option<&CancellationToken>) {
     match device {
@@ -273,6 +290,12 @@ async fn follow<E>(
                 }
                 Err(lost) => return failed(&lost),
             };
+            // A device revoked or lapsed before its stream opened, or while it was read, is
+            // sent none of it.
+            if device_ended(how) {
+                send(closing(device_close(how), ""), false);
+                return Ending::Close;
+            }
             match next {
                 Ok(Next::Wait) => {}
                 Ok(Next::Send(frames)) => {
@@ -298,9 +321,7 @@ async fn follow<E>(
                 return Ending::Close;
             }
             () = ended(how.device.as_ref()) => {
-                // A device's token is the daemon's child, so both end as the daemon stops.
-                let code = if how.stop.is_cancelled() { close_code::AWAY } else { close_code::POLICY };
-                send(closing(code, ""), false);
+                send(closing(device_close(how), ""), false);
                 return Ending::Close;
             }
             message = heard.next() => match message {
@@ -751,6 +772,11 @@ mod tests {
     }
 
     fn peer(store: &Writer) -> Peer {
+        peer_of(store, None)
+    }
+
+    /// The same, for a device's stream that ends with `device`.
+    fn peer_of(store: &Writer, device: Option<CancellationToken>) -> Peer {
         let epoch = store.reader().unwrap().reads().epoch().unwrap();
         let (to_peer, gets) = mpsc::unbounded_channel();
         let (says, from_peer) = mpsc::unbounded_channel::<Message>();
@@ -765,7 +791,7 @@ mod tests {
         let how = Streaming {
             store: store.clone(),
             stop: CancellationToken::new(),
-            device: None,
+            device,
             heartbeat: BEAT,
         };
         let tasks = TaskTracker::new();
@@ -817,6 +843,25 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
+    }
+
+    #[test]
+    fn sends_a_stream_its_device_ended_before_it_opened_nothing_but_a_policy_close() {
+        let dir = TempDir::new("stream-revoked");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            appended(&store, 1).await;
+            let device = CancellationToken::new();
+            device.cancel();
+            let mut peer = peer_of(&store, Some(device));
+            peer.ended.await.unwrap();
+            let mut got = Vec::new();
+            while let Ok(message) = peer.gets.try_recv() {
+                got.push(message);
+            }
+            assert_eq!(got, vec![closing(close_code::POLICY, "")]);
+        });
+        thread.finish();
     }
 
     #[test]
