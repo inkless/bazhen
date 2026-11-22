@@ -58,6 +58,11 @@ enum Action {
     InsertLines(u8),
     EraseDisplay(u8),
     EraseLine,
+    /// `CSI Ps K`: from the cursor, to it, or the whole row.
+    EraseLineIn(u8),
+    EraseChars(u8),
+    InsertChars(u8),
+    DeleteChars(u8),
     MoveTo(u8, u8),
     Region(u8, u8),
     Reset,
@@ -127,6 +132,10 @@ impl Action {
             Self::InsertLines(n) => format!("\x1b[{n}L"),
             Self::EraseDisplay(n) => format!("\x1b[{n}J"),
             Self::EraseLine => "\x1b[K".into(),
+            Self::EraseLineIn(n) => format!("\x1b[{n}K"),
+            Self::EraseChars(n) => format!("\x1b[{n}X"),
+            Self::InsertChars(n) => format!("\x1b[{n}@"),
+            Self::DeleteChars(n) => format!("\x1b[{n}P"),
             Self::MoveTo(row, col) => format!("\x1b[{row};{col}H"),
             Self::Region(top, bottom) => format!("\x1b[{top};{bottom}r"),
             Self::Reset => "\x1bc".into(),
@@ -207,6 +216,11 @@ fn output() -> impl Strategy<Value = Action> {
         1 => (0u8..12).prop_map(Action::InsertLines),
         2 => (0u8..4).prop_map(Action::EraseDisplay),
         1 => Just(Action::EraseLine),
+        1 => (0u8..3).prop_map(Action::EraseLineIn),
+        1 => (0u8..8).prop_map(Action::EraseChars),
+        1 => (0u8..8).prop_map(Action::InsertChars),
+        1 => (0u8..8).prop_map(Action::DeleteChars),
+        1 => any::<bool>().prop_map(|on| Action::Ansi(4, on)),
         2 => (0u8..14, 0u8..30).prop_map(|(r, c)| Action::MoveTo(r, c)),
         1 => (0u8..10, 0u8..14).prop_map(|(t, b)| Action::Region(t, b)),
         1 => Just(Action::Reset),
@@ -632,10 +646,13 @@ fn assert_same(engine: &Engine, full: &FullHistory) {
 
 /// Holds both to keeping every wide char whole, history included.
 fn assert_whole_wide_chars(engine: &Engine, full: &FullHistory) {
-    for (side, term) in [("engine", &engine.term), ("reference", &full.term)] {
-        if let Some((row, column)) = half_a_wide_char(term) {
-            panic!("the {side} holds half a wide char, row {row} from the oldest, column {column}");
-        }
+    assert_whole("engine", &engine.term);
+    assert_whole("reference", &full.term);
+}
+
+fn assert_whole(side: &str, term: &Term<Sink>) {
+    if let Some((row, column)) = half_a_wide_char(term) {
+        panic!("the {side} holds half a wide char, row {row} from the oldest, column {column}");
     }
 }
 

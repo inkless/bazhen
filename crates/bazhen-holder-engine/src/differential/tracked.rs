@@ -47,6 +47,9 @@ impl Case {
                 }
                 (None, _) => {}
             }
+            assert_whole("engine", &self.engine.term);
+            assert_whole("reference", &self.full.term);
+            assert_whole("wider reference", &self.wide.term);
         }
     }
 

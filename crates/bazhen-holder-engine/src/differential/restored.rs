@@ -45,6 +45,7 @@ fn play(engine: &mut Engine, actions: &[Action], cuts: &[usize]) -> Resized {
             }
             (None, _) => {}
         }
+        assert_whole("engine", &engine.term);
     }
     engine.take_replies();
     resized
