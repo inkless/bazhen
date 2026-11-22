@@ -4,7 +4,7 @@
 //! after, each request bounded; what a holder says unasked reaches `events` through the watch
 //! (`watch.rs`), on a connection of its own.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -128,6 +128,14 @@ pub enum HealthState {
 pub struct RuntimeHealth {
     pub state: HealthState,
     pub version: String,
+}
+
+/// Which terminals this build serves in full, and which run on a holder sharing no major with it,
+/// with the versions that holder speaks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Compatibility {
+    pub outdated: HashMap<TerminalId, Vec<String>>,
+    pub served: HashSet<TerminalId>,
 }
 
 /// A holder that answered, the build it runs and the protocol versions it speaks.
@@ -1262,6 +1270,42 @@ impl HolderRuntime {
         })
     }
 
+    /// What each holder speaks, by the terminal its socket is named for: one at another's socket
+    /// is neither. Reads only.
+    ///
+    /// # Errors
+    ///
+    /// When the holders can't be listed.
+    pub async fn compatibility(&self) -> Result<Compatibility, RuntimeError> {
+        let mut read = Compatibility::default();
+        for (socket, reached) in self.reach_all(false).await? {
+            let Some(at) = terminal_at(&socket) else {
+                continue;
+            };
+            match reached {
+                Reached::Not(Unreached::Outdated { protocol }) => {
+                    let protocol = protocol.map_or_else(Vec::new, |versions| {
+                        versions
+                            .as_slice()
+                            .iter()
+                            .map(|v| v.as_str().to_owned())
+                            .collect()
+                    });
+                    read.outdated.insert(at, protocol);
+                }
+                // This build says hello in its own major alone, so one that answers is served in
+                // full: none agrees on an older major, as a TypeScript daemon's holder may.
+                Reached::Holder(answered) => {
+                    if answered.client.hello().terminal_id.as_str() == at.as_str() {
+                        read.served.insert(at);
+                    }
+                }
+                Reached::Not(_) => {}
+            }
+        }
+        Ok(read)
+    }
+
     /// Each holder that answers, with the build its argv names if it started when it says, and
     /// whether it is contained. One sharing no protocol with this build is listed by its socket.
     /// Reads only.
@@ -1881,6 +1925,26 @@ mod tests {
             assert_eq!(
                 told.recv().await.unwrap(),
                 RuntimeEvent::Title { terminal_id: id(1) }
+            );
+            fixture.runtime.shutdown().await;
+        });
+    }
+
+    #[test]
+    fn tells_the_terminals_it_serves_from_those_on_a_holder_it_cant_naming_what_that_speaks() {
+        let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+        block_on(async {
+            fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
+            fixture.serve(&id(2), Answering::Outdated);
+            fixture.serve(&id(3), Answering::Hello(Box::new(hello_of(&id(9)))));
+            fixture.stale(&id(4));
+            let read = fixture.runtime.compatibility().await.unwrap();
+            assert_eq!(
+                read,
+                Compatibility {
+                    outdated: HashMap::from([(id(2), vec!["2.0".to_owned()])]),
+                    served: HashSet::from([id(1)]),
+                }
             );
             fixture.runtime.shutdown().await;
         });

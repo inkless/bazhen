@@ -49,8 +49,9 @@ pub use install::{
 };
 pub use locator::{HolderLocator, HolderRef, LocatorError};
 pub use runtime::{
-    ForegroundProcess, HELLO, HealthState, HolderBuild, HolderRuntime, InventoryEntry, Needs,
-    ProcessLaunch, REQUEST, RuntimeError, RuntimeHealth, RuntimeOptions, StaleReason, TerminalSpec,
+    Compatibility, ForegroundProcess, HELLO, HealthState, HolderBuild, HolderRuntime,
+    InventoryEntry, Needs, ProcessLaunch, REQUEST, RuntimeError, RuntimeHealth, RuntimeOptions,
+    StaleReason, TerminalSpec,
 };
 pub use sockets::{HolderRoot, UnsafeHolderDir};
 pub use tags::{TerminalTags, decode_tags, encode_tags, unlinked};

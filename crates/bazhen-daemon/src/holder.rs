@@ -3,16 +3,19 @@
 //! holders run, installed where it can't be written over, the runtime over it, and what `bazhen
 //! doctor` says of both.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use bazhen_holder_proto::body::{Cols, Generation, HistoryLines, Rows, Size, Theme};
+use bazhen_host_guard::holder::{HolderProcess, is_vouchable};
 use bazhen_host_guard::scope::{self, CapsRefused, MIN_SYSTEMD, TERMINALS_SLICE};
 use bazhen_protocol::daemon::{
     Containment, Holder as HolderReport, HolderStats, MemoryCap, RunningHolder,
     RuntimeHealthReport, RuntimeReportState,
 };
+use bazhen_protocol::ids::TerminalId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
@@ -24,7 +27,10 @@ use bazhen_runtime_holder::{
 use tokio::sync::broadcast;
 
 use crate::config::RuntimeKind;
-use crate::terminals::{Answer, Exit, Exits, Recorded, ShellSpec, TerminalError, Terminals};
+use crate::terminals::{
+    Answer, Compatibility, Event, Events, Exit, FoundShell, Recorded, ShellForeground, ShellSpec,
+    TerminalError, Terminals,
+};
 
 /// The size a terminal starts at, until a view attaches and sets its own (`DEFAULT_SIZE`).
 const COLS: u64 = 120;
@@ -262,6 +268,21 @@ fn holder_ref(terminal: &Recorded) -> Result<HolderRef, TerminalError> {
     })
 }
 
+/// The incarnation `terminal` names, as the store records it; `None` for one whose socket's path
+/// isn't UTF-8, as no holder's is.
+fn recorded_of(terminal: &HolderRef) -> Option<Recorded> {
+    Some(Recorded {
+        terminal_id: terminal.terminal_id.clone(),
+        locator: terminal.locator.encode().ok()?,
+    })
+}
+
+/// A program's name as a shell's foreground shows it: `None` for the shell's own process, and a
+/// login shell's without the leading dash it may be named with, as `-fish`.
+fn program(command: &str, own: bool) -> Option<String> {
+    (!own).then(|| command.strip_prefix('-').unwrap_or(command).to_owned())
+}
+
 fn theme(theme: TuiTheme) -> Theme {
     match theme {
         TuiTheme::Light => Theme::Light,
@@ -272,18 +293,56 @@ fn theme(theme: TuiTheme) -> Theme {
 /// The runtime over every holder this daemon starts or finds.
 #[derive(Debug)]
 pub(crate) struct Holder {
-    runtime: HolderRuntime,
+    runtime: Arc<HolderRuntime>,
     history_lines: u32,
     /// Whether containment has been said, once the first start decided it.
     told_containment: AtomicBool,
+    /// What each receiver of its events keeps of the processes told running, which a close
+    /// forgets.
+    told: Mutex<Vec<Weak<Respawned>>>,
 }
 
 impl Holder {
     pub(crate) fn new(runtime: HolderRuntime, history_lines: u32) -> Self {
         Self {
-            runtime,
+            runtime: Arc::new(runtime),
             history_lines,
             told_containment: AtomicBool::new(false),
+            told: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Forgets `terminal_id` in what each receiver of its events keeps, once it is closed.
+    fn forget(&self, terminal_id: &TerminalId) {
+        let mut told = self.told.lock().unwrap_or_else(PoisonError::into_inner);
+        told.retain(|kept| {
+            kept.upgrade().is_some_and(|kept| {
+                kept.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(terminal_id);
+                true
+            })
+        });
+    }
+
+    /// A receiver of its events from now on.
+    fn told(&self) -> HolderTold {
+        let respawned = Arc::new(Mutex::new(HashMap::new()));
+        self.told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Arc::downgrade(&respawned));
+        let runtime = Arc::clone(&self.runtime);
+        HolderTold {
+            told: self.runtime.events(),
+            respawned,
+            reread: Reread(Box::new(move || {
+                let runtime = Arc::clone(&runtime);
+                Box::pin(async move {
+                    let found = runtime.inventory().await.map_err(|e| detail(&e))?;
+                    Ok(found.into_iter().map(|entry| entry.terminal).collect())
+                })
+            })),
         }
     }
 
@@ -326,36 +385,91 @@ impl Holder {
     }
 }
 
-/// The exits a holder runtime tells.
-#[derive(Debug)]
-struct HolderExits(broadcast::Receiver<RuntimeEvent>);
+/// The process each terminal was last told running since the daemon started it, or read running
+/// once a receiver fell behind, which an exit at that generation names.
+type Respawned = Mutex<HashMap<TerminalId, HolderRef>>;
 
-impl Exits for HolderExits {
-    fn next(&mut self) -> Answer<'_, Option<Exit>> {
+/// Reads again what runs in each terminal, for a receiver that fell behind what it was told.
+struct Reread(Box<dyn Fn() -> Answer<'static, Result<Vec<HolderRef>, String>> + Send>);
+
+impl std::fmt::Debug for Reread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Reread")
+    }
+}
+
+/// The events a holder runtime tells.
+#[derive(Debug)]
+struct HolderTold {
+    told: broadcast::Receiver<RuntimeEvent>,
+    respawned: Arc<Respawned>,
+    reread: Reread,
+}
+
+impl HolderTold {
+    fn respawned(&self) -> std::sync::MutexGuard<'_, HashMap<TerminalId, HolderRef>> {
+        self.respawned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The process of `generation` the terminal was told running, if it was.
+    fn ended(&self, terminal_id: &TerminalId, generation: Generation) -> Option<Recorded> {
+        let mut respawned = self.respawned();
+        let told = respawned.get(terminal_id)?;
+        if told.locator.generation != Some(generation) {
+            return None;
+        }
+        recorded_of(&respawned.remove(terminal_id)?)
+    }
+}
+
+impl Events for HolderTold {
+    fn next(&mut self) -> Answer<'_, Option<Event>> {
         Box::pin(async move {
             loop {
-                match self.0.recv().await {
+                match self.told.recv().await {
                     Ok(RuntimeEvent::Exited {
                         terminal_id,
                         generation,
                         ..
                     }) => {
-                        return Some(Exit {
+                        let found = self.ended(&terminal_id, generation);
+                        return Some(Event::Exited(Exit {
                             terminal_id,
                             generation: generation.get(),
-                        });
+                            found,
+                        }));
                     }
-                    Ok(
-                        // A holder lost is a shell lost, which the next change marks; until then
-                        // its shell stays as recorded, and a close finds what is left of it.
-                        RuntimeEvent::Lost { .. }
-                        // A process started outside the daemon, and a title, are not followed
-                        // yet.
-                        | RuntimeEvent::Respawned { .. }
-                        | RuntimeEvent::Title { .. },
-                    )
-                    // An exit missed while behind is seen again by the close that finds it.
-                    | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Ok(RuntimeEvent::Respawned { terminal }) => {
+                        if let Some(recorded) = recorded_of(&terminal) {
+                            self.respawned()
+                                .insert(terminal.terminal_id.clone(), terminal);
+                            return Some(Event::Respawned(recorded));
+                        }
+                    }
+                    Ok(RuntimeEvent::Lost { terminal }) => {
+                        self.respawned().remove(&terminal.terminal_id);
+                        if let Some(recorded) = recorded_of(&terminal) {
+                            return Some(Event::Lost(recorded));
+                        }
+                    }
+                    // What each terminal runs is read again, so an exit told after a respawn
+                    // missed while behind still names its process. Any other event missed is
+                    // seen again by what reads the terminal next: a close finds what is left of
+                    // it.
+                    Err(broadcast::error::RecvError::Lagged(_)) => match (self.reread.0)().await {
+                        Ok(found) => self.respawned().extend(
+                            found
+                                .into_iter()
+                                .map(|terminal| (terminal.terminal_id.clone(), terminal)),
+                        ),
+                        Err(err) => tracing::warn!(
+                            "bazhen: holder events were missed, and what runs each terminal couldn't be read again: {err}"
+                        ),
+                    },
+                    // A title isn't followed yet.
+                    Ok(RuntimeEvent::Title { .. }) => {}
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
             }
@@ -384,7 +498,9 @@ impl Terminals for Holder {
             self.runtime
                 .close(&terminal)
                 .await
-                .map_err(|e| terminal_error(&e))
+                .map_err(|e| terminal_error(&e))?;
+            self.forget(&terminal.terminal_id);
+            Ok(())
         })
     }
 
@@ -399,21 +515,39 @@ impl Terminals for Holder {
                 .foreground(&terminal)
                 .await
                 .map_err(|e| terminal_error(&e))?;
-            // A login shell's process may be named with a leading dash, as `-fish`.
-            Ok((!found.own).then(|| {
-                found
-                    .command
-                    .strip_prefix('-')
-                    .unwrap_or(&found.command)
-                    .to_owned()
-            }))
+            Ok(program(&found.command, found.own))
+        })
+    }
+
+    fn foregrounds<'a>(
+        &'a self,
+        terminals: &'a [Recorded],
+    ) -> Answer<'a, Result<Vec<ShellForeground>, TerminalError>> {
+        Box::pin(async move {
+            let asked: HashSet<TerminalId> =
+                terminals.iter().map(|t| t.terminal_id.clone()).collect();
+            let read = self
+                .runtime
+                .foregrounds(&asked)
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(read
+                .into_iter()
+                .filter_map(|(terminal, found)| {
+                    Some(ShellForeground {
+                        terminal: recorded_of(&terminal)?,
+                        command: program(&found.command, found.own),
+                        cwd: found.cwd.and_then(|cwd| cwd.to_str().map(str::to_owned)),
+                    })
+                })
+                .collect())
         })
     }
 
     fn health(&self) -> Answer<'_, RuntimeHealthReport> {
         Box::pin(async move {
             // No terminal recorded is named: one named whose socket is gone would be told to bind
-            // it again, which only the recovery at start, not yet ported, does.
+            // it again, which only `reachable`, at start, does.
             let health = self.runtime.health(&[]).await;
             RuntimeHealthReport {
                 kind: "holder".to_owned(),
@@ -428,6 +562,87 @@ impl Terminals for Holder {
         })
     }
 
+    fn reachable<'a>(&'a self, recorded: &'a [Recorded]) -> Answer<'a, bool> {
+        Box::pin(async move {
+            let known: Vec<HolderRef> =
+                recorded.iter().filter_map(|r| holder_ref(r).ok()).collect();
+            self.runtime.health(&known).await.state != HealthState::Unreachable
+        })
+    }
+
+    fn shells(&self) -> Answer<'_, Result<Vec<FoundShell>, TerminalError>> {
+        Box::pin(async move {
+            let found = self
+                .runtime
+                .inventory()
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(found
+                .into_iter()
+                .filter_map(|entry| match entry.tags {
+                    TerminalTags::Shell { linked_agent_id } => Some(FoundShell {
+                        terminal: recorded_of(&entry.terminal)?,
+                        dead: entry.exit.is_some(),
+                        linked_agent_id,
+                    }),
+                    TerminalTags::Agent { .. } => None,
+                })
+                .collect())
+        })
+    }
+
+    fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool> {
+        Box::pin(async move {
+            // A locator that can't be read proves nothing gone.
+            match holder_ref(terminal) {
+                Ok(terminal) => self.runtime.gone(&terminal).await,
+                Err(_) => false,
+            }
+        })
+    }
+
+    fn unlink<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, Result<(), TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            self.runtime
+                .unlink(&terminal)
+                .await
+                .map_err(|e| terminal_error(&e))
+        })
+    }
+
+    fn compatibility(&self) -> Answer<'_, Result<Compatibility, TerminalError>> {
+        Box::pin(async move {
+            let read = self
+                .runtime
+                .compatibility()
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(Compatibility {
+                outdated: read
+                    .outdated
+                    .into_iter()
+                    .map(|(id, protocol)| (id.as_str().to_owned(), protocol))
+                    .collect(),
+                served: read
+                    .served
+                    .into_iter()
+                    .map(|id| id.as_str().to_owned())
+                    .collect(),
+            })
+        })
+    }
+
+    fn vouches(&self, pid: u64, start: u64) -> bool {
+        let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return false;
+        };
+        is_vouchable(HolderProcess { pid, start })
+    }
+
     fn holders(&self) -> Answer<'_, Result<Vec<RunningHolder>, String>> {
         Box::pin(async move {
             let builds = self.runtime.builds().await.map_err(|e| detail(&e))?;
@@ -439,8 +654,8 @@ impl Terminals for Holder {
         containment_doctor(self.runtime.containment())
     }
 
-    fn exits(&self) -> Box<dyn Exits> {
-        Box::new(HolderExits(self.runtime.events()))
+    fn events(&self) -> Box<dyn Events> {
+        Box::new(self.told())
     }
 
     fn shutdown(&self) -> Answer<'_, ()> {
@@ -715,6 +930,138 @@ mod tests {
         }
     }
 
+    fn holder_at(generation: u64) -> HolderRef {
+        use bazhen_holder_proto::body::{Pid, StartTime};
+        HolderRef {
+            terminal_id: TerminalId::parse("term_0190a1b2c3d47abc8def0123456789ad").unwrap(),
+            locator: HolderLocator {
+                socket: PathBuf::from("/run/h/term.sock"),
+                holder_pid: Pid::new(10).unwrap(),
+                holder_start: StartTime::new(11).unwrap(),
+                child_pid: Pid::new(12 + generation).unwrap(),
+                child_start: StartTime::new(13).unwrap(),
+                generation: Some(Generation::new(generation).unwrap()),
+            },
+        }
+    }
+
+    /// A receiver of `told` that reads `found` running whenever it falls behind.
+    fn told_of(told: broadcast::Receiver<RuntimeEvent>, found: Vec<HolderRef>) -> HolderTold {
+        HolderTold {
+            told,
+            respawned: Arc::default(),
+            reread: Reread(Box::new(move || {
+                let found = found.clone();
+                Box::pin(async move { Ok(found) })
+            })),
+        }
+    }
+
+    fn exited_at(generation: u64) -> RuntimeEvent {
+        RuntimeEvent::Exited {
+            terminal_id: holder_at(0).terminal_id,
+            generation: Generation::new(generation).unwrap(),
+            status: bazhen_holder_proto::body::ExitStatus::Unknown,
+        }
+    }
+
+    /// Every event `told` tells until its sender is gone.
+    fn told_all(mut told: HolderTold) -> Vec<Event> {
+        crate::testing::runtime().block_on(async {
+            let mut seen = Vec::new();
+            while let Some(event) = told.next().await {
+                seen.push(event);
+            }
+            seen
+        })
+    }
+
+    #[test]
+    fn names_the_process_an_exit_ended_where_it_was_told_running_and_none_it_wasnt() {
+        let (tx, rx) = broadcast::channel(16);
+        let told = told_of(rx, Vec::new());
+        for event in [
+            exited_at(0),
+            RuntimeEvent::Respawned {
+                terminal: holder_at(1),
+            },
+            exited_at(2),
+            exited_at(1),
+            exited_at(1),
+            RuntimeEvent::Lost {
+                terminal: holder_at(1),
+            },
+        ] {
+            tx.send(event).unwrap();
+        }
+        drop(tx);
+        let seen = told_all(told);
+        let at = |generation| recorded_of(&holder_at(generation)).unwrap();
+        let exit = |generation, found| {
+            Event::Exited(Exit {
+                terminal_id: holder_at(0).terminal_id,
+                generation,
+                found,
+            })
+        };
+        assert_eq!(
+            seen,
+            [
+                exit(0, None),
+                Event::Respawned(at(1)),
+                exit(2, None),
+                exit(1, Some(at(1))),
+                exit(1, None),
+                Event::Lost(at(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn names_the_process_an_exit_ended_where_it_fell_behind_the_respawn_that_started_it() {
+        let (tx, rx) = broadcast::channel(1);
+        let told = told_of(rx, vec![holder_at(1)]);
+        tx.send(RuntimeEvent::Respawned {
+            terminal: holder_at(1),
+        })
+        .unwrap();
+        tx.send(exited_at(1)).unwrap();
+        drop(tx);
+        assert_eq!(
+            told_all(told),
+            [Event::Exited(Exit {
+                terminal_id: holder_at(0).terminal_id,
+                generation: 1,
+                found: recorded_of(&holder_at(1)),
+            })]
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn forgets_the_process_told_running_in_a_terminal_once_it_is_closed() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let dir = crate::testing::TempDir::new("holder-forget");
+        let uid = rustix::process::getuid().as_raw();
+        let root = bazhen_runtime_holder::HolderRoot::of(&dir.path().join("run"), uid);
+        root.make_private(uid).unwrap();
+        let holder = Holder::new(
+            HolderRuntime::new(bazhen_runtime_holder::RuntimeOptions::new(root)),
+            1000,
+        );
+        let (told, gone) = (holder.told(), holder.told());
+        drop(gone);
+        let terminal = holder_at(1);
+        told.respawned()
+            .insert(terminal.terminal_id.clone(), terminal.clone());
+        // No holder answers for it, so it counts as closed, with nothing to end.
+        let closed =
+            crate::testing::runtime().block_on(holder.close(&recorded_of(&terminal).unwrap()));
+        assert_eq!(closed, Ok(()));
+        assert_eq!(told.respawned().len(), 0);
+        assert_eq!(holder.told.lock().unwrap().len(), 1);
+    }
+
     #[derive(Debug, thiserror::Error)]
     #[error("{0}")]
     struct Failed(String, #[source] std::io::Error);
@@ -855,8 +1202,8 @@ mod tests {
             let (shells, store, thread) = shells(&dir, &quits.to_string_lossy());
             runtime().block_on(async {
                 let (tracker, stop) = (TaskTracker::new(), CancellationToken::new());
-                let exits = shells.terminals().exits();
-                tracker.spawn(Arc::clone(&shells).watch(exits, tracker.clone(), stop.clone()));
+                let events = shells.terminals().events();
+                tracker.spawn(Arc::clone(&shells).watch(events, tracker.clone(), stop.clone()));
                 let id = shells.open(&opening("o"), None).await.unwrap().terminal_id;
                 let deadline = Instant::now() + Duration::from_secs(10);
                 while state_of(&store, id.as_str()) != Some(TerminalState::Closed)

@@ -186,6 +186,10 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
     let store = shared.store.clone();
     let view = SnapshotView {
         host: shared.host.to_string(),
+        restart_holders: shared
+            .shells
+            .as_ref()
+            .map_or_else(Default::default, |shells| shells.restarts().holders()),
     };
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
         store.reader()?.reads().snapshot(&view)

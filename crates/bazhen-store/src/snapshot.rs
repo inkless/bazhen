@@ -1,6 +1,8 @@
 //! `/v1/state`: every read model a client draws, with the cursor its event stream resumes from,
 //! read in one transaction so the two agree.
 
+use std::collections::HashMap;
+
 use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::notices::Notice;
 use serde::de::DeserializeOwned;
@@ -44,6 +46,9 @@ const OPEN_NOTICE_ACTIONS: [&str; 1] = ["dismiss"];
 pub struct SnapshotView {
     /// This machine's name, which each local environment is on.
     pub host: String,
+    /// The holder to end for each terminal that needs a restart, by its id, as last proved still
+    /// running there: a pid that wasn't is never named.
+    pub restart_holders: HashMap<String, u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -86,7 +91,7 @@ impl Reads<'_> {
                 "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",
                 (),
             )?,
-            shells: crate::terminals::shells(&tx)?,
+            shells: crate::terminals::shells(&tx, view)?,
             tasks: rows(
                 &tx,
                 "SELECT id, title, state, owner_agent_id AS ownerAgentId,

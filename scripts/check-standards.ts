@@ -1371,6 +1371,8 @@ const NOT_DECODERS: Record<string, string> = {
     "lists the holders' directory and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::health":
     "reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::compatibility":
+    "reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::builds":
     "reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes, and the stats a holder answers, decoded the same way; parses nothing",
   "crates/bazhen-runtime-holder/src/watch.rs::next":
