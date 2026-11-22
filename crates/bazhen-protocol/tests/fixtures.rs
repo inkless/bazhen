@@ -25,7 +25,8 @@ use bazhen_protocol::mail::{
 };
 use bazhen_protocol::names::{AGENT_NAME_MAX, AgentName, AgentRef, Role};
 use bazhen_protocol::notices::{
-    DevicesResponse, DismissNoticeRequest, DismissNoticeResponse, PairingCodeResponse,
+    DEVICE_NAME_MAX, DEVICE_PAIRED, DevicesResponse, DismissNoticeRequest, DismissNoticeResponse,
+    PAIRING_ALPHABET, PAIRING_CODE_LENGTH, PairRequest, PairResponse, PairingCodeResponse,
     RevokeDeviceResponse,
 };
 use bazhen_protocol::roles::RolesResponse;
@@ -141,6 +142,8 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("LaunchAgentRequest", round_trips::<LaunchAgentRequest>),
     ("LaunchAgentResponse", round_trips::<LaunchAgentResponse>),
     ("OpenShellRequest", round_trips::<OpenShellRequest>),
+    ("PairRequest", round_trips::<PairRequest>),
+    ("PairResponse", round_trips::<PairResponse>),
     ("PairingCodeResponse", round_trips::<PairingCodeResponse>),
     ("RelaunchAgentRequest", round_trips::<RelaunchAgentRequest>),
     ("RenameAgentRequest", round_trips::<RenameAgentRequest>),
@@ -340,6 +343,10 @@ fn the_constants_are_the_protocols() {
     assert_eq!(constants["taskNoteMaxBytes"], TASK_NOTE_MAX_BYTES);
     assert_eq!(constants["agentNameMax"], AGENT_NAME_MAX);
     assert_eq!(constants["streamFrameMaxBytes"], STREAM_FRAME_MAX_BYTES);
+    assert_eq!(constants["pairingAlphabet"], PAIRING_ALPHABET);
+    assert_eq!(constants["pairingCodeLength"], PAIRING_CODE_LENGTH);
+    assert_eq!(constants["deviceNameMax"], DEVICE_NAME_MAX);
+    assert_eq!(constants["devicePaired"], DEVICE_PAIRED);
     let harnesses: Vec<&str> = HarnessId::ALL.iter().map(|h| h.as_str()).collect();
     assert_eq!(constants["harnesses"], serde_json::json!(harnesses));
     let all = [

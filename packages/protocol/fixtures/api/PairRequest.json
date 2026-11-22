@@ -1,0 +1,52 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "code": "abcd-2345"
+    },
+    "parsed": {
+      "code": "abcd-2345"
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "code": "ABCD 2345",
+      "name": "Phone"
+    },
+    "parsed": {
+      "code": "ABCD 2345",
+      "name": "Phone"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "code": "abcd-2345",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "code": "abcd-2345"
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "code": "ABCD 2345",
+      "name": "Phone",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "code": "ABCD 2345",
+      "name": "Phone"
+    }
+  }
+]

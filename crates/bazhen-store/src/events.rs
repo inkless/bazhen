@@ -3,8 +3,10 @@
 
 use std::num::NonZeroU32;
 
-use bazhen_protocol::events::{ResetReason, TaskCreated, event_kind};
-use bazhen_protocol::ids::TaskId;
+use bazhen_protocol::events::{
+    DevicePaired, DeviceRevoked, NoticeClosed, NoticeOpened, ResetReason, TaskCreated, event_kind,
+};
+use bazhen_protocol::ids::{DeviceId, NoticeId, TaskId};
 use bazhen_protocol::record::Record;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
@@ -14,7 +16,8 @@ use serde_json::value::RawValue;
 use crate::projections;
 
 /// An event this build records, with the entity it is about and who it came from: an agent's id,
-/// or a word naming the human or the system.
+/// or a word naming the human or the system. A device's events and a notice's closing come from
+/// the human, `user`, and a notice opens from the `system`, as the TypeScript daemon records them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NewEvent {
     TaskCreated {
@@ -22,30 +25,61 @@ pub enum NewEvent {
         actor: String,
         payload: TaskCreated,
     },
+    DevicePaired {
+        device: DeviceId,
+        payload: DevicePaired,
+    },
+    DeviceRevoked {
+        device: DeviceId,
+    },
+    NoticeOpened {
+        notice: NoticeId,
+        payload: NoticeOpened,
+    },
+    NoticeClosed {
+        notice: NoticeId,
+        payload: NoticeClosed,
+    },
 }
 
 impl NewEvent {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::TaskCreated { .. } => "task.created",
+            Self::DevicePaired { .. } => "device.paired",
+            Self::DeviceRevoked { .. } => "device.revoked",
+            Self::NoticeOpened { .. } => "notice.opened",
+            Self::NoticeClosed { .. } => "notice.closed",
         }
     }
 
     fn entity_id(&self) -> &str {
         match self {
             Self::TaskCreated { task, .. } => task.as_str(),
+            Self::DevicePaired { device, .. } | Self::DeviceRevoked { device } => device.as_str(),
+            Self::NoticeOpened { notice, .. } | Self::NoticeClosed { notice, .. } => {
+                notice.as_str()
+            }
         }
     }
 
     fn actor(&self) -> &str {
         match self {
             Self::TaskCreated { actor, .. } => actor,
+            Self::DevicePaired { .. } | Self::DeviceRevoked { .. } | Self::NoticeClosed { .. } => {
+                "user"
+            }
+            Self::NoticeOpened { .. } => "system",
         }
     }
 
     fn payload(&self) -> serde_json::Result<String> {
         match self {
             Self::TaskCreated { payload, .. } => serde_json::to_string(payload),
+            Self::DevicePaired { payload, .. } => serde_json::to_string(payload),
+            Self::DeviceRevoked { .. } => serde_json::to_string(&DeviceRevoked {}),
+            Self::NoticeOpened { payload, .. } => serde_json::to_string(payload),
+            Self::NoticeClosed { payload, .. } => serde_json::to_string(payload),
         }
     }
 }
@@ -780,7 +814,10 @@ mod tests {
                 task,
                 actor,
                 mut payload,
-            } = created(task(1), None);
+            } = created(task(1), None)
+            else {
+                panic!("created makes a task.created")
+            };
             payload.title = title.to_owned();
             payload.brief = brief.to_owned();
             NewEvent::TaskCreated {

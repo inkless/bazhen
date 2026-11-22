@@ -1,0 +1,29 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "deviceId": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "Phone"
+    },
+    "parsed": {
+      "deviceId": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "Phone"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "deviceId": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "Phone",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "deviceId": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "name": "Phone"
+    }
+  }
+]

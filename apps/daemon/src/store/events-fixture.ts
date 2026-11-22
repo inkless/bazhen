@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { resolveRoles } from "@bazhen/core";
 import { CreateTaskRequest, EVENTS, EventFrame } from "@bazhen/protocol";
 import { z } from "zod";
+import { Notices } from "../attention/notices.ts";
 import { builtinRoles } from "../roles/roles.ts";
 import { type Launcher, Tasks } from "../tasks/tasks.ts";
 import { type SnapshotView, Store } from "./store.ts";
@@ -83,6 +84,10 @@ function steady(text: string, db: DatabaseSync): string {
     swaps.set(host, fixedId("host", swaps.size + 1));
   for (const task of values("SELECT id FROM tasks ORDER BY created_event_id"))
     swaps.set(task, fixedId("task", swaps.size + 1));
+  for (const device of values("SELECT id FROM devices ORDER BY paired_at, rowid"))
+    swaps.set(device, fixedId("dev", swaps.size + 1));
+  for (const notice of values("SELECT id FROM notices ORDER BY created_event_id"))
+    swaps.set(notice, fixedId("ntc", swaps.size + 1));
   for (const epoch of values("SELECT epoch FROM event_log")) swaps.set(epoch, "e".repeat(32));
   let out = text;
   for (const [from, to] of swaps) out = out.replaceAll(from, to);
@@ -93,25 +98,54 @@ function unused(): never {
   throw new Error("the events fixture holds nothing a snapshot view describes, and mails no one");
 }
 
-/** A snapshot view for a store holding nothing a view describes: any use of it is a fault here. */
-const NO_VIEW: SnapshotView = {
+/**
+ * A snapshot view for a store holding nothing a view describes but notices, which it offers as
+ * `notices` does the owner on the Unix socket: any other use of it is a fault here.
+ */
+const ownerView = (notices: Notices): SnapshotView => ({
   host: unused,
   attachCommand: unused,
   resumes: unused,
   themes: unused,
   attentionActions: unused,
-  noticeActions: unused,
+  noticeActions: (notice) => notices.actions(notice, "owner-socket"),
   get shellsReport(): boolean {
     return unused();
   },
   listening: unused,
   promptHash: unused,
-};
+});
+
+/** Devices paired for the fixture, each with the hash its token would have, and where from. */
+const PAIRINGS = [
+  {
+    name: "Laptop",
+    tokenHash: "a".repeat(64),
+    secure: false,
+    origin: "http://127.0.0.1:7900",
+    address: null,
+  },
+  {
+    name: "Phone",
+    tokenHash: "b".repeat(64),
+    secure: true,
+    origin: "https://box.ts.net",
+    address: "100.64.0.7",
+  },
+  {
+    name: "Tablet",
+    tokenHash: "c".repeat(64),
+    secure: true,
+    origin: "https://m.local:7942",
+    address: "192.168.1.9",
+  },
+];
 
 /**
  * What the Rust daemon's event log is held to: the registry, and a log the human made with task
- * commands, as rows, as the stream sends each one, and as the snapshot reads it, with the
- * idempotency keys its commands recorded.
+ * commands and by pairing devices, dismissing one's notice and revoking another, as rows, as the
+ * stream sends each one, and as the snapshot reads it, with the idempotency keys its commands
+ * recorded.
  */
 export function eventsFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "bazhen-events-fixture-"));
@@ -137,6 +171,22 @@ export function eventsFixture(): string {
       outcome: "done",
       note: "merged",
     });
+    const pairedAt = new Date("2026-11-01T00:00:00.000Z");
+    const devices = PAIRINGS.map(({ name, tokenHash, secure, origin, address }) =>
+      store.pairDevice(name, tokenHash, secure, pairedAt, { origin, address }),
+    );
+    const phone = devices[1];
+    const notices = new Notices(store);
+    const opened = store.openNotices();
+    const dismissal = { idempotencyKey: "dismiss", notice: opened[0]?.id ?? "", fromDevice: phone };
+    notices.dismiss(
+      dismissal.notice,
+      { idempotencyKey: dismissal.idempotencyKey },
+      "owner-socket",
+      dismissal.fromDevice,
+    );
+    store.revokeDevice(phone ?? "", pairedAt);
+    store.revokeDevice(phone ?? "", pairedAt);
     const requests = [parent, child];
     const created = [first, second];
     store.close();
@@ -148,7 +198,7 @@ export function eventsFixture(): string {
       const frames = read
         .events(0)
         .map((event) => JSON.stringify(EventFrame.parse({ type: "event", event })));
-      const snapshot = read.snapshot(NO_VIEW);
+      const snapshot = read.snapshot(ownerView(notices));
       read.close();
       const rows = (table: string) =>
         db
@@ -160,11 +210,20 @@ export function eventsFixture(): string {
         log: {
           requests,
           responses: created,
+          pairings: PAIRINGS.map((pairing, i) => ({ ...pairing, deviceId: devices[i] })),
+          dismissal: { ...dismissal, by: "owner-socket" },
+          revoked: phone,
           tables: Object.fromEntries(
-            ["host", "events", "tasks", "task_notes", "idempotency_keys", "event_log"].map((t) => [
-              t,
-              rows(t),
-            ]),
+            [
+              "host",
+              "events",
+              "tasks",
+              "task_notes",
+              "devices",
+              "notices",
+              "idempotency_keys",
+              "event_log",
+            ].map((t) => [t, rows(t)]),
           ),
           frames,
           snapshot,
