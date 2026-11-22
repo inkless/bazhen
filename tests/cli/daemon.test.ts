@@ -757,16 +757,20 @@ describe("bazhen stop", () => {
           setTimeout(() => void daemon.close(), 100);
           return {};
         });
-      const begun = Date.now();
-      const ran = s.bazhen(["stop"]);
+      let finished = Infinity;
+      const ran = s.bazhen(["stop"]).then((r) => {
+        finished = Date.now();
+        return r;
+      });
       await sleep(1000);
+      const released = Date.now();
       await release();
       expect(await ran).toEqual({
         code: 0,
         stdout: "bazhen stopped; agents keep running\n",
         stderr: "",
       });
-      expect(Date.now() - begun).toBeGreaterThanOrEqual(1000);
+      expect(finished).toBeGreaterThanOrEqual(released);
     },
   );
 
