@@ -113,6 +113,34 @@ pub fn environ(pid: Pid) -> io::Result<Vec<OsString>> {
     }
 }
 
+/// Every pid the kernel lists now, this process's among them: `/proc`'s numbered entries on
+/// Linux, `KERN_PROC_ALL` on macOS.
+///
+/// # Errors
+///
+/// When the list can't be read.
+pub fn pids() -> io::Result<Vec<Pid>> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut pids = Vec::new();
+        for entry in std::fs::read_dir("/proc")? {
+            let name = entry?.file_name();
+            if let Some(pid) = name
+                .to_str()
+                .and_then(|n| n.parse().ok())
+                .and_then(Pid::from_raw)
+            {
+                pids.push(pid);
+            }
+        }
+        Ok(pids)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::pids()
+    }
+}
+
 /// A process's uids and its gids, each real, effective, saved and filesystem, in that order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Credentials {

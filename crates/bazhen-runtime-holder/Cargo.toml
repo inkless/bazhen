@@ -1,0 +1,24 @@
+[package]
+name = "bazhen-runtime-holder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bazhen-client = { workspace = true }
+bazhen-holder = { workspace = true }
+bazhen-holder-proto = { workspace = true }
+bazhen-host-guard = { workspace = true }
+bazhen-protocol = { workspace = true }
+futures-util = { workspace = true }
+rustix = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+bazhen-test-signal = { workspace = true }
+
+[lints]
+workspace = true

@@ -423,7 +423,7 @@ mod os {
     }
 
     pub(super) fn list() -> io::Result<Vec<Listed>> {
-        Ok(pids()?
+        Ok(crate::process::pids()?
             .into_iter()
             .filter_map(|pid| {
                 seen(
@@ -458,21 +458,6 @@ mod os {
     fn gone(error: &io::Error) -> bool {
         error.kind() == io::ErrorKind::NotFound
             || error.raw_os_error() == Some(Errno::SRCH.raw_os_error())
-    }
-
-    fn pids() -> io::Result<Vec<Pid>> {
-        let mut pids = Vec::new();
-        for entry in std::fs::read_dir("/proc")? {
-            let name = entry?.file_name();
-            if let Some(pid) = name
-                .to_str()
-                .and_then(|n| n.parse().ok())
-                .and_then(Pid::from_raw)
-            {
-                pids.push(pid);
-            }
-        }
-        Ok(pids)
     }
 
     pub(super) fn visit(pid: Pid, session: Pid, signal: Option<Signal>) -> Member {

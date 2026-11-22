@@ -266,6 +266,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bazhen-runtime-holder"
+version = "0.1.0"
+dependencies = [
+ "bazhen-client",
+ "bazhen-holder",
+ "bazhen-holder-proto",
+ "bazhen-host-guard",
+ "bazhen-protocol",
+ "bazhen-test-signal",
+ "futures-util",
+ "rustix",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "bazhen-store"
 version = "0.1.0"
 dependencies = [
