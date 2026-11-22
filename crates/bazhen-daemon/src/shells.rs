@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use bazhen_protocol::events::{
     RuntimeRefPayload, TerminalClosed, TerminalClosedReason, TerminalFailed, TerminalFailedReason,
@@ -105,9 +106,11 @@ impl From<crate::writer::Closed> for ShellError {
 /// not as expected is a replaced one.
 fn from_runtime(id: &str, cause: TerminalError) -> ShellError {
     match cause {
-        TerminalError::Stale(_) | TerminalError::ProcessState(_) => ShellError::Conflict(format!(
-            "shell {id}'s terminal is not the one recorded; its server or pane has changed"
-        )),
+        TerminalError::Stale(_) | TerminalError::Gone(_) | TerminalError::ProcessState(_) => {
+            ShellError::Conflict(format!(
+                "shell {id}'s terminal is not the one recorded; its server or pane has changed"
+            ))
+        }
         TerminalError::Unservable {
             protocol,
             holder_pid,
@@ -177,7 +180,8 @@ pub(crate) fn resolve_directory(requested: &str, home: &str) -> Result<String, S
     let path = if requested == "~" {
         home.to_owned()
     } else if let Some(rest) = requested.strip_prefix("~/") {
-        let mut joined = normalized(&Path::new(home).join(rest))
+        // Joined as text, as `path.join` joins: a path's own join would take `~//tmp` for `/tmp`.
+        let mut joined = normalized(Path::new(&format!("{home}/{rest}")))
             .to_string_lossy()
             .into_owned();
         // `path.join` keeps a trailing slash, as `~/work/` asks.
@@ -265,6 +269,10 @@ pub(crate) struct ShellsDeps {
     /// The daemon's tasks, which every command runs on to its end.
     pub(crate) tracker: TaskTracker,
 }
+
+/// How long an exited shell's failed close waits to be tried again, at first and at most.
+const RETRY_FIRST: Duration = Duration::from_millis(100);
+const RETRY_MOST: Duration = Duration::from_secs(30);
 
 /// Shell terminals: whoever can reach the daemon's API can open and close them, confirming a
 /// busy close included, as with agents' own commands.
@@ -704,7 +712,9 @@ impl Shells {
         };
         let program = match self.deps.terminals.foreground(&terminal).await {
             Ok(program) => program,
-            Err(TerminalError::ProcessState(_)) => None,
+            // A shell already dead runs nothing, as one whose holder died with it: the close ends
+            // what is left of it, where a refusal would leave the user no way past.
+            Err(TerminalError::ProcessState(_) | TerminalError::Gone(_)) => None,
             Err(cause) => return Err(from_runtime(found.id.as_str(), cause)),
         };
         match program {
@@ -858,31 +868,49 @@ impl Shells {
         stop: CancellationToken,
     ) {
         while let Some(Some(exit)) = stop.run_until_cancelled(exits.next()).await {
-            let shells = Arc::clone(&self);
-            tracker.spawn(async move { shells.exited(exit).await });
+            let (shells, stop) = (Arc::clone(&self), stop.clone());
+            tracker.spawn(async move { shells.exited(exit, &stop).await });
         }
     }
 
     /// A shell that exits closes at once, with no warning. Closing goes first, so a view whose
-    /// stream ends with the terminal is told it closed, not that it disconnected; a close that
-    /// fails leaves it closing.
-    pub(crate) async fn exited(&self, exit: Exit) {
+    /// stream ends with the terminal is told it closed, not that it disconnected. A close that
+    /// fails leaves it closing and is tried again, less often each time, until it ends, the shell
+    /// is closed or replaced another way, or `stop`: the runtime tells each exit once, so nothing
+    /// else would end it while the daemon runs.
+    pub(crate) async fn exited(&self, exit: Exit, stop: &CancellationToken) {
         let id = exit.terminal_id.as_str().to_owned();
         let incarnation = format!("{id}:{}", exit.generation);
-        let ended = {
-            let _turn = self.turns.take(&id).await;
-            self.close_exited(&id, exit.generation).await
-        };
-        let mut unended = self.unended.lock().unwrap_or_else(PoisonError::into_inner);
-        match ended {
-            Ok(()) => {
-                unended.remove(&incarnation);
-            }
-            Err(err) => {
-                if unended.insert(incarnation) {
-                    tracing::warn!("bazhen: shell {id}: could not end it after it exited: {err}");
+        let mut wait = RETRY_FIRST;
+        loop {
+            let ended = {
+                let _turn = self.turns.take(&id).await;
+                self.close_exited(&id, exit.generation).await
+            };
+            {
+                let mut unended = self.unended.lock().unwrap_or_else(PoisonError::into_inner);
+                match ended {
+                    Ok(()) => {
+                        unended.remove(&incarnation);
+                        return;
+                    }
+                    Err(err) => {
+                        if unended.insert(incarnation.clone()) {
+                            tracing::warn!(
+                                "bazhen: shell {id}: could not end it after it exited: {err}"
+                            );
+                        }
+                    }
                 }
             }
+            if stop
+                .run_until_cancelled(tokio::time::sleep(wait))
+                .await
+                .is_none()
+            {
+                return;
+            }
+            wait = (wait * 2).min(RETRY_MOST);
         }
     }
 
@@ -1193,6 +1221,7 @@ mod tests {
         assert_eq!(resolved("~"), Ok(home.clone()));
         assert_eq!(resolved("~/a/../b"), Ok(format!("{home}/b")));
         assert_eq!(resolved("~/a/./b/"), Ok(format!("{home}/a/b/")));
+        assert_eq!(resolved("~//b"), Ok(format!("{home}/b")));
         assert_eq!(resolved(&format!("{home}/b")), Ok(format!("{home}/b")));
         assert_eq!(
             [
@@ -1272,6 +1301,23 @@ mod tests {
             let id = h.open("open").await.unwrap();
             h.fake.run_in_foreground(&id, "nvim");
             h.fake.exit_unseen(&id);
+            h.shells.close(&id, &closing("c", 0)).await.unwrap();
+            assert_eq!(
+                (h.state_of(&id), h.fake.carries(&id)),
+                (Some(TerminalState::Closed), false)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_without_asking_a_running_shell_whose_holder_died_with_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            h.fake.run_in_foreground(&id, "nvim");
+            h.fake.gone(&id);
             h.shells.close(&id, &closing("c", 0)).await.unwrap();
             assert_eq!(
                 (h.state_of(&id), h.fake.carries(&id)),
@@ -1408,11 +1454,15 @@ mod tests {
         let h = setup(100);
         runtime().block_on(async {
             let id = h.open("open").await.unwrap();
+            let stop = CancellationToken::new();
             h.shells
-                .exited(Exit {
-                    terminal_id: terminal(&id),
-                    generation: 1,
-                })
+                .exited(
+                    Exit {
+                        terminal_id: terminal(&id),
+                        generation: 1,
+                    },
+                    &stop,
+                )
                 .await;
             assert_eq!(
                 (h.state_of(&id), h.fake.carries(&id)),
@@ -1421,26 +1471,111 @@ mod tests {
         });
     }
 
-    #[test]
-    fn leaves_an_exited_shell_it_couldnt_end_closing_said_once_and_ends_it_on_the_next_exit() {
-        let h = setup(100);
-        runtime().block_on(async {
-            let id = h.open("open").await.unwrap();
+    /// What the daemon logs while it is set as the thread's subscriber.
+    #[derive(Debug, Clone, Default)]
+    struct Said(Arc<StdMutex<Vec<u8>>>);
+
+    impl std::io::Write for Said {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Said {
+        fn logging(&self) -> tracing::subscriber::DefaultGuard {
+            let said = self.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(move || said.clone())
+                .finish();
+            tracing::subscriber::set_default(subscriber)
+        }
+
+        fn times(&self, text: &str) -> usize {
+            String::from_utf8_lossy(&self.0.lock().unwrap())
+                .matches(text)
+                .count()
+        }
+    }
+
+    impl Harness {
+        /// How many closes have reached the runtime from now on.
+        fn count_closes(&self) -> Arc<std::sync::atomic::AtomicUsize> {
+            let tries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counted = Arc::clone(&tries);
+            *self.fake.on_close.lock().unwrap() = Some(OnClose(Box::new(move |_| {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            })));
+            tries
+        }
+
+        /// Handles the exit of `id`'s shell as the watch does, until `stop`.
+        fn exit_told(&self, id: &str, stop: &CancellationToken) -> tokio::task::JoinHandle<()> {
+            let (shells, stop) = (Arc::clone(&self.shells), stop.clone());
             let exit = Exit {
-                terminal_id: terminal(&id),
+                terminal_id: terminal(id),
                 generation: 0,
             };
+            TaskTracker::new().spawn(async move { shells.exited(exit, &stop).await })
+        }
+    }
+
+    async fn until_tried(tries: &std::sync::atomic::AtomicUsize, times: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while tries.load(std::sync::atomic::Ordering::SeqCst) < times {
+            assert!(
+                Instant::now() < deadline,
+                "tried {tries:?} times, never {times}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[test]
+    fn tries_again_to_end_an_exited_shell_it_couldnt_saying_so_once_until_it_ends() {
+        let h = setup(100);
+        let said = Said::default();
+        let _logging = said.logging();
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            let tries = h.count_closes();
             h.fake.set(|state| state.fail_closes = true);
-            h.shells.exited(exit.clone()).await;
-            h.shells.exited(exit.clone()).await;
+            let ending = h.exit_told(&id, &CancellationToken::new());
+            until_tried(&tries, 3).await;
             let unended = h.shells.unended.lock().unwrap().clone();
             let left = h.state_of(&id);
             h.fake.set(|state| state.fail_closes = false);
-            h.shells.exited(exit).await;
+            tokio::time::timeout(Duration::from_secs(5), ending)
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(unended, HashSet::from([format!("{id}:0")]));
             assert_eq!(left, Some(TerminalState::Closing));
             assert_eq!(h.state_of(&id), Some(TerminalState::Closed));
             assert!(h.shells.unended.lock().unwrap().is_empty());
+            assert_eq!(said.times("could not end it after it exited"), 1);
+        });
+    }
+
+    #[test]
+    fn stops_trying_to_end_an_exited_shell_once_the_daemon_stops() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            let tries = h.count_closes();
+            h.fake.set(|state| state.fail_closes = true);
+            let stop = CancellationToken::new();
+            let ending = h.exit_told(&id, &stop);
+            until_tried(&tries, 1).await;
+            stop.cancel();
+            let ended = tokio::time::timeout(Duration::from_secs(5), ending).await;
+            assert!(matches!(ended, Ok(Ok(()))), "{ended:?}");
+            assert_eq!(h.state_of(&id), Some(TerminalState::Closing));
         });
     }
 

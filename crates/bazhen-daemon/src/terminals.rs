@@ -40,6 +40,9 @@ pub(crate) enum TerminalError {
     /// What runs at the terminal is not the incarnation recorded: its holder or process changed.
     #[error("{0}")]
     Stale(String),
+    /// Nothing answers for it, and what ran it provably runs no more: it is running nothing.
+    #[error("{0}")]
+    Gone(String),
     /// Its process is not in the state the verb needs, as one that has exited.
     #[error("{0}")]
     ProcessState(String),
@@ -63,7 +66,7 @@ impl TerminalError {
     pub(crate) fn forceable(&self) -> bool {
         !matches!(
             self,
-            Self::Stale(_) | Self::ProcessState(_) | Self::Unservable { .. }
+            Self::Stale(_) | Self::Gone(_) | Self::ProcessState(_) | Self::Unservable { .. }
         )
     }
 }
@@ -133,6 +136,8 @@ pub(crate) mod fake {
         /// What holds its foreground; `None` for its own process.
         pub(crate) foreground: Option<String>,
         pub(crate) exited: bool,
+        /// Its holder died, taking its process with it.
+        pub(crate) gone: bool,
     }
 
     #[derive(Debug, Default)]
@@ -208,6 +213,12 @@ pub(crate) mod fake {
             state.exits.retain(|to| to.send(exit.clone()).is_ok());
         }
 
+        /// What ran it ends, told to no one, as a holder that died: its process is gone with it.
+        pub(crate) fn gone(&self, terminal_id: &str) {
+            let mut state = self.state.lock().unwrap();
+            state.running.get_mut(terminal_id).unwrap().gone = true;
+        }
+
         /// Its process ends, told to no one, as one that ended before anything watched it.
         pub(crate) fn exit_unseen(&self, terminal_id: &str) {
             let mut state = self.state.lock().unwrap();
@@ -247,6 +258,7 @@ pub(crate) mod fake {
                             spec,
                             foreground: None,
                             exited: false,
+                            gone: false,
                         },
                     );
                     state.exit_as_created
@@ -282,6 +294,9 @@ pub(crate) mod fake {
             Box::pin(async move {
                 let state = self.state.lock().unwrap();
                 match state.running.get(terminal.terminal_id.as_str()) {
+                    Some(running) if running.gone => {
+                        Err(TerminalError::Gone("its holder is gone".to_owned()))
+                    }
                     Some(running) if running.exited => Err(TerminalError::ProcessState(
                         "its process isn't running".to_owned(),
                     )),

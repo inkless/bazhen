@@ -18,7 +18,8 @@ use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
 use bazhen_runtime_holder::{
     HealthState, HolderBuild, HolderLocator, HolderRef, HolderRuntime, InstallOptions,
-    InstalledHolder, ProcessLaunch, RuntimeError, RuntimeEvent, TerminalSpec, TerminalTags,
+    InstalledHolder, ProcessLaunch, RuntimeError, RuntimeEvent, StaleReason, TerminalSpec,
+    TerminalTags,
 };
 use tokio::sync::broadcast;
 
@@ -229,6 +230,10 @@ fn detail(err: &dyn std::error::Error) -> String {
 /// The runtime's failure in the kinds a command answers differently.
 fn terminal_error(err: &RuntimeError) -> TerminalError {
     match err {
+        RuntimeError::Stale {
+            reason: StaleReason::Gone,
+            ..
+        } => TerminalError::Gone(detail(err)),
         RuntimeError::Stale { .. } => TerminalError::Stale(detail(err)),
         RuntimeError::ProcessState { .. } => TerminalError::ProcessState(detail(err)),
         RuntimeError::Unservable {
@@ -680,6 +685,34 @@ mod tests {
                 holder_pid: Some(77)
             }
         );
+    }
+
+    #[test]
+    fn answers_a_holder_gone_as_a_terminal_running_nothing_and_any_other_stale_one_as_stale() {
+        let stale = |reason| {
+            terminal_error(&RuntimeError::Stale {
+                terminal_id: bazhen_protocol::ids::TerminalId::parse(
+                    "term_01a20211782a7338a7c1cd3c3b942778",
+                )
+                .unwrap(),
+                reason,
+            })
+        };
+        assert!(
+            matches!(stale(StaleReason::Gone), TerminalError::Gone(_)),
+            "{:?}",
+            stale(StaleReason::Gone)
+        );
+        for reason in [
+            StaleReason::ServerReplaced,
+            StaleReason::ProcessReplaced,
+            StaleReason::Unnumbered,
+        ] {
+            assert!(
+                matches!(stale(reason), TerminalError::Stale(_)),
+                "{reason:?}"
+            );
+        }
     }
 
     #[derive(Debug, thiserror::Error)]
