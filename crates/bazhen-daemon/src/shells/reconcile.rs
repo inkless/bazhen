@@ -29,6 +29,9 @@ pub(crate) struct Unreconciled {
 enum Unsettled {
     /// A later try may settle it: the store or its runtime couldn't be reached just now.
     Again(ShellError),
+    /// The runtime doesn't list it, and what ran it isn't proven gone: it may still run where
+    /// no read reaches, or its holder may yet bind its socket again or be shown gone.
+    Unproven,
     /// No try can: it is left as it is.
     Never(ShellError),
 }
@@ -211,6 +214,12 @@ impl Shells {
                         .said
                         .push(format!("could not settle shell {id}: {err}"));
                 }
+                Err(Unsettled::Unproven) => {
+                    tried.kept.insert(id.to_owned());
+                    tried.said.push(format!(
+                        "shell {id}'s terminal may still run on its old server; trying again each tick"
+                    ));
+                }
                 Err(Unsettled::Never(err)) => {
                     tracing::warn!(
                         "bazhen: reconcile: can't settle shell {id}, so it is left as it is: {err}"
@@ -283,10 +292,7 @@ impl Shells {
         if let Some(terminal) = recorded(shell)
             && !self.deps.terminals.gone(&terminal).await
         {
-            tracing::warn!(
-                "bazhen: reconcile: shell {id}'s terminal may still run on its old server; left"
-            );
-            return Ok(());
+            return Err(Unsettled::Unproven);
         }
         Ok(self
             .record(id, Actor::System, gone_from(shell.state))
@@ -418,6 +424,25 @@ mod tests {
                 .reads()
                 .starting_terminals()
                 .unwrap()
+        }
+
+        /// Returns once a command or settle waits for the shell's turn behind the one holding it.
+        async fn turn_awaited(&self, id: &str) {
+            loop {
+                let waiting = self
+                    .shells
+                    .turns
+                    .0
+                    .lock()
+                    .unwrap()
+                    .get(id)
+                    // The map's, the holder's guard's, and the waiter's.
+                    .is_some_and(|lock| Arc::strong_count(lock) > 2);
+                if waiting {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
         }
 
         /// The generation the shell's recorded locator names.
@@ -635,7 +660,7 @@ mod tests {
             assert_eq!(h.state_of(&id), Some(TerminalState::Running));
             assert_eq!(
                 said.times(&format!(
-                    "reconcile: shell {id}'s terminal may still run on its old server; left"
+                    "reconcile: shell {id}'s terminal may still run on its old server; trying again each tick"
                 )),
                 1
             );
@@ -730,6 +755,82 @@ mod tests {
     }
 
     #[test]
+    fn marks_lost_on_a_later_try_a_shell_whose_holder_wasnt_yet_shown_gone_at_start() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            h.fake.set(|state| {
+                state.running.remove(&id);
+                state.unproven.insert(id.clone());
+            });
+            h.shells.reconcile().await.unwrap();
+            let at_start = h.state_of(&id);
+            h.fake.set(|state| {
+                state.unproven.remove(&id);
+            });
+            h.shells.reconcile_again().await;
+            assert_eq!(
+                (at_start, h.state_of(&id)),
+                (Some(TerminalState::Running), Some(TerminalState::Lost))
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn waits_for_a_users_close_of_a_kept_shell_rather_than_close_it_under_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let h = setup(100);
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            h.fake.set(|state| state.reads_refused = Some(unreadable()));
+            h.shells.reconcile().await.unwrap();
+            let held = Held::shut();
+            h.fake.set(|state| {
+                state.reads_refused = None;
+                state.hold_closes = Some(held.clone());
+            });
+            let shells = Arc::clone(&h.shells);
+            let close = bazhen_protocol::shells::CloseShellRequest {
+                idempotency_key: "c".to_owned(),
+                generation: 0,
+                confirm_busy: Some(true),
+                confirmed_program: None,
+                force: None,
+            };
+            let tasks = tokio_util::task::TaskTracker::new();
+            let shut = id.clone();
+            let closing = tasks.spawn(async move { shells.close(&shut, &close).await });
+            // Its terminal gone, the close yet to record it closed.
+            held.reached().await;
+            let shells = Arc::clone(&h.shells);
+            let mut trying = tasks.spawn(async move { shells.reconcile_again().await });
+            let tried = tokio::select! {
+                tried = &mut trying => {
+                    tried.unwrap();
+                    true
+                }
+                () = h.turn_awaited(&id) => false,
+            };
+            held.go.add_permits(1);
+            let answered = closing.await.unwrap();
+            if !tried {
+                trying.await.unwrap();
+            }
+            let recorded_closed = h
+                .events_of(&id)
+                .into_iter()
+                .filter(|(kind, _)| kind == "terminal.closed")
+                .count();
+            assert_eq!(
+                (answered.is_ok(), h.state_of(&id), recorded_closed),
+                (true, Some(TerminalState::Closed), 1),
+                "{answered:?}"
+            );
+        });
+    }
+
+    #[test]
     fn leaves_a_kept_shell_closed_while_a_later_try_read_the_runtime_as_it_was_closed() {
         let h = setup(100);
         let said = Said::default();
@@ -747,7 +848,7 @@ mod tests {
             let trying = tokio_util::task::TaskTracker::new()
                 .spawn(async move { shells.reconcile_again().await });
             held.reached().await;
-            // As a user's close records it, its holder ended.
+            // A close recorded meanwhile, its holder ended.
             h.fake.set(|state| {
                 state.running.remove(&id);
             });

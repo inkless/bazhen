@@ -288,6 +288,8 @@ pub(crate) mod fake {
         pub(crate) hold_inventory: Option<Held>,
         /// Each read of what the terminals speak is held here as it reaches the runtime.
         pub(crate) hold_compatibility: Option<Held>,
+        /// Each close is held here once its terminal is gone, before it answers.
+        pub(crate) hold_closes: Option<Held>,
         told: Vec<mpsc::UnboundedSender<Event>>,
     }
 
@@ -523,15 +525,19 @@ pub(crate) mod fake {
                 if let Some(OnClose(seen)) = self.on_close.lock().unwrap().as_ref() {
                     seen(id);
                 }
-                let mut state = self.state.lock().unwrap();
-                if state.fail_closes {
-                    return Err(TerminalError::Other("the fake is unreachable".to_owned()));
-                }
-                if let Some(refused) = &state.closes_refused {
-                    return Err(refused.clone());
-                }
-                state.running.remove(id);
-                state.closed.push(id.to_owned());
+                let held = {
+                    let mut state = self.state.lock().unwrap();
+                    if state.fail_closes {
+                        return Err(TerminalError::Other("the fake is unreachable".to_owned()));
+                    }
+                    if let Some(refused) = &state.closes_refused {
+                        return Err(refused.clone());
+                    }
+                    state.running.remove(id);
+                    state.closed.push(id.to_owned());
+                    state.hold_closes.clone()
+                };
+                Held::pass(held).await;
                 Ok(())
             })
         }

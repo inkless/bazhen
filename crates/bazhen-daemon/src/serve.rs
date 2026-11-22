@@ -28,7 +28,7 @@ use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
 use crate::shells::integration::{Integration, install_shell_integration};
-use crate::shells::{Shells, ShellsDeps};
+use crate::shells::{ShellError, Shells, ShellsDeps};
 use crate::terminals::Events;
 use crate::tokens;
 
@@ -255,10 +255,9 @@ async fn shells(
         stop: stop.clone(),
         integration,
     });
-    shells
-        .reconcile()
-        .await
-        .map_err(|err| Refused::Said(format!("bazhen can't read its shells: {err}")))?;
+    if let Err(err) = shells.reconcile().await {
+        return Err(unread_shells(startup, store, &err).await);
+    }
     if let Err(err) = shells.sweep_restarts().await {
         tracing::warn!(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -279,10 +278,30 @@ async fn shells(
 /// TypeScript daemon's server watch's tick.
 const TICK: Duration = Duration::from_secs(5);
 
+/// Why the start can't read the shells kept from before, naming the one it can't, as one bad row
+/// keeps the daemon from starting.
+async fn unread_shells(startup: &Startup, store: &Writer, err: &ShellError) -> Refused {
+    let named = store
+        .run(|store| store.reads().unreadable_shell())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    let db = PathBuf::from(&startup.paths.data).join("bazhen.db");
+    Refused::Said(match named {
+        Some(id) => format!(
+            "bazhen can't read shell {id} kept from before: {err}; start the bazhen build that wrote it, or move {} aside to start without anything it keeps",
+            db.display()
+        ),
+        None => format!("bazhen can't read its shells: {err}"),
+    })
+}
+
 /// Tries again the shells the start's reconcile couldn't settle, then reads the running shells'
 /// foregrounds, and which terminals need a restart, `every` so often, until `stop`, which ends a
-/// tick midway: each of its writes to the store is whole on its own. A restart read that fails is
-/// said once until one reads again.
+/// tick midway: each of its writes to the store is whole on its own. A stop amid a retry's close
+/// or unlink may leave the shell closing, or still naming its agent where it runs; the next
+/// start's reconcile settles it. A restart read that fails is said once until one reads again.
 async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToken) {
     let mut fault = None;
     while stop
@@ -752,7 +771,7 @@ mod tests {
         std::fs::create_dir_all(&startup.home).unwrap();
         let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         let fake = crate::terminals::fake::Fake::default();
-        let refused = runtime().block_on(async {
+        let (id, refused) = runtime().block_on(async {
             let runner = Runner {
                 terminals: Arc::new(fake.clone()),
                 ..faked(&startup)
@@ -773,7 +792,7 @@ mod tests {
                 cwd: None,
                 theme: None,
             };
-            before.open(&req, None).await.unwrap();
+            let id = before.open(&req, None).await.unwrap().terminal_id;
             store
                 .run(|store| {
                     store.write(|w| {
@@ -784,15 +803,22 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            match shells(&startup, &store, runner, &TaskTracker::new()).await {
+            let refused = match shells(&startup, &store, runner, &TaskTracker::new()).await {
                 Ok(_) => None,
                 Err(refused) => Some(refused.to_string()),
-            }
+            };
+            (id, refused)
         });
+        let named = format!("bazhen can't read shell {id} kept from before: ");
+        let db = PathBuf::from(&startup.paths.data).join("bazhen.db");
+        let remedy = format!(
+            "or move {} aside to start without anything it keeps",
+            db.display()
+        );
         assert!(
             refused
                 .as_deref()
-                .is_some_and(|said| said.starts_with("bazhen can't read its shells: ")),
+                .is_some_and(|said| said.starts_with(&named) && said.ends_with(&remedy)),
             "{refused:?}"
         );
         writer.finish();

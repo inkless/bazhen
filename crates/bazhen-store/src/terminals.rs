@@ -358,6 +358,16 @@ const SHELL_ROW: &str = "SELECT id, state, generation, runtime, locator, runtime
        coalesce(current_cwd, cwd), linked_agent_id, theme, json_extract(foreground, '$.command')
      FROM terminals WHERE kind = 'shell'";
 
+/// The shells of this machine's environment not yet lost, closed or failed, oldest first.
+fn recoverable_shells() -> String {
+    format!(
+        "{SHELL_ROW} AND environment_id = (
+           SELECT id FROM environments WHERE kind = 'local'
+           ORDER BY created_event_id LIMIT 1)
+         AND state NOT IN ('lost', 'closed', 'failed') ORDER BY created_event_id"
+    )
+}
+
 fn shell_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShellRow> {
     let unreadable = |i: usize, what: &str| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -404,14 +414,26 @@ impl Reads<'_> {
     /// `SQLite`'s.
     pub fn recoverable_shells(self) -> rusqlite::Result<Vec<ShellRow>> {
         self.0
-            .prepare(&format!(
-                "{SHELL_ROW} AND environment_id = (
-                   SELECT id FROM environments WHERE kind = 'local'
-                   ORDER BY created_event_id LIMIT 1)
-                 AND state NOT IN ('lost', 'closed', 'failed') ORDER BY created_event_id"
-            ))?
+            .prepare(&recoverable_shells())?
             .query_map((), shell_row)?
             .collect()
+    }
+
+    /// The id, as stored, of the first shell `recoverable_shells` can't read, or `None` when it
+    /// reads them all.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn unreadable_shell(self) -> rusqlite::Result<Option<String>> {
+        let mut statement = self.0.prepare(&recoverable_shells())?;
+        let mut rows = statement.query(())?;
+        while let Some(row) = rows.next()? {
+            if shell_row(row).is_err() {
+                return row.get(0).map(Some);
+            }
+        }
+        Ok(None)
     }
 
     /// Whether the terminal `id` names hasn't ended and isn't yet recorded as needing a restart.
