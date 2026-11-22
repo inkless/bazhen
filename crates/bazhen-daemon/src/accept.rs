@@ -80,10 +80,11 @@ impl Connected for tokio::net::UnixStream {
     }
 }
 
-/// Serves `router` on `listener` until `stop`. Then it stops accepting, calls `stopped`, and asks
-/// each open connection to end once it has answered the request it is on; an upgraded one is its
-/// route's to end. Every connection is a task on `tracker`, so waiting on it waits on them, and
-/// every request on a Unix connection carries its `PeerSocket`.
+/// Serves `router` on `listener` until `stop`. Then it stops accepting, calls `stopped` while it
+/// still listens, so a socket file `stopped` removes never refuses a connection, closes the
+/// listener, and asks each open connection to end once it has answered the request it is on; an
+/// upgraded one is its route's to end. Every connection is a task on `tracker`, so waiting on it
+/// waits on them, and every request on a Unix connection carries its `PeerSocket`.
 pub(crate) async fn serve_on<L>(
     mut listener: L,
     router: Router,
@@ -135,8 +136,8 @@ pub(crate) async fn serve_on<L>(
             let _ = connection.await;
         });
     }
-    drop(listener);
     stopped();
+    drop(listener);
 }
 
 /// `request`'s answer from `router`, or 408 if it isn't answered within `limit`.
@@ -386,7 +387,7 @@ mod tests {
             let stop = CancellationToken::new();
             let tracker = TaskTracker::new();
             let (told, heard) = tokio::sync::oneshot::channel();
-            tracker.spawn(serve_on(
+            let serving = tracker.spawn(serve_on(
                 listener,
                 router,
                 // Room for another, so the stop finds it waiting on the accept.
@@ -410,6 +411,10 @@ mod tests {
             stop.cancel();
             let said_so = tokio::time::timeout(Duration::from_secs(5), heard).await;
             assert!(matches!(said_so, Ok(Ok(()))), "{said_so:?}");
+            tokio::time::timeout(Duration::from_secs(5), serving)
+                .await
+                .unwrap()
+                .unwrap();
             assert!(TcpStream::connect(address).await.is_err());
             open.write_all(b"def").await.unwrap();
             let said = read_for(&mut open, Duration::from_secs(5)).await;
@@ -419,6 +424,28 @@ mod tests {
                 .await
                 .unwrap();
         });
+    }
+
+    #[test]
+    fn calls_stopped_while_its_socket_still_takes_a_connection() {
+        let dir = crate::testing::TempDir::new("stopped-listening");
+        let path = dir.path().join("s.sock");
+        let mut connected = None;
+        runtime().block_on(async {
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            let stop = CancellationToken::new();
+            stop.cancel();
+            serve_on(
+                listener,
+                Router::new(),
+                SOCKET,
+                stop,
+                TaskTracker::new(),
+                || connected = Some(std::os::unix::net::UnixStream::connect(&path).map(drop)),
+            )
+            .await;
+        });
+        assert!(matches!(connected, Some(Ok(()))), "{connected:?}");
     }
 
     /// `/peer` answers who is at the other end of its connection, or `none` for no socket kept.

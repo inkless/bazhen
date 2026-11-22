@@ -3,8 +3,9 @@ import { closeSync, constants, fstatSync, openSync, statSync } from "node:fs";
 import { type Answer, probe, silence } from "./probe.ts";
 
 /**
- * The longest a stopping daemon drains with its socket already gone, holding its lock: the Rust
- * daemon's (`DRAIN` in `bazhen-client`'s `paths.rs`, which a test holds this to).
+ * The longest the Rust daemon drains as it stops (`DRAIN` in `bazhen-client`'s `paths.rs`, which a
+ * test holds this to), holding its lock, with its socket removed before it stopped listening. This
+ * daemon doesn't drain: it exits once its servers' closes return.
  */
 export const DRAIN_MS = 5000;
 
@@ -92,8 +93,9 @@ export interface ClaimOptions {
 
 /**
  * The start-up lock for the daemon on `socket`, taken only where nothing answers there (`claim` in
- * `lock.rs`). While another daemon holds it, silently, it may be starting, or stopping with its
- * socket already gone, so the lock is tried again for up to `waitMs` before the start gives up.
+ * `lock.rs`). While another daemon holds it, silently, it may be starting, or stopping: it removes
+ * its socket before it stops listening, and holds the lock to the end. So the lock is tried again
+ * for up to `waitMs` before the start gives up.
  */
 export async function claim(socket: string, options: ClaimOptions = {}): Promise<Claimed> {
   const ask = options.probe ?? probe;

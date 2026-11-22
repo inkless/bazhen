@@ -74,8 +74,9 @@ fn same_file(file: &File, path: &Path) -> std::io::Result<bool> {
 }
 
 /// The lock at `path`, taken only where nothing answers `probe`. While another daemon holds it,
-/// silently, it may be starting, or stopping with its socket already gone, so the lock is tried
-/// again for up to `wait` before the start gives up.
+/// silently, it may be starting, or stopping: it removes its socket before it stops listening, and
+/// holds the lock to the end. So the lock is tried again for up to `wait` before the start gives
+/// up.
 pub(crate) fn claim(
     path: &Path,
     wait: Duration,

@@ -185,10 +185,10 @@ enum Waited {
 }
 
 /// Waits, for at most `limit`, for a daemon that took a stop to let go of its lock. Until it does it
-/// is still stopping, whatever its socket shows: while it drains, the socket may be gone, may refuse
-/// connections, or may not take one in time. A socket that takes a connection is asked, by
-/// `answers` within what is left of `limit`, whether a daemon there answers; one that answers with
-/// an error isn't taken for one.
+/// is still stopping, whatever its socket shows: the socket goes as its drain begins, and until then
+/// a look may find it too busy to take a connection, or take one nobody accepts. A socket that takes
+/// a connection is asked, by `answers` within what is left of `limit`, whether a daemon there
+/// answers; one that answers with an error isn't taken for one.
 fn wait_for_lock(
     socket: &Path,
     limit: Duration,
@@ -447,8 +447,7 @@ mod tests {
     /// A wait that runs out in a test's time.
     const SHORT: Duration = Duration::from_millis(300);
 
-    /// A socket file nothing listens on, as a daemon that has stopped listening leaves until it
-    /// removes it.
+    /// A socket file nothing listens on: it refuses connections.
     fn refusing(dir: &Dir) -> PathBuf {
         let socket = dir.socket();
         drop(UnixListener::bind(&socket).unwrap());
