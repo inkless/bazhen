@@ -97,10 +97,13 @@ name = "bazhen-host-guard"
 version = "0.1.0"
 dependencies = [
  "bazhen-holder",
+ "bazhen-holder-proto",
  "bazhen-peer",
  "bazhen-pid",
  "futures-util",
+ "libc",
  "rustix",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

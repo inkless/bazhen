@@ -147,6 +147,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bazhen-client",
+ "bazhen-host-guard",
  "bazhen-peer",
  "bazhen-protocol",
  "bazhen-store",
@@ -226,11 +227,14 @@ name = "bazhen-host-guard"
 version = "0.1.0"
 dependencies = [
  "bazhen-holder",
+ "bazhen-holder-proto",
  "bazhen-peer",
  "bazhen-pid",
  "bazhen-test-signal",
  "futures-util",
+ "libc",
  "rustix",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

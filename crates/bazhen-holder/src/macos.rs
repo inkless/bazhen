@@ -14,6 +14,7 @@ use std::ffi::OsString;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::fd::OwnedFd;
+use std::os::unix::ffi::OsStringExt as _;
 use std::ptr;
 use std::time::Duration;
 
@@ -212,6 +213,23 @@ impl ExitWatch {
 /// gives for another user's process too.
 pub(crate) fn parent(pid: Pid) -> Option<Pid> {
     Pid::from_raw(i32::try_from(short_info(pid)?.pbsi_ppid).ok()?)
+}
+
+/// The name `pid` runs as, from its `proc_bsdshortinfo`: the file name of the program it last
+/// executed, cut to 16 bytes.
+pub(crate) fn comm(pid: Pid) -> io::Result<OsString> {
+    let info = short_info(pid)
+        .ok_or_else(|| io::Error::other(format!("process {pid:?} can't be read")))?;
+    let name: Vec<u8> = info
+        .pbsi_comm
+        .iter()
+        .map(|c| {
+            let [byte] = c.to_ne_bytes();
+            byte
+        })
+        .take_while(|&byte| byte != 0)
+        .collect();
+    Ok(OsString::from_vec(name))
 }
 
 /// The effective uid `pid` runs as, from its `proc_bsdshortinfo`.

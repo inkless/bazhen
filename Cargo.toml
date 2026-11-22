@@ -22,6 +22,7 @@ bazhen-client = { path = "crates/bazhen-client" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }
+bazhen-host-guard = { path = "crates/bazhen-host-guard" }
 bazhen-peer = { path = "crates/bazhen-peer" }
 bazhen-pid = { path = "crates/bazhen-pid" }
 bazhen-protocol = { path = "crates/bazhen-protocol" }

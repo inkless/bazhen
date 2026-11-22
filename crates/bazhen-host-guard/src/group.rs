@@ -51,9 +51,7 @@ impl OwnGroup {
     fn signal_once(&self, signal: Signal) -> Result<bool, Error> {
         if self.child.id().is_none() || !unreaped(self.leader) {
             return Err(Error::Unsafe {
-                target: Target {
-                    leader: self.leader,
-                },
+                target: Target::Group(self.leader),
                 why: Unsafe::Reaped,
             });
         }
@@ -78,7 +76,7 @@ impl Drop for OwnGroup {
 
 /// Whether the kernel holds `leader` as this process's child, running or exited, and not yet
 /// reaped. Anything else, a leader reaped by something but its `Child` included, is no.
-fn unreaped(leader: Pid) -> bool {
+pub(crate) fn unreaped(leader: Pid) -> bool {
     let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
     rustix::process::waitid(WaitId::Pid(leader), unreaped).is_ok()
 }
@@ -202,7 +200,8 @@ mod tests {
     use tokio::process::Command;
 
     use super::{Ended, OUTPUT_MAX, OwnGroup, run_bounded, run_kept};
-    use crate::{Error, Target, Unsafe};
+    use crate::sigchld::{Careless, make_careless};
+    use crate::{Error, Target, Unsafe, keep_exited_children};
 
     fn block_on<F: Future>(future: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
@@ -356,6 +355,47 @@ mod tests {
         assert!(ends_soon(pid_in(&file)));
     }
 
+    /// Started by a parent that ignored SIGCHLD, as a daemon can be, the kernel would reap the
+    /// leader itself; given its default first, the leader is held, and its group still reached.
+    /// On macOS tokio's first spawn sets a SIGCHLD handler of its own, which holds the leader as
+    /// well, so only Linux's run shows the default is what holds it.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn kills_a_member_after_its_leader_exits_once_an_ignored_sigchld_is_given_its_default() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        make_careless(Careless::Ignored).unwrap();
+        keep_exited_children().unwrap();
+        let file = pid_file("kept");
+        let script = format!("sleep 30 & echo $! > '{}'", file.display());
+        let run = ran(sh(&script), Duration::from_secs(2));
+        assert!(matches!(run, Ended::TimedOut), "{run:?}");
+        assert!(ends_soon(pid_in(&file)));
+    }
+
+    /// The control: left ignored, the kernel reaps the leader as it exits, and its group, whose
+    /// number may be another's, is refused. The member ends by itself soon after. Linux's alone:
+    /// tokio waits on a child there through a pidfd, and leaves SIGCHLD ignored, where on macOS
+    /// its first spawn sets a handler of its own, with no `SA_NOCLDWAIT`, and the kernel then
+    /// keeps the leader.
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn refuses_the_group_of_a_leader_the_kernel_reaped_as_sigchld_was_ignored() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        make_careless(Careless::Ignored).unwrap();
+        let run = block_on(run_bounded(sh("sleep 3 &"), Duration::from_secs(1)));
+        assert!(
+            matches!(
+                run,
+                Err(Error::Unsafe {
+                    target: Target::Group(_),
+                    why: Unsafe::Reaped,
+                })
+            ),
+            "{run:?}"
+        );
+    }
+
     /// A run given up on, as a handler's future dropped when its client goes, still ends its
     /// group.
     #[test]
@@ -391,9 +431,7 @@ mod tests {
             assert_eq!(
                 group.signal(Signal::KILL),
                 Err(Error::Unsafe {
-                    target: Target {
-                        leader: group.leader
-                    },
+                    target: Target::Group(group.leader),
                     why: Unsafe::Reaped,
                 })
             );
@@ -411,9 +449,7 @@ mod tests {
             assert_eq!(
                 group.signal(Signal::KILL),
                 Err(Error::Unsafe {
-                    target: Target {
-                        leader: group.leader
-                    },
+                    target: Target::Group(group.leader),
                     why: Unsafe::Reaped,
                 })
             );

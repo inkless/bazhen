@@ -471,6 +471,10 @@ const UNSAFE_MODULES: Record<string, string> = {
     "Command::pre_exec, to make the detached daemon a session leader between fork and exec, as " +
     "Node's detached does, so no signal to the starting terminal reaches it; std's process_group " +
     "would leave it a group leader, which can't then call setsid",
+  "crates/bazhen-host-guard/src/sigchld.rs":
+    "libc's sigaction, the one call that gives SIGCHLD its default disposition with no " +
+    "SA_NOCLDWAIT, so the kernel keeps a daemon's exited children for it to wait for, and reads " +
+    "back whether it does; rustix covers neither",
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
@@ -815,6 +819,36 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/meminfo only to hand it to mem_total, which its containment target fuzzes",
   "crates/bazhen-host-guard/src/scope.rs::Host::random":
     "writes six random bytes as hex; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::start_holder_with":
+    "hands a child's stdout to first_line and its stderr to Run::new, and writes its spec to its stdin; decodes nothing itself",
+  "crates/bazhen-host-guard/src/holder.rs::Run::new":
+    "hands a child's stderr to keep_stderr; reads nothing itself",
+  "crates/bazhen-host-guard/src/holder.rs::Run::said":
+    "makes the stderr keep_stderr kept text through whole_text; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::Run::unchecked":
+    "takes a child's stderr only as text, through said; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::Run::unlaunched":
+    "takes a child's stderr only as text, through said; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::Run::failure":
+    "takes a child's stderr only as text, through said; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::Run::end_unready":
+    "reads no bytes: it asks whether the child has exited, and the kernel whether its pid is the holder, through read_process",
+  "crates/bazhen-host-guard/src/holder.rs::execed":
+    "reads no bytes: it asks whether the child has exited, and the kernel whether its pid is the holder, through read_process",
+  "crates/bazhen-host-guard/src/holder.rs::keep_stderr":
+    "copies at most STDERR_MAX bytes of a child's stderr into a buffer and drops the rest; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::whole_text":
+    "makes a child's kept stderr text, lossily, less a character its cap cut in two; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::first_line":
+    "reads at most 65 bytes of a child's stdout up to its first newline, only to compare them with ready; parses nothing",
+  "crates/bazhen-host-guard/src/holder.rs::quoted":
+    "shows a holder's first line, lossily, as a JSON string in an error; parses nothing",
+  "crates/bazhen-host-guard/src/lib.rs::send_process":
+    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+  "crates/bazhen-host-guard/src/lib.rs::is_alive":
+    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+  "crates/bazhen-holder/src/process.rs::comm":
+    "hands back a process's name from /proc/<pid>/comm or proc_pidinfo less its newline, which is compared whole, never parsed",
   "crates/bazhen-host-guard/src/lib.rs::send":
     "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
