@@ -183,9 +183,9 @@ fn default_run(i: &Inputs) -> String {
     }
 }
 
-/// The longest a stopping daemon takes to drain its connections. It removes its socket before it
-/// stops listening, so the socket is gone for the whole drain, and holds its start-up lock to the
-/// end. `DRAIN_MS` in `apps/daemon/src/socket/lock.ts` is the same, as a test there checks.
+/// The longest a stopping daemon takes to drain its connections. It removes its socket as its drain
+/// begins, just before it stops listening, and holds its start-up lock to the end. `DRAIN_MS` in
+/// `apps/daemon/src/socket/lock.ts` is the same, as a test there checks.
 pub const DRAIN: Duration = Duration::from_secs(5);
 
 /// How long a start or a `stop` waits on a lock another daemon holds without answering: a drain,

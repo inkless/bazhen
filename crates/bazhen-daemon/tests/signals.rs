@@ -153,7 +153,8 @@ fn a_second_signal_ends_the_drain_at_once() {
     held.write_all(b"GET /v1/health HTTP/1.1\r\n").unwrap();
     let pid = child.id();
     bazhen_test_signal::signal(pid, Signal::TERM).unwrap();
-    // Its socket goes once it stops listening, so the next is heard during the drain.
+    // Its socket goes as its drain begins, just before it stops listening, so the next is heard
+    // during the drain.
     let started = Instant::now();
     while home.socket().exists() && started.elapsed() < BOUND {
         thread::sleep(Duration::from_millis(20));
