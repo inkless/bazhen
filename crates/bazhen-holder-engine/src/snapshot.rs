@@ -109,8 +109,8 @@ impl Engine {
     /// - A wrap mark on the last row (a region past the bottom or a scroll down leaves one), or
     ///   inside a row, and a cursor a reflow left waiting to wrap off the last column, come back
     ///   unmarked.
-    /// - A cursor waiting to wrap is made to wait by printing its cell again, which unmarks that
-    ///   row's wrap and, for a wide char, the spacer it left in the row before.
+    /// - A cursor waiting to wrap is made to wait by printing its cell again, which, for a wide
+    ///   char, unmarks the spacer it left in the row before.
     /// - The cell a wide char didn't fit in comes back as a space in no colour when the row after
     ///   doesn't start with that char.
     /// - A wide char with no room for its spacer, in the last column as an insert or a narrowing
@@ -488,12 +488,6 @@ pub(crate) mod tests {
 
     fn screen(grid: &Grid<Cell>) -> ScreenState {
         let last = grid.screen_lines().saturating_sub(1);
-        // Printing a waiting cursor's cell again unmarks its row's wrap.
-        let waiting: Vec<usize> = [&grid.cursor, &grid.saved_cursor]
-            .iter()
-            .filter(|cursor| cursor.input_needs_wrap)
-            .filter_map(|cursor| usize::try_from(cursor.point.line.0).ok())
-            .collect();
         let rows = (0..grid.screen_lines())
             .map(|n| {
                 let mut row = grid[Line(i32::try_from(n).unwrap())].clone();
@@ -511,7 +505,7 @@ pub(crate) mod tests {
                 let mut text = String::new();
                 let ending = encode_row(&row, &mut text);
                 // Nothing follows the last row to wrap into, so its mark can't come back.
-                let wraps = ending.wrapped && n != last && !waiting.contains(&n);
+                let wraps = ending.wrapped && n != last;
                 (text.trim_end_matches(' ').to_owned(), wraps)
             })
             .collect();
@@ -577,6 +571,17 @@ pub(crate) mod tests {
         assert_restores(&("x".repeat(18) + "\u{4e2d}"));
         // With DEC line drawing in G0, the cell printed again is still the x it was.
         assert_restores(&("x".repeat(20) + "\x1b(0"));
+    }
+
+    #[test]
+    fn a_cursor_waiting_on_a_row_that_wraps_comes_back_with_the_row_wrapping() {
+        // Saved waiting, before the row wrapped; then brought back.
+        let saved = "x".repeat(20) + "\x1b7xyz";
+        assert_restores(&saved);
+        assert_restores(&(saved + "\x1b8"));
+        let saved = "x".repeat(18) + "\u{4e2d}\x1b7xyz";
+        assert_restores(&saved);
+        assert_restores(&(saved + "\x1b8"));
     }
 
     #[test]

@@ -36,6 +36,12 @@ impl Case {
             if self.resized && here {
                 continue;
             }
+            let endings = matches!(
+                action,
+                Action::Text(_) | Action::InsertChars(_) | Action::DeleteChars(_)
+            )
+            .then(|| self.line_endings())
+            .flatten();
             match (action.bytes(), action) {
                 (Some(bytes), _) => self.feed(bytes.as_bytes(), cuts),
                 (None, &Action::Resize(cols, rows)) => {
@@ -50,7 +56,31 @@ impl Case {
             assert_whole("engine", &self.engine.term);
             assert_whole("reference", &self.full.term);
             assert_whole("wider reference", &self.wide.term);
+            if let Some((before, after)) = endings.zip(self.line_endings()) {
+                assert_line_endings_kept(action, &before, &after);
+            }
         }
+    }
+
+    /// Whether each of the reference's rows wraps into the next, from the oldest, while its rows
+    /// keep their place as output scrolls: with the primary screen up and the region the whole
+    /// screen, a scroll moves the top row into history, which the reference never drops.
+    fn line_endings(&self) -> Option<Vec<bool>> {
+        let grid = self.full.term.grid();
+        let whole = 0..u16::try_from(grid.screen_lines()).unwrap();
+        if self.full.alternate() || self.engine.modes().screen.region != whole {
+            return None;
+        }
+        let scrolled = grid.history_size();
+        let endings = (0..scrolled + grid.screen_lines())
+            .map(|n| {
+                grid[scrollback_line(scrolled, n)]
+                    .into_iter()
+                    .last()
+                    .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE))
+            })
+            .collect();
+        Some(endings)
     }
 
     fn feed(&mut self, stream: &[u8], cuts: &[usize]) {
@@ -94,6 +124,18 @@ impl Case {
             shifted_out(&mut self.full),
             modes.screen.active_charset == ActiveCharset::G1,
             "the active charset"
+        );
+    }
+}
+
+/// Holds an insert or a delete to leaving every row's line ending as it was, and text to taking
+/// none away, as xterm.js does.
+fn assert_line_endings_kept(action: &Action, before: &[bool], after: &[bool]) {
+    let shift = matches!(action, Action::InsertChars(_) | Action::DeleteChars(_));
+    for (row, (&was, &is)) in before.iter().zip(after).enumerate() {
+        assert!(
+            if shift { was == is } else { is || !was },
+            "{action:?} changed the line ending of row {row} from the oldest: wrapped {was}, now {is}"
         );
     }
 }
