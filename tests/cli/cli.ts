@@ -348,6 +348,13 @@ export class FakeDaemon {
     return this;
   }
 
+  /** Leaves the first `hung` requests to `route` unanswered, then answers each with `value`. */
+  answerAfter<T>(route: string, hung: number, schema: Schema<T>, value: T): this {
+    let seen = 0;
+    this.#routes.set(route, () => (seen++ < hung ? "hang" : json(200, schema.parse(value))));
+    return this;
+  }
+
   /** Never answers `route`, as a wedged daemon doesn't. */
   hang(route: string): this {
     this.#routes.set(route, () => "hang");

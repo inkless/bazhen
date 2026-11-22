@@ -831,12 +831,12 @@ describe("bazhen stop", () => {
         });
       const ran = s.bazhen(["stop"]);
       await closed.promise;
-      // A daemon binds only once the stopped one lets go of the lock, so stop has long seen it stop
-      // answering; one answering at once would be the stopped daemon still answering, to stop.
-      await sleep(1000);
+      // Only a daemon that takes no start-up lock, as the TypeScript one on macOS, binds while the
+      // stopped one still holds it. Its first health goes unanswered, so stop has seen the socket
+      // go quiet before anything answers there; else it would take the answer for the stopped one.
       const next = await FakeDaemon.listen(s.socket);
+      next.answerAfter("GET /v1/health", 1, HealthResponse, health());
       try {
-        next.answer("GET /v1/health", HealthResponse, health());
         expect(await ran).toEqual({
           code: 0,
           stdout: `bazhen stopped; agents keep running\nanother daemon now answers on ${s.socket}\n`,
