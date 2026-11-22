@@ -145,30 +145,49 @@ mod tests {
         );
     }
 
-    /// The umask is the process's, but nextest runs each test in a process of its own.
-    struct Umask(rustix::fs::Mode);
+    /// Names the directory a child run of the umask test writes in.
+    const UMASK_CHILD: &str = "BAZHEN_TEST_UMASK_CHILD";
 
-    impl Umask {
-        fn set(mask: u32) -> Self {
-            Self(rustix::process::umask(rustix::fs::Mode::from_raw_mode(
-                mask,
-            )))
-        }
-    }
-
-    impl Drop for Umask {
-        fn drop(&mut self) {
-            rustix::process::umask(self.0);
-        }
-    }
-
+    /// The umask is the whole process's, and `cargo test` runs tests side by side in one, so the
+    /// write runs in a child: this test alone, rerun under the umask by a shell.
     #[test]
     fn writes_each_snippet_0600_under_a_umask_that_takes_this_user_s_write_away() {
+        if let Some(dir) = std::env::var_os(UMASK_CHILD) {
+            install_shell_integration(Path::new(&dir), me()).unwrap();
+            return;
+        }
         let root = TempDir::new("integration-umask");
         let dir = root.path().join("shell-integration");
-        let umask = Umask::set(0o277);
-        install_shell_integration(&dir, me()).unwrap();
-        drop(umask);
+        let (_crate, module) = module_path!().split_once("::").unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", r#"umask 277 && exec "$0" "$@""#])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!(
+                    "{module}::writes_each_snippet_0600_under_a_umask_that_takes_this_user_s_write_away"
+                ),
+            ])
+            .env(UMASK_CHILD, &dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while child.try_wait().unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child run never ended"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let child = child.wait_with_output().unwrap();
+        assert!(
+            child.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
         assert_eq!(
             INTEGRATED_SHELLS.map(|(shell, _)| mode(&dir.join(shell))),
             [0o600; 3]

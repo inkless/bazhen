@@ -679,11 +679,21 @@ pub struct SetThemeRequest {
 /// `HolderPasteRequest` in `holder.ts` for the answers and their order. The text holds no C0 or
 /// C1 control or DEL, and, unless marked with `brackets`, nothing beyond printable ASCII. Why a
 /// text is refused never quotes it. Since 1.3.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "PasteFields", into = "PasteFields")]
 pub struct PasteRequest(PasteFields);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The text may hold a secret typed at a shell's prompt, so it is never shown.
+impl std::fmt::Debug for PasteRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasteRequest")
+            .field("generation", &self.0.generation)
+            .field("brackets", &self.0.brackets)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct PasteFields {
     generation: Generation,
     text: String,
@@ -1092,6 +1102,20 @@ mod tests {
             ]
         );
         assert!(read::<PasteRequest>(json!({ "generation": 0, "text": "make" })).is_err());
+    }
+
+    #[test]
+    fn a_paste_shows_its_generation_and_brackets_but_never_its_text() {
+        let generation = Generation::new(7).unwrap();
+        let shown = format!(
+            "{:?}",
+            PasteRequest::new(generation, "export TOKEN=hunter2", true).unwrap()
+        );
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert_eq!(
+            shown,
+            format!("PasteRequest {{ generation: {generation:?}, brackets: true, .. }}")
+        );
     }
 
     #[test]
