@@ -88,7 +88,6 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "apps/web/src/ui/LiveStatus.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/TerminalView.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/scroll-input.ts": "tests/e2e/keys.spec.ts",
-  "apps/web/src/terminal/takeover.ts": "tests/e2e/keys.spec.ts",
   "apps/web/src/terminal/KeyBar.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/ui/ToggleButton.tsx": "tests/e2e/keys.spec.ts",
   "apps/web/src/ui/Toolbar.tsx": "tests/e2e/keys.spec.ts",
