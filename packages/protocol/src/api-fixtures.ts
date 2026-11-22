@@ -16,7 +16,16 @@ import {
   StopResponse,
 } from "./agents.ts";
 import { readDetachKeys } from "./detach-keys.ts";
-import { DevicesResponse, PairingCodeResponse, RevokeDeviceResponse } from "./devices.ts";
+import {
+  DEVICE_NAME_MAX,
+  DevicesResponse,
+  PAIRING_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PairRequest,
+  PairResponse,
+  PairingCodeResponse,
+  RevokeDeviceResponse,
+} from "./devices.ts";
 import { HarnessId, Id } from "./ids.ts";
 import { EventEnvelopeFrame } from "./events.ts";
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
@@ -29,7 +38,7 @@ import {
   WaitMessagesRequest,
   WaitMessagesResponse,
 } from "./mail.ts";
-import { DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
+import { DEVICE_PAIRED, DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
 import { hasKeystrokes } from "./input.ts";
 import { isOrigin, isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
@@ -764,6 +773,11 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       { idempotencyKey: KEY, cwd: "~/work", theme: "light" },
     ],
   },
+  PairRequest: {
+    schema: PairRequest,
+    wire: [{ code: "abcd-2345" }, { code: "ABCD 2345", name: "Phone" }],
+  },
+  PairResponse: { schema: PairResponse, wire: [{ deviceId: DEV, name: "Phone" }] },
   PairingCodeResponse: {
     schema: PairingCodeResponse,
     wire: [
@@ -1361,6 +1375,10 @@ export function checkFixtures() {
       taskNoteMaxBytes: TASK_NOTE_MAX_BYTES,
       agentNameMax: AGENT_NAME_MAX,
       streamFrameMaxBytes: STREAM_FRAME_MAX_BYTES,
+      pairingAlphabet: PAIRING_ALPHABET,
+      pairingCodeLength: PAIRING_CODE_LENGTH,
+      deviceNameMax: DEVICE_NAME_MAX,
+      devicePaired: DEVICE_PAIRED,
       settled: [...SETTLED].toSorted(),
       harnesses: HarnessId.options,
       agentConditions: AgentCondition.options.flatMap((o) => o.options),

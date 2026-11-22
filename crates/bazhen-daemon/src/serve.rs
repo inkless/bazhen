@@ -179,7 +179,8 @@ async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Re
         bazhen_protocol::id::PROTOCOL_ID,
         stop.clone(),
         store.clone(),
-    );
+    )
+    .with_external_origins(startup.external_origins.clone());
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -218,6 +219,10 @@ async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Re
     let tracker = TaskTracker::new();
     let token = stop.token();
     let retiring = token.clone();
+    tracker.spawn(crate::paired::close_lapsed_every_minute(
+        shared.clone(),
+        token.clone(),
+    ));
     tracker.spawn(retention::every_hour(token.clone(), move || {
         let (store, stop) = (store.clone(), retiring.clone());
         async move { retention::prune(&store, jiff::Timestamp::now(), &stop).await }

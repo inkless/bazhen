@@ -3,6 +3,7 @@
 //! the other's database. Blocking, as `SQLite` is: an async caller runs it on a thread of its own.
 
 mod agents;
+mod devices;
 mod events;
 #[cfg(test)]
 mod events_fixture;
@@ -28,6 +29,10 @@ use serde::de::DeserializeOwned;
 pub use agents::LiveTerminal;
 /// Every event type, with the payload keys a frame of it keeps.
 pub use bazhen_protocol::events::EVENT_KINDS;
+pub use devices::{
+    DeviceRow, DismissError, Dismissal, LOOPBACK_IDLE, NewDevice, PairError, Paired, RevokeError,
+    Revoked, SECURE_IDLE, TOUCH_EVERY, Viewer,
+};
 pub use events::{AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, Writer};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::SnapshotError;
@@ -137,6 +142,24 @@ impl Store {
         };
         let out = write(&writer)?;
         writer.tx.commit()?;
+        Ok(out)
+    }
+
+    /// Runs `write` as [`Store::write`] does, its commit flushed to disk before this answers, so
+    /// no crash of the machine loses it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::write`], or `SQLite`'s setting how commits are flushed.
+    pub(crate) fn write_durable<T, E: From<rusqlite::Error>>(
+        &mut self,
+        write: impl FnOnce(&Writer<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.db.pragma_update(None, "synchronous", "FULL")?;
+        let out = self.write(write);
+        let restored = self.db.pragma_update(None, "synchronous", "NORMAL");
+        let out = out?;
+        restored?;
         Ok(out)
     }
 
@@ -372,6 +395,24 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flushes_a_durable_write_as_it_commits_and_only_that_write() {
+        let dir = testing::TempDir::new("durable");
+        let mut store = Store::open(&dir.db("a.db")).unwrap();
+        let synchronous = |db: &Connection| -> i64 {
+            db.pragma_query_value(None, "synchronous", |row| row.get(0))
+                .unwrap()
+        };
+        let during = store
+            .write_durable(|w| -> rusqlite::Result<i64> { Ok(synchronous(w.connection())) })
+            .unwrap();
+        let failed: rusqlite::Result<()> =
+            store.write_durable(|_| Err(rusqlite::Error::InvalidQuery));
+        assert!(failed.is_err());
+        // FULL is 2, NORMAL 1.
+        assert_eq!((during, synchronous(&store.db)), (2, 1));
+    }
 
     #[test]
     fn now_is_written_as_javascripts_iso_string() {

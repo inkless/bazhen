@@ -2,6 +2,7 @@
 //! read in one transaction so the two agree.
 
 use bazhen_protocol::agents::StateSnapshot;
+use bazhen_protocol::notices::Notice;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -16,7 +17,7 @@ struct Unported {
     rows: &'static str,
 }
 
-const UNPORTED: [Unported; 5] = [
+const UNPORTED: [Unported; 4] = [
     // Lifted by the slice that brings environments, terminals and shells.
     Unported {
         section: "environments",
@@ -35,15 +36,17 @@ const UNPORTED: [Unported; 5] = [
         section: "attention",
         rows: "SELECT 1 FROM attention_items",
     },
-    // Lifted by the slice that brings pairing and devices.
-    Unported {
-        section: "notices",
-        rows: "SELECT 1 FROM notices",
-    },
 ];
 
 /// How many observed messages a snapshot carries: the latest.
 const OBSERVED_KEPT: u32 = 200;
+
+/// How many closed notices a snapshot carries, the latest closed, besides every open one.
+const CLOSED_NOTICES_SHOWN: u32 = 20;
+
+/// What the owner on this machine can do about an open notice; a device's viewer can do nothing,
+/// and the daemon takes it out of what such a viewer is sent.
+const OPEN_NOTICE_ACTIONS: [&str; 1] = ["dismiss"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -99,7 +102,7 @@ impl Reads<'_> {
                  FROM assignments ORDER BY created_event_id",
                 (),
             )?,
-            notices: Vec::new(),
+            notices: notices(&tx)?,
             observed: rows(
                 &tx,
                 "SELECT id, \"from\", \"to\", summary, accepted = 1 AS accepted, at FROM (
@@ -114,6 +117,61 @@ impl Reads<'_> {
         tx.finish()?;
         Ok(snapshot)
     }
+}
+
+/// Every open notice, and the latest closed ones, oldest first, as the owner on this machine sees
+/// them.
+fn notices(db: &rusqlite::Connection) -> Result<Vec<Notice>, SnapshotError> {
+    let mut statement = db.prepare(
+        "SELECT n.id, n.kind, n.state, n.close_reason, n.summary, e.ts, n.device_id, n.device_name,
+           n.device_origin, n.device_address, n.closed_by, n.closed_from_device, d.name
+         FROM notices n JOIN events e ON e.id = n.created_event_id
+         LEFT JOIN devices d ON d.id = n.closed_from_device
+         WHERE n.state = 'open' OR n.id IN (
+           SELECT id FROM notices WHERE state = 'closed' ORDER BY updated_event_id DESC LIMIT ?)
+         ORDER BY n.created_event_id",
+    )?;
+    let rows = statement
+        .query_map([CLOSED_NOTICES_SHOWN], |row| {
+            let device = match row.get::<_, Option<String>>(6)? {
+                Some(id) => Some(serde_json::json!({
+                    "id": id,
+                    "name": row.get::<_, String>(7)?,
+                    "origin": row.get::<_, String>(8)?,
+                    "address": row.get::<_, Option<String>>(9)?,
+                })),
+                None => None,
+            };
+            let closed_from = match row.get::<_, Option<String>>(11)? {
+                Some(id) => {
+                    Some(serde_json::json!({ "id": id, "name": row.get::<_, String>(12)? }))
+                }
+                None => None,
+            };
+            let state: String = row.get(2)?;
+            let actions: &[&str] = if state == "open" {
+                &OPEN_NOTICE_ACTIONS
+            } else {
+                &[]
+            };
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "kind": row.get::<_, String>(1)?,
+                "state": state,
+                "closeReason": row.get::<_, Option<String>>(3)?,
+                "summary": row.get::<_, String>(4)?,
+                "openedAt": row.get::<_, String>(5)?,
+                "device": device,
+                "actions": actions,
+                "closedBy": row.get::<_, Option<String>>(10)?,
+                "closedFrom": closed_from,
+            }))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .map(serde_json::from_value)
+        .collect::<Result<_, _>>()?)
 }
 
 /// Each row `sql` reads, as the protocol type its columns name; a column read as `accepted`, a

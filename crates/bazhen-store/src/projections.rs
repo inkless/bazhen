@@ -3,7 +3,7 @@
 
 use bazhen_protocol::ids::Id;
 use bazhen_protocol::tasks::{is_task_brief, is_task_title};
-use rusqlite::Transaction;
+use rusqlite::{OptionalExtension, Transaction};
 
 use crate::events::{AppendError, NewEvent, int};
 
@@ -31,6 +31,65 @@ pub(crate) fn project(tx: &Transaction<'_>, id: u64, event: &NewEvent) -> Result
                     payload.delegated_from.as_ref().map(Id::as_str),
                     int(id)?,
                     int(id)?,
+                ),
+            )?;
+        }
+        // The devices table carries the token's hash, which no event may, so the store writes it
+        // beside these events rather than from them.
+        NewEvent::DevicePaired { .. } | NewEvent::DeviceRevoked { .. } => {}
+        NewEvent::NoticeOpened { notice, payload } => {
+            let device = payload.device.as_ref();
+            tx.execute(
+                "INSERT INTO notices (id, kind, state, summary, device_id, device_name,
+                   device_origin, device_address, created_event_id, updated_event_id)
+                 VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    notice.as_str(),
+                    &payload.kind,
+                    &payload.summary,
+                    device.map(|d| d.id.as_str()),
+                    device.map(|d| d.name.as_str()),
+                    device.map(|d| d.origin.as_str()),
+                    device.and_then(|d| d.address.as_deref()),
+                    int(id)?,
+                    int(id)?,
+                ),
+            )?;
+        }
+        NewEvent::NoticeClosed { notice, payload } => {
+            // A notice closes once, as packages/core's machine has it: a dismissal after a
+            // revocation, or the reverse, is refused.
+            let state: Option<String> = tx
+                .query_row(
+                    "SELECT state FROM notices WHERE id = ?",
+                    [notice.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match state.as_deref() {
+                Some("open") => {}
+                Some(state) => {
+                    return Err(AppendError::Refused {
+                        event: event.name(),
+                        reason: format!("the notice is {state}"),
+                    });
+                }
+                None => {
+                    return Err(AppendError::Refused {
+                        event: event.name(),
+                        reason: format!("no notice {}", notice.as_str()),
+                    });
+                }
+            }
+            tx.execute(
+                "UPDATE notices SET state = 'closed', close_reason = ?, closed_by = ?,
+                   closed_from_device = ?, updated_event_id = ? WHERE id = ?",
+                (
+                    payload.reason.as_str(),
+                    payload.by.as_str(),
+                    payload.from_device.as_ref().map(Id::as_str),
+                    int(id)?,
+                    notice.as_str(),
                 ),
             )?;
         }

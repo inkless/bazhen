@@ -4,7 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AgentId, AssignmentId, TaskId};
+use crate::ids::{AgentId, AssignmentId, DeviceId, TaskId};
+use crate::notices::{NoticeCloseReason, NoticeCloser, NoticeDevice};
 
 /// Why the stream couldn't resume from a cursor: older than retention, or not from this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,4 +276,33 @@ pub struct TaskCreated {
     pub owner_agent_id: Option<AgentId>,
     pub parent_task_id: Option<TaskId>,
     pub delegated_from: Option<AssignmentId>,
+}
+
+/// The payload of `device.paired`: never the token, its hash or the code it was paired with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevicePaired {
+    pub name: String,
+}
+
+/// The payload of `device.revoked`, which is empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DeviceRevoked {}
+
+/// The payload of `notice.opened`, in the order the TypeScript daemon writes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoticeOpened {
+    pub kind: String,
+    pub summary: String,
+    pub device: Option<NoticeDevice>,
+}
+
+/// The payload of `notice.closed`. `from_device` is advisory: the device whose shell the socket
+/// call came from, as its environment claimed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeClosed {
+    pub reason: NoticeCloseReason,
+    pub by: NoticeCloser,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_device: Option<DeviceId>,
 }

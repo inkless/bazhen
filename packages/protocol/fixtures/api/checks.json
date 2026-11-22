@@ -4,6 +4,10 @@
     "taskNoteMaxBytes": 4000,
     "agentNameMax": 40,
     "streamFrameMaxBytes": 1048576,
+    "pairingAlphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+    "pairingCodeLength": 8,
+    "deviceNameMax": 64,
+    "devicePaired": "device_paired",
     "settled": [
       "delivered",
       "seen",
