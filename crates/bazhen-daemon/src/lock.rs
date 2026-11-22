@@ -6,7 +6,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{FlockOperation, flock};
@@ -38,14 +38,6 @@ pub(crate) enum Claim {
     Held,
     #[error("{0}")]
     Io(#[from] std::io::Error),
-}
-
-/// The lock file for the daemon on `socket`. It is never removed: a daemon that removed it could
-/// let a second one lock a fresh file while a third still holds the old one.
-pub(crate) fn lock_of(socket: &Path) -> PathBuf {
-    let mut path = socket.as_os_str().to_owned();
-    path.push(".lock");
-    PathBuf::from(path)
 }
 
 /// The lock at `path`, or `None` while another open of it holds it, in this process or another.
@@ -122,14 +114,6 @@ mod tests {
 
     fn daemon() -> Answer {
         Answer::Daemon { protocol_id: None }
-    }
-
-    #[test]
-    fn the_lock_file_sits_beside_the_socket() {
-        assert_eq!(
-            lock_of(Path::new("/h/run/bazhen.sock")),
-            PathBuf::from("/h/run/bazhen.sock.lock")
-        );
     }
 
     #[test]

@@ -182,6 +182,14 @@ fn default_run(i: &Inputs) -> String {
     }
 }
 
+/// The start-up lock file for the daemon on `socket`, beside it. It is never removed: a daemon that
+/// removed it could let a second one lock a fresh file while a third still holds the old one.
+pub fn lock_of(socket: &Path) -> PathBuf {
+    let mut path = socket.as_os_str().to_owned();
+    path.push(".lock");
+    PathBuf::from(path)
+}
+
 /// The directory containing terminal holder sockets for the daemon with this runtime directory,
 /// as resolved by the TypeScript daemon in `apps/daemon/src/config/paths.ts`, which hashes the
 /// normalised path: `run` is normalised the same way, whatever its spelling.
@@ -507,6 +515,14 @@ mod tests {
         );
         let short = holders_dir(Path::new("/r/./run/"), 1000);
         assert_eq!(short, Path::new("/r/run/holders"));
+    }
+
+    #[test]
+    fn the_lock_file_sits_beside_the_socket() {
+        assert_eq!(
+            lock_of(Path::new("/h/run/bazhen.sock")),
+            PathBuf::from("/h/run/bazhen.sock.lock")
+        );
     }
 
     #[test]

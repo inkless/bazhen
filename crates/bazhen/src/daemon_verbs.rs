@@ -17,6 +17,7 @@ use bazhen_protocol::notices::{
 };
 use bazhen_protocol::record::Record;
 
+use crate::absent::{Presence, presence, unanswering_text};
 use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, local, printable, uuid};
@@ -105,8 +106,21 @@ fn checkout() -> Option<PathBuf> {
 /// Idempotent: a daemon that isn't running is already stopped.
 pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     if !daemon.answers()? {
-        out.line("bazhen is not running");
-        return Ok(Exit::Done);
+        let socket = daemon.socket();
+        return Ok(match presence(Path::new(&socket)) {
+            Presence::Absent => {
+                out.line("bazhen is not running");
+                Exit::Done
+            }
+            Presence::Unbound { .. } => {
+                out.line("bazhen is already stopping, or has not begun to listen");
+                Exit::Done
+            }
+            Presence::Unanswering(why) => {
+                out.err(&unanswering_text(Path::new(&socket), &why));
+                Exit::Failed
+            }
+        });
     }
     let _: StopResponse = daemon.post_empty("/v1/daemon/stop", SLOW_CALL)?;
     let begun = Instant::now();
@@ -152,10 +166,17 @@ pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
 /// be reached; an unused runtime isn't read, and a missing hook binary is a warning.
 pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     if !daemon.answers()? {
-        out.line(&format!(
-            "daemon: not running (no answer on {})",
-            daemon.socket()
-        ));
+        let socket = daemon.socket();
+        out.line(&match presence(Path::new(&socket)) {
+            Presence::Absent => format!("daemon: not running (no answer on {socket})"),
+            Presence::Unbound { lock } => format!(
+                "daemon: stopping or still starting (holds {}, has no socket)",
+                lock.display()
+            ),
+            Presence::Unanswering(why) => {
+                format!("daemon: not answering on {socket}; it may be stuck or busy ({why})")
+            }
+        });
         return Ok(Exit::Failed);
     }
     let d: DoctorResponse = daemon.get("/v1/daemon/doctor", CALL)?;

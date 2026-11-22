@@ -26,6 +26,7 @@ use self::attachment::{Attachment, Ending};
 use self::direct::Direct;
 use self::keys::Detach;
 use self::link::Outcome;
+use crate::absent::daemon_absent;
 use crate::args::Parsed;
 use crate::call::{ANOTHER_BUILD, CALL, Daemon, Failed};
 use crate::out::Out;
@@ -95,7 +96,7 @@ pub(crate) fn run(
         }
         Ok(_) => {}
         Err(Failed::NotRunning) if is_id("term", target) => {
-            if let Err(why) = direct::daemon_absent(socket) {
+            if let Err(why) = daemon_absent(socket) {
                 out.err(&format!(
                     "the daemon doesn't answer, but may be running ({why}), so attach won't go \
                      around it: `bazhen terminals attach --direct {target}` can view the terminal"
@@ -219,7 +220,7 @@ fn straight(
     }
     // Only a daemon that is surely not there can't be holding the terminal's input: one that is
     // slow, or whose socket can't be read, may be, so the attachment never types behind it.
-    let absent = direct::daemon_absent(socket);
+    let absent = daemon_absent(socket);
     let asks = absent.is_ok();
     let (mut stream, hello, mut decoder) = direct::open(holders, target, asks)?;
     let mut notes = Vec::new();

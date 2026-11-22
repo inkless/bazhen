@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use bazhen_client::paths::Paths;
+use bazhen_client::paths::{Paths, lock_of};
 use bazhen_store::{OpenError, Store};
 
 use crate::retention;
@@ -19,7 +19,7 @@ use tokio_util::task::TaskTracker;
 
 use crate::accept::{self, Limits, serve_on};
 use crate::guard;
-use crate::lock::{Claim, Lock, claim, lock_of};
+use crate::lock::{Claim, Lock, claim};
 use crate::private_dir::ensure_private_dir;
 use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
