@@ -1528,7 +1528,7 @@ mod tests {
                         &self.stop,
                         &self.tracker,
                     );
-                    self.shells.reconcile().await;
+                    self.shells.reconcile().await.unwrap();
                     self.serve();
                 }
 

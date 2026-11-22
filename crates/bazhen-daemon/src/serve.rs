@@ -785,6 +785,7 @@ mod tests {
                 socket: startup.paths.socket.clone(),
                 tracker: TaskTracker::new(),
                 integration: None,
+                stop: CancellationToken::new(),
             });
             let req = bazhen_protocol::shells::OpenShellRequest {
                 idempotency_key: "a".to_owned(),
@@ -803,7 +804,15 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let refused = match shells(&startup, &store, runner, &TaskTracker::new()).await {
+            let refused = match shells(
+                &startup,
+                &store,
+                runner,
+                &TaskTracker::new(),
+                &CancellationToken::new(),
+            )
+            .await
+            {
                 Ok(_) => None,
                 Err(refused) => Some(refused.to_string()),
             };

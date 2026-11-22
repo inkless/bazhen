@@ -427,7 +427,9 @@ mod tests {
         }
 
         /// Returns once a command or settle waits for the shell's turn behind the one holding it.
+        /// Panics if none has within 10 s, so a retry that neither waits nor ends fails the test.
         async fn turn_awaited(&self, id: &str) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
                 let waiting = self
                     .shells
@@ -441,6 +443,10 @@ mod tests {
                 if waiting {
                     return;
                 }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "nothing waited for shell {id}'s turn within 10 s"
+                );
                 tokio::task::yield_now().await;
             }
         }
