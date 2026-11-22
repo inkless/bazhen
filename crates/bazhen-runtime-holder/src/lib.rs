@@ -7,7 +7,10 @@
 //! - `install`: `<state>/holder/<build>/bazhen-holder`, never written over, and the prune of builds
 //!   nothing runs any more;
 //! - `sockets`: the private root, under the home's run directory or the short root beside it,
-//!   whose `holders` directory each holder binds its socket in.
+//!   whose `holders` directory each holder binds its socket in;
+//! - `runtime`: the terminals, each in a holder of its own: created, found, acted on, and
+//!   watched, through one connection to each, for what its holder says unasked (`watch`);
+//! - `locator`: where a terminal's holder is, as the daemon records it.
 //!
 //! The client is async, on tokio, as only the daemon is; install and prune block, and run off
 //! the runtime.
@@ -19,13 +22,19 @@
 //! even then.
 
 mod client;
+mod host;
 mod install;
+mod locator;
 mod request_ids;
+mod runtime;
 mod sockets;
 mod tags;
+mod watch;
 
 #[cfg(test)]
 mod fake_holder;
+#[cfg(test)]
+mod real_holder;
 #[cfg(test)]
 mod test_support;
 
@@ -38,5 +47,11 @@ pub use install::{
     FRESH, InstallError, InstallOptions, InstalledHolder, install_holder, prune_holder_builds,
     prune_unused_holders, running_builds,
 };
+pub use locator::{HolderLocator, HolderRef, LocatorError};
+pub use runtime::{
+    ForegroundProcess, HELLO, HealthState, HolderBuild, HolderRuntime, InventoryEntry, Needs,
+    ProcessLaunch, REQUEST, RuntimeError, RuntimeHealth, RuntimeOptions, StaleReason, TerminalSpec,
+};
 pub use sockets::{HolderRoot, UnsafeHolderDir};
 pub use tags::{TerminalTags, decode_tags, encode_tags, unlinked};
+pub use watch::{EVENTS_KEPT, RuntimeEvent};
