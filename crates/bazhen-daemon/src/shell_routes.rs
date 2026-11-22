@@ -512,8 +512,14 @@ mod tests {
         );
     }
 
-    /// What a router answers a POST of `body` to `path` with, reaching it from this machine.
-    fn posted(router: axum::Router, path: &str, body: Vec<u8>) -> (u16, serde_json::Value) {
+    /// What a router answers a POST of `body` to `path` with, reaching it from this machine, on
+    /// `runtime`: a test's requests share one, as the daemon's do, which runs the shells' keeper.
+    fn posted(
+        runtime: &tokio::runtime::Runtime,
+        router: axum::Router,
+        path: &str,
+        body: Vec<u8>,
+    ) -> (u16, serde_json::Value) {
         use tower::ServiceExt as _;
         let request = axum::http::Request::builder()
             .method("POST")
@@ -522,7 +528,7 @@ mod tests {
             .header("content-type", "application/json")
             .body(axum::body::Body::from(body))
             .unwrap();
-        crate::testing::runtime().block_on(async {
+        runtime.block_on(async {
             let response = router.oneshot(request).await.unwrap();
             let status = response.status().as_u16();
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 16)
@@ -548,7 +554,8 @@ mod tests {
     fn takes_a_shell_s_reports_over_the_socket_by_its_own_token_held_to_their_bounds() {
         use crate::shells::tests::{integration, setup_with};
         let h = setup_with(100, Some(integration()));
-        let id = crate::testing::runtime().block_on(h.open("o")).unwrap();
+        let runtime = crate::testing::runtime();
+        let id = runtime.block_on(h.open("o")).unwrap();
         let token = h.token_of(&id).unwrap();
         let shared = Shared {
             shells: Some(Arc::clone(&h.shells)),
@@ -576,9 +583,9 @@ mod tests {
         let expected = "expected { token, at, command }";
         assert_eq!(
             [
-                posted(socket(), &at("report"), report),
-                posted(socket(), &at("report"), forged),
-                posted(socket(), &at("report"), padded(16 * 1024)),
+                posted(&runtime, socket(), &at("report"), report),
+                posted(&runtime, socket(), &at("report"), forged),
+                posted(&runtime, socket(), &at("report"), padded(16 * 1024)),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -590,7 +597,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            malformed.map(|body| posted(socket(), &at("report"), body)),
+            malformed.map(|body| posted(&runtime, socket(), &at("report"), body)),
             [(); 4].map(|()| said("invalid_request", expected))
         );
         assert_eq!(h.last_command(&id), Some("make".to_owned()));
@@ -603,14 +610,14 @@ mod tests {
         );
         assert_eq!(
             [
-                posted(socket(), &at("prompt"), own.clone()),
-                posted(socket(), &at("decline"), own.clone()),
-                posted(socket(), &at("prompt"), forged.clone()),
-                posted(socket(), &at("decline"), forged),
-                posted(socket(), &at("prompt"), marked_null),
-                posted(socket(), &at("decline"), b"{}".to_vec()),
-                posted(socket(), &at("prompt"), long.clone()),
-                posted(socket(), &at("decline"), long),
+                posted(&runtime, socket(), &at("prompt"), own.clone()),
+                posted(&runtime, socket(), &at("decline"), own.clone()),
+                posted(&runtime, socket(), &at("prompt"), forged.clone()),
+                posted(&runtime, socket(), &at("decline"), forged),
+                posted(&runtime, socket(), &at("prompt"), marked_null),
+                posted(&runtime, socket(), &at("decline"), b"{}".to_vec()),
+                posted(&runtime, socket(), &at("prompt"), long.clone()),
+                posted(&runtime, socket(), &at("decline"), long),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -629,7 +636,7 @@ mod tests {
         };
         let http = crate::routes::http_router(shared.clone(), gate);
         let over_http = ["report", "prompt", "decline"]
-            .map(|verb| posted(http.clone(), &at(verb), own.clone()).0);
+            .map(|verb| posted(&runtime, http.clone(), &at(verb), own.clone()).0);
         assert_eq!(over_http, [404; 3]);
     }
 
@@ -639,7 +646,8 @@ mod tests {
 
         use crate::shells::tests::{integration, setup_with};
         let h = setup_with(100, Some(integration()));
-        let id = crate::testing::runtime().block_on(h.open("o")).unwrap();
+        let runtime = crate::testing::runtime();
+        let id = runtime.block_on(h.open("o")).unwrap();
         let token = h.token_of(&id).unwrap();
         let shared = Shared {
             shells: Some(Arc::clone(&h.shells)),
@@ -662,6 +670,7 @@ mod tests {
         );
         assert_eq!(
             posted(
+                &runtime,
                 crate::routes::socket_router(shared),
                 &format!("/v1/shells/{id}/report"),
                 longest.into_bytes()
@@ -672,21 +681,13 @@ mod tests {
         assert_eq!(h.last_command(&id), Some("a".repeat(2048)));
     }
 
-    /// Whether `future` is still waiting after one poll.
-    async fn waits<F: std::future::Future + Unpin>(future: &mut F) -> bool {
-        tokio::select! {
-            biased;
-            _ = future => false,
-            () = std::future::ready(()) => true,
-        }
-    }
-
     /// Calls the handlers themselves, not the socket's router: the router's caller guard
     /// identifies the caller in `spawn_blocking`, so a single poll of the router can't be known to
     /// have reached the keeper. Dropping the handler's future is what hyper does when the hook's
     /// socket closes.
     #[test]
     fn keeps_a_line_whose_hook_hung_up_while_the_store_was_held_and_says_so_once() {
+        use crate::shells::reports::tests::waits;
         use crate::shells::tests::{Said, integration, setup_with};
         let h = setup_with(100, Some(integration()));
         let said = Said::default();

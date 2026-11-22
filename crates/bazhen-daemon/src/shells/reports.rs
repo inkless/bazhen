@@ -4,8 +4,10 @@
 //! is kept in the shell's row alone: no event records it, and no log names it.
 
 use std::future::Future;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, OnceLock};
+use std::task::Poll;
 
 use bazhen_protocol::shells::{ShellDecline, ShellPrompt, ShellReport};
 use tokio::sync::{mpsc, oneshot};
@@ -58,13 +60,23 @@ struct Job {
 }
 
 impl Job {
+    /// Runs it to its end, or to a panic, which is caught here: the job is dropped with its
+    /// answer unsent, so its route answers that it ended early.
     async fn run_to_end(self) {
-        if !self.run.await {
-            tracing::warn!(
-                "shell {}: finished a {} its hook stopped waiting for",
-                self.terminal_id,
-                self.kind.as_str()
-            );
+        let mut run = self.run;
+        let answered = std::future::poll_fn(|cx| {
+            catch_unwind(AssertUnwindSafe(|| run.as_mut().poll(cx)))
+                .map_or(Poll::Ready(None), |polled| polled.map(Some))
+        })
+        .await;
+        drop(run);
+        let (id, kind) = (self.terminal_id, self.kind.as_str());
+        match answered {
+            Some(true) => {}
+            Some(false) => {
+                tracing::warn!("shell {id}: finished a {kind} its hook stopped waiting for");
+            }
+            None => tracing::warn!("shell {id}: a {kind} panicked as it was handled"),
         }
     }
 }
@@ -78,34 +90,36 @@ impl Job {
 /// each behind one store job at a time, which costs nothing, since the store's writer runs one job
 /// at a time anyway. And it is what keeps a shell's report and its prompt or decline in the order
 /// they reached the daemon: a task for each shell, or each report, would let them pass each other.
+///
+/// The keeper never ends because of a job. One that panics is caught where it runs: its route is
+/// answered that it ended early, the panic is said, and the keeper goes on with the reports behind
+/// it. That matters only where a panic unwinds, as in the tests: a release build aborts on any
+/// panic (`panic = "abort"`), and the daemon with it.
 #[derive(Debug, Default)]
 pub(crate) struct Keeper {
-    /// Where the keeper takes reports from. It starts with the first report, since a shell's
-    /// lifecycle may be made outside a runtime, and again if it ends before the daemon's stop, as
-    /// one whose report panicked, or whose runtime ended, does: only once it has ended, so no two
-    /// ever run at once.
-    jobs: Mutex<Option<mpsc::Sender<Job>>>,
+    /// Where the keeper takes reports from. It starts with the first report, not in
+    /// `Shells::new`, which is sync, and which test harnesses call outside a runtime; the daemon
+    /// makes its shells once, inside its runtime (`serve::shells`).
+    jobs: OnceLock<mpsc::Sender<Job>>,
 }
 
 impl Keeper {
-    /// Where reports are sent, a keeper started on `tracker` if none runs and it isn't `stop`.
-    fn jobs(&self, tracker: &TaskTracker, stop: &CancellationToken) -> mpsc::Sender<Job> {
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(open) = jobs.as_ref()
-            && (!open.is_closed() || stop.is_cancelled())
-        {
-            return open.clone();
-        }
-        let (open, taken) = mpsc::channel(WAITING_AT_MOST);
-        tracker.spawn(keep(taken, stop.clone()));
-        *jobs = Some(open.clone());
-        open
+    /// Where reports are sent, the keeper started on `tracker` at the first.
+    fn jobs(&self, tracker: &TaskTracker, stop: &CancellationToken) -> &mpsc::Sender<Job> {
+        self.jobs.get_or_init(|| {
+            let (jobs, taken) = mpsc::channel(WAITING_AT_MOST);
+            tracker.spawn(keep(taken, stop.clone()));
+            jobs
+        })
     }
 }
 
-/// Handles each report `jobs` takes, in turn, until `stop`; then those already taken, and takes
-/// no more, so the daemon's drain, which waits on its tasks for no longer than its bound, waits
-/// for them too. Past that bound the runtime ends, and with it whatever is left.
+/// Handles each report `jobs` takes, in turn, until `stop`. Until the keeper sees the stop and
+/// closes `jobs`, a route's send still succeeds, and that report is handled too; one sent after
+/// the close is refused, its route answered 503. Once closed, it handles every report already
+/// taken, then ends. A keeper first started after the stop closes at once, and handles what it
+/// was sent. The daemon's drain waits on its tasks, this one among them, for no longer than its
+/// bound (`serve::drain`); past that the runtime ends, and with it whatever is left.
 async fn keep(mut jobs: mpsc::Receiver<Job>, stop: CancellationToken) {
     while let Some(Some(job)) = stop.run_until_cancelled(jobs.recv()).await {
         job.run_to_end().await;
@@ -167,7 +181,8 @@ impl Shells {
     ///
     /// # Errors
     ///
-    /// `work`'s, and [`ShellError::Unavailable`] once the daemon is stopping.
+    /// `work`'s; [`ShellError::Unavailable`] when the keeper has closed at the daemon's stop; and
+    /// [`ShellError::Internal`] when the report's handling panicked.
     pub(crate) async fn kept<T, F>(
         self: &Arc<Self>,
         kind: ReportKind,
@@ -522,26 +537,49 @@ pub(crate) mod tests {
         });
     }
 
+    /// Whether `future` is still waiting after one poll.
+    pub(crate) async fn waits<F: Future + Unpin>(future: &mut F) -> bool {
+        tokio::select! {
+            biased;
+            _ = future => false,
+            () = std::future::ready(()) => true,
+        }
+    }
+
     #[test]
     fn keeps_a_report_sent_after_one_whose_handling_panicked() {
         let h = setup_with(100, Some(integration()));
-        let shells = &h.shells;
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
         runtime().block_on(async {
             let id = h.open("o").await.unwrap();
             let token = h.token_of(&id).unwrap();
-            let panicked: Result<ReportOutcome, ShellError> = shells
-                .kept(ReportKind::Line, &id, |_| async {
-                    panic!("a report's handling panicked")
-                })
-                .await;
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let mut held = Box::pin(h.store.run(move |_| gate.recv().is_ok()));
+            assert!(waits(&mut held).await);
+            let store = h.store.clone();
+            let mut panicking = Box::pin(h.shells.kept(ReportKind::Line, &id, |_| async move {
+                store.run(|_| ()).await.unwrap();
+                panic!("a report's handling panicked")
+            }));
+            assert!(waits(&mut panicking).await);
+            // The keeper takes the panicking report, which waits behind the hold.
+            tokio::task::yield_now().await;
             let (on, report) = (id.clone(), line(Some(&token), 1, Some("make")));
-            let next = shells
-                .kept(ReportKind::Line, &id, move |shells| async move {
-                    shells.report(&on, report).await
-                })
-                .await;
+            let mut next = Box::pin(h.shells.kept(
+                ReportKind::Line,
+                &id,
+                move |shells| async move { shells.report(&on, report).await },
+            ));
+            assert!(
+                waits(&mut next).await,
+                "the next report is queued behind it"
+            );
+            release.send(()).unwrap();
+            assert!(held.await.unwrap());
+            let panicked: Result<ReportOutcome, ShellError> = panicking.await;
             assert_eq!(
-                (panicked, next, h.last_command(&id)),
+                (panicked, next.await, h.last_command(&id)),
                 (
                     Err(ShellError::Internal(format!(
                         "shell {id}'s report ended early"
@@ -549,6 +587,12 @@ pub(crate) mod tests {
                     Ok(ReportOutcome::Kept),
                     Some("make".to_owned())
                 )
+            );
+            assert_eq!(
+                said.times(&format!("shell {id}: a report panicked as it was handled")),
+                1,
+                "{}",
+                said.text()
             );
         });
     }
