@@ -122,6 +122,12 @@ fn unshowable(c: char) -> bool {
     )
 }
 
+/// Whether `text` holds a character that draws as nothing, as `INVISIBLE` in packages/protocol
+/// matches one.
+pub(crate) fn has_invisible(text: &str) -> bool {
+    text.chars().any(invisible)
+}
+
 /// Zero-width spaces and joiners, the directional marks, the word joiner and invisible operators,
 /// the byte-order mark, and the line and paragraph separators.
 fn invisible(c: char) -> bool {

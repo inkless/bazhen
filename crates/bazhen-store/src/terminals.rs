@@ -7,7 +7,7 @@ use bazhen_protocol::agents::{Environment, EnvironmentKind};
 use bazhen_protocol::events::{EnvironmentRegistered, RuntimeRefPayload};
 use bazhen_protocol::ids::{EnvironmentId, Id, TerminalId};
 use bazhen_protocol::shells::{
-    Foreground, NeedsRestart, Shell, TerminalState, TuiTheme, shell_commands,
+    Foreground, NeedsRestart, Shell, TerminalState, TuiTheme, shell_command_line, shell_commands,
 };
 use rusqlite::types::ToSql;
 use rusqlite::{OptionalExtension, Transaction};
@@ -486,6 +486,40 @@ impl Reads<'_> {
             .map(|kept| kept.unwrap_or(false))
     }
 
+    /// The hash of the token the shell `id` names reports with, or `None` for one that can't
+    /// report.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn shell_token_hash(self, id: &str) -> rusqlite::Result<Option<String>> {
+        self.0
+            .query_row(
+                "SELECT report_token_hash FROM terminals WHERE id = ? AND kind = 'shell'",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+
+    /// The line kept to type back into the replacement of the shell `id` names, or `None` when
+    /// none is.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn last_shell_command(self, id: &str) -> rusqlite::Result<Option<String>> {
+        self.0
+            .query_row(
+                "SELECT last_command FROM terminals WHERE id = ? AND kind = 'shell'",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+
     /// The environment this machine's terminals run in, once one is registered.
     ///
     /// # Errors
@@ -527,6 +561,64 @@ impl Writer<'_> {
              WHERE id = ? AND kind = 'shell' AND current_cwd IS NOT ?",
             (cwd, id, cwd),
         )?;
+        Ok(())
+    }
+
+    /// Keeps the line a live shell reported running, under the report's number `seq`. Only a
+    /// report newer than the kept one counts, so one arriving late leaves the newer line. A line
+    /// that can't be typed back safely clears the kept one: typing an older command instead would
+    /// mislead. Answers whether the report counted.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or one for a number beyond what it stores.
+    pub fn note_shell_command(
+        &self,
+        id: &str,
+        seq: u64,
+        line: Option<&str>,
+    ) -> rusqlite::Result<bool> {
+        let kept = line.filter(|line| shell_command_line(line));
+        let seq =
+            i64::try_from(seq).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let changed = self.connection().execute(
+            "UPDATE terminals SET last_command = ?, last_command_seq = ?
+             WHERE id = ? AND kind = 'shell' AND state IN ('creating', 'running')
+             AND (last_command_seq IS NULL OR last_command_seq < ?)",
+            (kept, seq, id, seq),
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Records the hash of the token a new shell's integration will report with.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn note_shell_token(&self, id: &str, hash: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE terminals SET report_token_hash = ? WHERE id = ? AND kind = 'shell'",
+            (hash, id),
+        )?;
+        Ok(())
+    }
+
+    /// Forgets every shell's kept line and token, for a daemon started with the integration off:
+    /// what it was given while on is no longer wanted, and no shell may report. The journal is
+    /// scrubbed once this commits, should it have forgotten any.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn forget_shell_commands(&self) -> rusqlite::Result<()> {
+        let changed = self.connection().execute(
+            "UPDATE terminals SET last_command = NULL, last_command_seq = NULL, report_token_hash = NULL
+             WHERE kind = 'shell' AND (last_command IS NOT NULL OR report_token_hash IS NOT NULL)",
+            (),
+        )?;
+        if changed > 0 {
+            self.scrub.set(true);
+        }
         Ok(())
     }
 
@@ -1093,6 +1185,218 @@ mod tests {
         assert_eq!(
             (lost.needs_restart.clone(), lost.attach_command.clone()),
             (None, None)
+        );
+    }
+
+    /// A store with `count` shells running in the local environment.
+    fn running(dir: &TempDir, count: u8) -> (Store, Vec<TerminalId>) {
+        let mut store = Store::open(&dir.db("terminals.db")).unwrap();
+        let environment = environment(&mut store);
+        let terminals: Vec<TerminalId> = (0..count)
+            .map(|n| TerminalId::mint(u64::from(n) + 1, [n + 3; 16]))
+            .collect();
+        for terminal in &terminals {
+            change(
+                &mut store,
+                terminal,
+                TerminalChange::Opened(TerminalOpened {
+                    environment_id: environment.clone(),
+                    cwd: "/home/me".to_owned(),
+                    linked_agent_id: None,
+                    theme: None,
+                    restart_of: None,
+                    runtime: Some("holder".to_owned()),
+                }),
+            )
+            .unwrap();
+            change(
+                &mut store,
+                terminal,
+                TerminalChange::Running(incarnation("0")),
+            )
+            .unwrap();
+        }
+        (store, terminals)
+    }
+
+    fn note(store: &mut Store, terminal: &TerminalId, seq: u64, line: Option<&str>) -> bool {
+        store
+            .write(|w| w.note_shell_command(terminal.as_str(), seq, line))
+            .unwrap()
+    }
+
+    fn kept(store: &Store, terminal: &TerminalId) -> Option<String> {
+        store.reads().last_shell_command(terminal.as_str()).unwrap()
+    }
+
+    fn closed(store: &mut Store, terminal: &TerminalId) {
+        change(store, terminal, TerminalChange::Closing).unwrap();
+        change(
+            store,
+            terminal,
+            TerminalChange::Closed(TerminalClosed {
+                reason: TerminalClosedReason::User,
+            }),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn keeps_the_newest_line_a_live_shell_reported_so_a_late_older_report_changes_nothing() {
+        let dir = TempDir::new("shell-line-newest");
+        let (mut store, terminals) = running(&dir, 1);
+        let shell = &terminals[0];
+        let counted = [
+            note(&mut store, shell, 2, Some("moon run :dev")),
+            note(&mut store, shell, 1, Some("ls")),
+            note(&mut store, shell, 2, Some("ls")),
+        ];
+        assert_eq!(
+            (counted, kept(&store, shell).as_deref()),
+            ([true, false, false], Some("moon run :dev"))
+        );
+    }
+
+    #[test]
+    fn clears_the_kept_line_when_a_newer_one_cant_be_typed_back_rather_than_keep_the_older() {
+        let dir = TempDir::new("shell-line-clears");
+        let (mut store, terminals) = running(&dir, 1);
+        let shell = &terminals[0];
+        note(&mut store, shell, 1, Some("moon run :dev"));
+        note(&mut store, shell, 2, Some("make\nrm -rf ~"));
+        let after_newline = kept(&store, shell);
+        note(&mut store, shell, 3, Some("moon run :dev"));
+        note(&mut store, shell, 4, None);
+        assert_eq!((after_newline, kept(&store, shell)), (None, None));
+    }
+
+    #[test]
+    fn keeps_a_lost_shell_s_line_for_its_restart_and_takes_no_report_for_it() {
+        let dir = TempDir::new("shell-line-lost");
+        let (mut store, terminals) = running(&dir, 1);
+        let shell = &terminals[0];
+        note(&mut store, shell, 1, Some("cargo watch"));
+        change(&mut store, shell, TerminalChange::Lost).unwrap();
+        let counted = note(&mut store, shell, 2, Some("ls"));
+        assert_eq!(
+            (counted, kept(&store, shell).as_deref()),
+            (false, Some("cargo watch"))
+        );
+    }
+
+    #[test]
+    fn keeps_a_shell_s_token_hash_and_answers_none_for_another_kind_or_no_terminal() {
+        let dir = TempDir::new("shell-token");
+        let (mut store, terminals) = running(&dir, 1);
+        let shell = &terminals[0];
+        let before = store.reads().shell_token_hash(shell.as_str()).unwrap();
+        store
+            .write(|w| w.note_shell_token(shell.as_str(), "hash"))
+            .unwrap();
+        store
+            .write(|w| w.note_shell_token("term_none", "hash"))
+            .unwrap();
+        assert_eq!(
+            (
+                before,
+                store.reads().shell_token_hash(shell.as_str()).unwrap(),
+                store.reads().shell_token_hash("term_none").unwrap()
+            ),
+            (None, Some("hash".to_owned()), None)
+        );
+    }
+
+    #[test]
+    fn forgets_the_line_once_the_shell_closes_or_fails_and_never_writes_it_into_an_event() {
+        let dir = TempDir::new("shell-line-forgets");
+        let (mut store, terminals) = running(&dir, 2);
+        let (closing, failing) = (&terminals[0], &terminals[1]);
+        note(&mut store, closing, 1, Some("export TOKEN=s3cret-closed"));
+        note(&mut store, failing, 1, Some("export TOKEN=s3cret-failed"));
+        closed(&mut store, closing);
+        store
+            .db
+            .execute(
+                "UPDATE terminals SET state = 'creating' WHERE id = ?",
+                [failing.as_str()],
+            )
+            .unwrap();
+        change(
+            &mut store,
+            failing,
+            TerminalChange::Failed(TerminalFailed {
+                reason: TerminalFailedReason::OpenRejected,
+            }),
+        )
+        .unwrap();
+        let in_events: i64 = store
+            .db
+            .query_row(
+                "SELECT count(*) FROM events WHERE payload LIKE '%s3cret%'",
+                (),
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            (kept(&store, closing), kept(&store, failing), in_events),
+            (None, None, 0)
+        );
+    }
+
+    /// Whether `needle` is anywhere in the database's file or its journal.
+    fn on_disk(dir: &TempDir, needle: &[u8]) -> [bool; 2] {
+        ["terminals.db", "terminals.db-wal"].map(|name| {
+            std::fs::read(dir.db(name))
+                .unwrap_or_default()
+                .windows(needle.len())
+                .any(|w| w == needle)
+        })
+    }
+
+    #[test]
+    fn leaves_no_trace_of_a_closed_shell_s_line_in_the_database_or_its_journal() {
+        let dir = TempDir::new("shell-line-disk");
+        // Rows after it on the same page keep a cleared row's old bytes where they stood, unzeroed.
+        let (mut store, terminals) = running(&dir, 3);
+        note(
+            &mut store,
+            &terminals[0],
+            1,
+            Some("export TOKEN=s3cret-on-disk"),
+        );
+        let before = on_disk(&dir, b"s3cret");
+        closed(&mut store, &terminals[0]);
+        assert_eq!(
+            (before.contains(&true), on_disk(&dir, b"s3cret")),
+            (true, [false, false])
+        );
+    }
+
+    #[test]
+    fn forgets_every_shell_s_line_and_token_and_scrubs_them_from_the_journal() {
+        let dir = TempDir::new("shell-line-off");
+        let (mut store, terminals) = running(&dir, 3);
+        note(
+            &mut store,
+            &terminals[0],
+            1,
+            Some("export TOKEN=s3cret-off"),
+        );
+        store
+            .write(|w| w.note_shell_token(terminals[1].as_str(), "hash"))
+            .unwrap();
+        store
+            .write(|w: &Writer<'_>| w.forget_shell_commands())
+            .unwrap();
+        let reported = note(&mut store, &terminals[0], 2, Some("ls"));
+        let reads = store.reads();
+        assert_eq!(
+            (
+                reads.shell_token_hash(terminals[1].as_str()).unwrap(),
+                on_disk(&dir, b"s3cret"),
+                reported,
+            ),
+            (None, [false, false], true)
         );
     }
 }

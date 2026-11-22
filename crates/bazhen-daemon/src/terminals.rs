@@ -15,7 +15,7 @@ use bazhen_protocol::shells::TuiTheme;
 pub(crate) type Answer<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A new shell, as the lifecycle asks for it; the runtime adds its size and history.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ShellSpec {
     pub(crate) terminal_id: TerminalId,
     pub(crate) linked_agent_id: Option<AgentId>,
@@ -24,6 +24,20 @@ pub(crate) struct ShellSpec {
     /// The shell's own variables, over the runtime's.
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) theme: Option<TuiTheme>,
+}
+
+/// Its variables by name alone: `BAZHEN_SHELL_TOKEN`'s value proves the shell.
+impl std::fmt::Debug for ShellSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShellSpec")
+            .field("terminal_id", &self.terminal_id)
+            .field("linked_agent_id", &self.linked_agent_id)
+            .field("argv", &self.argv)
+            .field("cwd", &self.cwd)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("theme", &self.theme)
+            .finish()
+    }
 }
 
 /// A terminal's incarnation as the store records it: its id, and its runtime's locator, as the

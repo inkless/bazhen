@@ -4,10 +4,14 @@
 //! opens its new shell standalone.
 //!
 //! - `reconcile`: what a restarted daemon makes of the shells it finds, and those it doesn't;
-//! - `foreground`: what each running shell's foreground holds, kept current from process facts.
+//! - `foreground`: what each running shell's foreground holds, kept current from process facts;
+//! - `integration`: the snippets shells source to report the lines they run;
+//! - `reports`: what a shell's integration reports, proved with the shell's own token.
 
 pub(crate) mod foreground;
+pub(crate) mod integration;
 pub(crate) mod reconcile;
+pub(crate) mod reports;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -32,6 +36,8 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use self::integration::Integration;
+use self::reports::new_shell_token;
 use crate::budget::{Budget, Counts, TerminalLimit};
 use crate::terminals::{Event, Events, Exit, Recorded, ShellSpec, TerminalError, Terminals};
 use crate::writer::Writer;
@@ -274,6 +280,9 @@ pub(crate) struct ShellsDeps {
     pub(crate) socket: String,
     /// The daemon's tasks, which every command runs on to its end.
     pub(crate) tracker: TaskTracker,
+    /// With `shells.retype_last_command` on, what each new shell reports its lines with; without
+    /// it, shells report nothing.
+    pub(crate) integration: Option<Integration>,
 }
 
 /// How long an exited shell's failed close waits to be tried again, at first and at most.
@@ -602,6 +611,13 @@ impl Shells {
             opening.theme,
             opening.restart_of.clone(),
         );
+        let reporting = self
+            .deps
+            .integration
+            .as_ref()
+            .map(|_| new_shell_token())
+            .transpose()?;
+        let hash = reporting.as_ref().map(|reporting| reporting.hash.clone());
         let opened = self
             .write(move |w| {
                 // Under the same transaction as the record, so two opens with one key make one.
@@ -627,6 +643,9 @@ impl Shells {
                     actor: Actor::User,
                     change: TerminalChange::Opened(payload),
                 })?;
+                if let Some(hash) = &hash {
+                    w.note_shell_token(terminal.as_str(), hash)?;
+                }
                 let response = ShellCommandResponse {
                     terminal_id: terminal,
                     event_ids: vec![id],
@@ -643,7 +662,11 @@ impl Shells {
         // Held until it is recorded running or failed: an exit told while the runtime still
         // starts it waits, and then finds it running, to close.
         let _turn = self.turns.take(terminal.as_str()).await;
-        let spec = self.spec(&terminal, opening);
+        let spec = self.spec(
+            &terminal,
+            opening,
+            reporting.map(|reporting| reporting.token),
+        );
         match self.deps.terminals.create(spec).await {
             Err(cause) => {
                 tracing::error!("bazhen: shell {terminal} failed to open: {cause}");
@@ -680,9 +703,9 @@ impl Shells {
         }
     }
 
-    /// The user's shell as a login shell, told its terminal and the daemon's socket, and the
-    /// paired device that opened it.
-    fn spec(&self, terminal: &TerminalId, opening: Opening) -> ShellSpec {
+    /// The user's shell as a login shell, told its terminal and the daemon's socket, the paired
+    /// device that opened it, and, with `token`, what its integration reports with and where.
+    fn spec(&self, terminal: &TerminalId, opening: Opening, token: Option<String>) -> ShellSpec {
         let mut env = BTreeMap::from([
             (
                 "BAZHEN_TERMINAL_ID".to_owned(),
@@ -692,6 +715,14 @@ impl Shells {
         ]);
         if let Some(device) = opening.opened_by {
             env.insert("BAZHEN_DEVICE_ID".to_owned(), device.as_str().to_owned());
+        }
+        if let (Some(token), Some(integration)) = (token, &self.deps.integration) {
+            env.insert("BAZHEN_SHELL_TOKEN".to_owned(), token);
+            env.insert("BAZHEN_HOOK".to_owned(), integration.hook.clone());
+            env.insert(
+                "BAZHEN_SHELL_INTEGRATION".to_owned(),
+                integration.dir.clone(),
+            );
         }
         ShellSpec {
             terminal_id: terminal.clone(),
@@ -1217,7 +1248,7 @@ pub(crate) mod tests {
         pub(crate) fake: Fake,
         pub(crate) store: Writer,
         pub(crate) home: String,
-        dir: TempDir,
+        pub(crate) dir: TempDir,
         thread: Option<crate::writer::Thread>,
     }
 
@@ -1230,6 +1261,19 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn setup(max: u64) -> Harness {
+        setup_with(max, None)
+    }
+
+    /// What new shells report their lines with in a test, where nothing is written to either.
+    pub(crate) fn integration() -> Integration {
+        Integration {
+            hook: "/state/hook/bazhen-hook".to_owned(),
+            dir: "/state/shell-integration".to_owned(),
+        }
+    }
+
+    /// The same, with new shells told to report with `integration`.
+    pub(crate) fn setup_with(max: u64, integration: Option<Integration>) -> Harness {
         let dir = TempDir::new("shells");
         let path = dir.path().join("bazhen.db");
         let (store, thread) =
@@ -1251,6 +1295,7 @@ pub(crate) mod tests {
             shell: "/bin/zsh".to_owned(),
             socket: "/run/b.sock".to_owned(),
             tracker: TaskTracker::new(),
+            integration,
         });
         Harness {
             shells: Arc::new(shells),
@@ -1303,6 +1348,11 @@ pub(crate) mod tests {
     }
 
     impl Harness {
+        /// The token the shell `id` names was told to report with, if any.
+        pub(crate) fn token_of(&self, id: &str) -> Option<String> {
+            self.fake.spec_of(id).env.get("BAZHEN_SHELL_TOKEN").cloned()
+        }
+
         pub(crate) async fn open(&self, key: &str) -> Result<String, ShellError> {
             self.shells
                 .open(&opening(key), None)

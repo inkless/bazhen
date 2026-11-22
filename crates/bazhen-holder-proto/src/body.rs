@@ -362,12 +362,21 @@ impl From<Tags> for BTreeMap<TagName, TagValue> {
 pub const RESERVED_ENV_NAMES: [&str; 1] = ["__proto__"];
 
 /// A program's environment.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     try_from = "BTreeMap<String, String>",
     into = "BTreeMap<String, String>"
 )]
 pub struct Env(BTreeMap<String, String>);
+
+/// By name alone: a value may be a secret, as a shell's report token is.
+impl std::fmt::Debug for Env {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Env")
+            .field(&self.0.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
 
 impl Env {
     /// # Errors

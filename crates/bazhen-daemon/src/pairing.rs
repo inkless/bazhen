@@ -76,7 +76,7 @@ fn digest(code: &str) -> String {
 
 /// Equal in time whatever the text, for two hashes of one length: the comparison says nothing of
 /// where they differ.
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())

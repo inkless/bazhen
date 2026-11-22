@@ -5,6 +5,7 @@
 use std::sync::{Arc, OnceLock};
 
 use axum::body::Bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
@@ -326,6 +327,20 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
         .route("/v1/shells/{id}/rename", post(shell_routes::rename))
+        // A shell's integration reports over the socket only, never HTTP.
+        .route(
+            "/v1/shells/{id}/report",
+            post(shell_routes::report).layer(DefaultBodyLimit::max(shell_routes::REPORT_MAX_BYTES)),
+        )
+        .route(
+            "/v1/shells/{id}/prompt",
+            post(shell_routes::prompt).layer(DefaultBodyLimit::max(shell_routes::PROMPT_MAX_BYTES)),
+        )
+        .route(
+            "/v1/shells/{id}/decline",
+            post(shell_routes::decline)
+                .layer(DefaultBodyLimit::max(shell_routes::PROMPT_MAX_BYTES)),
+        )
         .route("/v1/daemon/doctor", get(crate::doctor::doctor))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
