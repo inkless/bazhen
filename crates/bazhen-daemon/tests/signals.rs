@@ -3,7 +3,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -153,6 +153,7 @@ fn a_second_signal_ends_the_drain_at_once() {
 /// inherits that across the exec. It is bash: dash takes `trap "" CHLD` but leaves SIGCHLD as it
 /// was, and a shell started with SIGCHLD ignored gives it a handler of its own, so `program` is
 /// what the shell execs, never another shell.
+#[cfg(target_os = "linux")]
 fn ignoring_sigchld(program: &str) -> Command {
     let mut command = Command::new("bash");
     command.args(["-c", r#"trap "" CHLD; exec "$0" "$@""#, program]);
@@ -160,7 +161,9 @@ fn ignoring_sigchld(program: &str) -> Command {
 }
 
 /// What `ps` shows of `pid`: the file name it runs, and whether it ignores SIGCHLD. macOS's `ps`
-/// names the path it was run by, where Linux's names the file alone.
+/// names the path it was run by, where Linux's names the file alone. Only Linux's has a
+/// `sigignore` column: macOS's says "keyword not found", so all that reads it is Linux's.
+#[cfg(target_os = "linux")]
 fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
     // One `-o` each: BSD's ps reads all after a column's `=` as its header, commas and all.
     let out = Command::new("ps")
@@ -174,18 +177,20 @@ fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
             String::from_utf8_lossy(&out.stderr).trim()
         )
     })?;
-    let name = Path::new(comm.trim())
+    let name = std::path::Path::new(comm.trim())
         .file_name()
         .ok_or("ps showed no name")?;
     Ok((name.to_string_lossy().into_owned(), ignored_in(mask)?))
 }
 
 /// Whether `ps` shows SIGCHLD ignored by `pid`.
+#[cfg(target_os = "linux")]
 fn ignores_sigchld(pid: u32) -> Res<bool> {
     Ok(ignores_sigchld_as(pid)?.1)
 }
 
 /// Whether a `sigignore` mask, in hex, has SIGCHLD's bit.
+#[cfg(target_os = "linux")]
 fn ignored_in(mask: &str) -> Res<bool> {
     let mask = u64::from_str_radix(mask.trim(), 16)?;
     let bit = Signal::CHILD.as_raw() - 1;
@@ -193,8 +198,7 @@ fn ignored_in(mask: &str) -> Res<bool> {
 }
 
 /// The control for the daemon's: what the shell execs, here a `sleep` that ends by itself, still
-/// ignores SIGCHLD once `ps` shows it is the `sleep`. Nothing is signalled. It runs where the
-/// daemon's test does, on Linux: macOS's `ps` shows nothing for `sigignore`.
+/// ignores SIGCHLD once `ps` shows it is the `sleep`. Nothing is signalled.
 #[test]
 #[cfg(target_os = "linux")]
 fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
@@ -214,6 +218,7 @@ fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
 /// Started by a parent that ignored SIGCHLD, the daemon gives it its default before it starts
 /// any child, so the kernel keeps each one for it to wait for.
 #[test]
+#[cfg(target_os = "linux")]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn started_with_sigchld_ignored_it_gives_sigchld_its_default() {
     bazhen_test_signal::require_sandbox().unwrap();
