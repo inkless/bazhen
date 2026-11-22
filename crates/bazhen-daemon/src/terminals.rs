@@ -284,7 +284,48 @@ pub(crate) mod fake {
         /// What each paste fails with, where it types nothing, as one into a shell whose input
         /// was typed ahead.
         pub(crate) pastes_refused: Option<TerminalError>,
+        /// Each read of the runtime's shells is held here as it reaches the runtime.
+        pub(crate) hold_inventory: Option<Held>,
+        /// Each read of what the terminals speak is held here as it reaches the runtime.
+        pub(crate) hold_compatibility: Option<Held>,
         told: Vec<mpsc::UnboundedSender<Event>>,
+    }
+
+    /// A read a test holds: each tells `reached` as it comes, then waits for a permit of `go`.
+    #[derive(Debug, Clone)]
+    pub(crate) struct Held {
+        pub(crate) reached: Arc<Semaphore>,
+        pub(crate) go: Arc<Semaphore>,
+    }
+
+    impl Held {
+        /// Every read waits until the test lets it go.
+        pub(crate) fn shut() -> Self {
+            Self {
+                reached: Arc::new(Semaphore::new(0)),
+                go: Arc::new(Semaphore::new(0)),
+            }
+        }
+
+        /// Every read goes on at once, having told the test it came.
+        pub(crate) fn open() -> Self {
+            Self {
+                reached: Arc::new(Semaphore::new(0)),
+                go: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            }
+        }
+
+        /// Waits for the next read to reach it.
+        pub(crate) async fn reached(&self) {
+            self.reached.acquire().await.unwrap().forget();
+        }
+
+        async fn pass(held: Option<Self>) {
+            if let Some(held) = held {
+                held.reached.add_permits(1);
+                held.go.acquire().await.unwrap().forget();
+            }
+        }
     }
 
     /// Whether the fake runtime answers a read of its health, whatever else it answers.
@@ -580,6 +621,8 @@ pub(crate) mod fake {
 
         fn shells(&self) -> Answer<'_, Result<Vec<FoundShell>, TerminalError>> {
             Box::pin(async {
+                let held = self.state.lock().unwrap().hold_inventory.clone();
+                Held::pass(held).await;
                 let state = self.state.lock().unwrap();
                 if let Some(refused) = &state.reads_refused {
                     return Err(refused.clone());
@@ -619,6 +662,8 @@ pub(crate) mod fake {
 
         fn compatibility(&self) -> Answer<'_, Result<Compatibility, TerminalError>> {
             Box::pin(async {
+                let held = self.state.lock().unwrap().hold_compatibility.clone();
+                Held::pass(held).await;
                 let state = self.state.lock().unwrap();
                 if let Some(refused) = &state.reads_refused {
                     return Err(refused.clone());

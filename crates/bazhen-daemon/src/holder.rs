@@ -562,7 +562,7 @@ impl Terminals for Holder {
     fn health(&self) -> Answer<'_, RuntimeHealthReport> {
         Box::pin(async move {
             // No terminal recorded is named: one named whose socket is gone would be told to bind
-            // it again, which only `reachable`, at start, does.
+            // it again, which only `reachable`, as reconcile reads the shells, does.
             let health = self.runtime.health(&[]).await;
             RuntimeHealthReport {
                 kind: "holder".to_owned(),

@@ -255,7 +255,10 @@ async fn shells(
         stop: stop.clone(),
         integration,
     });
-    shells.reconcile().await;
+    shells
+        .reconcile()
+        .await
+        .map_err(|err| Refused::Said(format!("bazhen can't read its shells: {err}")))?;
     if let Err(err) = shells.sweep_restarts().await {
         tracing::warn!(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -276,9 +279,10 @@ async fn shells(
 /// TypeScript daemon's server watch's tick.
 const TICK: Duration = Duration::from_secs(5);
 
-/// Reads the running shells' foregrounds, and which terminals need a restart, `every` so often,
-/// until `stop`, which ends a tick midway: each of its writes to the store is whole on its own. A
-/// restart read that fails is said once until one reads again.
+/// Tries again the shells the start's reconcile couldn't settle, then reads the running shells'
+/// foregrounds, and which terminals need a restart, `every` so often, until `stop`, which ends a
+/// tick midway: each of its writes to the store is whole on its own. A restart read that fails is
+/// said once until one reads again.
 async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToken) {
     let mut fault = None;
     while stop
@@ -288,6 +292,7 @@ async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToke
     {
         let swept = stop
             .run_until_cancelled(async {
+                shells.reconcile_again().await;
                 shells.refresh_foregrounds().await;
                 shells.sweep_restarts().await
             })
@@ -741,6 +746,59 @@ mod tests {
     }
 
     #[test]
+    fn refuses_to_start_when_it_cant_read_the_shells_kept_from_before() {
+        let home = TempDir::new("unread");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let fake = crate::terminals::fake::Fake::default();
+        let refused = runtime().block_on(async {
+            let runner = Runner {
+                terminals: Arc::new(fake.clone()),
+                ..faked(&startup)
+            };
+            let before = Shells::new(ShellsDeps {
+                store: store.clone(),
+                terminals: Arc::clone(&runner.terminals),
+                budget: Arc::clone(&runner.budget),
+                home: startup.home.clone(),
+                shell: "/bin/sh".to_owned(),
+                socket: startup.paths.socket.clone(),
+                tracker: TaskTracker::new(),
+                integration: None,
+            });
+            let req = bazhen_protocol::shells::OpenShellRequest {
+                idempotency_key: "a".to_owned(),
+                linked_agent_id: None,
+                cwd: None,
+                theme: None,
+            };
+            before.open(&req, None).await.unwrap();
+            store
+                .run(|store| {
+                    store.write(|w| {
+                        w.connection()
+                            .execute("UPDATE terminals SET state = 'unreadable'", [])
+                    })
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            match shells(&startup, &store, runner, &TaskTracker::new()).await {
+                Ok(_) => None,
+                Err(refused) => Some(refused.to_string()),
+            }
+        });
+        assert!(
+            refused
+                .as_deref()
+                .is_some_and(|said| said.starts_with("bazhen can't read its shells: ")),
+            "{refused:?}"
+        );
+        writer.finish();
+    }
+
+    #[test]
     fn fails_doctor_rather_than_list_no_holders_where_it_cant_list_them() {
         let home = TempDir::new("doctor");
         let startup = startup(home.path());
@@ -886,6 +944,56 @@ mod tests {
             assert!(took < QUICK.drain, "{took:?}");
         });
         writer.finish();
+    }
+
+    #[test]
+    fn tries_again_on_the_next_tick_a_shell_the_start_couldnt_settle() {
+        use crate::terminals::fake::{Held, Reach};
+        use bazhen_protocol::shells::TerminalState;
+        let h = crate::shells::tests::setup(100);
+        crate::testing::paused().block_on(async {
+            let id = h.opening_unanswered().await;
+            h.fake.set(|state| state.reach = Reach::Unreachable);
+            h.shells.reconcile().await.unwrap();
+            let swept = Held::open();
+            h.fake.set(|state| {
+                state.reach = Reach::Answers;
+                state.hold_compatibility = Some(swept.clone());
+            });
+            let stop = CancellationToken::new();
+            let ticking =
+                TaskTracker::new().spawn(every_tick(Arc::clone(&h.shells), TICK, stop.clone()));
+            swept.reached().await;
+            let after_one_tick = h.state_of(&id);
+            stop.cancel();
+            ticking.await.unwrap();
+            assert_eq!(after_one_tick, Some(TerminalState::Failed));
+        });
+    }
+
+    #[test]
+    fn stops_at_once_amid_a_tick_trying_again_a_shell_the_start_couldnt_settle() {
+        use crate::terminals::fake::{Held, Reach};
+        use bazhen_protocol::shells::TerminalState;
+        let h = crate::shells::tests::setup(100);
+        crate::testing::paused().block_on(async {
+            let id = h.opening_unanswered().await;
+            h.fake.set(|state| state.reach = Reach::Unreachable);
+            h.shells.reconcile().await.unwrap();
+            let read = Held::shut();
+            h.fake.set(|state| {
+                state.reach = Reach::Answers;
+                state.hold_inventory = Some(read.clone());
+            });
+            let stop = CancellationToken::new();
+            let ticking =
+                TaskTracker::new().spawn(every_tick(Arc::clone(&h.shells), TICK, stop.clone()));
+            read.reached().await;
+            stop.cancel();
+            let stopped = tokio::time::timeout(TICK, ticking).await;
+            assert!(matches!(stopped, Ok(Ok(()))), "{stopped:?}");
+            assert_eq!(h.state_of(&id), Some(TerminalState::Creating));
+        });
     }
 
     #[test]
