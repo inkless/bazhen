@@ -1298,7 +1298,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::os::unix::process::ExitStatusExt as _;
+    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     use std::path::{Path, PathBuf};
     use std::process::ExitStatus;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -2597,7 +2597,10 @@ mod tests {
         assert_eq!(*sent.lock().unwrap(), []);
     }
 
-    /// A copy of `sleep` named as the holder, which the kernel names so too.
+    /// A copy of `sleep` named as the holder, which the kernel names so too. It runs with `sleep`
+    /// for its argv[0]: where `sleep` is a multicall coreutils, the copy runs the program its
+    /// argv[0] names, and under its own name it names none. The kernel's name for it comes from
+    /// the file, so stays the holder's.
     fn sleeper(dir: &TempDir) -> PathBuf {
         let copy = dir.path().join("bazhen-holder");
         let sleep = ["/bin/sleep", "/usr/bin/sleep"]
@@ -2625,6 +2628,7 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
         let mut child = std::process::Command::new(sleeper(&dir))
+            .arg0("sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -2642,6 +2646,7 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
         let mut child = std::process::Command::new(sleeper(&dir))
+            .arg0("sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -2651,8 +2656,8 @@ mod tests {
     }
 
     /// The real start, through `Host`: a copy of `sleep` named as the holder, which the kernel
-    /// names so too, from the moment a launcher, here a shell, execs it with the seconds that it
-    /// needs, as the holder is run with none. It never says `ready`, so once its wait is up it is
+    /// names so too, from the moment a launcher, here bash, execs it as `sleep` with the seconds
+    /// that it needs, as the holder is run with none. It never says `ready`, so once its wait is up it is
     /// killed by a proof for its pid and start. The shell can't stand in for it: run as a script,
     /// the holder's name is the kernel's only until the script execs something else.
     #[test]
@@ -2666,7 +2671,7 @@ mod tests {
         options.ready = Duration::from_millis(200);
         options.launch = Duration::from_secs(5);
         options.scope = Some(super::ScopeLaunch {
-            argv: argv(&["/bin/sh", "-c", r#"exec "$0" 10"#]),
+            argv: argv(&["/bin/bash", "-c", r#"exec -a sleep "$0" 10"#]),
             env: vec![],
         });
         let started = tokio::runtime::Builder::new_current_thread()
