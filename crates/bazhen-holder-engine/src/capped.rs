@@ -20,9 +20,11 @@
 //! It keeps a row's line ending, whether it wraps into the next, as xterm, VTE and xterm.js keep
 //! it: with the row, not with a cell. alacritty marks it on the row's last cell, so an insert or
 //! delete that shifts that cell carries the mark along the row, and text written into it drops
-//! the mark. Around each, the mark is taken off the cursor's row and put back on its last cell.
-//! An insert in insert mode with a wrap pending wraps first, as alacritty would, so that the row
-//! it shifts is the cursor's.
+//! the mark, as does an erase that reaches it. Around each, the mark is taken off the cursor's row
+//! and put back on its last cell. An insert in insert mode with a wrap pending wraps first, as
+//! alacritty would, so that the row it shifts is the cursor's. An erase of a whole row, or of one
+//! from its start, also ends the row before it, history's newest for the first: xterm.js makes
+//! the erased line start a line of its own, where alacritty leaves the row above wrapping into it.
 //!
 //! It answers colour queries itself, as alacritty leaves them to a window that knows its colours:
 //! the program's own colour, if it set one, else what the engine was given.
@@ -173,6 +175,26 @@ impl Capped<'_> {
             } else if ending.wraps {
                 cell.flags.insert(Flags::WRAPLINE);
             }
+        }
+    }
+
+    /// Whether an EL 0 or ED 0 erases the cursor's row from its first cell. Not with a wrap
+    /// pending: in one column that cursor stands in column 0, where xterm.js's stands past it.
+    fn erases_from_the_row_s_start(&self) -> bool {
+        let cursor = &self.0.grid().cursor;
+        cursor.point.column.0 == 0 && !cursor.input_needs_wrap
+    }
+
+    /// Ends the row before `line`, history's newest for the first, as xterm.js ends it when an
+    /// erase takes in a whole row, or one from its start: that row no longer wraps into `line`.
+    fn end_the_row_before(&mut self, line: Line) {
+        let grid = self.0.grid_mut();
+        let before = Line(line.0 - 1);
+        if before < grid.topmost_line() {
+            return;
+        }
+        if let Some(cell) = grid[before][..].last_mut() {
+            cell.flags.remove(Flags::WRAPLINE);
         }
     }
 
@@ -382,8 +404,10 @@ impl Handler for Capped<'_> {
     }
 
     fn erase_chars(&mut self, a: usize) {
+        let ending = self.take_line_ending();
         <Term<Sink> as Handler>::erase_chars(self.0, a);
         self.mend_wide_chars();
+        self.keep_line_ending(ending, true);
     }
 
     /// The row keeps its line ending, as in xterm.js, the web client's renderer, so that what the
@@ -412,13 +436,63 @@ impl Handler for Capped<'_> {
     }
 
     fn clear_line(&mut self, a: LineClearMode) {
+        let whole = match a {
+            LineClearMode::Right => self.erases_from_the_row_s_start(),
+            LineClearMode::Left => false,
+            LineClearMode::All => true,
+        };
+        let ending = self.take_line_ending();
         <Term<Sink> as Handler>::clear_line(self.0, a);
         self.mend_wide_chars();
+        self.keep_line_ending(ending, true);
+        if whole {
+            self.end_the_row_before(self.0.grid().cursor.point.line);
+        }
     }
 
     fn clear_screen(&mut self, a: ClearMode) {
-        <Term<Sink> as Handler>::clear_screen(self.0, a);
-        self.mend_wide_chars();
+        let line = self.0.grid().cursor.point.line;
+        match a {
+            // The cursor's row ends, as in alacritty: xterm.js clears the row below, and with it
+            // the wrap into it.
+            ClearMode::Below => {
+                let whole = self.erases_from_the_row_s_start();
+                <Term<Sink> as Handler>::clear_screen(self.0, a);
+                self.mend_wide_chars();
+                if whole {
+                    self.end_the_row_before(line);
+                }
+            }
+            ClearMode::Above => {
+                // xterm.js ends the row too when the erase reaches its last cell, but counts that
+                // row from the top of its scrollback, not of the screen: with no scrollback, as on
+                // the alternate screen, the row ends; with any, it keeps its wrap.
+                let grid = self.0.grid();
+                let keeps =
+                    grid.history_size() > 0 || grid.cursor.point.column.0 + 1 < grid.columns();
+                let ending = self.take_line_ending();
+                <Term<Sink> as Handler>::clear_screen(self.0, a);
+                // alacritty clears the rows above only with the cursor on the third row or below.
+                self.0.grid_mut().reset_region(..line);
+                self.mend_wide_chars();
+                if keeps {
+                    self.keep_line_ending(ending, true);
+                }
+                self.end_the_row_before(Line(0));
+            }
+            // alacritty scrolls the screen into history up to its last row that isn't empty, and
+            // a blank row that wraps counts as one: the row it leaves newest in history would wrap
+            // into the cleared screen, where xterm.js resets its first row's wrap.
+            ClearMode::All => {
+                <Term<Sink> as Handler>::clear_screen(self.0, a);
+                self.mend_wide_chars();
+                self.end_the_row_before(Line(0));
+            }
+            ClearMode::Saved => {
+                <Term<Sink> as Handler>::clear_screen(self.0, a);
+                self.mend_wide_chars();
+            }
+        }
     }
 
     fn clear_tabs(&mut self, a: TabulationClearMode) {
@@ -581,9 +655,14 @@ mod tests {
 
     /// `stream` fed through [`Capped`] to a terminal `rows` high and 6 wide.
     fn fed(rows: u16, stream: &str) -> Term<Sink> {
+        fed_at(Size { cols: 6, rows }, stream)
+    }
+
+    /// `stream` fed through [`Capped`] to a terminal of `size`.
+    fn fed_at(size: Size, stream: &str) -> Term<Sink> {
         let sink = Sink::default();
-        let mut term = Term::new(config(10), &Size { cols: 6, rows }, sink.clone());
-        let mut tracker = Tracker::new(6, rows.into());
+        let mut term = Term::new(config(10), &size, sink.clone());
+        let mut tracker = Tracker::new(size.cols.into(), size.rows.into());
         Processor::<StdSyncHandler>::new().advance(
             &mut Capped(&mut term, &mut tracker, &sink),
             stream.as_bytes(),
@@ -813,5 +892,127 @@ mod tests {
         );
         let term = fed(3, "\x1b[1;2r\x1b[3;1Habcdef\x1b[4hX");
         assert_eq!(cells(&term, 2), "Xabcde|");
+    }
+
+    /// History's newest row and the screen of a terminal 3 rows high, after every row but the
+    /// last wraps (`012345|` `abcdef|` `ghijkl|` `mn....`) and `stream`. Each is xterm.js's.
+    fn after_wraps_into_history(stream: &str) -> [String; 4] {
+        let term = fed(3, &("012345abcdefghijklmn".to_owned() + stream));
+        [-1, 0, 1, 2].map(|line| cells(&term, line))
+    }
+
+    #[test]
+    fn an_erase_that_reaches_the_last_cell_keeps_the_row_s_line_ending() {
+        for (stream, row) in [
+            ("\x1b[2;4H\x1b[K", "ghi...|"),
+            ("\x1b[2;6H\x1b[K", "ghijk.|"),
+            ("\x1b[2;6H\x1b[1K", "......|"),
+            ("\x1b[2;1Hghijkl\x1b[1K", "......|"),
+            ("\x1b[2;4H\x1b[3X", "ghi...|"),
+            ("\x1b[2;6H\x1b[X", "ghijk.|"),
+            ("\x1b[2;1H\x1b[9X", "......|"),
+        ] {
+            assert_eq!(
+                after_wraps_into_history(stream),
+                ["012345|", "abcdef|", row, "mn...."],
+                "{stream:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_erase_from_the_row_s_start_ends_the_row_before() {
+        let ended = ["012345|", "abcdef", "......|", "mn...."];
+        assert_eq!(after_wraps_into_history("\x1b[2;1H\x1b[K"), ended);
+        assert_eq!(after_wraps_into_history("\x1b[2;4H\x1b[2K"), ended);
+        assert_eq!(
+            after_wraps_into_history("\x1b[2;1H\x1b[J"),
+            ["012345|", "abcdef", "......", "......"]
+        );
+        assert_eq!(
+            after_wraps_into_history("\x1b[2;4H\x1b[J"),
+            ["012345|", "abcdef|", "ghi...", "......"]
+        );
+    }
+
+    #[test]
+    fn an_erase_from_the_first_row_s_start_ends_history_s_newest_row() {
+        let ended = ["012345", "......|", "ghijkl|", "mn...."];
+        assert_eq!(after_wraps_into_history("\x1b[1;1H\x1b[K"), ended);
+        assert_eq!(after_wraps_into_history("\x1b[1;4H\x1b[2K"), ended);
+        assert_eq!(
+            after_wraps_into_history("\x1b[1;1H\x1b[J"),
+            ["012345", "......", "......", "......"]
+        );
+    }
+
+    /// Without its guard, `end_the_row_before` reaches past the oldest row, which alacritty's
+    /// grid catches in a debug assertion of its own before any assertion here can run: falsify
+    /// can't count that panic, so the test carries a control.
+    #[test]
+    fn an_erase_from_the_first_row_s_start_with_no_history_ends_no_other_row() {
+        // A scroll down leaves the last row wrapping, where a row before the first would land if
+        // alacritty's ring of rows were indexed past its oldest. That wrap is the engine's own:
+        // xterm.js drops it with the row the scroll pushes off.
+        let rows = |term: &Term<Sink>| [0, 1, 2].map(|line| cells(term, line));
+        let wrapping_last = "\x1b[2;1Habcdefgh\x1b[T";
+        for erase in ["\x1b[1;1H\x1b[2K", "\x1b[1;1H\x1b[1J"] {
+            let term = fed(3, &(wrapping_last.to_owned() + erase));
+            assert_eq!(rows(&term), ["......", "......", "abcdef|"], "{erase:?}");
+            let alternate = "\x1b[?1049h".to_owned() + wrapping_last + erase;
+            assert_eq!(rows(&fed(3, &alternate)), ["......", "......", "abcdef|"]);
+        }
+    }
+
+    #[test]
+    fn an_erase_while_waiting_to_wrap_in_one_column_leaves_the_row_before_wrapping() {
+        // Waiting in the only column is waiting in column 0; xterm.js's cursor is past it.
+        let term = fed_at(Size { cols: 1, rows: 3 }, "abc\x1b[K");
+        assert_eq!([0, 1, 2].map(|line| cells(&term, line)), ["a|", "b|", "c"]);
+        let term = fed_at(Size { cols: 1, rows: 3 }, "abc\x1b[J");
+        assert_eq!(cells(&term, 1), "b|");
+    }
+
+    #[test]
+    fn an_erase_above_ends_every_row_above_and_keeps_the_cursor_s() {
+        assert_eq!(
+            after_wraps_into_history("\x1b[1;3H\x1b[1J"),
+            ["012345", "...def|", "ghijkl|", "mn...."]
+        );
+        // xterm.js keeps the row wrapping here too, once it has any scrollback.
+        assert_eq!(
+            after_wraps_into_history("\x1b[2;6H\x1b[1J"),
+            ["012345", "......", "......|", "mn...."]
+        );
+        assert_eq!(
+            after_wraps_into_history("\x1b[3;2H\x1b[1J"),
+            ["012345", "......", "......", "......"]
+        );
+    }
+
+    #[test]
+    fn an_erase_above_from_the_last_column_with_no_scrollback_ends_the_row() {
+        for stream in ["abcdefgh\x1b[1;6H\x1b[1J", "abcdefgh\x1b[1;1Habcdef\x1b[1J"] {
+            assert_eq!(cells(&fed(3, stream), 0), "......", "{stream:?}");
+            let alternate = "\x1b[?1049h".to_owned() + stream;
+            assert_eq!(cells(&fed(3, &alternate), 0), "......", "{alternate:?}");
+        }
+    }
+
+    #[test]
+    fn an_erase_of_the_screen_ends_the_row_it_leaves_newest_in_history() {
+        let term = fed(3, "abcdefgh\x1b[2;1H\x1b[2X\x1b[2J");
+        assert_eq!(cells(&term, -1), "abcdef");
+    }
+
+    #[test]
+    fn an_erase_above_from_the_second_row_clears_the_first() {
+        let rows = after_wraps_into_history("\x1b[41m\x1b[2;4H\x1b[1J");
+        assert_eq!(rows[1], "......");
+        let term = fed(3, "012345abcdefghijklmn\x1b[41m\x1b[2;4H\x1b[1J");
+        assert_eq!(
+            term.grid()[Line(0)][Column(0)].bg,
+            Color::Named(NamedColor::Red)
+        );
     }
 }
