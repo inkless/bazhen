@@ -3432,6 +3432,17 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("must be marked when an astral char literal comes before its close", () => {
+    const source = [
+      "#[test]\nfn a() { let _ = vec!{'😀','\"', child.close(group, now), '\"'}; }",
+      "#[test]\nfn b() { let _ = vec!{'é','\"', child.close(group, now), '\"'}; }",
+    ].join("\n");
+    expect(unmarked({ "crates/h/src/child.rs": source })).toEqual([
+      "crates/h/src/child.rs:1",
+      "crates/h/src/child.rs:3",
+    ]);
+  });
+
   it("needn't be marked for a task tracker's own close(), and must be for any other call", () => {
     // A tracker's close(), with nothing in its parentheses, only stops it taking tasks. Any other
     // call on it, a close of what isn't one, or of one the file never types, still counts.

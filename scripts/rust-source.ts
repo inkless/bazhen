@@ -4,6 +4,7 @@
 const RAW_STRING = /r(#*)"/y;
 export const isIdent = (c: string | undefined) => c !== undefined && /\w/.test(c);
 export const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
+const charWidth = (text: string, i: number) => ((text.codePointAt(i) ?? 0) > 0xffff ? 2 : 1);
 
 /**
  * Rust source with its comments removed and every string and char literal emptied, so neither a
@@ -11,7 +12,9 @@ export const newlinesIn = (text: string) => text.replaceAll(/[^\n]/g, "");
  * kept, so a line in the result is the same line in the source. Each string literal becomes
  * `""`, and its contents, a raw string's included, are pushed to `strings` in order, so the nth
  * `""` in the result is `strings[n]`; `raw[n]` says whether it was a raw string, whose contents
- * are its text, with no escapes to take.
+ * are its text, with no escapes to take. A `'` opens a char literal, as in Rust's lexer, when
+ * the char after it is `\` or the char after that is `'`, and is a lifetime or a label otherwise;
+ * those are chars, not UTF-16 units, so `'😀'` is a literal like `'a'`.
  */
 export function rustCode(source: string, strings: string[] = [], raw: boolean[] = []): string {
   let out = "";
@@ -56,7 +59,7 @@ export function rustCode(source: string, strings: string[] = [], raw: boolean[] 
       raw.push(false);
       i++;
       out += `""${newlinesIn(source.slice(start, i))}`;
-    } else if (c === "'" && (next === "\\" || source[i + 2] === "'")) {
+    } else if (c === "'" && (next === "\\" || source[i + 1 + charWidth(source, i + 1)] === "'")) {
       i += next === "\\" ? 3 : 1;
       while (i < source.length && source[i] !== "'") i++;
       i++;
