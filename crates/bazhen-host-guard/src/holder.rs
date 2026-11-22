@@ -2700,7 +2700,7 @@ mod tests {
                 {
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                other => panic!("{other:?}"),
+                other => panic!("never became bazhen-holder within 5s: {other:?}"),
             }
         }
     }
