@@ -12,11 +12,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bazhen_holder_proto::PROTOCOL_VERSION;
 use bazhen_holder_proto::body::{
-    Argv, Env, ErrorCode, ExitStatus, Generation, HelloReply, HistoryLines, NonEmpty, Pid,
-    ProcessSpec, Signal, Size, SpawnSpec, Stats, Theme, Versions,
+    Argv, Env, ErrorCode, ExitStatus, Generation, HelloReply, HistoryLines, NonEmpty, PasteRequest,
+    Pid, ProcessSpec, Signal, Size, SpawnSpec, Stats, Theme, Versions,
 };
+use bazhen_holder_proto::{PROTOCOL_VERSION, negotiate};
 use bazhen_host_guard::holder::{
     HolderProcess, START_SKEW_S, StartError, StartHolderOptions, holder_build_of,
     holder_socket_refusal,
@@ -269,6 +269,13 @@ pub enum RuntimeError {
     Unreadable { sockets: Vec<PathBuf> },
     #[error("terminal {terminal_id}: its foreground can't be read")]
     Foreground { terminal_id: TerminalId },
+    /// A paste that typed nothing: the text may not be pasted, or the program wasn't reading it
+    /// as text, as `PasteRefused` says. The reason never quotes the text.
+    #[error("{reason}")]
+    PasteRefused {
+        terminal_id: TerminalId,
+        reason: String,
+    },
 }
 
 /// What saying `hello` at a socket found.
@@ -387,6 +394,34 @@ fn refusal(terminal_id: &TerminalId, error: RequestError) -> RuntimeError {
             source: Some(Box::new(other)),
         },
     }
+}
+
+/// The holder protocol version that added `paste`, the gated paste.
+const PASTE_VERSION: &str = "1.3";
+
+/// Whether a holder that agreed `agreed` has `paste` (`holderHasPaste` in packages/protocol).
+fn has_paste(agreed: &str) -> bool {
+    negotiate(&[agreed], &[PASTE_VERSION])
+        .map(|v| v.to_string())
+        .as_deref()
+        == Some(PASTE_VERSION)
+}
+
+/// Why `text` may not be pasted, or `None` when it may, as `pasteTextRefusal` in
+/// packages/host-guard words it: a control character is a key, not text, and text that may arrive
+/// as keys, unmarked, must be printable ASCII as well. A byte of 0x80 or more is a meta key to a
+/// line editor reading 8-bit input.
+fn paste_text_refusal(text: &str, brackets: bool) -> Option<&'static str> {
+    if text
+        .chars()
+        .any(|c| c < ' ' || ('\u{7f}'..='\u{9f}').contains(&c))
+    {
+        return Some("refusing to paste a control character");
+    }
+    if !brackets && !text.bytes().all(|b| (0x20..=0x7e).contains(&b)) {
+        return Some("refusing to paste text beyond printable ASCII that may arrive as keys");
+    }
+    None
 }
 
 /// Text no two scopes of this process share, from the kernel's randomness where it gives some.
@@ -1053,6 +1088,59 @@ impl HolderRuntime {
         sent
     }
 
+    /// Pastes `text` through the holder's gate, which types it only if the program would read it
+    /// as text now, checked in the turn that queues it; marked with the bracketed-paste sequences
+    /// when `brackets` is true. A holder older than the gate refuses every paste.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::PasteRefused`] for text that may not be pasted, a holder before the gate,
+    /// or a program not reading text; otherwise as a verb's, or when its process has exited.
+    pub async fn paste(
+        &self,
+        terminal: &HolderRef,
+        text: &str,
+        brackets: bool,
+    ) -> Result<(), RuntimeError> {
+        let refused = |reason: String| RuntimeError::PasteRefused {
+            terminal_id: terminal.terminal_id.clone(),
+            reason,
+        };
+        if let Some(reason) = paste_text_refusal(text, brackets) {
+            return Err(refused(reason.to_owned()));
+        }
+        let (client, events) = self.process_that(terminal, Needs::Running).await?;
+        drop(events);
+        let hello = client.hello();
+        let request = if has_paste(hello.version.as_str()) {
+            PasteRequest::new(hello.generation, text, brackets).map_err(|e| refused(e.to_string()))
+        } else {
+            Err(refused(
+                "this terminal's holder predates gated paste; restart the terminal to paste"
+                    .to_owned(),
+            ))
+        };
+        let pasted = match request {
+            Err(err) => Err(err),
+            Ok(request) => {
+                match tokio::time::timeout(self.options.request, client.paste(request)).await {
+                    Ok(Err(RequestError::Refused(said)))
+                        if matches!(said.raw_code.as_str(), "not-ready" | "unavailable") =>
+                    {
+                        Err(refused(said.reason))
+                    }
+                    Ok(answered) => answered.map_err(|e| refusal(&terminal.terminal_id, e)),
+                    Err(_) => Err(RuntimeError::Unanswered {
+                        terminal_id: terminal.terminal_id.clone(),
+                        source: None,
+                    }),
+                }
+            }
+        };
+        client.end();
+        pasted
+    }
+
     /// Runs `launch` in the terminal whose process has exited; the ref of the new process.
     ///
     /// # Errors
@@ -1385,7 +1473,9 @@ mod tests {
     use std::ffi::OsString;
     use std::sync::atomic::AtomicUsize;
 
-    use bazhen_holder_proto::body::{ErrorBody, Foreground, OkBody, StartTime, Tags, VersionText};
+    use bazhen_holder_proto::body::{
+        ErrorBody, Foreground, OkBody, ProtocolVersion, StartTime, Tags, VersionText,
+    };
     use bazhen_holder_proto::{Reply, Request};
     use bazhen_host_guard::holder::HolderProcess;
     use bazhen_host_guard::scope::{Enforced, Scoped};
@@ -1539,6 +1629,14 @@ mod tests {
                     history_lines: 7.try_into().unwrap(),
                     engine_resets: None,
                 },
+            }],
+            Request::Paste { body, .. } if body.text() == "cat" => vec![Reply::Error {
+                id,
+                body: ErrorBody::new(
+                    "paste",
+                    ErrorCode::NotReady,
+                    "the shell isn't reading at its prompt",
+                ),
             }],
             _ => ok(request),
         }
@@ -2180,6 +2278,68 @@ mod tests {
             cwd: Some(PathBuf::from("/src")),
         };
         assert_eq!(read, [(Some(vim.clone()), vec![vim]), (None, vec![])]);
+    }
+
+    #[test]
+    fn pastes_only_text_the_gate_takes_on_a_holder_with_the_gate_saying_why_it_typed_nothing() {
+        let pasted = |hello: HelloReply, text: &'static str, brackets: bool| {
+            let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+            block_on(async {
+                fixture.serve(&id(1), Answering::Hello(Box::new(hello)));
+                let at = reference(&fixture, &id(1));
+                let pasted = match fixture.runtime.paste(&at, text, brackets).await {
+                    Ok(()) => Ok(()),
+                    Err(RuntimeError::PasteRefused { reason, .. }) => Err(reason),
+                    Err(other) => panic!("{other:?}"),
+                };
+                fixture.runtime.shutdown().await;
+                let sent: Vec<(String, bool)> = fixture
+                    .seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| match r {
+                        Request::Paste { body, .. } => {
+                            Some((body.text().to_owned(), body.brackets()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                (pasted, sent)
+            })
+        };
+        let mut before_gate = hello_of(&id(1));
+        before_gate.version = ProtocolVersion::new("1.2").unwrap();
+        let sent = |text: &str, brackets| vec![(text.to_owned(), brackets)];
+        assert_eq!(
+            [
+                pasted(hello_of(&id(1)), "echo café", true),
+                pasted(hello_of(&id(1)), "make", false),
+                pasted(hello_of(&id(1)), "cat", false),
+                pasted(hello_of(&id(1)), "echo café", false),
+                pasted(hello_of(&id(1)), "make\r", true),
+                pasted(before_gate, "make", false),
+            ],
+            [
+                (Ok(()), sent("echo café", true)),
+                (Ok(()), sent("make", false)),
+                (
+                    Err("the shell isn't reading at its prompt".to_owned()),
+                    sent("cat", false)
+                ),
+                (
+                    Err("refusing to paste text beyond printable ASCII that may arrive as keys"
+                        .to_owned()),
+                    vec![]
+                ),
+                (Err("refusing to paste a control character".to_owned()), vec![]),
+                (
+                    Err("this terminal's holder predates gated paste; restart the terminal to paste"
+                        .to_owned()),
+                    vec![]
+                ),
+            ]
+        );
     }
 
     #[test]

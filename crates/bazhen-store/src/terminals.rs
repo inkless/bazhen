@@ -719,7 +719,8 @@ pub(crate) fn shells(
 ) -> Result<Vec<Shell>, SnapshotError> {
     let mut statement = db.prepare(
         "SELECT id, environment_id, state, generation, cwd, linked_agent_id, name,
-           coalesce(theme, 'dark'), foreground, runtime, restart_protocol
+           coalesce(theme, 'dark'), foreground, runtime, restart_protocol,
+           last_command IS NOT NULL
          FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed')
          ORDER BY created_event_id",
     )?;
@@ -740,6 +741,7 @@ pub(crate) fn shells(
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    row.get::<_, bool>(11)?,
                 ),
             ))
         })?
@@ -748,7 +750,7 @@ pub(crate) fn shells(
         .map(
             |(
                 (id, environment, state, generation, cwd),
-                (linked, name, theme, foreground, runtime, protocol),
+                (linked, name, theme, foreground, runtime, protocol, kept),
             )| {
                 let state: TerminalState =
                     serde_json::from_value(serde_json::Value::String(state))?;
@@ -771,9 +773,9 @@ pub(crate) fn shells(
                     "foreground": foreground,
                     "attachCommand": if attach { attach_command(runtime.as_deref(), &id) } else { None },
                     "commands": shell_commands(state, linked.is_some()),
-                    // A lost shell's last line is offered back only by shells that report what
-                    // they run, which this daemon starts none of.
-                    "retypeable": false,
+                    // A lost shell's last line is offered back only while shells report what
+                    // they run, as only then can its replacement say when it is at its prompt.
+                    "retypeable": view.shells_report && state == TerminalState::Lost && kept,
                     "needsRestart": restart,
                 }))?)
             },
@@ -1397,6 +1399,36 @@ mod tests {
                 reported,
             ),
             (None, [false, false], true)
+        );
+    }
+
+    #[test]
+    fn offers_a_lost_shell_s_line_back_only_while_shells_report() {
+        let dir = TempDir::new("shell-retypeable");
+        let (mut store, terminals) = running(&dir, 2);
+        note(&mut store, &terminals[0], 1, Some("make"));
+        let reporting = SnapshotView {
+            shells_report: true,
+            ..crate::testing::view()
+        };
+        let live = shells(&store.db, &reporting).unwrap();
+        for terminal in &terminals {
+            change(&mut store, terminal, TerminalChange::Lost).unwrap();
+        }
+        let retypeable = |view: &SnapshotView| -> Vec<bool> {
+            shells(&store.db, view)
+                .unwrap()
+                .iter()
+                .map(|s| s.retypeable)
+                .collect()
+        };
+        assert_eq!(
+            (
+                live[0].retypeable,
+                retypeable(&reporting),
+                retypeable(&crate::testing::view())
+            ),
+            (false, vec![true, false], vec![false, false])
         );
     }
 }

@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 
 use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
-use crate::shells::reports::ReportOutcome;
+use crate::shells::reports::{ReportKind, ReportOutcome};
 use crate::shells::{ShellError, Shells};
 
 /// The most UTF-16 units an idempotency key has, and a confirmed program's name.
@@ -279,7 +279,9 @@ fn not_its_token() -> Response {
     )
 }
 
-/// `POST /v1/shells/:id/report`, on the socket only: the line the shell starts running.
+/// `POST /v1/shells/:id/report`, on the socket only: the line the shell starts running. Once its
+/// body is whole, it is handled on the shells' keeper, to its end even if the hook hangs up first,
+/// as a prompt and a decline are.
 pub(crate) async fn report(
     State(shared): State<Shared>,
     Path(id): Path<String>,
@@ -290,7 +292,14 @@ pub(crate) async fn report(
         Err(unread) => return unread.answer("expected { token, at, command }"),
     };
     let reported = match shells_of(&shared) {
-        Ok(shells) => shells.report(&id, req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Line, &on, move |shells| async move {
+                    shells.report(&id, req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     match reported {
@@ -311,7 +320,14 @@ pub(crate) async fn prompt(
         Err(unread) => return unread.answer("expected { token }"),
     };
     let prompted = match shells_of(&shared) {
-        Ok(shells) => shells.prompt(&id, &req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Prompt, &on, move |shells| async move {
+                    shells.prompt(&id, &req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     owned(prompted)
@@ -328,7 +344,14 @@ pub(crate) async fn decline(
         Err(unread) => return unread.answer("expected { token }"),
     };
     let declined = match shells_of(&shared) {
-        Ok(shells) => shells.decline(&id, &req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Decline, &on, move |shells| async move {
+                    shells.decline(&id, &req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     owned(declined)
@@ -489,8 +512,14 @@ mod tests {
         );
     }
 
-    /// What a router answers a POST of `body` to `path` with, reaching it from this machine.
-    fn posted(router: axum::Router, path: &str, body: Vec<u8>) -> (u16, serde_json::Value) {
+    /// What a router answers a POST of `body` to `path` with, reaching it from this machine, on
+    /// `runtime`: a test's requests share one, as the daemon's do, which runs the shells' keeper.
+    fn posted(
+        runtime: &tokio::runtime::Runtime,
+        router: axum::Router,
+        path: &str,
+        body: Vec<u8>,
+    ) -> (u16, serde_json::Value) {
         use tower::ServiceExt as _;
         let request = axum::http::Request::builder()
             .method("POST")
@@ -499,7 +528,7 @@ mod tests {
             .header("content-type", "application/json")
             .body(axum::body::Body::from(body))
             .unwrap();
-        crate::testing::runtime().block_on(async {
+        runtime.block_on(async {
             let response = router.oneshot(request).await.unwrap();
             let status = response.status().as_u16();
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 16)
@@ -525,7 +554,8 @@ mod tests {
     fn takes_a_shell_s_reports_over_the_socket_by_its_own_token_held_to_their_bounds() {
         use crate::shells::tests::{integration, setup_with};
         let h = setup_with(100, Some(integration()));
-        let id = crate::testing::runtime().block_on(h.open("o")).unwrap();
+        let runtime = crate::testing::runtime();
+        let id = runtime.block_on(h.open("o")).unwrap();
         let token = h.token_of(&id).unwrap();
         let shared = Shared {
             shells: Some(Arc::clone(&h.shells)),
@@ -553,9 +583,9 @@ mod tests {
         let expected = "expected { token, at, command }";
         assert_eq!(
             [
-                posted(socket(), &at("report"), report),
-                posted(socket(), &at("report"), forged),
-                posted(socket(), &at("report"), padded(16 * 1024)),
+                posted(&runtime, socket(), &at("report"), report),
+                posted(&runtime, socket(), &at("report"), forged),
+                posted(&runtime, socket(), &at("report"), padded(16 * 1024)),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -567,7 +597,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            malformed.map(|body| posted(socket(), &at("report"), body)),
+            malformed.map(|body| posted(&runtime, socket(), &at("report"), body)),
             [(); 4].map(|()| said("invalid_request", expected))
         );
         assert_eq!(h.last_command(&id), Some("make".to_owned()));
@@ -580,14 +610,14 @@ mod tests {
         );
         assert_eq!(
             [
-                posted(socket(), &at("prompt"), own.clone()),
-                posted(socket(), &at("decline"), own.clone()),
-                posted(socket(), &at("prompt"), forged.clone()),
-                posted(socket(), &at("decline"), forged),
-                posted(socket(), &at("prompt"), marked_null),
-                posted(socket(), &at("decline"), b"{}".to_vec()),
-                posted(socket(), &at("prompt"), long.clone()),
-                posted(socket(), &at("decline"), long),
+                posted(&runtime, socket(), &at("prompt"), own.clone()),
+                posted(&runtime, socket(), &at("decline"), own.clone()),
+                posted(&runtime, socket(), &at("prompt"), forged.clone()),
+                posted(&runtime, socket(), &at("decline"), forged),
+                posted(&runtime, socket(), &at("prompt"), marked_null),
+                posted(&runtime, socket(), &at("decline"), b"{}".to_vec()),
+                posted(&runtime, socket(), &at("prompt"), long.clone()),
+                posted(&runtime, socket(), &at("decline"), long),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -606,7 +636,112 @@ mod tests {
         };
         let http = crate::routes::http_router(shared.clone(), gate);
         let over_http = ["report", "prompt", "decline"]
-            .map(|verb| posted(http.clone(), &at(verb), own.clone()).0);
+            .map(|verb| posted(&runtime, http.clone(), &at(verb), own.clone()).0);
         assert_eq!(over_http, [404; 3]);
+    }
+
+    #[test]
+    fn takes_a_report_at_its_bounds_with_every_character_escaped() {
+        use std::fmt::Write as _;
+
+        use crate::shells::tests::{integration, setup_with};
+        let h = setup_with(100, Some(integration()));
+        let runtime = crate::testing::runtime();
+        let id = runtime.block_on(h.open("o")).unwrap();
+        let token = h.token_of(&id).unwrap();
+        let shared = Shared {
+            shells: Some(Arc::clone(&h.shells)),
+            ..Shared::new(
+                "f".repeat(64).as_str(),
+                crate::routes::Stop::default(),
+                h.store.clone(),
+            )
+        };
+        let escaped = |text: &str| {
+            text.encode_utf16().fold(String::new(), |mut out, unit| {
+                write!(out, "\\u{unit:04x}").unwrap();
+                out
+            })
+        };
+        let longest = format!(
+            r#"{{"token":"{}","at":9007199254740991,"command":"{}"}}"#,
+            escaped(&token),
+            escaped(&"a".repeat(2048))
+        );
+        assert_eq!(
+            posted(
+                &runtime,
+                crate::routes::socket_router(shared),
+                &format!("/v1/shells/{id}/report"),
+                longest.into_bytes()
+            ),
+            (204, serde_json::Value::Null),
+            "about 12 KiB of JSON, under the 16 KiB limit"
+        );
+        assert_eq!(h.last_command(&id), Some("a".repeat(2048)));
+    }
+
+    /// Calls the handlers themselves, not the socket's router: the router's caller guard
+    /// identifies the caller in `spawn_blocking`, so a single poll of the router can't be known to
+    /// have reached the keeper. Dropping the handler's future is what hyper does when the hook's
+    /// socket closes.
+    #[test]
+    fn keeps_a_line_whose_hook_hung_up_while_the_store_was_held_and_says_so_once() {
+        use crate::shells::reports::tests::waits;
+        use crate::shells::tests::{Said, integration, setup_with};
+        let h = setup_with(100, Some(integration()));
+        let said = Said::default();
+        let _logging = said.logging();
+        let line = "cargo build --release";
+        let (id, token) = crate::testing::runtime().block_on(async {
+            let id = h.open("o").await.unwrap();
+            let token = h.token_of(&id).unwrap();
+            let shared = Shared {
+                shells: Some(Arc::clone(&h.shells)),
+                ..Shared::new(
+                    "f".repeat(64).as_str(),
+                    crate::routes::Stop::default(),
+                    h.store.clone(),
+                )
+            };
+            let body = |value: serde_json::Value| Ok(Bytes::from(value.to_string()));
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let mut held = Box::pin(h.store.run(move |_| gate.recv().is_ok()));
+            assert!(waits(&mut held).await);
+            let mut reporting = Box::pin(report(
+                State(shared.clone()),
+                Path(id.clone()),
+                body(serde_json::json!({ "token": token, "at": 1, "command": line })),
+            ));
+            assert!(waits(&mut reporting).await, "answered past the held store");
+            // The hook hangs up, and hyper drops the route's future.
+            drop(reporting);
+            // Whatever runs the report reaches the store, behind the hold, before it is let go.
+            tokio::task::yield_now().await;
+            release.send(()).unwrap();
+            assert!(held.await.unwrap());
+            // Reports are handled in turn, so once a later one is answered the line's has ended.
+            let prompted = prompt(
+                State(shared),
+                Path(id.clone()),
+                body(serde_json::json!({ "token": token })),
+            )
+            .await;
+            assert_eq!(prompted.status(), StatusCode::NO_CONTENT);
+            assert_eq!(h.last_command(&id), Some(line.to_owned()));
+            (id, token)
+        });
+        let text = said.text();
+        assert_eq!(
+            (
+                said.times(&format!(
+                    "shell {id}: finished a report its hook stopped waiting for"
+                )),
+                said.times("stopped waiting"),
+                text.contains(line) || text.contains(&token),
+            ),
+            (1, 1, false),
+            "{text}"
+        );
     }
 }

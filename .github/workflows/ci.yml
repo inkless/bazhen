@@ -98,6 +98,12 @@ jobs:
       # and this runner is the only macOS place they run.
       - name: Mark the runner disposable
         run: sudo touch /etc/bazhen-disposable-host
+      # The real-shell tests run zsh, bash and fish, and the integration takes bash 4.4 or later:
+      # macOS has zsh, and bash 3.2 alone.
+      - name: Install the shells the real-shell tests run
+        run: brew install bash fish
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
         id: moon

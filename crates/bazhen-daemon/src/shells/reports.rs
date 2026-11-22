@@ -3,7 +3,16 @@
 //! the shell with the token the daemon gave it at its start, of which only a hash is kept. A line
 //! is kept in the shell's row alone: no event records it, and no log names it.
 
+use std::future::Future;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
+use std::task::Poll;
+
 use bazhen_protocol::shells::{ShellDecline, ShellPrompt, ShellReport};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use super::{ShellError, Shells};
 use crate::devices::{hash_token, token_of};
@@ -12,6 +21,114 @@ use crate::pairing::{random_bytes, same};
 /// How far ahead of the daemon's clock a report's time counts: a shell's clock running fast, or
 /// a forged time, can't keep every later report out.
 const AHEAD_MICROS: u64 = 60_000_000;
+
+/// How many reports wait for the keeper at most. The shells' report routes are served on the
+/// socket alone, which serves this many connections at once, each one request at a time, so it
+/// is every report that can be waiting while its hook waits too. A hook that hangs up frees its
+/// connection for another while its report still waits, so more can come behind a slow store:
+/// those wait for room, and no more work than this is held. Nothing caps the rate on a
+/// connection, so this is the bound.
+const WAITING_AT_MOST: usize = crate::accept::SOCKET.connections;
+
+/// What a shell's integration reported, as its log names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportKind {
+    /// A line it starts running.
+    Line,
+    /// Its first prompt.
+    Prompt,
+    /// That it won't take a line typed back.
+    Decline,
+}
+
+impl ReportKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Line => "report",
+            Self::Prompt => "prompt",
+            Self::Decline => "decline",
+        }
+    }
+}
+
+/// A report taken whole, to be handled by the keeper.
+struct Job {
+    terminal_id: String,
+    kind: ReportKind,
+    /// Handles it and sends the answer; says whether anyone was still waiting for it.
+    run: Pin<Box<dyn Future<Output = bool> + Send>>,
+}
+
+impl Job {
+    /// Runs it to its end, or to a panic, which is caught here: the job is dropped with its
+    /// answer unsent, so its route answers that it ended early.
+    async fn run_to_end(self) {
+        let mut run = self.run;
+        let answered = std::future::poll_fn(|cx| {
+            catch_unwind(AssertUnwindSafe(|| run.as_mut().poll(cx)))
+                .map_or(Poll::Ready(None), |polled| polled.map(Some))
+        })
+        .await;
+        drop(run);
+        let (id, kind) = (self.terminal_id, self.kind.as_str());
+        match answered {
+            Some(true) => {}
+            Some(false) => {
+                tracing::warn!("shell {id}: finished a {kind} its hook stopped waiting for");
+            }
+            None => tracing::warn!("shell {id}: a {kind} panicked as it was handled"),
+        }
+    }
+}
+
+/// Handles every shell's reports, one at a time in the order the routes took them whole, on a
+/// task of the daemon's own, so a hook that hangs up, as its detached copy does after its
+/// deadline whatever the daemon does, can't cancel one midway, as the TypeScript daemon's
+/// handler runs on after its client has gone.
+///
+/// One keeper for every shell is deliberate. It puts every shell's reports behind one another,
+/// each behind one store job at a time, which costs nothing, since the store's writer runs one job
+/// at a time anyway. And it is what keeps a shell's report and its prompt or decline in the order
+/// they reached the daemon: a task for each shell, or each report, would let them pass each other.
+///
+/// The keeper never ends because of a job. One that panics is caught where it runs: its route is
+/// answered that it ended early, the panic is said, and the keeper goes on with the reports behind
+/// it. That matters only where a panic unwinds, as in the tests: a release build aborts on any
+/// panic (`panic = "abort"`), and the daemon with it.
+#[derive(Debug, Default)]
+pub(crate) struct Keeper {
+    /// Where the keeper takes reports from. It starts with the first report, not in
+    /// `Shells::new`, which is sync, and which test harnesses call outside a runtime; the daemon
+    /// makes its shells once, inside its runtime (`serve::shells`).
+    jobs: OnceLock<mpsc::Sender<Job>>,
+}
+
+impl Keeper {
+    /// Where reports are sent, the keeper started on `tracker` at the first.
+    fn jobs(&self, tracker: &TaskTracker, stop: &CancellationToken) -> &mpsc::Sender<Job> {
+        self.jobs.get_or_init(|| {
+            let (jobs, taken) = mpsc::channel(WAITING_AT_MOST);
+            tracker.spawn(keep(taken, stop.clone()));
+            jobs
+        })
+    }
+}
+
+/// Handles each report `jobs` takes, in turn, until `stop`. Until the keeper sees the stop and
+/// closes `jobs`, a route's send still succeeds, and that report is handled too; one sent after
+/// the close is refused, its route answered 503. Once closed, it handles every report already
+/// taken, then ends. A keeper first started after the stop closes at once, and handles what it
+/// was sent. The daemon's drain waits on its tasks, this one among them, for no longer than its
+/// bound (`serve::drain`); past that the runtime ends, and with it whatever is left.
+async fn keep(mut jobs: mpsc::Receiver<Job>, stop: CancellationToken) {
+    while let Some(Some(job)) = stop.run_until_cancelled(jobs.recv()).await {
+        job.run_to_end().await;
+    }
+    jobs.close();
+    while let Some(job) = jobs.recv().await {
+        job.run_to_end().await;
+    }
+}
 
 /// What became of a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +173,51 @@ fn now_micros() -> u64 {
 }
 
 impl Shells {
+    /// Runs `work`, a `kind` of report from the shell `terminal_id` names, on the keeper, to its
+    /// end whether or not its caller waits for the answer. A report the caller gives up on before
+    /// the keeper has it was never taken, so nothing of it is kept. `work` checks the report's
+    /// token itself: that is a read of the store, as slow as a write can be, so handing on only a
+    /// report already checked would leave a hook's hang-up the same time to cancel it in.
+    ///
+    /// # Errors
+    ///
+    /// `work`'s; [`ShellError::Unavailable`] when the keeper has closed at the daemon's stop; and
+    /// [`ShellError::Internal`] when the report's handling panicked.
+    pub(crate) async fn kept<T, F>(
+        self: &Arc<Self>,
+        kind: ReportKind,
+        terminal_id: &str,
+        work: impl FnOnce(Arc<Self>) -> F,
+    ) -> Result<T, ShellError>
+    where
+        F: Future<Output = Result<T, ShellError>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (answer, answered) = oneshot::channel();
+        let done = work(Arc::clone(self));
+        let job = Job {
+            terminal_id: terminal_id.to_owned(),
+            kind,
+            run: Box::pin(async move { answer.send(done.await).is_ok() }),
+        };
+        self.keeper
+            .jobs(&self.deps.tracker, &self.deps.stop)
+            .send(job)
+            .await
+            .map_err(|_| {
+                ShellError::Unavailable(format!(
+                    "shell {terminal_id}'s {} wasn't taken: bazhen is stopping",
+                    kind.as_str()
+                ))
+            })?;
+        answered.await.map_err(|_| {
+            ShellError::Internal(format!(
+                "shell {terminal_id}'s {} ended early",
+                kind.as_str()
+            ))
+        })?
+    }
+
     /// Keeps the line a shell reported running, unless the report isn't the shell's own or a
     /// later one has been kept.
     ///
@@ -92,8 +254,8 @@ impl Shells {
         })
     }
 
-    /// The shell's integration reported its first prompt, which no restart waits on yet.
-    /// Answers whether the report was the shell's own.
+    /// The shell's integration reported its first prompt: a line its restart is to type back is
+    /// typed now. Answers whether the report was the shell's own.
     ///
     /// # Errors
     ///
@@ -103,11 +265,20 @@ impl Shells {
         terminal_id: &str,
         prompt: &ShellPrompt,
     ) -> Result<bool, ShellError> {
-        self.owns(terminal_id, &prompt.token).await
+        if !self.owns(terminal_id, &prompt.token).await? {
+            return Ok(false);
+        }
+        if let Some(typing) = self
+            .retypes
+            .prompted(terminal_id, prompt.brackets == Some(true))
+        {
+            self.type_back(typing);
+        }
+        Ok(true)
     }
 
-    /// The shell's integration said it won't take a line typed back, which no restart holds for
-    /// it yet. Answers whether the report was the shell's own.
+    /// The shell's integration said it won't take a line typed back: a line held for it is
+    /// dropped. Answers whether the report was the shell's own.
     ///
     /// # Errors
     ///
@@ -117,7 +288,11 @@ impl Shells {
         terminal_id: &str,
         decline: &ShellDecline,
     ) -> Result<bool, ShellError> {
-        self.owns(terminal_id, &decline.token).await
+        if !self.owns(terminal_id, &decline.token).await? {
+            return Ok(false);
+        }
+        self.retypes.declined(terminal_id);
+        Ok(true)
     }
 
     /// Whether `token` is the one the shell `terminal_id` names was started with, compared in
@@ -237,8 +412,8 @@ pub(crate) mod tests {
                 .filter(|key| key.starts_with("BAZHEN_SHELL") || *key == "BAZHEN_HOOK")
                 .collect();
             assert_eq!(
-                (outcome, named),
-                (Ok(ReportOutcome::Refused), Vec::<&String>::new())
+                (outcome, named, h.shells.reports()),
+                (Ok(ReportOutcome::Refused), Vec::<&String>::new(), false)
             );
         });
     }
@@ -359,6 +534,66 @@ pub(crate) mod tests {
                 ));
             }
             assert_eq!(answers, [(true, true), (false, false), (false, false)]);
+        });
+    }
+
+    /// Whether `future` is still waiting after one poll.
+    pub(crate) async fn waits<F: Future + Unpin>(future: &mut F) -> bool {
+        tokio::select! {
+            biased;
+            _ = future => false,
+            () = std::future::ready(()) => true,
+        }
+    }
+
+    #[test]
+    fn keeps_a_report_sent_after_one_whose_handling_panicked() {
+        let h = setup_with(100, Some(integration()));
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        runtime().block_on(async {
+            let id = h.open("o").await.unwrap();
+            let token = h.token_of(&id).unwrap();
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let mut held = Box::pin(h.store.run(move |_| gate.recv().is_ok()));
+            assert!(waits(&mut held).await);
+            let store = h.store.clone();
+            let mut panicking = Box::pin(h.shells.kept(ReportKind::Line, &id, |_| async move {
+                store.run(|_| ()).await.unwrap();
+                panic!("a report's handling panicked")
+            }));
+            assert!(waits(&mut panicking).await);
+            // The keeper takes the panicking report, which waits behind the hold.
+            tokio::task::yield_now().await;
+            let (on, report) = (id.clone(), line(Some(&token), 1, Some("make")));
+            let mut next = Box::pin(h.shells.kept(
+                ReportKind::Line,
+                &id,
+                move |shells| async move { shells.report(&on, report).await },
+            ));
+            assert!(
+                waits(&mut next).await,
+                "the next report is queued behind it"
+            );
+            release.send(()).unwrap();
+            assert!(held.await.unwrap());
+            let panicked: Result<ReportOutcome, ShellError> = panicking.await;
+            assert_eq!(
+                (panicked, next.await, h.last_command(&id)),
+                (
+                    Err(ShellError::Internal(format!(
+                        "shell {id}'s report ended early"
+                    ))),
+                    Ok(ReportOutcome::Kept),
+                    Some("make".to_owned())
+                )
+            );
+            assert_eq!(
+                said.times(&format!("shell {id}: a report panicked as it was handled")),
+                1,
+                "{}",
+                said.text()
+            );
         });
     }
 }

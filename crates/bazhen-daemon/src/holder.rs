@@ -519,6 +519,21 @@ impl Terminals for Holder {
         })
     }
 
+    fn paste<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        text: &'a str,
+        brackets: bool,
+    ) -> Answer<'a, Result<(), TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            self.runtime
+                .paste(&terminal, text, brackets)
+                .await
+                .map_err(|e| terminal_error(&e))
+        })
+    }
+
     fn foregrounds<'a>(
         &'a self,
         terminals: &'a [Recorded],
@@ -1141,6 +1156,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 tracker: TaskTracker::new(),
+                stop: CancellationToken::new(),
                 integration: None,
             });
             (Arc::new(shells), store, thread)
@@ -1220,6 +1236,693 @@ mod tests {
             });
             drop(shells);
             thread.finish();
+        }
+        /// Shells with the integration on, on real holders, reporting over a socket served as the
+        /// daemon serves its own (`tests/api/shell-integration.test.ts`): each runs real zsh, bash
+        /// and fish, and starts and closes holders, so each runs only in the sandbox.
+        mod integrated {
+            use std::collections::BTreeMap;
+            use std::path::{Path, PathBuf};
+
+            use bazhen_holder_proto::body::Count;
+            use bazhen_protocol::shells::RestartShellRequest;
+            use bazhen_runtime_holder::{ClientOptions, HolderLocator, connect};
+
+            use super::*;
+            use crate::shells::integration::{Integration, install_shell_integration};
+            use crate::shells::tests::Said;
+            use crate::terminals::Recorded;
+
+            const KINDS: [&str; 3] = ["zsh", "bash", "fish"];
+            const TYPED: &str = r#"echo "$HOME" 'a  b'"#;
+            const HIDDEN: &str = " export TOKEN=s3cret-kept-out";
+            const DECLINED: &str = "the shell's integration said it can't take a line typed back";
+
+            /// The line docs/shell-integration.md gives each shell's rc file.
+            fn rc_line(kind: &str) -> &'static str {
+                match kind {
+                    "zsh" => {
+                        r#"[[ -n $BAZHEN_SHELL_INTEGRATION && -r $BAZHEN_SHELL_INTEGRATION/zsh ]] && source "$BAZHEN_SHELL_INTEGRATION/zsh""#
+                    }
+                    "bash" => {
+                        r#"[[ -n $BAZHEN_SHELL_INTEGRATION && -r $BAZHEN_SHELL_INTEGRATION/bash ]] && . "$BAZHEN_SHELL_INTEGRATION/bash""#
+                    }
+                    _ => {
+                        r#"test -n "$BAZHEN_SHELL_INTEGRATION"; and test -r "$BAZHEN_SHELL_INTEGRATION/fish"; and source "$BAZHEN_SHELL_INTEGRATION/fish""#
+                    }
+                }
+            }
+
+            /// Each test shell's rc: a prompt showing the last line's status, around the
+            /// integration's line, as a prompt framework would.
+            fn rc(kind: &str) -> String {
+                match kind {
+                    "zsh" => format!("{}\nPS1='[st=%?] '", rc_line(kind)),
+                    "bash" => [
+                        "__before_hook() { __before=$?; return $__before; }",
+                        "PROMPT_COMMAND='__before_hook;'",
+                        rc_line(kind),
+                        "PROMPT_COMMAND+=$'\\n''__after=$?'",
+                        "PS1='[st=$(( __before < __after ? __before : __after ))] '",
+                    ]
+                    .join("\n"),
+                    _ => format!(
+                        "{}\nfunction fish_prompt; echo -n \"[st=$status] \"; end",
+                        rc_line(kind)
+                    ),
+                }
+            }
+
+            /// Whether the integration types a line back into this kind of shell: fish only
+            /// where its version has the check a paste needs.
+            fn types_back(kind: &str) -> bool {
+                if kind != "fish" {
+                    return true;
+                }
+                let version = std::process::Command::new(program("fish"))
+                    .arg("--version")
+                    .output()
+                    .unwrap();
+                let version = String::from_utf8_lossy(&version.stdout).into_owned();
+                version.starts_with("fish, version 3.7.")
+                    || version.starts_with("fish, version 4.0.")
+            }
+
+            /// `name` as found on this test's PATH.
+            fn program(name: &str) -> PathBuf {
+                std::env::split_paths(&std::env::var_os("PATH").unwrap())
+                    .map(|dir| dir.join(name))
+                    .find(|path| path.is_file())
+                    .unwrap_or_else(|| panic!("no {name} on PATH"))
+            }
+
+            /// The program built into the target directory this test binary is under.
+            fn built(name: &str) -> PathBuf {
+                let exe = std::env::current_exe().unwrap();
+                exe.ancestors()
+                    .skip(1)
+                    .map(|dir| dir.join(name))
+                    .find(|path| path.is_file())
+                    .unwrap_or_else(|| panic!("no {name} above {}", exe.display()))
+            }
+
+            /// Whether `bash` is 4.4 or later, the oldest the integration runs in, so a test fails as
+            /// that rather than as a line never reported: macOS's own bash is 3.2.
+            fn integrated_bash(bash: &Path) -> Result<(), String> {
+                let out = std::process::Command::new(bash)
+                    .args(["-c", "echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"])
+                    .output()
+                    .map_err(|e| e.to_string())?;
+                let version = String::from_utf8_lossy(&out.stdout).into_owned();
+                let mut parts = version.split_whitespace().map(str::parse::<u32>);
+                match (parts.next(), parts.next()) {
+                    (Some(Ok(major)), Some(Ok(minor))) if (major, minor) >= (4, 4) => Ok(()),
+                    _ => Err(format!(
+                        "{} is bash {}; the integration takes 4.4 or later",
+                        bash.display(),
+                        version.trim()
+                    )),
+                }
+            }
+
+            #[test]
+            fn refuses_a_bash_older_than_the_integration_takes() {
+                let dir = TempDir::new("integrated-old-bash");
+                let bash = dir.path().join("bash");
+                std::fs::write(&bash, "#!/bin/sh\necho 3 2\n").unwrap();
+                std::fs::set_permissions(&bash, std::fs::Permissions::from_mode(0o755)).unwrap();
+                assert_eq!(
+                    integrated_bash(&bash),
+                    Err(format!(
+                        "{} is bash 3 2; the integration takes 4.4 or later",
+                        bash.display()
+                    ))
+                );
+            }
+
+            /// A script starting `kind` interactive with `rc` alone, as `shellWithRc` does.
+            fn shell_with_rc(dir: &Path, kind: &str, rc: &str) -> String {
+                let rcs = dir.join(format!("rc-{kind}"));
+                std::fs::create_dir_all(&rcs).unwrap();
+                let file = rcs.join(if kind == "zsh" {
+                    ".zshrc".to_owned()
+                } else {
+                    format!("{kind}rc")
+                });
+                std::fs::write(&file, format!("{rc}\n")).unwrap();
+                if kind == "zsh" {
+                    std::fs::write(rcs.join(".zshenv"), "unsetopt GLOBAL_RCS\n").unwrap();
+                }
+                let exe = program(kind);
+                if kind == "bash" {
+                    integrated_bash(&exe).unwrap();
+                }
+                let exe = exe.display().to_string();
+                let start = match kind {
+                    "zsh" => format!("ZDOTDIR='{}' exec {exe} -i", rcs.display()),
+                    "bash" => format!("exec {exe} --rcfile '{}' -i", file.display()),
+                    _ => format!("exec {exe} -i -C \"source '{}'\"", file.display()),
+                };
+                let script = rcs.join(format!("{kind}-shell"));
+                // The token as the shell gets it, where this test alone reads it.
+                let token = format!(
+                    r#"printf '%s' "${{BAZHEN_SHELL_TOKEN-}}" > '{}/token-'"$BAZHEN_TERMINAL_ID""#,
+                    dir.display()
+                );
+                std::fs::write(&script, format!("#!/bin/sh\n{token}\n{start}\n")).unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+                script.to_string_lossy().into_owned()
+            }
+
+            /// A daemon of shells over real holders under `dir`, running `shell`, with the
+            /// integration on and its socket served.
+            struct Daemon {
+                shells: Arc<Shells>,
+                store: Writer,
+                thread: Option<Thread>,
+                stop: CancellationToken,
+                tracker: TaskTracker,
+                root: PathBuf,
+                shell: String,
+                db: PathBuf,
+            }
+
+            impl Daemon {
+                fn shells(
+                    dir: &Path,
+                    shell: &str,
+                    store: &Writer,
+                    stop: &CancellationToken,
+                    tracker: &TaskTracker,
+                ) -> Arc<Shells> {
+                    let uid = rustix::process::getuid().as_raw();
+                    let root = HolderRoot::of(&dir.join("run"), uid);
+                    root.make_private(uid).unwrap();
+                    let mut options = RuntimeOptions::new(root);
+                    options.binary = Some(holder_binary());
+                    options.env = BTreeMap::from([
+                        ("PATH".to_owned(), std::env::var("PATH").unwrap()),
+                        ("HOME".to_owned(), dir.to_string_lossy().into_owned()),
+                        ("LANG".to_owned(), "C.UTF-8".to_owned()),
+                    ]);
+                    let terminals: Arc<dyn Terminals> =
+                        Arc::new(Holder::new(HolderRuntime::new(options), 1000));
+                    let snippets = dir.join("state/shell-integration");
+                    install_shell_integration(&snippets, uid).unwrap();
+                    Arc::new(Shells::new(ShellsDeps {
+                        store: store.clone(),
+                        terminals,
+                        budget: Arc::new(Budget::new(
+                            10,
+                            Arc::new(Machine(std::sync::Mutex::new(roomy()))),
+                            Box::new(|_| {}),
+                        )),
+                        home: dir.to_string_lossy().into_owned(),
+                        shell: shell.to_owned(),
+                        socket: dir.join("bazhen.sock").to_string_lossy().into_owned(),
+                        tracker: tracker.clone(),
+                        stop: stop.clone(),
+                        integration: Some(Integration {
+                            hook: built("bazhen-hook").to_string_lossy().into_owned(),
+                            dir: snippets.to_string_lossy().into_owned(),
+                        }),
+                    }))
+                }
+
+                /// Starts it, within a runtime, serving its socket and closing shells as they exit.
+                fn start(dir: &Path, shell: &str) -> Self {
+                    let db = dir.join("bazhen.db");
+                    let (store, thread) =
+                        crate::writer::start(bazhen_store::Store::open(&db).unwrap(), &db).unwrap();
+                    let (stop, tracker) = (CancellationToken::new(), TaskTracker::new());
+                    let shells = Self::shells(dir, shell, &store, &stop, &tracker);
+                    let daemon = Self {
+                        shells,
+                        store,
+                        thread: Some(thread),
+                        stop,
+                        tracker,
+                        root: dir.to_owned(),
+                        shell: shell.to_owned(),
+                        db,
+                    };
+                    daemon.serve();
+                    daemon
+                }
+
+                fn serve(&self) {
+                    let socket = self.root.join("bazhen.sock");
+                    drop(std::fs::remove_file(&socket));
+                    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+                    let shared = crate::routes::Shared {
+                        shells: Some(Arc::clone(&self.shells)),
+                        ..crate::routes::Shared::new(
+                            "f",
+                            crate::routes::Stop::default(),
+                            self.store.clone(),
+                        )
+                    };
+                    self.tracker.spawn(crate::accept::serve_on(
+                        listener,
+                        crate::routes::socket_router(shared),
+                        crate::accept::SOCKET,
+                        self.stop.clone(),
+                        self.tracker.clone(),
+                        || {},
+                    ));
+                    let events = self.shells.terminals().events();
+                    self.tracker.spawn(Arc::clone(&self.shells).watch(
+                        events,
+                        self.tracker.clone(),
+                        self.stop.clone(),
+                    ));
+                }
+
+                /// The daemon ends, and every holder with it, as a reboot would; another starts
+                /// over the same store, and finds the shells it kept lost.
+                /// Every shell's holder closed and provably gone, as a reboot leaves them, so the
+                /// daemon that starts next finds them lost.
+                async fn reboot(&mut self) {
+                    for id in self.ids() {
+                        if let Some(at) = self.recorded(&id) {
+                            let terminals = self.shells.terminals();
+                            if let Err(e) = terminals.close(&at).await {
+                                panic!("{id}: its holder didn't close: {e}");
+                            }
+                            let deadline = Instant::now() + Duration::from_secs(10);
+                            while !terminals.gone(&at).await {
+                                assert!(Instant::now() < deadline, "{id}: its holder never went");
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                        }
+                    }
+                    self.stop.cancel();
+                    self.shells.terminals().shutdown().await;
+                    self.tracker.close();
+                    self.tracker.wait().await;
+                    (self.stop, self.tracker) = (CancellationToken::new(), TaskTracker::new());
+                    self.shells = Self::shells(
+                        &self.root,
+                        &self.shell,
+                        &self.store,
+                        &self.stop,
+                        &self.tracker,
+                    );
+                    self.shells.reconcile().await;
+                    self.serve();
+                }
+
+                async fn end(mut self) {
+                    for id in self.ids() {
+                        if let Some(at) = self.recorded(&id) {
+                            drop(self.shells.terminals().close(&at).await);
+                        }
+                    }
+                    self.stop.cancel();
+                    self.shells.terminals().shutdown().await;
+                    self.tracker.close();
+                    self.tracker.wait().await;
+                    if let Some(thread) = self.thread.take() {
+                        thread.finish();
+                    }
+                }
+
+                fn ids(&self) -> Vec<String> {
+                    rusqlite::Connection::open(&self.db)
+                        .unwrap()
+                        .prepare("SELECT id FROM terminals WHERE kind = 'shell'")
+                        .unwrap()
+                        .query_map((), |row| row.get(0))
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .collect()
+                }
+
+                fn recorded(&self, id: &str) -> Option<Recorded> {
+                    let reader = self.store.reader().unwrap();
+                    let found = reader.reads().shell(id).unwrap()?;
+                    Some(Recorded {
+                        terminal_id: found.id,
+                        locator: found.locator?,
+                    })
+                }
+
+                fn locator(&self, id: &str) -> HolderLocator {
+                    HolderLocator::decode(&self.recorded(id).unwrap().locator).unwrap()
+                }
+
+                fn kept(&self, id: &str) -> Option<String> {
+                    let reader = self.store.reader().unwrap();
+                    reader.reads().last_shell_command(id).unwrap()
+                }
+
+                /// Opens a shell, once its first prompt is drawn.
+                async fn driven(&self, key: &str) -> String {
+                    let id = self
+                        .shells
+                        .open(&opening(key), None)
+                        .await
+                        .unwrap()
+                        .terminal_id;
+                    let id = id.as_str().to_owned();
+                    self.until_screen(&id, |screen| screen.contains("[st=0]"))
+                        .await;
+                    id
+                }
+
+                /// Types `text` into the shell `id`, as a view driving it would.
+                async fn types(&self, id: &str, text: &str) {
+                    let options = ClientOptions {
+                        writer: true,
+                        ..ClientOptions::default()
+                    };
+                    let (client, events) =
+                        connect(&self.locator(id).socket, &options).await.unwrap();
+                    client.input(text.as_bytes()).unwrap();
+                    client.drained().await;
+                    client.end();
+                    drop(events);
+                }
+
+                async fn screen(&self, id: &str) -> String {
+                    let (client, events) =
+                        connect(&self.locator(id).socket, &ClientOptions::default())
+                            .await
+                            .unwrap();
+                    let screen = client.screen(Count::new(0).unwrap()).await.unwrap();
+                    client.end();
+                    drop(events);
+                    screen.text().to_owned()
+                }
+
+                async fn last_line(&self, id: &str) -> String {
+                    self.screen(id)
+                        .await
+                        .trim_end()
+                        .lines()
+                        .last()
+                        .unwrap_or_default()
+                        .to_owned()
+                }
+
+                async fn until_screen(&self, id: &str, done: impl Fn(&str) -> bool) {
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    loop {
+                        let screen = self.screen(id).await;
+                        if done(&screen) {
+                            return;
+                        }
+                        assert!(
+                            Instant::now() < deadline,
+                            "the screen still shows:\n{screen}"
+                        );
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+
+                async fn until_kept(&self, id: &str, line: Option<&str>) {
+                    let deadline = Instant::now() + Duration::from_secs(15);
+                    while self.kept(id).as_deref() != line {
+                        assert!(
+                            Instant::now() < deadline,
+                            "kept {:?}, not {line:?}",
+                            self.kept(id)
+                        );
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                }
+
+                /// The shell's own token, as its start script found it in its environment.
+                fn token(&self, id: &str) -> String {
+                    std::fs::read_to_string(self.root.join(format!("token-{id}"))).unwrap()
+                }
+
+                /// Everything a client sees: the state and every event.
+                fn seen(&self) -> String {
+                    let view = bazhen_store::SnapshotView {
+                        host: "h".to_owned(),
+                        restart_holders: std::collections::HashMap::new(),
+                        shells_report: true,
+                    };
+                    let reader = self.store.reader().unwrap();
+                    let state =
+                        serde_json::to_string(&reader.reads().snapshot(&view).unwrap()).unwrap();
+                    let events: Vec<String> = rusqlite::Connection::open(&self.db)
+                        .unwrap()
+                        .prepare("SELECT payload FROM events")
+                        .unwrap()
+                        .query_map((), |row| row.get(0))
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .collect();
+                    format!("{state}\n{}", events.join("\n"))
+                }
+
+                /// Restarts the lost shell `id`, asking for its line typed back.
+                async fn retyped(&self, id: &str) -> String {
+                    let req = RestartShellRequest {
+                        idempotency_key: format!("retype-{id}"),
+                        generation: 0,
+                        theme: None,
+                        retype: Some(true),
+                    };
+                    let restarted = self.shells.restart(id, &req, None).await.unwrap();
+                    restarted.terminal_id.as_str().to_owned()
+                }
+            }
+
+            /// Runs `test` against a daemon whose shells are `kind` with `rc`, once for each kind.
+            fn each_kind<F>(name: &str, rc: fn(&str) -> String, test: &F)
+            where
+                F: AsyncFn(&mut Daemon, &str, &Said),
+            {
+                for kind in KINDS {
+                    let dir = TempDir::new(&format!("{name}-{kind}"));
+                    let shell = shell_with_rc(dir.path(), kind, &rc(kind));
+                    let said = Said::default();
+                    let _logging = said.logging();
+                    runtime().block_on(async {
+                        let mut daemon = Daemon::start(dir.path(), &shell);
+                        test(&mut daemon, kind, &said).await;
+                        daemon.end().await;
+                    });
+                }
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn keeps_the_line_as_typed_and_puts_neither_it_nor_the_shell_s_token_where_a_client_or_log_sees()
+             {
+                bazhen_test_signal::require_sandbox().unwrap();
+                each_kind("integrated-keeps", rc, &async |daemon, kind, said| {
+                    let id = daemon.driven("o").await;
+                    daemon.types(&id, &format!("{TYPED}\r")).await;
+                    daemon.until_kept(&id, Some(TYPED)).await;
+                    daemon.types(&id, &format!("{HIDDEN}\r")).await;
+                    daemon.types(&id, "true\r").await;
+                    daemon.until_kept(&id, Some("true")).await;
+                    let token = daemon.token(&id);
+                    let seen = format!("{}\n{}", daemon.seen(), said.text());
+                    let found: Vec<&str> = ["a  b", "s3cret", token.as_str()]
+                        .into_iter()
+                        .filter(|secret| seen.contains(secret))
+                        .collect();
+                    assert_eq!((token.len(), found), (43, Vec::<&str>::new()), "{kind}");
+                });
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn leaves_the_prompt_the_status_of_the_line_that_ran() {
+                bazhen_test_signal::require_sandbox().unwrap();
+                each_kind("integrated-status", rc, &async |daemon, _, _| {
+                    let id = daemon.driven("o").await;
+                    daemon.types(&id, "false\r").await;
+                    daemon
+                        .until_screen(&id, |screen| screen.contains("[st=1]"))
+                        .await;
+                    daemon.types(&id, "true\r").await;
+                    daemon
+                        .until_screen(&id, |screen| {
+                            screen.trim_end().lines().last() == Some("[st=0]")
+                        })
+                        .await;
+                });
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn forgets_the_shell_s_line_once_it_exits() {
+                bazhen_test_signal::require_sandbox().unwrap();
+                each_kind("integrated-exits", rc, &async |daemon, kind, _| {
+                    let id = daemon.driven("o").await;
+                    daemon.types(&id, "echo kept-until-exit\r").await;
+                    daemon.until_kept(&id, Some("echo kept-until-exit")).await;
+                    daemon.types(&id, "exit\r").await;
+                    let deadline = Instant::now() + Duration::from_secs(15);
+                    while state_of(&daemon.store, &id) != Some(TerminalState::Closed) {
+                        assert!(Instant::now() < deadline, "{kind}: the shell never closed");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    assert_eq!(daemon.kept(&id), None, "{kind}");
+                });
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn leaves_the_user_s_last_background_job_as_the_shell_s_own() {
+                bazhen_test_signal::require_sandbox().unwrap();
+                each_kind("integrated-job", rc, &async |daemon, kind, _| {
+                    let (start, show) = if kind == "fish" {
+                        ("sleep 1 &; echo bg=$last_pid", "echo now=$last_pid")
+                    } else {
+                        ("sleep 1 & echo bg=$!", "echo now=$!")
+                    };
+                    let id = daemon.driven("o").await;
+                    daemon.types(&id, &format!("{start}\r")).await;
+                    let shown = |screen: &str, label: &str| {
+                        screen.lines().find_map(|line| {
+                            line.strip_prefix(label)
+                                .filter(|pid| {
+                                    !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit())
+                                })
+                                .map(str::to_owned)
+                        })
+                    };
+                    daemon
+                        .until_screen(&id, |screen| shown(screen, "bg=").is_some())
+                        .await;
+                    daemon.types(&id, "true\r").await;
+                    daemon.types(&id, &format!("{show}\r")).await;
+                    daemon
+                        .until_screen(&id, |screen| shown(screen, "now=").is_some())
+                        .await;
+                    let screen = daemon.screen(&id).await;
+                    assert_eq!(shown(&screen, "now="), shown(&screen, "bg="), "{kind}");
+                });
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn types_the_line_back_at_a_restarted_shell_s_prompt_exactly_and_without_running_it_or_says_why_not()
+             {
+                bazhen_test_signal::require_sandbox().unwrap();
+                each_kind("integrated-retype", rc, &async |daemon, kind, said| {
+                    let id = daemon.driven("o").await;
+                    daemon.types(&id, &format!("{TYPED}\r")).await;
+                    daemon.until_kept(&id, Some(TYPED)).await;
+                    let ran = format!("{} a  b", daemon.root.display());
+                    daemon.reboot().await;
+                    assert_eq!(
+                        state_of(&daemon.store, &id),
+                        Some(TerminalState::Lost),
+                        "{kind}"
+                    );
+                    let next = daemon.retyped(&id).await;
+                    if types_back(kind) {
+                        let typed = format!("[st=0] {TYPED}");
+                        daemon
+                            .until_screen(&next, |screen| {
+                                screen.trim_end().lines().last() == Some(typed.as_str())
+                            })
+                            .await;
+                        // Had Enter been pressed, the line's output and a new prompt would follow.
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        assert_eq!(daemon.last_line(&next).await, typed, "{kind}");
+                        assert!(!daemon.screen(&next).await.contains(&ran), "{kind}");
+                    } else {
+                        let declined =
+                            format!("shell {next}: last command not retyped: {DECLINED}");
+                        let deadline = Instant::now() + Duration::from_secs(15);
+                        while said.times(&declined) == 0 {
+                            assert!(Instant::now() < deadline, "{kind}: never said it declined");
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        assert_eq!(daemon.last_line(&next).await, "[st=0]", "{kind}");
+                    }
+                    let seen = format!("{}\n{}", daemon.seen(), said.text());
+                    assert!(!seen.contains("a  b"), "{kind}: the line is seen");
+                    assert_eq!(
+                        (daemon.kept(&id), daemon.kept(&next)),
+                        (None, None),
+                        "{kind}"
+                    );
+                });
+            }
+
+            /// Each test shell's rc with the line editor told to take no bracketed paste, in a
+            /// UTF-8 locale and, once `marker` exists, a C locale, as a daemon a service manager
+            /// started without LANG gives its shells: there the line can only arrive as keys.
+            fn keys_rc(kind: &str, marker: &Path) -> String {
+                let locale = format!(
+                    "if [[ -e '{}' ]]; then export LC_ALL=C; else export LC_ALL=C.UTF-8; fi",
+                    marker.display()
+                );
+                match kind {
+                    "zsh" => [
+                        rc_line(kind),
+                        "PS1='[st=%?] '",
+                        "zmodload zsh/zle",
+                        "unset zle_bracketed_paste",
+                        "bindkey -r '^[[200~'",
+                        &locale,
+                    ]
+                    .join("\n"),
+                    _ => [
+                        rc_line(kind),
+                        "PS1='[st=0] '",
+                        "bind 'set enable-bracketed-paste off'",
+                        &locale,
+                    ]
+                    .join("\n"),
+                }
+            }
+
+            #[test]
+            #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+            fn types_a_printable_ascii_line_back_as_keys_and_no_line_beyond_it_where_the_editor_takes_no_paste()
+             {
+                bazhen_test_signal::require_sandbox().unwrap();
+                for kind in ["zsh", "bash"] {
+                    let dir = TempDir::new(&format!("integrated-keys-{kind}"));
+                    let marker = dir.path().join("marked");
+                    let shell = shell_with_rc(dir.path(), kind, &keys_rc(kind, &marker));
+                    let said = Said::default();
+                    let _logging = said.logging();
+                    runtime().block_on(async {
+                        let mut daemon = Daemon::start(dir.path(), &shell);
+                        let plain = daemon.driven("plain").await;
+                        daemon.types(&plain, "echo plain-ascii\r").await;
+                        daemon.until_kept(&plain, Some("echo plain-ascii")).await;
+                        let accented = daemon.driven("accented").await;
+                        daemon.types(&accented, "echo café\r").await;
+                        daemon.until_kept(&accented, Some("echo café")).await;
+                        std::fs::write(&marker, "").unwrap();
+                        daemon.reboot().await;
+                        let plain = daemon.retyped(&plain).await;
+                        let accented = daemon.retyped(&accented).await;
+                        daemon
+                            .until_screen(&plain, |screen| {
+                                screen.trim_end().lines().last() == Some("[st=0] echo plain-ascii")
+                            })
+                            .await;
+                        let screen = daemon.screen(&plain).await;
+                        assert!(
+                            !screen.contains("200~") && !screen.contains("201~"),
+                            "{kind}: {screen}"
+                        );
+                        let refused = format!("shell {accented}: last command not retyped");
+                        let deadline = Instant::now() + Duration::from_secs(20);
+                        while said.times(&refused) == 0 {
+                            assert!(Instant::now() < deadline, "{kind}: never said why");
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        assert_eq!(daemon.last_line(&accented).await, "[st=0]", "{kind}");
+                        assert_eq!(said.times("café"), 0, "{kind}");
+                        daemon.end().await;
+                    });
+                }
+            }
         }
     }
 }

@@ -266,6 +266,10 @@ pub fn shell_command_line(line: &str) -> bool {
         && line.len() <= COMMAND_LINE_MAX_BYTES
 }
 
+/// The most UTF-16 units a reported line has, as zod's `.max(2048)` on `ShellReport`'s `command`
+/// counts them: a bound on the report, not on the line kept, which is [`COMMAND_LINE_MAX_BYTES`].
+pub const REPORTED_LINE_MAX_UNITS: usize = 2048;
+
 /// The largest integer a JSON number holds exactly, as zod's `.max(Number.MAX_SAFE_INTEGER)`.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
@@ -295,7 +299,7 @@ impl ShellReport {
             && self
                 .command
                 .as_ref()
-                .is_none_or(|line| line.encode_utf16().count() <= COMMAND_LINE_MAX_BYTES)
+                .is_none_or(|line| line.encode_utf16().count() <= REPORTED_LINE_MAX_UNITS)
     }
 }
 
@@ -429,6 +433,30 @@ mod tests {
             "é".repeat(2048)
         );
         assert!(read(&edge).unwrap().bounded(), "at its bounds");
+    }
+
+    #[test]
+    fn holds_a_reported_line_to_2048_utf16_units_however_many_bytes_they_take() {
+        let bounded = |line: String| {
+            ShellReport {
+                token: "t".to_owned(),
+                at: 0,
+                command: Some(line),
+            }
+            .bounded()
+        };
+        let taken = ["a".repeat(2048), "é".repeat(2048), "😀".repeat(1024)];
+        let refused = [
+            "a".repeat(2049),
+            format!("{}a", "é".repeat(2048)),
+            format!("{}a", "😀".repeat(1024)),
+        ];
+        assert_eq!(
+            taken.map(bounded),
+            [true; 3],
+            "2048 units, in 2048 bytes or 4096"
+        );
+        assert_eq!(refused.map(bounded), [false; 3], "2049 units");
     }
 
     #[test]

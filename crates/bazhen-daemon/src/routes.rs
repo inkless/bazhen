@@ -191,6 +191,10 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
             .shells
             .as_ref()
             .map_or_else(Default::default, |shells| shells.restarts().holders()),
+        shells_report: shared
+            .shells
+            .as_ref()
+            .is_some_and(|shells| shells.reports()),
     };
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
         store.reader()?.reads().snapshot(&view)

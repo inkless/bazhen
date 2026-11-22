@@ -159,6 +159,7 @@ mod tests {
             let view = SnapshotView {
                 host: "h".to_owned(),
                 restart_holders: self.shells.restarts().holders(),
+                shells_report: false,
             };
             let reader = self.store.reader().unwrap();
             reader

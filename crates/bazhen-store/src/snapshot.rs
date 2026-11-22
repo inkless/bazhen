@@ -49,6 +49,9 @@ pub struct SnapshotView {
     /// The holder to end for each terminal that needs a restart, by its id, as last proved still
     /// running there: a pid that wasn't is never named.
     pub restart_holders: HashMap<String, u64>,
+    /// Whether this daemon's shells report the lines they run, so a lost shell's kept line can
+    /// be typed back.
+    pub shells_report: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

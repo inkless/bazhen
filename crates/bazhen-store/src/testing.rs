@@ -31,5 +31,6 @@ pub(crate) fn view() -> crate::SnapshotView {
     crate::SnapshotView {
         host: "testhost".to_owned(),
         restart_holders: std::collections::HashMap::new(),
+        shells_report: false,
     }
 }
