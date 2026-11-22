@@ -2436,9 +2436,72 @@ const MENTIONS_TARGET = [
   "tests/cli/fixtures.ts",
 ];
 const FALSIFY_TESTS = ["scripts/falsify.medium.test.ts", "scripts/falsify.test.ts"];
-// Any spelling of a path into target/: a quoted or slashed `target/`, or "target" joined to more,
-// or ending a join whose result is joined to more later.
-const TARGET_MENTION = /["'`/]target\/|["']target["']\s*[,+)]/;
+// A string with target as a path segment, that more path follows or a relative or interpolated
+// root precedes. An absolute path ending at target, as a CARGO_TARGET_DIR, isn't the repository's.
+const TARGET_SEGMENT = /["'`/]target\/|(?:\.\.?|\})\/target["'`]/;
+const BARE_TARGET = /["'`]target["'`]/g;
+// How far around a bare "target" its shape is read: far enough for a call's first argument, and
+// bounded so a file of many of them is read in linear time.
+const NEAR = 200;
+const KEY_BEFORE =
+  /(?:[!=]==?|\bcase|\.includes\(|\b(?:defineProperty|hasOwn|hasOwnProperty|Reflect\.\w+)\(\s*[^(),;]*(?:\([^()]*\)[^(),;]*)*,)\s*$/;
+const KEY_AFTER = /^(?:\s*[!=]==?|\s+in\b|[^[\]();]*\]\s*\.includes\()/;
+const OBJECT_KEY = [/[{,]\s*$/, /^\s*:/] as const;
+// A keyword before `[` begins an array, as `return ["target"]`, so it marks no member.
+const MEMBER = [
+  /(?:[)\]]|(?<![\w$])(?!(?:return|of|yield|await|in|case|default|typeof|void|else|do|throw|new|delete)\s*\[)[\w$]+)\s*\[\s*$/,
+  /^\s*\]/,
+] as const;
+
+// How far back a block comment's opening is looked for: far enough for a long doc comment.
+const COMMENT_NEAR = 4000;
+
+/**
+ * Whether `at` in `text` is inside a comment that its own line starts with: a `//` line, or a
+ * block whose lines, walked back from this one, each start with `*` up to one starting with `/*`.
+ * A `/*` anywhere else, as in a glob string, opens nothing here.
+ */
+function inComment(text: string, at: number): boolean {
+  const near = text.slice(Math.max(0, at - NEAR), at);
+  const line = near.slice(near.lastIndexOf("\n") + 1);
+  if (/^\s*\/\//.test(line)) return true;
+  if (!/^\s*\/?\*/.test(line)) return false;
+  const before = text.slice(Math.max(0, at - COMMENT_NEAR), at);
+  for (let end = before.length; end >= 0;) {
+    const start = before.lastIndexOf("\n", end - 1) + 1;
+    const each = before.slice(start, end);
+    if (each.includes("*/")) return false;
+    if (/^\s*\/\*/.test(each)) return true;
+    if (!/^\s*\*/.test(each)) return false;
+    end = start - 1;
+  }
+  return false;
+}
+
+/**
+ * Whether the bare "target" from `at` to `end` names a property rather than a path: a key passed
+ * to a call that takes one, compared, tested for, an object's key or a member, or a backticked
+ * word in a comment's prose.
+ */
+function namesProperty(text: string, at: number, end: number): boolean {
+  const before = text.slice(Math.max(0, at - NEAR), at);
+  const after = text.slice(end, end + NEAR);
+  if (text[at] === "`" && inComment(text, at)) return true;
+  return (
+    KEY_BEFORE.test(before) ||
+    KEY_AFTER.test(after) ||
+    [OBJECT_KEY, MEMBER].some(([b, a]) => b.test(before) && a.test(after))
+  );
+}
+
+/**
+ * Whether `text` spells a path into target/, however a helper spells it. Every bare "target" is
+ * read as one unless it names a property, so a helper falsify has never seen fails loud here
+ * rather than running the branch's binary.
+ */
+const mentionsTarget = (text: string) =>
+  TARGET_SEGMENT.test(text) ||
+  [...text.matchAll(BARE_TARGET)].some((m) => !namesProperty(text, m.index, m.index + m[0].length));
 /** The binaries a file names, except the fixtures of falsify's own tests. */
 const named = (path: string, text: string) =>
   FALSIFY_TESTS.includes(path) ? [] : namedBinaries(path, text).toSorted();
@@ -2493,13 +2556,78 @@ describe("the repository's tests that run a binary", () => {
       '"target/" + profile',
       "`${root}/target/${profile}/bazhen`",
       "`target/${profile}/bazhen`",
+      '"./target"',
+      '"../../target"',
+      "`${root}/target`",
+      "resolve(root, `target`)",
+      'new URL("target", root)',
+      'join(dirname(fileURLToPath(new URL(".", import.meta.url))), "..", "target")',
+      'join(a(b(c(d(e(f()))))), "target")',
+      'join(\n  root,\n  "target",\n  profile,\n)',
+      '[root, "target", profile].join("/")',
+      '"target" + sep',
+      'sep + "target"',
+      'joinPath(root, "target")',
+      'repoPath("target", "release", "bazhen")',
+      'fromRoot("target")',
+      'const rel = ["target", "release"];',
+      'join(root, ")", "target")',
+      'join(root, f(")"), "target")',
+      'join(root, /\\)/.source, "target")',
+      'join(\n  root, // step 1)\n  "target",\n)',
+      '[root, "]", "target"].join("/")',
+      'process.env.CARGO_TARGET_DIR ?? "target"',
+      'process.env.CARGO_TARGET_DIR || "target"',
+      'const dir = "target";',
+      '{ cwd: "target" }',
+      'join(root, cond ? "target" : "out")',
+      '[join(root, "target", "release", "bazhen")].includes(bin)',
+      'const u = "http://x"; join(root, `target`)',
+      'for (const d of ["target"]) rmSync(join(root, d));',
+      'return ["target"];',
+      'yield ["target"]',
+      'await ["target"]',
+      "/* x */ const p = join(root, `target`)",
+      " * join(root, `target`)",
+      '/* a */ const g = "src/**/*.ts"; join(root, `target`)',
+      'const g = "src/**/*.ts";\nclass A {\n  *paths() { yield join(root, `target`) }\n}',
+      'const g = "src/**/*.ts";\nconst n = 2\n  * join(root, `target`).length',
+      "const s = `/*`;\n * join(root, `target`)",
+      "/** doc */\n * join(root, `target`)",
+      'export default ["target"];',
     ];
-    expect(spellings.filter((s) => TARGET_MENTION.test(s))).toEqual(spellings);
+    expect(spellings.filter((s) => !mentionsTarget(s))).toEqual([]);
+  });
+
+  it("read no property named target, or other target dir, as a path", () => {
+    const spellings = [
+      'Object.defineProperty(event, "target", { value: target })',
+      'Object.defineProperty(join(root, name), "target", { value })',
+      'Object.defineProperty(\n  event,\n  "target",\n  { value },\n)',
+      'Reflect.get(event, "target")',
+      'Object.hasOwn(event, "target")',
+      'kind === "target")',
+      '"target" !== kind',
+      '["target", "currentTarget"].includes(key)',
+      'keys.includes("target")',
+      '"target" in event',
+      'case "target":',
+      'event["target"]',
+      '{ "target": node }',
+      '{ id, "target": node }',
+      "/** Whether `target` has a getter. */",
+      "// `target`, a pid or a negated pgid",
+      `/**\n * ${"x".repeat(300)}\n * unless a \`target\` is given.\n */`,
+      "event.target",
+      "e.target/2",
+      'CARGO_TARGET_DIR: "/tmp/target"',
+    ];
+    expect(spellings.filter((s) => mentionsTarget(s))).toEqual([]);
   });
 
   it("mention a target/ path nowhere else", () => {
     const mentions = files
-      .filter(({ text }) => TARGET_MENTION.test(text))
+      .filter(({ text }) => mentionsTarget(text))
       .map(({ path }) => path)
       .filter((path) => !(path in RUNS_BINARIES));
     expect(mentions).toEqual(MENTIONS_TARGET);
