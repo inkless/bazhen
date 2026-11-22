@@ -33,7 +33,7 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
     let wrapped = row
         .last()
         .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
-    // Whether the first cell is written as a wide char, which an alone one isn't: set below.
+    // Whether the first cell is written as a wide char.
     let mut wide_start = false;
     let mut spacer = false;
     let end = if wrapped {
@@ -48,20 +48,7 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
     let last = row.len().saturating_sub(1);
     let cells: Vec<&Cell> = row.into_iter().collect();
     for (column, &cell) in cells.iter().take(end).enumerate() {
-        // A wide char takes the next cell too when written, so the cell's own content is lost:
-        // fine for the blank an erase that starts there leaves, but a char written over the
-        // spacer would be lost, and every cell after it would move. That wide char, whose
-        // spacer is gone, is written as the blank it has room to draw.
-        let next = cells.get(column + 1);
-        let alone = cell.flags.contains(Flags::WIDE_CHAR)
-            && next.is_some_and(|next| {
-                // A real char: a blank, in any colour, is what an erase over the spacer leaves.
-                !next.flags.contains(Flags::WIDE_CHAR_SPACER) && !matches!(next.c, ' ' | '\t')
-            });
-        if std::mem::replace(
-            &mut covered,
-            cell.flags.contains(Flags::WIDE_CHAR) && !alone,
-        ) {
+        if std::mem::replace(&mut covered, cell.flags.contains(Flags::WIDE_CHAR)) {
             continue;
         }
         // The cell a wide char didn't fit in, when the row wraps there. Anywhere else, as a
@@ -71,14 +58,7 @@ pub(crate) fn encode_row(row: &Row<Cell>, out: &mut String) -> Ending {
             continue;
         }
         pen = write_pen(out, pen, Pen::of(cell));
-        let blanked = alone || (column == last && cell.flags.contains(Flags::WIDE_CHAR));
-        wide_start |= column == 0 && cell.flags.contains(Flags::WIDE_CHAR) && !blanked;
-        if blanked {
-            // An insert can push a wide char's spacer off the row: written, the char wouldn't
-            // fit and would wrap, so its cell is written as the blank it has room to draw.
-            out.push(' ');
-            continue;
-        }
+        wide_start |= column == 0 && cell.flags.contains(Flags::WIDE_CHAR);
         out.push(drawable(cell.c));
         for &mark in cell.zerowidth().unwrap_or_default() {
             out.push(mark);
@@ -511,15 +491,6 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_char_whose_spacer_was_erased_still_takes_two_cells() {
-        // The erase starts on the spacer and clears it; the row still wraps after "e".
-        let stream = "中\x1b[1;2H\x1b[K\x1b[1;3Hbcde\r\nxy".as_bytes();
-        let (original, replayed) = round_trip(stream, 6);
-        assert_eq!(original[1], replayed[1]);
-        assert_eq!(original[0][2..], replayed[0][2..]);
-    }
-
-    #[test]
     fn a_space_a_row_owes_isn_t_written_once_its_line_fills_the_row() {
         // Kept at 4 columns, abc ended in 中's spacer, and xyz was written over 中. At 3 columns
         // abc fills its row, so the space would start the next one.
@@ -543,34 +514,6 @@ mod tests {
         // The spacer comes back as the space it draws, still wrapping into the blank row.
         assert_eq!(original[1..], replayed[1..]);
         assert!(replayed[0][3].flags.contains(Flags::WRAPLINE));
-    }
-
-    #[test]
-    fn a_row_starting_with_a_wide_char_written_as_a_blank_still_takes_the_spacer_before_it() {
-        // 文 leaves a spacer at the end of the first row; ED then leaves 文 without its spacer,
-        // and 中 is written over it, so the second row starts with a blank, not a wide char.
-        let stream = "abcde文\x1b[2;2H\x1b[0J中x".as_bytes();
-        let (original, replayed) = round_trip(stream, 6);
-        assert_eq!(original[1][1..], replayed[1][1..]);
-        assert_eq!(original[2..], replayed[2..]);
-    }
-
-    #[test]
-    fn a_coloured_erase_over_a_wide_char_s_spacer_keeps_the_char() {
-        // ECH in red erases the spacer only: alacritty keeps 中 wide, its second cell red.
-        let (original, replayed) = round_trip("中\x1b[2G\x1b[41m\x1b[X".as_bytes(), 6);
-        assert_eq!(original[0][0].c, '中');
-        assert_eq!(replayed[0][0].c, '中');
-        assert_eq!(original[1..], replayed[1..]);
-    }
-
-    #[test]
-    fn a_wide_char_written_over_its_spacer_keeps_every_cell_after_it_in_place() {
-        // ED leaves 中 without its spacer, and 文 is then written where the spacer was.
-        let stream = "中\x1b[2G\x1b[0J文def".as_bytes();
-        let (original, replayed) = round_trip(stream, 11);
-        assert_eq!(original[0][1..], replayed[0][1..]);
-        assert_eq!(original[1..], replayed[1..]);
     }
 
     #[test]

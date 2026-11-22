@@ -9,6 +9,14 @@
 //! It tells [`Tracker`] of the calls that change a mode alacritty keeps to itself or ignores,
 //! before passing them on, so the tracker sees them with alacritty's cursor as it was.
 //!
+//! It keeps a wide char whole or gone, as xterm, VTE and xterm.js do. alacritty's erases, inserts
+//! and deletes change only the cells in their range, so one that takes in half a wide char leaves
+//! the other half: a char with no spacer, or a spacer with no char. After each of them the cursor's
+//! row is mended, the half left over blanked in the cursor's background as the erase's own cells
+//! are. Insert mode needs a step before as well: alacritty's shift brings the cells it pushes off
+//! the row round to the cursor's cell, and writing over a spacer there clears the char before the
+//! cursor, so those cells are blanked first.
+//!
 //! It answers colour queries itself, as alacritty leaves them to a window that knows its colours:
 //! the program's own colour, if it set one, else what the engine was given.
 //!
@@ -82,6 +90,51 @@ impl Capped<'_> {
         cell.c.len_utf8() + marks + mark.len_utf8() > MOST_CELL_BYTES
     }
 
+    /// Blanks each half of a wide char on the cursor's row whose other half is gone, keeping the
+    /// row's wrap.
+    fn mend_wide_chars(&mut self) {
+        let grid = self.0.grid_mut();
+        let bg = grid.cursor.template.bg;
+        let line = grid.cursor.point.line;
+        let row = &mut grid[line];
+        let columns = row.len();
+        for column in 0..columns {
+            let flags = row[Column(column)].flags;
+            let whole = if flags.contains(Flags::WIDE_CHAR) {
+                column + 1 < columns
+                    && row[Column(column + 1)]
+                        .flags
+                        .contains(Flags::WIDE_CHAR_SPACER)
+            } else if flags.contains(Flags::WIDE_CHAR_SPACER) {
+                column > 0 && row[Column(column - 1)].flags.contains(Flags::WIDE_CHAR)
+            } else {
+                true
+            };
+            if !whole {
+                let cell = &mut row[Column(column)];
+                *cell = bg.into();
+                cell.flags.insert(flags & Flags::WRAPLINE);
+            }
+        }
+    }
+
+    /// Blanks the cells at the end of the cursor's row that inserting a char `width` wide pushes
+    /// off it, when alacritty will shift the row: it brings them round to the cursor's cell, and
+    /// writing over a spacer there would clear the char before the cursor.
+    fn blank_what_an_insert_pushes_off(&mut self, width: usize) {
+        let grid = self.0.grid_mut();
+        let columns = grid.columns();
+        let cursor = &grid.cursor;
+        if cursor.input_needs_wrap || cursor.point.column.0 + width >= columns {
+            return;
+        }
+        let bg = cursor.template.bg;
+        let line = cursor.point.line;
+        for cell in &mut grid[line][Column(columns - width)..] {
+            *cell = bg.into();
+        }
+    }
+
     fn alternate(&self) -> bool {
         self.0.mode().contains(TermMode::ALT_SCREEN)
     }
@@ -123,10 +176,18 @@ impl Handler for Capped<'_> {
     }
 
     fn input(&mut self, a: char) {
-        if a.width() == Some(0) && self.marks_full(a) {
+        let width = a.width();
+        if width == Some(0) && self.marks_full(a) {
             return;
         }
+        let inserted = width.filter(|&width| width > 0 && self.0.mode().contains(TermMode::INSERT));
+        if let Some(width) = inserted {
+            self.blank_what_an_insert_pushes_off(width);
+        }
         <Term<Sink> as Handler>::input(self.0, a);
+        if inserted.is_some() {
+            self.mend_wide_chars();
+        }
     }
 
     fn goto(&mut self, a0: i32, a1: usize) {
@@ -143,6 +204,7 @@ impl Handler for Capped<'_> {
 
     fn insert_blank(&mut self, a: usize) {
         <Term<Sink> as Handler>::insert_blank(self.0, a);
+        self.mend_wide_chars();
     }
 
     fn move_up(&mut self, a: usize) {
@@ -228,10 +290,12 @@ impl Handler for Capped<'_> {
 
     fn erase_chars(&mut self, a: usize) {
         <Term<Sink> as Handler>::erase_chars(self.0, a);
+        self.mend_wide_chars();
     }
 
     fn delete_chars(&mut self, a: usize) {
         <Term<Sink> as Handler>::delete_chars(self.0, a);
+        self.mend_wide_chars();
     }
 
     fn move_backward_tabs(&mut self, a: u16) {
@@ -252,10 +316,12 @@ impl Handler for Capped<'_> {
 
     fn clear_line(&mut self, a: LineClearMode) {
         <Term<Sink> as Handler>::clear_line(self.0, a);
+        self.mend_wide_chars();
     }
 
     fn clear_screen(&mut self, a: ClearMode) {
         <Term<Sink> as Handler>::clear_screen(self.0, a);
+        self.mend_wide_chars();
     }
 
     fn clear_tabs(&mut self, a: TabulationClearMode) {
@@ -405,5 +471,109 @@ impl Handler for Capped<'_> {
 
     fn set_scp(&mut self, a0: ScpCharPath, a1: ScpUpdateMode) {
         <Term<Sink> as Handler>::set_scp(self.0, a0, a1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alacritty_terminal::index::Line;
+    use alacritty_terminal::term::cell::Cell;
+    use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, StdSyncHandler};
+
+    use super::*;
+    use crate::{Size, config};
+
+    /// `stream` fed through [`Capped`] to a terminal `rows` high and 6 wide.
+    fn fed(rows: u16, stream: &str) -> Term<Sink> {
+        let sink = Sink::default();
+        let mut term = Term::new(config(10), &Size { cols: 6, rows }, sink.clone());
+        let mut tracker = Tracker::new(6, rows.into());
+        Processor::<StdSyncHandler>::new().advance(
+            &mut Capped(&mut term, &mut tracker, &sink),
+            stream.as_bytes(),
+        );
+        term
+    }
+
+    /// Row `line`'s cells: a blank as `.`, a wide char's spacer as `>`.
+    fn cells(term: &Term<Sink>, line: i32) -> String {
+        let row = &term.grid()[Line(line)];
+        (0..term.columns())
+            .map(|column| {
+                let cell: &Cell = &row[Column(column)];
+                match cell.c {
+                    _ if cell.flags.contains(Flags::WIDE_CHAR_SPACER) => '>',
+                    ' ' => '.',
+                    c => c,
+                }
+            })
+            .collect()
+    }
+
+    /// The row `stream` leaves in a terminal one row high: xterm.js's, in every case below.
+    fn row(stream: &str) -> String {
+        cells(&fed(1, stream), 0)
+    }
+
+    #[test]
+    fn an_erase_from_a_wide_char_s_second_half_clears_its_first() {
+        assert_eq!(row("ab中cd\x1b[4G\x1b[K"), "ab....");
+        assert_eq!(row("ab中cd\x1b[4G\x1b[J"), "ab....");
+        assert_eq!(row("ab中cd\x1b[4G\x1b[X"), "ab..cd");
+    }
+
+    #[test]
+    fn an_erase_to_a_wide_char_s_first_half_clears_its_second() {
+        assert_eq!(row("ab中cd\x1b[3G\x1b[1K"), "....cd");
+        assert_eq!(row("ab中cd\x1b[3G\x1b[1J"), "....cd");
+        assert_eq!(row("ab中cd\x1b[3G\x1b[X"), "ab..cd");
+    }
+
+    #[test]
+    fn an_erase_beside_a_wide_char_leaves_it_whole() {
+        assert_eq!(row("ab中cd\x1b[5G\x1b[K"), "ab中>..");
+        assert_eq!(row("ab中cd\x1b[2G\x1b[1K"), "..中>cd");
+        assert_eq!(row("ab中cd\x1b[1G\x1b[2X"), "..中>cd");
+    }
+
+    #[test]
+    fn a_delete_of_half_a_wide_char_clears_the_other_half() {
+        assert_eq!(row("ab中cd\x1b[4G\x1b[P"), "ab.cd.");
+        assert_eq!(row("ab中cd\x1b[3G\x1b[P"), "ab.cd.");
+    }
+
+    #[test]
+    fn an_insert_inside_a_wide_char_clears_both_halves() {
+        assert_eq!(row("ab中cd\x1b[4G\x1b[@"), "ab...c");
+        assert_eq!(row("ab中cd\x1b[4G\x1b[4hX"), "ab.X.c");
+        assert_eq!(row("ab中cd\x1b[4G\x1b[4h文"), "ab.文>.");
+    }
+
+    #[test]
+    fn an_insert_that_pushes_a_wide_char_s_second_half_off_the_row_clears_the_first() {
+        assert_eq!(row("abcd中\x1b[1G\x1b[@"), ".abcd.");
+        assert_eq!(row("abcd中\x1b[1G\x1b[4hX"), "Xabcd.");
+    }
+
+    #[test]
+    fn text_inserted_before_a_row_ending_in_a_wide_char_keeps_the_char_before_it() {
+        // alacritty's shift brings the spacer pushed off the end round to the cursor's cell, and
+        // writing over a spacer clears the char before it.
+        assert_eq!(row("abcd中\x1b[3G\x1b[4hX"), "abXcd.");
+    }
+
+    #[test]
+    fn text_inserted_with_a_wrap_pending_shifts_the_next_row_and_clears_what_it_pushes_off() {
+        let term = fed(2, "\x1b[2;1Hwxyz中\x1b[1;1Habcdef\x1b[4hX");
+        assert_eq!(cells(&term, 0), "abcdef");
+        assert_eq!(cells(&term, 1), "Xwxyz.");
+    }
+
+    #[test]
+    fn a_half_left_by_an_erase_is_cleared_in_the_erase_s_background() {
+        let term = fed(1, "ab中cd\x1b[41m\x1b[4G\x1b[K");
+        let row = &term.grid()[Line(0)];
+        assert_eq!(row[Column(2)].bg, Color::Named(NamedColor::Red));
+        assert_eq!(row[Column(2)].c, ' ');
     }
 }

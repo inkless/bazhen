@@ -321,6 +321,7 @@ impl Engine {
         // Brought into reach and put back, which sets the primary's saved cursor to its cursor.
         drop(PrimaryShown::new(&mut self.term));
         mark_widened_rows(&mut self.term);
+        clear_wide_chars_cut_off(&mut self.term);
         self.tracker.resize(
             (self.size.cols(), self.size.rows()),
             (size.cols(), size.rows()),
@@ -603,6 +604,26 @@ fn mark_widened_rows(term: &mut Term<Sink>) {
         let row = &mut grid[scrollback_line(scrolled, n)];
         if let Some(last) = row.len().checked_sub(1) {
             let _: &mut Cell = &mut row[Column(last)];
+        }
+    }
+}
+
+/// alacritty narrows the alternate screen by cutting its rows, without reflowing them as it does
+/// the primary's, and a wide char in the cell a row is cut after loses its spacer. It is cleared
+/// to the blank it has room to draw, as xterm, VTE and xterm.js clear a wide char an erase leaves
+/// half of, so no wide char is ever held without its spacer (see [`Capped`]).
+fn clear_wide_chars_cut_off(term: &mut Term<Sink>) {
+    if !term.mode().contains(TermMode::ALT_SCREEN) {
+        return;
+    }
+    let grid = term.grid_mut();
+    for n in 0..grid.screen_lines() {
+        let row = &mut grid[scrollback_line(0, n)];
+        if let Some(last) = row
+            .last_mut()
+            .filter(|cell| cell.flags.contains(Flags::WIDE_CHAR))
+        {
+            last.clear_wide();
         }
     }
 }
