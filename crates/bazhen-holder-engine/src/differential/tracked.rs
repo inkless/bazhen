@@ -3,6 +3,8 @@
 //! line feed scrolls, what a `q` prints. Kitty's flags, which alacritty ignores with them off,
 //! are held against an alacritty that has them on.
 
+use std::ops::Range;
+
 use alacritty_terminal::index::Column;
 use alacritty_terminal::vte::ansi::{CursorStyle as Style, KeyboardModes, StdSyncHandler};
 
@@ -42,6 +44,11 @@ impl Case {
             )
             .then(|| self.line_endings())
             .flatten();
+            let erased = ended_by_erase(action, &self.full).map(|ended| {
+                let mut endings = every_line_ending(&self.full.term);
+                endings[ended].fill(false);
+                endings
+            });
             match (action.bytes(), action) {
                 (Some(bytes), _) => self.feed(bytes.as_bytes(), cuts),
                 (None, &Action::Resize(cols, rows)) => {
@@ -59,6 +66,13 @@ impl Case {
             if let Some((before, after)) = endings.zip(self.line_endings()) {
                 assert_line_endings_kept(action, &before, &after);
             }
+            if let Some(erased) = erased {
+                assert_eq!(
+                    every_line_ending(&self.full.term),
+                    erased,
+                    "{action:?} left line endings, from the oldest, other than the erase's"
+                );
+            }
         }
     }
 
@@ -66,21 +80,11 @@ impl Case {
     /// keep their place as output scrolls: with the primary screen up and the region the whole
     /// screen, a scroll moves the top row into history, which the reference never drops.
     fn line_endings(&self) -> Option<Vec<bool>> {
-        let grid = self.full.term.grid();
-        let whole = 0..u16::try_from(grid.screen_lines()).unwrap();
+        let whole = 0..u16::try_from(self.full.term.screen_lines()).unwrap();
         if self.full.alternate() || self.engine.modes().screen.region != whole {
             return None;
         }
-        let scrolled = grid.history_size();
-        let endings = (0..scrolled + grid.screen_lines())
-            .map(|n| {
-                grid[scrollback_line(scrolled, n)]
-                    .into_iter()
-                    .last()
-                    .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE))
-            })
-            .collect();
-        Some(endings)
+        Some(every_line_ending(&self.full.term))
     }
 
     fn feed(&mut self, stream: &[u8], cuts: &[usize]) {
@@ -138,6 +142,49 @@ fn assert_line_endings_kept(action: &Action, before: &[bool], after: &[bool]) {
             "{action:?} changed the line ending of row {row} from the oldest: wrapped {was}, now {is}"
         );
     }
+}
+
+/// Whether each row of the screen `term` shows, and of its history, wraps into the next, from
+/// the oldest.
+fn every_line_ending(term: &Term<Sink>) -> Vec<bool> {
+    let grid = term.grid();
+    let scrolled = grid.history_size();
+    (0..scrolled + grid.screen_lines())
+        .map(|n| {
+            grid[scrollback_line(scrolled, n)]
+                .into_iter()
+                .last()
+                .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE))
+        })
+        .collect()
+}
+
+/// The rows, from the oldest, whose line endings `action` ends when it is an erase from the
+/// reference's cursor, as xterm.js ends them; every other row keeps its own. An erase keeps the
+/// cursor's row's, unless it is ED 0, which also clears the rows below it. One that takes in the
+/// whole row, or one from its start, ends the row before. ED 1 from the last column ends the
+/// cursor's row only with no scrollback: with any, xterm.js's clear lands on another line, which
+/// the engine leaves alone. ED 2 and ED 3 move rows, so they have none. No erase scrolls, so a
+/// row keeps its place from the oldest whatever the screen, region or origin.
+fn ended_by_erase(action: &Action, full: &FullHistory) -> Option<Range<usize>> {
+    let grid = full.term.grid();
+    let cursor = &grid.cursor;
+    let scrolled = grid.history_size();
+    let row = scrolled + usize::try_from(cursor.point.line.0).ok()?;
+    let rows = scrolled + grid.screen_lines();
+    let from_the_start = cursor.point.column.0 == 0 && !cursor.input_needs_wrap;
+    let in_the_last_column = cursor.point.column.0 + 1 == grid.columns();
+    let ended = match action {
+        Action::EraseLine | Action::EraseLineIn(0) if from_the_start => row.saturating_sub(1)..row,
+        Action::EraseLine | Action::EraseLineIn(0 | 1) | Action::EraseChars(_) => row..row,
+        Action::EraseLineIn(_) => row.saturating_sub(1)..row,
+        Action::EraseDisplay(0) if from_the_start => row.saturating_sub(1)..rows,
+        Action::EraseDisplay(0) => row..rows,
+        Action::EraseDisplay(1) if scrolled == 0 && in_the_last_column => 0..row + 1,
+        Action::EraseDisplay(1) => scrolled.saturating_sub(1)..row,
+        _ => return None,
+    };
+    Some(ended)
 }
 
 fn column(full: &FullHistory) -> usize {
