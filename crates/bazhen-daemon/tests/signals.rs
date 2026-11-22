@@ -162,8 +162,9 @@ fn ignoring_sigchld(program: &str) -> Command {
 /// What `ps` shows of `pid`: the file name it runs, and whether it ignores SIGCHLD. macOS's `ps`
 /// names the path it was run by, where Linux's names the file alone.
 fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
+    // One `-o` each: BSD's ps reads all after a column's `=` as its header, commas and all.
     let out = Command::new("ps")
-        .args(["-o", "comm=,sigignore=", "-p", &pid.to_string()])
+        .args(["-o", "comm=", "-o", "sigignore=", "-p", &pid.to_string()])
         .output()?;
     let said = String::from_utf8(out.stdout)?;
     let (comm, mask) = said.trim().rsplit_once(' ').ok_or("ps showed no process")?;
