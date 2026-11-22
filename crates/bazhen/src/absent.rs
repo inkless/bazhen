@@ -128,26 +128,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     use super::*;
-    use crate::testing::Dir;
-
-    impl Dir {
-        fn socket(&self) -> PathBuf {
-            self.0.join("bazhen.sock")
-        }
-    }
-
-    /// Holds the lock beside `socket` as a daemon does: exclusively, on a file of its own.
-    fn hold(socket: &Path) -> File {
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_of(socket))
-            .unwrap();
-        flock(&file, FlockOperation::NonBlockingLockExclusive).unwrap();
-        file
-    }
+    use crate::testing::{Dir, hold};
 
     #[test]
     fn takes_a_connect_that_never_finished_for_a_daemon_that_may_be_there() {
