@@ -436,8 +436,9 @@ fn bind_socket(path: &Path) -> Result<(UnixListener, Made), Refused> {
     Ok((listener, (file.dev(), file.ino())))
 }
 
-/// Removes the socket file once the daemon no longer listens on it, as Node's close does, so it
-/// doesn't outlive the daemon; but only the one it made, not one a daemon started since has.
+/// Removes the socket file while the daemon still listens on it, as Node's close does, so it
+/// doesn't outlive the daemon; but only the one it made, not one a daemon started since has. The
+/// open listener holds the file's inode, so no other file at `path` can have the one it made.
 fn forget_socket(path: &Path, made: Made) {
     let ours = std::fs::symlink_metadata(path).is_ok_and(|file| (file.dev(), file.ino()) == made);
     if ours && let Err(err) = std::fs::remove_file(path) {
@@ -979,17 +980,15 @@ mod tests {
         let dir = TempDir::new("socket");
         let path = dir.path().join("bazhen.sock");
         std::fs::write(&path, "left from before").unwrap();
-        let ours = runtime().block_on(async {
-            let (_listener, made) = bind_socket(&path).unwrap();
-            made
+        let (mode, removed, ours, theirs) = runtime().block_on(async {
+            let (_listener, ours) = bind_socket(&path).unwrap();
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            forget_socket(&path, ours);
+            let removed = !path.exists();
+            let (_replacement, theirs) = bind_socket(&path).unwrap();
+            forget_socket(&path, ours);
+            (mode, removed, ours, theirs)
         });
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        // Kept linked, so the next socket can't be given its inode.
-        std::fs::hard_link(&path, dir.path().join("kept")).unwrap();
-        forget_socket(&path, ours);
-        let removed = !path.exists();
-        let theirs = runtime().block_on(async { bind_socket(&path).unwrap().1 });
-        forget_socket(&path, ours);
         assert_eq!(mode, 0o600);
         assert!(removed);
         assert_ne!(theirs, ours);

@@ -29,9 +29,8 @@ import {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Closes `daemon` but leaves its socket file, which refuses connections, as a daemon that stops
- * listening before it removes its socket does. `close` removes the file, so a second link to it is
- * put back in its place.
+ * Closes `daemon` but leaves its socket file, which then refuses connections. `close` removes the
+ * file, so a second link to it is put back in its place.
  */
 async function closeLeavingSocket(daemon: FakeDaemon, socket: string): Promise<void> {
   const kept = `${socket}.kept`;

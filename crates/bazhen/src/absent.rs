@@ -26,8 +26,7 @@ pub(crate) enum Presence {
     /// its drain, or one that hasn't bound yet.
     Unbound { lock: PathBuf },
     /// The socket is there, or the lock is held behind it, yet nothing answers: the daemon may be
-    /// stuck or busy, or stopping, having stopped listening before it removed its socket. `why`
-    /// says what was seen.
+    /// stuck or busy. `why` says what was seen.
     Unanswering(String),
 }
 
