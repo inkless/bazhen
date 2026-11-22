@@ -234,10 +234,25 @@ jobs:
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
       - run: moon run :test-e2e
 
-  falsify:
+  # The branch's falsify, and the base's for a branch that changes falsify (scripts/falsify-base.ts),
+  # each on a runner of its own: one triggered base run does the head's work over again, and the two
+  # in series outgrew one job's budget. The base half always runs and decides in its script whether
+  # it is needed, so the gate never sees a half that was skipped.
+  falsify-half:
+    name: falsify (${{ matrix.half }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The slowest head run seen took 27 minutes, setup included; the base half does the same work
+    # after installing the base, in at most two tries of 2 minutes each, so about 31 at worst.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - half: head
+            task: test-falsify
+          - half: base
+            task: test-falsify-base
     steps:
       - uses: actions/checkout@v7
         with:
@@ -261,12 +276,24 @@ jobs:
           tool: cargo-nextest@0.9.152,cargo-mutants@27.1.0
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
-      - name: moon run :test-falsify
+      - name: moon run :${{ matrix.task }}
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: moon run :test-falsify -- --base "origin/$BASE_REF"
-      # A branch that changes falsify is judged by the base's falsify too (scripts/falsify-base.ts).
-      - name: moon run :test-falsify-base
+          TASK: ${{ matrix.task }}
+        run: moon run ":$TASK" -- --base "origin/$BASE_REF"
+
+  # The check branch protection requires. It runs whatever became of the halves, because a skipped
+  # required check counts as passed, and passes only when both succeeded: a failed, timed-out or
+  # cancelled half fails it.
+  falsify:
+    needs: falsify-half
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Both halves passed
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: moon run :test-falsify-base -- --base "origin/$BASE_REF"
+          RESULT: ${{ needs.falsify-half.result }}
+        run: |
+          echo "falsify (head) and falsify (base): $RESULT"
+          test "$RESULT" = success
