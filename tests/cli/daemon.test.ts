@@ -791,23 +791,21 @@ describe("bazhen stop", () => {
     "says it stopped only once the daemon lets go of the start-up lock, though its socket still refuses",
     async () => {
       const release = await holdLock(s.socket);
+      const closed = Promise.withResolvers<void>();
       s.daemon
         .answer("GET /v1/health", HealthResponse, health())
         .answerWith("POST /v1/daemon/stop", StopResponse, () => {
           const { daemon, socket } = s;
-          setTimeout(() => {
-            left = closeLeavingSocket(daemon, socket);
-          }, 100);
+          closed.resolve(sleep(100).then(() => closeLeavingSocket(daemon, socket)));
           return {};
         });
-      let left = Promise.resolve();
       let finished = Infinity;
       const ran = s.bazhen(["stop"]).then((r) => {
         finished = Date.now();
         return r;
       });
-      await sleep(1000);
-      await left;
+      await closed.promise;
+      await sleep(500);
       const released = Date.now();
       await release();
       expect(await ran).toEqual({
@@ -823,15 +821,16 @@ describe("bazhen stop", () => {
     "says it stopped when another daemon answers on the socket before the stopped one lets go of the lock",
     async () => {
       const release = await holdLock(s.socket);
+      const closed = Promise.withResolvers<void>();
       s.daemon
         .answer("GET /v1/health", HealthResponse, health())
         .answerWith("POST /v1/daemon/stop", StopResponse, () => {
           const { daemon } = s;
-          setTimeout(() => void daemon.close(), 100);
+          closed.resolve(sleep(100).then(() => daemon.close()));
           return {};
         });
       const ran = s.bazhen(["stop"]);
-      await sleep(500);
+      await closed.promise;
       const next = await FakeDaemon.listen(s.socket);
       try {
         next.answer("GET /v1/health", HealthResponse, health());
