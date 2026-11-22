@@ -1,3 +1,4 @@
+import { linkSync, renameSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DevicesResponse,
@@ -26,6 +27,18 @@ import {
 } from "./fixtures.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Closes `daemon` but leaves its socket file, which refuses connections, as a daemon that stops
+ * listening before it removes its socket does. Node removes the file on close, so a second link to
+ * it is put back in its place.
+ */
+async function closeLeavingSocket(daemon: FakeDaemon, socket: string): Promise<void> {
+  const kept = `${socket}.kept`;
+  linkSync(socket, kept);
+  await daemon.close();
+  renameSync(kept, socket);
+}
 
 let s: Scene;
 beforeEach(async () => {
@@ -755,6 +768,34 @@ describe("bazhen stop", () => {
         .answerWith("POST /v1/daemon/stop", StopResponse, () => {
           const { daemon } = s;
           setTimeout(() => void daemon.close(), 100);
+          return {};
+        });
+      let finished = Infinity;
+      const ran = s.bazhen(["stop"]).then((r) => {
+        finished = Date.now();
+        return r;
+      });
+      await sleep(1000);
+      const released = Date.now();
+      await release();
+      expect(await ran).toEqual({
+        code: 0,
+        stdout: "bazhen stopped; agents keep running\n",
+        stderr: "",
+      });
+      expect(finished).toBeGreaterThanOrEqual(released);
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "says it stopped only once the daemon lets go of the start-up lock, though its socket still refuses",
+    async () => {
+      const release = await holdLock(s.socket);
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+          const { daemon, socket } = s;
+          setTimeout(() => void closeLeavingSocket(daemon, socket), 100);
           return {};
         });
       let finished = Infinity;

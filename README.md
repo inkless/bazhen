@@ -278,8 +278,9 @@ with no socket is stopping or still starting, and one that holds the socket but 
 be stuck or busy. `bazhen stop` exits 0 when the daemon stopped, which is when it lets go of its lock (a
 daemon stops answering as its drain begins), or wasn't running. A daemon with no socket that
 holds the lock is waited on, up to 6 s, for the lock to free, or for the socket to answer so it
-can be told to stop. It exits 1 when that wait runs out, when a stuck daemon doesn't answer, or
-when the daemon is still answering 5 s after it was told to stop.
+can be told to stop. Once a daemon has taken the stop, `stop` waits up to 6 s for its lock to free,
+whatever its socket shows while it drains. It exits 1 when either wait runs out, when a stuck daemon
+doesn't answer, or when the daemon is still answering 5 s after it was told to stop.
 
 ## Tasks
 

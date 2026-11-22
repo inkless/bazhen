@@ -22,12 +22,12 @@ const PROBE: Duration = Duration::from_millis(500);
 pub(crate) enum Presence {
     /// Nothing is at the socket and no daemon holds the lock: not running.
     Absent,
-    /// A daemon holds the lock but has no socket. Since the daemon removes its socket as its
-    /// drain begins and keeps the lock to the end, that is a daemon stopping, though one that
-    /// hasn't bound yet looks the same.
+    /// A daemon holds the lock but has no socket: one stopping, which keeps the lock to the end of
+    /// its drain, or one that hasn't bound yet.
     Unbound { lock: PathBuf },
     /// The socket is there, or the lock is held behind it, yet nothing answers: the daemon may be
-    /// stuck or busy. `why` says what was seen.
+    /// stuck or busy, or stopping, having stopped listening before it removed its socket. `why`
+    /// says what was seen.
     Unanswering(String),
 }
 

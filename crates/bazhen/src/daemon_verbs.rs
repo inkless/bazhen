@@ -149,8 +149,8 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     while begun.elapsed() < STOPPED_WITHIN {
         if !daemon.answers()? {
             // A daemon stops answering as its drain begins, and is stopped when it lets go of the lock.
-            if let Err(lock) = wait_for_lock(Path::new(&socket)) {
-                out.err(&unbound_text(&lock));
+            if let Err(message) = wait_for_lock(Path::new(&socket), LOCK_WAIT) {
+                out.err(&message);
                 return Ok(Exit::Failed);
             }
             out.line("bazhen stopped; agents keep running");
@@ -162,19 +162,21 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     Ok(Exit::Failed)
 }
 
-/// Waits while a daemon holds the lock with no socket, for at most `LOCK_WAIT`. The lock is the
-/// one still held when that runs out.
-fn wait_for_lock(socket: &Path) -> Result<(), PathBuf> {
+/// Waits, for at most `limit`, for a daemon that took a stop to let go of its lock. Until it does it
+/// is still stopping, whatever its socket shows: while it drains, the socket may be gone, may refuse
+/// connections, or may not take one in time. The error is what the last look saw.
+fn wait_for_lock(socket: &Path, limit: Duration) -> Result<(), String> {
     let begun = Instant::now();
     loop {
-        match presence(socket) {
-            Presence::Unbound { lock } if begun.elapsed() >= LOCK_WAIT => return Err(lock),
-            Presence::Unbound { .. } => sleep(Duration::from_millis(100)),
-            // A held lock behind a socket that is there, and refuses, is not a drain: both daemons
-            // remove their socket as their drain begins, so only a socketless daemon counts as
-            // stopping, and this wait ends for anything else.
-            Presence::Absent | Presence::Unanswering(_) => return Ok(()),
+        let still = match presence(socket) {
+            Presence::Absent => return Ok(()),
+            Presence::Unbound { lock } => unbound_text(&lock),
+            Presence::Unanswering(why) => unanswering_text(socket, &why),
+        };
+        if begun.elapsed() >= limit {
+            return Err(still);
         }
+        sleep(Duration::from_millis(100));
     }
 }
 
@@ -393,7 +395,56 @@ pub(crate) fn devices(
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    use bazhen_client::paths::lock_of;
+
     use super::*;
+    use crate::testing::{Dir, hold};
+
+    /// A socket file nothing listens on, as a daemon that has stopped listening leaves until it
+    /// removes it.
+    fn refusing(dir: &Dir) -> PathBuf {
+        let socket = dir.socket();
+        drop(UnixListener::bind(&socket).unwrap());
+        socket
+    }
+
+    #[test]
+    fn waits_for_the_lock_to_free_though_the_socket_still_refuses() {
+        let dir = Dir::new("wait-refusing");
+        let socket = refusing(&dir);
+        let daemon = hold(&socket);
+        let freed = thread::spawn(move || {
+            sleep(Duration::from_millis(300));
+            let at = Instant::now();
+            drop(daemon);
+            at
+        });
+        let waited = wait_for_lock(&socket, LOCK_WAIT);
+        let ended = Instant::now();
+        assert_eq!(waited, Ok(()));
+        assert!(
+            ended >= freed.join().unwrap(),
+            "the wait ended before the lock freed"
+        );
+    }
+
+    #[test]
+    fn fails_as_unanswering_when_the_lock_outlasts_the_wait_behind_a_refusing_socket() {
+        let dir = Dir::new("wait-refusing-out");
+        let socket = refusing(&dir);
+        let _daemon = hold(&socket);
+        let why = format!(
+            "a daemon holds {}, yet its socket refuses connections",
+            lock_of(&socket).display()
+        );
+        assert_eq!(
+            wait_for_lock(&socket, Duration::from_millis(300)),
+            Err(unanswering_text(&socket, &why))
+        );
+    }
 
     #[test]
     fn takes_the_test_daemon_only_by_an_absolute_path_and_none_unset_or_empty() {
