@@ -111,6 +111,7 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     let socket = daemon.socket();
     let begun = Instant::now();
     let mut waited = false;
+    let mut doubted = false;
     while !daemon.answers()? {
         match presence(Path::new(&socket)) {
             Presence::Absent => {
@@ -129,16 +130,29 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
                 waited = true;
                 sleep(Duration::from_millis(100));
             }
+            // A daemon that bound its socket between the health call and the look has not been
+            // given time to answer: only one that stays silent is stuck.
+            Presence::Unanswering(_) if !doubted => {
+                doubted = true;
+                sleep(Duration::from_millis(100));
+                continue;
+            }
             Presence::Unanswering(why) => {
                 out.err(&unanswering_text(Path::new(&socket), &why));
                 return Ok(Exit::Failed);
             }
         }
+        doubted = false;
     }
     let _: StopResponse = daemon.post_empty("/v1/daemon/stop", SLOW_CALL)?;
     let begun = Instant::now();
     while begun.elapsed() < STOPPED_WITHIN {
         if !daemon.answers()? {
+            // A daemon stops answering as its drain begins, and is stopped when it lets go of the lock.
+            if let Err(lock) = wait_for_lock(Path::new(&socket)) {
+                out.err(&unbound_text(&lock));
+                return Ok(Exit::Failed);
+            }
             out.line("bazhen stopped; agents keep running");
             return Ok(Exit::Done);
         }
@@ -146,6 +160,19 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     }
     out.err("bazhen is still answering after 5 s");
     Ok(Exit::Failed)
+}
+
+/// Waits while a daemon holds the lock with no socket, for at most `LOCK_WAIT`. The lock is the
+/// one still held when that runs out.
+fn wait_for_lock(socket: &Path) -> Result<(), PathBuf> {
+    let begun = Instant::now();
+    loop {
+        match presence(socket) {
+            Presence::Unbound { lock } if begun.elapsed() >= LOCK_WAIT => return Err(lock),
+            Presence::Unbound { .. } => sleep(Duration::from_millis(100)),
+            Presence::Absent | Presence::Unanswering(_) => return Ok(()),
+        }
+    }
 }
 
 pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {

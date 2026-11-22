@@ -422,6 +422,7 @@ export async function holdLock(socket: string): Promise<() => Promise<void>> {
   });
   return () =>
     new Promise<void>((resolve) => {
+      if (held.exitCode !== null) return resolve();
       held.once("close", () => resolve());
       held.stdin.end();
     });

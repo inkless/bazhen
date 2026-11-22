@@ -712,7 +712,7 @@ describe("bazhen stop", () => {
           starting
             .answer("GET /v1/health", HealthResponse, health())
             .answerWith("POST /v1/daemon/stop", StopResponse, () => {
-              setTimeout(() => void starting.close(), 100);
+              setTimeout(() => void starting.close().then(release), 100);
               return {};
             });
           expect(await ran).toEqual({
@@ -743,6 +743,30 @@ describe("bazhen stop", () => {
           await release();
         }
       }, 20_000);
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "says it stopped only once the daemon lets go of the start-up lock, though its socket is gone",
+    async () => {
+      const release = await holdLock(s.socket);
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+          const { daemon } = s;
+          setTimeout(() => void daemon.close(), 100);
+          return {};
+        });
+      const begun = Date.now();
+      const ran = s.bazhen(["stop"]);
+      await sleep(1000);
+      await release();
+      expect(await ran).toEqual({
+        code: 0,
+        stdout: "bazhen stopped; agents keep running\n",
+        stderr: "",
+      });
+      expect(Date.now() - begun).toBeGreaterThanOrEqual(1000);
     },
   );
 
