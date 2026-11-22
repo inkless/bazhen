@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use bazhen_holder_proto::body::{ExitStatus, Generation, HistoryLines, Signal};
 use bazhen_host_guard::scope::{Containment, TerminalCaps, in_terminal_scope, probe_containment};
@@ -319,7 +320,15 @@ fn reads_what_holds_a_terminals_foreground_with_its_directory() {
             own: true,
             cwd: cfg!(target_os = "linux").then(|| dir.path().to_path_buf()),
         };
-        assert_eq!(runtime.foreground(&made).await.unwrap(), want);
+        // The holder's `sh -c "exec sleep 600"` is the shell until it has exec'd, which may be a
+        // moment after the create answers.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut read = runtime.foreground(&made).await.unwrap();
+        while read.command != want.command && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            read = runtime.foreground(&made).await.unwrap();
+        }
+        assert_eq!(read, want);
         let all = runtime
             .foregrounds(&HashSet::from([id(1), id(2)]))
             .await
