@@ -128,25 +128,11 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     use super::*;
-
-    /// A directory of the test's own, removed when the guard drops.
-    struct Dir(PathBuf);
+    use crate::testing::Dir;
 
     impl Dir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("bz-absent-{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
         fn socket(&self) -> PathBuf {
             self.0.join("bazhen.sock")
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -172,7 +158,7 @@ mod tests {
 
     #[test]
     fn says_not_running_where_nothing_is_or_nothing_listens_and_no_lock_is_held() {
-        let dir = Dir::new("absent");
+        let dir = Dir::new("absent-nothing");
         let nothing = dir.0.join("nothing.sock");
         let stale = dir.0.join("stale.sock");
         drop(UnixListener::bind(&stale).unwrap());
@@ -247,6 +233,9 @@ mod tests {
 
     #[test]
     fn a_lock_that_cannot_be_read_may_be_a_daemon() {
+        if rustix::process::geteuid().is_root() {
+            return;
+        }
         let dir = Dir::new("unreadable");
         drop(hold(&dir.socket()));
         std::fs::set_permissions(
@@ -263,6 +252,9 @@ mod tests {
 
     #[test]
     fn takes_the_daemon_for_gone_only_where_nothing_is_or_nothing_listens() {
+        if rustix::process::geteuid().is_root() {
+            return;
+        }
         let dir = Dir::new("sealed");
         let sealed = dir.0.join("sealed");
         std::fs::create_dir(&sealed).unwrap();

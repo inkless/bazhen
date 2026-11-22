@@ -272,6 +272,14 @@ To reach another instance from inside one, empty it: `BAZHEN_SOCKET= bazhen stat
 `start` ignores `BAZHEN_SOCKET`: it starts the daemon of the home `--home` or `BAZHEN_HOME` names,
 else the default one.
 
+When no daemon answers, a command says what it saw and exits 3. "Not running" means nothing is at
+the socket and no daemon holds its start-up lock (`<socket>.lock`). A daemon that holds the lock
+with no socket is stopping or still starting, and one that holds the socket but doesn't answer may
+be stuck or busy. `bazhen stop` exits 0 when the daemon stopped or wasn't running. A daemon with
+no socket that holds the lock is waited on, up to 6 s, for the lock to free, or for the socket to
+answer so it can be told to stop. It exits 1 when that wait runs out, when a stuck daemon doesn't
+answer, or when the daemon is still answering 5 s after it was told to stop.
+
 ## Tasks
 
 A task is a title and a brief, given to agents as its coordinator, lead or worker. Giving an agent

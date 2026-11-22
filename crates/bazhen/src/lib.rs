@@ -23,6 +23,8 @@ mod screen;
 mod shells;
 mod target;
 mod tasks;
+#[cfg(test)]
+mod testing;
 mod waits;
 
 /// The holder's frames, for the fuzz targets to name what a direct attachment sends.

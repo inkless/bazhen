@@ -398,11 +398,11 @@ fn write_whole(stream: &mut UnixStream, frame: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::Dir;
     use bazhen_holder_proto::body::{ErrorBody, ErrorCode};
     use bazhen_holder_proto::request_decoder;
     use serde_json::json;
     use std::os::unix::net::UnixListener;
-    use std::path::PathBuf;
     use std::thread;
 
     fn sent(steps: &[Step]) -> Vec<&'static str> {
@@ -510,23 +510,6 @@ mod tests {
             d.reply(refused("snapshot", ErrorCode::Unavailable)).as_slice(),
             [Step::End(Ending::Failed(m))] if m.starts_with("the holder refused snapshot")
         ));
-    }
-
-    /// A holder socket path of the test's own, in a directory removed when the guard drops.
-    struct Dir(PathBuf);
-
-    impl Dir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("bz-direct-{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
     }
 
     /// A holder of `term_x` in `dir` that reads one hello, answers with `answer` made from the

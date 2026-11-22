@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ import {
   WaitMessagesResponse,
   WaitResponse,
 } from "@bazhen/protocol";
-import { FakeDaemon, type Scene, checkoutWith, scene } from "./cli.ts";
+import { FakeDaemon, type Scene, checkoutWith, holdLock, scene } from "./cli.ts";
 import {
   AGENT,
   ANOTHER_BUILD,
@@ -56,21 +56,6 @@ const execFileAsync = promisify(execFile);
 const stuck = (socket: string) =>
   `bazhen doesn't answer on ${socket} and may be stuck or busy (something listens on its socket)\n`;
 
-/** Holds the start-up lock beside `socket` as a daemon does, until the returned function lets go. */
-async function holdLock(socket: string): Promise<() => Promise<void>> {
-  const held = spawn("flock", ["--exclusive", `${socket}.lock`, "sh", "-c", "echo held; cat"], {
-    stdio: ["pipe", "pipe", "inherit"],
-  });
-  await new Promise<void>((resolve, reject) => {
-    held.once("error", reject);
-    held.stdout.once("data", () => resolve());
-  });
-  return () =>
-    new Promise<void>((resolve) => {
-      held.once("close", () => resolve());
-      held.stdin.end();
-    });
-}
 const PATH = process.env["PATH"] ?? "/usr/bin:/bin";
 
 describe("the command line", () => {
@@ -291,21 +276,12 @@ describe("a daemon that may be there though it doesn't answer", () => {
       const release = await holdLock(s.socket);
       try {
         const lock = `${s.socket}.lock`;
-        const [status, stop, doctored] = [
-          await s.bazhen(["status"]),
-          await s.bazhen(["stop"]),
-          await s.bazhen(["doctor"]),
-        ];
-        expect([status, stop, doctored]).toEqual([
+        const [status, doctored] = [await s.bazhen(["status"]), await s.bazhen(["doctor"])];
+        expect([status, doctored]).toEqual([
           {
             code: 3,
             stdout: "",
             stderr: `bazhen is stopping or still starting: a daemon holds ${lock} but has no socket; try again in a moment\n`,
-          },
-          {
-            code: 0,
-            stdout: "bazhen is already stopping, or has not begun to listen\n",
-            stderr: "",
           },
           {
             code: 1,

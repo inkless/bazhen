@@ -17,7 +17,7 @@ use bazhen_protocol::notices::{
 };
 use bazhen_protocol::record::Record;
 
-use crate::absent::{Presence, presence, unanswering_text};
+use crate::absent::{Presence, presence, unanswering_text, unbound_text};
 use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, local, printable, uuid};
@@ -26,6 +26,9 @@ use crate::{Exit, doctor};
 
 /// How long a stopped daemon may take to stop answering.
 const STOPPED_WITHIN: Duration = Duration::from_secs(5);
+/// How long `stop` waits on a daemon that holds the start-up lock with no socket: the longest a
+/// stopping daemon drains (`STOPPED_WITHIN`) and a second more.
+const LOCK_WAIT: Duration = Duration::from_secs(6);
 /// How long the daemon may take to take a stop, or a new environment, before it is wedged.
 const SLOW_CALL: Duration = Duration::from_secs(30);
 
@@ -103,24 +106,36 @@ fn checkout() -> Option<PathBuf> {
     exe.ancestors().nth(3).map(Path::to_path_buf)
 }
 
-/// Idempotent: a daemon that isn't running is already stopped.
+/// Idempotent: a daemon that isn't running is already stopped. One that holds the start-up lock
+/// with no socket is stopping or still starting, so `stop` waits, for as long as a stopping daemon
+/// drains and a little more, until the lock frees, or the socket answers and it can be told to stop.
 pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    if !daemon.answers()? {
-        let socket = daemon.socket();
-        return Ok(match presence(Path::new(&socket)) {
+    let socket = daemon.socket();
+    let begun = Instant::now();
+    let mut waited = false;
+    while !daemon.answers()? {
+        match presence(Path::new(&socket)) {
             Presence::Absent => {
-                out.line("bazhen is not running");
-                Exit::Done
+                out.line(if waited {
+                    "bazhen stopped; agents keep running"
+                } else {
+                    "bazhen is not running"
+                });
+                return Ok(Exit::Done);
             }
-            Presence::Unbound { .. } => {
-                out.line("bazhen is already stopping, or has not begun to listen");
-                Exit::Done
+            Presence::Unbound { lock } => {
+                if begun.elapsed() >= LOCK_WAIT {
+                    out.err(&unbound_text(&lock));
+                    return Ok(Exit::Failed);
+                }
+                waited = true;
+                sleep(Duration::from_millis(100));
             }
             Presence::Unanswering(why) => {
                 out.err(&unanswering_text(Path::new(&socket), &why));
-                Exit::Failed
+                return Ok(Exit::Failed);
             }
-        });
+        }
     }
     let _: StopResponse = daemon.post_empty("/v1/daemon/stop", SLOW_CALL)?;
     let begun = Instant::now();
