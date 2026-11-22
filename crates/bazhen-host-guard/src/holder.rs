@@ -180,10 +180,10 @@ fn vouched(holder: HolderProcess, made_for: HolderUse, reading: &Reading) -> Opt
     is_holder(reading, holder).then(|| HolderProof::made_now(holder, made_for))
 }
 
-/// What the kernel shows at `holder.pid`, as `vouch` reads it; `None` for init or below, which
-/// is never read.
-fn reading_of(holder: HolderProcess) -> Option<Reading> {
-    (holder.pid.as_raw_pid() > 1).then(|| read_process(holder.pid))
+/// What `read` shows at `holder.pid`, as `vouch` reads it; `None` for init or below, which is
+/// never read.
+fn reading_of(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> Option<Reading> {
+    (holder.pid.as_raw_pid() > 1).then(|| read(holder.pid))
 }
 
 /// Whether the kernel shows `holder.pid` as the `bazhen-holder` that started within
@@ -191,7 +191,12 @@ fn reading_of(holder: HolderProcess) -> Option<Reading> {
 /// made now. It makes none, so a caller that only reads, as an inventory does, holds nothing a
 /// signal could be sent with.
 pub fn is_vouchable(holder: HolderProcess) -> bool {
-    reading_of(holder).is_some_and(|reading| is_holder(&reading, holder))
+    vouchable_by(holder, read_process)
+}
+
+/// `is_vouchable`, on what `read` shows, so its tests can show it a holder without starting one.
+fn vouchable_by(holder: HolderProcess, read: impl FnOnce(Pid) -> Reading) -> bool {
+    reading_of(holder, read).is_some_and(|reading| is_holder(&reading, holder))
 }
 
 /// A proof `kill_holder` or `rebind_holder` takes, as `made_for` says, if the kernel shows
@@ -203,7 +208,7 @@ pub fn vouch(holder: HolderProcess, made_for: HolderUse) -> Option<HolderProof> 
     if made_for == HolderUse::Rebind && unfit(holder) {
         return None;
     }
-    vouched(holder, made_for, &reading_of(holder)?)
+    vouched(holder, made_for, &reading_of(holder, read_process)?)
 }
 
 /// Sends SIGKILL to the holder `proof` was made for, and to it alone. Whether it was still
@@ -1423,7 +1428,37 @@ mod tests {
     }
 
     #[test]
-    fn takes_no_pid_without_a_holder_for_one_that_could_be_vouched_for() {
+    fn finds_a_holder_vouchable_only_where_the_kernel_shows_one_that_started_when_it_says() {
+        let read = std::cell::Cell::new(0);
+        let shown = |reading: Reading| {
+            let read = &read;
+            move |at: Pid| {
+                assert_eq!(at, pid());
+                read.set(read.get() + 1);
+                reading
+            }
+        };
+        let vouchable = [
+            holder_at(START + super::START_SKEW_S),
+            holder_at(START + super::START_SKEW_S + 1),
+            stranger(),
+            Reading::Absent,
+            unreadable(),
+        ]
+        .map(|reading| super::vouchable_by(holder(), shown(reading)));
+        assert_eq!(vouchable, [true, false, false, false, false]);
+        // Init is never read, whatever would be shown there.
+        let init = HolderProcess {
+            pid: Pid::from_raw(1).unwrap(),
+            start: START,
+        };
+        let before = read.get();
+        assert!(!super::vouchable_by(init, |_| holder_at(START)));
+        assert_eq!((before, read.get()), (5, 5));
+    }
+
+    #[test]
+    fn finds_no_holder_vouchable_at_a_free_pid_at_this_process_or_at_init() {
         let me = rustix::process::getpid();
         let my_start = bazhen_holder::start_time::of(me).unwrap().get();
         let at = |pid, start| super::is_vouchable(HolderProcess { pid, start });

@@ -1345,7 +1345,7 @@ const NOT_DECODERS: Record<string, string> = {
     "hashes the copy install_holder made of a build; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::unit_random":
     "turns /dev/urandom's bytes into hex for a scope's unit name; parses nothing",
-  "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::create":
+  "crates/bazhen-runtime-holder/src/runtime.rs::Starting::start":
     "starts a holder and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::listed":
     "lists the holders' directory and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",

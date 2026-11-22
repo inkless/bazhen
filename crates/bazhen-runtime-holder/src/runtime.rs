@@ -36,7 +36,7 @@ use crate::host::{Host, System};
 use crate::locator::{HolderLocator, HolderRef, os_pid};
 use crate::sockets::HolderRoot;
 use crate::tags::{TerminalTags, decode_tags, encode_tags, unlinked};
-use crate::watch::{RuntimeEvent, Watches};
+use crate::watch::{Running, RuntimeEvent, Watches};
 
 /// How long a holder has to answer `hello`, past which it counts as one that can't be read.
 pub const HELLO: Duration = Duration::from_secs(2);
@@ -231,8 +231,17 @@ pub enum RuntimeError {
         terminal_id: TerminalId,
         why: String,
     },
-    #[error(transparent)]
-    Containment(CapsRefused),
+    #[error(
+        "terminal {terminal_id}: no holder can be started, as the caps of its scope are refused"
+    )]
+    Containment {
+        terminal_id: TerminalId,
+        #[source]
+        source: CapsRefused,
+    },
+    /// The runtime is shutting down: no holder is started from now on.
+    #[error("terminal {terminal_id}: no holder is started while the runtime shuts down")]
+    ShuttingDown { terminal_id: TerminalId },
     #[error("the holders' directory can't be listed")]
     Unlistable(#[source] io::Error),
     #[error("the holders at {sockets:?} can't be read")]
@@ -258,7 +267,7 @@ struct Answered {
 
 /// Why no holder this build speaks to answered at a socket.
 #[derive(Debug)]
-enum Unreached {
+pub(crate) enum Unreached {
     /// No holder listens there: no file, or one a holder that died left behind.
     None { stale: bool, source: ConnectError },
     /// Something may listen there, but couldn't be read: refused access, or no answer in time.
@@ -397,6 +406,101 @@ fn log_containment(found: &Result<Containment, CapsRefused>) {
     }
 }
 
+/// Whether `hello` came from the holder this runtime started as `holder`.
+fn is_started(hello: &HelloReply, holder: HolderProcess) -> bool {
+    os_pid(hello.holder_pid) == Some(holder.pid)
+        && hello.holder_start.get().abs_diff(holder.start) <= START_SKEW_S
+}
+
+/// What a create needs from its start on, in a task of the runtime's own.
+struct Starting {
+    host: Arc<dyn Host>,
+    watches: Arc<Watches>,
+    hello: Duration,
+    request: Duration,
+}
+
+impl Starting {
+    /// Options for a connection to a holder just started, which shutdown doesn't end: once a
+    /// holder runs, it is answered and watched, or told to close, either bounded by its deadline.
+    fn client_options(&self) -> ClientOptions {
+        ClientOptions {
+            writer: false,
+            connect: self.hello,
+            ..ClientOptions::default()
+        }
+    }
+
+    async fn start(
+        self,
+        terminal_id: TerminalId,
+        socket: PathBuf,
+        options: StartHolderOptions,
+    ) -> Result<HolderRef, RuntimeError> {
+        // Asked here, in the tracker's task: a shutdown that cancelled after this had not yet
+        // closed the tracker as the task was spawned, so it waits for whatever this starts.
+        if self.watches.token.is_cancelled() {
+            return Err(RuntimeError::ShuttingDown { terminal_id });
+        }
+        let started = self
+            .host
+            .start(options)
+            .await
+            .map_err(|source| RuntimeError::Start {
+                terminal_id: terminal_id.clone(),
+                source,
+            })?;
+        if let Some(handle) = started.handle {
+            self.watches.reap(handle);
+        }
+        let (_, reached) = reach(socket.clone(), self.client_options(), false, self.request).await;
+        let why = match reached {
+            Reached::Holder(answered) if is_started(answered.client.hello(), started.holder) => {
+                let Answered { client, events, .. } = *answered;
+                let terminal = HolderRef {
+                    terminal_id,
+                    locator: HolderLocator::of(socket, client.hello()),
+                };
+                self.watches.adopt(terminal.clone(), client, events);
+                return Ok(terminal);
+            }
+            Reached::Holder(answered) => {
+                // Another holder answers: not ours to close.
+                let pid = answered.client.hello().holder_pid.get();
+                return Err(RuntimeError::Unstarted {
+                    terminal_id,
+                    why: format!("pid {pid} answers at its socket"),
+                });
+            }
+            Reached::Not(Unreached::Outdated { protocol }) => format!("it speaks {protocol:?}"),
+            Reached::Not(Unreached::None { source, .. } | Unreached::Unreadable { source }) => {
+                source.to_string()
+            }
+        };
+        self.close_unanswered(socket, started.holder);
+        Err(RuntimeError::Unstarted { terminal_id, why })
+    }
+
+    /// Best effort, in a task of its own: the holder started as `holder`, should it answer
+    /// later, is told to close, rather than left with no record. Spawned from the create's own
+    /// task, so the tracker holds one or the other throughout, and shutdown waits for it.
+    fn close_unanswered(&self, socket: PathBuf, holder: HolderProcess) {
+        let options = self.client_options();
+        let bound = self.request;
+        self.watches.tasks.spawn(async move {
+            if let Ok((client, events)) = connect(&socket, &options).await {
+                drop(events);
+                // Another holder answers there now: not ours to close.
+                if is_started(client.hello(), holder) {
+                    // It won't close: there is nothing more to do from here.
+                    let _ = tokio::time::timeout(bound, client.close()).await;
+                }
+                client.end();
+            }
+        });
+    }
+}
+
 /// Runs each terminal in a `bazhen-holder` of its own. Share it in an `Arc`; `shutdown` ends its
 /// watches and connections.
 #[derive(Debug)]
@@ -418,7 +522,11 @@ impl HolderRuntime {
 
     pub(crate) fn with_host(mut options: RuntimeOptions, host: Arc<dyn Host>) -> Self {
         let env = std::mem::take(&mut options.env);
-        let watches = Arc::new(Watches::new(options.hello));
+        let runs = Arc::clone(&host);
+        let watches = Arc::new(Watches::new(
+            options.hello,
+            Running::new(move |holder| runs.runs(holder)),
+        ));
         Self {
             options,
             env: Mutex::new(env),
@@ -435,9 +543,17 @@ impl HolderRuntime {
     }
 
     /// What the watch tells from now on: every terminal found or created is watched, until it
-    /// is closed or its holder lost.
+    /// is closed or its holder lost. Subscribe before the first `inventory`, `create` or `watch`:
+    /// what a watch tells as it opens, an exit its holder saw before and the title, is told once,
+    /// and a receiver made after has missed it.
     pub fn events(&self) -> broadcast::Receiver<RuntimeEvent> {
         self.watches.subscribe()
+    }
+
+    /// What the first start that needed it found of this machine's containment, as `doctor`
+    /// reports it; `None` before one has, or with no caps, when nothing is probed.
+    pub fn containment(&self) -> Option<&Result<Containment, CapsRefused>> {
+        self.containment.get()
     }
 
     /// Ends every watch and connection, and waits for them; holders run on.
@@ -626,16 +742,23 @@ impl HolderRuntime {
                 &unit_random(),
             ))),
             Ok(Containment::Uncontained { .. }) => Ok(None),
-            Err(refused) => Err(RuntimeError::Containment(refused.clone())),
+            Err(refused) => Err(RuntimeError::Containment {
+                terminal_id: terminal_id.clone(),
+                source: refused.clone(),
+            }),
         }
     }
 
     /// Starts a holder for a new terminal, contained where terminals can be, and watches it.
+    /// From the start on, it runs in a task of the runtime's own, so a caller that stops waiting,
+    /// as a request whose client hung up does, leaves no holder started and never answered or
+    /// told to close; shutdown waits for it.
     ///
     /// # Errors
     ///
-    /// With no binary, a spec no holder takes, a start that fails, or a holder that started but
-    /// doesn't answer, which is told to close should it answer later.
+    /// Once the runtime is shutting down, with no binary, a spec no holder takes, a start that
+    /// fails, or a holder that started but doesn't answer, which is told to close should it
+    /// answer later.
     pub async fn create(&self, spec: TerminalSpec) -> Result<HolderRef, RuntimeError> {
         let terminal_id = spec.terminal_id.clone();
         let Some(binary) = self.options.binary.clone() else {
@@ -670,66 +793,23 @@ impl HolderRuntime {
         let mut options =
             StartHolderOptions::new(binary, self.options.root.path().to_path_buf(), holder_spec);
         options.scope = self.scope(&terminal_id).await?;
-        let started = self
-            .host
-            .start(options)
-            .await
-            .map_err(|source| RuntimeError::Start {
-                terminal_id: terminal_id.clone(),
-                source,
-            })?;
-        if let Some(handle) = started.handle {
-            self.watches.reap(handle);
-        }
-        let (_, reached) = reach(
-            socket.clone(),
-            self.client_options(),
-            false,
-            self.options.request,
-        )
-        .await;
-        let why = match reached {
-            Reached::Holder(answered)
-                if os_pid(answered.client.hello().holder_pid) == Some(started.holder.pid) =>
-            {
-                let Answered { client, events, .. } = *answered;
-                let terminal = HolderRef {
-                    terminal_id,
-                    locator: HolderLocator::of(socket, client.hello()),
-                };
-                self.watches.adopt(terminal.clone(), client, events);
-                return Ok(terminal);
-            }
-            Reached::Holder(answered) => {
-                // Another holder answers: not ours to close.
-                let pid = answered.client.hello().holder_pid.get();
-                return Err(RuntimeError::Unstarted {
-                    terminal_id,
-                    why: format!("pid {pid} answers at its socket"),
-                });
-            }
-            Reached::Not(Unreached::Outdated { protocol }) => format!("it speaks {protocol:?}"),
-            Reached::Not(Unreached::None { source, .. } | Unreached::Unreadable { source }) => {
-                source.to_string()
-            }
+        let starting = Starting {
+            host: Arc::clone(&self.host),
+            watches: Arc::clone(&self.watches),
+            hello: self.options.hello,
+            request: self.options.request,
         };
-        self.close_unanswered(socket);
-        Err(RuntimeError::Unstarted { terminal_id, why })
-    }
-
-    /// Best effort, in a task of its own: a holder that answers later is told to close, rather
-    /// than left with no record.
-    fn close_unanswered(&self, socket: PathBuf) {
-        let options = self.client_options();
-        let bound = self.options.request;
-        self.watches.tasks.spawn(async move {
-            if let Ok((client, events)) = connect(&socket, &options).await {
-                drop(events);
-                // Nothing answers, or it won't close: there is nothing more to do from here.
-                let _ = tokio::time::timeout(bound, client.close()).await;
-                client.end();
-            }
-        });
+        let id = terminal_id.clone();
+        self.watches
+            .tasks
+            .spawn(starting.start(id, socket, options))
+            .await
+            .unwrap_or_else(|ended| {
+                Err(RuntimeError::Unstarted {
+                    terminal_id,
+                    why: format!("its start ended early: {ended}"),
+                })
+            })
     }
 
     /// `hello` to every socket in the holders' directory, and `stats` too `with_stats`, at once.
@@ -775,8 +855,9 @@ impl HolderRuntime {
     }
 
     /// The entries `inventory` reads, and the sockets that couldn't be read. Each holder found is
-    /// watched; one whose pid isn't the holder the kernel shows is unreadable, as nothing it says
-    /// of its process can be checked.
+    /// watched. A holder is listed by what it says, as the TypeScript runtime lists it, whether
+    /// or not the kernel vouches for its pid: one in another pid namespace names a pid this one
+    /// can't read, and refusing it would refuse every inventory for as long as it runs.
     async fn listed(&self) -> Result<(Vec<InventoryEntry>, Vec<PathBuf>), RuntimeError> {
         let all = self.reach_all(false).await?;
         {
@@ -805,19 +886,6 @@ impl HolderRuntime {
                 }
             };
             let hello = client.hello();
-            let holder = os_pid(hello.holder_pid).map(|pid| HolderProcess {
-                pid,
-                start: hello.holder_start.get(),
-            });
-            if !holder.is_some_and(|holder| self.host.runs(holder)) {
-                let why = format!(
-                    "pid {} isn't the holder that answered",
-                    hello.holder_pid.get()
-                );
-                self.report_unreadable(&socket, &why);
-                unreadable.push(socket);
-                continue;
-            }
             self.unreadable
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -875,9 +943,11 @@ impl HolderRuntime {
     /// As a verb's, when its holder isn't the one `terminal` records.
     pub async fn watch(&self, terminal: &HolderRef) -> Result<(), RuntimeError> {
         let (client, events) = self.holder_of(terminal).await?;
+        // The socket the runtime would bind, not the caller's: its watch says hello again there.
+        let socket = self.socket_of(&terminal.terminal_id)?;
         let found = HolderRef {
             terminal_id: terminal.terminal_id.clone(),
-            locator: HolderLocator::of(terminal.locator.socket.clone(), client.hello()),
+            locator: HolderLocator::of(socket, client.hello()),
         };
         self.watches.adopt(found, client, events);
         Ok(())
@@ -907,7 +977,7 @@ impl HolderRuntime {
                 reason: StaleReason::Gone,
                 ..
             }) => {
-                self.watches.forget(terminal_id);
+                self.watches.closing(terminal).closed();
                 let socket = self.socket_of(terminal_id)?;
                 let (_, reached) = reach(
                     socket.clone(),
@@ -929,16 +999,19 @@ impl HolderRuntime {
             Err(e) => return Err(e),
         };
         drop(events);
-        // Closed on purpose: no exit or loss of it is told.
-        self.watches.forget(terminal_id);
+        // Closed on purpose: no exit or loss of it is told, by its watch or by one an inventory
+        // in flight would start.
+        let closing = self.watches.closing(terminal);
         let closed = self.bounded(terminal_id, client.close()).await;
         let ended = tokio::time::timeout(self.options.request, client.ended()).await;
         client.end();
         closed?;
-        ended.map(drop).map_err(|_| RuntimeError::Unanswered {
+        ended.map_err(|_| RuntimeError::Unanswered {
             terminal_id: terminal_id.clone(),
             source: None,
-        })
+        })?;
+        closing.closed();
+        Ok(())
     }
 
     /// Sends `signal` to the terminal's running process, through its holder.
@@ -1329,6 +1402,8 @@ mod tests {
         Outdated,
         /// Never.
         Silent,
+        /// Never on the first connection, as `Hello` on each after.
+        Late(Box<HelloReply>),
     }
 
     /// Each connection at `listener`, its hello answered as `answering` says, and each request
@@ -1340,8 +1415,15 @@ mod tests {
         seen: Arc<Mutex<Vec<Request>>>,
     ) {
         let mut connections = JoinSet::new();
+        let mut first = true;
         while let Ok((stream, _)) = listener.accept().await {
-            let (answering, seen) = (answering.clone(), Arc::clone(&seen));
+            let answering = match (&answering, first) {
+                (Answering::Late(_), true) => Answering::Silent,
+                (Answering::Late(hello), false) => Answering::Hello(hello.clone()),
+                (answering, _) => answering.clone(),
+            };
+            first = false;
+            let seen = Arc::clone(&seen);
             connections.spawn(async move {
                 let mut holder = FakeHolder::new(stream);
                 match answering {
@@ -1355,7 +1437,7 @@ mod tests {
                             Some(Versions::new(vec![VersionText::new("2.0").unwrap()]).unwrap());
                         holder.send(&[Reply::Error { id, body }]).await;
                     }
-                    Answering::Silent => drop(holder.until_eof().await),
+                    Answering::Silent | Answering::Late(_) => drop(holder.until_eof().await),
                 }
                 while let Some(request) = holder.next().await {
                     let replies = answer(&request);
@@ -1667,17 +1749,105 @@ mod tests {
     }
 
     #[test]
-    fn fails_a_create_whose_holder_doesnt_answer() {
-        let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
-        let terminal_id = id(1);
-        block_on(async {
-            fixture.serve(&terminal_id, Answering::Silent);
-            let created = fixture.runtime.create(spec(&terminal_id)).await;
-            assert!(
-                matches!(created, Err(RuntimeError::Unstarted { .. })),
-                "{created:?}"
-            );
-        });
+    fn fails_a_create_whose_holder_doesnt_answer_and_closes_it_once_it_does_if_it_is_the_one_started()
+     {
+        let asked: Vec<_> = [PID, 4999]
+            .into_iter()
+            .map(|pid| {
+                let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+                let terminal_id = id(1);
+                let mut hello = hello_of(&terminal_id);
+                hello.holder_pid = Pid::new(pid.try_into().unwrap()).unwrap();
+                block_on(async {
+                    fixture.serve(&terminal_id, Answering::Late(Box::new(hello)));
+                    let created = fixture.runtime.create(spec(&terminal_id)).await;
+                    assert!(
+                        matches!(created, Err(RuntimeError::Unstarted { .. })),
+                        "{created:?}"
+                    );
+                    // Shutdown waits for the close it was told.
+                    fixture.runtime.shutdown().await;
+                });
+                let seen = fixture.seen.lock().unwrap();
+                seen.iter()
+                    .map(|r| matches!(r, Request::Close { .. }))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(asked, [vec![true], vec![]]);
+    }
+
+    #[test]
+    fn refuses_to_start_a_holder_once_the_runtime_is_shutting_down() {
+        // Shut down before the create, and as the create's start waits for its task to run.
+        let refused: Vec<_> = [false, true]
+            .into_iter()
+            .map(|during| {
+                let (fixture, host) = Fixture::new(FakeHost::default(), |_| {});
+                let created = block_on(async {
+                    if during {
+                        let both = futures_util::future::join(
+                            fixture.runtime.create(spec(&id(1))),
+                            fixture.runtime.shutdown(),
+                        );
+                        both.await.0
+                    } else {
+                        fixture.runtime.shutdown().await;
+                        fixture.runtime.create(spec(&id(1))).await
+                    }
+                });
+                let started = host.started.lock().unwrap().len();
+                (
+                    matches!(created, Err(RuntimeError::ShuttingDown { terminal_id }) if terminal_id == id(1)),
+                    started,
+                )
+            })
+            .collect();
+        assert_eq!(refused, [(true, 0), (true, 0)]);
+    }
+
+    #[test]
+    fn says_what_containment_the_first_start_found_and_a_refusal_naming_the_terminal() {
+        let caps = TerminalCaps {
+            terminal: "1G".to_owned(),
+            total: "4G".to_owned(),
+            swap: "0".to_owned(),
+        };
+        let refused = CapsRefused {
+            caps: caps.clone(),
+            why: "not a size",
+        };
+        let found = [Ok(scoped()), Err(refused.clone())];
+        let decided: Vec<_> = found
+            .into_iter()
+            .map(|found| {
+                let host = FakeHost {
+                    containment: Some(found),
+                    ..FakeHost::default()
+                };
+                let (mut fixture, _) = Fixture::new(host, |o| o.caps = Some(caps.clone()));
+                let before = fixture.runtime.containment().cloned();
+                let created = block_on(async {
+                    fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
+                    let created = fixture.runtime.create(spec(&id(1))).await;
+                    fixture.runtime.shutdown().await;
+                    created
+                });
+                let named = match created {
+                    Ok(_) => None,
+                    Err(RuntimeError::Containment { terminal_id, .. }) => Some(terminal_id),
+                    Err(other) => panic!("{other:?}"),
+                };
+                (before, fixture.runtime.containment().cloned(), named)
+            })
+            .collect();
+        assert_eq!(
+            decided,
+            [
+                (None, Some(Ok(scoped())), None),
+                (None, Some(Err(refused)), Some(id(1)))
+            ]
+        );
     }
 
     #[test]
@@ -1717,56 +1887,55 @@ mod tests {
     fn finds_nothing_before_the_first_terminal_and_fails_when_the_holders_cant_be_listed() {
         let (fixture, _) = Fixture::new(FakeHost::default(), |_| {});
         std::fs::remove_dir(fixture.root.holders_dir()).unwrap();
-        assert_eq!(block_on(fixture.runtime.inventory()).unwrap(), Vec::new());
+        let before = block_on(fixture.runtime.inventory());
         std::fs::write(fixture.root.holders_dir(), "").unwrap();
-        let listed = block_on(fixture.runtime.inventory());
-        assert!(
-            matches!(listed, Err(RuntimeError::Unlistable(_))),
-            "{listed:?}"
-        );
+        let unlistable = block_on(fixture.runtime.inventory());
+        let listed = [before, unlistable]
+            .map(|listed| listed.map_err(|e| matches!(e, RuntimeError::Unlistable(_))));
+        assert_eq!(listed, [Ok(Vec::new()), Err(true)]);
         drop(fixture.dir);
     }
 
     #[test]
-    fn refuses_an_inventory_while_a_holder_cant_be_read_or_isnt_the_holder_and_watches_the_rest() {
-        for (running, silent) in [(true, true), (false, false)] {
-            let (mut fixture, _) = Fixture::new(
-                FakeHost {
-                    running,
-                    ..FakeHost::default()
-                },
-                |_| {},
+    fn refuses_an_inventory_while_a_holder_cant_be_read_and_watches_the_rest() {
+        let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+        block_on(async {
+            fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
+            fixture.serve(&id(2), Answering::Silent);
+            let mut told = fixture.runtime.events();
+            let listed = fixture.runtime.inventory().await;
+            let want = vec![fixture.socket(&id(2))];
+            assert!(
+                matches!(&listed, Err(RuntimeError::Unreadable { sockets }) if *sockets == want),
+                "{listed:?}"
             );
-            block_on(async {
-                fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
-                fixture.serve(
-                    &id(2),
-                    if silent {
-                        Answering::Silent
-                    } else {
-                        Answering::Hello(Box::new(hello_of(&id(2))))
-                    },
-                );
-                let mut told = fixture.runtime.events();
-                let listed = fixture.runtime.inventory().await;
-                let want = if running {
-                    vec![fixture.socket(&id(2))]
-                } else {
-                    vec![fixture.socket(&id(1)), fixture.socket(&id(2))]
-                };
-                assert!(
-                    matches!(&listed, Err(RuntimeError::Unreadable { sockets }) if *sockets == want),
-                    "{listed:?}"
-                );
-                if running {
-                    assert_eq!(
-                        told.recv().await.unwrap(),
-                        RuntimeEvent::Title { terminal_id: id(1) }
-                    );
-                }
-                fixture.runtime.shutdown().await;
-            });
-        }
+            assert_eq!(
+                told.recv().await.unwrap(),
+                RuntimeEvent::Title { terminal_id: id(1) }
+            );
+            fixture.runtime.shutdown().await;
+        });
+    }
+
+    #[test]
+    fn lists_a_holder_whose_pid_the_kernel_wont_vouch_for_as_the_typescript_runtime_does() {
+        // Taken for running by nothing: every pid is one the kernel won't vouch for.
+        let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+        let listed = block_on(async {
+            fixture.serve(&id(1), Answering::Hello(Box::new(hello_of(&id(1)))));
+            let listed = fixture.runtime.inventory().await;
+            fixture.runtime.shutdown().await;
+            listed
+        });
+        let ids = listed
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|e| e.terminal.terminal_id)
+                    .collect()
+            })
+            .map_err(|e| e.to_string());
+        assert_eq!(ids, Ok(vec![id(1)]));
     }
 
     #[test]
