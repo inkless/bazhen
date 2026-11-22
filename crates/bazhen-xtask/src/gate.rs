@@ -237,6 +237,16 @@ fn removed(name: &OsStr) -> bool {
             .any(|p| bytes.starts_with(p))
 }
 
+/// What a CI run passes nextest, so that one failing test doesn't hide those after it. A local run
+/// stops at the first failure, which is what someone watching it wants.
+const NO_FAIL_FAST: &str = "--no-fail-fast";
+
+/// Whether the caller is a CI run, that is, `CI` is set and non-empty: GitHub Actions, as most CI
+/// services, sets it on every runner. `CI=false` counts, which is harmless.
+fn ci(env: &Env) -> bool {
+    env.get(OsStr::new("CI")).is_some_and(|v| !v.is_empty())
+}
+
 /// The seed every proptest draws its cases from unless the caller gives one, so that a run tests
 /// the change and not the draw: the scheduled job in `.github/workflows/fuzz.yml` gives a random
 /// one. Changing it changes every property's cases.
@@ -342,6 +352,7 @@ pub(crate) fn run(
         let _ = writeln!(err, "{refused}");
         return Exit::Usage;
     }
+    let report_every_failure = gate.takes_tests() && ci(&env);
     let env = gate_env(env);
     // Every gate, fmt and deny too: a config's [env] could put another cargo-fmt or cargo-deny first
     // on PATH for a cargo that starts them.
@@ -360,6 +371,7 @@ pub(crate) fn run(
     for command in gate.commands() {
         let argv: Vec<&str> = command
             .into_iter()
+            .chain(report_every_failure.then_some(NO_FAIL_FAST))
             .chain(tests.iter().map(String::as_str))
             .collect();
         if let Some(exit) = failed(host.run(&argv, &env, false), &argv, err) {
@@ -669,6 +681,15 @@ mod tests {
     }
 
     fn ran(host: &mut Fake, name: &str, tests: &[&str]) -> (Exit, Vec<String>, String) {
+        ran_in(host, name, tests, Env::new())
+    }
+
+    fn ran_in(
+        host: &mut Fake,
+        name: &str,
+        tests: &[&str],
+        env: Env,
+    ) -> (Exit, Vec<String>, String) {
         let places = Places {
             root: "/a/repo".into(),
             cargo_home: "/home/u/.cargo".into(),
@@ -678,13 +699,45 @@ mod tests {
         let exit = run(
             Gate::named(name).unwrap(),
             &tests,
-            Env::new(),
+            env,
             &places,
             host,
             &mut err,
         );
         let bins = host.runs.iter().map(|r| r[0].clone()).collect();
         (exit, bins, String::from_utf8(err).unwrap())
+    }
+
+    #[test]
+    fn tells_nextest_to_run_every_test_only_in_ci_and_before_any_test_name() {
+        let runs = |ci: Option<&str>, name: &str, tests: &[&str]| {
+            let env: Env = ci
+                .map(|v| (OsString::from("CI"), OsString::from(v)))
+                .into_iter()
+                .collect();
+            let mut host = Fake::new(true);
+            ran_in(&mut host, name, tests, env);
+            host.runs
+        };
+        let has_flag = |runs: &[Vec<String>]| runs.iter().flatten().any(|a| a == NO_FAIL_FAST);
+        for name in ["test", "test-all"] {
+            let ci = runs(Some("true"), name, &["a_test"]);
+            let nextest = ci.last().unwrap();
+            let flag = nextest.iter().position(|a| a == NO_FAIL_FAST).unwrap();
+            assert_eq!(nextest.last().unwrap(), "a_test", "{name}");
+            assert_eq!(flag, nextest.len() - 2, "{name}");
+            for local in [None, Some("")] {
+                assert!(
+                    !has_flag(&runs(local, name, &["a_test"])),
+                    "{name} {local:?}"
+                );
+            }
+        }
+        for name in ["fmt", "lint", "deny"] {
+            let ci = runs(Some("true"), name, &[]);
+            assert!(ci.len() > 1 || name != "lint", "{name} ran nothing");
+            assert!(!has_flag(&ci), "{name}");
+        }
     }
 
     #[test]
