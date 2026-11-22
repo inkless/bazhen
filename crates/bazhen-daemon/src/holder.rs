@@ -1326,6 +1326,40 @@ mod tests {
                     .unwrap_or_else(|| panic!("no {name} above {}", exe.display()))
             }
 
+            /// Whether `bash` is 4.4 or later, the oldest the integration runs in, so a test fails as
+            /// that rather than as a line never reported: macOS's own bash is 3.2.
+            fn integrated_bash(bash: &Path) -> Result<(), String> {
+                let out = std::process::Command::new(bash)
+                    .args(["-c", "echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"])
+                    .output()
+                    .map_err(|e| e.to_string())?;
+                let version = String::from_utf8_lossy(&out.stdout).into_owned();
+                let mut parts = version.split_whitespace().map(str::parse::<u32>);
+                match (parts.next(), parts.next()) {
+                    (Some(Ok(major)), Some(Ok(minor))) if (major, minor) >= (4, 4) => Ok(()),
+                    _ => Err(format!(
+                        "{} is bash {}; the integration takes 4.4 or later",
+                        bash.display(),
+                        version.trim()
+                    )),
+                }
+            }
+
+            #[test]
+            fn refuses_a_bash_older_than_the_integration_takes() {
+                let dir = TempDir::new("integrated-old-bash");
+                let bash = dir.path().join("bash");
+                std::fs::write(&bash, "#!/bin/sh\necho 3 2\n").unwrap();
+                std::fs::set_permissions(&bash, std::fs::Permissions::from_mode(0o755)).unwrap();
+                assert_eq!(
+                    integrated_bash(&bash),
+                    Err(format!(
+                        "{} is bash 3 2; the integration takes 4.4 or later",
+                        bash.display()
+                    ))
+                );
+            }
+
             /// A script starting `kind` interactive with `rc` alone, as `shellWithRc` does.
             fn shell_with_rc(dir: &Path, kind: &str, rc: &str) -> String {
                 let rcs = dir.join(format!("rc-{kind}"));
@@ -1339,14 +1373,23 @@ mod tests {
                 if kind == "zsh" {
                     std::fs::write(rcs.join(".zshenv"), "unsetopt GLOBAL_RCS\n").unwrap();
                 }
-                let exe = program(kind).display().to_string();
+                let exe = program(kind);
+                if kind == "bash" {
+                    integrated_bash(&exe).unwrap();
+                }
+                let exe = exe.display().to_string();
                 let start = match kind {
                     "zsh" => format!("ZDOTDIR='{}' exec {exe} -i", rcs.display()),
                     "bash" => format!("exec {exe} --rcfile '{}' -i", file.display()),
                     _ => format!("exec {exe} -i -C \"source '{}'\"", file.display()),
                 };
                 let script = rcs.join(format!("{kind}-shell"));
-                std::fs::write(&script, format!("#!/bin/sh\n{start}\n")).unwrap();
+                // The token as the shell gets it, where this test alone reads it.
+                let token = format!(
+                    r#"printf '%s' "${{BAZHEN_SHELL_TOKEN-}}" > '{}/token-'"$BAZHEN_TERMINAL_ID""#,
+                    dir.display()
+                );
+                std::fs::write(&script, format!("#!/bin/sh\n{token}\n{start}\n")).unwrap();
                 std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
                 script.to_string_lossy().into_owned()
             }
@@ -1457,10 +1500,20 @@ mod tests {
 
                 /// The daemon ends, and every holder with it, as a reboot would; another starts
                 /// over the same store, and finds the shells it kept lost.
+                /// Every shell's holder closed and provably gone, as a reboot leaves them, so the
+                /// daemon that starts next finds them lost.
                 async fn reboot(&mut self) {
                     for id in self.ids() {
                         if let Some(at) = self.recorded(&id) {
-                            drop(self.shells.terminals().close(&at).await);
+                            let terminals = self.shells.terminals();
+                            if let Err(e) = terminals.close(&at).await {
+                                panic!("{id}: its holder didn't close: {e}");
+                            }
+                            let deadline = Instant::now() + Duration::from_secs(10);
+                            while !terminals.gone(&at).await {
+                                assert!(Instant::now() < deadline, "{id}: its holder never went");
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
                         }
                     }
                     self.stop.cancel();
@@ -1599,15 +1652,9 @@ mod tests {
                     }
                 }
 
-                /// The shell's own token, from its process's environment.
+                /// The shell's own token, as its start script found it in its environment.
                 fn token(&self, id: &str) -> String {
-                    let pid = self.locator(id).child_pid.get();
-                    let environ = std::fs::read(format!("/proc/{pid}/environ")).unwrap();
-                    environ
-                        .split(|b| *b == 0)
-                        .find_map(|var| var.strip_prefix(b"BAZHEN_SHELL_TOKEN="))
-                        .map(|token| String::from_utf8_lossy(token).into_owned())
-                        .unwrap()
+                    std::fs::read_to_string(self.root.join(format!("token-{id}"))).unwrap()
                 }
 
                 /// Everything a client sees: the state and every event.
