@@ -357,6 +357,8 @@ mod tests {
 
     /// Started by a parent that ignored SIGCHLD, as a daemon can be, the kernel would reap the
     /// leader itself; given its default first, the leader is held, and its group still reached.
+    /// On macOS tokio's first spawn sets a SIGCHLD handler of its own, which holds the leader as
+    /// well, so only Linux's run shows the default is what holds it.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn kills_a_member_after_its_leader_exits_once_an_ignored_sigchld_is_given_its_default() {
@@ -371,8 +373,12 @@ mod tests {
     }
 
     /// The control: left ignored, the kernel reaps the leader as it exits, and its group, whose
-    /// number may be another's, is refused. The member ends by itself soon after.
+    /// number may be another's, is refused. The member ends by itself soon after. Linux's alone:
+    /// tokio waits on a child there through a pidfd, and leaves SIGCHLD ignored, where on macOS
+    /// its first spawn sets a handler of its own, with no `SA_NOCLDWAIT`, and the kernel then
+    /// keeps the leader.
     #[test]
+    #[cfg(target_os = "linux")]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn refuses_the_group_of_a_leader_the_kernel_reaped_as_sigchld_was_ignored() {
         bazhen_test_signal::require_sandbox().unwrap();
