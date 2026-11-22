@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use bazhen_client::paths::{Paths, lock_of};
+use bazhen_client::paths::{DRAIN, LOCK_WAIT, Paths, lock_of};
 use bazhen_store::{OpenError, Store};
 
 use crate::retention;
@@ -37,12 +37,8 @@ struct Serving {
 const SERVING: Serving = Serving {
     http: accept::HTTP,
     socket: accept::SOCKET,
-    drain: Duration::from_secs(5),
+    drain: DRAIN,
 };
-
-/// How long a start waits on a lock another daemon holds without answering: it may be starting,
-/// or draining with its socket already gone.
-const LOCK_WAIT: Duration = SERVING.drain.saturating_add(Duration::from_secs(1));
 
 /// What serving needs from the settings.
 #[derive(Debug, Clone)]

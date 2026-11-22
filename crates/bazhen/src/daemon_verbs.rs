@@ -7,6 +7,7 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use bazhen_client::paths::LOCK_WAIT;
 use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
@@ -26,9 +27,6 @@ use crate::{Exit, doctor};
 
 /// How long a stopped daemon may take to stop answering.
 const STOPPED_WITHIN: Duration = Duration::from_secs(5);
-/// How long `stop` waits on a daemon that holds the start-up lock with no socket: the longest a
-/// stopping daemon drains (`STOPPED_WITHIN`) and a second more.
-const LOCK_WAIT: Duration = Duration::from_secs(6);
 /// How long the daemon may take to take a stop, or a new environment, before it is wedged.
 const SLOW_CALL: Duration = Duration::from_secs(30);
 

@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::sha256::{hex, sha256};
 
@@ -181,6 +182,14 @@ fn default_run(i: &Inputs) -> String {
         _ => format!("/tmp/bazhen-{}", i.uid),
     }
 }
+
+/// The longest a stopping daemon takes to drain its connections. It holds its start-up lock to the
+/// end, with its socket already gone (`apps/daemon/src/socket/lock.ts` holds `DRAIN_MS` to it).
+pub const DRAIN: Duration = Duration::from_secs(5);
+
+/// How long a start or a `stop` waits on a lock another daemon holds without answering: a drain,
+/// and a second more.
+pub const LOCK_WAIT: Duration = DRAIN.saturating_add(Duration::from_secs(1));
 
 /// The start-up lock file for the daemon on `socket`, beside it. It is never removed: a daemon that
 /// removed it could let a second one lock a fresh file while a third still holds the old one.

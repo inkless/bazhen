@@ -746,6 +746,18 @@ describe("bazhen stop", () => {
     },
   );
 
+  it("fails, saying what the daemon said, when it answers but refuses the stop", async () => {
+    s.daemon
+      .answer("GET /v1/health", HealthResponse, health())
+      .fail("POST /v1/daemon/stop", 403, { error: "forbidden", message: "agents may not stop it" });
+    const ran = await s.bazhen(["stop"]);
+    expect([ran.code, ran.stdout, ran.stderr]).toEqual([
+      1,
+      "",
+      expect.stringContaining("/v1/daemon/stop: HTTP 403"),
+    ]);
+  });
+
   it("fails when the daemon still answers five seconds after it was told to stop", async () => {
     s.daemon
       .answer("GET /v1/health", HealthResponse, health())
