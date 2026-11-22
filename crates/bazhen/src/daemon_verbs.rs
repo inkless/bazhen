@@ -170,6 +170,9 @@ fn wait_for_lock(socket: &Path) -> Result<(), PathBuf> {
         match presence(socket) {
             Presence::Unbound { lock } if begun.elapsed() >= LOCK_WAIT => return Err(lock),
             Presence::Unbound { .. } => sleep(Duration::from_millis(100)),
+            // A held lock behind a socket that is there, and refuses, is not a drain: both daemons
+            // remove their socket as their drain begins, so only a socketless daemon counts as
+            // stopping, and this wait ends for anything else.
             Presence::Absent | Presence::Unanswering(_) => return Ok(()),
         }
     }
