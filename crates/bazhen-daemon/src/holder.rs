@@ -3,16 +3,18 @@
 //! holders run, installed where it can't be written over, the runtime over it, and what `bazhen
 //! doctor` says of both.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bazhen_holder_proto::body::{Cols, Generation, HistoryLines, Rows, Size, Theme};
+use bazhen_host_guard::holder::{HolderProcess, is_vouchable};
 use bazhen_host_guard::scope::{self, CapsRefused, MIN_SYSTEMD, TERMINALS_SLICE};
 use bazhen_protocol::daemon::{
     Containment, Holder as HolderReport, HolderStats, MemoryCap, RunningHolder,
     RuntimeHealthReport, RuntimeReportState,
 };
+use bazhen_protocol::ids::TerminalId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
@@ -24,7 +26,10 @@ use bazhen_runtime_holder::{
 use tokio::sync::broadcast;
 
 use crate::config::RuntimeKind;
-use crate::terminals::{Answer, Exit, Exits, Recorded, ShellSpec, TerminalError, Terminals};
+use crate::terminals::{
+    Answer, Compatibility, Event, Events, Exit, FoundShell, Recorded, ShellForeground, ShellSpec,
+    TerminalError, Terminals,
+};
 
 /// The size a terminal starts at, until a view attaches and sets its own (`DEFAULT_SIZE`).
 const COLS: u64 = 120;
@@ -262,6 +267,21 @@ fn holder_ref(terminal: &Recorded) -> Result<HolderRef, TerminalError> {
     })
 }
 
+/// The incarnation `terminal` names, as the store records it; `None` for one whose socket's path
+/// isn't UTF-8, as no holder's is.
+fn recorded_of(terminal: &HolderRef) -> Option<Recorded> {
+    Some(Recorded {
+        terminal_id: terminal.terminal_id.clone(),
+        locator: terminal.locator.encode().ok()?,
+    })
+}
+
+/// A program's name as a shell's foreground shows it: `None` for the shell's own process, and a
+/// login shell's without the leading dash it may be named with, as `-fish`.
+fn program(command: &str, own: bool) -> Option<String> {
+    (!own).then(|| command.strip_prefix('-').unwrap_or(command).to_owned())
+}
+
 fn theme(theme: TuiTheme) -> Theme {
     match theme {
         TuiTheme::Light => Theme::Light,
@@ -326,35 +346,59 @@ impl Holder {
     }
 }
 
-/// The exits a holder runtime tells.
+/// The events a holder runtime tells.
 #[derive(Debug)]
-struct HolderExits(broadcast::Receiver<RuntimeEvent>);
+struct HolderTold {
+    told: broadcast::Receiver<RuntimeEvent>,
+    /// The process each terminal was last told running since the daemon started it, which an
+    /// exit at that generation names.
+    respawned: HashMap<TerminalId, HolderRef>,
+}
 
-impl Exits for HolderExits {
-    fn next(&mut self) -> Answer<'_, Option<Exit>> {
+impl HolderTold {
+    /// The process of `generation` the terminal was told running, if it was.
+    fn ended(&mut self, terminal_id: &TerminalId, generation: Generation) -> Option<Recorded> {
+        let told = self.respawned.get(terminal_id)?;
+        if told.locator.generation != Some(generation) {
+            return None;
+        }
+        recorded_of(&self.respawned.remove(terminal_id)?)
+    }
+}
+
+impl Events for HolderTold {
+    fn next(&mut self) -> Answer<'_, Option<Event>> {
         Box::pin(async move {
             loop {
-                match self.0.recv().await {
+                match self.told.recv().await {
                     Ok(RuntimeEvent::Exited {
                         terminal_id,
                         generation,
                         ..
                     }) => {
-                        return Some(Exit {
+                        let found = self.ended(&terminal_id, generation);
+                        return Some(Event::Exited(Exit {
                             terminal_id,
                             generation: generation.get(),
-                        });
+                            found,
+                        }));
                     }
-                    Ok(
-                        // A holder lost is a shell lost, which the next change marks; until then
-                        // its shell stays as recorded, and a close finds what is left of it.
-                        RuntimeEvent::Lost { .. }
-                        // A process started outside the daemon, and a title, are not followed
-                        // yet.
-                        | RuntimeEvent::Respawned { .. }
-                        | RuntimeEvent::Title { .. },
-                    )
-                    // An exit missed while behind is seen again by the close that finds it.
+                    Ok(RuntimeEvent::Respawned { terminal }) => {
+                        if let Some(recorded) = recorded_of(&terminal) {
+                            self.respawned
+                                .insert(terminal.terminal_id.clone(), terminal);
+                            return Some(Event::Respawned(recorded));
+                        }
+                    }
+                    Ok(RuntimeEvent::Lost { terminal }) => {
+                        self.respawned.remove(&terminal.terminal_id);
+                        if let Some(recorded) = recorded_of(&terminal) {
+                            return Some(Event::Lost(recorded));
+                        }
+                    }
+                    // A title isn't followed yet. An event missed while behind is seen again by
+                    // what reads the terminal next: a close finds what is left of it.
+                    Ok(RuntimeEvent::Title { .. })
                     | Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
@@ -399,21 +443,39 @@ impl Terminals for Holder {
                 .foreground(&terminal)
                 .await
                 .map_err(|e| terminal_error(&e))?;
-            // A login shell's process may be named with a leading dash, as `-fish`.
-            Ok((!found.own).then(|| {
-                found
-                    .command
-                    .strip_prefix('-')
-                    .unwrap_or(&found.command)
-                    .to_owned()
-            }))
+            Ok(program(&found.command, found.own))
+        })
+    }
+
+    fn foregrounds<'a>(
+        &'a self,
+        terminals: &'a [Recorded],
+    ) -> Answer<'a, Result<Vec<ShellForeground>, TerminalError>> {
+        Box::pin(async move {
+            let asked: HashSet<TerminalId> =
+                terminals.iter().map(|t| t.terminal_id.clone()).collect();
+            let read = self
+                .runtime
+                .foregrounds(&asked)
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(read
+                .into_iter()
+                .filter_map(|(terminal, found)| {
+                    Some(ShellForeground {
+                        terminal: recorded_of(&terminal)?,
+                        command: program(&found.command, found.own),
+                        cwd: found.cwd.and_then(|cwd| cwd.to_str().map(str::to_owned)),
+                    })
+                })
+                .collect())
         })
     }
 
     fn health(&self) -> Answer<'_, RuntimeHealthReport> {
         Box::pin(async move {
             // No terminal recorded is named: one named whose socket is gone would be told to bind
-            // it again, which only the recovery at start, not yet ported, does.
+            // it again, which only `reachable`, at start, does.
             let health = self.runtime.health(&[]).await;
             RuntimeHealthReport {
                 kind: "holder".to_owned(),
@@ -428,6 +490,87 @@ impl Terminals for Holder {
         })
     }
 
+    fn reachable<'a>(&'a self, recorded: &'a [Recorded]) -> Answer<'a, bool> {
+        Box::pin(async move {
+            let known: Vec<HolderRef> =
+                recorded.iter().filter_map(|r| holder_ref(r).ok()).collect();
+            self.runtime.health(&known).await.state != HealthState::Unreachable
+        })
+    }
+
+    fn shells(&self) -> Answer<'_, Result<Vec<FoundShell>, TerminalError>> {
+        Box::pin(async move {
+            let found = self
+                .runtime
+                .inventory()
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(found
+                .into_iter()
+                .filter_map(|entry| match entry.tags {
+                    TerminalTags::Shell { linked_agent_id } => Some(FoundShell {
+                        terminal: recorded_of(&entry.terminal)?,
+                        dead: entry.exit.is_some(),
+                        linked_agent_id,
+                    }),
+                    TerminalTags::Agent { .. } => None,
+                })
+                .collect())
+        })
+    }
+
+    fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool> {
+        Box::pin(async move {
+            // A locator that can't be read proves nothing gone.
+            match holder_ref(terminal) {
+                Ok(terminal) => self.runtime.gone(&terminal).await,
+                Err(_) => false,
+            }
+        })
+    }
+
+    fn unlink<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, Result<(), TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            self.runtime
+                .unlink(&terminal)
+                .await
+                .map_err(|e| terminal_error(&e))
+        })
+    }
+
+    fn compatibility(&self) -> Answer<'_, Result<Compatibility, TerminalError>> {
+        Box::pin(async move {
+            let read = self
+                .runtime
+                .compatibility()
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(Compatibility {
+                outdated: read
+                    .outdated
+                    .into_iter()
+                    .map(|(id, protocol)| (id.as_str().to_owned(), protocol))
+                    .collect(),
+                served: read
+                    .served
+                    .into_iter()
+                    .map(|id| id.as_str().to_owned())
+                    .collect(),
+            })
+        })
+    }
+
+    fn vouches(&self, pid: u64, start: u64) -> bool {
+        let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return false;
+        };
+        is_vouchable(HolderProcess { pid, start })
+    }
+
     fn holders(&self) -> Answer<'_, Result<Vec<RunningHolder>, String>> {
         Box::pin(async move {
             let builds = self.runtime.builds().await.map_err(|e| detail(&e))?;
@@ -439,8 +582,11 @@ impl Terminals for Holder {
         containment_doctor(self.runtime.containment())
     }
 
-    fn exits(&self) -> Box<dyn Exits> {
-        Box::new(HolderExits(self.runtime.events()))
+    fn events(&self) -> Box<dyn Events> {
+        Box::new(HolderTold {
+            told: self.runtime.events(),
+            respawned: HashMap::new(),
+        })
     }
 
     fn shutdown(&self) -> Answer<'_, ()> {
@@ -715,6 +861,76 @@ mod tests {
         }
     }
 
+    fn holder_at(generation: u64) -> HolderRef {
+        use bazhen_holder_proto::body::{Pid, StartTime};
+        HolderRef {
+            terminal_id: TerminalId::parse("term_0190a1b2c3d47abc8def0123456789ad").unwrap(),
+            locator: HolderLocator {
+                socket: PathBuf::from("/run/h/term.sock"),
+                holder_pid: Pid::new(10).unwrap(),
+                holder_start: StartTime::new(11).unwrap(),
+                child_pid: Pid::new(12 + generation).unwrap(),
+                child_start: StartTime::new(13).unwrap(),
+                generation: Some(Generation::new(generation).unwrap()),
+            },
+        }
+    }
+
+    #[test]
+    fn names_the_process_an_exit_ended_where_it_was_told_running_and_none_it_wasnt() {
+        let (tx, rx) = broadcast::channel(16);
+        let mut told = HolderTold {
+            told: rx,
+            respawned: HashMap::new(),
+        };
+        let exited = |generation| RuntimeEvent::Exited {
+            terminal_id: holder_at(0).terminal_id,
+            generation: Generation::new(generation).unwrap(),
+            status: bazhen_holder_proto::body::ExitStatus::Unknown,
+        };
+        for event in [
+            exited(0),
+            RuntimeEvent::Respawned {
+                terminal: holder_at(1),
+            },
+            exited(2),
+            exited(1),
+            exited(1),
+            RuntimeEvent::Lost {
+                terminal: holder_at(1),
+            },
+        ] {
+            tx.send(event).unwrap();
+        }
+        drop(tx);
+        let seen = crate::testing::runtime().block_on(async {
+            let mut seen = Vec::new();
+            while let Some(event) = told.next().await {
+                seen.push(event);
+            }
+            seen
+        });
+        let at = |generation| recorded_of(&holder_at(generation)).unwrap();
+        let exit = |generation, found| {
+            Event::Exited(Exit {
+                terminal_id: holder_at(0).terminal_id,
+                generation,
+                found,
+            })
+        };
+        assert_eq!(
+            seen,
+            [
+                exit(0, None),
+                Event::Respawned(at(1)),
+                exit(2, None),
+                exit(1, Some(at(1))),
+                exit(1, None),
+                Event::Lost(at(1)),
+            ]
+        );
+    }
+
     #[derive(Debug, thiserror::Error)]
     #[error("{0}")]
     struct Failed(String, #[source] std::io::Error);
@@ -855,7 +1071,7 @@ mod tests {
             let (shells, store, thread) = shells(&dir, &quits.to_string_lossy());
             runtime().block_on(async {
                 let (tracker, stop) = (TaskTracker::new(), CancellationToken::new());
-                let exits = shells.terminals().exits();
+                let exits = shells.terminals().events();
                 tracker.spawn(Arc::clone(&shells).watch(exits, tracker.clone(), stop.clone()));
                 let id = shells.open(&opening("o"), None).await.unwrap().terminal_id;
                 let deadline = Instant::now() + Duration::from_secs(10);

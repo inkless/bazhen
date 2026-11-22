@@ -28,7 +28,7 @@ use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
 use crate::shells::{Shells, ShellsDeps};
-use crate::terminals::Exits;
+use crate::terminals::Events;
 use crate::tokens;
 
 /// How the daemon serves: each listener's limits, and how long its connections get to finish once
@@ -185,28 +185,24 @@ fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<R
     served
 }
 
-/// The shells over `runner`'s terminals, with this machine's environment registered, what the
-/// budget says of the terminals kept from before, and the exits told from before any opens.
+/// The shells over `runner`'s terminals, with this machine's environment registered, the shells
+/// kept from before reconciled with what runs, what the budget says of those still open, and the
+/// events told from before any of it.
 async fn shells(
     startup: &Startup,
     store: &Writer,
     runner: Runner,
     tracker: &TaskTracker,
-) -> Result<(Arc<Shells>, Box<dyn Exits>, Settled), Refused> {
-    let exits = runner.terminals.exits();
-    let open = store
+) -> Result<(Arc<Shells>, Box<dyn Events>, Settled), Refused> {
+    let events = runner.terminals.events();
+    store
         .run(|store| {
-            store.write(|w| -> Result<u64, AppendError> {
-                w.local_environment()?;
-                Ok(w.reads().open_terminals()?)
-            })
+            store.write(|w| -> Result<(), AppendError> { w.local_environment().map(drop) })
         })
         .await
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
         .map_err(|err| Refused::Said(format!("bazhen can't register this machine: {err}")))?;
-    for warning in runner.budget.startup_warnings(open) {
-        tracing::warn!("bazhen: {warning}");
-    }
+    let budget = Arc::clone(&runner.budget);
     let shells = Shells::new(ShellsDeps {
         store: store.clone(),
         terminals: runner.terminals,
@@ -216,7 +212,49 @@ async fn shells(
         socket: startup.paths.socket.clone(),
         tracker: tracker.clone(),
     });
-    Ok((Arc::new(shells), exits, runner.doctor))
+    shells.reconcile().await;
+    if let Err(err) = shells.sweep_restarts().await {
+        tracing::warn!(
+            "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
+        );
+    }
+    let open = store
+        .run(|store| store.reads().open_terminals())
+        .await
+        .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
+        .map_err(|err| Refused::Said(format!("bazhen can't read its terminals: {err}")))?;
+    for warning in budget.startup_warnings(open) {
+        tracing::warn!("bazhen: {warning}");
+    }
+    Ok((Arc::new(shells), events, runner.doctor))
+}
+
+/// How often the running shells' foregrounds, and what their holders speak, are read again: the
+/// TypeScript daemon's server watch's tick.
+const TICK: Duration = Duration::from_secs(5);
+
+/// Reads the running shells' foregrounds, and which terminals need a restart, each `TICK`, until
+/// `stop`. A restart read that fails is said once until one reads again.
+async fn every_tick(shells: Arc<Shells>, stop: CancellationToken) {
+    let mut fault = None;
+    while stop
+        .run_until_cancelled(tokio::time::sleep(TICK))
+        .await
+        .is_some()
+    {
+        shells.refresh_foregrounds().await;
+        match shells.sweep_restarts().await {
+            Ok(()) => fault = None,
+            Err(err) => {
+                if fault.as_ref() != Some(&err) {
+                    tracing::warn!(
+                        "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
+                    );
+                }
+                fault = Some(err);
+            }
+        }
+    }
 }
 
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
@@ -241,9 +279,9 @@ async fn listen(
     let tracker = TaskTracker::new();
     let mut watching = None;
     if let Some(runner) = runner {
-        let (running, exits, doctor) = shells(startup, &store, runner, &tracker).await?;
+        let (running, events, doctor) = shells(startup, &store, runner, &tracker).await?;
         shared = shared.with_shells(Arc::clone(&running), doctor);
-        watching = Some((running, exits));
+        watching = Some((running, events));
     }
     let gate = Gate {
         allow: guard::allowlists(
@@ -283,8 +321,9 @@ async fn listen(
     let token = stop.token();
     let retiring = token.clone();
     let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
-    if let Some((running, exits)) = watching {
-        tracker.spawn(running.watch(exits, tracker.clone(), token.clone()));
+    if let Some((running, events)) = watching {
+        tracker.spawn(every_tick(Arc::clone(&running), token.clone()));
+        tracker.spawn(running.watch(events, tracker.clone(), token.clone()));
     }
     tracker.spawn(crate::paired::close_lapsed_every_minute(
         shared.clone(),
@@ -512,6 +551,67 @@ mod tests {
             doctor,
             shell: "/bin/sh".to_owned(),
         }
+    }
+
+    #[test]
+    fn reconciles_the_shells_kept_from_before_then_says_what_the_budget_makes_of_those_left_open() {
+        use crate::budget::tests::{Machine, roomy};
+        use bazhen_protocol::shells::TerminalState;
+        let home = TempDir::new("kept");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let fake = crate::terminals::fake::Fake::default();
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        let budget = |max| {
+            Arc::new(crate::budget::Budget::new(
+                max,
+                Arc::new(Machine(std::sync::Mutex::new(roomy()))),
+                Box::new(|_| {}),
+            ))
+        };
+        let (kept, gone) = runtime().block_on(async {
+            let before = Shells::new(ShellsDeps {
+                store: store.clone(),
+                terminals: Arc::new(fake.clone()),
+                budget: budget(3),
+                home: startup.home.clone(),
+                shell: "/bin/sh".to_owned(),
+                socket: startup.paths.socket.clone(),
+                tracker: TaskTracker::new(),
+            });
+            let mut opened = Vec::new();
+            for key in ["a", "b"] {
+                let req = bazhen_protocol::shells::OpenShellRequest {
+                    idempotency_key: key.to_owned(),
+                    linked_agent_id: None,
+                    cwd: None,
+                    theme: None,
+                };
+                opened.push(before.open(&req, None).await.unwrap().terminal_id);
+            }
+            fake.gone(opened[1].as_str());
+            let runner = Runner {
+                terminals: Arc::new(fake.clone()),
+                budget: budget(1),
+                ..faked(&startup)
+            };
+            let Ok(_) = shells(&startup, &store, runner, &TaskTracker::new()).await else {
+                panic!("refused to start");
+            };
+            (opened[0].clone(), opened[1].clone())
+        });
+        let state_of = |id: &bazhen_protocol::ids::TerminalId| {
+            let reader = store.reader().unwrap();
+            reader.reads().shell(id.as_str()).unwrap().map(|s| s.state)
+        };
+        assert_eq!(
+            [state_of(&kept), state_of(&gone)],
+            [Some(TerminalState::Running), Some(TerminalState::Lost)]
+        );
+        assert_eq!(said.times("above terminals.max_open"), 0);
+        writer.finish();
     }
 
     #[test]

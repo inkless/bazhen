@@ -198,7 +198,7 @@ fn js_trim(text: &str) -> &str {
 }
 
 /// At most `max` UTF-16 units of `text`, never half a surrogate pair (`whole`, in core).
-fn whole(text: &str, max: usize) -> &str {
+pub(crate) fn whole(text: &str, max: usize) -> &str {
     let mut units = 0;
     for (at, c) in text.char_indices() {
         units += c.len_utf16();

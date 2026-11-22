@@ -14,7 +14,7 @@ use rusqlite::{OptionalExtension, Transaction};
 
 use crate::events::{AppendError, NewEvent, Reads, TerminalChange, Writer, int, unsigned};
 use crate::projections::At;
-use crate::snapshot::SnapshotError;
+use crate::snapshot::{SnapshotError, SnapshotView};
 
 /// A step of a terminal's lifecycle, as packages/core's `TerminalEvent` names it; only the steps
 /// a shell's events take are here.
@@ -346,10 +346,43 @@ pub struct ShellRow {
     pub current_cwd: String,
     pub linked_agent_id: Option<String>,
     pub theme: Option<TuiTheme>,
+    /// The program its foreground was last seen running, `None` at its prompt.
+    pub foreground: Option<String>,
 }
 
 /// The states of a terminal that holds, or may yet hold, a PTY.
 const OPEN_STATES: &str = "('creating', 'running', 'unknown', 'exited', 'closing')";
+
+/// What a `ShellRow` is read from, for a `WHERE` to follow.
+const SHELL_ROW: &str = "SELECT id, state, generation, runtime, locator, runtime_kind, cwd,
+       coalesce(current_cwd, cwd), linked_agent_id, theme, json_extract(foreground, '$.command')
+     FROM terminals WHERE kind = 'shell'";
+
+fn shell_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShellRow> {
+    let unreadable = |i: usize, what: &str| {
+        rusqlite::Error::FromSqlConversionFailure(
+            i,
+            rusqlite::types::Type::Text,
+            format!("{what} isn't one a shell has").into(),
+        )
+    };
+    let id: String = row.get(0)?;
+    let state: String = row.get(1)?;
+    let theme: Option<String> = row.get(9)?;
+    Ok(ShellRow {
+        id: TerminalId::parse(&id).ok_or_else(|| unreadable(0, "its id"))?,
+        state: TerminalState::parse(&state).ok_or_else(|| unreadable(1, "its state"))?,
+        generation: unsigned(row, 2)?,
+        runtime: row.get(3)?,
+        locator: row.get(4)?,
+        runtime_kind: row.get(5)?,
+        cwd: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+        current_cwd: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+        linked_agent_id: row.get(8)?,
+        theme: theme.as_deref().and_then(TuiTheme::parse),
+        foreground: row.get(10)?,
+    })
+}
 
 impl Reads<'_> {
     /// The shell `id` names, or `None` for none, or a terminal that isn't a shell.
@@ -359,38 +392,55 @@ impl Reads<'_> {
     /// `SQLite`'s.
     pub fn shell(self, id: &str) -> rusqlite::Result<Option<ShellRow>> {
         self.0
-            .query_row(
-                "SELECT id, state, generation, runtime, locator, runtime_kind, cwd,
-                   coalesce(current_cwd, cwd), linked_agent_id, theme
-                 FROM terminals WHERE id = ? AND kind = 'shell'",
-                [id],
-                |row| {
-                    let unreadable = |i: usize, what: &str| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            i,
-                            rusqlite::types::Type::Text,
-                            format!("{what} isn't one a shell has").into(),
-                        )
-                    };
-                    let id: String = row.get(0)?;
-                    let state: String = row.get(1)?;
-                    let theme: Option<String> = row.get(9)?;
-                    Ok(ShellRow {
-                        id: TerminalId::parse(&id).ok_or_else(|| unreadable(0, "its id"))?,
-                        state: TerminalState::parse(&state)
-                            .ok_or_else(|| unreadable(1, "its state"))?,
-                        generation: unsigned(row, 2)?,
-                        runtime: row.get(3)?,
-                        locator: row.get(4)?,
-                        runtime_kind: row.get(5)?,
-                        cwd: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        current_cwd: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                        linked_agent_id: row.get(8)?,
-                        theme: theme.as_deref().and_then(TuiTheme::parse),
-                    })
-                },
-            )
+            .query_row(&format!("{SHELL_ROW} AND id = ?"), [id], shell_row)
             .optional()
+    }
+
+    /// The shells of this machine's environment a restarted daemon may still find running, as
+    /// any but lost, closed or failed ones may be, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn recoverable_shells(self) -> rusqlite::Result<Vec<ShellRow>> {
+        self.0
+            .prepare(&format!(
+                "{SHELL_ROW} AND environment_id = (
+                   SELECT id FROM environments WHERE kind = 'local'
+                   ORDER BY created_event_id LIMIT 1)
+                 AND state NOT IN ('lost', 'closed', 'failed') ORDER BY created_event_id"
+            ))?
+            .query_map((), shell_row)?
+            .collect()
+    }
+
+    /// Whether the terminal `id` names hasn't ended and isn't yet recorded as needing a restart.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn restart_unrecorded(self, id: &str) -> rusqlite::Result<bool> {
+        self.0
+            .prepare(
+                "SELECT 1 FROM terminals WHERE id = ? AND restart_protocol IS NULL
+                 AND state NOT IN ('closed', 'failed', 'lost')",
+            )?
+            .exists([id])
+    }
+
+    /// The terminals not yet ended that are recorded as needing a restart.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn restarts_recorded(self) -> rusqlite::Result<Vec<String>> {
+        self.0
+            .prepare(
+                "SELECT id FROM terminals WHERE restart_protocol IS NOT NULL
+                 AND state NOT IN ('closed', 'failed', 'lost') ORDER BY created_event_id",
+            )?
+            .query_map((), |row| row.get(0))?
+            .collect()
     }
 
     /// How many terminals, agents' and shells', hold or may yet hold a PTY.
@@ -436,7 +486,12 @@ impl Reads<'_> {
             .map(|kept| kept.unwrap_or(false))
     }
 
-    fn local_environment(self) -> rusqlite::Result<Option<String>> {
+    /// The environment this machine's terminals run in, once one is registered.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn local_environment(self) -> rusqlite::Result<Option<String>> {
         self.0
             .query_row(
                 "SELECT id FROM environments WHERE kind = 'local' ORDER BY created_event_id LIMIT 1",
@@ -459,6 +514,20 @@ impl Writer<'_> {
             reason: format!("no id can be made: {e}"),
         })?;
         Ok(TerminalId::mint(crate::now_ms(), urandom))
+    }
+
+    /// Notes the directory the shell `id` names was last seen in, as its foreground read shows.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn note_shell_cwd(&self, id: &str, cwd: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE terminals SET current_cwd = ?
+             WHERE id = ? AND kind = 'shell' AND current_cwd IS NOT ?",
+            (cwd, id, cwd),
+        )?;
+        Ok(())
     }
 
     /// The environment this machine's terminals run in: the first registered, or one registered
@@ -505,18 +574,18 @@ fn attachable(state: TerminalState) -> bool {
     )
 }
 
-/// A terminal's restart prompt, or `None` when it needs none or has ended. No holder is named to
-/// end: this daemon doesn't yet prove which still runs one, and a pid it can't vouch for is never
-/// named.
-fn needs_restart(protocol: Option<&str>, state: TerminalState) -> Option<NeedsRestart> {
+/// A terminal's restart prompt, or `None` when it needs none or has ended, naming the holder to end
+/// where `holder_pid` proved it still runs.
+fn needs_restart(
+    protocol: Option<&str>,
+    state: TerminalState,
+    holder_pid: Option<u64>,
+) -> Option<NeedsRestart> {
     let protocol = protocol.filter(|_| restartable(state))?;
     let served = serde_json::from_str::<Vec<String>>(protocol).is_ok_and(|versions| {
         (1..=16).contains(&versions.len()) && negotiate(&[PROTOCOL_VERSION], &versions).is_some()
     });
-    Some(NeedsRestart {
-        holder_pid: None,
-        served,
-    })
+    Some(NeedsRestart { holder_pid, served })
 }
 
 /// The command that attaches to a terminal on `runtime`: the holder's, the only runtime this
@@ -552,7 +621,10 @@ pub(crate) fn environments(
 }
 
 /// Every shell not yet ended, oldest first, with what can be done about it now.
-pub(crate) fn shells(db: &rusqlite::Connection) -> Result<Vec<Shell>, SnapshotError> {
+pub(crate) fn shells(
+    db: &rusqlite::Connection,
+    view: &SnapshotView,
+) -> Result<Vec<Shell>, SnapshotError> {
     let mut statement = db.prepare(
         "SELECT id, environment_id, state, generation, cwd, linked_agent_id, name,
            coalesce(theme, 'dark'), foreground, runtime, restart_protocol
@@ -588,7 +660,8 @@ pub(crate) fn shells(db: &rusqlite::Connection) -> Result<Vec<Shell>, SnapshotEr
             )| {
                 let state: TerminalState =
                     serde_json::from_value(serde_json::Value::String(state))?;
-                let restart = needs_restart(protocol.as_deref(), state);
+                let holder = view.restart_holders.get(&id).copied();
+                let restart = needs_restart(protocol.as_deref(), state, holder);
                 let attach = attachable(state) && restart.as_ref().is_none_or(|r| r.served);
                 let foreground: Option<Foreground> = foreground
                     .as_deref()
@@ -958,7 +1031,7 @@ mod tests {
     fn offers_a_shell_the_commands_its_state_takes_and_attaches_only_on_a_holder_it_serves() {
         let dir = TempDir::new("terminal-snapshot");
         let (mut store, terminal) = opened(&dir);
-        let creating = shells(&store.db).unwrap();
+        let creating = shells(&store.db, &crate::testing::view()).unwrap();
         assert_eq!(creating[0].commands, [ShellCommand::Rename]);
         assert_eq!(creating[0].attach_command, None);
         change(
@@ -975,7 +1048,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let running = &shells(&store.db).unwrap()[0];
+        let running = &shells(&store.db, &crate::testing::view()).unwrap()[0];
         assert_eq!(
             running.commands,
             [ShellCommand::Close, ShellCommand::Rename]
@@ -997,7 +1070,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let unserved = &shells(&store.db).unwrap()[0];
+        let unserved = &shells(&store.db, &crate::testing::view()).unwrap()[0];
         assert_eq!(
             unserved.needs_restart,
             Some(NeedsRestart {
@@ -1008,7 +1081,7 @@ mod tests {
         assert_eq!(unserved.attach_command, None);
         change(&mut store, &terminal, TerminalChange::RestartCleared).unwrap();
         change(&mut store, &terminal, TerminalChange::Lost).unwrap();
-        let lost = &shells(&store.db).unwrap()[0];
+        let lost = &shells(&store.db, &crate::testing::view()).unwrap()[0];
         assert_eq!(
             lost.commands,
             [
