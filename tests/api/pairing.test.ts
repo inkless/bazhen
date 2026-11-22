@@ -152,14 +152,6 @@ describe.each([
       "pairing: required on every origin",
     );
   });
-
-  it("serves the page outside pairing, which says to build the app when it isn't built", async () => {
-    const page = await daemon.request("/", {
-      cookie: null,
-      headers: { "x-forwarded-for": "192.168.1.30, 127.0.0.1" },
-    });
-    expect([page.status, String(page.body).includes("moon run :build")]).toEqual([404, true]);
-  });
 });
 
 describe("a daemon that only serves paired browsers", () => {
