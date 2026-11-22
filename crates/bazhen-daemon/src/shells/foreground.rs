@@ -124,14 +124,16 @@ fn at_generation(found: &ShellForeground, generation: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use bazhen_protocol::shells::{Foreground, TuiTheme};
+    use tokio::sync::oneshot;
 
     use super::*;
     use crate::shells::tests::{Harness, Said, setup};
     use crate::terminals::fake::unreadable;
     use crate::testing::runtime;
+    use crate::writer::Closed;
 
     impl Harness {
         /// What the state shows the only shell's foreground holding.
@@ -178,20 +180,55 @@ mod tests {
         }
     }
 
-    /// Drives `refresh` until its read of the foregrounds has reached the runtime: by then it has
-    /// sent the store its read of the shells again.
-    async fn past_the_read<F: Future + Unpin>(h: &Harness, refresh: &mut F) {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        tokio::select! {
-            biased;
-            _ = refresh => panic!("ended before its turn"),
-            () = async {
-                while h.fake.state.lock().unwrap().foreground_reads == 0 {
-                    assert!(Instant::now() < deadline, "the foregrounds were never read");
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-            } => {}
-        }
+    /// A job that holds the store's writer until `release` sends, and sends `started` once the
+    /// writer takes it: by then every job sent before it has been answered.
+    fn hold(
+        h: &Harness,
+    ) -> (
+        impl Future<Output = Result<bool, Closed>> + '_,
+        std::sync::mpsc::Sender<()>,
+        oneshot::Receiver<()>,
+    ) {
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let (start, started) = oneshot::channel();
+        let held = h.store.run(move |_| {
+            let _ = start.send(());
+            gate.recv().is_ok()
+        });
+        (held, release, started)
+    }
+
+    /// Starts `refresh` with its first read of the shells queued behind a hold, and `held`'s job
+    /// behind that read, then lets the read through. Returns the front hold, to await.
+    async fn queue_behind_a_hold<'h, F: Future + Unpin, H: Future + Unpin>(
+        h: &'h Harness,
+        refresh: &mut F,
+        held: &mut H,
+    ) -> impl Future<Output = Result<bool, Closed>> + 'h {
+        let (front, release_front, _) = hold(h);
+        let mut front = Box::pin(front);
+        queue(&mut front).await;
+        queue(refresh).await;
+        queue(held).await;
+        release_front.send(()).unwrap();
+        front
+    }
+
+    /// Takes `refresh`, whose first read of the shells has been answered, through its read of the
+    /// foregrounds, so that it has sent the store its read of the shells again.
+    async fn past_the_read<F: Future + Unpin>(
+        h: &Harness,
+        refresh: &mut F,
+        held_started: oneshot::Receiver<()>,
+    ) {
+        held_started.await.unwrap();
+        queue(refresh).await;
+        assert_eq!(
+            h.fake.state.lock().unwrap().foreground_answers,
+            1,
+            "the fake's read of the foregrounds didn't answer in the poll that made it, so \
+             refresh's read of the shells again isn't known to be queued: the fake now yields"
+        );
     }
 
     #[test]
@@ -200,12 +237,11 @@ mod tests {
         runtime().block_on(async {
             let id = h.open("open").await.unwrap();
             h.fake.run_in_foreground(&id, "nvim");
-            let (release, gate) = std::sync::mpsc::channel::<()>();
             let mut refresh = std::pin::pin!(h.shells.refresh_foregrounds());
-            queue(&mut refresh).await;
-            let mut held = std::pin::pin!(h.store.run(move |_| gate.recv().is_ok()));
-            queue(&mut held).await;
-            past_the_read(&h, &mut refresh).await;
+            let (held, release, started) = hold(&h);
+            let mut held = std::pin::pin!(held);
+            let front = queue_behind_a_hold(&h, &mut refresh, &mut held).await;
+            past_the_read(&h, &mut refresh, started).await;
             // Behind the writer's hold the shell is read again, then closed, before its write.
             let terminal = bazhen_protocol::ids::TerminalId::parse(&id).unwrap();
             let mut closed = std::pin::pin!(h.store.run(move |store| {
@@ -230,6 +266,7 @@ mod tests {
             refresh.await;
             closed.await.unwrap().unwrap();
             held.await.unwrap();
+            front.await.unwrap();
             let reader = h.store.reader().unwrap();
             let kinds: Vec<String> = reader
                 .reads()
@@ -248,20 +285,20 @@ mod tests {
         let h = setup(100);
         runtime().block_on(async {
             h.open("open").await.unwrap();
-            let (release, gate) = std::sync::mpsc::channel::<()>();
-            let (release_after, gate_after) = std::sync::mpsc::channel::<()>();
             let mut refresh = std::pin::pin!(h.shells.refresh_foregrounds());
-            queue(&mut refresh).await;
-            let mut held = std::pin::pin!(h.store.run(move |_| gate.recv().is_ok()));
-            queue(&mut held).await;
-            past_the_read(&h, &mut refresh).await;
+            let (held, release, started) = hold(&h);
+            let mut held = std::pin::pin!(held);
+            let front = queue_behind_a_hold(&h, &mut refresh, &mut held).await;
+            past_the_read(&h, &mut refresh, started).await;
             // Its read of the shells again is queued behind the first hold, and any write it made
             // would wait behind the second.
-            let mut held_after = std::pin::pin!(h.store.run(move |_| gate_after.recv().is_ok()));
+            let (held_after, release_after, _) = hold(&h);
+            let mut held_after = std::pin::pin!(held_after);
             queue(&mut held_after).await;
             release.send(()).unwrap();
             let ended = tokio::time::timeout(Duration::from_secs(5), &mut refresh).await;
             release_after.send(()).unwrap();
+            front.await.unwrap();
             held.await.unwrap();
             held_after.await.unwrap();
             assert!(ended.is_ok(), "it waited for the store to write");
