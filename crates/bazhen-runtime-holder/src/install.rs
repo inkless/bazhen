@@ -1,7 +1,8 @@
 //! Installs the built `bazhen-holder` where the daemon runs it from, as `install.ts` does: a
 //! directory named by the binary's content, which nothing writes again once it is there. A holder
 //! runs for as long as its terminal does, so the next build installs beside it, never over it,
-//! and the old directory goes only once no holder runs it and it is older than `FRESH`.
+//! and the old directory goes only once no process of this user runs it and it is older than
+//! `FRESH`.
 //!
 //! Every call here blocks on the filesystem: the daemon runs it off its runtime.
 
@@ -16,9 +17,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_client::sha256::{hex, sha256};
-use bazhen_host_guard::holder::{
-    HOLDER_COMMAND, HolderProcess, HolderUse, holder_build_of, is_holder_build, vouch,
-};
+use bazhen_holder::process;
+use bazhen_holder::start_time::{self, StartTimeError};
+use bazhen_host_guard::holder::{HOLDER_COMMAND, holder_build_of, is_holder_build};
+use rustix::process::{Pid, getpid};
 
 /// How old a directory must be before a prune may remove it: younger, it may be another start's
 /// install, still copying, or a build it has just installed and not yet started a holder from.
@@ -339,76 +341,94 @@ pub fn prune_holder_builds(
     removed
 }
 
-/// What the kernel shows of a holder the ledger names.
+/// What the kernel shows of one process it listed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Seen {
-    /// No holder runs as it: gone, or its pid reused.
+    /// Gone since it was listed.
     Gone,
-    /// It runs, with these arguments.
-    Running(Vec<OsString>),
-    /// It runs, but its arguments couldn't be read.
-    Unreadable,
+    /// Its owner can't be read. Each of this user's can be, so it is another's: on Linux, a
+    /// `/proc` mounted `hidepid` hides only other users'; on macOS, it is a zombie.
+    Unowned,
+    /// Run by `uid`, with `argv`, `None` when they can't be read.
+    Of {
+        uid: u32,
+        argv: Option<Vec<OsString>>,
+    },
 }
 
-/// Whether `vouch` shows `holder` running, by its name and start, and with which arguments.
-fn seen(holder: HolderProcess) -> Seen {
-    // Made only to check the pid is still the holder: it is never spent on a signal.
-    if vouch(holder, HolderUse::Kill).is_none() {
-        return Seen::Gone;
-    }
-    match bazhen_holder::process::args(holder.pid) {
-        Ok(argv) => Seen::Running(argv),
-        Err(_) => Seen::Unreadable,
+/// What the kernel shows of `pid` now. Reading only: nothing here reaches a process.
+fn seen(pid: Pid) -> Seen {
+    let gone = || matches!(start_time::of(pid), Err(StartTimeError::Absent(_)));
+    let Ok(uid) = process::uid(pid) else {
+        return if gone() { Seen::Gone } else { Seen::Unowned };
+    };
+    match process::args(pid) {
+        Ok(argv) => Seen::Of {
+            uid,
+            argv: Some(argv),
+        },
+        Err(_) if gone() => Seen::Gone,
+        Err(_) => Seen::Of { uid, argv: None },
     }
 }
 
-/// The builds in `dir` that the live holders among `holders` run, each vouched for by the kernel
-/// now; `None` when one runs but its arguments can't be read, so that nothing is taken for
-/// unused.
-pub fn running_builds(dir: &Path, holders: &[HolderProcess]) -> Option<BTreeSet<String>> {
-    running_builds_with(dir, holders, seen)
+/// The builds in `dir` that some process of `uid` runs, as `runningBuilds` in `install.ts`
+/// finds them with `ps`: every process the kernel lists, whether or not a ledger names it, so a
+/// holder the ledger lost, or recorded with no start, still keeps its build. `None` when that
+/// list can't be vouched for as whole, so that nothing is taken for unused: it can't be read,
+/// it doesn't show this process as `uid`'s, one of `uid`'s arguments can't be read, or `dir`
+/// isn't a path `holder_build_of` can read.
+pub fn running_builds(dir: &Path, uid: u32) -> Option<BTreeSet<String>> {
+    running_builds_with(dir, uid, getpid(), process::pids(), seen)
 }
 
 fn running_builds_with(
     dir: &Path,
-    holders: &[HolderProcess],
-    see: impl Fn(HolderProcess) -> Seen,
+    uid: u32,
+    me: Pid,
+    pids: io::Result<Vec<Pid>>,
+    see: impl Fn(Pid) -> Seen,
 ) -> Option<BTreeSet<String>> {
+    dir.to_str()?;
     let mut builds = BTreeSet::new();
-    for &holder in holders {
-        match see(holder) {
-            Seen::Gone => {}
-            Seen::Unreadable => return None,
-            Seen::Running(argv) => {
+    let mut listed_me = false;
+    for pid in pids.ok()? {
+        match see(pid) {
+            Seen::Gone | Seen::Unowned => {}
+            Seen::Of { uid: owner, .. } if owner != uid => {}
+            Seen::Of { argv: None, .. } => return None,
+            Seen::Of {
+                argv: Some(argv), ..
+            } => {
+                listed_me |= pid == me;
                 if let Some(build) = holder_build_of(&argv, dir) {
                     builds.insert(build.to_owned());
                 }
             }
         }
     }
-    Some(builds)
+    listed_me.then_some(builds)
 }
 
-/// Removes the builds in `dir` that neither `installed` nor any live holder among `holders` uses,
-/// as `prune_holder_builds` does: none when a live holder's build can't be read.
+/// Removes the builds in `dir` that neither `installed` nor any process of `uid` uses, as
+/// `prune_holder_builds` does: none when `running_builds` can't say which run.
 pub fn prune_unused_holders(
     dir: &Path,
     uid: u32,
     installed: Option<&InstalledHolder>,
-    holders: &[HolderProcess],
 ) -> Vec<String> {
-    prune_unused_with(dir, uid, installed, holders, seen, SystemTime::now())
+    let running = running_builds(dir, uid);
+    prune_unused_with(dir, uid, installed, running, SystemTime::now())
 }
 
 fn prune_unused_with(
     dir: &Path,
     uid: u32,
     installed: Option<&InstalledHolder>,
-    holders: &[HolderProcess],
-    see: impl Fn(HolderProcess) -> Seen,
+    running: Option<BTreeSet<String>>,
     now: SystemTime,
 ) -> Vec<String> {
-    let Some(mut keep) = running_builds_with(dir, holders, see) else {
+    let Some(mut keep) = running else {
         return Vec::new();
     };
     if let Some(installed) = installed {
@@ -421,8 +441,6 @@ fn prune_unused_with(
 mod tests {
     use std::cell::RefCell;
     use std::os::unix::fs::symlink;
-
-    use rustix::process::{Pid, getpid};
 
     use super::*;
     use crate::test_support::{TempDir, me};
@@ -548,24 +566,44 @@ mod tests {
         set_age(path, FRESH + Duration::from_mins(1));
     }
 
-    fn holder(pid: i32) -> HolderProcess {
-        HolderProcess {
-            pid: Pid::from_raw(pid).unwrap(),
-            start: 1_700_000_000,
+    /// The pid the test's kernel lists as this process.
+    const SELF: i32 = 4242;
+
+    fn pid(raw: i32) -> Pid {
+        Pid::from_raw(raw).unwrap()
+    }
+
+    /// A process of `uid` running `argv`.
+    fn of(uid: u32, argv: &[OsString]) -> Seen {
+        Seen::Of {
+            uid,
+            argv: Some(argv.to_vec()),
         }
     }
 
-    /// The kernel as a test has it: what each pid runs, and nothing at any other.
-    fn kernel(seen: Vec<(i32, Seen)>) -> impl Fn(HolderProcess) -> Seen {
-        move |h| {
-            seen.iter()
-                .find(|(pid, _)| *pid == h.pid.as_raw_pid())
-                .map_or(Seen::Gone, |(_, s)| s.clone())
-        }
-    }
-
+    /// This user's process running the program at `path`.
     fn running(path: impl Into<OsString>) -> Seen {
-        Seen::Running(vec![path.into()])
+        of(me(), &[path.into()])
+    }
+
+    /// The kernel as a test has it: this process, as this user's, then each of `seen`.
+    fn kernel(seen: Vec<(i32, Seen)>) -> (io::Result<Vec<Pid>>, impl Fn(Pid) -> Seen) {
+        let seen: Vec<_> = [(SELF, running("bazhen-daemon"))]
+            .into_iter()
+            .chain(seen)
+            .collect();
+        let pids = seen.iter().map(|(raw, _)| pid(*raw)).collect();
+        let see = move |p: Pid| {
+            seen.iter()
+                .find(|(raw, _)| pid(*raw) == p)
+                .map_or(Seen::Gone, |(_, s)| s.clone())
+        };
+        (Ok(pids), see)
+    }
+
+    fn builds_in(dir: &Path, seen: Vec<(i32, Seen)>) -> Option<BTreeSet<String>> {
+        let (pids, see) = kernel(seen);
+        running_builds_with(dir, me(), pid(SELF), pids, see)
     }
 
     #[test]
@@ -907,35 +945,43 @@ mod tests {
     }
 
     #[test]
-    fn are_the_builds_the_live_holders_run_from_the_directory() {
+    fn are_those_some_process_of_this_user_runs_from_the_directory() {
         let home = home();
         let elsewhere = home.root.join("elsewhere").join(OLD).join("bazhen-holder");
-        let see = kernel(vec![
-            (77, running(home.at(RUNNING))),
-            (78, running(elsewhere)),
-            (79, Seen::Running(vec!["vim".into(), home.at(OLD)])),
-            (80, running("/usr/bin/sleep")),
-        ]);
-        let holders: Vec<_> = (76..=80).map(holder).collect();
-        assert_eq!(
-            running_builds_with(&home.dir, &holders, see),
-            Some(BTreeSet::from([RUNNING.to_owned()]))
+        let running = builds_in(
+            &home.dir,
+            vec![
+                (77, running(home.at(RUNNING))),
+                (78, of(me() + 1, &[home.at(OLD)])),
+                (79, of(me(), &["vim".into(), home.at(OLD)])),
+                (80, running("/usr/bin/sleep")),
+                (81, running(elsewhere)),
+                (82, Seen::Unowned),
+                (
+                    83,
+                    Seen::Of {
+                        uid: me() + 1,
+                        argv: None,
+                    },
+                ),
+            ],
         );
+        assert_eq!(running, Some(BTreeSet::from([RUNNING.to_owned()])));
     }
 
     #[test]
-    fn keeps_the_builds_live_holders_run_and_the_one_just_installed_even_with_no_holder_on_it() {
+    fn keep_their_builds_and_the_one_just_installed_even_with_no_holder_on_it() {
         let home = home();
         let installed = home.install();
         age(&home.dir.join(&installed.build));
         home.plant(OLD);
         home.plant(RUNNING);
+        let running = builds_in(&home.dir, vec![(77, running(home.at(RUNNING)))]);
         let removed = prune_unused_with(
             &home.dir,
             me(),
             Some(&home.install()),
-            &[holder(77), holder(78)],
-            kernel(vec![(77, running(home.at(RUNNING)))]),
+            running,
             SystemTime::now(),
         );
         assert_eq!(
@@ -949,36 +995,83 @@ mod tests {
     }
 
     #[test]
-    fn are_unknown_when_a_live_holder_s_arguments_can_t_be_read_and_then_nothing_is_removed() {
+    fn are_unknown_when_the_list_fails_or_doesn_t_show_this_process_as_this_user_s() {
+        let home = home();
+        let (_, see) = kernel(vec![(77, running(home.at(RUNNING)))]);
+        let failed = running_builds_with(
+            &home.dir,
+            me(),
+            pid(SELF),
+            Err(io::Error::other("no list")),
+            &see,
+        );
+        let unlisted = running_builds_with(&home.dir, me(), pid(SELF), Ok(vec![pid(77)]), &see);
+        let another_s =
+            running_builds_with(&home.dir, me(), pid(SELF), Ok(vec![pid(SELF)]), |_| {
+                of(me() + 1, &["bazhen-daemon".into()])
+            });
+        assert_eq!((failed, unlisted, another_s), (None, None, None));
+    }
+
+    #[test]
+    fn are_unknown_when_a_process_of_this_user_s_arguments_can_t_be_read_and_then_none_go() {
         let home = home();
         home.plant(OLD);
-        let see = || kernel(vec![(77, Seen::Unreadable)]);
-        let holders = [holder(77)];
-        assert_eq!(running_builds_with(&home.dir, &holders, see()), None);
+        let unreadable = Seen::Of {
+            uid: me(),
+            argv: None,
+        };
+        let running = builds_in(&home.dir, vec![(77, unreadable)]);
+        assert_eq!(running, None);
         assert_eq!(
-            prune_unused_with(&home.dir, me(), None, &holders, see(), SystemTime::now()),
+            prune_unused_with(&home.dir, me(), None, running, SystemTime::now()),
             Vec::<String>::new()
         );
         assert_eq!(home.ls(), vec![OLD.to_owned()]);
     }
 
+    /// `holder_build_of` reads a directory only as text, so under one that isn't, a holder's
+    /// build would go unseen.
     #[test]
-    fn are_read_from_the_kernel_which_shows_no_holder_at_this_test_s_pid() {
-        let home = home();
-        let pid = getpid();
-        let start = bazhen_holder::start_time::of(pid).unwrap().get();
-        let nobody = HolderProcess {
-            pid: Pid::from_raw(i32::MAX).unwrap(),
-            start,
-        };
-        assert_eq!(
-            running_builds(&home.dir, &[HolderProcess { pid, start }, nobody]),
-            Some(BTreeSet::new())
-        );
+    fn are_unknown_under_a_directory_that_is_not_text() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let dir = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/zo\xffe/holder"));
+        let argv = [dir.join(RUNNING).join("bazhen-holder").into_os_string()];
+        assert_eq!(builds_in(dir, vec![(77, of(me(), &argv))]), None);
     }
 
-    /// The test container's: a copy of `sleep` named as the holder, which the kernel names so
-    /// too, installed and run from its build while the next build installs beside it.
+    #[test]
+    fn are_read_from_the_kernel_which_lists_this_process() {
+        let home = home();
+        assert_eq!(running_builds(&home.dir, me()), Some(BTreeSet::new()));
+    }
+
+    /// A child the test started, killed through the test's chokepoint and reaped however the
+    /// test ends, so a failure leaves no `sleep` running.
+    struct Sleeper(std::process::Child);
+
+    impl Sleeper {
+        fn pid(&self) -> Pid {
+            Pid::from_raw(i32::try_from(self.0.id()).unwrap()).unwrap()
+        }
+
+        fn end(&mut self) {
+            // Unreaped, its pid is still its own: no other process can have it.
+            if let Ok(None) = self.0.try_wait() {
+                let _ = bazhen_test_signal::signal(self.0.id(), bazhen_test_signal::Signal::KILL);
+                let _ = self.0.wait();
+            }
+        }
+    }
+
+    impl Drop for Sleeper {
+        fn drop(&mut self) {
+            self.end();
+        }
+    }
+
+    /// The test container's: a copy of `sleep` named as the holder, installed and run from its
+    /// build while the next build installs beside it.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn keeps_a_build_a_live_holder_runs_while_the_next_installs_then_prunes_it_once_it_ends() {
@@ -990,29 +1083,34 @@ mod tests {
             .unwrap();
         fs::copy(sleep, &home.source).unwrap();
         let old = home.install();
-        let mut child = std::process::Command::new(&old.binary)
-            .arg("300")
-            .spawn()
-            .unwrap();
-        let pid = Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
-        // The kernel names it as the holder once it has exec'd, which may be a moment after.
-        let start = loop {
-            if bazhen_holder::process::comm(pid).is_ok_and(|c| c == "bazhen-holder") {
-                break bazhen_holder::start_time::of(pid).unwrap().get();
-            }
+        let mut sleeper = Sleeper(
+            std::process::Command::new(&old.binary)
+                .arg("300")
+                .spawn()
+                .unwrap(),
+        );
+        // It runs from its build once it has exec'd, which may be a moment after the spawn.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while process::args(sleeper.pid())
+            .ok()
+            .and_then(|argv| argv.into_iter().next())
+            != Some(old.binary.clone().into_os_string())
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the sleeper never exec'd"
+            );
             std::thread::yield_now();
-        };
-        let live = [HolderProcess { pid, start }];
+        }
         fs::write(&home.source, "the next build, which nothing here runs").unwrap();
         let next = home.install();
         age(&home.dir.join(&old.build));
         let while_running = (
-            running_builds(&home.dir, &live),
-            prune_unused_holders(&home.dir, me(), Some(&next), &live),
+            running_builds(&home.dir, me()),
+            prune_unused_holders(&home.dir, me(), Some(&next)),
         );
-        bazhen_test_signal::signal(child.id(), bazhen_test_signal::Signal::KILL).unwrap();
-        child.wait().unwrap();
-        let after = prune_unused_holders(&home.dir, me(), Some(&next), &live);
+        sleeper.end();
+        let after = prune_unused_holders(&home.dir, me(), Some(&next));
         assert_eq!(
             (while_running, after, home.ls()),
             (

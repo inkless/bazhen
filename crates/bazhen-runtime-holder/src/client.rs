@@ -259,7 +259,8 @@ impl<T: Send + 'static> Answer<T> {
 
 /// A connection's events, in the order the holder sent them, ending with `HolderEvent::Ended`.
 /// They queue up to `EVENTS_QUEUED` for a consumer that hasn't taken them, and the connection
-/// reads no more from the holder meanwhile; once this is dropped, they are dropped as they come.
+/// reads no more from the holder meanwhile, answers included; once this is dropped, they are
+/// dropped as they come. So it is drained or dropped, never left.
 #[derive(Debug)]
 pub struct HolderEvents(mpsc::Receiver<HolderEvent>);
 
@@ -726,11 +727,18 @@ async fn take_frames(
             Step::Nothing => {}
             Step::End(end) => return ControlFlow::Break(Some(end)),
             Step::Event(event) => {
-                // A consumer that dropped its events has the rest dropped as they come.
+                // A consumer that dropped its events has the rest dropped as they come. One that
+                // stopped draining them holds the reader here, until the connection ends or is
+                // stopped from above.
                 let ended = pin!(shared.ended.cancelled());
+                let stopped = pin!(shared.stop.cancelled());
                 let sending = pin!(events.send(event));
-                if let Either::Left(_) = select(ended, sending).await {
-                    return ControlFlow::Break(None);
+                match select(select(ended, stopped), sending).await {
+                    Either::Left((Either::Left(_), _)) => return ControlFlow::Break(None),
+                    Either::Left((Either::Right(_), _)) => {
+                        return ControlFlow::Break(Some(HolderEnd::Eof));
+                    }
+                    Either::Right(_) => {}
                 }
             }
         }
@@ -2082,6 +2090,50 @@ mod tests {
     }
 
     #[test]
+    fn ends_at_once_when_cancelled_while_its_events_are_full_failing_what_waits() {
+        block_on(async {
+            let cancel = CancellationToken::new();
+            let Connected {
+                client,
+                mut holder,
+                events,
+                ..
+            } = FakeHolder::client_with(ClientOptions {
+                cancel: cancel.clone(),
+                ..ClientOptions::default()
+            })
+            .await;
+            let mut answer = client.stats();
+            let request = holder.request().await;
+            let mut sent: Vec<_> = (0..=EVENTS_QUEUED)
+                .map(|_| Reply::Title(title("vim")))
+                .collect();
+            sent.push(Reply::Stats {
+                id: request.id(),
+                body: stats(),
+            });
+            holder.send(&sent).await;
+            while events.0.len() < EVENTS_QUEUED {
+                tokio::task::yield_now().await;
+            }
+            // The reader holds the event past the queue's end, and the answer behind it.
+            for _ in 0..100 {
+                tokio::task::yield_now().await;
+            }
+            let held = ((&mut answer).now_or_never().is_none(), client.is_open());
+            cancel.cancel();
+            let bound = Duration::from_secs(5);
+            let ended = tokio::time::timeout(bound, client.ended()).await;
+            let failed = end_of(tokio::time::timeout(bound, answer).await.unwrap());
+            tokio::time::timeout(bound, client.closed()).await.unwrap();
+            assert_eq!(
+                (held, ended.unwrap(), failed),
+                ((true, true), HolderEnd::Eof, HolderEnd::Eof)
+            );
+        });
+    }
+
+    #[test]
     fn hangs_up_when_asked_ending_its_side_so_the_holder_sees_end_of_file() {
         block_on(async {
             let Connected {
@@ -2097,17 +2149,24 @@ mod tests {
 
     #[test]
     fn drops_the_socket_when_a_holder_that_stopped_reading_doesn_t_take_the_hang_up() {
+        const HUNG_UP: Duration = Duration::from_millis(200);
         block_on(async {
-            let Connected { client, .. } = FakeHolder::client_with(ClientOptions {
-                hang_up: Duration::from_millis(20),
+            // Kept, and never read from.
+            let Connected {
+                client,
+                holder: _stopped,
+                ..
+            } = FakeHolder::client_with(ClientOptions {
+                hang_up: HUNG_UP,
                 ..ClientOptions::default()
             })
             .await;
+            // More than a socket's buffer holds, so the hang-up can't be sent before the wait.
             client.input(&vec![0; MAX_REQUEST_BYTES]).unwrap();
+            let before = std::time::Instant::now();
             client.end();
-            let mut closed = pin!(client.closed());
-            assert!(closed.as_mut().now_or_never().is_none());
-            closed.await;
+            client.closed().await;
+            assert!(before.elapsed() >= HUNG_UP, "{:?}", before.elapsed());
         });
     }
 

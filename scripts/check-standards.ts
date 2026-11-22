@@ -1250,29 +1250,29 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/session.rs::supported":
     "reads /proc/self/stat for own_pid, which proc_stat fuzzes",
   "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::recv":
-    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+    "hands on events the reader made of frames from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::try_recv":
-    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+    "hands on events the reader made of frames from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::poll_next":
-    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+    "hands on events the reader made of frames from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_hello":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_snapshot":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_stats":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_foreground":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_screen":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::into_ok":
-    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "unwraps an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Answered::name":
     "names an answer's kind; reads no bytes",
   "crates/bazhen-runtime-holder/src/client.rs::offer":
     "a trait's method with no body: Typed::offer is its one impl",
   "crates/bazhen-runtime-holder/src/client.rs::Typed::offer":
-    "gives an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes to the request waiting for it; parses nothing",
+    "gives the request waiting an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Shared::hang_up":
     "queues the hang-up; reads nothing",
   "crates/bazhen-runtime-holder/src/client.rs::Shared::send":
@@ -1280,15 +1280,15 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/client.rs::Waiter::drop":
     "removes a request from those waiting; reads no bytes",
   "crates/bazhen-runtime-holder/src/client.rs::waiting":
-    "awaits an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+    "awaits an answer made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::ask":
     "encodes a request and queues it; reads nothing",
   "crates/bazhen-runtime-holder/src/client.rs::dispatch":
-    "routes a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes by its type; parses nothing",
+    "routes a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it) by its type; parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::answer":
-    "gives an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes to its request; parses nothing",
+    "gives a request its answer, made of a frame from FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/client.rs::take_frames":
-    "takes FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames and hands them to dispatch; parses nothing itself",
+    "takes frames from FrameDecoder::next_frame (the proto crate's frame target fuzzes it) and hands them to dispatch; parses nothing itself",
   "crates/bazhen-runtime-holder/src/client.rs::read_loop":
     "reads the socket into FrameDecoder::push, which the proto crate's frame target fuzzes; parses nothing itself",
   "crates/bazhen-runtime-holder/src/client.rs::drain":
@@ -3691,32 +3691,114 @@ export function withoutTrackerCloses(code: string): string {
   return code.replace(close, (call) => call.replace(/[^\n]/g, " "));
 }
 
+/** The in-process fake holder a client in runtime-holder's tests talks to, and its crate. */
+const FAKE_HOLDER = "crates/bazhen-runtime-holder/src/fake_holder.rs";
+const FAKE_HOLDER_CRATE = "crates/bazhen-runtime-holder/src/";
+/** A `FakeHolder` that may be another type under that name: an alias, or another definition. */
+const FAKE_HOLDER_ALIAS = /\bas\s+FakeHolder\b|\btype\s+FakeHolder\b/;
+const FAKE_HOLDER_DEFINED =
+  /\b(?:struct|enum|union|trait|mod|fn|const|static)\s+FakeHolder\b|\bmacro_rules\s*!\s*FakeHolder\b/;
+
+/**
+ * The constructors of `FakeHolder` in `fake_holder.rs` whose client can only be talking to the
+ * fake: each takes no `self`, and nothing but `ClientOptions`, an `impl FnOnce(&mut HelloReply)`
+ * or a `&Path` it binds a `UnixListener` at (a bind fails where a socket already is), and each
+ * `connect(` in it names such a path. So none takes a stream, a socket, a client or a path to
+ * another's listener, and a constructor added that does isn't trusted. None, when the file
+ * itself closes, signals or respawns anything.
+ */
+export function fakeHolderConstructors(source: string): Set<string> {
+  const code = rustCode(source);
+  const trusted = new Set<string>();
+  if (SIGNALLING_CALL.test(code)) return trusted;
+  for (const impl of code.matchAll(/\bimpl\s+FakeHolder\s*\{/g)) {
+    const block = code.slice(impl.index, closingBrace(code, impl.index + impl[0].length));
+    for (const fn of block.matchAll(/\bfn\s+(\w+)\s*(?:<[^>]*>)?\s*\(/g)) {
+      const open = fn.index + fn[0].length;
+      const params = topLevelParts(block.slice(open, closingParen(block, open) - 1));
+      const start = fnBodyStart(block, fn.index);
+      const body = block.slice(start, closingBrace(block, start));
+      const bound = (name: string) =>
+        new RegExp(`\\bUnixListener\\s*::\\s*bind\\s*\\(\\s*&?\\s*${name}\\s*\\)`).test(body);
+      const fit = params.every((param) => {
+        const typed = /^(\w+)\s*:\s*([^]+)$/.exec(param);
+        const [name, type] = [typed?.[1] ?? "", typed?.[2]?.trim() ?? ""];
+        return (
+          /^ClientOptions$/.test(type) ||
+          /^impl\s+FnOnce\s*\(\s*&\s*mut\s+HelloReply\s*\)$/.test(type) ||
+          (/^&\s*Path$/.test(type) && bound(name))
+        );
+      });
+      const dials = [...body.matchAll(/\bconnect\s*\(\s*&?\s*(\w*)/g)];
+      if (fit && dials.every((m) => bound(m[1] ?? ""))) trusted.add(fn[1] ?? "");
+    }
+  }
+  trusted.delete("");
+  return trusted;
+}
+
+/**
+ * The trusted constructors of runtime-holder's `FakeHolder` (`fakeHolderConstructors`), or none
+ * when any file of that crate could make the name another type's: an alias to it, or a
+ * definition of it anywhere but `fake_holder.rs`.
+ */
+function trustedFakeHolder(files: readonly string[], read: (file: string) => string) {
+  const crate = files.filter((f) => f.startsWith(FAKE_HOLDER_CRATE));
+  if (!crate.includes(FAKE_HOLDER)) return new Set<string>();
+  const renamed = crate.some((f) => {
+    const code = rustCode(read(f));
+    return FAKE_HOLDER_ALIAS.test(code) || (f !== FAKE_HOLDER && FAKE_HOLDER_DEFINED.test(code));
+  });
+  return renamed ? new Set<string>() : fakeHolderConstructors(read(FAKE_HOLDER));
+}
+
 /**
  * `code` with each `close(`, `signal(` and `respawn(` asked of a client of the in-process fake
- * holder blanked out, to its length so positions hold: that client's far end is a `FakeHolder`,
- * which runs no child, so the request reaches none. A fake's client is a name a function binds
- * by a `let` from a `FakeHolder::<constructor>(..)` call taken whole (nothing after it but
- * `.await`, `.unwrap()` or `?`), and mentions nowhere else but before a `.` (a field's or a
- * path's segment of that name isn't it): so no other `let`, parameter, closure, `for` or match
- * arm can bind it to anything else. A request on any other
- * name, on a field (`far.client.close()`), or a `close_step`, still counts.
+ * holder blanked out, to its length so positions hold. That client's far end is runtime-holder's
+ * `FakeHolder`, which runs no child, so the request reaches none.
+ *
+ * A fake's client is a name that a `let` binds from a call of one of `constructors` (see
+ * `fakeHolderConstructors`), taken whole: nothing after the call but `.await`, `.unwrap()` or
+ * `?`. Every other mention of it in that function comes before a `.`, so no other `let`,
+ * parameter, closure, `for` or match arm binds it to anything else; a field's or a path's
+ * segment of that name isn't one. Only the calls in the block that `let` is in are blanked.
+ *
+ * Only in `file`s of that crate that take `FakeHolder` from `crate::fake_holder` by a `use` and
+ * by no other path, or in `fake_holder.rs` itself. A request on any other name, on a field
+ * (`far.client.close()`), or a `close_step`, still counts.
  */
-export function withoutFakeHolderRequests(code: string): string {
+export function withoutFakeHolderRequests(
+  code: string,
+  file: string,
+  constructors: ReadonlySet<string>,
+): string {
+  if (!file.startsWith(FAKE_HOLDER_CRATE) || constructors.size === 0) return code;
+  const uses = [...code.matchAll(/\buse\s+([^;]*);/g)]
+    .map((m) => (m[1] ?? "").trim())
+    .filter((u) => /\bFakeHolder\b/.test(u));
+  const fromTheFake = uses.every((u) =>
+    /^crate\s*::\s*fake_holder\s*::\s*(?:FakeHolder|\{[^{}]*\})$/.test(u),
+  );
+  if (file !== FAKE_HOLDER && (uses.length === 0 || !fromTheFake)) return code;
   const blanks: [number, number][] = [];
   for (const fn of code.matchAll(/\bfn\s+\w+/g)) {
     const start = fnBodyStart(code, fn.index);
     if (code[start - 1] !== "{") continue;
-    const end = closingBrace(code, start);
-    const whole = code.slice(fn.index, end);
+    const whole = code.slice(fn.index, closingBrace(code, start));
     const fake = new Map<string, number[]>();
-    for (const bound of whole.matchAll(/\blet\s+([^=;]+?)\s*=\s*FakeHolder\s*::\s*\w+\s*\(/g)) {
+    const scope = new Map<string, [number, number]>();
+    const lets = /\blet\s+([^=;]+?)\s*=\s*FakeHolder\s*::\s*(\w+)\s*\(/g;
+    for (const bound of whole.matchAll(lets)) {
+      if (!constructors.has(bound[2] ?? "")) continue;
       const close = closingParen(whole, bound.index + bound[0].length);
       if (!/^(?:\s*\.\s*(?:await|unwrap\s*\(\s*\))|\s*\?)*\s*;/.test(whole.slice(close))) continue;
       const pattern = bound[1] ?? "";
       const at = bound.index + bound[0].indexOf(pattern, 3);
+      const block = enclosingBlock(whole, bound.index);
       for (const name of pattern.matchAll(/\b[a-z_]\w*\b/g)) {
         if (name[0] === "mut" || name[0] === "ref" || name[0] === "_") continue;
         fake.set(name[0], [...(fake.get(name[0]) ?? []), at + name.index]);
+        scope.set(name[0], [bound.index, block]);
       }
     }
     for (const [name, at] of fake) {
@@ -3725,12 +3807,14 @@ export function withoutFakeHolderRequests(code: string): string {
         (m) => at.includes(m.index) || /^\s*\./.test(whole.slice(m.index + name.length)),
       );
       if (at.length !== 1 || !onlyCalled) continue;
+      const [from, to] = scope.get(name) ?? [0, 0];
       const request = new RegExp(
         `(?<![\\w.]\\s*)\\b${name}\\s*\\.\\s*(?:close|signal|respawn)\\s*\\(`,
         "g",
       );
-      for (const m of whole.matchAll(request)) {
-        blanks.push([fn.index + m.index, fn.index + m.index + m[0].length]);
+      for (const m of whole.slice(from, to).matchAll(request)) {
+        const begin = fn.index + from + m.index;
+        blanks.push([begin, begin + m[0].length]);
       }
     }
   }
@@ -3739,6 +3823,16 @@ export function withoutFakeHolderRequests(code: string): string {
     out = out.slice(0, from) + out.slice(from, to).replace(/[^\n]/g, " ") + out.slice(to);
   }
   return out;
+}
+
+/** Just past the `}` that closes the innermost block `at` is in, or the end of `code`. */
+function enclosingBlock(code: string, at: number): number {
+  let depth = 0;
+  for (let i = at - 1; i >= 0; i--) {
+    if (code[i] === "}") depth++;
+    else if (code[i] === "{" && depth-- === 0) return closingBrace(code, i + 1);
+  }
+  return code.length;
 }
 
 /** Just past the `)` that closes the `(` before `from`, or the end of `code`. */
@@ -3765,9 +3859,14 @@ export function unmarkedSignallingTests(
     rust.flatMap((f) => (read(f).includes(HOLDER_BINARY) ? [testBinary(f) ?? ""] : [])),
   );
   holderBinaries.delete("");
+  const fake = trustedFakeHolder(rust, read);
   return rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = withoutFakeHolderRequests(withoutTrackerCloses(rustCode(read(file), strings)));
+    const code = withoutFakeHolderRequests(
+      withoutTrackerCloses(rustCode(read(file), strings)),
+      file,
+      fake,
+    );
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however

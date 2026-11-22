@@ -11,6 +11,12 @@
 //!
 //! The client is async, on tokio, as only the daemon is; install and prune block, and run off
 //! the runtime.
+//!
+//! A connection reads its replies and its events in the order the holder wrote them, so a
+//! consumer that stops taking its events, once `EVENTS_QUEUED` wait, holds back every answer
+//! behind them too, and no request has a timeout of its own: whoever holds a connection's
+//! `HolderEvents` drains it or drops it. Cancelling `ClientOptions::cancel` ends a connection
+//! even then.
 
 mod client;
 mod install;
