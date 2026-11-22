@@ -18,6 +18,7 @@ mod terminals;
 #[cfg(test)]
 mod testing;
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -139,15 +140,42 @@ impl Store {
         &mut self,
         write: impl FnOnce(&Writer<'_>) -> Result<T, E>,
     ) -> Result<T, E> {
-        let writer = Writer {
-            tx: self
-                .db
-                .transaction_with_behavior(TransactionBehavior::Immediate)?,
-            host: self.host.as_ref().map(HostId::as_str),
+        let (out, scrub) = {
+            let writer = Writer {
+                tx: self
+                    .db
+                    .transaction_with_behavior(TransactionBehavior::Immediate)?,
+                host: self.host.as_ref().map(HostId::as_str),
+                scrub: Cell::new(false),
+            };
+            let out = write(&writer)?;
+            let scrub = writer.scrub.get();
+            writer.tx.commit()?;
+            (out, scrub)
         };
-        let out = write(&writer)?;
-        writer.tx.commit()?;
+        if scrub {
+            self.scrub_journal();
+        }
         Ok(out)
+    }
+
+    /// Writes the WAL into the database and truncates it, so a shell's cleared line, zeroed in the
+    /// database's page by `secure_delete`, keeps no earlier copy in the journal. A reader holding
+    /// the WAL open leaves it for the next checkpoint, which `journal_size_limit` truncates as
+    /// well.
+    fn scrub_journal(&self) {
+        let truncated = self
+            .db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", (), |row| {
+                row.get::<_, i64>(0)
+            });
+        if let Err(err) = truncated {
+            // The line is cleared and committed either way; only its earlier copy waits for the
+            // next checkpoint.
+            tracing::warn!(
+                "the WAL could not be truncated after a shell's line was cleared: {err}"
+            );
+        }
     }
 
     /// Runs `write` as [`Store::write`] does, its commit flushed to disk before this answers, so

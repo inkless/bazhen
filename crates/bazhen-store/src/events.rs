@@ -1,6 +1,7 @@
 //! The event log: every change is an event appended with its projection in one transaction, read
 //! back in id order from a cursor, and retired once old unless a projection still points at it.
 
+use std::cell::Cell;
 use std::num::NonZeroU32;
 
 use bazhen_protocol::events::{
@@ -190,6 +191,9 @@ pub enum AppendError {
 pub struct Writer<'a> {
     pub(crate) tx: Transaction<'a>,
     pub(crate) host: Option<&'a str>,
+    /// Whether a shell's kept line was cleared, so the journal's earlier copy of it is scrubbed
+    /// once this commits.
+    pub(crate) scrub: Cell<bool>,
 }
 
 impl Writer<'_> {
@@ -224,6 +228,15 @@ impl Writer<'_> {
             event: kind.name,
             reason: "its id isn't positive".to_owned(),
         })?;
+        if let NewEvent::Terminal {
+            terminal,
+            change: TerminalChange::Closed(_) | TerminalChange::Failed(_),
+            ..
+        } = event
+            && Reads(&self.tx).keeps_last_command(terminal.as_str())?
+        {
+            self.scrub.set(true);
+        }
         projections::project(&self.tx, &projections::At { id, ts: &ts, host }, event)?;
         Ok(id)
     }

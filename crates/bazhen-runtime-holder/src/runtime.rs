@@ -80,7 +80,7 @@ impl RuntimeOptions {
 }
 
 /// What a terminal runs, as a create or a respawn gives it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ProcessLaunch {
     pub argv: Vec<String>,
     pub cwd: String,
@@ -88,6 +88,19 @@ pub struct ProcessLaunch {
     pub env: BTreeMap<String, String>,
     pub generation: Generation,
     pub theme: Option<Theme>,
+}
+
+/// Its variables by name alone: a value may be a secret, as a shell's report token is.
+impl std::fmt::Debug for ProcessLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessLaunch")
+            .field("argv", &self.argv)
+            .field("cwd", &self.cwd)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("generation", &self.generation)
+            .field("theme", &self.theme)
+            .finish()
+    }
 }
 
 /// A new terminal.

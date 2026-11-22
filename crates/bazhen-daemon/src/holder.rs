@@ -1141,6 +1141,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 tracker: TaskTracker::new(),
+                integration: None,
             });
             (Arc::new(shells), store, thread)
         }

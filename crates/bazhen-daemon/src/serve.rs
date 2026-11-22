@@ -27,6 +27,7 @@ use crate::private_dir::ensure_private_dir;
 use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
+use crate::shells::integration::{Integration, install_shell_integration};
 use crate::shells::{Shells, ShellsDeps};
 use crate::terminals::Events;
 use crate::tokens;
@@ -187,6 +188,42 @@ fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<R
     served
 }
 
+/// What new shells report their lines with (`shellIntegration` in `main.ts`): with
+/// `shells.retype_last_command` off, nothing, and every line and token kept from before is
+/// forgotten; with it on, the snippets written where shells are told to find them, and the hook
+/// client built beside the daemon that they run. Without either, shells report nothing, as is said.
+async fn shell_integration(
+    startup: &Startup,
+    store: &Writer,
+    hook: &bazhen_protocol::daemon::HookClient,
+) -> Result<Option<Integration>, Refused> {
+    if !startup.settings.config.retype_last_command {
+        store
+            .run(|store| store.write(|w: &bazhen_store::Writer<'_>| w.forget_shell_commands()))
+            .await
+            .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
+            .map_err(|err| Refused::Said(format!("bazhen can't forget shells' lines: {err}")))?;
+        return Ok(None);
+    }
+    if hook.fallback {
+        tracing::warn!(
+            "shells.retype_last_command is on, but bazhen-hook is not built: shells report nothing"
+        );
+        return Ok(None);
+    }
+    let dir = Path::new(&startup.paths.state).join("shell-integration");
+    match install_shell_integration(&dir, startup.uid) {
+        Ok(()) => Ok(Some(Integration {
+            hook: hook.path.clone(),
+            dir: dir.to_string_lossy().into_owned(),
+        })),
+        Err(err) => {
+            tracing::warn!("shells.retype_last_command is on, but shells report nothing: {err}");
+            Ok(None)
+        }
+    }
+}
+
 /// The shells over `runner`'s terminals, with this machine's environment registered, the shells
 /// kept from before reconciled with what runs, what the budget says of those still open, and the
 /// events told from before any of it.
@@ -204,6 +241,7 @@ async fn shells(
         .await
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
         .map_err(|err| Refused::Said(format!("bazhen can't register this machine: {err}")))?;
+    let integration = shell_integration(startup, store, &runner.doctor.hook_client).await?;
     let budget = Arc::clone(&runner.budget);
     let shells = Shells::new(ShellsDeps {
         store: store.clone(),
@@ -213,6 +251,7 @@ async fn shells(
         shell: runner.shell,
         socket: startup.paths.socket.clone(),
         tracker: tracker.clone(),
+        integration,
     });
     shells.reconcile().await;
     if let Err(err) = shells.sweep_restarts().await {
@@ -593,6 +632,7 @@ mod tests {
                 shell: "/bin/sh".to_owned(),
                 socket: startup.paths.socket.clone(),
                 tracker: TaskTracker::new(),
+                integration: None,
             });
             let mut opened = Vec::new();
             for key in ["a", "b"] {
@@ -628,6 +668,73 @@ mod tests {
     }
 
     #[test]
+    fn tells_shells_to_report_only_with_retyping_on_the_hook_built_and_the_snippets_written() {
+        use bazhen_protocol::daemon::HookClient;
+        use bazhen_protocol::shells::ShellReport;
+        let h = crate::shells::tests::setup_with(100, Some(crate::shells::tests::integration()));
+        let mut startup = startup(h.dir.path());
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        let built = HookClient {
+            path: "/opt/bazhen/bazhen-hook".to_owned(),
+            fallback: false,
+        };
+        let unbuilt = HookClient {
+            path: "/usr/bin/env".to_owned(),
+            fallback: true,
+        };
+        runtime().block_on(async {
+            let id = h.open("o").await.unwrap();
+            let report = ShellReport {
+                token: h.token_of(&id).unwrap(),
+                at: 1,
+                command: Some("make".to_owned()),
+            };
+            h.shells.report(&id, report).await.unwrap();
+            let off = shell_integration(&startup, &h.store, &built).await;
+            let forgotten = {
+                let reader = h.store.reader().unwrap();
+                let reads = reader.reads();
+                (
+                    reads.last_shell_command(&id).unwrap(),
+                    reads.shell_token_hash(&id).unwrap(),
+                )
+            };
+            startup.settings.config.retype_last_command = true;
+            let state = std::path::Path::new(&startup.paths.state);
+            std::fs::create_dir_all(state).unwrap();
+            std::fs::write(state.join("shell-integration"), "a file").unwrap();
+            let unwritten = shell_integration(&startup, &h.store, &built).await;
+            std::fs::remove_file(state.join("shell-integration")).unwrap();
+            let on = shell_integration(&startup, &h.store, &built).await;
+            let no_hook = shell_integration(&startup, &h.store, &unbuilt).await;
+            assert_eq!((off.unwrap(), forgotten), (None, (None, None)));
+            assert_eq!((no_hook.unwrap(), unwritten.unwrap()), (None, None));
+            assert_eq!(
+                on.unwrap(),
+                Some(Integration {
+                    hook: "/opt/bazhen/bazhen-hook".to_owned(),
+                    dir: state
+                        .join("shell-integration")
+                        .to_string_lossy()
+                        .into_owned(),
+                })
+            );
+            assert!(state.join("shell-integration/zsh").is_file());
+        });
+        assert_eq!(
+            said.times(
+                "shells.retype_last_command is on, but bazhen-hook is not built: shells report nothing"
+            ),
+            1
+        );
+        assert_eq!(
+            said.times("shells.retype_last_command is on, but shells report nothing: "),
+            1
+        );
+    }
+
+    #[test]
     fn fails_doctor_rather_than_list_no_holders_where_it_cant_list_them() {
         let home = TempDir::new("doctor");
         let startup = startup(home.path());
@@ -647,6 +754,7 @@ mod tests {
             shell: runner.shell,
             socket: startup.paths.socket.clone(),
             tracker: TaskTracker::new(),
+            integration: None,
         });
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store)
             .with_shells(Arc::new(shells), runner.doctor);

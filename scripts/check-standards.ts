@@ -822,6 +822,14 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to restart_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::rename":
     "hands its body to rename_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::reported":
+    "reads a body only as serde_json's derive for the shell report it names, then holds it to its bounds; refuses anything else whole",
+  "crates/bazhen-daemon/src/shell_routes.rs::report":
+    "hands its body to reported; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::prompt":
+    "hands its body to reported; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::decline":
+    "hands its body to reported; decodes nothing itself",
   "crates/bazhen-host-guard/src/ptys.rs::Machine::read_file":
     "reads a kernel counter file whole as text for count, which takes it only as a whole number; parses nothing itself",
   "crates/bazhen-host-guard/src/group.rs::read_out":

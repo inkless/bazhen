@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::Extension;
 use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -13,13 +14,14 @@ use bazhen_protocol::ids::DeviceId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommandResponse, shell_name,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport, shell_name,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
+use crate::shells::reports::ReportOutcome;
 use crate::shells::{ShellError, Shells};
 
 /// The most UTF-16 units an idempotency key has, and a confirmed program's name.
@@ -226,6 +228,121 @@ pub(crate) async fn rename(
     answer(renamed.await)
 }
 
+/// The most bytes a line's report has, and a prompt's or a decline's, which is its token alone.
+pub(crate) const REPORT_MAX_BYTES: usize = 16 * 1024;
+pub(crate) const PROMPT_MAX_BYTES: usize = 1024;
+
+/// Why a shell's report wasn't read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unread {
+    /// Its body is past the route's limit.
+    TooLarge,
+    /// Its body isn't one, or breaks its bounds.
+    Malformed,
+}
+
+impl Unread {
+    /// The answer to it, which says what a report was `expected` to be.
+    fn answer(self, expected: &str) -> Response {
+        match self {
+            Self::TooLarge => fail(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                ErrorCode::InvalidRequest,
+                "report too large",
+            ),
+            Self::Malformed => fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, expected),
+        }
+    }
+}
+
+/// A shell's report as its integration sends it over the socket, held to its bounds.
+fn reported<R: DeserializeOwned>(
+    body: Result<Bytes, BytesRejection>,
+    bounded: fn(&R) -> bool,
+) -> Result<R, Unread> {
+    let body = match body {
+        Ok(body) => body,
+        Err(err) if err.status() == StatusCode::PAYLOAD_TOO_LARGE => return Err(Unread::TooLarge),
+        Err(_) => return Err(Unread::Malformed),
+    };
+    serde_json::from_slice(&body)
+        .ok()
+        .filter(bounded)
+        .ok_or(Unread::Malformed)
+}
+
+fn not_its_token() -> Response {
+    fail(
+        StatusCode::FORBIDDEN,
+        ErrorCode::Forbidden,
+        "no such shell, or not its token",
+    )
+}
+
+/// `POST /v1/shells/:id/report`, on the socket only: the line the shell starts running.
+pub(crate) async fn report(
+    State(shared): State<Shared>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let req: ShellReport = match reported(body, ShellReport::bounded) {
+        Ok(req) => req,
+        Err(unread) => return unread.answer("expected { token, at, command }"),
+    };
+    let reported = match shells_of(&shared) {
+        Ok(shells) => shells.report(&id, req).await,
+        Err(err) => Err(err),
+    };
+    match reported {
+        Ok(ReportOutcome::Refused) => not_its_token(),
+        Ok(ReportOutcome::Kept | ReportOutcome::Stale) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => refusal(&err),
+    }
+}
+
+/// `POST /v1/shells/:id/prompt`, on the socket only: the shell's first prompt.
+pub(crate) async fn prompt(
+    State(shared): State<Shared>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let req: ShellPrompt = match reported(body, ShellPrompt::bounded) {
+        Ok(req) => req,
+        Err(unread) => return unread.answer("expected { token }"),
+    };
+    let prompted = match shells_of(&shared) {
+        Ok(shells) => shells.prompt(&id, &req).await,
+        Err(err) => Err(err),
+    };
+    owned(prompted)
+}
+
+/// `POST /v1/shells/:id/decline`, on the socket only: a shell that won't take a line typed back.
+pub(crate) async fn decline(
+    State(shared): State<Shared>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let req: ShellDecline = match reported(body, ShellDecline::bounded) {
+        Ok(req) => req,
+        Err(unread) => return unread.answer("expected { token }"),
+    };
+    let declined = match shells_of(&shared) {
+        Ok(shells) => shells.decline(&id, &req).await,
+        Err(err) => Err(err),
+    };
+    owned(declined)
+}
+
+/// The answer to a report that was the shell's own, or not.
+fn owned(done: Result<bool, ShellError>) -> Response {
+    match done {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_its_token(),
+        Err(err) => refusal(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,5 +487,126 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// What a router answers a POST of `body` to `path` with, reaching it from this machine.
+    fn posted(router: axum::Router, path: &str, body: Vec<u8>) -> (u16, serde_json::Value) {
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("host", "127.0.0.1:7900")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap();
+        crate::testing::runtime().block_on(async {
+            let response = router.oneshot(request).await.unwrap();
+            let status = response.status().as_u16();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+            (status, body)
+        })
+    }
+
+    fn said(error: &str, message: &str) -> (u16, serde_json::Value) {
+        let status = match error {
+            "forbidden" => 403,
+            _ => 400,
+        };
+        (
+            status,
+            serde_json::json!({ "error": error, "message": message }),
+        )
+    }
+
+    #[test]
+    fn takes_a_shell_s_reports_over_the_socket_by_its_own_token_held_to_their_bounds() {
+        use crate::shells::tests::{integration, setup_with};
+        let h = setup_with(100, Some(integration()));
+        let id = crate::testing::runtime().block_on(h.open("o")).unwrap();
+        let token = h.token_of(&id).unwrap();
+        let shared = Shared {
+            shells: Some(Arc::clone(&h.shells)),
+            ..Shared::new(
+                "f".repeat(64).as_str(),
+                crate::routes::Stop::default(),
+                h.store.clone(),
+            )
+        };
+        let socket = || crate::routes::socket_router(shared.clone());
+        let at = |verb: &str| format!("/v1/shells/{id}/{verb}");
+        let json = |value: serde_json::Value| value.to_string().into_bytes();
+        let report = json(serde_json::json!({ "token": token, "at": 1, "command": "make" }));
+        let forged = json(serde_json::json!({ "token": "forged", "at": 2, "command": "rm -rf ~" }));
+        let own = json(serde_json::json!({ "token": token }));
+        let padded = |limit: usize| {
+            json(serde_json::json!({ "token": token, "at": 3, "command": "x".repeat(limit) }))
+        };
+        let malformed = [
+            b"{}".to_vec(),
+            json(serde_json::json!({ "token": token, "at": 1 })),
+            json(serde_json::json!({ "token": token, "at": -1, "command": null })),
+            b"not json".to_vec(),
+        ];
+        let expected = "expected { token, at, command }";
+        assert_eq!(
+            [
+                posted(socket(), &at("report"), report),
+                posted(socket(), &at("report"), forged),
+                posted(socket(), &at("report"), padded(16 * 1024)),
+            ],
+            [
+                (204, serde_json::Value::Null),
+                said("forbidden", "no such shell, or not its token"),
+                (
+                    413,
+                    serde_json::json!({ "error": "invalid_request", "message": "report too large" })
+                ),
+            ]
+        );
+        assert_eq!(
+            malformed.map(|body| posted(socket(), &at("report"), body)),
+            [(); 4].map(|()| said("invalid_request", expected))
+        );
+        assert_eq!(h.last_command(&id), Some("make".to_owned()));
+        let marked_null = json(serde_json::json!({ "token": token, "brackets": null }));
+        let forged = json(serde_json::json!({ "token": "forged" }));
+        let long = json(serde_json::json!({ "token": "x".repeat(1024) }));
+        let too_large = (
+            413,
+            serde_json::json!({ "error": "invalid_request", "message": "report too large" }),
+        );
+        assert_eq!(
+            [
+                posted(socket(), &at("prompt"), own.clone()),
+                posted(socket(), &at("decline"), own.clone()),
+                posted(socket(), &at("prompt"), forged.clone()),
+                posted(socket(), &at("decline"), forged),
+                posted(socket(), &at("prompt"), marked_null),
+                posted(socket(), &at("decline"), b"{}".to_vec()),
+                posted(socket(), &at("prompt"), long.clone()),
+                posted(socket(), &at("decline"), long),
+            ],
+            [
+                (204, serde_json::Value::Null),
+                (204, serde_json::Value::Null),
+                said("forbidden", "no such shell, or not its token"),
+                said("forbidden", "no such shell, or not its token"),
+                said("invalid_request", "expected { token }"),
+                said("invalid_request", "expected { token }"),
+                too_large.clone(),
+                too_large,
+            ]
+        );
+        let gate = crate::routes::Gate {
+            allow: crate::guard::allowlists(7900, None, &[]),
+            pairing_required: false,
+        };
+        let http = crate::routes::http_router(shared.clone(), gate);
+        let over_http = ["report", "prompt", "decline"]
+            .map(|verb| posted(http.clone(), &at(verb), own.clone()).0);
+        assert_eq!(over_http, [404; 3]);
     }
 }
