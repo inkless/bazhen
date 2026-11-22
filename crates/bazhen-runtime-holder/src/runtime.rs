@@ -966,6 +966,9 @@ impl HolderRuntime {
     /// Closes the terminal: its holder ends its process and exits. One no holder answers for
     /// counts as closed once it is provably gone, its stale socket removed.
     ///
+    /// The terminal isn't watched while it closes, so one whose close fails is watched again only
+    /// at the next inventory or `watch`: a caller that keeps the terminal calls `watch` itself.
+    ///
     /// # Errors
     ///
     /// As a verb's, or when the holder doesn't answer or hang up in time.

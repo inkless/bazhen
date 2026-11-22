@@ -889,8 +889,9 @@ mod tests {
                     "vim".clone_into(&mut h.title);
                 })
                 .await;
-            // Told only once the hello again has told whatever it would.
-            again.send(&[title("vim")]).await;
+            // Told only once the hello again has told whatever it would: an exit, not a title,
+            // so a title told again by the hello comes before it, and is seen.
+            again.send(&[exited(2)]).await;
             seen.push(next(&mut told).await);
             let respawn = RuntimeEvent::Respawned {
                 terminal: after(&terminal, respawned()),
@@ -903,7 +904,7 @@ mod tests {
                     Some(told_exit(0)),
                     Some(respawn),
                     Some(told_exit(1)),
-                    Some(titled())
+                    Some(told_exit(2))
                 ]
             );
             watches.shutdown().await;
