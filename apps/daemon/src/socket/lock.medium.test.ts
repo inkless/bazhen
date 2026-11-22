@@ -247,12 +247,12 @@ describe("claim where this daemon takes no lock", () => {
 });
 
 describe("the wait on a held lock", () => {
-  it("covers the Rust daemon's drain, as serve.rs sets it", () => {
+  it("covers the Rust daemon's drain, as bazhen-client sets it", () => {
     const serve = readFileSync(
-      new URL("../../../../crates/bazhen-daemon/src/serve.rs", import.meta.url),
+      new URL("../../../../crates/bazhen-client/src/paths.rs", import.meta.url),
       "utf8",
     );
-    const drain = /^ {4}drain: Duration::from_secs\((\d+)\),$/m.exec(serve)?.[1];
+    const drain = /^pub const DRAIN: Duration = Duration::from_secs\((\d+)\);$/m.exec(serve)?.[1];
     expect(Number(drain) * 1000).toBe(DRAIN_MS);
   });
 });

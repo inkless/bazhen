@@ -27,7 +27,7 @@ import {
   WaitMessagesResponse,
   WaitResponse,
 } from "@bazhen/protocol";
-import { FakeDaemon, type Scene, checkoutWith, scene } from "./cli.ts";
+import { FakeDaemon, type Scene, checkoutWith, holdLock, scene } from "./cli.ts";
 import {
   AGENT,
   ANOTHER_BUILD,
@@ -53,6 +53,9 @@ afterEach(async () => {
 
 const NOT_RUNNING = "bazhen is not running; start it with `bazhen start`\n";
 const execFileAsync = promisify(execFile);
+const stuck = (socket: string) =>
+  `bazhen doesn't answer on ${socket} and may be stuck or busy (something listens on its socket)\n`;
+
 const PATH = process.env["PATH"] ?? "/usr/bin:/bin";
 
 describe("the command line", () => {
@@ -231,24 +234,68 @@ describe("a daemon that isn't running", () => {
     );
   });
 
-  it("exits 3 when it holds a read past five seconds, as one wedged does", async () => {
+  it("exits 3, saying it may be stuck, when it holds a read past five seconds, as one wedged does", async () => {
     s.daemon.hang("GET /v1/state");
     const begun = Date.now();
     const ran = await s.bazhen(["tasks", "list", "--all"]);
-    expect(ran).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
+    expect(ran).toEqual({ code: 3, stdout: "", stderr: stuck(s.socket) });
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
 
-  it("exits 3 when it holds its answer on who is calling, rather than taking the caller for the human", async () => {
+  it("exits 3, saying it may be stuck, when it holds its answer on who is calling, rather than taking the caller for the human", async () => {
     s.daemon.hang("GET /v1/caller");
     const begun = Date.now();
     const ran = await s.bazhen(["agents", "whoami"]);
     expect([ran, s.daemon.routes()]).toEqual([
-      { code: 3, stdout: "", stderr: NOT_RUNNING },
+      { code: 3, stdout: "", stderr: stuck(s.socket) },
       ["GET /v1/caller"],
     ]);
     expect(Date.now() - begun).toBeGreaterThanOrEqual(4500);
   });
+});
+
+describe("a daemon that may be there though it doesn't answer", () => {
+  it("fails stop and doctor, saying it may be stuck, when it takes a connection and holds its health", async () => {
+    s.daemon.hang("GET /v1/health");
+    const stopped = await s.bazhen(["stop"]);
+    const doctored = await s.bazhen(["doctor"]);
+    expect([stopped, doctored]).toEqual([
+      { code: 1, stdout: "", stderr: stuck(s.socket) },
+      {
+        code: 1,
+        stdout: `daemon: not answering on ${s.socket}; it may be stuck or busy (something listens on its socket)\n`,
+        stderr: "",
+      },
+    ]);
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "says it is stopping, not that it isn't running, while it holds the start-up lock with no socket",
+    async () => {
+      await s.daemon.close();
+      const release = await holdLock(s.socket);
+      try {
+        const lock = `${s.socket}.lock`;
+        const [status, doctored] = [await s.bazhen(["status"]), await s.bazhen(["doctor"])];
+        expect([status, doctored]).toEqual([
+          {
+            code: 3,
+            stdout: "",
+            stderr: `bazhen is stopping or still starting: a daemon holds ${lock} but has no socket; try again in a moment\n`,
+          },
+          {
+            code: 1,
+            stdout: `daemon: stopping or still starting (holds ${lock}, has no socket)\n`,
+            stderr: "",
+          },
+        ]);
+      } finally {
+        await release();
+      }
+      const gone = await s.bazhen(["status"]);
+      expect(gone).toEqual({ code: 3, stdout: "", stderr: NOT_RUNNING });
+    },
+  );
 });
 
 describe("a daemon that refuses", () => {

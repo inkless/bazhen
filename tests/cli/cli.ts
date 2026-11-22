@@ -404,6 +404,30 @@ export interface Scene {
   readonly cleanup: () => Promise<void>;
 }
 
+/**
+ * Holds the start-up lock beside `socket` as a daemon does, until the returned function lets go.
+ * It needs `flock(1)`, which Linux has.
+ */
+export async function holdLock(socket: string): Promise<() => Promise<void>> {
+  const held = spawn("flock", ["-x", `${socket}.lock`, "sh", "-c", "echo held; cat"], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  await new Promise<void>((resolve, reject) => {
+    held.once("error", reject);
+    held.once("close", (code) => reject(new Error(`flock exited ${code} without the lock`)));
+    held.stdout.once("data", () => {
+      held.removeAllListeners("close");
+      resolve();
+    });
+  });
+  return () =>
+    new Promise<void>((resolve) => {
+      if (held.exitCode !== null) return resolve();
+      held.once("close", () => resolve());
+      held.stdin.end();
+    });
+}
+
 /** A fresh home with a fake daemon on its socket, and nothing of the test run's environment. */
 export async function scene(): Promise<Scene> {
   const root = realpathSync(mkdtempSync("/tmp/bz-cli-"));

@@ -7,6 +7,7 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use bazhen_client::paths::LOCK_WAIT;
 use bazhen_protocol::agents::StateSnapshot;
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse, StopResponse,
@@ -17,6 +18,7 @@ use bazhen_protocol::notices::{
 };
 use bazhen_protocol::record::Record;
 
+use crate::absent::{Presence, presence, unanswering_text, unbound_text};
 use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
 use crate::fmt::{encode_uri_component, local, printable, uuid};
@@ -102,16 +104,55 @@ fn checkout() -> Option<PathBuf> {
     exe.ancestors().nth(3).map(Path::to_path_buf)
 }
 
-/// Idempotent: a daemon that isn't running is already stopped.
+/// Idempotent: a daemon that isn't running is already stopped. One that holds the start-up lock
+/// with no socket is stopping or still starting, so `stop` waits, for as long as a stopping daemon
+/// drains and a little more, until the lock frees, or the socket answers and it can be told to stop.
 pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
-    if !daemon.answers()? {
-        out.line("bazhen is not running");
-        return Ok(Exit::Done);
+    let socket = daemon.socket();
+    let begun = Instant::now();
+    let mut waited = false;
+    let mut doubted = false;
+    while !daemon.answers()? {
+        match presence(Path::new(&socket)) {
+            Presence::Absent => {
+                out.line(if waited {
+                    "bazhen stopped; agents keep running"
+                } else {
+                    "bazhen is not running"
+                });
+                return Ok(Exit::Done);
+            }
+            Presence::Unbound { lock } => {
+                if begun.elapsed() >= LOCK_WAIT {
+                    out.err(&unbound_text(&lock));
+                    return Ok(Exit::Failed);
+                }
+                waited = true;
+                sleep(Duration::from_millis(100));
+            }
+            // A daemon that bound its socket between the health call and the look has not been
+            // given time to answer: only one that stays silent is stuck.
+            Presence::Unanswering(_) if !doubted => {
+                doubted = true;
+                sleep(Duration::from_millis(100));
+                continue;
+            }
+            Presence::Unanswering(why) => {
+                out.err(&unanswering_text(Path::new(&socket), &why));
+                return Ok(Exit::Failed);
+            }
+        }
+        doubted = false;
     }
     let _: StopResponse = daemon.post_empty("/v1/daemon/stop", SLOW_CALL)?;
     let begun = Instant::now();
     while begun.elapsed() < STOPPED_WITHIN {
         if !daemon.answers()? {
+            // A daemon stops answering as its drain begins, and is stopped when it lets go of the lock.
+            if let Err(lock) = wait_for_lock(Path::new(&socket)) {
+                out.err(&unbound_text(&lock));
+                return Ok(Exit::Failed);
+            }
             out.line("bazhen stopped; agents keep running");
             return Ok(Exit::Done);
         }
@@ -119,6 +160,22 @@ pub(crate) fn stop(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     }
     out.err("bazhen is still answering after 5 s");
     Ok(Exit::Failed)
+}
+
+/// Waits while a daemon holds the lock with no socket, for at most `LOCK_WAIT`. The lock is the
+/// one still held when that runs out.
+fn wait_for_lock(socket: &Path) -> Result<(), PathBuf> {
+    let begun = Instant::now();
+    loop {
+        match presence(socket) {
+            Presence::Unbound { lock } if begun.elapsed() >= LOCK_WAIT => return Err(lock),
+            Presence::Unbound { .. } => sleep(Duration::from_millis(100)),
+            // A held lock behind a socket that is there, and refuses, is not a drain: both daemons
+            // remove their socket as their drain begins, so only a socketless daemon counts as
+            // stopping, and this wait ends for anything else.
+            Presence::Absent | Presence::Unanswering(_) => return Ok(()),
+        }
+    }
 }
 
 pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
@@ -152,10 +209,17 @@ pub(crate) fn status(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
 /// be reached; an unused runtime isn't read, and a missing hook binary is a warning.
 pub(crate) fn doctor(daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
     if !daemon.answers()? {
-        out.line(&format!(
-            "daemon: not running (no answer on {})",
-            daemon.socket()
-        ));
+        let socket = daemon.socket();
+        out.line(&match presence(Path::new(&socket)) {
+            Presence::Absent => format!("daemon: not running (no answer on {socket})"),
+            Presence::Unbound { lock } => format!(
+                "daemon: stopping or still starting (holds {}, has no socket)",
+                lock.display()
+            ),
+            Presence::Unanswering(why) => {
+                format!("daemon: not answering on {socket}; it may be stuck or busy ({why})")
+            }
+        });
         return Ok(Exit::Failed);
     }
     let d: DoctorResponse = daemon.get("/v1/daemon/doctor", CALL)?;

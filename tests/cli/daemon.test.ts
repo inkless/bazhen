@@ -11,7 +11,7 @@ import {
   StateSnapshot,
   StopResponse,
 } from "@bazhen/protocol";
-import { type Scene, scene } from "./cli.ts";
+import { FakeDaemon, type Scene, holdLock, scene } from "./cli.ts";
 import {
   AGENT,
   ANOTHER_BUILD,
@@ -24,6 +24,8 @@ import {
   health,
   snapshot,
 } from "./fixtures.ts";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let s: Scene;
 beforeEach(async () => {
@@ -683,6 +685,94 @@ describe("bazhen stop", () => {
     const ran = await s.bazhen(["stop"]);
     expect([ran.code, ran.stdout]).toEqual([0, "bazhen is not running\n"]);
   });
+
+  describe.skipIf(process.platform !== "linux")(
+    "when a daemon holds the start-up lock and has no socket",
+    () => {
+      it("waits for the lock to free, then says it stopped", async () => {
+        await s.daemon.close();
+        const release = await holdLock(s.socket);
+        const ran = s.bazhen(["stop"]);
+        await sleep(500);
+        await release();
+        expect(await ran).toEqual({
+          code: 0,
+          stdout: "bazhen stopped; agents keep running\n",
+          stderr: "",
+        });
+      });
+
+      it("tells the daemon to stop once its socket answers", async () => {
+        await s.daemon.close();
+        const release = await holdLock(s.socket);
+        const ran = s.bazhen(["stop"]);
+        await sleep(500);
+        const starting = await FakeDaemon.listen(s.socket);
+        try {
+          starting
+            .answer("GET /v1/health", HealthResponse, health())
+            .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+              setTimeout(() => void starting.close().then(release), 100);
+              return {};
+            });
+          expect(await ran).toEqual({
+            code: 0,
+            stdout: "bazhen stopped; agents keep running\n",
+            stderr: "",
+          });
+          expect(starting.routes()).toContain("POST /v1/daemon/stop");
+        } finally {
+          await starting.close();
+          await release();
+        }
+      });
+
+      it("fails once the wait runs out with the lock still held", async () => {
+        await s.daemon.close();
+        const release = await holdLock(s.socket);
+        try {
+          const begun = Date.now();
+          const ran = await s.bazhen(["stop"]);
+          expect(ran).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: `bazhen is stopping or still starting: a daemon holds ${s.socket}.lock but has no socket; try again in a moment\n`,
+          });
+          expect(Date.now() - begun).toBeGreaterThanOrEqual(5900);
+        } finally {
+          await release();
+        }
+      }, 20_000);
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "says it stopped only once the daemon lets go of the start-up lock, though its socket is gone",
+    async () => {
+      const release = await holdLock(s.socket);
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+          const { daemon } = s;
+          setTimeout(() => void daemon.close(), 100);
+          return {};
+        });
+      let finished = Infinity;
+      const ran = s.bazhen(["stop"]).then((r) => {
+        finished = Date.now();
+        return r;
+      });
+      await sleep(1000);
+      const released = Date.now();
+      await release();
+      expect(await ran).toEqual({
+        code: 0,
+        stdout: "bazhen stopped; agents keep running\n",
+        stderr: "",
+      });
+      expect(finished).toBeGreaterThanOrEqual(released);
+    },
+  );
 
   it("fails when the daemon still answers five seconds after it was told to stop", async () => {
     s.daemon

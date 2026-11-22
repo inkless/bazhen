@@ -4,7 +4,7 @@ import { type Answer, probe, silence } from "./probe.ts";
 
 /**
  * The longest a stopping daemon drains with its socket already gone, holding its lock: the Rust
- * daemon's (`SERVING.drain` in `serve.rs`, which a test holds this to).
+ * daemon's (`DRAIN` in `bazhen-client`'s `paths.rs`, which a test holds this to).
  */
 export const DRAIN_MS = 5000;
 

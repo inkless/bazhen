@@ -6,6 +6,7 @@
 //!
 //! Its decoders are public so the fuzz targets in `fuzz/` can reach them.
 
+mod absent;
 mod args;
 pub mod attach;
 mod call;
@@ -22,6 +23,8 @@ mod screen;
 mod shells;
 mod target;
 mod tasks;
+#[cfg(test)]
+mod testing;
 mod waits;
 
 /// The holder's frames, for the fuzz targets to name what a direct attachment sends.
@@ -271,6 +274,22 @@ fn unknown(p: &args::Parsed) -> String {
 
 const NOT_RUNNING: &str = "bazhen is not running; start it with `bazhen start`";
 
+/// What a call that no daemon answered says: that none is running, only where none is, else what
+/// was seen of the one that may be.
+fn not_running(socket: &paths::Socket) -> String {
+    let path = Path::new(&socket.path);
+    match absent::presence(path) {
+        absent::Presence::Absent if socket.from_env => format!(
+            "bazhen is not running on BAZHEN_SOCKET {}; run with BAZHEN_SOCKET= to reach the \
+             daemon your home names",
+            socket.path
+        ),
+        absent::Presence::Absent => NOT_RUNNING.to_owned(),
+        absent::Presence::Unbound { lock } => absent::unbound_text(&lock),
+        absent::Presence::Unanswering(why) => absent::unanswering_text(path, &why),
+    }
+}
+
 /// Runs the command line this process was given.
 pub fn main() -> ExitCode {
     let mut out = Out::default();
@@ -333,16 +352,8 @@ fn run(args: Vec<OsString>, out: &mut Out) -> Exit {
     };
     match result {
         Ok(exit) => exit,
-        Err(Failed::NotRunning) if socket.from_env => {
-            out.err(&format!(
-                "bazhen is not running on BAZHEN_SOCKET {}; run with BAZHEN_SOCKET= to reach \
-                 the daemon your home names",
-                socket.path
-            ));
-            Exit::NotRunning
-        }
         Err(Failed::NotRunning) => {
-            out.err(NOT_RUNNING);
+            out.err(&not_running(&socket));
             Exit::NotRunning
         }
         Err(Failed::Refused(message) | Failed::Unsendable(message)) => {
