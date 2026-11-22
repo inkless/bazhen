@@ -3346,6 +3346,10 @@ const inCrate = (name: string) => `crates/bazhen-runtime-holder/src/${name}.rs`;
 /** A test that closes `client` once `lets` has bound it. */
 const closing = (lets: string) => `#[test]\nfn a() { ${lets} client.close().await; }`;
 
+/** A test that closes a child between two copies of `form`. */
+const around = (form: string) =>
+  `#[test]\nfn a() { let _ = stringify!(${form}); child.close(group, now); let _ = stringify!(${form}); }`;
+
 const unmarked = (sources: Record<string, string>) =>
   unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
     (f) => f.split(": ")[0],
@@ -3468,6 +3472,19 @@ describe("tests that signal processes they didn't start", () => {
       "crates/h/src/serve.rs:20",
       "crates/h/src/x.rs:1",
     ]);
+  });
+
+  it("must be marked when a lifetime or a literal's suffix named r comes before its close", () => {
+    const forms = [
+      String.raw`'r"\" "`,
+      String.raw`'a'r"\" "`,
+      String.raw`"a"r"\" "`,
+      String.raw`'ér"\" "`,
+    ];
+    const sources = Object.fromEntries(
+      forms.map((form, n) => [`crates/h/src/t${n}.rs`, around(form)]),
+    );
+    expect(unmarked(sources)).toEqual(Object.keys(sources).map((file) => `${file}:1`));
   });
 
   it("must be marked for requests on a fake holder's client, as on any other", () => {

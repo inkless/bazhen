@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { rustCode } from "./rust-source.ts";
 
+/** The nth line of the every-form test: a form, then a call it mustn't hide. */
+const line = (body: string, n: number) => `m!(${body}); close(${n});`;
+
 describe("rustCode", () => {
   it("removes comments, nested block comments included, keeping their lines", () => {
     expect(rustCode("a // kill(1)\nb /* x /* kill */ y */ c")).toBe("a \nb   c");
@@ -50,5 +53,83 @@ describe("rustCode", () => {
       "y",
     ]);
     expect(raw).toEqual([false, false, false, false, true, true, true, true]);
+  });
+
+  it("starts a raw string only where a token starts, never in a lifetime, a suffix or an identifier", () => {
+    const quote = String.raw`\" `;
+    const cases: [form: string, code: string, literals: [string, boolean][]][] = [
+      [String.raw`'r"\" "`, `'r""`, [[quote, false]]],
+      [String.raw`'br"\" "`, `'br""`, [[quote, false]]],
+      [String.raw`'cr"\" "`, `'cr""`, [[quote, false]]],
+      [String.raw`'r#r"\" "`, `'r#r""`, [[quote, false]]],
+      [String.raw`'ér"\" "`, `'ér""`, [[quote, false]]],
+      [String.raw`'a'r"\" "`, `' 'r""`, [[quote, false]]],
+      [String.raw`b'a'r"\" "`, `b' 'r""`, [[quote, false]]],
+      [
+        String.raw`"a"r"\" "`,
+        `""r""`,
+        [
+          ["a", false],
+          [quote, false],
+        ],
+      ],
+      [
+        String.raw`b"a"r"\" "`,
+        `b""r""`,
+        [
+          ["a", false],
+          [quote, false],
+        ],
+      ],
+      [
+        String.raw`c"a"r"\" "`,
+        `c""r""`,
+        [
+          ["a", false],
+          [quote, false],
+        ],
+      ],
+      [
+        String.raw`r"a"r"\" "`,
+        `""r""`,
+        [
+          ["a", true],
+          [quote, false],
+        ],
+      ],
+      [
+        String.raw`r#"a"#r"\" "`,
+        `""r""`,
+        [
+          ["a", true],
+          [quote, false],
+        ],
+      ],
+      [
+        String.raw`"a"ér"\" "`,
+        `""ér""`,
+        [
+          ["a", false],
+          [quote, false],
+        ],
+      ],
+      [String.raw`r#r"\" "`, `r#r""`, [[quote, false]]],
+      [String.raw`1r"\" "`, `1r""`, [[quote, false]]],
+      [String.raw`0xbr"\" "`, `0xbr""`, [[quote, false]]],
+      ["'r: loop", "'r: loop", []],
+      ["'r#a", "'r#a", []],
+      [String.raw`r#"a"b"#`, `""`, [['a"b', true]]],
+      [String.raw`br##"x"#"##`, `b""`, [['x"#', true]]],
+      [String.raw`cr"y"`, `c""`, [["y", true]]],
+    ];
+    const strings: string[] = [];
+    const raw: boolean[] = [];
+    const source = cases.map(([form], n) => line(form, n)).join("\n");
+    expect(rustCode(source, strings, raw).split("\n")).toEqual(
+      cases.map(([, code], n) => line(code, n)),
+    );
+    const literals = cases.flatMap(([, , each]) => each);
+    expect(strings).toEqual(literals.map(([text]) => text));
+    expect(raw).toEqual(literals.map(([, isRaw]) => isRaw));
   });
 });
