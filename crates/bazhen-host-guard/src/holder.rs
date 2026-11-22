@@ -2683,14 +2683,25 @@ mod tests {
         copy
     }
 
+    /// The kernel names a child after its parent's code until it has exec'd, and a spawn returns
+    /// once the exec has closed its close-on-exec pipe, which is before it sets the name. So the
+    /// name is read until it is the holder's, within a bound.
     fn holder_of(child: &std::process::Child) -> HolderProcess {
         let pid = Pid::from_raw(RawPid::try_from(child.id()).unwrap()).unwrap();
-        match read_process(pid) {
-            Reading::Running { comm, start } => {
-                assert_eq!(comm, "bazhen-holder");
-                HolderProcess { pid, start }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let reading = read_process(pid);
+            match reading {
+                Reading::Running { comm, start } if comm == "bazhen-holder" => {
+                    return HolderProcess { pid, start };
+                }
+                Reading::Running { .. } | Reading::Unreadable(_)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                other => panic!("{other:?}"),
             }
-            other => panic!("{other:?}"),
         }
     }
 
