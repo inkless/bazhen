@@ -212,14 +212,13 @@ impl ExitWatch {
 /// `pid`'s parent, from `proc_pidinfo`'s `proc_bsdshortinfo`, which, unlike `proc_bsdinfo`, it
 /// gives for another user's process too.
 pub(crate) fn parent(pid: Pid) -> Option<Pid> {
-    Pid::from_raw(i32::try_from(short_info(pid)?.pbsi_ppid).ok()?)
+    Pid::from_raw(i32::try_from(short_info(pid).ok()?.pbsi_ppid).ok()?)
 }
 
 /// The name `pid` runs as, from its `proc_bsdshortinfo`: the file name of the program it last
 /// executed, cut to 16 bytes.
 pub(crate) fn comm(pid: Pid) -> io::Result<OsString> {
-    let info = short_info(pid)
-        .ok_or_else(|| io::Error::other(format!("process {pid:?} can't be read")))?;
+    let info = short_info(pid)?;
     let name: Vec<u8> = info
         .pbsi_comm
         .iter()
@@ -234,15 +233,16 @@ pub(crate) fn comm(pid: Pid) -> io::Result<OsString> {
 
 /// The effective uid `pid` runs as, from its `proc_bsdshortinfo`.
 pub(crate) fn uid(pid: Pid) -> io::Result<u32> {
-    short_info(pid)
-        .map(|info| info.pbsi_uid)
-        .ok_or_else(|| io::Error::other(format!("process {pid:?} can't be read")))
+    short_info(pid).map(|info| info.pbsi_uid)
 }
 
-/// `pid`'s `proc_bsdshortinfo`, which `proc_pidinfo` gives for another user's process too.
-fn short_info(pid: Pid) -> Option<libc::proc_bsdshortinfo> {
+/// `pid`'s `proc_bsdshortinfo`, which `proc_pidinfo` gives for another user's process too. The
+/// error is the call's own, `ESRCH` for a pid with no process or a zombie's, so a caller can tell
+/// a process gone from one it couldn't read.
+fn short_info(pid: Pid) -> io::Result<libc::proc_bsdshortinfo> {
     let mut info = MaybeUninit::<libc::proc_bsdshortinfo>::uninit();
-    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>())
+        .map_err(io::Error::other)?;
     // SAFETY: `info` is writable for `size` bytes, which the call writes no more than, and it
     // returns how many it wrote.
     let written = unsafe {
@@ -254,11 +254,16 @@ fn short_info(pid: Pid) -> Option<libc::proc_bsdshortinfo> {
             size,
         )
     };
+    if written <= 0 {
+        return Err(io::Error::last_os_error());
+    }
     if written != size {
-        return None;
+        return Err(io::Error::other(format!(
+            "process {pid:?}'s record came short: {written} of {size} bytes"
+        )));
     }
     // SAFETY: the call wrote the whole struct, which is plain integers and bytes.
-    Some(unsafe { info.assume_init() })
+    Ok(unsafe { info.assume_init() })
 }
 
 /// The arguments `pid` runs with, from `sysctl(KERN_PROCARGS2)`, which `ps` reads too. The kernel

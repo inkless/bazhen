@@ -20,6 +20,7 @@ use bazhen_client::sha256::{hex, sha256};
 use bazhen_holder::process;
 use bazhen_holder::start_time::{self, StartTimeError};
 use bazhen_host_guard::holder::{HOLDER_COMMAND, holder_build_of, is_holder_build};
+use rustix::io::Errno;
 use rustix::process::{Pid, getpid};
 
 /// How old a directory must be before a prune may remove it: younger, it may be another start's
@@ -346,9 +347,12 @@ pub fn prune_holder_builds(
 enum Seen {
     /// Gone since it was listed.
     Gone,
-    /// Its owner can't be read. Each of this user's can be, so it is another's: on Linux, a
-    /// `/proc` mounted `hidepid` hides only other users'; on macOS, it is a zombie.
+    /// Its owner may not be read, so it is another user's: this user may read each of its own,
+    /// and a `/proc` mounted `hidepid` hides only other users'.
     Unowned,
+    /// Its owner couldn't be read for another reason, as a lack of file descriptors: whose it
+    /// is, and what it runs, are unknown.
+    Unknown,
     /// Run by `uid`, with `argv`, `None` when they can't be read.
     Of {
         uid: u32,
@@ -358,16 +362,36 @@ enum Seen {
 
 /// What the kernel shows of `pid` now. Reading only: nothing here reaches a process.
 fn seen(pid: Pid) -> Seen {
-    let gone = || matches!(start_time::of(pid), Err(StartTimeError::Absent(_)));
-    let Ok(uid) = process::uid(pid) else {
-        return if gone() { Seen::Gone } else { Seen::Unowned };
+    seen_by(pid, process::uid, process::args, |pid| {
+        matches!(start_time::of(pid), Err(StartTimeError::Absent(_)))
+    })
+}
+
+/// What `seen` makes of `pid`'s owner as `uid_of` reads it, and of its arguments as `args_of`
+/// does, `gone` saying whether it has no process any more.
+fn seen_by(
+    pid: Pid,
+    uid_of: impl Fn(Pid) -> io::Result<u32>,
+    args_of: impl Fn(Pid) -> io::Result<Vec<OsString>>,
+    gone: impl Fn(Pid) -> bool,
+) -> Seen {
+    let uid = match uid_of(pid) {
+        Ok(uid) => uid,
+        Err(e)
+            if e.kind() == io::ErrorKind::NotFound
+                || e.raw_os_error() == Some(Errno::SRCH.raw_os_error()) =>
+        {
+            return Seen::Gone;
+        }
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Seen::Unowned,
+        Err(_) => return Seen::Unknown,
     };
-    match process::args(pid) {
+    match args_of(pid) {
         Ok(argv) => Seen::Of {
             uid,
             argv: Some(argv),
         },
-        Err(_) if gone() => Seen::Gone,
+        Err(_) if gone(pid) => Seen::Gone,
         Err(_) => Seen::Of { uid, argv: None },
     }
 }
@@ -376,8 +400,8 @@ fn seen(pid: Pid) -> Seen {
 /// finds them with `ps`: every process the kernel lists, whether or not a ledger names it, so a
 /// holder the ledger lost, or recorded with no start, still keeps its build. `None` when that
 /// list can't be vouched for as whole, so that nothing is taken for unused: it can't be read,
-/// it doesn't show this process as `uid`'s, one of `uid`'s arguments can't be read, or `dir`
-/// isn't a path `holder_build_of` can read.
+/// it doesn't show this process as `uid`'s, a process's owner or one of `uid`'s arguments can't
+/// be read, or `dir` isn't a path `holder_build_of` can read.
 pub fn running_builds(dir: &Path, uid: u32) -> Option<BTreeSet<String>> {
     running_builds_with(dir, uid, getpid(), process::pids(), seen)
 }
@@ -396,7 +420,7 @@ fn running_builds_with(
         match see(pid) {
             Seen::Gone | Seen::Unowned => {}
             Seen::Of { uid: owner, .. } if owner != uid => {}
-            Seen::Of { argv: None, .. } => return None,
+            Seen::Unknown | Seen::Of { argv: None, .. } => return None,
             Seen::Of {
                 argv: Some(argv), ..
             } => {
@@ -784,15 +808,25 @@ mod tests {
     fn installs_once_when_two_installs_run_together() {
         let home = home();
         let options = home.options();
-        let binaries: BTreeSet<_> = std::thread::scope(|s| {
-            let installs: Vec<_> = (0..3)
-                .map(|_| s.spawn(|| install_holder(&options).unwrap().binary))
-                .collect();
-            installs.into_iter().map(|t| t.join().unwrap()).collect()
-        });
+        // The second runs whole as the first is about to rename its copy in, so the first finds
+        // its rename lost to it; a third then finds the build there.
+        let second = RefCell::new(None);
+        let race = || *second.borrow_mut() = Some(install_holder(&options).ok());
+        let seams = Seams {
+            before_rename: Some(&race),
+            ..Seams::default()
+        };
+        let first = install_holder_with(&options, &seams).ok();
+        let third = install_holder(&options).ok();
+        let binaries = [first, second.take().flatten(), third].map(|i| i.map(|i| i.binary));
+        let build = build_of_text("build one");
+        let binary = home.dir.join(&build).join(HOLDER_COMMAND);
         assert_eq!(
-            (binaries.len(), home.ls()),
-            (1, vec![build_of_text("build one")])
+            (binaries, home.ls()),
+            (
+                [Some(binary.clone()), Some(binary.clone()), Some(binary)],
+                vec![build]
+            )
         );
     }
 
@@ -1028,6 +1062,24 @@ mod tests {
             Vec::<String>::new()
         );
         assert_eq!(home.ls(), vec![OLD.to_owned()]);
+    }
+
+    #[test]
+    fn takes_a_process_for_gone_or_another_s_only_when_the_kernel_says_so_and_else_knows_nothing() {
+        let home = home();
+        let owner = |errno: Errno| {
+            seen_by(
+                pid(77),
+                |_| Err(io::Error::from_raw_os_error(errno.raw_os_error())),
+                |_| Ok(vec![]),
+                |_| false,
+            )
+        };
+        let read = [Errno::NOENT, Errno::SRCH, Errno::ACCESS, Errno::MFILE].map(owner);
+        assert_eq!(
+            (read, builds_in(&home.dir, vec![(77, Seen::Unknown)])),
+            ([Seen::Gone, Seen::Gone, Seen::Unowned, Seen::Unknown], None)
+        );
     }
 
     /// `holder_build_of` reads a directory only as text, so under one that isn't, a holder's

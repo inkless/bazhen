@@ -2123,12 +2123,23 @@ mod tests {
             let held = ((&mut answer).now_or_never().is_none(), client.is_open());
             cancel.cancel();
             let bound = Duration::from_secs(5);
-            let ended = tokio::time::timeout(bound, client.ended()).await;
-            let failed = end_of(tokio::time::timeout(bound, answer).await.unwrap());
-            tokio::time::timeout(bound, client.closed()).await.unwrap();
+            let ended = tokio::time::timeout(bound, client.ended()).await.ok();
+            let failed = tokio::time::timeout(bound, answer)
+                .await
+                .ok()
+                .map(|answered| match answered {
+                    Err(RequestError::Disconnected(gone)) => Some(gone.end),
+                    _ => None,
+                });
+            let closed = tokio::time::timeout(bound, client.closed()).await.is_ok();
             assert_eq!(
-                (held, ended.unwrap(), failed),
-                ((true, true), HolderEnd::Eof, HolderEnd::Eof)
+                (held, ended, failed, closed),
+                (
+                    (true, true),
+                    Some(HolderEnd::Eof),
+                    Some(Some(HolderEnd::Eof)),
+                    true
+                )
             );
         });
     }

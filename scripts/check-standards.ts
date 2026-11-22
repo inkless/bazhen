@@ -3698,19 +3698,127 @@ const FAKE_HOLDER_CRATE = "crates/bazhen-runtime-holder/src/";
 const FAKE_HOLDER_ALIAS = /\bas\s+FakeHolder\b|\btype\s+FakeHolder\b/;
 const FAKE_HOLDER_DEFINED =
   /\b(?:struct|enum|union|trait|mod|fn|const|static)\s+FakeHolder\b|\bmacro_rules\s*!\s*FakeHolder\b/;
+/** A `use` of `FakeHolder` from where the fake is, and nowhere else. */
+const FAKE_HOLDER_USE = /^crate\s*::\s*fake_holder\s*::\s*(?:FakeHolder|\{[^{}]*\})$/;
+/**
+ * A call that opens a connection, or takes one opened elsewhere: a `connect`, `connect_unix` or
+ * the like, or a stream or socket made `from_std` or `from_raw_fd`. Its first argument is caught.
+ */
+const FAKE_HOLDER_DIAL = /\b(?:connect\w*|from_std|from_raw_fd)\s*\(\s*&?\s*(\w*)/g;
+
+/**
+ * What the fake may name outside itself: the protocol's own crate, and these of the client,
+ * where a dial among them is one `FAKE_HOLDER_DIAL` sees by its name.
+ */
+const FAKE_HOLDER_CLIENT = new Set([
+  "ClientOptions",
+  "HolderClient",
+  "HolderEvents",
+  "connect",
+  "open",
+]);
+
+/**
+ * Whether `code` names anything of this crate, or of another bazhen crate, but the protocol's
+ * crate and `FAKE_HOLDER_CLIENT`: one could dial under a name of its own, as a `reach(path)`
+ * elsewhere in the crate might, and an alias (`connect as dial`) hides a dial's name.
+ */
+function reachesPastTheClient(code: string): boolean {
+  for (const path of code.matchAll(/\b(crate|super|self|bazhen_\w+)\s*::\s*/g)) {
+    if (path[1] === "bazhen_holder_proto") continue;
+    const rest = code.slice(path.index + path[0].length);
+    const named = /^client\s*::\s*(?:(\w+)|\{([^{}]*)\})/.exec(rest);
+    const names = named
+      ? named[1] !== undefined
+        ? [named[1]]
+        : topLevelParts(named[2] ?? "")
+      : [];
+    if (
+      path[1] !== "crate" ||
+      names.length === 0 ||
+      !names.every((n) => FAKE_HOLDER_CLIENT.has(n))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A bind of a `UnixListener` at `name` that fails loudly, through `.unwrap()` or `?`. */
+function loudBind(name: string): RegExp {
+  return new RegExp(
+    `\\bUnixListener\\s*::\\s*bind\\s*\\(\\s*&?\\s*(${name})\\s*\\)` +
+      "\\s*(?:\\.\\s*unwrap\\s*\\(\\s*\\)|\\?)",
+    "g",
+  );
+}
+
+/** The `use`d paths of `code` that name `FakeHolder`, each after its `use`. */
+function fakeHolderUses(code: string): string[] {
+  return [...code.matchAll(/\buse\s+([^;]*);/g)]
+    .map((m) => (m[1] ?? "").trim())
+    .filter((u) => /\bFakeHolder\b/.test(u));
+}
+
+/** Whether a generic parameter list in `code` names a parameter `FakeHolder`, hiding the type. */
+function hasFakeHolderParameter(code: string): boolean {
+  const opens =
+    /\b(?:fn\s+\w+|impl|struct\s+\w+|enum\s+\w+|union\s+\w+|trait\s+\w+|type\s+\w+)\s*</g;
+  for (const open of code.matchAll(opens)) {
+    const from = open.index + open[0].length;
+    let i = from;
+    for (let depth = 1; i < code.length && depth > 0; i++) {
+      if (code[i] === "<") depth++;
+      else if (code[i] === ">" && code[i - 1] !== "-") depth--;
+    }
+    if (topLevelParts(code.slice(from, i - 1)).some((p) => /^(?:const\s+)?FakeHolder\b/.test(p))) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * The constructors of `FakeHolder` in `fake_holder.rs` whose client can only be talking to the
  * fake: each takes no `self`, and nothing but `ClientOptions`, an `impl FnOnce(&mut HelloReply)`
- * or a `&Path` it binds a `UnixListener` at (a bind fails where a socket already is), and each
- * `connect(` in it names such a path. So none takes a stream, a socket, a client or a path to
- * another's listener, and a constructor added that does isn't trusted. None, when the file
- * itself closes, signals or respawns anything.
+ * or a `&Path` it binds a `UnixListener` at. So none takes a stream, a socket, a client or a
+ * path to another's listener, and a constructor added that does isn't trusted.
+ *
+ * And none at all unless the whole file is shown to open nothing but its own: each dial in it
+ * (`FAKE_HOLDER_DIAL`), in whichever function, names a path that function binds a listener at,
+ * and nothing there binds that name again; and each bind in it fails loudly, through `.unwrap()` or `?`,
+ * since a bind whose failure is let go, as `let _ =` does, where a holder's socket already is
+ * would leave the dial reaching that holder.
+ * None either when the file closes, signals or respawns anything, or names anything of this crate
+ * or another bazhen crate but the protocol's and the client's own (`reachesPastTheClient`).
  */
 export function fakeHolderConstructors(source: string): Set<string> {
   const code = rustCode(source);
   const trusted = new Set<string>();
-  if (SIGNALLING_CALL.test(code)) return trusted;
+  if (SIGNALLING_CALL.test(code) || reachesPastTheClient(code)) return trusted;
+  // And nothing in that function binds the name again, to some other path: a `let`, an
+  // `if let` or `while let` pattern, a `for` or a closure's parameter.
+  const binds = (body: string, name: string) =>
+    loudBind(name).test(body) &&
+    !new RegExp(
+      `\\blet\\b[^=;]*\\b${name}\\b|\\bfor\\b[^{;]*\\b${name}\\b[^{;]*\\bin\\b|\\|[^|]*\\b${name}\\b[^|]*\\|`,
+    ).test(body);
+  const anyBind = /\bUnixListener\s*::\s*bind\b/g;
+  const loudAt = new Set([...code.matchAll(loudBind("\\w+"))].map((m) => m.index));
+  const fns = [...code.matchAll(/\bfn\s+\w+/g)].map((m) => {
+    const start = fnBodyStart(code, m.index);
+    return [m.index, code[start - 1] === "{" ? closingBrace(code, start) : start] as const;
+  });
+  // The innermost function `at` is in, as its text.
+  const within = (at: number) => {
+    const around = fns.filter(([from, to]) => from <= at && at < to);
+    const [from, to] = around.toSorted((x, y) => x[1] - x[0] - (y[1] - y[0]))[0] ?? [0, 0];
+    return code.slice(from, to);
+  };
+  for (const bind of code.matchAll(anyBind)) if (!loudAt.has(bind.index)) return trusted;
+  for (const dial of code.matchAll(FAKE_HOLDER_DIAL)) {
+    if (!binds(within(dial.index), dial[1] ?? "")) return trusted;
+  }
   for (const impl of code.matchAll(/\bimpl\s+FakeHolder\s*\{/g)) {
     const block = code.slice(impl.index, closingBrace(code, impl.index + impl[0].length));
     for (const fn of block.matchAll(/\bfn\s+(\w+)\s*(?:<[^>]*>)?\s*\(/g)) {
@@ -3718,19 +3826,16 @@ export function fakeHolderConstructors(source: string): Set<string> {
       const params = topLevelParts(block.slice(open, closingParen(block, open) - 1));
       const start = fnBodyStart(block, fn.index);
       const body = block.slice(start, closingBrace(block, start));
-      const bound = (name: string) =>
-        new RegExp(`\\bUnixListener\\s*::\\s*bind\\s*\\(\\s*&?\\s*${name}\\s*\\)`).test(body);
       const fit = params.every((param) => {
         const typed = /^(\w+)\s*:\s*([^]+)$/.exec(param);
         const [name, type] = [typed?.[1] ?? "", typed?.[2]?.trim() ?? ""];
         return (
           /^ClientOptions$/.test(type) ||
           /^impl\s+FnOnce\s*\(\s*&\s*mut\s+HelloReply\s*\)$/.test(type) ||
-          (/^&\s*Path$/.test(type) && bound(name))
+          (/^&\s*Path$/.test(type) && binds(body, name))
         );
       });
-      const dials = [...body.matchAll(/\bconnect\s*\(\s*&?\s*(\w*)/g)];
-      if (fit && dials.every((m) => bound(m[1] ?? ""))) trusted.add(fn[1] ?? "");
+      if (fit) trusted.add(fn[1] ?? "");
     }
   }
   trusted.delete("");
@@ -3739,15 +3844,21 @@ export function fakeHolderConstructors(source: string): Set<string> {
 
 /**
  * The trusted constructors of runtime-holder's `FakeHolder` (`fakeHolderConstructors`), or none
- * when any file of that crate could make the name another type's: an alias to it, or a
- * definition of it anywhere but `fake_holder.rs`.
+ * when any file of that crate could make the name another type's: an alias to it, a definition
+ * of it anywhere but `fake_holder.rs`, a generic parameter of that name, or a `use` of it from
+ * anywhere but `crate::fake_holder`.
  */
 function trustedFakeHolder(files: readonly string[], read: (file: string) => string) {
   const crate = files.filter((f) => f.startsWith(FAKE_HOLDER_CRATE));
   if (!crate.includes(FAKE_HOLDER)) return new Set<string>();
   const renamed = crate.some((f) => {
     const code = rustCode(read(f));
-    return FAKE_HOLDER_ALIAS.test(code) || (f !== FAKE_HOLDER && FAKE_HOLDER_DEFINED.test(code));
+    return (
+      FAKE_HOLDER_ALIAS.test(code) ||
+      (f !== FAKE_HOLDER && FAKE_HOLDER_DEFINED.test(code)) ||
+      hasFakeHolderParameter(code) ||
+      !fakeHolderUses(code).every((u) => FAKE_HOLDER_USE.test(u))
+    );
   });
   return renamed ? new Set<string>() : fakeHolderConstructors(read(FAKE_HOLDER));
 }
@@ -3773,12 +3884,8 @@ export function withoutFakeHolderRequests(
   constructors: ReadonlySet<string>,
 ): string {
   if (!file.startsWith(FAKE_HOLDER_CRATE) || constructors.size === 0) return code;
-  const uses = [...code.matchAll(/\buse\s+([^;]*);/g)]
-    .map((m) => (m[1] ?? "").trim())
-    .filter((u) => /\bFakeHolder\b/.test(u));
-  const fromTheFake = uses.every((u) =>
-    /^crate\s*::\s*fake_holder\s*::\s*(?:FakeHolder|\{[^{}]*\})$/.test(u),
-  );
+  const uses = fakeHolderUses(code);
+  const fromTheFake = uses.every((u) => FAKE_HOLDER_USE.test(u));
   if (file !== FAKE_HOLDER && (uses.length === 0 || !fromTheFake)) return code;
   const blanks: [number, number][] = [];
   for (const fn of code.matchAll(/\bfn\s+\w+/g)) {

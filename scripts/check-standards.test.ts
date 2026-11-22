@@ -3460,7 +3460,7 @@ describe("tests that signal processes they didn't start", () => {
   });
 
   // The fake as runtime-holder's tests have it: three constructors that make their own far end,
-  // and three a test can't trust: one taking a stream, and two dialling a path they didn't bind.
+  // and two a test can't trust: one taking a stream, and one taking a path it doesn't bind.
   const FAKE = "crates/bazhen-runtime-holder/src/fake_holder.rs";
   const fakeHolder = [
     "pub(crate) struct FakeHolder { stream: UnixStream }",
@@ -3475,10 +3475,7 @@ describe("tests that signal processes they didn't start", () => {
     "        connect(path, &ClientOptions::default()).await",
     "    }",
     "    pub(crate) async fn wrap(stream: UnixStream) -> Connected { open(stream).await }",
-    "    pub(crate) async fn dial(path: &Path) -> Connected { connect(path, &o).await }",
-    "    pub(crate) async fn real(options: ClientOptions) -> Connected {",
-    "        connect(&holder_socket(&root, id), &options).await",
-    "    }",
+    "    pub(crate) async fn beside(path: &Path) -> Connected { Self::client().await }",
     "    pub(crate) fn new(stream: UnixStream) -> Self { Self { stream } }",
     "}",
   ].join("\n");
@@ -3518,23 +3515,19 @@ describe("tests that signal processes they didn't start", () => {
     const sources = {
       [inCrate("wrap")]:
         `${USE}\n${closing("let Connected { client, .. } = FakeHolder::wrap(s).await;")}`,
-      [inCrate("dial")]:
-        `${USE}\n${closing("let Connected { client, .. } = FakeHolder::dial(&p).await;")}`,
-      [inCrate("real")]:
-        `${USE}\n${closing("let Connected { client, .. } = FakeHolder::real(o).await;")}`,
+      [inCrate("beside")]:
+        `${USE}\n${closing("let Connected { client, .. } = FakeHolder::beside(&p).await;")}`,
       [inCrate("unimported")]: `use crate::client::HolderClient;\n${closing(fakeLet)}`,
-      [inCrate("elsewhere")]: `use crate::testing::FakeHolder;\n${closing(fakeLet)}`,
       [inCrate("trusted")]: `${USE}\n${closing(fakeLet)}`,
       "crates/bazhen-daemon/src/x.rs": `${USE}\n${closing(fakeLet)}`,
     };
-    // Each file's test but the trusted one's; then an alias or another `FakeHolder` anywhere in
-    // the crate, or a fake that signals, leaves even that one unexempt.
+    // Each file's test but the trusted one's; then an alias, another `FakeHolder`, a generic
+    // parameter of that name or a `use` of it from elsewhere, anywhere in the crate, leaves even
+    // that one unexempt.
     expect(withFake(sources)).toEqual([
       `${inCrate("wrap")}:2`,
-      `${inCrate("dial")}:2`,
-      `${inCrate("real")}:2`,
+      `${inCrate("beside")}:2`,
       `${inCrate("unimported")}:2`,
-      `${inCrate("elsewhere")}:2`,
       "crates/bazhen-daemon/src/x.rs:2",
     ]);
     const trusted = { [inCrate("trusted")]: `${USE}\n${closing(fakeLet)}` };
@@ -3543,14 +3536,47 @@ describe("tests that signal processes they didn't start", () => {
       "use bazhen_runtime_holder as FakeHolder;",
       "type FakeHolder = RealHolder;",
       "struct FakeHolder;",
+      "async fn a<FakeHolder: Spawn>() { let Connected { client, .. } = FakeHolder::client(); }",
+      "impl<FakeHolder: Spawn> Pool<FakeHolder> {}",
+      "use crate::testing::FakeHolder;",
+      "pub(crate) use bazhen_other::FakeHolder;",
     ];
     for (const other of renames) {
       expect(withFake({ ...trusted, [inCrate("other")]: other })).toEqual([
         `${inCrate("trusted")}:2`,
       ]);
     }
-    const signalling = `${fakeHolder}\nfn end(child: &Child) { child.signal(9); }`;
-    expect(unmarked({ ...trusted, [FAKE]: signalling })).toEqual([`${inCrate("trusted")}:2`]);
+    // So does a fake that signals, or that anywhere opens a connection, or takes one, other than
+    // at a path the same function binds and fails loudly if it can't.
+    const opening = [
+      "fn end(child: &Child) { child.signal(9); }",
+      "async fn real(root: &Path) -> Connected { connect(&holder_socket(root, id), &o).await }",
+      "impl FakeHolder { async fn dial(path: &Path) -> Connected { connect(path, &o).await } }",
+      "async fn at(path: &Path) { let _ = UnixListener::bind(path); connect(path, &o).await }",
+      "async fn at(path: &Path) { UnixListener::bind(path).ok(); connect(path, &o).await }",
+      "fn at(path: &Path) { UnixListener::bind(path)?; let path = elsewhere; connect(&path) }",
+      "fn raw(fd: &OwnedFd, addr: &SocketAddrUnix) { rustix::net::connect_unix(fd, addr) }",
+      "fn adopt(std: std::os::unix::net::UnixStream) { UnixStream::from_std(std) }",
+      "fn adopt(fd: RawFd) -> UnixStream { unsafe { UnixStream::from_raw_fd(fd) } }",
+      "fn at(path: &Path) { UnixListener::bind(path)?; if let Some(path) = o { connect(path) } }",
+      "fn at(path: &Path) { UnixListener::bind(path)?; for path in o { connect(path); } }",
+      "fn at(path: &Path) { UnixListener::bind(path)?; o.map(|path| connect(path)); }",
+      "use crate::runtime::reach;",
+      "async fn real(root: &Path) -> Connected { crate::runtime::reach(root).await }",
+      "fn real(p: &Path) { bazhen_host_guard::holder::dial(p) }",
+      "use crate::client::{connect as dial, open};",
+      "use super::sockets::dial;",
+    ];
+    // While the fake as it is, naming the client's own, stays trusted.
+    const named = `use crate::client::{ClientOptions, HolderClient, HolderEvents, connect, open};`;
+    expect(
+      unmarked({ ...trusted, [FAKE]: `${named}\nuse bazhen_holder_proto::Reply;\n${fakeHolder}` }),
+    ).toEqual([]);
+    for (const added of opening) {
+      expect(unmarked({ ...trusted, [FAKE]: `${fakeHolder}\n${added}` })).toEqual([
+        `${inCrate("trusted")}:2`,
+      ]);
+    }
   });
 
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
