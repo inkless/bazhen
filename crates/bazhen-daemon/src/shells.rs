@@ -332,6 +332,9 @@ pub(crate) struct Shells {
     retypes: PendingRetypes,
     /// What handles the shells' reports, each to its end.
     keeper: self::reports::Keeper,
+    /// The shells the start's reconcile read and couldn't yet settle, by id, tried again each
+    /// tick, and what the last try of them said.
+    unreconciled: Mutex<reconcile::Unreconciled>,
 }
 
 /// A new shell, as `start` opens it.
@@ -477,6 +480,7 @@ impl Shells {
             foreground_fault: Mutex::new(None),
             restarts: crate::restarts::Restarts::default(),
             keeper: self::reports::Keeper::default(),
+            unreconciled: Mutex::new(reconcile::Unreconciled::default()),
         }
     }
 
