@@ -167,7 +167,13 @@ fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
         .args(["-o", "comm=", "-o", "sigignore=", "-p", &pid.to_string()])
         .output()?;
     let said = String::from_utf8(out.stdout)?;
-    let (comm, mask) = said.trim().rsplit_once(' ').ok_or("ps showed no process")?;
+    let (comm, mask) = said.trim().rsplit_once(' ').ok_or_else(|| {
+        format!(
+            "ps showed no process ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )
+    })?;
     let name = Path::new(comm.trim())
         .file_name()
         .ok_or("ps showed no name")?;
@@ -187,8 +193,10 @@ fn ignored_in(mask: &str) -> Res<bool> {
 }
 
 /// The control for the daemon's: what the shell execs, here a `sleep` that ends by itself, still
-/// ignores SIGCHLD once `ps` shows it is the `sleep`. Nothing is signalled.
+/// ignores SIGCHLD once `ps` shows it is the `sleep`. Nothing is signalled. It runs where the
+/// daemon's test does, on Linux: macOS's `ps` shows nothing for `sigignore`.
 #[test]
+#[cfg(target_os = "linux")]
 fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
     let mut child = ignoring_sigchld("sleep").arg("2").spawn().unwrap();
     let started = Instant::now();
