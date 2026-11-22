@@ -196,7 +196,8 @@ fn replays_the_answer_the_typescript_daemon_recorded_for_a_key_and_refuses_it_fo
 fn snapshots_the_log_as_the_typescript_daemon_does() {
     let dir = TempDir::new("events-snapshot");
     let store = written_by_typescript(&dir.db("bazhen.db"));
-    let snapshot = serde_json::to_value(store.reads().snapshot().unwrap()).unwrap();
+    let snapshot =
+        serde_json::to_value(store.reads().snapshot(&crate::testing::view()).unwrap()).unwrap();
     assert_eq!(snapshot, fixture()["log"]["snapshot"]);
 }
 
@@ -208,13 +209,16 @@ fn refuses_a_snapshot_that_would_leave_out_rows_this_build_cant_describe() {
         .db
         .execute_batch(
             "INSERT INTO environments (id, kind, created_event_id) VALUES ('env_1', 'local', 1);
+             INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+               created_event_id, updated_event_id)
+               VALUES ('agent_1', 'env_1', 'codex', 'p', '/', 'running', 1, 1);
              INSERT INTO notices (id, kind, state, summary, created_event_id, updated_event_id)
                VALUES ('ntc_1', 'pairing', 'closed', 'paired', 1, 1);",
         )
         .unwrap();
-    let refused = store.reads().snapshot();
+    let refused = store.reads().snapshot(&crate::testing::view());
     assert!(
-        matches!(&refused, Err(crate::SnapshotError::Unported(s)) if s == &["environments"]),
+        matches!(&refused, Err(crate::SnapshotError::Unported(s)) if s == &["agents"]),
         "{refused:?}"
     );
 }

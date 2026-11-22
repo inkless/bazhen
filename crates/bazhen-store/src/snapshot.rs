@@ -17,16 +17,7 @@ struct Unported {
     rows: &'static str,
 }
 
-const UNPORTED: [Unported; 4] = [
-    // Lifted by the slice that brings environments, terminals and shells.
-    Unported {
-        section: "environments",
-        rows: "SELECT 1 FROM environments",
-    },
-    Unported {
-        section: "shells",
-        rows: "SELECT 1 FROM terminals WHERE kind = 'shell' AND state NOT IN ('closed', 'failed')",
-    },
+const UNPORTED: [Unported; 2] = [
     // Lifted by the slice that brings agents, their mail and the human's inbox.
     Unported {
         section: "agents",
@@ -48,6 +39,13 @@ const CLOSED_NOTICES_SHOWN: u32 = 20;
 /// and the daemon takes it out of what such a viewer is sent.
 const OPEN_NOTICE_ACTIONS: [&str; 1] = ["dismiss"];
 
+/// What the snapshot needs of the daemon, which the database doesn't hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotView {
+    /// This machine's name, which each local environment is on.
+    pub host: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
     /// The database holds rows of sections this build can't describe yet.
@@ -65,7 +63,7 @@ impl Reads<'_> {
     /// # Errors
     ///
     /// [`SnapshotError::Unported`] when the database holds what this build can't describe.
-    pub fn snapshot(self) -> Result<StateSnapshot, SnapshotError> {
+    pub fn snapshot(self, view: &SnapshotView) -> Result<StateSnapshot, SnapshotError> {
         let tx = self.0.unchecked_transaction()?;
         let reads = Reads(&tx);
         let mut unported = Vec::new();
@@ -80,7 +78,7 @@ impl Reads<'_> {
         let snapshot = StateSnapshot {
             epoch: reads.epoch()?,
             event_id: reads.latest_event_id()?,
-            environments: Vec::new(),
+            environments: crate::terminals::environments(&tx, &view.host)?,
             agents: Vec::new(),
             attention: Vec::new(),
             messages: rows(
@@ -88,7 +86,7 @@ impl Reads<'_> {
                 "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",
                 (),
             )?,
-            shells: Vec::new(),
+            shells: crate::terminals::shells(&tx)?,
             tasks: rows(
                 &tx,
                 "SELECT id, title, state, owner_agent_id AS ownerAgentId,

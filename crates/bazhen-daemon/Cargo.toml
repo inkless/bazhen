@@ -8,9 +8,11 @@ publish.workspace = true
 [dependencies]
 axum = { workspace = true }
 bazhen-client = { workspace = true }
+bazhen-holder-proto = { workspace = true }
 bazhen-host-guard = { workspace = true }
 bazhen-peer = { workspace = true }
 bazhen-protocol = { workspace = true }
+bazhen-runtime-holder = { workspace = true }
 bazhen-store = { workspace = true }
 futures-util = { workspace = true }
 hyper = { workspace = true }

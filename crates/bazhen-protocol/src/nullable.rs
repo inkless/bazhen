@@ -39,6 +39,20 @@ impl<T> Nullable<T> {
     }
 }
 
+/// A field's deserializer for zod's `.optional()`, called only when the field is there: absent
+/// comes from its default, and null, which `.optional()` refuses, is refused here too.
+///
+/// # Errors
+///
+/// When the field is not a `T`, null included.
+pub fn optional<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
+}
+
 impl<T: Serialize> Serialize for Nullable<T> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {

@@ -802,7 +802,7 @@ mod tests {
         }
         let shown: Vec<(String, Vec<String>)> = store
             .reads()
-            .snapshot()
+            .snapshot(&crate::testing::view())
             .unwrap()
             .notices
             .into_iter()

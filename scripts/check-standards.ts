@@ -805,6 +805,26 @@ const NOT_DECODERS: Record<string, string> = {
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
     "hands its body to tasks::asked, which its tasks target fuzzes; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::parsed":
+    "reads a request body only as serde_json's derive for the shell request it names, refusing anything else whole",
+  "crates/bazhen-daemon/src/shell_routes.rs::open_request":
+    "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::close_request":
+    "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::restart_request":
+    "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::rename_request":
+    "hands its body to parsed, then checks the name serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::open":
+    "hands its body to open_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::close":
+    "hands its body to close_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::restart":
+    "hands its body to restart_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::rename":
+    "hands its body to rename_request; decodes nothing itself",
+  "crates/bazhen-host-guard/src/ptys.rs::Machine::read_file":
+    "reads a kernel counter file whole as text for count, which takes it only as a whole number; parses nothing itself",
   "crates/bazhen-host-guard/src/group.rs::read_out":
     "copies at most OUTPUT_MAX bytes of a child's pipe into a buffer and drops the rest; parses nothing",
   "crates/bazhen-host-guard/src/scope.rs::said":

@@ -25,3 +25,10 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+/// What a snapshot is told of the daemon in a test.
+pub(crate) fn view() -> crate::SnapshotView {
+    crate::SnapshotView {
+        host: "testhost".to_owned(),
+    }
+}

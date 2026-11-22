@@ -4,9 +4,11 @@
 use std::num::NonZeroU32;
 
 use bazhen_protocol::events::{
-    DevicePaired, DeviceRevoked, NoticeClosed, NoticeOpened, ResetReason, TaskCreated, event_kind,
+    DevicePaired, DeviceRevoked, EnvironmentRegistered, NoticeClosed, NoticeOpened, ResetReason,
+    TaskCreated, TerminalClosed, TerminalFailed, TerminalForegroundChanged, TerminalIncarnation,
+    TerminalNeedsRestart, TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
 };
-use bazhen_protocol::ids::{DeviceId, NoticeId, TaskId};
+use bazhen_protocol::ids::{DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId};
 use bazhen_protocol::record::Record;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
@@ -40,6 +42,84 @@ pub enum NewEvent {
         notice: NoticeId,
         payload: NoticeClosed,
     },
+    /// An environment terminals run in, which the `system` registers.
+    EnvironmentRegistered {
+        environment: EnvironmentId,
+        payload: EnvironmentRegistered,
+    },
+    /// A change to a terminal, from the human or from the `system`.
+    Terminal {
+        terminal: TerminalId,
+        actor: Actor,
+        change: TerminalChange,
+    },
+}
+
+/// Who a terminal's change came from: the human's command, or the daemon's own finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Actor {
+    User,
+    System,
+}
+
+impl Actor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::System => "system",
+        }
+    }
+}
+
+/// What a `terminal.*` event records, with its payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalChange {
+    Opened(TerminalOpened),
+    Running(TerminalIncarnation),
+    Failed(TerminalFailed),
+    ProcessAdopted(TerminalIncarnation),
+    Lost,
+    Closing,
+    Closed(TerminalClosed),
+    Renamed(TerminalRenamed),
+    ForegroundChanged(TerminalForegroundChanged),
+    NeedsRestart(TerminalNeedsRestart),
+    RestartCleared,
+}
+
+impl TerminalChange {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Opened(_) => "terminal.opened",
+            Self::Running(_) => "terminal.running",
+            Self::Failed(_) => "terminal.failed",
+            Self::ProcessAdopted(_) => "terminal.process_adopted",
+            Self::Lost => "terminal.lost",
+            Self::Closing => "terminal.closing",
+            Self::Closed(_) => "terminal.closed",
+            Self::Renamed(_) => "terminal.renamed",
+            Self::ForegroundChanged(_) => "terminal.foreground_changed",
+            Self::NeedsRestart(_) => "terminal.needs_restart",
+            Self::RestartCleared => "terminal.restart_cleared",
+        }
+    }
+
+    fn payload(&self) -> serde_json::Result<String> {
+        match self {
+            Self::Opened(payload) => serde_json::to_string(payload),
+            Self::Running(payload) | Self::ProcessAdopted(payload) => {
+                serde_json::to_string(payload)
+            }
+            Self::Failed(payload) => serde_json::to_string(payload),
+            Self::Closed(payload) => serde_json::to_string(payload),
+            Self::Renamed(payload) => serde_json::to_string(payload),
+            Self::ForegroundChanged(payload) => serde_json::to_string(payload),
+            Self::NeedsRestart(payload) => serde_json::to_string(payload),
+            Self::Lost | Self::Closing | Self::RestartCleared => {
+                serde_json::to_string(&TerminalNoted {})
+            }
+        }
+    }
 }
 
 impl NewEvent {
@@ -50,6 +130,8 @@ impl NewEvent {
             Self::DeviceRevoked { .. } => "device.revoked",
             Self::NoticeOpened { .. } => "notice.opened",
             Self::NoticeClosed { .. } => "notice.closed",
+            Self::EnvironmentRegistered { .. } => "environment.registered",
+            Self::Terminal { change, .. } => change.name(),
         }
     }
 
@@ -60,6 +142,8 @@ impl NewEvent {
             Self::NoticeOpened { notice, .. } | Self::NoticeClosed { notice, .. } => {
                 notice.as_str()
             }
+            Self::EnvironmentRegistered { environment, .. } => environment.as_str(),
+            Self::Terminal { terminal, .. } => terminal.as_str(),
         }
     }
 
@@ -69,7 +153,8 @@ impl NewEvent {
             Self::DevicePaired { .. } | Self::DeviceRevoked { .. } | Self::NoticeClosed { .. } => {
                 "user"
             }
-            Self::NoticeOpened { .. } => "system",
+            Self::NoticeOpened { .. } | Self::EnvironmentRegistered { .. } => "system",
+            Self::Terminal { actor, .. } => actor.as_str(),
         }
     }
 
@@ -80,6 +165,8 @@ impl NewEvent {
             Self::DeviceRevoked { .. } => serde_json::to_string(&DeviceRevoked {}),
             Self::NoticeOpened { payload, .. } => serde_json::to_string(payload),
             Self::NoticeClosed { payload, .. } => serde_json::to_string(payload),
+            Self::EnvironmentRegistered { payload, .. } => serde_json::to_string(payload),
+            Self::Terminal { change, .. } => change.payload(),
         }
     }
 }
@@ -119,12 +206,13 @@ impl Writer<'_> {
             event: event.name(),
             reason: "the type isn't registered".to_owned(),
         })?;
+        let ts = crate::now();
         self.tx.execute(
             "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, causation_id,
                correlation_id, payload) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
             (
                 host,
-                crate::now(),
+                &ts,
                 kind.name,
                 kind.entity,
                 event.entity_id(),
@@ -136,8 +224,42 @@ impl Writer<'_> {
             event: kind.name,
             reason: "its id isn't positive".to_owned(),
         })?;
-        projections::project(&self.tx, id, event)?;
+        projections::project(&self.tx, &projections::At { id, ts: &ts, host }, event)?;
         Ok(id)
+    }
+
+    /// The answer first given to `key`, if it was given for `request`, as
+    /// [`Store::once`](crate::Store::once) replays it, for a caller whose answer comes after work
+    /// it does outside the transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`OnceError::Conflict`] when the key was first used for another request.
+    pub fn replay<R: DeserializeOwned>(
+        &self,
+        key: &str,
+        request: &str,
+    ) -> Result<Option<R>, OnceError> {
+        replay(&self.tx, key, request)
+    }
+
+    /// Records `response` as the answer to `key` for `request`, for [`Writer::replay`].
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or `serde_json`'s writing the answer.
+    pub fn answered<R: Serialize>(
+        &self,
+        key: &str,
+        request: &str,
+        response: &R,
+    ) -> Result<(), OnceError> {
+        answered(&self.tx, key, request, response)
+    }
+
+    /// The read models as this transaction sees them.
+    pub fn reads(&self) -> Reads<'_> {
+        Reads(&self.tx)
     }
 
     /// The connection, for reading inside the transaction.

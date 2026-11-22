@@ -109,6 +109,12 @@ fn note_safe(text: &str) -> bool {
 }
 
 /// C0 and C1 control characters, and the bidirectional embeddings, overrides and isolates.
+/// Whether a client can draw `text` as it is: no control character and no bidirectional override
+/// that reorders the text around it, as `showable` in packages/protocol says.
+pub fn showable(text: &str) -> bool {
+    !text.chars().any(unshowable)
+}
+
 fn unshowable(c: char) -> bool {
     matches!(
         c,

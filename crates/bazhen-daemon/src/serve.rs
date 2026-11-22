@@ -5,10 +5,11 @@
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bazhen_client::paths::{DRAIN, LOCK_WAIT, Paths, lock_of};
-use bazhen_store::{OpenError, Store};
+use bazhen_store::{AppendError, OpenError, Store};
 
 use crate::retention;
 use crate::writer::{self, Writer};
@@ -18,11 +19,16 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::accept::{self, Limits, serve_on};
+use crate::config::Settings;
+use crate::doctor::Settled;
 use crate::guard;
 use crate::lock::{Claim, Lock, claim};
 use crate::private_dir::ensure_private_dir;
 use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
+use crate::runner::{self, Runner};
+use crate::shells::{Shells, ShellsDeps};
+use crate::terminals::Exits;
 use crate::tokens;
 
 /// How the daemon serves: each listener's limits, and how long its connections get to finish once
@@ -44,6 +50,10 @@ const SERVING: Serving = Serving {
 #[derive(Debug, Clone)]
 pub(crate) struct Startup {
     pub(crate) paths: Paths,
+    /// The settings as loaded, which the terminals and doctor read.
+    pub(crate) settings: Settings,
+    /// The daemon user's home: a shell's default directory.
+    pub(crate) home: String,
     pub(crate) uid: u32,
     pub(crate) port: u16,
     /// `BAZHEN_WEB_PORT`: the web dev server's port, whose pages may act.
@@ -165,23 +175,76 @@ fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<R
         .enable_all()
         .build()
         .map_err(|err| Refused::Said(format!("bazhen can't start its runtime: {err}")))
-        .and_then(|runtime| runtime.block_on(listen(startup, SERVING, store)));
+        .and_then(|runtime| {
+            runtime.block_on(async {
+                let runner = runner::holders(startup).await?;
+                listen(startup, SERVING, store, Some(runner)).await
+            })
+        });
     writer.finish();
     served
 }
 
+/// The shells over `runner`'s terminals, with this machine's environment registered, what the
+/// budget says of the terminals kept from before, and the exits told from before any opens.
+async fn shells(
+    startup: &Startup,
+    store: &Writer,
+    runner: Runner,
+    tracker: &TaskTracker,
+) -> Result<(Arc<Shells>, Box<dyn Exits>, Settled), Refused> {
+    let exits = runner.terminals.exits();
+    let open = store
+        .run(|store| {
+            store.write(|w| -> Result<u64, AppendError> {
+                w.local_environment()?;
+                Ok(w.reads().open_terminals()?)
+            })
+        })
+        .await
+        .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
+        .map_err(|err| Refused::Said(format!("bazhen can't register this machine: {err}")))?;
+    for warning in runner.budget.startup_warnings(open) {
+        tracing::warn!("bazhen: {warning}");
+    }
+    let shells = Shells::new(ShellsDeps {
+        store: store.clone(),
+        terminals: runner.terminals,
+        budget: runner.budget,
+        home: startup.home.clone(),
+        shell: runner.shell,
+        socket: startup.paths.socket.clone(),
+        tracker: tracker.clone(),
+    });
+    Ok((Arc::new(shells), exits, runner.doctor))
+}
+
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
-async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Reason, Refused> {
+/// With `runner`, it runs shells on its terminals, and ends the runtime's watches at the drain.
+async fn listen(
+    startup: &Startup,
+    serving: Serving,
+    store: Writer,
+    runner: Option<Runner>,
+) -> Result<Reason, Refused> {
     let stop = Stop::default();
     let hurry = CancellationToken::new();
     let hearing = TaskTracker::new();
     hear_signals(&hearing, &stop, &hurry)?;
-    let shared = Shared::new(
+    let mut shared = Shared::new(
         bazhen_protocol::id::PROTOCOL_ID,
         stop.clone(),
         store.clone(),
     )
     .with_external_origins(startup.external_origins.clone());
+    // Made before the shells, whose commands run on it, so the drain waits for them as well.
+    let tracker = TaskTracker::new();
+    let mut watching = None;
+    if let Some(runner) = runner {
+        let (running, exits, doctor) = shells(startup, &store, runner, &tracker).await?;
+        shared = shared.with_shells(Arc::clone(&running), doctor);
+        watching = Some((running, exits));
+    }
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -217,9 +280,12 @@ async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Re
     let path = PathBuf::from(&startup.paths.socket);
     let (socket, made) = bind_socket(&path)?;
 
-    let tracker = TaskTracker::new();
     let token = stop.token();
     let retiring = token.clone();
+    let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
+    if let Some((running, exits)) = watching {
+        tracker.spawn(running.watch(exits, tracker.clone(), token.clone()));
+    }
     tracker.spawn(crate::paired::close_lapsed_every_minute(
         shared.clone(),
         token.clone(),
@@ -247,6 +313,10 @@ async fn listen(startup: &Startup, serving: Serving, store: Writer) -> Result<Re
     tracker.close();
     token.cancelled().await;
     drain(&tracker, serving.drain, &hurry).await;
+    if let Some(running) = ending {
+        // Holders run on; only the daemon's watches of them and its connections end here.
+        let _ = tokio::time::timeout(serving.drain, running.terminals().shutdown()).await;
+    }
     Ok(stop.reason().unwrap_or(Reason::Requested))
 }
 
@@ -330,16 +400,30 @@ mod tests {
 
     fn startup(home: &Path) -> Startup {
         let at = |name: &str| home.join(name).to_string_lossy().into_owned();
+        let paths = Paths {
+            config: at("config"),
+            data: at("data"),
+            bank: at("bank"),
+            state: at("state"),
+            cache: at("cache"),
+            run: at("run"),
+            socket: at("run/bazhen.sock"),
+        };
         Startup {
-            paths: Paths {
-                config: at("config"),
-                data: at("data"),
-                bank: at("bank"),
-                state: at("state"),
-                cache: at("cache"),
-                run: at("run"),
-                socket: at("run/bazhen.sock"),
+            paths: paths.clone(),
+            settings: Settings {
+                paths,
+                config: crate::config::resolve_config(
+                    &crate::config::FileConfig::default(),
+                    &|_| None,
+                )
+                .unwrap(),
+                config_file: crate::config::ConfigFile {
+                    path: at("config/config.toml"),
+                    found: false,
+                },
             },
+            home: at("home"),
             uid: rustix::process::getuid().as_raw(),
             port: 0,
             web_port: None,
@@ -387,7 +471,7 @@ mod tests {
         let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
-            let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
+            let serving = tracker.spawn(async move { listen(&startup, QUICK, store, None).await });
             let answer = ask(&socket, STOP).await;
             let asked = Instant::now();
             let reason = tokio::time::timeout(Duration::from_secs(5), serving).await;
@@ -403,6 +487,135 @@ mod tests {
         writer.finish();
     }
 
+    /// Terminals on a fake runtime, three at most, with no holder installed.
+    fn faked(startup: &Startup) -> Runner {
+        use crate::budget::tests::{Machine, roomy};
+        let captured = crate::env::capture(
+            &[],
+            &startup.settings.config.env_rules,
+            jiff::Timestamp::UNIX_EPOCH,
+        );
+        let doctor = Settled::of(crate::doctor::Settings {
+            exe: Path::new("/nowhere/target/release/bazhen-daemon"),
+            config: &startup.settings,
+            install: crate::holder::Install::None("no build".to_owned()),
+            capture: &captured,
+        });
+        let budget = crate::budget::Budget::new(
+            3,
+            Arc::new(Machine(std::sync::Mutex::new(roomy()))),
+            Box::new(|_| {}),
+        );
+        Runner {
+            terminals: Arc::new(crate::terminals::fake::Fake::default()),
+            budget: Arc::new(budget),
+            doctor,
+            shell: "/bin/sh".to_owned(),
+        }
+    }
+
+    #[test]
+    fn fails_doctor_rather_than_list_no_holders_where_it_cant_list_them() {
+        let home = TempDir::new("doctor");
+        let startup = startup(home.path());
+        let path = home.path().join("bazhen.db");
+        let (store, thread) =
+            crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+        let fake = crate::terminals::fake::Fake::default();
+        let runner = Runner {
+            terminals: Arc::new(fake.clone()),
+            ..faked(&startup)
+        };
+        let shells = Shells::new(crate::shells::ShellsDeps {
+            store: store.clone(),
+            terminals: runner.terminals,
+            budget: runner.budget,
+            home: startup.home.clone(),
+            shell: runner.shell,
+            socket: startup.paths.socket.clone(),
+            tracker: TaskTracker::new(),
+        });
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store)
+            .with_shells(Arc::new(shells), runner.doctor);
+        let asked = || crate::doctor::doctor(axum::extract::State(shared.clone()));
+        let answered = runtime().block_on(async {
+            let listed = asked().await.status().as_u16();
+            fake.set(|state| state.fail_holders = true);
+            [listed, asked().await.status().as_u16()]
+        });
+        thread.finish();
+        assert_eq!(answered, [200, 500]);
+    }
+
+    /// The JSON body of an answer read whole.
+    fn body_of(answer: &str) -> serde_json::Value {
+        let (_, body) = answer.split_once("\r\n\r\n").unwrap();
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}: {answer}"))
+    }
+
+    #[test]
+    fn serves_shells_on_its_runtime_and_says_what_runs_them_in_its_health_and_doctor() {
+        let home = TempDir::new("shells");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let socket = PathBuf::from(&startup.paths.socket);
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let runner = faked(&startup);
+        runtime().block_on(async {
+            let tracker = TaskTracker::new();
+            let serving =
+                tracker.spawn(async move { listen(&startup, QUICK, store, Some(runner)).await });
+            let open = b"POST /v1/shells HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: 22\r\nconnection: close\r\n\r\n{\"idempotencyKey\":\"o\"}";
+            let opened = body_of(&ask(&socket, open).await);
+            let doctor = body_of(
+                &ask(
+                    &socket,
+                    b"GET /v1/daemon/doctor HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n",
+                )
+                .await,
+            );
+            let health = body_of(
+                &ask(
+                    &socket,
+                    b"GET /v1/health HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n",
+                )
+                .await,
+            );
+            ask(&socket, STOP).await;
+            let _ = tokio::time::timeout(Duration::from_secs(5), serving).await;
+            assert_eq!(opened["eventIds"].as_array().map(Vec::len), Some(2), "{opened}");
+            assert_eq!(
+                (
+                    &doctor["terminals"]["open"],
+                    &doctor["terminals"]["max"],
+                    &doctor["holder"]["reason"],
+                    &doctor["runtimes"],
+                    &doctor["web"]["pairing"]["mode"],
+                ),
+                (
+                    &serde_json::json!(1),
+                    &serde_json::json!(3),
+                    &serde_json::json!("no build"),
+                    &serde_json::json!([
+                        {"kind": "tmux", "state": "unused", "version": null, "workarounds": []},
+                        {"kind": "holder", "state": "not-running", "version": "holder/1.4", "workarounds": []},
+                    ]),
+                    &serde_json::json!("auto"),
+                ),
+                "{doctor}"
+            );
+            assert_eq!(
+                health["runtimes"],
+                serde_json::json!([
+                    {"kind": "tmux", "state": "unused", "version": null},
+                    {"kind": "holder", "state": "not-running", "version": "holder/1.4"},
+                ]),
+                "{health}"
+            );
+        });
+        writer.finish();
+    }
+
     #[test]
     fn waits_out_its_drain_for_a_connection_still_sending_its_request_then_stops() {
         let home = TempDir::new("drain");
@@ -411,7 +624,7 @@ mod tests {
         let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
-            let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
+            let serving = tracker.spawn(async move { listen(&startup, QUICK, store, None).await });
             let mut held = connect(&socket).await;
             held.write_all(b"GET /v1/health HTTP/1.1\r\n")
                 .await

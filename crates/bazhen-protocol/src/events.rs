@@ -4,8 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AgentId, AssignmentId, DeviceId, TaskId};
+use crate::agents::EnvironmentKind;
+use crate::ids::{AgentId, AssignmentId, DeviceId, EnvironmentId, TaskId, TerminalId};
 use crate::notices::{NoticeCloseReason, NoticeCloser, NoticeDevice};
+use crate::record::Record;
+use crate::shells::TuiTheme;
 
 /// Why the stream couldn't resume from a cursor: older than retention, or not from this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,3 +309,97 @@ pub struct NoticeClosed {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_device: Option<DeviceId>,
 }
+
+/// The payload of `environment.registered`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentRegistered {
+    pub kind: EnvironmentKind,
+}
+
+/// A runtime incarnation as an event records it: the runtime, and where it keeps the terminal,
+/// every value a string, in the order the runtime wrote them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRefPayload {
+    pub runtime: String,
+    pub locator: Record<String>,
+}
+
+/// The payload of `terminal.opened`, in the order the TypeScript daemon writes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOpened {
+    pub environment_id: EnvironmentId,
+    pub cwd: String,
+    pub linked_agent_id: Option<AgentId>,
+    /// The theme it is opened for, when one was named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<TuiTheme>,
+    /// The lost shell it was opened to restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_of: Option<TerminalId>,
+    /// The runtime its terminal is created on; tmux, from an older daemon that says none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+}
+
+/// The payload of `terminal.running` and of `terminal.process_adopted`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalIncarnation {
+    pub runtime_ref: RuntimeRefPayload,
+}
+
+/// Why a terminal failed: its runtime refused it, or the daemon died while opening it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalFailedReason {
+    OpenRejected,
+    DaemonRestart,
+}
+
+/// The payload of `terminal.failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalFailed {
+    pub reason: TerminalFailedReason,
+}
+
+/// Why a terminal closed: the user closed it, its shell exited, the agent it was linked to
+/// closed, or a new shell replaced the lost one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalClosedReason {
+    User,
+    Exited,
+    AgentClosed,
+    Restarted,
+}
+
+/// The payload of `terminal.closed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalClosed {
+    pub reason: TerminalClosedReason,
+}
+
+/// The payload of `terminal.foreground_changed`: what runs in the shell's foreground, by name, or
+/// `None` at its prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalForegroundChanged {
+    pub command: Option<String>,
+}
+
+/// The payload of `terminal.needs_restart`: the versions the terminal's holder speaks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalNeedsRestart {
+    pub protocol: Vec<String>,
+}
+
+/// The payload of `terminal.renamed`: the name the user gave, or `None` once taken away.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalRenamed {
+    pub name: Option<String>,
+}
+
+/// The payload of `terminal.lost`, `terminal.closing` and `terminal.restart_cleared`, which is
+/// empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TerminalNoted {}
