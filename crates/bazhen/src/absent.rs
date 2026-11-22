@@ -22,13 +22,23 @@ const PROBE: Duration = Duration::from_millis(500);
 pub(crate) enum Presence {
     /// Nothing is at the socket and no daemon holds the lock: not running.
     Absent,
-    /// A daemon holds the lock but has no socket. Since the daemon removes its socket as its
-    /// drain begins and keeps the lock to the end, that is a daemon stopping, though one that
-    /// hasn't bound yet looks the same.
+    /// A daemon holds the lock but has no socket: one stopping, which keeps the lock to the end of
+    /// its drain, or one that hasn't bound yet.
     Unbound { lock: PathBuf },
     /// The socket is there, or the lock is held behind it, yet nothing answers: the daemon may be
-    /// stuck or busy. `why` says what was seen.
+    /// stuck or busy, or stopping, having stopped listening before it removed its socket. `why`
+    /// says what was seen.
     Unanswering(String),
+}
+
+/// Why a socket that takes a connection yet doesn't answer may be a daemon stuck or busy.
+const LISTENS: &str = "something listens on its socket";
+
+impl Presence {
+    /// Whether the socket took the look's connection: a daemon there may yet answer.
+    pub(crate) fn listens(&self) -> bool {
+        matches!(self, Self::Unanswering(why) if why == LISTENS)
+    }
 }
 
 /// What the daemon at `socket` is, going by a connect to it and by its start-up lock.
@@ -65,7 +75,7 @@ fn presence_of(
 ) -> Presence {
     let kind = match &connected {
         Some(Err(e)) => e.kind(),
-        Some(Ok(_)) => return Presence::Unanswering("something listens on its socket".to_owned()),
+        Some(Ok(_)) => return Presence::Unanswering(LISTENS.to_owned()),
         None => {
             return Presence::Unanswering("its socket is too busy to take a connection".to_owned());
         }
@@ -128,26 +138,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     use super::*;
-    use crate::testing::Dir;
-
-    impl Dir {
-        fn socket(&self) -> PathBuf {
-            self.0.join("bazhen.sock")
-        }
-    }
-
-    /// Holds the lock beside `socket` as a daemon does: exclusively, on a file of its own.
-    fn hold(socket: &Path) -> File {
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_of(socket))
-            .unwrap();
-        flock(&file, FlockOperation::NonBlockingLockExclusive).unwrap();
-        file
-    }
+    use crate::testing::{Dir, hold};
 
     #[test]
     fn takes_a_connect_that_never_finished_for_a_daemon_that_may_be_there() {

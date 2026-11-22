@@ -182,11 +182,11 @@ mod tests {
     use super::*;
     use crate::attach::attachment::{Attachment, Size};
     use crate::call::ANOTHER_BUILD;
+    use crate::testing::Dir;
     use bazhen_protocol::agents::ExitStatus;
     use bazhen_protocol::detach_keys::DetachKeys;
     use std::io::{Read as _, Write as _};
     use std::os::unix::net::UnixListener;
-    use std::path::PathBuf;
     use std::thread;
     use tungstenite::handshake::server::{Callback, ErrorResponse, Request as Asked, Response};
 
@@ -204,30 +204,9 @@ mod tests {
 
     const TOKEN: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
 
-    /// A socket path of the test's own, in a directory removed when the guard drops.
-    struct Dir(PathBuf);
-
-    impl Dir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("bz-link-{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
-        fn socket(&self) -> PathBuf {
-            self.0.join("bazhen.sock")
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
     #[test]
     fn upgrades_the_terminals_stream_as_the_caller_and_joins_with_its_hello() {
-        let dir = Dir::new("join");
+        let dir = Dir::new("link-join");
         let listener = UnixListener::bind(dir.socket()).unwrap();
         let server = thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
@@ -255,7 +234,7 @@ mod tests {
 
     #[test]
     fn says_why_the_daemon_refused_to_attach() {
-        let dir = Dir::new("refused");
+        let dir = Dir::new("link-refused");
         let listener = UnixListener::bind(dir.socket()).unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -280,7 +259,7 @@ mod tests {
 
     #[test]
     fn takes_a_daemon_that_serves_no_stream_on_its_socket_for_another_build() {
-        let dir = Dir::new("older");
+        let dir = Dir::new("link-older");
         let listener = UnixListener::bind(dir.socket()).unwrap();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -403,7 +382,7 @@ mod tests {
 
     #[test]
     fn finds_no_daemon_where_nothing_listens() {
-        let dir = Dir::new("none");
+        let dir = Dir::new("link-none");
         let hello = Attachment::hello(Size { cols: 80, rows: 24 });
         let none = open(&dir.socket(), "term_x", &Caller::default(), &hello).unwrap_err();
         assert!(matches!(none, Failed::NotRunning), "{none:?}");

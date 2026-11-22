@@ -166,7 +166,12 @@ impl Daemon {
     /// Whether a daemon answers on the socket at all. Only its status is read, so `stop` still
     /// stops a daemon of another build.
     pub(crate) fn answers(&self) -> Result<bool, Failed> {
-        match self.get::<Answering>("/v1/health", PROBE) {
+        self.answers_within(PROBE)
+    }
+
+    /// Whether a daemon answers on the socket within `within`, or `PROBE` if that is sooner.
+    pub(crate) fn answers_within(&self, within: Duration) -> Result<bool, Failed> {
+        match self.get::<Answering>("/v1/health", within.min(PROBE)) {
             Ok(Answering {
                 status: HealthStatus::Ok,
             }) => Ok(true),
