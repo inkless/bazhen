@@ -3487,6 +3487,12 @@ describe("tests that signal processes they didn't start", () => {
     expect(unmarked(sources)).toEqual(Object.keys(sources).map((file) => `${file}:1`));
   });
 
+  it("must be marked when a shebang line rustc drops opens a string before its close", () => {
+    const test = '#!/** x */[] "\n#[test]\nfn a() { child.close(group, now); }\n// "\n';
+    const sources = { "crates/h/src/t0.rs": test, "crates/h/src/t1.rs": `\ufeff${test}` };
+    expect(unmarked(sources)).toEqual(Object.keys(sources).map((file) => `${file}:2`));
+  });
+
   it("must be marked for requests on a fake holder's client, as on any other", () => {
     // Source text can't show the client reaches only the fake: a trait method taking `self` by
     // value can stand in for `close`, and a path in a string attribute can reach past the fake.

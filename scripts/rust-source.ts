@@ -26,6 +26,52 @@ const runAt = (text: string, i: number) => {
 const wordAt = (text: string, i: number) =>
   (text.startsWith("r#", i) && matchAt(RAW_IDENT, text, i)) || runAt(text, i);
 
+/** Rust's whitespace, Pattern_White_Space, which `\s` is not: it has U+00A0 but not U+0085. */
+const RUST_WHITESPACE = new Set("\t\n\v\f\r \u0085\u200e\u200f\u2028\u2029");
+// `///` and `/**` open doc comments, but `////`, `/***` and `/**/` don't; `//!` and `/*!` do.
+const isDocComment = (text: string, i: number) =>
+  text[i + 2] === "!" ||
+  (text[i + 1] === "/"
+    ? text[i + 2] === "/" && text[i + 3] !== "/"
+    : text[i + 2] === "*" && text[i + 3] !== "*" && text[i + 3] !== "/");
+/** The index just past the block comment, nested ones included, that opens at `start`. */
+const blockCommentEnd = (text: string, start: number) => {
+  let depth = 1;
+  let i = start + 2;
+  while (i < text.length && depth > 0) {
+    const pair = text.slice(i, i + 2);
+    const step = pair === "/*" ? 1 : pair === "*/" ? -1 : 0;
+    depth += step;
+    i += step === 0 ? 1 : 2;
+  }
+  return i;
+};
+
+/**
+ * Where rustc starts lexing `source`: past a byte order mark, then past a first line that starts
+ * `#!` unless the next token is `[`, which makes it an inner attribute. Whitespace and comments
+ * are passed over on the way to that token, but a doc comment is a token, so a doc comment
+ * after `#!` makes the line a shebang. The `\n` ending the line, and a `\r` before it, stay.
+ */
+function codeStart(source: string): number {
+  const bom = source.startsWith("\ufeff") ? 1 : 0;
+  if (!source.startsWith("#!", bom)) return bom;
+  let i = bom + 2;
+  for (;;) {
+    if (RUST_WHITESPACE.has(source[i] ?? "")) i++;
+    else if (source.startsWith("//", i) && !isDocComment(source, i)) {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end;
+    } else if (source.startsWith("/*", i) && !isDocComment(source, i)) {
+      i = blockCommentEnd(source, i);
+    } else break;
+  }
+  if (source[i] === "[") return bom;
+  const newline = source.indexOf("\n", bom);
+  const end = newline === -1 ? source.length : newline;
+  return source[end - 1] === "\r" ? end - 1 : end;
+}
+
 /**
  * Rust source with its comments removed and every string and char literal emptied, so neither a
  * `//` in a string nor an attribute quoted in one changes what the attributes are. Newlines are
@@ -38,11 +84,12 @@ const wordAt = (text: string, i: number) =>
  *
  * As in Rust's lexer, a word (an identifier, a raw one, a keyword, or a number with its suffix),
  * a lifetime's or label's name, and a literal's suffix are each taken whole, so an `r` begins a
- * raw string only where it begins a token, never in `'r`, `"a"r` or `r#r`.
+ * raw string only where it begins a token, never in `'r`, `"a"r` or `r#r`. A byte order mark and
+ * a shebang line are dropped, as rustc drops them; see `codeStart`.
  */
 export function rustCode(source: string, strings: string[] = [], raw: boolean[] = []): string {
   let out = "";
-  let i = 0;
+  let i = codeStart(source);
   const suffix = () => {
     const taken = runAt(source, i);
     i += taken.length;
@@ -56,14 +103,7 @@ export function rustCode(source: string, strings: string[] = [], raw: boolean[] 
     if (c === "/" && next === "/") {
       while (i < source.length && source[i] !== "\n") i++;
     } else if (c === "/" && next === "*") {
-      let depth = 1;
-      i += 2;
-      while (i < source.length && depth > 0) {
-        const pair = source.slice(i, i + 2);
-        const step = pair === "/*" ? 1 : pair === "*/" ? -1 : 0;
-        depth += step;
-        i += step === 0 ? 1 : 2;
-      }
+      i = blockCommentEnd(source, i);
       out += ` ${newlinesIn(source.slice(start, i))}`;
     } else if (word !== "") {
       i += word.length;

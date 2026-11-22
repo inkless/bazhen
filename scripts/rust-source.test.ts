@@ -132,4 +132,40 @@ describe("rustCode", () => {
     expect(strings).toEqual(literals.map(([text]) => text));
     expect(raw).toEqual(literals.map(([, isRaw]) => isRaw));
   });
+
+  it("drops a first line rustc reads as a shebang, and keeps one it reads as an inner attribute", () => {
+    const stripped: [form: string, code: string][] = [
+      ['#!/** x */[] "', ""],
+      ["#!/usr/bin/env run-cargo-script", ""],
+      ["#!", ""],
+      ["#! /// d\n[a]", "\n[a]"],
+      ["#! //! d\n[a]", "\n[a]"],
+      ["#!/*! d */[a]", ""],
+      ["#! /* unterminated", ""],
+      ["#!\u00a0[a]", ""],
+      ["#!\u3000[a]", ""],
+      ["#!x\r", "\r"],
+      ['\ufeff#!/** x */[] "', ""],
+    ];
+    const kept: [form: string, code: string][] = [
+      ["#![a]", "#![a]"],
+      ["#! [a]", "#! [a]"],
+      ["#!\n[a]", "#!\n[a]"],
+      ["#! /* c */ [a]", "#!   [a]"],
+      ["#! // c\n[a]", "#! \n[a]"],
+      ["#! //// c\n[a]", "#! \n[a]"],
+      ["#!/**/[a]", "#! [a]"],
+      ["#!/***/[a]", "#! [a]"],
+      ["#!/* /** */ */[a]", "#! [a]"],
+      ["#!\u200e[a]", "#!\u200e[a]"],
+      ["#!\u0085[a]", "#!\u0085[a]"],
+      ["\ufeff#![a]", "#![a]"],
+      [" #!/** x */[]", " #! []"],
+      ["\n#!/** x */[]", "\n#! []"],
+    ];
+    const cases = [...stripped, ...kept];
+    expect(cases.map(([form], n) => rustCode(`${form}\nclose(${n});`))).toEqual(
+      cases.map(([, code], n) => `${code}\nclose(${n});`),
+    );
+  });
 });
