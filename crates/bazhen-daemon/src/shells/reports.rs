@@ -92,8 +92,8 @@ impl Shells {
         })
     }
 
-    /// The shell's integration reported its first prompt, which no restart waits on yet.
-    /// Answers whether the report was the shell's own.
+    /// The shell's integration reported its first prompt: a line its restart is to type back is
+    /// typed now. Answers whether the report was the shell's own.
     ///
     /// # Errors
     ///
@@ -103,11 +103,20 @@ impl Shells {
         terminal_id: &str,
         prompt: &ShellPrompt,
     ) -> Result<bool, ShellError> {
-        self.owns(terminal_id, &prompt.token).await
+        if !self.owns(terminal_id, &prompt.token).await? {
+            return Ok(false);
+        }
+        if let Some(typing) = self
+            .retypes
+            .prompted(terminal_id, prompt.brackets == Some(true))
+        {
+            self.type_back(typing);
+        }
+        Ok(true)
     }
 
-    /// The shell's integration said it won't take a line typed back, which no restart holds for
-    /// it yet. Answers whether the report was the shell's own.
+    /// The shell's integration said it won't take a line typed back: a line held for it is
+    /// dropped. Answers whether the report was the shell's own.
     ///
     /// # Errors
     ///
@@ -117,7 +126,11 @@ impl Shells {
         terminal_id: &str,
         decline: &ShellDecline,
     ) -> Result<bool, ShellError> {
-        self.owns(terminal_id, &decline.token).await
+        if !self.owns(terminal_id, &decline.token).await? {
+            return Ok(false);
+        }
+        self.retypes.declined(terminal_id);
+        Ok(true)
     }
 
     /// Whether `token` is the one the shell `terminal_id` names was started with, compared in
@@ -237,8 +250,8 @@ pub(crate) mod tests {
                 .filter(|key| key.starts_with("BAZHEN_SHELL") || *key == "BAZHEN_HOOK")
                 .collect();
             assert_eq!(
-                (outcome, named),
-                (Ok(ReportOutcome::Refused), Vec::<&String>::new())
+                (outcome, named, h.shells.reports()),
+                (Ok(ReportOutcome::Refused), Vec::<&String>::new(), false)
             );
         });
     }

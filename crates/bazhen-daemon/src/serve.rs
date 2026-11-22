@@ -226,12 +226,13 @@ async fn shell_integration(
 
 /// The shells over `runner`'s terminals, with this machine's environment registered, the shells
 /// kept from before reconciled with what runs, what the budget says of those still open, and the
-/// events told from before any of it.
+/// events told from before any of it. A wait on a restarted shell's prompt ends at `stop`.
 async fn shells(
     startup: &Startup,
     store: &Writer,
     runner: Runner,
     tracker: &TaskTracker,
+    stop: &CancellationToken,
 ) -> Result<(Arc<Shells>, Box<dyn Events>, Settled), Refused> {
     let events = runner.terminals.events();
     store
@@ -251,6 +252,7 @@ async fn shells(
         shell: runner.shell,
         socket: startup.paths.socket.clone(),
         tracker: tracker.clone(),
+        stop: stop.clone(),
         integration,
     });
     shells.reconcile().await;
@@ -327,7 +329,8 @@ async fn listen(
     let tracker = TaskTracker::new();
     let mut watching = None;
     if let Some(runner) = runner {
-        let (running, events, doctor) = shells(startup, &store, runner, &tracker).await?;
+        let (running, events, doctor) =
+            shells(startup, &store, runner, &tracker, stop.token()).await?;
         shared = shared.with_shells(Arc::clone(&running), doctor);
         watching = Some((running, events));
     }
@@ -633,6 +636,7 @@ mod tests {
                 shell: "/bin/sh".to_owned(),
                 socket: startup.paths.socket.clone(),
                 tracker: TaskTracker::new(),
+                stop: CancellationToken::new(),
                 integration: None,
             });
             let mut opened = Vec::new();
@@ -651,7 +655,8 @@ mod tests {
                 budget: budget(1),
                 ..faked(&startup)
             };
-            let Ok(_) = shells(&startup, &store, runner, &TaskTracker::new()).await else {
+            let stop = CancellationToken::new();
+            let Ok(_) = shells(&startup, &store, runner, &TaskTracker::new(), &stop).await else {
                 panic!("refused to start");
             };
             (opened[0].clone(), opened[1].clone())
@@ -755,6 +760,7 @@ mod tests {
             shell: runner.shell,
             socket: startup.paths.socket.clone(),
             tracker: TaskTracker::new(),
+            stop: CancellationToken::new(),
             integration: None,
         });
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), store)

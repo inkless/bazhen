@@ -6,12 +6,14 @@
 //! - `reconcile`: what a restarted daemon makes of the shells it finds, and those it doesn't;
 //! - `foreground`: what each running shell's foreground holds, kept current from process facts;
 //! - `integration`: the snippets shells source to report the lines they run;
-//! - `reports`: what a shell's integration reports, proved with the shell's own token.
+//! - `reports`: what a shell's integration reports, proved with the shell's own token;
+//! - `retype`: the lines restarts type back into their new shells, held until the first prompt.
 
 pub(crate) mod foreground;
 pub(crate) mod integration;
 pub(crate) mod reconcile;
 pub(crate) mod reports;
+pub(crate) mod retype;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -38,6 +40,7 @@ use tokio_util::task::TaskTracker;
 
 use self::integration::Integration;
 use self::reports::new_shell_token;
+use self::retype::{PendingRetypes, Typing};
 use crate::budget::{Budget, Counts, TerminalLimit};
 use crate::terminals::{Event, Events, Exit, Recorded, ShellSpec, TerminalError, Terminals};
 use crate::writer::Writer;
@@ -280,6 +283,8 @@ pub(crate) struct ShellsDeps {
     pub(crate) socket: String,
     /// The daemon's tasks, which every command runs on to its end.
     pub(crate) tracker: TaskTracker,
+    /// The daemon's stop, which ends a wait for a restarted shell's prompt.
+    pub(crate) stop: CancellationToken,
     /// With `shells.retype_last_command` on, what each new shell reports its lines with; without
     /// it, shells report nothing.
     pub(crate) integration: Option<Integration>,
@@ -323,6 +328,8 @@ pub(crate) struct Shells {
     foreground_fault: Mutex<Option<String>>,
     /// Which terminals need a restart, as last read.
     restarts: crate::restarts::Restarts,
+    /// The lines restarts are to type back, each until its new shell's first prompt.
+    retypes: PendingRetypes,
 }
 
 /// A new shell, as `start` opens it.
@@ -333,6 +340,8 @@ struct Opening {
     restart_of: Option<TerminalId>,
     /// The paired device that asked for it, which its environment names.
     opened_by: Option<DeviceId>,
+    /// A line to type at its first prompt.
+    retype: Option<String>,
 }
 
 /// A command's last step: an answer made already, or changes to record with the key's answer.
@@ -457,13 +466,20 @@ fn incarnation(terminal: &Recorded) -> Result<TerminalIncarnation, ShellError> {
 
 impl Shells {
     pub(crate) fn new(deps: ShellsDeps) -> Self {
+        let retypes = PendingRetypes::new(deps.tracker.clone(), deps.stop.clone());
         Self {
+            retypes,
             deps,
             turns: Turns::default(),
             unended: Mutex::new(HashSet::new()),
             foreground_fault: Mutex::new(None),
             restarts: crate::restarts::Restarts::default(),
         }
+    }
+
+    /// Whether new shells report the lines they run, so a lost one's can be typed back.
+    pub(crate) fn reports(&self) -> bool {
+        self.deps.integration.is_some()
     }
 
     /// Which terminals need a restart, as last read.
@@ -592,6 +608,7 @@ impl Shells {
             theme: req.theme,
             restart_of: None,
             opened_by,
+            retype: None,
         };
         self.start(opening, &req.idempotency_key, &request).await
     }
@@ -662,6 +679,10 @@ impl Shells {
         // Held until it is recorded running or failed: an exit told while the runtime still
         // starts it waits, and then finds it running, to close.
         let _turn = self.turns.take(terminal.as_str()).await;
+        // Held before the shell starts, which may reach its prompt before its start answers here.
+        if let Some(line) = opening.retype.clone() {
+            self.retypes.hold(terminal.as_str(), line);
+        }
         let spec = self.spec(
             &terminal,
             opening,
@@ -670,6 +691,7 @@ impl Shells {
         match self.deps.terminals.create(spec).await {
             Err(cause) => {
                 tracing::error!("bazhen: shell {terminal} failed to open: {cause}");
+                self.retypes.drop(terminal.as_str());
                 self.record(
                     &terminal,
                     Actor::User,
@@ -680,27 +702,44 @@ impl Shells {
                 .await?;
                 Err(ShellError::OpenFailed(terminal.as_str().to_owned()))
             }
-            Ok(locator) => {
-                let running = self
-                    .record(
-                        &terminal,
-                        Actor::User,
-                        TerminalChange::Running(TerminalIncarnation {
-                            runtime_ref: RuntimeRefPayload {
-                                runtime: RUNTIME.to_owned(),
-                                locator,
-                            },
-                        }),
-                    )
-                    .await?;
-                let mut event_ids = opened.event_ids;
-                event_ids.push(running);
-                Ok(ShellCommandResponse {
-                    terminal_id: terminal,
-                    event_ids,
-                })
-            }
+            Ok(locator) => self.started(opened, locator).await,
         }
+    }
+
+    /// Records the shell `opened` running at `locator`, and types a line held for it once it
+    /// has reported its prompt.
+    async fn started(
+        &self,
+        opened: ShellCommandResponse,
+        locator: Record<String>,
+    ) -> Result<ShellCommandResponse, ShellError> {
+        let terminal = opened.terminal_id;
+        let at = Recorded {
+            terminal_id: terminal.clone(),
+            locator: serde_json::to_string(&locator)
+                .map_err(|e| ShellError::Internal(format!("its locator isn't one: {e}")))?,
+        };
+        let running = self
+            .record(
+                &terminal,
+                Actor::User,
+                TerminalChange::Running(TerminalIncarnation {
+                    runtime_ref: RuntimeRefPayload {
+                        runtime: RUNTIME.to_owned(),
+                        locator,
+                    },
+                }),
+            )
+            .await?;
+        if let Some(typing) = self.retypes.opened(terminal.as_str(), at) {
+            self.type_back(typing);
+        }
+        let mut event_ids = opened.event_ids;
+        event_ids.push(running);
+        Ok(ShellCommandResponse {
+            terminal_id: terminal,
+            event_ids,
+        })
     }
 
     /// The user's shell as a login shell, told its terminal and the daemon's socket, the paired
@@ -932,14 +971,17 @@ impl Shells {
             Begun::Prior(prior) => return Ok(prior),
             Begun::Found(found) => found,
         };
-        if req.retype == Some(true) {
-            return Err(self.unretypeable(&found).await?);
-        }
+        let retype = if req.retype == Some(true) {
+            Some(self.retypeable(&found).await?)
+        } else {
+            None
+        };
         let opening = Opening {
             cwd: self.restart_cwd(&found)?,
             theme: req.theme.or(found.theme),
             restart_of: Some(found.id.clone()),
             opened_by,
+            retype,
         };
         let response = self.start(opening, key, &request).await?;
         let old = found.id.clone();
@@ -963,20 +1005,43 @@ impl Shells {
             .await
     }
 
-    /// Why a restart can't type the lost shell's last line back: none is kept, or, with one kept
-    /// by an earlier daemon, this one has no shell integration to report the prompt it waits for.
-    async fn unretypeable(&self, found: &ShellRow) -> Result<ShellError, ShellError> {
+    /// The lost shell's last line, for a restart to type back: refused when none is kept, or
+    /// when new shells can't report the prompt it waits for. It is held in memory only from here
+    /// on, and the lost shell's row forgets it as it closes.
+    async fn retypeable(&self, found: &ShellRow) -> Result<String, ShellError> {
         let id = found.id.as_str().to_owned();
-        let kept = self
+        let line = self
             .deps
             .store
-            .run(move |store| store.reads().keeps_last_command(&id))
-            .await??;
-        Ok(ShellError::Conflict(if kept {
-            "shell integration is off, so a new shell can't report its prompt".to_owned()
-        } else {
-            format!("shell {} is lost with no last command kept", found.id)
-        }))
+            .run(move |store| store.reads().last_shell_command(&id))
+            .await??
+            .ok_or_else(|| {
+                ShellError::Conflict(format!(
+                    "shell {} is lost with no last command kept",
+                    found.id
+                ))
+            })?;
+        if self.deps.integration.is_none() {
+            return Err(ShellError::Conflict(
+                "shell integration is off, so a new shell can't report its prompt".to_owned(),
+            ));
+        }
+        Ok(line)
+    }
+
+    /// Types a restart's line into its new shell, on the daemon's tasks, until its stop; a paste
+    /// that types nothing says why.
+    fn type_back(&self, typing: Typing) {
+        let terminals = Arc::clone(&self.deps.terminals);
+        let stop = self.deps.stop.clone();
+        self.deps.tracker.spawn(async move {
+            if let Some(Err(why)) = stop
+                .run_until_cancelled(retype::paste(terminals.as_ref(), &typing))
+                .await
+            {
+                retype::skipped(&typing.terminal_id, &why);
+            }
+        });
     }
 
     /// Where a restart opens: the directory the shell was last seen in, while it is still a
@@ -1295,6 +1360,7 @@ pub(crate) mod tests {
             shell: "/bin/zsh".to_owned(),
             socket: "/run/b.sock".to_owned(),
             tracker: TaskTracker::new(),
+            stop: CancellationToken::new(),
             integration,
         });
         Harness {
@@ -1348,6 +1414,26 @@ pub(crate) mod tests {
     }
 
     impl Harness {
+        /// Other shells over the same store and runtime, as a daemon started again would run, with
+        /// new shells told to report with `integration`.
+        pub(crate) fn again(&self, integration: Option<Integration>) -> Shells {
+            Shells::new(ShellsDeps {
+                store: self.store.clone(),
+                terminals: Arc::new(self.fake.clone()),
+                budget: Arc::new(Budget::new(
+                    100,
+                    Arc::new(Machine(StdMutex::new(roomy()))),
+                    Box::new(|_| {}),
+                )),
+                home: self.home.clone(),
+                shell: "/bin/zsh".to_owned(),
+                socket: "/run/b.sock".to_owned(),
+                tracker: TaskTracker::new(),
+                stop: CancellationToken::new(),
+                integration,
+            })
+        }
+
         /// The token the shell `id` names was told to report with, if any.
         pub(crate) fn token_of(&self, id: &str) -> Option<String> {
             self.fake.spec_of(id).env.get("BAZHEN_SHELL_TOKEN").cloned()
@@ -1373,6 +1459,7 @@ pub(crate) mod tests {
             let view = SnapshotView {
                 host: "h".to_owned(),
                 restart_holders: HashMap::new(),
+                shells_report: self.shells.reports(),
             };
             let reader = self.store.reader().unwrap();
             reader.reads().snapshot(&view).unwrap().shells
@@ -1939,6 +2026,11 @@ pub(crate) mod tests {
                 .with_writer(move || said.clone())
                 .finish();
             tracing::subscriber::set_default(subscriber)
+        }
+
+        /// Everything logged so far.
+        pub(crate) fn text(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
         }
 
         pub(crate) fn times(&self, text: &str) -> usize {

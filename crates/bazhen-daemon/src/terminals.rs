@@ -161,6 +161,16 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
         terminals: &'a [Recorded],
     ) -> Answer<'a, Result<Vec<ShellForeground>, TerminalError>>;
 
+    /// Types `text` at the terminal without Enter, as a paste its holder's gate types only if
+    /// the program would read it as text now; marked with the bracketed-paste sequences when
+    /// `brackets` is true. A refusal says why, never quoting the text.
+    fn paste<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        text: &'a str,
+        brackets: bool,
+    ) -> Answer<'a, Result<(), TerminalError>>;
+
     /// The runtime's health, as `/v1/health` reports it.
     fn health(&self) -> Answer<'_, RuntimeHealthReport>;
 
@@ -269,6 +279,11 @@ pub(crate) mod fake {
         pub(crate) hold_reads: Option<Arc<Semaphore>>,
         /// Each create's process exits as it starts, told while the create has yet to answer.
         pub(crate) exit_as_created: bool,
+        /// Each paste asked for, in order: the terminal, the text and whether it was marked.
+        pub(crate) pasted: Vec<(String, String, bool)>,
+        /// What each paste fails with, where it types nothing, as one into a shell whose input
+        /// was typed ahead.
+        pub(crate) pastes_refused: Option<TerminalError>,
         told: Vec<mpsc::UnboundedSender<Event>>,
     }
 
@@ -531,6 +546,20 @@ pub(crate) mod fake {
                         cwd: running.cwd.clone(),
                     })
                     .collect())
+            })
+        }
+
+        fn paste<'a>(
+            &'a self,
+            terminal: &'a Recorded,
+            text: &'a str,
+            brackets: bool,
+        ) -> Answer<'a, Result<(), TerminalError>> {
+            Box::pin(async move {
+                let mut state = self.state.lock().unwrap();
+                let id = terminal.terminal_id.as_str().to_owned();
+                state.pasted.push((id, text.to_owned(), brackets));
+                state.pastes_refused.clone().map_or(Ok(()), Err)
             })
         }
 
