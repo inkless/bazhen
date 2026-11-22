@@ -609,4 +609,43 @@ mod tests {
             .map(|verb| posted(http.clone(), &at(verb), own.clone()).0);
         assert_eq!(over_http, [404; 3]);
     }
+
+    #[test]
+    fn takes_a_report_at_its_bounds_with_every_character_escaped() {
+        use std::fmt::Write as _;
+
+        use crate::shells::tests::{integration, setup_with};
+        let h = setup_with(100, Some(integration()));
+        let id = crate::testing::runtime().block_on(h.open("o")).unwrap();
+        let token = h.token_of(&id).unwrap();
+        let shared = Shared {
+            shells: Some(Arc::clone(&h.shells)),
+            ..Shared::new(
+                "f".repeat(64).as_str(),
+                crate::routes::Stop::default(),
+                h.store.clone(),
+            )
+        };
+        let escaped = |text: &str| {
+            text.encode_utf16().fold(String::new(), |mut out, unit| {
+                write!(out, "\\u{unit:04x}").unwrap();
+                out
+            })
+        };
+        let longest = format!(
+            r#"{{"token":"{}","at":9007199254740991,"command":"{}"}}"#,
+            escaped(&token),
+            escaped(&"a".repeat(2048))
+        );
+        assert_eq!(
+            posted(
+                crate::routes::socket_router(shared),
+                &format!("/v1/shells/{id}/report"),
+                longest.into_bytes()
+            ),
+            (204, serde_json::Value::Null),
+            "about 12 KiB of JSON, under the 16 KiB limit"
+        );
+        assert_eq!(h.last_command(&id), Some("a".repeat(2048)));
+    }
 }
