@@ -136,7 +136,7 @@ fn prepare(startup: &Startup, wait: Duration) -> Result<(Lock, (Writer, writer::
         }
     })?;
     let path = PathBuf::from(&p.data).join("bazhen.db");
-    let store = Store::open(&path).map_err(|err| match err {
+    let mut store = Store::open(&path).map_err(|err| match err {
         OpenError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
             Refused::Said(format!(
                 "bazhen can't open {} as its own ({}): check who owns it",
@@ -158,6 +158,11 @@ fn prepare(startup: &Startup, wait: Duration) -> Result<(Lock, (Writer, writer::
         store.reads(),
     )
     .map_err(|err| Refused::Said(err.to_string()))?;
+    // No view outlives the daemon that served it: each still recorded as open ends, releasing its
+    // lease, and its page reattaches for a fresh screen.
+    store
+        .write(|w: &bazhen_store::Writer<'_>| w.end_open_attachments())
+        .map_err(|err| Refused::Said(format!("bazhen can't end the views left open: {err}")))?;
     let store = writer::start(store, &path)
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?;
     Ok((lock, store))
@@ -1188,6 +1193,89 @@ mod tests {
         assert!(
             matches!(&refused, Err(Refused::Silent { socket, .. }) if *socket == startup.paths.socket),
             "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn ends_the_views_left_open_by_the_daemon_before_it_as_a_restart_and_frees_the_lease() {
+        use bazhen_protocol::events::{AttachmentStarted, LeaseGranted, TerminalOpened};
+        use bazhen_protocol::ids::{AttachmentId, TerminalId};
+        use bazhen_protocol::stream::AttachmentMode;
+        use bazhen_store::{Actor, NewEvent, TerminalChange};
+        use rusqlite::OptionalExtension;
+        let home = TempDir::new("views-left");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.paths.data).unwrap();
+        let terminal = TerminalId::mint(1, [3; 16]);
+        let laptop = AttachmentId::mint(1, [1; 16]);
+        let mut before =
+            Store::open(&PathBuf::from(&startup.paths.data).join("bazhen.db")).unwrap();
+        before
+            .write(|w| -> Result<_, AppendError> {
+                let environment = w.local_environment()?;
+                w.append(&NewEvent::Terminal {
+                    terminal: terminal.clone(),
+                    actor: Actor::User,
+                    change: TerminalChange::Opened(TerminalOpened {
+                        environment_id: environment,
+                        cwd: "/home/me".to_owned(),
+                        linked_agent_id: None,
+                        theme: None,
+                        restart_of: None,
+                        runtime: Some("holder".to_owned()),
+                    }),
+                })?;
+                w.append(&NewEvent::AttachmentStarted {
+                    attachment: laptop.clone(),
+                    payload: AttachmentStarted {
+                        terminal_id: terminal.clone(),
+                        mode: AttachmentMode::Interactive,
+                    },
+                })?;
+                w.append(&NewEvent::LeaseGranted {
+                    terminal: terminal.clone(),
+                    payload: LeaseGranted {
+                        attachment_id: laptop.clone(),
+                        epoch: 2,
+                    },
+                })
+            })
+            .unwrap();
+        drop(before);
+        let (_lock, (store, _writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let (open, epoch, holder, ended) = runtime().block_on(async {
+            store
+                .run(move |store| {
+                    store.write(|w| -> rusqlite::Result<_> {
+                        let holder: Option<String> = w.connection().query_row(
+                            "SELECT holder FROM leases WHERE terminal_id = ?",
+                            [terminal.as_str()],
+                            |row| row.get(0),
+                        )?;
+                        let ended: Option<String> = w
+                            .connection()
+                            .query_row(
+                                "SELECT payload FROM events WHERE type = 'attachment.ended'
+                               AND entity_id = ?",
+                                [laptop.as_str()],
+                                |row| row.get(0),
+                            )
+                            .optional()?;
+                        Ok((
+                            w.reads().open_attachments()?,
+                            w.reads().lease_epoch(&terminal)?,
+                            holder,
+                            ended,
+                        ))
+                    })
+                })
+                .await
+                .unwrap()
+                .unwrap()
+        });
+        assert_eq!(
+            (open, epoch, holder, ended.as_deref()),
+            (vec![], 2, None, Some(r#"{"reason":"daemon_restart"}"#))
         );
     }
 

@@ -754,6 +754,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
+  "crates/bazhen-protocol/src/input.rs::without_replies": "input",
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-store/src/events.rs::StoredEvent::frame": "frame",
@@ -1040,8 +1041,6 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/server.rs::send": "encodes and queues a reply; reads no bytes",
   "crates/bazhen-holder/src/server.rs::serve":
     "answers requests FrameDecoder decoded, which the proto crate's frame target fuzzes",
-  "crates/bazhen-protocol/src/input.rs::without_replies":
-    "a step of has_keystrokes, which the input target fuzzes",
   "crates/bazhen-protocol/src/input.rs::strip":
     "a step of has_keystrokes, which the input target fuzzes",
   "crates/bazhen-protocol/src/input.rs::find":

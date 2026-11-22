@@ -5,11 +5,12 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 
 use bazhen_protocol::events::{
-    DevicePaired, DeviceRevoked, EnvironmentRegistered, NoticeClosed, NoticeOpened, ResetReason,
-    TaskCreated, TerminalClosed, TerminalFailed, TerminalForegroundChanged, TerminalIncarnation,
-    TerminalNeedsRestart, TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
+    AttachmentEnded, AttachmentStarted, DevicePaired, DeviceRevoked, EnvironmentRegistered,
+    LeaseGranted, NoticeClosed, NoticeOpened, ResetReason, TaskCreated, TerminalClosed,
+    TerminalFailed, TerminalForegroundChanged, TerminalIncarnation, TerminalNeedsRestart,
+    TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
 };
-use bazhen_protocol::ids::{DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId};
+use bazhen_protocol::ids::{AttachmentId, DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId};
 use bazhen_protocol::record::Record;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
@@ -53,6 +54,21 @@ pub enum NewEvent {
         terminal: TerminalId,
         actor: Actor,
         change: TerminalChange,
+    },
+    /// A view of a terminal began, which the `system` records for audit, with no terminal bytes.
+    AttachmentStarted {
+        attachment: AttachmentId,
+        payload: AttachmentStarted,
+    },
+    /// A view ended, and the lease with it if it held it.
+    AttachmentEnded {
+        attachment: AttachmentId,
+        payload: AttachmentEnded,
+    },
+    /// A terminal's lease went to an attachment.
+    LeaseGranted {
+        terminal: TerminalId,
+        payload: LeaseGranted,
     },
 }
 
@@ -133,6 +149,9 @@ impl NewEvent {
             Self::NoticeClosed { .. } => "notice.closed",
             Self::EnvironmentRegistered { .. } => "environment.registered",
             Self::Terminal { change, .. } => change.name(),
+            Self::AttachmentStarted { .. } => "attachment.started",
+            Self::AttachmentEnded { .. } => "attachment.ended",
+            Self::LeaseGranted { .. } => "lease.granted",
         }
     }
 
@@ -144,7 +163,11 @@ impl NewEvent {
                 notice.as_str()
             }
             Self::EnvironmentRegistered { environment, .. } => environment.as_str(),
-            Self::Terminal { terminal, .. } => terminal.as_str(),
+            Self::Terminal { terminal, .. } | Self::LeaseGranted { terminal, .. } => {
+                terminal.as_str()
+            }
+            Self::AttachmentStarted { attachment, .. }
+            | Self::AttachmentEnded { attachment, .. } => attachment.as_str(),
         }
     }
 
@@ -154,7 +177,11 @@ impl NewEvent {
             Self::DevicePaired { .. } | Self::DeviceRevoked { .. } | Self::NoticeClosed { .. } => {
                 "user"
             }
-            Self::NoticeOpened { .. } | Self::EnvironmentRegistered { .. } => "system",
+            Self::NoticeOpened { .. }
+            | Self::EnvironmentRegistered { .. }
+            | Self::AttachmentStarted { .. }
+            | Self::AttachmentEnded { .. }
+            | Self::LeaseGranted { .. } => "system",
             Self::Terminal { actor, .. } => actor.as_str(),
         }
     }
@@ -168,6 +195,9 @@ impl NewEvent {
             Self::NoticeClosed { payload, .. } => serde_json::to_string(payload),
             Self::EnvironmentRegistered { payload, .. } => serde_json::to_string(payload),
             Self::Terminal { change, .. } => change.payload(),
+            Self::AttachmentStarted { payload, .. } => serde_json::to_string(payload),
+            Self::AttachmentEnded { payload, .. } => serde_json::to_string(payload),
+            Self::LeaseGranted { payload, .. } => serde_json::to_string(payload),
         }
     }
 }

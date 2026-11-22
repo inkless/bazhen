@@ -1306,151 +1306,203 @@
   "keystrokes": [
     {
       "input": "a",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "a"
     },
     {
       "input": "",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\r",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\r"
     },
     {
       "input": "é",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "é"
     },
     {
       "input": "\u001b",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b"
     },
     {
       "input": "\u001b[",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b["
     },
     {
       "input": "\u001b[A",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[A"
     },
     {
       "input": "\u001b[1;2R",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[1;2R"
     },
     {
       "input": "\u001b[I",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[I"
     },
     {
       "input": "\u001b[O",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[O"
     },
     {
       "input": "\u001b[I\u001b[O",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[I\u001b[O"
     },
     {
       "input": "\u001b[Ix",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[Ix"
     },
     {
       "input": "\u001b[<65;10;5M",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[<65;10;5M"
     },
     {
       "input": "\u001b[<0;10;5m",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[<0;10;5m"
     },
     {
       "input": "\u001b[96;10;5M",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[96;10;5M"
     },
     {
       "input": "\u001b[Ma*%",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[Ma*%"
     },
     {
       "input": "\u001b[?62;22c",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[>0;276;0c",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[c",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[c"
     },
     {
       "input": "\u001b[0n",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[?1;2R",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[?2004;1$y",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[2004;2$y",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b[8;24;80t",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001bP1$r0m\u001b\\",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001bP>|xterm(388)\u001b\\",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001bP1$r0m",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001bP1$r0m"
     },
     {
       "input": "\u001bPabc\u001b\\",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001bPabc\u001b\\"
     },
     {
       "input": "\u001bP1+r544e=787465726d\u001b\\",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001bP1+r544e=787465726d\u001b\\"
     },
     {
       "input": "5M",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "5M"
     },
     {
       "input": "\u001b]10;rgb:ffff/ffff/ffff\u001b\\",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b]4;1;rgb:cd/00/00\u0007",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": ""
     },
     {
       "input": "\u001b]11;rgb:00/00/00",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b]11;rgb:00/00/00"
     },
     {
       "input": "\u001b[?62;22c\u001b[<0;1;1M\u001b[O",
-      "keystrokes": false
+      "keystrokes": false,
+      "withoutReplies": "\u001b[<0;1;1M\u001b[O"
     },
     {
       "input": "\u001b[?62;22cq",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "q"
     },
     {
       "input": "\u001b[200~\u001b[I\u001b[201~",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[200~\u001b[I\u001b[201~"
     },
     {
       "input": "\u001b[200~unended",
-      "keystrokes": true
+      "keystrokes": true,
+      "withoutReplies": "\u001b[200~unended"
+    },
+    {
+      "input": "\u001b[200~\u001b[0n\u001b[201~",
+      "keystrokes": true,
+      "withoutReplies": "\u001b[200~\u001b[0n\u001b[201~"
+    },
+    {
+      "input": "\u001b[200~x\u001b[201~\u001b[0n",
+      "keystrokes": true,
+      "withoutReplies": "\u001b[200~x\u001b[201~"
+    },
+    {
+      "input": "\u001b[0n\u001b[200~\u001b[0n",
+      "keystrokes": true,
+      "withoutReplies": "\u001b[200~\u001b[0n"
     }
   ],
   "detachKeys": [
