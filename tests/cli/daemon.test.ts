@@ -831,6 +831,9 @@ describe("bazhen stop", () => {
         });
       const ran = s.bazhen(["stop"]);
       await closed.promise;
+      // A daemon binds only once the stopped one lets go of the lock, so stop has long seen it stop
+      // answering; one answering at once would be the stopped daemon still answering, to stop.
+      await sleep(1000);
       const next = await FakeDaemon.listen(s.socket);
       try {
         next.answer("GET /v1/health", HealthResponse, health());
