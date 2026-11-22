@@ -3,7 +3,8 @@
 // judges the branch with the base's falsify as well (docs/standards/testing.md § Falsification).
 // The files are the base's list and the branch's together, so a branch can't shorten the list to
 // skip this. A base whose falsify has no --harness lists nothing, and the branch's list stands
-// alone. CI and `moon run :test-real -- falsify` both run it, after `moon run :test-falsify`.
+// alone. CI runs it in a job of its own, beside `moon run :test-falsify`, and
+// `moon run :test-real -- falsify` runs it after `:test-falsify`.
 //
 // The base's falsify runs from a worktree of the base, locked as falsify locks its own, so a run
 // killed before it could clean up is swept by the next falsify. It runs only in a sandbox: a base
