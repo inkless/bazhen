@@ -1092,10 +1092,17 @@ mod tests {
         assert_eq!(builds_in(dir, vec![(77, of(me(), &argv))]), None);
     }
 
+    /// Of the kernel's list, only this process: any other process of this user, as a test exiting
+    /// beside this one whose arguments can't be read, would rightly make `running_builds` `None`.
     #[test]
     fn are_read_from_the_kernel_which_lists_this_process() {
         let home = home();
-        assert_eq!(running_builds(&home.dir, me()), Some(BTreeSet::new()));
+        let this = getpid();
+        let listed = process::pids().map(|pids| pids.into_iter().filter(|&p| p == this).collect());
+        assert_eq!(
+            running_builds_with(&home.dir, me(), this, listed, seen),
+            Some(BTreeSet::new())
+        );
     }
 
     /// A child the test started, killed through the test's chokepoint and reaped however the
