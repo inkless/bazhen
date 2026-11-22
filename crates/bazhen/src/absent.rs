@@ -31,6 +31,16 @@ pub(crate) enum Presence {
     Unanswering(String),
 }
 
+/// Why a socket that takes a connection yet doesn't answer may be a daemon stuck or busy.
+const LISTENS: &str = "something listens on its socket";
+
+impl Presence {
+    /// Whether the socket took the look's connection: a daemon there may yet answer.
+    pub(crate) fn listens(&self) -> bool {
+        matches!(self, Self::Unanswering(why) if why == LISTENS)
+    }
+}
+
 /// What the daemon at `socket` is, going by a connect to it and by its start-up lock.
 pub(crate) fn presence(socket: &Path) -> Presence {
     let (tell, told) = mpsc::channel();
@@ -65,7 +75,7 @@ fn presence_of(
 ) -> Presence {
     let kind = match &connected {
         Some(Err(e)) => e.kind(),
-        Some(Ok(_)) => return Presence::Unanswering("something listens on its socket".to_owned()),
+        Some(Ok(_)) => return Presence::Unanswering(LISTENS.to_owned()),
         None => {
             return Presence::Unanswering("its socket is too busy to take a connection".to_owned());
         }

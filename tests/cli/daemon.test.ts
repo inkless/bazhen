@@ -30,8 +30,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Closes `daemon` but leaves its socket file, which refuses connections, as a daemon that stops
- * listening before it removes its socket does. Node removes the file on close, so a second link to
- * it is put back in its place.
+ * listening before it removes its socket does. `close` removes the file, so a second link to it is
+ * put back in its place.
  */
 async function closeLeavingSocket(daemon: FakeDaemon, socket: string): Promise<void> {
   const kept = `${socket}.kept`;
@@ -795,15 +795,19 @@ describe("bazhen stop", () => {
         .answer("GET /v1/health", HealthResponse, health())
         .answerWith("POST /v1/daemon/stop", StopResponse, () => {
           const { daemon, socket } = s;
-          setTimeout(() => void closeLeavingSocket(daemon, socket), 100);
+          setTimeout(() => {
+            left = closeLeavingSocket(daemon, socket);
+          }, 100);
           return {};
         });
+      let left = Promise.resolve();
       let finished = Infinity;
       const ran = s.bazhen(["stop"]).then((r) => {
         finished = Date.now();
         return r;
       });
       await sleep(1000);
+      await left;
       const released = Date.now();
       await release();
       expect(await ran).toEqual({
@@ -813,6 +817,36 @@ describe("bazhen stop", () => {
       });
       expect(finished).toBeGreaterThanOrEqual(released);
     },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "says it stopped when another daemon answers on the socket before the stopped one lets go of the lock",
+    async () => {
+      const release = await holdLock(s.socket);
+      s.daemon
+        .answer("GET /v1/health", HealthResponse, health())
+        .answerWith("POST /v1/daemon/stop", StopResponse, () => {
+          const { daemon } = s;
+          setTimeout(() => void daemon.close(), 100);
+          return {};
+        });
+      const ran = s.bazhen(["stop"]);
+      await sleep(500);
+      const next = await FakeDaemon.listen(s.socket);
+      try {
+        next.answer("GET /v1/health", HealthResponse, health());
+        expect(await ran).toEqual({
+          code: 0,
+          stdout: `bazhen stopped; agents keep running\nanother daemon now answers on ${s.socket}\n`,
+          stderr: "",
+        });
+        expect(next.routes()).not.toContain("POST /v1/daemon/stop");
+      } finally {
+        await next.close();
+        await release();
+      }
+    },
+    15_000,
   );
 
   it("fails when the daemon still answers five seconds after it was told to stop", async () => {
