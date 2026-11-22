@@ -24,14 +24,6 @@ export function silence(socket: string, seen: string): string {
   return `bazhen won't start over ${socket}: something may hold it, but it gave no answer (${seen})`;
 }
 
-/** Why start-up won't take `socket`, or null when nothing holds it. */
-export async function refusal(socket: string, timeoutMs = PROBE_MS): Promise<string | null> {
-  const found = await probe(socket, timeoutMs);
-  if (found.kind === "silent") return silence(socket, found.seen);
-  if (found.kind === "daemon") return `bazhen is already running on ${socket}`;
-  return null;
-}
-
 /** Only a socket that isn't there, or that refuses, is proven free: anything else may be a daemon. */
 export function answerOf(err: unknown): Answer {
   const code = err instanceof Error && "code" in err ? err.code : undefined;

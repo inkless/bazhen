@@ -4,7 +4,7 @@ import { type Socket, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fullBacklog } from "../testing/full-backlog.ts";
-import { probe, refusal } from "./probe.ts";
+import { probe } from "./probe.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -111,21 +111,4 @@ describe("probe", () => {
       { kind: "daemon", protocolId: null },
     ]);
   });
-});
-
-describe("refusal", () => {
-  it.runIf(process.platform === "linux")(
-    "refuses a socket something holds without answering, and one a daemon answers on",
-    async () => {
-      const held = await stuck();
-      const answered = await daemon({ body: JSON.stringify({ status: "ok" }) });
-      expect([await refusal(socketPath()), await refusal(held), await refusal(answered)]).toEqual([
-        null,
-        expect.stringMatching(
-          new RegExp(`^bazhen won't start over ${held}: something may hold it`),
-        ),
-        `bazhen is already running on ${answered}`,
-      ]);
-    },
-  );
 });

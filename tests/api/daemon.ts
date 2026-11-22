@@ -7,9 +7,12 @@ import { hostname } from "node:os";
 import { once } from "node:events";
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -183,6 +186,7 @@ export function followEvents(daemon: Daemon) {
 function cliOnPath(home: string): string {
   const dir = join(home, "cli");
   mkdirSync(dir, { recursive: true });
+  rmSync(join(dir, "bazhen"), { force: true });
   symlinkSync(CLI, join(dir, "bazhen"));
   return dir;
 }
@@ -386,6 +390,49 @@ export class Daemon {
     const daemon = new Daemon(realpathSync(mkdtempSync("/tmp/bz-api-")), opts);
     await daemon.spawn();
     return daemon;
+  }
+
+  /**
+   * Two daemons on one fresh home, started at once from their entry point, each on a port of its
+   * own, so that they share only the home. Their config.toml is a FIFO until both have opened it,
+   * so both read it, and go on to start up, at the same moment, before either can bind; then it is
+   * gone again. Linux only, as the api suite is: it sees what each has open in `/proc/<pid>/fd`.
+   * Resolves once one of them has exited, with how it exited and what it printed, and the other
+   * once it answers. `exited` is null if both still run after `withinMs`; `both` are to be stopped
+   * either way.
+   */
+  static async startTwoAtOnce(withinMs = 20_000): Promise<{
+    exited: (ExitStatus & { readonly out: string }) | null;
+    serving: Daemon;
+    both: readonly [Daemon, Daemon];
+  }> {
+    const home = realpathSync(mkdtempSync("/tmp/bz-api-"));
+    const both = [new Daemon(home, {}), new Daemon(home, {})] as const;
+    const config = join(home, "config", "config.toml");
+    mkdirSync(join(home, "config"), { recursive: true });
+    const made = spawnSync("mkfifo", ["-m", "600", config]);
+    if (made.status !== 0) throw new Error(`mkfifo ${config}: ${made.stderr.toString()}`);
+    // Open for writing too, so each daemon's open of it doesn't wait, and its read waits for this.
+    const gate = openSync(config, constants.O_RDWR);
+    try {
+      await Promise.all(both.map((d) => d.launchProcess()));
+      await waitUntil(
+        () => both.every((d) => d.holdsOpen(config)),
+        "both to open their config",
+        withinMs,
+      );
+    } finally {
+      closeSync(gate);
+    }
+    rmSync(config);
+    const first = await Promise.race([
+      ...both.map((d) => d.exited.then((status) => ({ d, status }))),
+      new Promise<null>((r) => setTimeout(() => r(null), withinMs)),
+    ]);
+    if (first === null) return { exited: null, serving: both[0], both };
+    const serving = first.d === both[0] ? both[1] : both[0];
+    await serving.answering();
+    return { exited: { ...first.status, out: first.d.#log.text() }, serving, both };
   }
 
   /**
@@ -620,6 +667,22 @@ export class Daemon {
   }
 
   private async spawn(): Promise<void> {
+    await this.launchProcess();
+    await this.answering();
+  }
+
+  /** Whether the daemon's process has `path` open. */
+  private holdsOpen(path: string): boolean {
+    const fds = `/proc/${this.process?.pid}/fd`;
+    try {
+      return readdirSync(fds).some((fd) => readlinkSync(join(fds, fd)) === path);
+    } catch {
+      return false;
+    }
+  }
+
+  /** The daemon's process, started on a port of its own, not yet waited on. */
+  private async launchProcess(): Promise<void> {
     this.port = await freePort();
     const [program, ...args] = daemonCommand();
     const child = spawn(program, args, {
@@ -634,6 +697,12 @@ export class Daemon {
     this.#log = log;
     child.stdout.on("data", (d: Buffer) => log.append(d.toString()));
     child.stderr.on("data", (d: Buffer) => log.append(d.toString()));
+  }
+
+  /** Waits for the launched daemon to answer, and stops it if it never does. */
+  private async answering(): Promise<void> {
+    const child = this.process;
+    if (child === undefined) throw new Error("no daemon was launched");
     for (let i = 0; i < 100 && child.exitCode === null; i++) {
       // An unpaired caller is answered 401, which is answer enough that the daemon is up.
       if (

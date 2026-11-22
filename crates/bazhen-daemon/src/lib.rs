@@ -9,6 +9,7 @@ mod env;
 mod events;
 mod guard;
 mod heartbeat;
+mod lock;
 mod log;
 mod peer;
 mod private_dir;

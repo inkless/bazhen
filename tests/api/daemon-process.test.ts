@@ -20,6 +20,22 @@ describe("a daemon on its own home", () => {
   });
 });
 
+describe("two daemons started at once on one home", () => {
+  let race: Awaited<ReturnType<typeof Daemon.startTwoAtOnce>> | undefined;
+  afterAll(async () => {
+    for (const daemon of race?.both ?? []) await daemon.stop();
+  });
+
+  it("serves with one, and the other exits 1 without taking its socket", async () => {
+    race = await Daemon.startTwoAtOnce();
+    expect(race.exited).toMatchObject({
+      code: 1,
+      out: expect.stringMatching(/already running|another daemon holds/),
+    });
+    expect((await overSocket(race.serving.socket, "GET", "/v1/health")).status).toBe(200);
+  });
+});
+
 describe("bazhen stop with no daemon", () => {
   let home: Awaited<ReturnType<typeof cliHome>>;
   beforeAll(async () => {
