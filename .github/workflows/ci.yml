@@ -64,8 +64,11 @@ jobs:
       - run: moon run :lint-shell
       # The suites that signal processes they didn't start, which run only on a sandbox: this
       # runner, marked disposable above, or the test container. `moon run :check` leaves them out.
-      - run: moon run :test-holder
-      - run: moon run :test-rust-all
+      # Each runs after an earlier step has failed, so one red gate doesn't hide what the others find.
+      - if: ${{ !cancelled() }}
+        run: moon run :test-holder
+      - if: ${{ !cancelled() }}
+        run: moon run :test-rust-all
 
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
   # Only clippy and nextest: tmux isn't run here, and rustfmt and cargo-deny don't depend on the
@@ -95,8 +98,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
       - run: moon run :lint-rust
-      - run: moon run :test-rust-all
-      - run: moon run :test-holder
+      # Each runs after an earlier step has failed, so one red gate doesn't hide what the others find.
+      - if: ${{ !cancelled() }}
+        run: moon run :test-rust-all
+      - if: ${{ !cancelled() }}
+        run: moon run :test-holder
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
   # model, so it needs no credentials. It is slower than `moon run :check`, so it is a job of its
