@@ -1298,7 +1298,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+    use std::os::unix::process::ExitStatusExt as _;
     use std::path::{Path, PathBuf};
     use std::process::ExitStatus;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -2597,17 +2597,25 @@ mod tests {
         assert_eq!(*sent.lock().unwrap(), []);
     }
 
-    /// A copy of `sleep` named as the holder, which the kernel names so too. It runs with `sleep`
-    /// for its argv[0]: where `sleep` is a multicall coreutils, the copy runs the program its
-    /// argv[0] names, and under its own name it names none. The kernel's name for it comes from
-    /// the file, so stays the holder's.
+    /// A copy of the tests' own sleeper (`bazhen-test-sleeper`, which the workspace's tests build
+    /// into the target directory this test binary is somewhere under) named as the holder, which
+    /// the kernel names so too. Not a copy of `sleep`: where that is a multicall coreutils, it
+    /// runs nothing under this name.
     fn sleeper(dir: &TempDir) -> PathBuf {
+        let exe = std::env::current_exe().unwrap();
+        let built = exe
+            .ancestors()
+            .skip(1)
+            .map(|d| d.join("bazhen-test-sleeper"))
+            .find(|p| p.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no bazhen-test-sleeper above {}: run the workspace's tests, which build it",
+                    exe.display()
+                )
+            });
         let copy = dir.path().join("bazhen-holder");
-        let sleep = ["/bin/sleep", "/usr/bin/sleep"]
-            .into_iter()
-            .find(|path| Path::new(path).exists())
-            .unwrap();
-        std::fs::copy(sleep, &copy).unwrap();
+        std::fs::copy(built, &copy).unwrap();
         copy
     }
 
@@ -2628,7 +2636,6 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
         let mut child = std::process::Command::new(sleeper(&dir))
-            .arg0("sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -2639,14 +2646,13 @@ mod tests {
         assert!(super::vouch(holder, HolderUse::Kill).is_none());
     }
 
-    /// `sleep` has no handler for SIGUSR1, so the rebind ends it, which shows it was sent.
+    /// The sleeper has no handler for SIGUSR1, so the rebind ends it, which shows it was sent.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn rebinds_a_real_holder_this_process_didn_t_start_through_start_holder() {
         bazhen_test_signal::require_sandbox().unwrap();
         let dir = TempDir::new();
         let mut child = std::process::Command::new(sleeper(&dir))
-            .arg0("sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -2655,9 +2661,9 @@ mod tests {
         assert_eq!(child.wait().unwrap().signal(), Some(Signal::USR1.as_raw()));
     }
 
-    /// The real start, through `Host`: a copy of `sleep` named as the holder, which the kernel
-    /// names so too, from the moment a launcher, here bash, execs it as `sleep` with the seconds
-    /// that it needs, as the holder is run with none. It never says `ready`, so once its wait is up it is
+    /// The real start, through `Host`: the tests' sleeper named as the holder, which the kernel
+    /// names so too, from the moment a launcher, here a shell, execs it with the seconds that it
+    /// needs, as the holder is run with none. It never says `ready`, so once its wait is up it is
     /// killed by a proof for its pid and start. The shell can't stand in for it: run as a script,
     /// the holder's name is the kernel's only until the script execs something else.
     #[test]
@@ -2671,7 +2677,7 @@ mod tests {
         options.ready = Duration::from_millis(200);
         options.launch = Duration::from_secs(5);
         options.scope = Some(super::ScopeLaunch {
-            argv: argv(&["/bin/bash", "-c", r#"exec -a sleep "$0" 10"#]),
+            argv: argv(&["/bin/sh", "-c", r#"exec "$0" 10"#]),
             env: vec![],
         });
         let started = tokio::runtime::Builder::new_current_thread()
