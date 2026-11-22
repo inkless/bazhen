@@ -3459,124 +3459,28 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
-  // The fake as runtime-holder's tests have it: three constructors that make their own far end,
-  // and two a test can't trust: one taking a stream, and one taking a path it doesn't bind.
-  const FAKE = "crates/bazhen-runtime-holder/src/fake_holder.rs";
-  const fakeHolder = [
-    "pub(crate) struct FakeHolder { stream: UnixStream }",
-    "impl FakeHolder {",
-    "    pub(crate) async fn client() -> Connected { Self::client_with(ClientOptions::default()).await }",
-    "    pub(crate) async fn client_with(options: ClientOptions) -> Connected {",
-    "        let (near, far) = UnixStream::pair().unwrap();",
-    "        open(near, &options).await",
-    "    }",
-    "    pub(crate) async fn client_at(path: &Path, edit: impl FnOnce(&mut HelloReply)) -> Connected {",
-    "        let listener = UnixListener::bind(path).unwrap();",
-    "        connect(path, &ClientOptions::default()).await",
-    "    }",
-    "    pub(crate) async fn wrap(stream: UnixStream) -> Connected { open(stream).await }",
-    "    pub(crate) async fn beside(path: &Path) -> Connected { Self::client().await }",
-    "    pub(crate) fn new(stream: UnixStream) -> Self { Self { stream } }",
-    "}",
-  ].join("\n");
-  const USE = "use crate::fake_holder::{Connected, FakeHolder};";
-  const fakeLet = "let Connected { client, mut far, .. } = FakeHolder::client().await;";
-  const realLet = "let (real, _events) = connect(&root.socket(&id), &options).await.unwrap();";
-  const withFake = (sources: Record<string, string>) =>
-    unmarked({ [FAKE]: fakeHolder, ...sources });
-
-  it("needn't be marked for requests on a fake holder's client, and must be for any other", () => {
-    // A client a `let` takes whole from a trusted FakeHolder constructor, and mentions after only
-    // to call it, asks a fake that runs no child. One a real connect gave, one bound again, or a
-    // test that mixes in a real holder's, still counts.
-    const source = [
-      USE,
-      `#[test]\nfn a() { ${fakeLet} client.close().await.unwrap(); client.signal(Signal::Sigint); }`,
-      `#[test]\nfn b() { ${fakeLet} let verbs = vec![Box::new(|| client.respawn(spec.clone()))]; }`,
-      "#[test]\nfn c() { let (client, _e, far) = FakeHolder::client_at(&path, |_| {})?; client.close(); }",
-      `#[test]\nfn d() { ${realLet} real.close().await.unwrap(); }`,
-      `#[test]\nfn e() { ${fakeLet} ${realLet} client.close().await; real.close().await; }`,
-      `#[test]\nfn f() { ${fakeLet} let client = other; client.close().await; }`,
-      `#[test]\nfn g() { ${fakeLet} let ask = |client: &HolderClient| client.close(); }`,
-      `#[test]\nfn h() { ${fakeLet} take(client); client.close().await; }`,
-      "#[test]\nfn i() { let client = FakeHolder::client().await.real; client.close().await; }",
-      `#[test]\nfn j() { ${fakeLet} far.client.close().await; client.close_step(); }`,
-      "#[test]\nfn k() { let (client, _e) = connect(&path, &o).await.unwrap(); client.signal(s); }",
-      `#[test]\nfn l() { { ${fakeLet} } client.close().await; }`,
+  it("must be marked for requests on a fake holder's client, as on any other", () => {
+    // Source text can't show the client reaches only the fake: a trait method taking `self` by
+    // value can stand in for `close`, and a path in a string attribute can reach past the fake.
+    const fake = [
+      "pub(crate) struct FakeHolder { stream: UnixStream }",
+      "impl FakeHolder {",
+      "    pub(crate) async fn client() -> Connected {",
+      "        let (near, far) = UnixStream::pair().unwrap();",
+      "        open(near, &ClientOptions::default()).await",
+      "    }",
+      "}",
     ].join("\n");
-    expect(withFake({ [inCrate("client")]: source })).toEqual(
-      [8, 10, 12, 14, 16, 18, 20, 22, 24].map((line) => `${inCrate("client")}:${line}`),
+    const fakeLet = "let Connected { client, .. } = FakeHolder::client().await;";
+    const source = [
+      "use crate::fake_holder::{Connected, FakeHolder};",
+      closing(fakeLet),
+      `#[test]\nfn b() { ${fakeLet} client.signal(Signal::Sigint).await; }`,
+      `#[test]\nfn c() { ${fakeLet} client.respawn(spec).await; }`,
+    ].join("\n");
+    expect(unmarked({ [inCrate("fake_holder")]: fake, [inCrate("client")]: source })).toEqual(
+      [2, 4, 6].map((line) => `${inCrate("client")}:${line}`),
     );
-  });
-
-  it("must be marked for a fake holder's client when the fake can't be shown to be the fake", () => {
-    // Only a constructor that makes its own far end is trusted; only the crate's own fake, by
-    // that name and imported from it; and only while the fake itself signals nothing.
-    const sources = {
-      [inCrate("wrap")]:
-        `${USE}\n${closing("let Connected { client, .. } = FakeHolder::wrap(s).await;")}`,
-      [inCrate("beside")]:
-        `${USE}\n${closing("let Connected { client, .. } = FakeHolder::beside(&p).await;")}`,
-      [inCrate("unimported")]: `use crate::client::HolderClient;\n${closing(fakeLet)}`,
-      [inCrate("trusted")]: `${USE}\n${closing(fakeLet)}`,
-      "crates/bazhen-daemon/src/x.rs": `${USE}\n${closing(fakeLet)}`,
-    };
-    // Each file's test but the trusted one's; then an alias, another `FakeHolder`, a generic
-    // parameter of that name or a `use` of it from elsewhere, anywhere in the crate, leaves even
-    // that one unexempt.
-    expect(withFake(sources)).toEqual([
-      `${inCrate("wrap")}:2`,
-      `${inCrate("beside")}:2`,
-      `${inCrate("unimported")}:2`,
-      "crates/bazhen-daemon/src/x.rs:2",
-    ]);
-    const trusted = { [inCrate("trusted")]: `${USE}\n${closing(fakeLet)}` };
-    const renames = [
-      "use crate::client as FakeHolder;",
-      "use bazhen_runtime_holder as FakeHolder;",
-      "type FakeHolder = RealHolder;",
-      "struct FakeHolder;",
-      "async fn a<FakeHolder: Spawn>() { let Connected { client, .. } = FakeHolder::client(); }",
-      "impl<FakeHolder: Spawn> Pool<FakeHolder> {}",
-      "use crate::testing::FakeHolder;",
-      "pub(crate) use bazhen_other::FakeHolder;",
-    ];
-    for (const other of renames) {
-      expect(withFake({ ...trusted, [inCrate("other")]: other })).toEqual([
-        `${inCrate("trusted")}:2`,
-      ]);
-    }
-    // So does a fake that signals, or that anywhere opens a connection, or takes one, other than
-    // at a path the same function binds and fails loudly if it can't.
-    const opening = [
-      "fn end(child: &Child) { child.signal(9); }",
-      "async fn real(root: &Path) -> Connected { connect(&holder_socket(root, id), &o).await }",
-      "impl FakeHolder { async fn dial(path: &Path) -> Connected { connect(path, &o).await } }",
-      "async fn at(path: &Path) { let _ = UnixListener::bind(path); connect(path, &o).await }",
-      "async fn at(path: &Path) { UnixListener::bind(path).ok(); connect(path, &o).await }",
-      "fn at(path: &Path) { UnixListener::bind(path)?; let path = elsewhere; connect(&path) }",
-      "fn raw(fd: &OwnedFd, addr: &SocketAddrUnix) { rustix::net::connect_unix(fd, addr) }",
-      "fn adopt(std: std::os::unix::net::UnixStream) { UnixStream::from_std(std) }",
-      "fn adopt(fd: RawFd) -> UnixStream { unsafe { UnixStream::from_raw_fd(fd) } }",
-      "fn at(path: &Path) { UnixListener::bind(path)?; if let Some(path) = o { connect(path) } }",
-      "fn at(path: &Path) { UnixListener::bind(path)?; for path in o { connect(path); } }",
-      "fn at(path: &Path) { UnixListener::bind(path)?; o.map(|path| connect(path)); }",
-      "use crate::runtime::reach;",
-      "async fn real(root: &Path) -> Connected { crate::runtime::reach(root).await }",
-      "fn real(p: &Path) { bazhen_host_guard::holder::dial(p) }",
-      "use crate::client::{connect as dial, open};",
-      "use super::sockets::dial;",
-    ];
-    // While the fake as it is, naming the client's own, stays trusted.
-    const named = `use crate::client::{ClientOptions, HolderClient, HolderEvents, connect, open};`;
-    expect(
-      unmarked({ ...trusted, [FAKE]: `${named}\nuse bazhen_holder_proto::Reply;\n${fakeHolder}` }),
-    ).toEqual([]);
-    for (const added of opening) {
-      expect(unmarked({ ...trusted, [FAKE]: `${fakeHolder}\n${added}` })).toEqual([
-        `${inCrate("trusted")}:2`,
-      ]);
-    }
   });
 
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
