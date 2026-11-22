@@ -2,13 +2,6 @@
 //! `testing/fake-holder.ts` is: the test reads the requests in order and writes the answers and
 //! events. It reads only when the test asks it to, so between reads it is a holder that has
 //! stopped reading.
-//!
-//! `client`, `client_with` and `client_at` also hand out the client at the near end, whose
-//! `close`, `signal` and `respawn` reach no child, since this fake runs none: so a test that asks
-//! them of it needn't be marked as signalling. The standards check (`fakeHolderConstructors`)
-//! trusts a constructor for that only while it takes nothing but `ClientOptions`, a hello edit,
-//! or a path it binds its own listener at, and connects to no other: one that took a stream or
-//! dialled another's socket would leave each test that used it marked as signalling.
 
 use std::future::Future as _;
 use std::io;
