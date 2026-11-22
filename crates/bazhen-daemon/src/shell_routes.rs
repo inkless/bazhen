@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 
 use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
-use crate::shells::reports::ReportOutcome;
+use crate::shells::reports::{ReportKind, ReportOutcome};
 use crate::shells::{ShellError, Shells};
 
 /// The most UTF-16 units an idempotency key has, and a confirmed program's name.
@@ -279,7 +279,9 @@ fn not_its_token() -> Response {
     )
 }
 
-/// `POST /v1/shells/:id/report`, on the socket only: the line the shell starts running.
+/// `POST /v1/shells/:id/report`, on the socket only: the line the shell starts running. Once its
+/// body is whole, it is handled on the shells' keeper, to its end even if the hook hangs up first,
+/// as a prompt and a decline are.
 pub(crate) async fn report(
     State(shared): State<Shared>,
     Path(id): Path<String>,
@@ -290,7 +292,14 @@ pub(crate) async fn report(
         Err(unread) => return unread.answer("expected { token, at, command }"),
     };
     let reported = match shells_of(&shared) {
-        Ok(shells) => shells.report(&id, req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Line, &on, move |shells| async move {
+                    shells.report(&id, req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     match reported {
@@ -311,7 +320,14 @@ pub(crate) async fn prompt(
         Err(unread) => return unread.answer("expected { token }"),
     };
     let prompted = match shells_of(&shared) {
-        Ok(shells) => shells.prompt(&id, &req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Prompt, &on, move |shells| async move {
+                    shells.prompt(&id, &req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     owned(prompted)
@@ -328,7 +344,14 @@ pub(crate) async fn decline(
         Err(unread) => return unread.answer("expected { token }"),
     };
     let declined = match shells_of(&shared) {
-        Ok(shells) => shells.decline(&id, &req).await,
+        Ok(shells) => {
+            let on = id.clone();
+            shells
+                .kept(ReportKind::Decline, &on, move |shells| async move {
+                    shells.decline(&id, &req).await
+                })
+                .await
+        }
         Err(err) => Err(err),
     };
     owned(declined)
@@ -647,5 +670,77 @@ mod tests {
             "about 12 KiB of JSON, under the 16 KiB limit"
         );
         assert_eq!(h.last_command(&id), Some("a".repeat(2048)));
+    }
+
+    /// Whether `future` is still waiting after one poll.
+    async fn waits<F: std::future::Future + Unpin>(future: &mut F) -> bool {
+        tokio::select! {
+            biased;
+            _ = future => false,
+            () = std::future::ready(()) => true,
+        }
+    }
+
+    /// Calls the handlers themselves, not the socket's router: the router's caller guard
+    /// identifies the caller in `spawn_blocking`, so a single poll of the router can't be known to
+    /// have reached the keeper. Dropping the handler's future is what hyper does when the hook's
+    /// socket closes.
+    #[test]
+    fn keeps_a_line_whose_hook_hung_up_while_the_store_was_held_and_says_so_once() {
+        use crate::shells::tests::{Said, integration, setup_with};
+        let h = setup_with(100, Some(integration()));
+        let said = Said::default();
+        let _logging = said.logging();
+        let line = "cargo build --release";
+        let (id, token) = crate::testing::runtime().block_on(async {
+            let id = h.open("o").await.unwrap();
+            let token = h.token_of(&id).unwrap();
+            let shared = Shared {
+                shells: Some(Arc::clone(&h.shells)),
+                ..Shared::new(
+                    "f".repeat(64).as_str(),
+                    crate::routes::Stop::default(),
+                    h.store.clone(),
+                )
+            };
+            let body = |value: serde_json::Value| Ok(Bytes::from(value.to_string()));
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let mut held = Box::pin(h.store.run(move |_| gate.recv().is_ok()));
+            assert!(waits(&mut held).await);
+            let mut reporting = Box::pin(report(
+                State(shared.clone()),
+                Path(id.clone()),
+                body(serde_json::json!({ "token": token, "at": 1, "command": line })),
+            ));
+            assert!(waits(&mut reporting).await, "answered past the held store");
+            // The hook hangs up, and hyper drops the route's future.
+            drop(reporting);
+            // Whatever runs the report reaches the store, behind the hold, before it is let go.
+            tokio::task::yield_now().await;
+            release.send(()).unwrap();
+            assert!(held.await.unwrap());
+            // Reports are handled in turn, so once a later one is answered the line's has ended.
+            let prompted = prompt(
+                State(shared),
+                Path(id.clone()),
+                body(serde_json::json!({ "token": token })),
+            )
+            .await;
+            assert_eq!(prompted.status(), StatusCode::NO_CONTENT);
+            assert_eq!(h.last_command(&id), Some(line.to_owned()));
+            (id, token)
+        });
+        let text = said.text();
+        assert_eq!(
+            (
+                said.times(&format!(
+                    "shell {id}: finished a report its hook stopped waiting for"
+                )),
+                said.times("stopped waiting"),
+                text.contains(line) || text.contains(&token),
+            ),
+            (1, 1, false),
+            "{text}"
+        );
     }
 }

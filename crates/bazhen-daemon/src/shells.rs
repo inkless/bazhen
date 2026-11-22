@@ -330,6 +330,8 @@ pub(crate) struct Shells {
     restarts: crate::restarts::Restarts,
     /// The lines restarts are to type back, each until its new shell's first prompt.
     retypes: PendingRetypes,
+    /// What handles the shells' reports, each to its end.
+    keeper: self::reports::Keeper,
 }
 
 /// A new shell, as `start` opens it.
@@ -474,6 +476,7 @@ impl Shells {
             unended: Mutex::new(HashSet::new()),
             foreground_fault: Mutex::new(None),
             restarts: crate::restarts::Restarts::default(),
+            keeper: self::reports::Keeper::default(),
         }
     }
 
