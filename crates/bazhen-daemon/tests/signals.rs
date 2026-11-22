@@ -3,7 +3,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -40,14 +40,16 @@ impl Drop for Home {
 /// The daemon, copied under `home` as `moon run :build` lays it out, with the holder the
 /// workspace's tests build beside it: a daemon whose default runtime is the holder refuses to
 /// start with no holder build, as `main.ts` does, and cargo builds none at `release-holder`.
+/// The holder is the one cargo built beside this daemon, in the same profile's directory.
 fn daemon_binary(home: &Home) -> Res<PathBuf> {
-    let exe = std::env::current_exe()?;
-    let holder = exe
-        .ancestors()
-        .skip(1)
-        .map(|dir| dir.join("bazhen-holder"))
-        .find(|holder| holder.is_file())
-        .ok_or_else(|| format!("no bazhen-holder above {}", exe.display()))?;
+    let holder = Path::new(env!("CARGO_BIN_EXE_bazhen-daemon")).with_file_name("bazhen-holder");
+    if !holder.is_file() {
+        return Err(format!(
+            "no {}: run the workspace's tests, which build it",
+            holder.display()
+        )
+        .into());
+    }
     let build = home.0.join("target");
     std::fs::create_dir_all(build.join("release"))?;
     std::fs::create_dir_all(build.join("release-holder"))?;
@@ -288,20 +290,15 @@ fn refuses_to_start_with_no_holder_build_to_run_new_terminals_on() {
                     b"POST /v1/daemon/stop HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n",
                 )
                 .unwrap();
-            let asked = Instant::now();
-            while child.try_wait().unwrap().is_none() && asked.elapsed() < BOUND {
-                thread::sleep(Duration::from_millis(20));
-            }
-            panic!(
-                "the daemon started with no holder build: {:?}",
-                child.try_wait()
-            );
+            // Killed if the stop doesn't end it, so a failing run leaves no daemon behind.
+            let ended = ended_within_bound(child);
+            panic!("the daemon started with no holder build: {ended:?}");
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let out = child.wait_with_output().unwrap();
-    let said = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(1), "{said}");
+    // Killed if it is still starting at the bound, neither refused nor bound.
+    let (code, said) = ended_within_bound(child).unwrap();
+    assert_eq!(code, Some(1), "{said}");
     assert!(
         said.contains("bazhen: no holder can be started for new terminals: ")
             && said.contains("release-holder/bazhen-holder isn't built; run `moon run :build`")

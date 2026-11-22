@@ -274,13 +274,35 @@ pub(crate) struct ShellsDeps {
 const RETRY_FIRST: Duration = Duration::from_millis(100);
 const RETRY_MOST: Duration = Duration::from_secs(30);
 
+/// Why an exited shell's terminal wasn't ended.
+#[derive(Debug)]
+enum Unended {
+    /// A later try may end it: its runtime or the store couldn't be reached just now.
+    Again(ShellError),
+    /// No try can: it has no terminal recorded, or what runs there is provably not the one
+    /// recorded or speaks no protocol this build does, the failures a forced close can't record
+    /// past either. The shell stays `state`.
+    Never {
+        state: TerminalState,
+        err: ShellError,
+    },
+}
+
+impl From<ShellError> for Unended {
+    fn from(err: ShellError) -> Self {
+        Self::Again(err)
+    }
+}
+
 /// Shell terminals: whoever can reach the daemon's API can open and close them, confirming a
 /// busy close included, as with agents' own commands.
 #[derive(Debug)]
 pub(crate) struct Shells {
     deps: ShellsDeps,
     turns: Turns,
-    /// Exited shells whose terminal couldn't be ended, by terminal and generation, each said once.
+    /// Exited shells whose terminal couldn't be ended and is being tried again, by terminal and
+    /// generation, each said once. One no try can end is said once as it is given up, and not
+    /// kept, since nothing tries it again.
     unended: Mutex<HashSet<String>>,
 }
 
@@ -894,7 +916,15 @@ impl Shells {
                         unended.remove(&incarnation);
                         return;
                     }
-                    Err(err) => {
+                    Err(Unended::Never { state, err }) => {
+                        unended.remove(&incarnation);
+                        tracing::warn!(
+                            "bazhen: shell {id}: can't end it after it exited, so it stays {}: {err}",
+                            state.as_str()
+                        );
+                        return;
+                    }
+                    Err(Unended::Again(err)) => {
                         if unended.insert(incarnation.clone()) {
                             tracing::warn!(
                                 "bazhen: shell {id}: could not end it after it exited: {err}"
@@ -914,7 +944,7 @@ impl Shells {
         }
     }
 
-    async fn close_exited(&self, id: &str, generation: u64) -> Result<(), ShellError> {
+    async fn close_exited(&self, id: &str, generation: u64) -> Result<(), Unended> {
         let Some(found) = self.shell(id).await? else {
             return Ok(());
         };
@@ -924,8 +954,10 @@ impl Shells {
         if !ending || found.generation != generation {
             return Ok(());
         }
-        let terminal = recorded(&found)
-            .ok_or_else(|| ShellError::Conflict("the shell has no terminal recorded".to_owned()))?;
+        let terminal = recorded(&found).ok_or_else(|| Unended::Never {
+            state: found.state,
+            err: ShellError::Conflict("the shell has no terminal recorded".to_owned()),
+        })?;
         if found.state != TerminalState::Closing {
             self.record(&found.id, Actor::System, TerminalChange::Closing)
                 .await?;
@@ -934,7 +966,16 @@ impl Shells {
             .terminals
             .close(&terminal)
             .await
-            .map_err(|cause| from_runtime(id, cause))?;
+            .map_err(|cause| {
+                if cause.forceable() {
+                    Unended::Again(from_runtime(id, cause))
+                } else {
+                    Unended::Never {
+                        state: TerminalState::Closing,
+                        err: from_runtime(id, cause),
+                    }
+                }
+            })?;
         self.record(
             &found.id,
             Actor::System,
@@ -1559,6 +1600,35 @@ mod tests {
             assert_eq!(h.state_of(&id), Some(TerminalState::Closed));
             assert!(h.shells.unended.lock().unwrap().is_empty());
             assert_eq!(said.times("could not end it after it exited"), 1);
+        });
+    }
+
+    #[test]
+    fn gives_up_at_once_ending_an_exited_shell_no_try_can_end_saying_so_once() {
+        let h = setup(100);
+        let said = Said::default();
+        let _logging = said.logging();
+        runtime().block_on(async {
+            let id = h.open("open").await.unwrap();
+            let tries = h.count_closes();
+            let replaced = TerminalError::Stale("another holder answers".to_owned());
+            h.fake.set(|state| state.closes_refused = Some(replaced));
+            let ending = h.exit_told(&id, &CancellationToken::new());
+            tokio::time::timeout(Duration::from_secs(5), ending)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert_eq!(h.state_of(&id), Some(TerminalState::Closing));
+            // Nothing tries it again, so nothing is kept to say it once more.
+            assert!(h.shells.unended.lock().unwrap().is_empty());
+            assert_eq!(
+                [
+                    said.times("can't end it after it exited, so it stays closing"),
+                    said.times("could not end it after it exited"),
+                ],
+                [1, 0]
+            );
         });
     }
 

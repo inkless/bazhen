@@ -147,6 +147,8 @@ pub(crate) mod fake {
         pub(crate) closed: Vec<String>,
         pub(crate) fail_creates: bool,
         pub(crate) fail_closes: bool,
+        /// What each close fails with, where it fails as no unreachable runtime does.
+        pub(crate) closes_refused: Option<TerminalError>,
         pub(crate) fail_holders: bool,
         /// Each create waits for a permit here before it starts anything.
         pub(crate) hold_creates: Option<Arc<Semaphore>>,
@@ -280,6 +282,9 @@ pub(crate) mod fake {
                 let mut state = self.state.lock().unwrap();
                 if state.fail_closes {
                     return Err(TerminalError::Other("the fake is unreachable".to_owned()));
+                }
+                if let Some(refused) = &state.closes_refused {
+                    return Err(refused.clone());
                 }
                 state.running.remove(id);
                 state.closed.push(id.to_owned());
