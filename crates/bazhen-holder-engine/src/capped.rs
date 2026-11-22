@@ -176,6 +176,16 @@ impl Capped<'_> {
         }
     }
 
+    /// Writes the cell a wide char that doesn't fit leaves blank, as alacritty does, so that the
+    /// cursor waits to wrap like any other. Only on a row as wide as the char: the char then fills
+    /// the next row, its last cell included, and that row's line ending has to be kept too.
+    fn leave_the_cell_a_wide_char_does_not_fit_in(&mut self) {
+        let leading = Flags::LEADING_WIDE_CHAR_SPACER;
+        self.0.grid_mut().cursor.template.flags.insert(leading);
+        self.input(' ');
+        self.0.grid_mut().cursor.template.flags.remove(leading);
+    }
+
     /// Wraps a waiting cursor, as alacritty's `wrapline` does before it prints: marks the
     /// row as wrapping, feeds a line and returns to the first column.
     fn wrap(&mut self) {
@@ -241,6 +251,14 @@ impl Handler for Capped<'_> {
             mode.contains(TermMode::LINE_WRAP),
         );
         let columns = self.0.columns();
+        let cursor = &self.0.grid().cursor;
+        if wraps
+            && width >= columns
+            && !cursor.input_needs_wrap
+            && cursor.point.column.0 + width > columns
+        {
+            self.leave_the_cell_a_wide_char_does_not_fit_in();
+        }
         if self.0.grid().cursor.input_needs_wrap && wraps && (insert || width >= columns) {
             self.wrap();
         }
@@ -708,6 +726,48 @@ mod tests {
             (cells(&term, 0), cells(&term, 1)),
             ("abcde.|".into(), "中>....".into())
         );
+    }
+
+    /// Rows 0 to 2 of a terminal 2 wide and 3 high, after `abcd` wraps row 1 and `stream`.
+    fn two_wide(stream: &str) -> Vec<String> {
+        let sink = Sink::default();
+        let mut term = Term::new(config(10), &Size { cols: 2, rows: 3 }, sink.clone());
+        let mut tracker = Tracker::new(2, 3);
+        let stream = "\x1b[2;1Habcd".to_owned() + stream;
+        Processor::<StdSyncHandler>::new().advance(
+            &mut Capped(&mut term, &mut tracker, &sink),
+            stream.as_bytes(),
+        );
+        (0..3)
+            .map(|line| {
+                let row = &term.grid()[Line(line)];
+                (0..2)
+                    .map(|column| {
+                        let cell: &Cell = &row[Column(column)];
+                        let c = match cell.c {
+                            _ if cell.flags.intersects(Flags::WIDE_CHAR_SPACER) => '>',
+                            _ if cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) => '<',
+                            ' ' => '.',
+                            c => c,
+                        };
+                        let wraps = cell.flags.contains(Flags::WRAPLINE);
+                        c.to_string() + if wraps { "|" } else { "" }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_wide_char_that_fills_the_row_it_wraps_to_keeps_that_row_s_line_ending() {
+        // Not fitting after column 0, 中 wraps and fills the row below.
+        assert_eq!(two_wide("\x1b[1;2H中"), [".<|", "中>|", "cd"]);
+        assert_eq!(two_wide("\x1b[1;2H\x1b[4h中"), [".<|", "中>|", "cd"]);
+    }
+
+    #[test]
+    fn a_wide_char_after_a_wait_to_wrap_keeps_the_line_ending_of_the_row_it_fills() {
+        assert_eq!(two_wide("\x1b[1;1Hxy中"), ["xy|", "中>|", "cd"]);
     }
 
     #[test]

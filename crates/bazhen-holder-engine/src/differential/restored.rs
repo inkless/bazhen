@@ -288,6 +288,18 @@ fn a_wide_line_through_resizes_under_vim_comes_back_with_no_cell_twice() {
     goes_on_as_its_source(Size { cols: 2, rows: 1 }, &before, &[], &[1]).unwrap();
 }
 
+#[test]
+fn a_cursor_saved_waiting_on_a_row_that_then_wraps_comes_back_with_the_row_wrapping() {
+    // A case the property rarely reaches: the snapshot prints the saved cursor's cell again to
+    // make it wait, which must leave the row wrapping.
+    let before = [
+        Action::Text("a  中  ".into()),
+        Action::SaveCursor,
+        Action::Text("a".into()),
+    ];
+    goes_on_as_its_source(Size { cols: 4, rows: 4 }, &before, &[], &[1]).unwrap();
+}
+
 proptest! {
     // The named divergences leave out about 4% of cases (30 in 829 over six runs at a limit of
     // 5), well inside the default limit of 1,024 rejects at 512 cases.
