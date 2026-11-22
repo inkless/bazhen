@@ -3454,6 +3454,37 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("needn't be marked for requests on a fake holder's client, and must be for any other", () => {
+    // A client a `let` takes whole from a FakeHolder constructor, and mentions after only to call
+    // it, asks a fake that runs no child. One a real connect gave, one bound again, or a test
+    // that mixes in a real holder's, still counts.
+    const fake = "let Connected { client, mut far, .. } = FakeHolder::client().await;";
+    const real = "let (real, _events) = connect(&root.socket(&id), &options).await.unwrap();";
+    const source = [
+      `#[test]\nfn a() { ${fake} client.close().await.unwrap(); client.signal(Signal::Sigint); }`,
+      `#[test]\nfn b() { ${fake} let verbs = vec![Box::new(|| client.respawn(spec.clone()))]; }`,
+      "#[test]\nfn c() { let (client, _e, far) = FakeHolder::client_at(&path, |_| {})?; client.close(); }",
+      `#[test]\nfn d() { ${real} real.close().await.unwrap(); }`,
+      `#[test]\nfn e() { ${fake} ${real} client.close().await; real.close().await; }`,
+      `#[test]\nfn f() { ${fake} let client = other; client.close().await; }`,
+      `#[test]\nfn g() { ${fake} let ask = |client: &HolderClient| client.close(); }`,
+      `#[test]\nfn h() { ${fake} take(client); client.close().await; }`,
+      "#[test]\nfn i() { let client = FakeHolder::client().await.real; client.close().await; }",
+      `#[test]\nfn j() { ${fake} far.client.close().await; client.close_step(); }`,
+      "#[test]\nfn k() { let (client, _e) = connect(&path, &o).await.unwrap(); client.signal(s); }",
+    ].join("\n");
+    expect(unmarked({ "crates/r/src/client.rs": source })).toEqual([
+      "crates/r/src/client.rs:7",
+      "crates/r/src/client.rs:9",
+      "crates/r/src/client.rs:11",
+      "crates/r/src/client.rs:13",
+      "crates/r/src/client.rs:15",
+      "crates/r/src/client.rs:17",
+      "crates/r/src/client.rs:19",
+      "crates/r/src/client.rs:21",
+    ]);
+  });
+
   it("must be marked when it calls a same-file helper that closes or sweeps", () => {
     const source = [
       "fn end(r: &mut Running) { r.child.close(group, now); }",

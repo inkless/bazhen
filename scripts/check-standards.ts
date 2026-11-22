@@ -1249,11 +1249,107 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/<pid>/stat for has_exited and parent_field, which proc_stat fuzzes",
   "crates/bazhen-holder/src/session.rs::supported":
     "reads /proc/self/stat for own_pid, which proc_stat fuzzes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::recv":
+    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::try_recv":
+    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::poll_next":
+    "hands on events the reader made of FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_hello":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_snapshot":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_stats":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_foreground":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_screen":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::into_ok":
+    "unwraps an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Answered::name":
+    "names an answer's kind; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::offer":
+    "a trait's method with no body: Typed::offer is its one impl",
+  "crates/bazhen-runtime-holder/src/client.rs::Typed::offer":
+    "gives an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes to the request waiting for it; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Shared::hang_up":
+    "queues the hang-up; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Shared::send":
+    "queues frames this client encoded; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Waiter::drop":
+    "removes a request from those waiting; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::waiting":
+    "awaits an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::ask":
+    "encodes a request and queues it; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::dispatch":
+    "routes a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes by its type; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::answer":
+    "gives an answer made of a frame from FrameDecoder::next_frame, which the proto crate's frame target fuzzes to its request; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::take_frames":
+    "takes FrameDecoder::next_frame, which the proto crate's frame target fuzzes's frames and hands them to dispatch; parses nothing itself",
+  "crates/bazhen-runtime-holder/src/client.rs::read_loop":
+    "reads the socket into FrameDecoder::push, which the proto crate's frame target fuzzes; parses nothing itself",
+  "crates/bazhen-runtime-holder/src/client.rs::drain":
+    "writes frames this client encoded; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::write_loop":
+    "writes frames this client encoded, through drain; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::Owner::drop": "hangs up; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::open":
+    "hands the socket's halves to read_loop and write_loop and says hello through ask; decodes nothing itself",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::shared":
+    "returns a field; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::is_open":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::room":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::drained":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::generation":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::end": "hangs up; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::ended":
+    "reads the connection's own state; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::closed":
+    "waits for the connection's tasks; reads no bytes",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::snapshot":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::attach":
+    "encodes two requests and queues them in one write; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::subscribe":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::input":
+    "frames the caller's input for the holder and queues it; parses nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::resize":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::signal":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::paste":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::respawn":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::set_tags":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::set_theme":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::stats":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::foreground":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::screen":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/client.rs::HolderClient::close":
+    "encodes a request and queues it through ask; reads nothing",
+  "crates/bazhen-runtime-holder/src/install.rs::build_of":
+    "hashes the copy install_holder made of a build; parses nothing",
 };
 
 // A carrier's bytes are found by the methods of its own crate that use the field holding them, so
 // a field another crate can read is listed here with why its bytes aren't from outside.
 const PUBLIC_BYTE_FIELDS: Record<string, string> = {
+  "crates/bazhen-runtime-holder/src/client.rs::HolderSnapshot::bytes":
+    "VT a holder sent, which FrameDecoder::next_frame decoded and the proto crate's frame target fuzzes, for a terminal to draw as it does HolderEvent::Data's",
   "crates/bazhen-holder-proto/src/body.rs::ThemeColours::text":
     "a built-in theme's RGB, which Theme::colours makes in-process",
   "crates/bazhen-holder-proto/src/body.rs::ThemeColours::background":
@@ -3207,6 +3303,9 @@ const HEAVY_ALLOWED: Record<string, string> = {
   "bazhen-host-guard":
     "the daemon's signal chokepoint: its bounded runs wait on a child under tokio, as only the " +
     "daemon does",
+  "bazhen-runtime-holder":
+    "the daemon's holder runtime: its client talks to each holder's socket under tokio, as only " +
+    "the daemon does",
   "bazhen-store": "the daemon's SQLite seam: it builds SQLite, which only the daemon needs",
 };
 
@@ -3593,6 +3692,66 @@ export function withoutTrackerCloses(code: string): string {
 }
 
 /**
+ * `code` with each `close(`, `signal(` and `respawn(` asked of a client of the in-process fake
+ * holder blanked out, to its length so positions hold: that client's far end is a `FakeHolder`,
+ * which runs no child, so the request reaches none. A fake's client is a name a function binds
+ * by a `let` from a `FakeHolder::<constructor>(..)` call taken whole (nothing after it but
+ * `.await`, `.unwrap()` or `?`), and mentions nowhere else but before a `.` (a field's or a
+ * path's segment of that name isn't it): so no other `let`, parameter, closure, `for` or match
+ * arm can bind it to anything else. A request on any other
+ * name, on a field (`far.client.close()`), or a `close_step`, still counts.
+ */
+export function withoutFakeHolderRequests(code: string): string {
+  const blanks: [number, number][] = [];
+  for (const fn of code.matchAll(/\bfn\s+\w+/g)) {
+    const start = fnBodyStart(code, fn.index);
+    if (code[start - 1] !== "{") continue;
+    const end = closingBrace(code, start);
+    const whole = code.slice(fn.index, end);
+    const fake = new Map<string, number[]>();
+    for (const bound of whole.matchAll(/\blet\s+([^=;]+?)\s*=\s*FakeHolder\s*::\s*\w+\s*\(/g)) {
+      const close = closingParen(whole, bound.index + bound[0].length);
+      if (!/^(?:\s*\.\s*(?:await|unwrap\s*\(\s*\))|\s*\?)*\s*;/.test(whole.slice(close))) continue;
+      const pattern = bound[1] ?? "";
+      const at = bound.index + bound[0].indexOf(pattern, 3);
+      for (const name of pattern.matchAll(/\b[a-z_]\w*\b/g)) {
+        if (name[0] === "mut" || name[0] === "ref" || name[0] === "_") continue;
+        fake.set(name[0], [...(fake.get(name[0]) ?? []), at + name.index]);
+      }
+    }
+    for (const [name, at] of fake) {
+      const mentions = [...whole.matchAll(new RegExp(`(?<!(?:\\.|::)\\s*)\\b${name}\\b`, "g"))];
+      const onlyCalled = mentions.every(
+        (m) => at.includes(m.index) || /^\s*\./.test(whole.slice(m.index + name.length)),
+      );
+      if (at.length !== 1 || !onlyCalled) continue;
+      const request = new RegExp(
+        `(?<![\\w.]\\s*)\\b${name}\\s*\\.\\s*(?:close|signal|respawn)\\s*\\(`,
+        "g",
+      );
+      for (const m of whole.matchAll(request)) {
+        blanks.push([fn.index + m.index, fn.index + m.index + m[0].length]);
+      }
+    }
+  }
+  let out = code;
+  for (const [from, to] of blanks) {
+    out = out.slice(0, from) + out.slice(from, to).replace(/[^\n]/g, " ") + out.slice(to);
+  }
+  return out;
+}
+
+/** Just past the `)` that closes the `(` before `from`, or the end of `code`. */
+function closingParen(code: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) return i + 1;
+  }
+  return code.length;
+}
+
+/**
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
@@ -3608,7 +3767,7 @@ export function unmarkedSignallingTests(
   holderBinaries.delete("");
   return rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = withoutTrackerCloses(rustCode(read(file), strings));
+    const code = withoutFakeHolderRequests(withoutTrackerCloses(rustCode(read(file), strings)));
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however
