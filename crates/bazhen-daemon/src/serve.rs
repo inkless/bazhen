@@ -19,8 +19,9 @@ use tokio_util::task::TaskTracker;
 
 use crate::accept::{self, Limits, serve_on};
 use crate::guard;
+use crate::lock::{Claim, Lock, claim, lock_of};
 use crate::private_dir::ensure_private_dir;
-use crate::probe::{Answer, probe, silence};
+use crate::probe::{probe, silence};
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::tokens;
 
@@ -38,6 +39,10 @@ const SERVING: Serving = Serving {
     socket: accept::SOCKET,
     drain: Duration::from_secs(5),
 };
+
+/// How long a start waits on a lock another daemon holds without answering: it may be starting,
+/// or draining with its socket already gone.
+const LOCK_WAIT: Duration = SERVING.drain.saturating_add(Duration::from_secs(1));
 
 /// What serving needs from the settings.
 #[derive(Debug, Clone)]
@@ -61,13 +66,23 @@ pub(crate) enum Refused {
     Running(String),
     #[error("{}", silence(.socket, .seen))]
     Silent { socket: String, seen: String },
+    #[error(
+        "bazhen won't start: another daemon holds {} but doesn't answer on {socket}; it may be stuck",
+        .lock.display()
+    )]
+    Held { lock: PathBuf, socket: String },
     #[error("{0}")]
     Said(String),
 }
 
 /// Runs the daemon until it is stopped.
 pub(crate) fn serve(startup: &Startup) -> ExitCode {
-    match prepare(startup).and_then(|store| run(startup, store)) {
+    let served = prepare(startup, LOCK_WAIT).and_then(|(lock, store)| {
+        let reason = run(startup, store);
+        drop(lock);
+        reason
+    });
+    match served {
         Ok(reason) => {
             tracing::info!("bazhen daemon stopped ({})", reason.as_str());
             ExitCode::SUCCESS
@@ -79,27 +94,33 @@ pub(crate) fn serve(startup: &Startup) -> ExitCode {
     }
 }
 
-/// Everything before the daemon serves: its directories, a private `run`, no daemon already on
-/// the socket, and the store, migrated, on its writer thread.
-fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
+/// Everything before the daemon serves: its directories, a private `run`, the start-up lock with
+/// no daemon on the socket, and the store, migrated, on its writer thread.
+fn prepare(startup: &Startup, wait: Duration) -> Result<(Lock, (Writer, writer::Thread)), Refused> {
     let p = &startup.paths;
     for dir in [&p.config, &p.data, &p.bank, &p.state, &p.cache] {
         std::fs::create_dir_all(dir)
             .map_err(|err| Refused::Said(format!("bazhen can't create {dir}: {err}")))?;
     }
     ensure_private_dir(Path::new(&p.run), startup.uid).map_err(|e| Refused::Said(e.to_string()))?;
-    // Its socket is about to be replaced; a daemon still answering on it would be orphaned, with
-    // its store shared.
-    match probe(Path::new(&p.socket)) {
-        Answer::Nothing => {}
-        Answer::Silent { seen } => {
-            return Err(Refused::Silent {
-                socket: p.socket.clone(),
-                seen,
-            });
+    // Its socket is about to be replaced; a daemon still holding it would be orphaned, with its
+    // store shared.
+    let socket = Path::new(&p.socket);
+    let lock_file = lock_of(socket);
+    let lock = claim(&lock_file, wait, || probe(socket)).map_err(|claimed| match claimed {
+        Claim::Running => Refused::Running(p.socket.clone()),
+        Claim::Silent { seen } => Refused::Silent {
+            socket: p.socket.clone(),
+            seen,
+        },
+        Claim::Held => Refused::Held {
+            lock: lock_file.clone(),
+            socket: p.socket.clone(),
+        },
+        Claim::Io(err) => {
+            Refused::Said(format!("bazhen can't lock {}: {err}", lock_file.display()))
         }
-        Answer::Daemon { .. } => return Err(Refused::Running(p.socket.clone())),
-    }
+    })?;
     let path = PathBuf::from(&p.data).join("bazhen.db");
     let store = Store::open(&path).map_err(|err| match err {
         OpenError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -123,8 +144,9 @@ fn prepare(startup: &Startup) -> Result<(Writer, writer::Thread), Refused> {
         store.reads(),
     )
     .map_err(|err| Refused::Said(err.to_string()))?;
-    writer::start(store, &path)
-        .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))
+    let store = writer::start(store, &path)
+        .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?;
+    Ok((lock, store))
 }
 
 /// `EPERM` or `EACCES`, as Node names the code.
@@ -356,7 +378,7 @@ mod tests {
         let home = TempDir::new("stop");
         let startup = startup(home.path());
         let socket = PathBuf::from(&startup.paths.socket);
-        let (store, writer) = prepare(&startup).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
             let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
@@ -380,7 +402,7 @@ mod tests {
         let home = TempDir::new("drain");
         let startup = startup(home.path());
         let socket = PathBuf::from(&startup.paths.socket);
-        let (store, writer) = prepare(&startup).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         runtime().block_on(async {
             let tracker = TaskTracker::new();
             let serving = tracker.spawn(async move { listen(&startup, QUICK, store).await });
@@ -512,7 +534,7 @@ mod tests {
             )
             .unwrap();
         });
-        let refused = prepare(&startup);
+        let refused = prepare(&startup, QUICK.drain);
         // Left to end with the test: it waits on a probe forever if prepare never asked.
         drop(answering);
         assert!(
@@ -530,7 +552,7 @@ mod tests {
         std::fs::set_permissions(&startup.paths.run, std::fs::Permissions::from_mode(0o700))
             .unwrap();
         let _stuck = crate::testing::FullBacklog::at(Path::new(&startup.paths.socket));
-        let refused = prepare(&startup);
+        let refused = prepare(&startup, QUICK.drain);
         assert!(
             matches!(&refused, Err(Refused::Silent { socket, .. }) if *socket == startup.paths.socket),
             "{refused:?}"
@@ -538,11 +560,29 @@ mod tests {
     }
 
     #[test]
+    fn refuses_to_start_while_another_daemon_holds_the_lock_though_nothing_answers() {
+        let home = TempDir::new("held");
+        let startup = startup(home.path());
+        std::fs::create_dir(&startup.paths.run).unwrap();
+        std::fs::set_permissions(&startup.paths.run, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let lock_file = lock_of(Path::new(&startup.paths.socket));
+        let _held = crate::lock::try_lock(&lock_file).unwrap().unwrap();
+        let refused = prepare(&startup, QUICK.drain);
+        assert!(
+            matches!(&refused, Err(Refused::Held { lock, socket })
+                if *lock == lock_file && *socket == startup.paths.socket),
+            "{refused:?}"
+        );
+        assert!(!Path::new(&startup.paths.data).join("bazhen.db").exists());
+    }
+
+    #[test]
     fn refuses_to_start_on_a_database_it_cant_open() {
         let home = TempDir::new("store");
         let startup = startup(home.path());
         std::fs::create_dir_all(Path::new(&startup.paths.data).join("bazhen.db")).unwrap();
-        let refused = prepare(&startup);
+        let refused = prepare(&startup, QUICK.drain);
         assert!(
             matches!(&refused, Err(Refused::Said(said)) if said.contains("bazhen.db")),
             "{refused:?}"
@@ -557,7 +597,7 @@ mod tests {
         std::fs::create_dir_all(&agents).unwrap();
         let unknown = agents.join("agent_0190a1b2c3d47abc8def0123456789ad.0a.token");
         std::fs::write(&unknown, "x").unwrap();
-        let (store, writer) = prepare(&startup).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
         drop(store);
         writer.finish();
         assert!(!unknown.exists());
@@ -574,7 +614,7 @@ mod tests {
             Path::new(&startup.paths.run).join("agents"),
         )
         .unwrap();
-        let refused = prepare(&startup);
+        let refused = prepare(&startup, QUICK.drain);
         assert!(
             matches!(&refused, Err(Refused::Said(said)) if said.contains("agents") && said.contains("symlink")),
             "{refused:?}"
