@@ -135,25 +135,6 @@ fn waits_off_the_last_column(engine: &mut Engine) -> bool {
     primary || off(engine.term.grid())
 }
 
-/// Whether a cursor of either screen waits to wrap on a row that already wraps into the next.
-/// Printing its cell again to make it wait unmarks that row's wrap, a named divergence of
-/// `Engine::snapshot`, which then lasts.
-fn waits_on_a_wrapped_row(engine: &mut Engine) -> bool {
-    let on = |grid: &Grid<Cell>| {
-        [&grid.cursor, &grid.saved_cursor].iter().any(|cursor| {
-            cursor.input_needs_wrap
-                && cursor.point.line.0 >= 0
-                && cursor.point.line.0 < i32::try_from(grid.screen_lines()).unwrap()
-                && grid[cursor.point.line]
-                    .into_iter()
-                    .last()
-                    .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE))
-        })
-    };
-    let primary = PrimaryShown::new(&mut engine.term).is_some_and(|shown| on(shown.grid()));
-    primary || on(engine.term.grid())
-}
-
 /// Whether DECRC left the cursor outside the region under DECOM, which no move but DECRC reaches:
 /// the snapshot brings it back clamped into the region, a named divergence.
 fn outside_its_origin(engine: &Engine) -> bool {
@@ -214,7 +195,6 @@ fn goes_on_as_its_source(
     let resized_under_alt = before_resized.under_alt;
     let reflowed = before_resized.at_all;
     prop_assume!(!waits_off_the_last_column(&mut original));
-    prop_assume!(!waits_on_a_wrapped_row(&mut original));
     prop_assume!(!outside_its_origin(&original));
     prop_assume!(!last_row_wraps(&mut original));
     let after = without_a_repeat_before_printing(after);
@@ -306,6 +286,18 @@ fn a_wide_line_through_resizes_under_vim_comes_back_with_no_cell_twice() {
         Action::Lines(1),
     ];
     goes_on_as_its_source(Size { cols: 2, rows: 1 }, &before, &[], &[1]).unwrap();
+}
+
+#[test]
+fn a_cursor_saved_waiting_on_a_row_that_then_wraps_comes_back_with_the_row_wrapping() {
+    // A case the property rarely reaches: the snapshot prints the saved cursor's cell again to
+    // make it wait, which must leave the row wrapping.
+    let before = [
+        Action::Text("a  中  ".into()),
+        Action::SaveCursor,
+        Action::Text("a".into()),
+    ];
+    goes_on_as_its_source(Size { cols: 4, rows: 4 }, &before, &[], &[1]).unwrap();
 }
 
 proptest! {
