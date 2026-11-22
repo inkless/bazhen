@@ -1,6 +1,19 @@
 /** Finger travel past this is a swipe, which scrolls; a tap moves less. */
 const TAP_SLOP_PX = 10;
 
+/** What takeover reads of the view: its box, and the events it hears. */
+type Surface = EventTarget &
+  Pick<
+    HTMLElement,
+    | "addEventListener"
+    | "removeEventListener"
+    | "getBoundingClientRect"
+    | "clientLeft"
+    | "clientTop"
+    | "clientWidth"
+    | "clientHeight"
+  >;
+
 /**
  * Calls `engage` when the user engages this view (foundation-design §4.3): a click, a tap, focus
  * moving into it, or the window gaining focus. A view whose page already has focus gets no focus
@@ -8,7 +21,7 @@ const TAP_SLOP_PX = 10;
  * tap: a phone watching a laptop scrolls without taking the lease, which would reflow the TUI to
  * the phone's width. Returns the teardown.
  */
-export function attachTakeover(element: HTMLElement, engage: () => void): () => void {
+export function attachTakeover(element: Surface, engage: () => void): () => void {
   let touchStart: { x: number; y: number } | null = null;
   const down = (event: PointerEvent) => {
     const bounds = element.getBoundingClientRect();
