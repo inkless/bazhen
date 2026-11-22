@@ -27,6 +27,7 @@ use crate::callers::{self, Caller};
 use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
 use crate::heartbeat::{HEARTBEAT, Heartbeat};
+use crate::paired::{self, Gated, Pairing, Viewer};
 use crate::peer::Peers;
 use crate::tasks::{self, Refused};
 use crate::writer::Writer;
@@ -81,6 +82,8 @@ pub(crate) struct Shared {
     pub(crate) heartbeat: Heartbeat,
     /// Who is at the other end of a socket connection.
     pub(crate) peers: Peers,
+    /// The live pairing code, and the streams paired devices hold.
+    pub(crate) pairing: Pairing,
 }
 
 impl Shared {
@@ -97,7 +100,14 @@ impl Shared {
             store,
             heartbeat: HEARTBEAT,
             peers: Peers::default(),
+            pairing: Pairing::default(),
         }
+    }
+
+    /// The same, where a pairing code may also be entered at `origins`.
+    pub(crate) fn with_external_origins(mut self, origins: Vec<String>) -> Self {
+        self.pairing.origins = Arc::new(origins);
+        self
     }
 }
 
@@ -137,14 +147,22 @@ pub(crate) fn internal(err: &dyn std::fmt::Display) -> Response {
 }
 
 /// Every read model a client draws, with the cursor its event stream resumes from.
-async fn state(State(shared): State<Shared>) -> Response {
+async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) -> Response {
     let store = shared.store.clone();
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
         store.reader()?.reads().snapshot()
     })
     .await;
     match read {
-        Ok(Ok(snapshot)) => axum::Json(snapshot).into_response(),
+        Ok(Ok(mut snapshot)) => {
+            // A device can only look: what to do about a notice is the owner's.
+            if let Some(Extension(Viewer::Device { .. })) = viewer {
+                for notice in &mut snapshot.notices {
+                    notice.actions.clear();
+                }
+            }
+            axum::Json(snapshot).into_response()
+        }
         Ok(Err(unported @ SnapshotError::Unported(_))) => fail(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::Unavailable,
@@ -162,6 +180,7 @@ async fn stream(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     held: Option<Extension<Held>>,
+    viewer: Option<Extension<Viewer>>,
 ) -> Response {
     let Ok(upgrade) = upgrade else {
         return not_found().await;
@@ -169,16 +188,28 @@ async fn stream(
     let Some(cursor) = query.ok().and_then(|Query(query)| events::cursor(&query)) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    // A device's stream is held, to close when the device is revoked or lapses.
+    let device = match viewer {
+        Some(Extension(Viewer::Device { id, required })) => Some(shared.pairing.holds.hold(
+            id.as_str(),
+            shared.stop.token(),
+            required,
+        )),
+        _ => None,
+    };
     let how = Streaming {
+        stop: device
+            .as_ref()
+            .map_or_else(|| shared.stop.token().clone(), |hold| hold.token().clone()),
         store: shared.store,
-        stop: shared.stop.token().clone(),
         heartbeat: shared.heartbeat,
     };
     upgrade
         .max_message_size(EVENT_FRAME_MAX_BYTES)
         .max_frame_size(EVENT_FRAME_MAX_BYTES)
-        .on_upgrade(move |socket| {
-            events::stream(socket, cursor, how, held.map(|Extension(held)| held))
+        .on_upgrade(move |socket| async move {
+            let _device = device;
+            events::stream(socket, cursor, how, held.map(|Extension(held)| held)).await;
         })
 }
 
@@ -246,6 +277,10 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/state", get(state))
         .route("/v1/events", get(stream))
         .route("/v1/tasks", post(create_task))
+        .route("/v1/pairing/codes", post(paired::issue))
+        .route("/v1/devices", get(paired::list))
+        .route("/v1/devices/{id}/revoke", post(paired::revoke))
+        .route("/v1/notices/{id}/dismiss", post(paired::dismiss))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
@@ -258,18 +293,24 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
 /// no test of the path's text can miss one.
 pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let gate = Arc::new(gate);
+    let gated = Gated {
+        gate: Arc::clone(&gate),
+        shared: shared.clone(),
+    };
     let api = Router::new()
         .route("/health", get(health))
         .route("/caller", get(callers::caller))
         .route("/state", get(state))
         .route("/events", get(stream))
         .route("/tasks", post(create_task))
+        .route("/pairing", post(paired::pair))
+        .route("/notices/{id}/dismiss", post(paired::dismiss))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)
-        .layer(middleware::from_fn_with_state(Arc::clone(&gate), pairing));
+        .layer(middleware::from_fn_with_state(gated.clone(), paired::gate));
     // The nest takes `/v1` and `/v1/<rest>` but not `/v1/` itself, which Hono's `/v1/*` gates.
-    let bare = any(not_found).layer(middleware::from_fn_with_state(Arc::clone(&gate), pairing));
+    let bare = any(not_found).layer(middleware::from_fn_with_state(gated, paired::gate));
     Router::new()
         .nest("/v1", api)
         .route("/v1/", bare)
@@ -323,34 +364,6 @@ async fn guarded(State(gate): State<Arc<Gate>>, request: Request, next: Next) ->
         ),
         None => next.run(request).await,
     }
-}
-
-/// The pairing gate, on the API only: the page holds no secret. A request that must pair needs a
-/// paired device, and this daemon pairs none yet, so it refuses every one, pairing itself included:
-/// it fails closed rather than let one through. A page elsewhere can't even read.
-async fn pairing(State(gate): State<Arc<Gate>>, request: Request, next: Next) -> Response {
-    let headers = request.headers();
-    let required = guard::must_pair(
-        gate.pairing_required,
-        header(headers, "x-forwarded-for").as_deref(),
-        header(headers, "forwarded").as_deref(),
-    );
-    if let Some(origin) = header(headers, "origin")
-        && !gate.allow.origins.contains(&origin)
-    {
-        if required {
-            return fail(StatusCode::FORBIDDEN, ErrorCode::OriginNotAllowed, &origin);
-        }
-        return next.run(request).await;
-    }
-    if required {
-        return fail(
-            StatusCode::UNAUTHORIZED,
-            ErrorCode::Unpaired,
-            "pair this browser: run `bazhen devices pair`",
-        );
-    }
-    next.run(request).await
 }
 
 #[cfg(test)]
@@ -586,10 +599,10 @@ mod tests {
         );
     }
 
-    /// No device can pair with this daemon yet, so wherever pairing is required every API request
-    /// is refused, the pairing endpoint's path included: the gate fails closed.
+    /// Wherever pairing is required, an API request with no device's cookie is refused, but the
+    /// one that pairs a device, which the gate lets by to be read.
     #[test]
-    fn where_pairing_is_required_refuses_every_api_request_as_unpaired() {
+    fn where_pairing_is_required_refuses_every_api_request_but_pairing_as_unpaired() {
         let unpaired = (
             401,
             refused("unpaired", "pair this browser: run `bazhen devices pair`"),
@@ -601,16 +614,21 @@ mod tests {
             [
                 send(http(true), request("GET", "/v1/health", &[("host", HOST)])),
                 send(http(true), request("GET", "/v1/health", &own)),
-                send(http(true), request("POST", "/v1/pairing", &own)),
+                send(http(true), request("GET", "/v1/pairing", &own)),
                 send(http(false), request("GET", "/v1/health", &forwarded)),
                 send(http(false), request("GET", "/v1/health", &proxied)),
+                send(http(true), request("POST", "/v1/pairing", &own)),
             ],
             [
                 unpaired.clone(),
                 unpaired.clone(),
                 unpaired.clone(),
                 unpaired.clone(),
-                unpaired
+                unpaired,
+                (
+                    400,
+                    refused("invalid_request", "the body is not a JSON object")
+                ),
             ]
         );
     }

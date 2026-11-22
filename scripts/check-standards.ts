@@ -787,6 +787,16 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-daemon/src/devices.rs::token_of":
+    "encodes random bytes the daemon read itself as base64url; parses nothing",
+  "crates/bazhen-daemon/src/paired.rs::dismiss":
+    "reads its body only as serde_json's derive for DismissNoticeRequest, one string field, refusing anything else whole",
+  "crates/bazhen-daemon/src/pairing.rs::code_from":
+    "maps random bytes the daemon read itself to the code's letters; parses nothing",
+  "crates/bazhen-daemon/src/pairing.rs::random_bytes":
+    "reads a fixed count of bytes from /dev/urandom and hands them back; parses nothing",
+  "crates/bazhen-daemon/src/pairing.rs::PairingCodes::issue_from":
+    "hands random bytes the daemon read itself to code_from; parses nothing",
   "crates/bazhen-daemon/src/events.rs::stream":
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
