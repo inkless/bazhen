@@ -39,10 +39,15 @@ impl Drop for Home {
 
 /// The daemon on `home`, in the foreground with its output piped, once its socket answers.
 fn daemon(home: &Home) -> Res<Child> {
+    daemon_by(home, Command::new(env!("CARGO_BIN_EXE_bazhen-daemon")))
+}
+
+/// `daemon`, run by `command`, which execs it.
+fn daemon_by(home: &Home, mut command: Command) -> Res<Child> {
     let port = std::net::TcpListener::bind("127.0.0.1:0")?
         .local_addr()?
         .port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bazhen-daemon"))
+    let mut child = command
         .env_clear()
         .env("HOME", &home.0)
         .env("BAZHEN_HOME", &home.0)
@@ -142,4 +147,68 @@ fn a_second_signal_ends_the_drain_at_once() {
         (Some(0), true)
     );
     assert!(took < Duration::from_secs(2), "{took:?}");
+}
+
+/// A shell that ignores SIGCHLD, as a careless parent may, and then execs `program`, which
+/// inherits that across the exec. It is bash: dash takes `trap "" CHLD` but leaves SIGCHLD as it
+/// was, and a shell started with SIGCHLD ignored gives it a handler of its own, so `program` is
+/// what the shell execs, never another shell.
+fn ignoring_sigchld(program: &str) -> Command {
+    let mut command = Command::new("bash");
+    command.args(["-c", r#"trap "" CHLD; exec "$0" "$@""#, program]);
+    command
+}
+
+/// What `ps` shows of `pid`: its name, and whether it ignores SIGCHLD.
+fn ignores_sigchld_as(pid: u32) -> Res<(String, bool)> {
+    let out = Command::new("ps")
+        .args(["-o", "comm=,sigignore=", "-p", &pid.to_string()])
+        .output()?;
+    let said = String::from_utf8(out.stdout)?;
+    let (name, mask) = said.trim().rsplit_once(' ').ok_or("ps showed no process")?;
+    Ok((name.trim().to_owned(), ignored_in(mask)?))
+}
+
+/// Whether `ps` shows SIGCHLD ignored by `pid`.
+fn ignores_sigchld(pid: u32) -> Res<bool> {
+    Ok(ignores_sigchld_as(pid)?.1)
+}
+
+/// Whether a `sigignore` mask, in hex, has SIGCHLD's bit.
+fn ignored_in(mask: &str) -> Res<bool> {
+    let mask = u64::from_str_radix(mask.trim(), 16)?;
+    let bit = Signal::CHILD.as_raw() - 1;
+    Ok(mask >> bit & 1 == 1)
+}
+
+/// The control for the daemon's: what the shell execs, here a `sleep` that ends by itself, still
+/// ignores SIGCHLD once `ps` shows it is the `sleep`. Nothing is signalled.
+#[test]
+fn a_shell_that_ignores_sigchld_leaves_what_it_execs_ignoring_it() {
+    let mut child = ignoring_sigchld("sleep").arg("2").spawn().unwrap();
+    let started = Instant::now();
+    let shown = loop {
+        let shown = ignores_sigchld_as(child.id()).unwrap();
+        if shown.0 == "sleep" || started.elapsed() > BOUND {
+            break shown;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    child.wait().unwrap();
+    assert_eq!(shown, ("sleep".to_owned(), true));
+}
+
+/// Started by a parent that ignored SIGCHLD, the daemon gives it its default before it starts
+/// any child, so the kernel keeps each one for it to wait for.
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn started_with_sigchld_ignored_it_gives_sigchld_its_default() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let home = Home::new("sigchld").unwrap();
+    let child = daemon_by(&home, ignoring_sigchld(env!("CARGO_BIN_EXE_bazhen-daemon"))).unwrap();
+    let ignored = ignores_sigchld(child.id());
+    bazhen_test_signal::signal(child.id(), Signal::TERM).unwrap();
+    let (code, _) = ended_within_bound(child).unwrap();
+    assert!(!ignored.unwrap());
+    assert_eq!(code, Some(0));
 }

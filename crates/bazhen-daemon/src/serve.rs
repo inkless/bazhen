@@ -73,11 +73,16 @@ pub(crate) enum Refused {
 
 /// Runs the daemon until it is stopped.
 pub(crate) fn serve(startup: &Startup) -> ExitCode {
-    let served = prepare(startup, LOCK_WAIT).and_then(|(lock, store)| {
-        let reason = run(startup, store);
-        drop(lock);
-        reason
-    });
+    // Before any child starts, so the kernel keeps each one exited until it is waited for, and its
+    // pid stays its own: a SIGCHLD ignored by whatever started the daemon would reap it at once.
+    let served = bazhen_host_guard::keep_exited_children()
+        .map_err(|e| Refused::Said(format!("bazhen can't keep its exited children: {e}")))
+        .and_then(|()| prepare(startup, LOCK_WAIT))
+        .and_then(|(lock, store)| {
+            let reason = run(startup, store);
+            drop(lock);
+            reason
+        });
     match served {
         Ok(reason) => {
             tracing::info!("bazhen daemon stopped ({})", reason.as_str());

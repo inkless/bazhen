@@ -7,15 +7,19 @@ publish.workspace = true
 
 [dependencies]
 bazhen-holder = { workspace = true }
+bazhen-holder-proto = { workspace = true }
 bazhen-peer = { workspace = true }
 bazhen-pid = { workspace = true }
 futures-util = { workspace = true }
+libc = { workspace = true }
 rustix = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
 bazhen-test-signal = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

@@ -34,7 +34,10 @@ export const SIGNAL_CHOKEPOINTS: Readonly<Record<string, string>> = {
     "be in the session that child leads; never ≤ 1, the holder, its group, session or ancestors",
   "crates/bazhen-host-guard/src/lib.rs":
     "every Rust signal outside the holder and the tests: to a group whose leader this process " +
-    "started and hasn't reaped; never init, this process, its ancestors or its own group",
+    "started and hasn't reaped; to one process alone, a child it started and hasn't reaped, or a " +
+    "bazhen-holder vouched for by its name and start time in the last second, SIGKILL or " +
+    "SIGUSR1 as the proof was made for; and signal 0, which sends nothing; never init, this " +
+    "process, its ancestors or its own group",
   "crates/bazhen-test-signal/src/lib.rs":
     "every Rust test's signals: to a process it started or checked is still the one it started, " +
     "never 0, ±1, the test, its parent or its own group",

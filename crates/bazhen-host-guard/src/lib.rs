@@ -5,12 +5,17 @@
 //! goes to init, whose group is every process, to this process, to any process it descends from,
 //! or to its own group, and nothing goes to any group while this process can't read which group is
 //! its own or which processes it descends from. A process group is reached only while this process
-//! holds its leader unreaped (`group`), so the group's number can't since have become another's.
-//! That holds only while SIGCHLD keeps its default disposition: ignored, or with `SA_NOCLDWAIT`,
-//! the kernel reaps children itself, and a group is then refused once its leader has exited.
+//! holds its leader unreaped (`group`), so the group's number can't since have become another's. A
+//! single process is reached only as a `bazhen-holder` checked by its name and start time
+//! (`holder`), or by signal 0, which sends nothing (`is_alive`). Holding a leader unreaped holds
+//! only while SIGCHLD keeps its default disposition: ignored, or with `SA_NOCLDWAIT`, the kernel
+//! reaps children itself, and a group is then refused once its leader has exited. A daemon gives
+//! SIGCHLD its default before it starts a child (`keep_exited_children`).
 
 mod group;
+pub mod holder;
 pub mod scope;
+mod sigchld;
 
 use std::fmt;
 
@@ -18,16 +23,21 @@ use rustix::io::Errno;
 use rustix::process::{Pid, RawPid, Signal};
 
 pub use group::{Ended, run_bounded};
+pub use sigchld::{children_kept, keep_exited_children};
 
-/// What a signal was meant for: the process group a leader leads.
+/// What a signal was meant for: the process group a leader leads, or one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Target {
-    leader: Pid,
+pub enum Target {
+    Group(Pid),
+    Process(Pid),
 }
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "group {}", self.leader.as_raw_pid())
+        match self {
+            Self::Group(leader) => write!(f, "group {}", leader.as_raw_pid()),
+            Self::Process(pid) => write!(f, "process {}", pid.as_raw_pid()),
+        }
     }
 }
 
@@ -48,6 +58,10 @@ pub enum Unsafe {
     AncestryUnread,
     #[error("its leader has been reaped, so its number may be another group's")]
     Reaped,
+    #[error("it was vouched for another signal")]
+    Unvouched,
+    #[error("it was vouched for more than a second ago, so its pid may be another process's")]
+    Stale,
 }
 
 /// Why nothing was sent: the target was refused, which is a fault and never a target that has
@@ -81,24 +95,25 @@ impl Own {
     }
 }
 
-/// Why the group `leader` leads may not be signalled by `own`, if it may not. Raw, since a `Pid`
-/// can hold a negative number, which `kill_process_group` would negate into a process's own.
-fn floor(leader: RawPid, own: &Own) -> Result<(), Unsafe> {
-    if leader <= 1 {
+/// Why `target`, a group's leader or a process, may not be signalled by `own`, if it may not.
+/// Raw, since a `Pid` can hold a negative number, which `kill_process_group` would negate into a
+/// process's own. A process numbered as this one's group is refused too: it leads that group.
+fn floor(target: RawPid, own: &Own) -> Result<(), Unsafe> {
+    if target <= 1 {
         return Err(Unsafe::NotAboveInit);
     }
-    if leader == own.pid.as_raw_pid() {
+    if target == own.pid.as_raw_pid() {
         return Err(Unsafe::This);
     }
     let Some(ancestors) = &own.ancestors else {
         return Err(Unsafe::AncestryUnread);
     };
-    if ancestors.iter().any(|a| a.as_raw_pid() == leader) {
+    if ancestors.iter().any(|a| a.as_raw_pid() == target) {
         return Err(Unsafe::Ancestor);
     }
     match own.group {
         None => Err(Unsafe::OwnGroupUnknown),
-        Some(group) if group.as_raw_pid() == leader => Err(Unsafe::OwnGroup),
+        Some(group) if group.as_raw_pid() == target => Err(Unsafe::OwnGroup),
         Some(_) => Ok(()),
     }
 }
@@ -106,10 +121,57 @@ fn floor(leader: RawPid, own: &Own) -> Result<(), Unsafe> {
 /// Sends `signal` to the group `leader` leads, once the floor passes it. Whether the group was
 /// still there.
 fn send(leader: Pid, signal: Signal) -> Result<bool, Error> {
-    let target = Target { leader };
+    let target = Target::Group(leader);
     floor(leader.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
     match rustix::process::kill_process_group(leader, signal) {
         Ok(()) => Ok(true),
+        Err(Errno::SRCH) => Ok(false),
+        Err(source) => Err(Error::Os { target, source }),
+    }
+}
+
+/// Sends `signal` to `pid` alone, once the floor passes it. Only `holder` calls it, with a pid a
+/// proof says is a holder's, and `signal_child`. Whether the process was still there.
+fn send_process(pid: Pid, signal: Signal) -> Result<bool, Error> {
+    let target = Target::Process(pid);
+    floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
+    match rustix::process::kill_process(pid, signal) {
+        Ok(()) => Ok(true),
+        Err(Errno::SRCH) => Ok(false),
+        Err(source) => Err(Error::Os { target, source }),
+    }
+}
+
+/// Sends `signal` to `pid` alone, a child this process spawned, while the kernel holds it
+/// unreaped, so its pid is still its own. Whether it was sent.
+fn signal_child(pid: Pid, signal: Signal) -> Result<bool, Error> {
+    if !group::unreaped(pid) {
+        return Err(Error::Unsafe {
+            target: Target::Process(pid),
+            why: Unsafe::Reaped,
+        });
+    }
+    send_process(pid, signal)
+}
+
+/// Whether a process has `pid`, by signal 0, which sends nothing, once the floor passes it. One
+/// this user may not signal counts as alive, and so does one that has exited and isn't yet
+/// reaped.
+///
+/// # Errors
+///
+/// When the floor refuses `pid`, as init, this process, one it descends from or its own group,
+/// or the kernel answers anything but that.
+pub fn is_alive(pid: Pid) -> Result<bool, Error> {
+    let target = Target::Process(pid);
+    floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
+    alive(target, rustix::process::test_kill_process(pid))
+}
+
+/// What a probe's answer says of its target.
+fn alive(target: Target, probed: Result<(), Errno>) -> Result<bool, Error> {
+    match probed {
+        Ok(()) | Err(Errno::PERM) => Ok(true),
         Err(Errno::SRCH) => Ok(false),
         Err(source) => Err(Error::Os { target, source }),
     }
@@ -121,7 +183,13 @@ mod tests {
 
     use rustix::process::{Pid, Signal, getpgrp, getpid, getppid};
 
-    use super::{Error, Own, Target, Unsafe, floor, send};
+    use rustix::io::Errno;
+
+    use super::sigchld::{Careless, make_careless};
+    use super::{
+        Error, Own, Target, Unsafe, alive, children_kept, floor, is_alive, keep_exited_children,
+        send,
+    };
 
     fn pid(raw: i32) -> Pid {
         Pid::from_raw(raw).unwrap()
@@ -226,10 +294,88 @@ mod tests {
             assert_eq!(
                 send(leader, Signal::CONT),
                 Err(Error::Unsafe {
-                    target: Target { leader },
+                    target: Target::Group(leader),
                     why
                 })
             );
         }
+    }
+
+    /// Signal 0 sends nothing, and the floor refuses these before it would.
+    #[test]
+    fn asks_nothing_of_init_or_of_this_process() {
+        for (target, why) in [(pid(1), Unsafe::NotAboveInit), (getpid(), Unsafe::This)] {
+            assert_eq!(
+                is_alive(target),
+                Err(Error::Unsafe {
+                    target: Target::Process(target),
+                    why
+                })
+            );
+        }
+    }
+
+    /// A process of another user's is there, though this one may not signal it.
+    #[test]
+    fn counts_a_process_it_may_not_signal_as_alive_and_none_as_gone() {
+        let target = Target::Process(pid(4242));
+        assert_eq!(alive(target, Ok(())), Ok(true));
+        assert_eq!(alive(target, Err(Errno::PERM)), Ok(true));
+        assert_eq!(alive(target, Err(Errno::SRCH)), Ok(false));
+        assert_eq!(
+            alive(target, Err(Errno::INVAL)),
+            Err(Error::Os {
+                target,
+                source: Errno::INVAL
+            })
+        );
+    }
+
+    #[test]
+    fn names_a_group_and_a_process_apart() {
+        assert_eq!(Target::Group(pid(42)).to_string(), "group 42");
+        assert_eq!(Target::Process(pid(42)).to_string(), "process 42");
+    }
+
+    /// SIGCHLD's disposition is this test process's own, which nextest runs alone.
+    #[test]
+    fn keeps_exited_children_once_given_its_default_after_a_parent_ignored_sigchld() {
+        make_careless(Careless::Ignored).unwrap();
+        assert!(!children_kept().unwrap());
+        keep_exited_children().unwrap();
+        assert!(children_kept().unwrap());
+    }
+
+    #[test]
+    fn keeps_exited_children_once_given_its_default_after_a_parent_set_no_child_wait() {
+        make_careless(Careless::NoChildWait).unwrap();
+        assert!(!children_kept().unwrap());
+        keep_exited_children().unwrap();
+        assert!(children_kept().unwrap());
+    }
+
+    /// Signal 0 sends nothing, but a child exited and unreaped still holds its pid, so it is
+    /// still there.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn finds_a_child_alive_until_it_is_reaped() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        let raw = i32::try_from(child.id()).unwrap();
+        let exited = std::time::Instant::now();
+        while rustix::process::waitid(
+            rustix::process::WaitId::Pid(pid(raw)),
+            rustix::process::WaitIdOptions::EXITED
+                | rustix::process::WaitIdOptions::NOHANG
+                | rustix::process::WaitIdOptions::NOWAIT,
+        )
+        .unwrap()
+        .is_none()
+        {
+            assert!(exited.elapsed().as_secs() < 10, "true never exited");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(is_alive(pid(raw)), Ok(true));
+        child.wait().unwrap();
     }
 }

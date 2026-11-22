@@ -1,5 +1,5 @@
-//! What the kernel says of another process of this user: its parent, its user, its arguments and
-//! its environment. Reading only: nothing here reaches a process.
+//! What the kernel says of another process of this user: its parent, its user, its name, its
+//! arguments and its environment. Reading only: nothing here reaches a process.
 
 use std::ffi::OsString;
 use std::io;
@@ -50,6 +50,28 @@ pub fn uid(pid: Pid) -> io::Result<u32> {
     #[cfg(target_os = "macos")]
     {
         crate::macos::uid(pid)
+    }
+}
+
+/// The name the kernel keeps for `pid`, as `ps -o comm` shows it on Linux: the file name of the
+/// program it last executed, cut to 15 bytes on Linux and 16 on macOS, unless the process renamed
+/// itself since.
+///
+/// # Errors
+///
+/// When `pid` has gone, or its name can't be read.
+pub fn comm(pid: Pid) -> io::Result<OsString> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut name = std::fs::read(format!("/proc/{}/comm", pid.as_raw_pid()))?;
+        if name.last() == Some(&b'\n') {
+            name.pop();
+        }
+        Ok(OsString::from_vec(name))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::comm(pid)
     }
 }
 
@@ -204,6 +226,8 @@ pub fn procargs2_env(procargs: &[u8]) -> Option<Vec<OsString>> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::ffi::OsStrExt as _;
+
     use proptest::prelude::*;
     use rustix::process::{geteuid, getpid, getppid};
 
@@ -230,6 +254,16 @@ mod tests {
         assert_eq!(uid(getpid()).unwrap(), geteuid().as_raw());
         let ours: Vec<OsString> = std::env::args_os().collect();
         assert_eq!(args(getpid()).unwrap(), ours);
+    }
+
+    /// The kernel cuts the name it keeps, so the test binary's own file name begins with it.
+    #[test]
+    fn reads_this_process_s_name_as_the_file_name_it_was_started_from() {
+        let name = comm(getpid()).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let file = exe.file_name().unwrap().as_bytes();
+        assert!(name.len() >= 15.min(file.len()), "{name:?}");
+        assert!(file.starts_with(name.as_bytes()), "{name:?} of {exe:?}");
     }
 
     #[test]
@@ -272,6 +306,7 @@ mod tests {
     fn reads_no_uid_or_arguments_of_a_process_that_isn_t_there() {
         let absent = Pid::from_raw(i32::MAX).unwrap();
         assert!(uid(absent).is_err());
+        assert!(comm(absent).is_err());
         assert!(args(absent).is_err());
         assert!(environ(absent).is_err());
     }
