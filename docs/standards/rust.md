@@ -251,6 +251,10 @@ any option after the gate (`moon run :test-rust -- <name>` may name tests), remo
 that change flags, tools or the test runner, sets `CARGO_ENCODED_RUSTFLAGS` empty (which outranks
 every other source of rustflags), and overrides any configured compiler or wrapper.
 
+`CI`, set and non-empty, is the one variable that changes a gate's arguments: `test` and `test-all`
+then pass `--no-fail-fast`, so a CI run reports every failing test, not the first. It only widens
+the run, so it can't make a gate pass. A local run stops at the first failure.
+
 Every gate, fmt and deny too, refuses to run under a cargo config that sets what it can't override:
 
 - a test runner, a `rustdoc` or a linker;

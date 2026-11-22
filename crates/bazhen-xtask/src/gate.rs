@@ -241,7 +241,8 @@ fn removed(name: &OsStr) -> bool {
 /// stops at the first failure, which is what someone watching it wants.
 const NO_FAIL_FAST: &str = "--no-fail-fast";
 
-/// Whether the caller is a CI run: GitHub Actions, as most CI services, sets `CI` on every runner.
+/// Whether the caller is a CI run, that is, `CI` is set and non-empty: GitHub Actions, as most CI
+/// services, sets it on every runner. `CI=false` counts, which is harmless.
 fn ci(env: &Env) -> bool {
     env.get(OsStr::new("CI")).is_some_and(|v| !v.is_empty())
 }
@@ -709,29 +710,34 @@ mod tests {
 
     #[test]
     fn tells_nextest_to_run_every_test_only_in_ci_and_before_any_test_name() {
-        let nextest_argv = |ci: Option<&str>, name: &str| {
+        let runs = |ci: Option<&str>, name: &str, tests: &[&str]| {
             let env: Env = ci
                 .map(|v| (OsString::from("CI"), OsString::from(v)))
                 .into_iter()
                 .collect();
             let mut host = Fake::new(true);
-            ran_in(&mut host, name, &["a_test"], env);
-            host.runs.pop().unwrap()
+            ran_in(&mut host, name, tests, env);
+            host.runs
         };
+        let has_flag = |runs: &[Vec<String>]| runs.iter().flatten().any(|a| a == NO_FAIL_FAST);
         for name in ["test", "test-all"] {
-            let ci = nextest_argv(Some("true"), name);
-            let flag = ci.iter().position(|a| a == NO_FAIL_FAST).unwrap();
-            assert_eq!(ci.last().unwrap(), "a_test", "{name}");
-            assert_eq!(flag, ci.len() - 2, "{name}");
+            let ci = runs(Some("true"), name, &["a_test"]);
+            let nextest = ci.last().unwrap();
+            let flag = nextest.iter().position(|a| a == NO_FAIL_FAST).unwrap();
+            assert_eq!(nextest.last().unwrap(), "a_test", "{name}");
+            assert_eq!(flag, nextest.len() - 2, "{name}");
             for local in [None, Some("")] {
                 assert!(
-                    !nextest_argv(local, name).iter().any(|a| a == NO_FAIL_FAST),
+                    !has_flag(&runs(local, name, &["a_test"])),
                     "{name} {local:?}"
                 );
             }
         }
-        let lint = nextest_argv(Some("true"), "lint");
-        assert!(!lint.iter().any(|a| a == NO_FAIL_FAST));
+        for name in ["fmt", "lint", "deny"] {
+            let ci = runs(Some("true"), name, &[]);
+            assert!(ci.len() > 1 || name != "lint", "{name} ran nothing");
+            assert!(!has_flag(&ci), "{name}");
+        }
     }
 
     #[test]

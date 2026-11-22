@@ -59,15 +59,18 @@ jobs:
           tool: cargo-nextest@0.9.152,cargo-deny@0.20.2
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
+        id: moon
       - run: moon run :check
       # shellcheck is on the runner image, not on every developer's machine, so it runs here.
-      - run: moon run :lint-shell
+      - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
+        run: moon run :lint-shell
       # The suites that signal processes they didn't start, which run only on a sandbox: this
       # runner, marked disposable above, or the test container. `moon run :check` leaves them out.
-      # Each runs after an earlier step has failed, so one red gate doesn't hide what the others find.
-      - if: ${{ !cancelled() }}
+      # Each runs after an earlier gate has failed, so one red gate doesn't hide what the others
+      # find, but not after a setup step has, which would only add red steps that aren't test failures.
+      - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-holder
-      - if: ${{ !cancelled() }}
+      - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-rust-all
 
   # The Rust gates on macOS, where code behind `cfg(target_os = "macos")` is built and tested.
@@ -97,11 +100,13 @@ jobs:
         run: sudo touch /etc/bazhen-disposable-host
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
+        id: moon
       - run: moon run :lint-rust
-      # Each runs after an earlier step has failed, so one red gate doesn't hide what the others find.
-      - if: ${{ !cancelled() }}
+      # Each runs after an earlier gate has failed, so one red gate doesn't hide what the others
+      # find, but not after a setup step has, which would only add red steps that aren't test failures.
+      - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-rust-all
-      - if: ${{ !cancelled() }}
+      - if: ${{ !cancelled() && steps.moon.outcome == 'success' }}
         run: moon run :test-holder
 
   # The black-box suite runs the real harness CLIs, pinned in tests/api. No agent is let reach a
