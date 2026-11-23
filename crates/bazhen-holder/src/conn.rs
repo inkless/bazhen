@@ -31,6 +31,10 @@ pub const DATA_FRAME: usize = 64 << 10;
 pub const HELLO_WITHIN: Duration = Duration::from_secs(5);
 /// How long a connection being hung up has to read what it is owed.
 pub const HANG_UP_WITHIN: Duration = Duration::from_secs(1);
+/// How long a peer a write to has failed has to end its input. One that has gone left what it
+/// sent, and its end, in the kernel's buffer, read within a turn or two: this bounds only one that
+/// stopped reading and keeps sending.
+pub const WENT_WITHIN: Duration = Duration::from_secs(1);
 /// The most `resized` a subscriber that lags is owed: past them, it is sent a `gap` to the
 /// newest, and the older go, so a writer that resizes endlessly can't grow its queue.
 pub const MOST_QUEUED_RESIZES: usize = 8;
@@ -142,6 +146,32 @@ pub struct Connection {
     /// Output the subscriber is sent a `gap` over rather than the output: it was owed more
     /// `resized` than it is kept.
     skip_to: Option<u64>,
+    /// A write to the peer has failed: it has gone, or stopped reading for good.
+    went: Option<Went>,
+}
+
+/// A peer that has gone, found by a failed write or a hang-up while it wasn't read, is written
+/// nothing more and owed nothing, but what it sent before it went is still read and handed over,
+/// in order, until its end of input or `until`: a writer that types and hangs up at once may go
+/// before its last keys are read. A request that only asks is passed over: nothing would reach it
+/// of the answer.
+#[derive(Debug, Clone, Copy)]
+struct Went {
+    until: Instant,
+    /// Requests handed over since.
+    handed_over: u64,
+}
+
+/// Whether `request` does nothing but get an answer.
+const fn only_asks(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::Subscribe { .. }
+            | Request::Snapshot { .. }
+            | Request::Stats { .. }
+            | Request::Foreground { .. }
+            | Request::Screen { .. }
+    )
 }
 
 impl Connection {
@@ -171,6 +201,7 @@ impl Connection {
             held: None,
             held_from: None,
             skip_to: None,
+            went: None,
         }
     }
 
@@ -199,6 +230,11 @@ impl Connection {
 
     pub fn is_gone(&self) -> bool {
         self.phase == Phase::Gone
+    }
+
+    /// Whether frames are queued and written to the peer: not once it is gone, or has gone.
+    fn writes(&self) -> bool {
+        !self.is_gone() && self.went.is_none()
     }
 
     pub const fn stuck_since(&self) -> Option<Instant> {
@@ -240,6 +276,10 @@ impl Connection {
     /// request again, and nothing after it is answered first. One that waited before keeps the
     /// time it began waiting.
     pub fn hold(&mut self, snapshot: Request, now: Instant) {
+        // Nothing would be written of it.
+        if self.went.is_some() {
+            return;
+        }
         let since = self.held_from.take().unwrap_or(now);
         self.held = Some((snapshot, since));
     }
@@ -255,7 +295,7 @@ impl Connection {
     /// it goes out: a subscriber is never sent output from before its snapshot after it, as a
     /// lagging one that snapshots again, as `gap` tells it to, would be.
     pub fn queue_snapshot(&mut self, frame: Vec<u8>, at: u64) {
-        if self.is_gone() || frame.is_empty() {
+        if !self.writes() || frame.is_empty() {
             return;
         }
         let moved = self.subscribed();
@@ -280,7 +320,7 @@ impl Connection {
     /// queued since the latest subscription but one at the same offset, up to
     /// `MOST_QUEUED_RESIZES`, past which it is sent a `gap` to the newest.
     pub fn queue_state(&mut self, state: State, at: u64, frame: Vec<u8>) {
-        if self.is_gone() || frame.is_empty() {
+        if !self.writes() || frame.is_empty() {
             return;
         }
         // Only what the latest subscription is owed: what is queued before it moves goes to the
@@ -364,15 +404,23 @@ impl Connection {
     }
 
     /// Does what `poll` found for it, `revents`: reads while it reads. One that no longer reads
-    /// and whose peer has gone is dropped: its socket would report the hang-up every turn.
-    pub fn polled(&mut self, revents: PollFlags, buffer: &mut [u8]) {
+    /// and whose peer has hung up would report the hang-up every turn: it is owed nothing from
+    /// then on, so what it sent is read on (`lose_peer`), or, if none of it would be handed over,
+    /// it is dropped.
+    pub fn polled(&mut self, revents: PollFlags, buffer: &mut [u8], now: Instant) {
         if revents.is_empty() {
             return;
         }
-        if !self.reading() && revents.intersects(PollFlags::HUP | PollFlags::ERR) {
-            tracing::info!("a peer hung up while it wasn't read; dropping its connection");
-            self.drop_now();
-            return;
+        if !self.reading()
+            && self.went.is_none()
+            && revents.intersects(PollFlags::HUP | PollFlags::ERR)
+        {
+            if !self.reads_on() {
+                tracing::info!("a peer hung up while it wasn't read; dropping its connection");
+                self.drop_now();
+                return;
+            }
+            self.lose_peer(now, &"it hung up while it wasn't read");
         }
         self.receive(buffer);
     }
@@ -420,7 +468,7 @@ impl Connection {
     /// moves it. Until the `ok` goes out, the subscription before it, if any, still has its output
     /// and events sent.
     pub fn queue_subscribed(&mut self, frame: Vec<u8>, from: u64) {
-        if self.is_gone() || frame.is_empty() {
+        if !self.writes() || frame.is_empty() {
             return;
         }
         self.queued = self.queued.saturating_add(frame.len());
@@ -449,7 +497,7 @@ impl Connection {
             return;
         };
         match (&self.stream).read(chunk) {
-            Ok(0) => self.input_ended = true,
+            Ok(0) => self.end_input(),
             Ok(n) => {
                 self.decoder.push(chunk.get(..n).unwrap_or_default());
                 self.take_next();
@@ -459,10 +507,23 @@ impl Connection {
                     e.kind(),
                     io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
                 ) => {}
+            // A peer that went with our bytes unread leaves a reset after what it sent.
+            Err(_) if self.went.is_some() => self.end_input(),
             Err(error) => {
                 tracing::warn!(%error, "a read failed; dropping its connection");
                 self.drop_now();
             }
+        }
+    }
+
+    fn end_input(&mut self) {
+        self.input_ended = true;
+        if let Some(went) = self.went {
+            tracing::info!(
+                handed_over = went.handed_over,
+                "a peer that went before it was written to has ended: every request it sent was \
+                 handed over"
+            );
         }
     }
 
@@ -484,12 +545,22 @@ impl Connection {
             return Some(Ok(held));
         }
         self.held_from = None;
-        let next = self.next.take();
-        if matches!(next, Some(Err(_))) {
-            self.refused = true;
+        loop {
+            let next = self.next.take();
+            if matches!(next, Some(Err(_))) {
+                self.refused = true;
+            }
+            self.take_next();
+            if let Some(went) = &mut self.went
+                && let Some(request) = &next
+            {
+                if request.as_ref().is_ok_and(only_asks) {
+                    continue;
+                }
+                went.handed_over += 1;
+            }
+            return next;
         }
-        self.take_next();
-        next
     }
 
     /// Queues a frame to be written after those already queued. The queue has no cap of its own:
@@ -498,7 +569,7 @@ impl Connection {
     /// output) must bound itself, as by pulling from the ring only as the peer reads.
     pub fn queue(&mut self, frame: Vec<u8>) {
         // An empty frame would write nothing, which reads as a peer that has gone.
-        if self.is_gone() || frame.is_empty() {
+        if !self.writes() || frame.is_empty() {
             return;
         }
         self.queued = self.queued.saturating_add(frame.len());
@@ -550,7 +621,7 @@ impl Connection {
     }
 
     fn push_event(&mut self, at: u64, frame: Vec<u8>, rebases: Option<u64>, exit: bool) {
-        if self.is_gone() || frame.is_empty() {
+        if !self.writes() || frame.is_empty() {
             return;
         }
         self.queued = self.queued.saturating_add(frame.len());
@@ -649,8 +720,21 @@ impl Connection {
 
     /// Writes what is owed, output from `ring` included, up to `WRITE_PER_TURN`, until the peer's
     /// buffer is full. A frame is written whole, in parts if need be, before the next is chosen. A
-    /// failed write, such as to a peer that has gone, drops the connection.
+    /// failed write, such as to a peer that has gone, ends the writing (`lose_peer`).
     pub fn flush(&mut self, now: Instant, ring: &Ring) {
+        if let Some(went) = self.went
+            && now >= went.until
+            && !self.is_gone()
+        {
+            tracing::warn!(
+                handed_over = went.handed_over,
+                "a peer that went before it was written to sent no end of input in time; dropping it"
+            );
+            self.drop_now();
+        }
+        if !self.writes() {
+            return;
+        }
         let mut budget = WRITE_PER_TURN;
         for _ in 0..WRITES_PER_TURN {
             if budget == 0 || self.is_gone() {
@@ -667,8 +751,11 @@ impl Connection {
             }
             let pending = self.out.get(self.written..).unwrap_or_default();
             let cut = pending.get(..pending.len().min(budget)).unwrap_or_default();
-            match (&self.stream).write(cut) {
-                Ok(0) => self.drop_now(),
+            let wrote = match (&self.stream).write(cut) {
+                Ok(0) => Err(io::ErrorKind::WriteZero.into()),
+                wrote => wrote,
+            };
+            match wrote {
                 Ok(n) => {
                     self.stuck_since = None;
                     budget -= n;
@@ -689,20 +776,54 @@ impl Connection {
                     self.stuck_since.get_or_insert(now);
                     return;
                 }
+                // The peer has gone, or stopped reading for good, and may have sent requests this
+                // turn hasn't read.
+                Err(error) if self.reads_on() => {
+                    self.lose_peer(now, &error);
+                    return;
+                }
                 Err(error) => {
                     tracing::warn!(%error, "a write failed; dropping its connection");
                     self.drop_now();
+                    return;
                 }
             }
         }
     }
 
+    /// Whether what its peer sends is still read and handed over: open or opening, and nothing it
+    /// sent was refused.
+    fn reads_on(&self) -> bool {
+        matches!(self.phase, Phase::Opening { .. } | Phase::Open) && !self.refused
+    }
+
+    /// Its peer has gone, as `why` says: what it is owed is dropped, and what it sent is read on.
+    fn lose_peer(&mut self, now: Instant, why: &dyn std::fmt::Display) {
+        tracing::info!(%why, "its peer has gone; reading on what it sent");
+        self.went = Some(Went {
+            until: now + WENT_WITHIN,
+            handed_over: 0,
+        });
+        self.queue.clear();
+        self.queued = 0;
+        self.out.clear();
+        self.written = 0;
+        self.owed_snapshot = 0;
+        self.held = None;
+        self.held_from = None;
+        self.cursor = None;
+        self.skip_to = None;
+        self.stuck_since = None;
+    }
+
     /// When this connection next needs looking at, with nothing to read or write.
     pub fn deadline(&self) -> Option<Instant> {
-        match self.phase {
+        let phase = match self.phase {
             Phase::Opening { until } | Phase::HangingUp { until } => Some(until),
             Phase::Open | Phase::Gone => None,
-        }
+        };
+        let went = self.went.map(|went| went.until).filter(|_| !self.is_gone());
+        phase.into_iter().chain(went).min()
     }
 
     /// Whether the connection is over: dropped, hung up with all written or out of time, never
@@ -1165,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn a_peer_that_ends_its_side_is_read_no_more_and_one_that_goes_is_dropped() {
+    fn a_peer_that_ends_its_side_is_read_no_more_and_one_that_goes_ends_with_its_input() {
         let now = Instant::now();
         let (mut conn, peer) = pair(now);
         conn.open(0);
@@ -1180,7 +1301,9 @@ mod tests {
         drop(peer);
         conn.queue(vec![1; 10]);
         conn.flush(now, &no_output());
-        assert!(conn.is_gone());
+        assert_eq!(conn.interest(0), PollFlags::IN);
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        assert!(conn.is_finished(now));
         assert_eq!(conn.interest(0), PollFlags::empty());
     }
 
@@ -1243,6 +1366,143 @@ mod tests {
         assert!(!conn.is_finished(now));
         conn.receive(&mut vec![0; READ_CHUNK]);
         assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    fn input_request(id: u32, bytes: &[u8]) -> Request {
+        Request::Input {
+            id: RequestId(id),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    /// A writer that types and hangs up at once may go between a turn's `poll` and its write of a
+    /// report to it: the write fails before its last keys are read. A request that only asks gets
+    /// nothing done for it.
+    #[test]
+    fn hands_over_what_a_peer_sent_before_it_went_though_a_write_to_it_failed_first() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        // Left unread, so the peer's close is a reset.
+        conn.queue(vec![1; 10]);
+        conn.flush(now, &no_output());
+        let sent = [
+            input_request(1, b"echo a\r"),
+            Request::Stats { id: RequestId(2) },
+            input_request(3, b"true\r"),
+        ];
+        for request in &sent {
+            peer.write_all(&request.encode().unwrap()).unwrap();
+        }
+        drop(peer);
+        conn.queue(vec![1; 10]);
+        conn.flush(now, &no_output());
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        let handed: Vec<Request> = std::iter::from_fn(|| conn.next_request())
+            .map(Result::unwrap)
+            .collect();
+        let [echo, _, typed] = sent;
+        assert_eq!(handed, [echo, typed]);
+        assert_eq!(conn.queued(), 0, "still owed to a peer that went");
+        conn.receive(&mut vec![0; READ_CHUNK]);
+        assert!(!conn.is_gone(), "its reset was taken for a failed read");
+        assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    /// A snapshot held for room keeps the requests after it from being read, so its socket reports
+    /// the peer's hang-up with them still waiting.
+    #[test]
+    fn hands_over_what_waits_behind_a_held_snapshot_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        let typed = input_request(2, b"true\r");
+        let snapshot = Request::Snapshot { id: RequestId(1) };
+        peer.write_all(&[snapshot.encode().unwrap(), typed.encode().unwrap()].concat())
+            .unwrap();
+        let mut buffer = vec![0; READ_CHUNK];
+        conn.receive(&mut buffer);
+        let held = conn.next_request().unwrap().unwrap();
+        conn.hold(held, now);
+        drop(peer);
+        conn.polled(PollFlags::IN | PollFlags::HUP, &mut buffer, now);
+        assert_eq!(conn.next_request().map(Result::unwrap), Some(typed));
+        conn.receive(&mut buffer);
+        assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    /// One being hung up hands nothing more over, so its peer's hang-up drops it.
+    #[test]
+    fn a_connection_being_hung_up_is_dropped_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        conn.open(0);
+        conn.queue(vec![1; 10]);
+        conn.hang_up(now);
+        drop(peer);
+        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK], now);
+        assert!(conn.is_gone());
+    }
+
+    /// Past the mark a connection's requests wait unread, so its socket reports the peer's hang-up
+    /// with them still waiting.
+    #[test]
+    fn hands_over_what_waits_past_the_mark_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        let sent = [input_request(1, b"echo a\r"), input_request(2, b"true\r")];
+        for request in &sent {
+            peer.write_all(&request.encode().unwrap()).unwrap();
+        }
+        let mut buffer = vec![0; READ_CHUNK];
+        conn.receive(&mut buffer);
+        conn.queue(vec![1; QUEUE_MARK]);
+        assert!(conn.next_request().is_none(), "answered past the mark");
+        drop(peer);
+        conn.polled(PollFlags::IN | PollFlags::HUP, &mut buffer, now);
+        let handed: Vec<Request> = std::iter::from_fn(|| conn.next_request())
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(handed, sent);
+        conn.receive(&mut buffer);
+        assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    /// One that stopped reading but keeps sending is owed nothing, so it holds no memory, and is
+    /// dropped `WENT_WITHIN` after it was found gone, so it holds the writer slot no longer. A
+    /// failed write finding it gone is tested where what it sent is handed over.
+    #[test]
+    fn a_peer_that_stops_reading_and_keeps_sending_is_owed_nothing_and_dropped_in_time() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        conn.queue(vec![1; 10]);
+        conn.lose_peer(now, &"it stopped reading");
+        assert_eq!(conn.queued(), 0);
+        assert!(conn.may_send());
+        assert_eq!(conn.deadline(), Some(now + WENT_WITHIN));
+        let mut buffer = vec![0; READ_CHUNK];
+        for id in 0..3 {
+            let input = input_request(id, b"x");
+            peer.write_all(&input.encode().unwrap()).unwrap();
+            conn.receive(&mut buffer);
+            assert_eq!(conn.next_request().map(Result::unwrap), Some(input));
+            conn.queue(vec![1; QUEUE_MARK]);
+            conn.queue_snapshot(vec![1; 64], 0);
+            conn.queue_state(State::Title, 0, title_frame(0, "unread"));
+            conn.queue_subscribed(ok_frame(1), 0);
+            conn.queue_exited(0, exited_frame());
+            conn.hold(Request::Snapshot { id: RequestId(9) }, now);
+            assert_eq!((conn.queued(), conn.owed_snapshot()), (0, 0));
+            assert!(!conn.holds_a_snapshot());
+            assert_eq!(conn.interest(u64::MAX), PollFlags::IN);
+        }
+        conn.flush(now + WENT_WITHIN / 2, &no_output());
+        assert!(!conn.is_finished(now + WENT_WITHIN / 2));
+        conn.flush(now + WENT_WITHIN, &no_output());
+        assert!(conn.is_gone());
+        assert!(!conn.may_send());
     }
 
     /// While a whole request waits, the socket isn't read, so what the peer sends after it stays
@@ -1538,7 +1798,7 @@ mod tests {
             let revents = fds[0].revents();
             assert!(revents.contains(PollFlags::HUP), "{revents:?}");
         }
-        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK]);
+        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK], now);
         assert!(conn.is_finished(now), "it would spin on the hang-up");
     }
 

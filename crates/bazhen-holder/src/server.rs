@@ -236,7 +236,7 @@ impl Server {
         for i in 0..self.conns.len() {
             if let Some(conn) = self.conns.get_mut(i) {
                 let revents = ready.conns.get(i).copied().unwrap_or_else(PollFlags::empty);
-                conn.polled(revents, &mut self.buffer);
+                conn.polled(revents, &mut self.buffer, now);
             }
             // A respawn is answered here, with every connection at hand, and the connection's
             // requests after it then go on being answered.
