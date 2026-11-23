@@ -142,10 +142,10 @@ describe("what a run says when it ends", () => {
   });
 
   it("escapes a name's control characters, so it can't forge a line", () => {
-    const left = ["x\ncapped: a forged line", "tab\there"];
-    expect(report({ ...ended, leftover: 2, left }, cap, "scope", false)).toContain(
-      "capped: stopped 2 process(es) its command left running: " +
-        "tab\\x09here ×1, x\\x0acapped: a forged line ×1",
+    const left = ["x\ncapped: a forged line", "tab\there", "rtl\u202Eexe.txt"];
+    expect(report({ ...ended, leftover: 3, left }, cap, "scope", false)).toContain(
+      "capped: stopped 3 process(es) its command left running: " +
+        "rtl\\u{202e}exe.txt ×1, tab\\x09here ×1, x\\x0acapped: a forged line ×1",
     );
   });
 

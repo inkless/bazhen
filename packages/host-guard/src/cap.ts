@@ -158,11 +158,13 @@ const errorCode = (error: unknown) =>
   error instanceof Error && "code" in error ? error.code : undefined;
 
 /**
- * The names of `pids`' processes, leaving out only one gone before its name could be read. One
- * whose name can't be read for any other reason still counts, as `UNNAMED`.
+ * The names of `pids`' processes, leaving out only one gone before its name could be read: one
+ * `listed` no longer lists. One whose name can't be read for any other reason, or whose `/proc`
+ * entry is hidden from this user (hidepid) while `listed` still lists it, counts as `UNNAMED`.
  */
 export const namesOf = (
   pids: readonly string[],
+  listed: () => readonly string[],
   read: (path: string) => string = (path) => readFileSync(path, "utf8"),
 ) =>
   pids.flatMap((pid) => {
@@ -170,7 +172,8 @@ export const namesOf = (
       return [orUnnamed(read(`/proc/${pid}/comm`).replace(/\n$/, ""))];
     } catch (error) {
       const code = errorCode(error);
-      return code === "ENOENT" || code === "ESRCH" ? [] : [UNNAMED];
+      const gone = (code === "ENOENT" || code === "ESRCH") && !listed().includes(pid);
+      return gone ? [] : [UNNAMED];
     }
   });
 
@@ -399,7 +402,7 @@ export function runInScope(
       sample();
       clearInterval(poll);
       watcher?.close();
-      const left = asRun ? await settled(() => namesOf(procs())) : undefined;
+      const left = asRun ? await settled(() => namesOf(procs(), procs)) : undefined;
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);

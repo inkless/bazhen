@@ -109,9 +109,15 @@ export function formatBytes(bytes: number): string {
   return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
 }
 
-/** A process's name with its control characters escaped, so it can't forge a line of output. */
+/**
+ * A process's name with its control and format characters escaped, so it can't forge a line of
+ * output or reorder one (a bidi override).
+ */
 const printable = (name: string) =>
-  name.replace(/\p{Cc}/gu, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+  name.replace(/[\p{Cc}\p{Cf}]/gu, (c) => {
+    const code = c.codePointAt(0) ?? 0;
+    return code < 0x100 ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u{${code.toString(16)}}`;
+  });
 
 /** `tmux ×3, bazhen-holder ×1`: each name once, the most frequent first. */
 export function nameCounts(names: readonly string[]): string {

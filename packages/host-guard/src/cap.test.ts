@@ -411,7 +411,12 @@ describe("reading memory", () => {
 
   it("names each process listed, but one gone before its name was read", () => {
     const read = readerOf({ "/proc/7/comm": () => "tmux\n", "/proc/9/comm": () => "sleep\n" });
-    expect(namesOf(["7", "8", "9"], read)).toEqual(["tmux", "sleep"]);
+    expect(namesOf(["7", "8", "9"], () => ["7", "9"], read)).toEqual(["tmux", "sleep"]);
+  });
+
+  it("counts a listed process whose /proc entry is hidden, as hidepid hides another user's", () => {
+    const read = readerOf({ "/proc/7/comm": () => "tmux\n" });
+    expect(namesOf(["7", "8"], () => ["7", "8"], read)).toEqual(["tmux", UNNAMED]);
   });
 
   it("counts a listed process whose name reads empty or can't be read", () => {
@@ -421,7 +426,11 @@ describe("reading memory", () => {
       "/proc/9/comm": () => fail("/proc/9/comm", "ESRCH"),
       "/proc/10/comm": () => "tmux\n",
     });
-    expect(namesOf(["7", "8", "9", "10"], read)).toEqual([UNNAMED, UNNAMED, "tmux"]);
+    expect(namesOf(["7", "8", "9", "10"], () => ["7", "8", "10"], read)).toEqual([
+      UNNAMED,
+      UNNAMED,
+      "tmux",
+    ]);
   });
 
   it("reads a process's own anonymous memory, swapped out included, but no shared memory", () => {
