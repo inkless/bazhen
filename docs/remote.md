@@ -1,5 +1,9 @@
 # Reaching Bazhen from another machine
 
+This page describes the Rust daemon. The same steps work with the TypeScript daemon, which
+`bazhen start` runs by default: it too listens on `127.0.0.1` alone, admits the same Host headers,
+and treats a request on the forward as its own machine's when deciding whether to pair.
+
 The daemon listens on IPv4 loopback (`127.0.0.1`) and nowhere else, and it never terminates TLS.
 To open it from a laptop or another machine, forward a port to that loopback address over SSH.
 When the two machines aren't on one network, reach the daemon host's SSH port through a VPN such as
@@ -7,9 +11,9 @@ Tailscale. The forward carries the page and its API, and the daemon needs no ext
 for it. Build the web app first (`moon run :build`): the daemon serves whatever was built last, and
 answers that it isn't built until then.
 
-`web.listen = "lan"`, `web.lan_port` and `web.lan_allow` are not supported by this daemon: it
+`web.listen = "lan"`, `web.lan_port` and `web.lan_allow` are not supported by the Rust daemon: it
 refuses to start with any of them.
-[docs/lan.md](lan.md) describes the TypeScript daemon's LAN listener, which this daemon doesn't
+[docs/lan.md](lan.md) describes the TypeScript daemon's LAN listener, which the Rust daemon doesn't
 have. A proxy such as Caddy ([docs/caddy.md](caddy.md)) with external origins is another route; this
 page needs neither.
 

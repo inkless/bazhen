@@ -57,7 +57,8 @@ fn outcome(file: &str, case: &Value) -> Result<Value, String> {
         .map_err(|e| e.0)
 }
 
-/// The first of `web.lan_port` and `web.lan_allow` a case's file sets, however it writes `web`.
+/// `web.lan_port` if a case's file sets it, else `web.lan_allow` if it sets that, however the file
+/// writes `web`: the daemon refuses them in that order, whatever order the file has them in.
 fn lan_key(case: &Value) -> Option<&'static str> {
     let toml = case["toml"].as_str().unwrap();
     let (root, _) = DeTable::parse_recoverable(toml);
