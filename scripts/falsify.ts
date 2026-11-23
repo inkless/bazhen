@@ -198,6 +198,10 @@ const MUTANT_TIMEOUT_MS = timeoutFrom(
 // nextest's libtest JSON is experimental; the version pins its shape.
 const LIBTEST_JSON_VERSION = "0.1";
 const KILL_GRACE_MS = 2000;
+
+const counted = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+const secondsSince = (start: number) => Math.round((performance.now() - start) / 1000);
+
 // Beside this file, never the worktree's copy, which the branch's revert may have changed or removed.
 const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
 const JUDGING = "BZ_FALSIFY_JUDGING";
@@ -1908,12 +1912,19 @@ async function mutateRustTests(
   for (const t of added) counts.set(key(t), (counts.get(key(t)) ?? 0) + 1);
   const shared = (t: RustTest) => (counts.get(key(t)) ?? 0) > 1;
   const runnable = added.filter((t) => filterable(t) && !atBase.has(key(t)) && !shared(t));
+  const unmutatedStart = performance.now();
   const unmutated =
     runnable.length > 0 && mutants.length > 0
       ? await runRustTests(dir, top, runnable)
       : { out: "", timedOut: false, memoryKilled: false };
   const passedUnmutated = passing(testEvents(unmutated.out, targets));
   let pending = runnable.filter(passedUnmutated);
+  if (runnable.length > 0 && mutants.length > 0) {
+    console.error(
+      `falsify: ${counted(runnable.length, "new Rust test")} run unmutated in ` +
+        `${secondsSince(unmutatedStart)} s, ${pending.length} passing`,
+    );
+  }
   const killedBy = new Map<string, string>();
   const unapplied: string[] = [];
   const timedOut: string[] = [];
@@ -1936,6 +1947,8 @@ async function mutateRustTests(
       return tests.filter((t) => failed.has(key(t)));
     };
     let confirmed: RustTest[] = [];
+    const against = pending.length;
+    const start = performance.now();
     const applied = await withMutant(dir, mutant, async () => {
       ran += 1;
       const candidates = await failedUnder(pending);
@@ -1953,6 +1966,14 @@ async function mutateRustTests(
       const passesAgain = passing(testEvents(recheck.out, targets));
       for (const t of confirmed.filter(passesAgain)) killedBy.set(key(t), mutant.name);
       pending = pending.filter((t) => !killedBy.has(key(t)));
+    }
+    if (applied) {
+      const stopped = [ranOutOfTime && " (timed out)", ranOutOfMemory && " (memory-killed)"];
+      console.error(
+        `falsify: mutant ${ran} of at most ${MAX_MUTANTS} (${mutants.length} listed), against ` +
+          `${counted(against, "test")}, killed ${against - pending.length} in ` +
+          `${secondsSince(start)} s${stopped.filter(Boolean).join("")}: ${mutant.name}`,
+      );
     }
   }
   const capped =
@@ -2336,6 +2357,9 @@ async function main(args: string[]): Promise<number> {
         for (const [index, [project, inProject]] of runs.entries()) {
           const reportFile = join(dir, `falsify-report-${tag}${index}.json`);
           const resultsFile = join(dir, `falsify-results-${tag}${index}.jsonl`);
+          const files = counted(inProject.length, "file");
+          console.error(`falsify: running the ${project} project${on} (${files})`);
+          const start = performance.now();
           const ran = await logged(
             "pnpm",
             [
@@ -2354,6 +2378,7 @@ async function main(args: string[]): Promise<number> {
             VITEST_TIMEOUT_MS,
             { ...env, [RESULTS_FILE_ENV]: resultsFile },
           );
+          console.error(`falsify: the ${project} run${on} took ${secondsSince(start)} s`);
           const written = readWritten(reportFile);
           if (written.kind === "json" && isReport(written.value)) {
             report.testResults.push(...written.value.testResults);
@@ -2366,7 +2391,6 @@ async function main(args: string[]): Promise<number> {
           const collected = recorded.flatMap((suite) => suite.assertionResults);
           const finished = collected.filter((t) => t.status !== UNFINISHED).length;
           const reason = noOutputReason(ran, written, "report", VITEST_TIMEOUT_MS);
-          const files = `${inProject.length} file${inProject.length === 1 ? "" : "s"}`;
           const judged =
             collected.length === 0
               ? ""
