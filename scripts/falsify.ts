@@ -205,8 +205,8 @@ const CAPPED_STOP_GRACE_MS = 30_000;
 // The falsify task's own cap: inside its scope, capped holds a run of its own to 90% of that. The
 // run's scope is beside the task's, which meanwhile holds only falsify and capped, waiting on it.
 const MUTANT_RUN_MEMORY = "8G";
-// Runs a mutant's tests without a capped scope of their own, saving its half a second, for tests
-// of falsify's judging. It can't hide a leftover from the falsify task's run: what an uncontained
+// Runs the Rust tests without a capped scope of their own, saving its half a second, for tests of
+// falsify's judging. It can't hide a leftover from the falsify task's run: what an uncontained
 // run leaves stays where that run counts, as far as it can count (its scope under systemd, only its
 // process group elsewhere, which a process in a session of its own escapes either way).
 const UNCONTAINED_ENV = "BZ_FALSIFY_UNCONTAINED";
@@ -1727,21 +1727,38 @@ async function capture(
   args: string[],
   dir: string,
   file: string,
-  options: { env: NodeJS.ProcessEnv; timeoutMs: number; killGraceMs?: number },
-): Promise<{ ok: boolean; out: string; timedOut: boolean }> {
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number; killGraceMs?: number; errFile?: string },
+): Promise<{ ok: boolean; out: string; err: string; timedOut: boolean }> {
   const path = join(dir, file);
+  const errPath = options.errFile === undefined ? undefined : join(dir, options.errFile);
   const fd = openSync(path, "w");
+  const errFd = errPath === undefined ? undefined : openSync(errPath, "w");
   let ran: Ran;
   try {
     ran = await run(cmd, args, dir, options.timeoutMs, {
       env: options.env,
       stdout: fd,
+      ...(errFd === undefined ? {} : { stderr: errFd }),
       ...(options.killGraceMs === undefined ? {} : { killGraceMs: options.killGraceMs }),
     });
   } finally {
     closeSync(fd);
+    if (errFd !== undefined) closeSync(errFd);
   }
-  return { ok: ran.ok, out: readFileSync(path, "utf8"), timedOut: ran.timedOut };
+  const err = errPath === undefined ? "" : readFileSync(errPath, "utf8");
+  return { ok: ran.ok, out: readFileSync(path, "utf8"), err, timedOut: ran.timedOut };
+}
+
+const LEFT_RUNNING = /^capped: stopped (\d+) process\(es\) its command left running(?:: (.+))?$/m;
+
+/**
+ * What capped's report on a run says its command left running, as "N process(es)" or the names
+ * it counted, or undefined when it says nothing was.
+ */
+export function leftRunning(report: string): string | undefined {
+  const match = LEFT_RUNNING.exec(report);
+  if (match === null) return undefined;
+  return match[2] ?? `${match[1]} process(es)`;
 }
 
 /**
@@ -1788,14 +1805,9 @@ fail-fast = false
 
 /**
  * Runs `tests` once in `dir` and returns nextest's libtest-json-plus output, however it exited,
- * and whether it ran out of time. `mutated` says a mutant is applied.
+ * whether it ran out of time, and what it left running.
  */
-async function runRustTests(
-  dir: string,
-  top: string,
-  tests: RustTest[],
-  mutated = false,
-): Promise<{ out: string; timedOut: boolean; memoryKilled: boolean }> {
+async function runRustTests(dir: string, top: string, tests: RustTest[]): Promise<NextestRun> {
   const kills = join(dir, "falsify-memory-kills");
   rmSync(kills, { force: true });
   const env: NodeJS.ProcessEnv = {
@@ -1825,16 +1837,17 @@ async function runRustTests(
     "-E",
     nextestFilter(tests),
   ];
-  // A test a mutant hangs dies before its Drop stops what it started, and a holder it started is in
-  // a session of its own, out of every process group's reach: only stopping a scope the run had to
-  // itself ends it, before the next run. A run without a mutant isn't contained, so what it leaves
-  // is the test's own leak, which fails falsify's own run. The time cap only backs up falsify's
-  // own timeout. Each test process's runner names the test in `kills` when a memory cap killed it.
+  // A test ended at its time limit, by a mutant or not, dies before its Drop stops what it
+  // started, and a holder it started is in a session of its own, out of every process group's
+  // reach: only stopping a scope the run had to itself ends it, before the next run. Capped's
+  // report on that scope says what it stopped, for the caller to judge. The time cap only backs up
+  // falsify's own timeout. Each test process's runner names the test in `kills` when a memory cap
+  // killed it.
   const backstopS = Math.min(Math.ceil(MUTANT_TIMEOUT_MS / 1000) + 60, MAX_BACKSTOP_S);
   const caps = ["--memory", MUTANT_RUN_MEMORY, "--time", `${backstopS}s`];
   const contained = [CAPPED, OWN_SCOPE_FLAG, ...caps, "--", "cargo-nextest", ...args];
-  const { out, timedOut } =
-    !mutated || process.env[UNCONTAINED_ENV] === "1"
+  const { out, err, timedOut } =
+    process.env[UNCONTAINED_ENV] === "1"
       ? await capture("cargo-nextest", args, dir, "falsify-results.json", {
           env,
           timeoutMs: MUTANT_TIMEOUT_MS,
@@ -1843,9 +1856,18 @@ async function runRustTests(
           env,
           timeoutMs: MUTANT_TIMEOUT_MS,
           killGraceMs: CAPPED_STOP_GRACE_MS,
+          errFile: "falsify-capped.log",
         });
-  return { out, timedOut, memoryKilled: existsSync(kills) };
+  const left = leftRunning(err);
+  return {
+    out,
+    timedOut,
+    memoryKilled: existsSync(kills),
+    ...(left === undefined ? {} : { left }),
+  };
 }
+
+type NextestRun = { out: string; timedOut: boolean; memoryKilled: boolean; left?: string };
 
 export type RustVerdict = RustTest & { outcome: Outcome; note: string };
 type RustJudgement = {
@@ -1853,9 +1875,13 @@ type RustJudgement = {
   unapplied: string[];
   timedOut: string[];
   memoryKilled: string[];
+  /** Each run without a mutant that left processes running, with no test ended to explain it. */
+  leaked: string[];
   ran: number;
   total: number;
 };
+
+const TIME_LIMIT = "time limit exceeded";
 
 const key = (t: RustTest) => `${t.file} ${t.title}`;
 
@@ -1919,7 +1945,15 @@ async function mutateRustTests(
   const diff = git(["diff", "-M", ...range, "--", "*.rs"], dir);
   if (diff === "") {
     const verdicts = added.map((t) => invalidRust(t, "no Rust source changed"));
-    return { verdicts, unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
+    return {
+      verdicts,
+      unapplied: [],
+      timedOut: [],
+      memoryKilled: [],
+      leaked: [],
+      ran: 0,
+      total: 0,
+    };
   }
   const diffFile = join(dir, "falsify-rust.diff");
   writeFileSync(diffFile, diff);
@@ -1957,6 +1991,20 @@ async function mutateRustTests(
     runnable.length > 0 && mutants.length > 0
       ? await runRustTests(dir, top, runnable)
       : { out: "", timedOut: false, memoryKilled: false };
+  const leaked: string[] = [];
+  // A run without a mutant that leaves processes running shows a test's own leak, which fails
+  // falsify, as it would any run around it; unless a test of it was ended at a time limit, since
+  // that test died before it could stop what it started, and it is judged invalid already.
+  const judgeLeftovers = (tried: NextestRun, tests: RustTest[], which: string) => {
+    if (tried.left === undefined) return;
+    const ended =
+      tried.timedOut || testEvents(tried.out, targets).some((e) => e.reason === TIME_LIMIT);
+    const what = `the ${which} run of ${tests.map(key).join(", ")} left ${tried.left} running`;
+    if (!ended) leaked.push(what);
+    else
+      console.error(`falsify: ${what}, stopped with it, after a test was ended at its time limit`);
+  };
+  judgeLeftovers(unmutated, runnable, "unmutated");
   const passedUnmutated = passing(testEvents(unmutated.out, targets));
   let pending = runnable.filter(passedUnmutated);
   if (runnable.length > 0 && mutants.length > 0) {
@@ -1976,7 +2024,7 @@ async function mutateRustTests(
     let ranOutOfTime = false;
     let ranOutOfMemory = false;
     const failedUnder = async (tests: RustTest[]) => {
-      const tried = await runRustTests(dir, top, tests, true);
+      const tried = await runRustTests(dir, top, tests);
       ranOutOfTime ||= tried.timedOut;
       ranOutOfMemory ||= tried.memoryKilled;
       const failed = new Set(
@@ -2003,6 +2051,7 @@ async function mutateRustTests(
       // And once with the mutant undone: a test that fails without it too, from state an earlier
       // run left behind, failed for some other reason than the mutant.
       const recheck = await runRustTests(dir, top, confirmed);
+      judgeLeftovers(recheck, confirmed, "recheck");
       const passesAgain = passing(testEvents(recheck.out, targets));
       for (const t of confirmed.filter(passesAgain)) killedBy.set(key(t), mutant.name);
       pending = pending.filter((t) => !killedBy.has(key(t)));
@@ -2039,7 +2088,7 @@ async function mutateRustTests(
         : "no mutant of the change failed it on an assertion",
     );
   });
-  return { verdicts, unapplied, timedOut, memoryKilled, ran, total: mutants.length };
+  return { verdicts, unapplied, timedOut, memoryKilled, leaked, ran, total: mutants.length };
 }
 
 /**
@@ -2073,7 +2122,15 @@ async function judgeRustTests(top: string, base: string, head: string, rustFiles
     const atBase = rustTestIds(before);
     const added = addedRustTests(atBase, rustTestIds(after));
     if (added.length === 0)
-      return { verdicts: [], unapplied: [], timedOut: [], memoryKilled: [], ran: 0, total: 0 };
+      return {
+        verdicts: [],
+        unapplied: [],
+        timedOut: [],
+        memoryKilled: [],
+        leaked: [],
+        ran: 0,
+        total: 0,
+      };
     // Mutants are made only in the changed files, and the new tests live in them.
     if (!judgeableHere(signallingWork(rustFiles, rustFiles, [base, head], fileAt))) {
       return undefined;
@@ -2267,6 +2324,7 @@ async function main(args: string[]): Promise<number> {
     unapplied: [],
     timedOut: [],
     memoryKilled: [],
+    leaked: [],
     ran: 0,
     total: 0,
   };
@@ -2572,6 +2630,14 @@ async function main(args: string[]): Promise<number> {
     console.log(`  INVALID  mutant ${name} (its patch left the file unchanged; not run)`);
   }
 
+  if (rust.leaked.length > 0) {
+    console.error(
+      "\nThese runs of the new Rust tests, with no mutant applied and no test ended at a time " +
+        "limit, left processes running. A test must stop what it starts, even when it passes:\n" +
+        rust.leaked.map((line) => `  ${line}`).join("\n"),
+    );
+    return 1;
+  }
   const survived = results.filter((r) => r.outcome === "SURVIVED");
   if (survived.length > 0) {
     console.error(
