@@ -1968,10 +1968,11 @@ async function mutateRustTests(
       pending = pending.filter((t) => !killedBy.has(key(t)));
     }
     if (applied) {
+      const stopped = [ranOutOfTime && " (timed out)", ranOutOfMemory && " (memory-killed)"];
       console.error(
         `falsify: mutant ${ran} of at most ${MAX_MUTANTS} (${mutants.length} listed), against ` +
           `${counted(against, "test")}, killed ${against - pending.length} in ` +
-          `${secondsSince(start)} s: ${mutant.name}`,
+          `${secondsSince(start)} s${stopped.filter(Boolean).join("")}: ${mutant.name}`,
       );
     }
   }
