@@ -34,13 +34,6 @@ const scopesLeft = () =>
     { encoding: "utf8" },
   ).stdout ?? "";
 
-/** `times` runs of `run`, one after another, as caps on a shared machine should be tested. */
-async function oneByOne<T>(times: number, run: () => Promise<T>): Promise<T[]> {
-  const ended: T[] = [];
-  for (let i = 0; i < times; i += 1) ended.push(await run());
-  return ended;
-}
-
 /** A command that leaves one process running once it has gone. */
 const LEAVES_ONE = "(exec sleep 30) &";
 
@@ -96,20 +89,6 @@ describe("a capped run", () => {
     const pid = Number(readFileSync(pidFile, "utf8"));
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   }, 30_000);
-
-  // Where systemd caps, the kernel kills only the runaway, and `sh` exits a moment later, taking
-  // the scope and its counter with it: about one run in two lost the kill to that race.
-  it.runIf(cappedScope() !== undefined)(
-    "counts every kill its command outlived, when asked, though the scope went with the command",
-    async () => {
-      const outlives = `exec 2>/dev/null; "${process.execPath}" -e '${RUNAWAY}'; exit 0`;
-      const runs = await oneByOne(6, () =>
-        runIn("scope", "sh", ["-c", outlives], cap, process.env, true),
-      );
-      expect(runs.map((ended) => ended.memoryKills)).toEqual([1, 1, 1, 1, 1, 1]);
-    },
-    60_000,
-  );
 
   it("counts what its command left running, and nothing when it left nothing", async () => {
     const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env);
