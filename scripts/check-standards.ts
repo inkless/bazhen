@@ -1001,6 +1001,18 @@ const NOT_DECODERS: Record<string, string> = {
     "holds the hub's state, whose views hold output queued for them; ends a view with a frame, reading none of that output",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::end":
     "holds the hub's state, whose views hold output queued for them; drops a view, its queue with it, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::make_room":
+    "weighs the sizes of the snapshots being sent against the cap and ends stalled views; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::unload":
+    "takes a view out of those whose snapshots are being sent, by its id; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::park":
+    "keeps a stream whose last view has left and starts the timer that closes it; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::unpark":
+    "takes a stream out of its terminal's parked ones, by identity; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release":
+    "closes a parked stream; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release_all_but":
+    "closes a terminal's other parked streams; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::on":
     "runs a closure on a terminal's state, which holds output queued for its views; reads none of it itself",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::forget":
@@ -1009,7 +1021,6 @@ const NOT_DECODERS: Record<string, string> = {
     "removes a terminal's entry from the hub's map; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Joining::drop":
     "holds the hub's state, whose views hold output queued for them; ends a view whose join was dropped, reading none of that output",
-  "crates/bazhen-daemon/src/stream/hub.rs::let_go": "closes a terminal's stream; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Watched::lock":
     "locks a terminal's state, which holds output queued for its views; reads none of it",
   "crates/bazhen-daemon/src/stream/hub.rs::Watched::until":
