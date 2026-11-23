@@ -105,3 +105,58 @@ impl ClosingBudget {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stream::view::{Inbox, Outbox, queue};
+
+    /// A view's queue, holding `bytes` unsent.
+    fn holding(bytes: usize) -> (Outbox, Inbox) {
+        let (outbox, inbox) = queue(usize::MAX);
+        outbox.send(vec![b'x'; bytes]).unwrap();
+        (outbox, inbox)
+    }
+
+    // Sandbox-only by name alone: it calls ClosingBudget::close, which the signal scan can't tell
+    // from a holder stream's close; it only counts bytes, and signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn ends_the_oldest_closing_streams_past_the_budget_but_never_the_one_closing_now() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let budget = ClosingBudget::new(10);
+        let views = [holding(6), holding(4), holding(3), holding(50)];
+        let [first, second] = [0, 1].map(|n| budget.close(views[n].1.unsent()));
+        let within = (first.ended().is_cancelled(), second.ended().is_cancelled());
+        let [third, fourth] = [2, 3].map(|n| budget.close(views[n].1.unsent()));
+        assert_eq!(
+            (
+                within,
+                [&first, &second, &third, &fourth].map(|place| place.ended().is_cancelled())
+            ),
+            ((false, false), [true, true, true, false])
+        );
+    }
+
+    // Sandbox-only by name alone: it calls ClosingBudget::close, which the signal scan can't tell
+    // from a holder stream's close; it only counts bytes, and signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn counts_a_closing_stream_only_for_what_it_still_holds_and_forgets_one_once_it_has_closed() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let budget = ClosingBudget::new(10);
+        let (outbox, inbox) = queue(usize::MAX);
+        outbox.send(vec![b'x'; 8]).unwrap();
+        let first = budget.close(inbox.unsent());
+        // Sent: what the writer took and finished sending is no longer held.
+        drop(inbox);
+        let (_b, b) = holding(9);
+        drop(budget.close(b.unsent()));
+        let (_c, c) = holding(9);
+        let third = budget.close(c.unsent());
+        assert_eq!(
+            (first.ended().is_cancelled(), third.ended().is_cancelled()),
+            (false, false)
+        );
+    }
+}

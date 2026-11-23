@@ -611,14 +611,17 @@ async fn write(
 
 #[cfg(test)]
 mod tests {
-    //! The route over the hub's fake runtime, served on the daemon's socket.
+    //! The route over the hub's fake runtime, each socket in-process: what the client says goes
+    //! in on one channel, what it is sent comes out on another.
 
+    use std::convert::Infallible;
     use std::time::Duration;
 
     use super::*;
     use crate::stream::closing::MAX_CLOSING_BYTES;
     use crate::stream::hub::HubOptions;
-    use crate::stream::hub::tests::{Fake, Log};
+    use crate::stream::hub::tests::{Fake, Log, size};
+    use crate::testing::runtime;
 
     const WAIT: Duration = Duration::from_secs(5);
     const BUILD: &str = "this-build";
@@ -633,26 +636,45 @@ mod tests {
         )
     }
 
-    /// The route over a fake terminal that runs.
+    /// A ping every `every`, patient for one beat.
+    fn how(every: Duration) -> How {
+        How {
+            stop: CancellationToken::new(),
+            device: None,
+            device_name: None,
+            heartbeat: Heartbeat { every, patience: 1 },
+        }
+    }
+
+    fn quiet() -> How {
+        how(Duration::from_secs(60))
+    }
+
+    /// The route over a fake terminal, which runs as `running` says.
     struct Served {
+        fake: Fake,
         log: Log,
         streams: Streams,
     }
 
     impl Served {
-        fn running() -> Self {
-            let log = Log::default();
+        fn new(
+            running: impl Fn(&TerminalId) -> Result<bool, String> + Send + Sync + 'static,
+        ) -> Self {
+            let (fake, log) = (Fake::new("", 0), Log::default());
             let hub = Hub::new(
-                Fake::new("", 0),
+                fake.clone(),
                 log.clone(),
                 HubOptions::default(),
                 TaskTracker::new(),
             );
+            let running = Arc::new(running);
             Self {
+                fake,
                 log,
                 streams: Streams {
                     views: Arc::new(hub),
-                    running: Arc::new(|id| Box::pin(std::future::ready(Ok(id == terminal())))),
+                    running: Arc::new(move |id| Box::pin(std::future::ready(running(&id)))),
                     protocol_id: Arc::from(BUILD),
                     closing: ClosingBudget::new(MAX_CLOSING_BYTES),
                     tasks: TaskTracker::new(),
@@ -661,12 +683,32 @@ mod tests {
             }
         }
 
-        /// Waits for every socket's task to end.
-        async fn ended(&self) {
+        fn running() -> Self {
+            Self::new(|id| Ok(*id == terminal()))
+        }
+
+        fn open(&self, terminal: &str, how: How) -> Client {
+            let (says, from_client) = mpsc::unbounded_channel::<Result<Message, Infallible>>();
+            let (to_client, hears) = mpsc::unbounded_channel();
+            let sink = futures_util::sink::unfold(to_client, |to, message: Message| async move {
+                to.send(message).map(|()| to).map_err(drop)
+            });
+            let said = futures_util::stream::unfold(from_client, |mut from| async move {
+                from.recv().await.map(|message| (message, from))
+            });
+            let streams = self.streams.clone();
+            self.streams
+                .tasks
+                .spawn(serve(sink, said, terminal.to_owned(), streams, how));
+            Client { says, hears }
+        }
+
+        /// Whether every socket's task ended within the wait.
+        async fn ended(&self) -> bool {
             self.streams.tasks.close();
             tokio::time::timeout(WAIT, self.streams.tasks.wait())
                 .await
-                .expect("a socket's task never ended");
+                .is_ok()
         }
 
         /// What the hub recorded of views ending.
@@ -676,8 +718,326 @@ mod tests {
         }
     }
 
+    struct Client {
+        says: mpsc::UnboundedSender<Result<Message, Infallible>>,
+        hears: mpsc::UnboundedReceiver<Message>,
+    }
+
+    impl Client {
+        fn say(&self, frame: &str) {
+            let _ = self.says.send(Ok(Message::Text(frame.into())));
+        }
+
+        fn send(&self, message: Message) {
+            let _ = self.says.send(Ok(message));
+        }
+
+        /// The next text frame by `by`, past output and pings, or what came instead.
+        async fn next(&mut self, by: tokio::time::Instant) -> Heard {
+            loop {
+                match tokio::time::timeout_at(by, self.hears.recv()).await {
+                    Err(_) => return Heard::Nothing,
+                    Ok(None) => return Heard::Ended,
+                    Ok(Some(Message::Text(text))) => {
+                        return Heard::Frame(serde_json::from_str(&text).unwrap());
+                    }
+                    Ok(Some(Message::Close(close))) => return Heard::Closed(close),
+                    Ok(Some(_)) => {}
+                }
+            }
+        }
+
+        /// Every text frame heard within the wait, and what ended them.
+        async fn until_closed(&mut self) -> (Vec<StreamServerFrame>, Heard) {
+            let by = tokio::time::Instant::now() + WAIT;
+            let mut frames = vec![];
+            loop {
+                match self.next(by).await {
+                    Heard::Frame(frame) => frames.push(frame),
+                    other => return (frames, other),
+                }
+            }
+        }
+
+        /// Says hello, and waits to be told the view is attached.
+        async fn attached(&mut self, mode: &str) -> AttachmentId {
+            self.say(&hello(BUILD, mode));
+            self.until(|frame| match frame {
+                StreamServerFrame::Attached { attachment_id, .. } => Some(attachment_id),
+                _ => None,
+            })
+            .await
+            .unwrap_or_else(|heard| panic!("the view was never attached: {heard:?}"))
+        }
+
+        /// The first frame within the wait that `pick` keeps, or what came instead.
+        async fn until<T>(
+            &mut self,
+            pick: impl Fn(StreamServerFrame) -> Option<T>,
+        ) -> Result<T, Heard> {
+            let by = tokio::time::Instant::now() + WAIT;
+            loop {
+                match self.next(by).await {
+                    Heard::Frame(frame) => {
+                        if let Some(picked) = pick(frame) {
+                            return Ok(picked);
+                        }
+                    }
+                    other => return Err(other),
+                }
+            }
+        }
+    }
+
+    /// What a client heard within a wait: a text frame, the close, the stream ending without
+    /// one, or nothing at all. A value, so a test waiting on a frame that never comes fails its
+    /// own assertion rather than its wait.
+    #[derive(Debug, PartialEq)]
+    enum Heard {
+        Frame(StreamServerFrame),
+        Closed(Option<CloseFrame>),
+        Ended,
+        Nothing,
+    }
+
+    impl Heard {
+        /// The code of the close heard, if a close with one was.
+        fn code(&self) -> Option<u16> {
+            match self {
+                Self::Closed(Some(close)) => Some(close.code),
+                _ => None,
+            }
+        }
+    }
+
+    /// `read` as soon as `done` says it is done, or as it is once a wait has passed.
+    async fn once<T>(read: impl Fn() -> T, done: impl Fn(&T) -> bool) -> T {
+        let until = Instant::now() + WAIT;
+        loop {
+            let value = read();
+            if done(&value) || Instant::now() > until {
+                return value;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     fn ended(attachment: &AttachmentId, reason: &str) -> Vec<String> {
         vec![format!("ended {attachment} {reason}")]
+    }
+
+    fn error(message: &str) -> StreamServerFrame {
+        StreamServerFrame::Error {
+            message: message.to_owned(),
+        }
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn attaches_a_view_that_says_hello_and_answers_its_ping() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            client.attached("observe").await;
+            client.say(r#"{"type":"ping"}"#);
+            let pong = client
+                .until(|frame| (frame == StreamServerFrame::Pong).then_some(frame))
+                .await;
+            assert_eq!(pong, Ok(StreamServerFrame::Pong));
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn refuses_a_page_from_another_build_with_an_error_then_closes() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            client.say(&hello("another-build", "observe"));
+            let refused = client.until_closed().await;
+            assert_eq!(refused, (vec![error(ANOTHER_PAGE)], Heard::Closed(None)));
+            assert_eq!((served.ended().await, served.log.events()), (true, vec![]));
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn refuses_a_terminal_that_isnt_running_with_an_error_then_closes() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let other = TerminalId::mint(2, [8; 16]);
+            let mut unknown = served.open(other.as_str(), quiet());
+            let mut unnamed = served.open("not-a-terminal", quiet());
+            let unread = Served::new(|_| Err("the store has closed".to_owned()));
+            let mut unreadable = unread.open(terminal().as_str(), quiet());
+            let mut refusals = vec![];
+            for client in [&mut unknown, &mut unnamed, &mut unreadable] {
+                client.say(&hello(BUILD, "observe"));
+                refusals.push(client.until_closed().await);
+            }
+            assert_eq!(
+                refusals,
+                [
+                    (
+                        vec![error(&format!("no running terminal {other}"))],
+                        Heard::Closed(None)
+                    ),
+                    (
+                        vec![error("no running terminal not-a-terminal")],
+                        Heard::Closed(None)
+                    ),
+                    (
+                        vec![error("attach failed: the store has closed")],
+                        Heard::Closed(None)
+                    ),
+                ]
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn refuses_an_unreadable_frame_with_an_error_then_closes() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            client.say(
+                r#"{"type":"hello","protocolId":"this-build","mode":"observe","cols":1,"rows":24}"#,
+            );
+            assert_eq!(
+                client.until_closed().await,
+                (vec![error("unreadable frame")], Heard::Closed(None))
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_view_once_its_terminal_has_gone_after_sending_what_it_was_given() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            client.attached("observe").await;
+            served.fake.vanish();
+            let (frames, heard) = client.until_closed().await;
+            let gone = StreamServerFrame::Ended {
+                reason: bazhen_protocol::stream::EndedReason::Disconnected,
+            };
+            assert_eq!((frames.last(), heard), (Some(&gone), Heard::Closed(None)));
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn types_binary_frames_only_into_the_terminal_and_resizes_it_as_its_driver_asks() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            client.attached("interactive").await;
+            client.say(r#"{"type":"engage"}"#);
+            let epoch = client
+                .until(|frame| match frame {
+                    StreamServerFrame::Lease {
+                        driver: true,
+                        epoch,
+                        ..
+                    } => Some(epoch),
+                    _ => None,
+                })
+                .await
+                .unwrap_or_else(|heard| panic!("never made the driver: {heard:?}"));
+            client.say(&format!(r#"{{"type":"epoch","epoch":{epoch}}}"#));
+            client.send(Message::Binary(Bytes::from_static(b"ls\r")));
+            client.say(r#"{"type":"resize","cols":100,"rows":30}"#);
+            let resizes = once(|| served.fake.resizes(), |resizes| !resizes.is_empty()).await;
+            assert_eq!(
+                (served.fake.written(), resizes),
+                (vec!["ls\r".to_owned()], vec![size(100, 30)])
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_the_terminal_once_the_client_closes() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), quiet());
+            let attachment = client.attached("observe").await;
+            client.send(Message::Close(None));
+            assert_eq!(
+                (served.ended().await, served.ends()),
+                (true, ended(&attachment, "client_closed"))
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_the_terminal_timed_out_once_the_client_stops_answering_its_pings() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let mut client = served.open(terminal().as_str(), how(Duration::from_millis(30)));
+            let attachment = client.attached("observe").await;
+            assert_eq!(
+                (served.ended().await, served.ends()),
+                (true, ended(&attachment, "timed_out"))
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_revoked_device_s_view_and_leaves_the_terminal() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let holds = crate::devices::Holds::default();
+            let stop = CancellationToken::new();
+            let hold = holds.hold("dev_1", &stop, true);
+            let mut client = served.open(
+                terminal().as_str(),
+                How {
+                    device: Some(hold.token().clone()),
+                    device_name: Some("phone".to_owned()),
+                    ..quiet()
+                },
+            );
+            let attachment = client.attached("observe").await;
+            holds.revoke("dev_1");
+            let (_, heard) = client.until_closed().await;
+            assert_eq!(heard.code(), Some(close_code::POLICY), "{heard:?}");
+            assert_eq!(
+                (served.ended().await, served.ends()),
+                (true, ended(&attachment, "client_closed"))
+            );
+        });
     }
 
     // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
@@ -741,8 +1101,11 @@ mod tests {
         };
         ws.close(None).unwrap();
         while ws.read().is_ok() {}
-        rt.block_on(served.ended());
+        let all_ended = rt.block_on(served.ended());
         stop.now(crate::routes::Reason::Requested);
-        assert_eq!(served.ends(), ended(&attachment_id, "client_closed"));
+        assert_eq!(
+            (all_ended, served.ends()),
+            (true, ended(&attachment_id, "client_closed"))
+        );
     }
 }
