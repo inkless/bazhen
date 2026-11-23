@@ -1,7 +1,8 @@
 //! Waiting a bound for a child the test started. A thread that reaps the child while the bound
 //! runs out frees its pid for another process, and a signal sent at the bound then reaches that
 //! one. So the wait here only watches: the child stays unreaped until its owner reaps it, after
-//! any signal.
+//! any signal. That holds only while the kernel keeps exited children, so neither wait starts
+//! while SIGCHLD is ignored or set with `SA_NOCLDWAIT`.
 
 use std::io;
 use std::process::{Child, ExitStatus};
@@ -11,6 +12,24 @@ use std::time::Duration;
 
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, waitid};
 
+/// Why a child can't be waited for a bound here: the kernel reaps every child itself as it exits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Refusing to wait for a child: SIGCHLD is ignored or set with SA_NOCLDWAIT, so the kernel \
+     reaps each child as it exits, and by the bound its pid may be another process's. Run the \
+     tests from a process that leaves SIGCHLD at its default"
+)]
+pub struct ChildrenNotKept;
+
+/// Nothing, while the kernel keeps exited children until they are waited for.
+fn require_children_kept() -> io::Result<()> {
+    if bazhen_pid::children_kept()? {
+        Ok(())
+    } else {
+        Err(io::Error::other(ChildrenNotKept))
+    }
+}
+
 /// Whether `child` ended within `bound`. It is left unreaped, so until it is reaped through
 /// `child` its pid is still its own, and a signal sent to it reaches it alone. Pass a child not
 /// yet waited for: once reaped, as `Child::try_wait` or `Child::wait` reap it, its pid may be
@@ -19,8 +38,9 @@ use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, waitid};
 ///
 /// # Errors
 ///
-/// When the child can't be waited for.
+/// When the kernel reaps children itself (`ChildrenNotKept`), or the child can't be waited for.
 pub fn ended_within(child: &Child, bound: Duration) -> io::Result<bool> {
+    require_children_kept()?;
     let pid = Pid::from_child(child);
     let (tell, ended) = mpsc::channel();
     // Past the bound it is left waiting, and returns once the child ends.
@@ -57,8 +77,10 @@ fn watch(pid: Pid) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// When the child can't be waited for, or the kill is refused (`crate::Tester::check`).
+/// When the kernel reaps children itself (`ChildrenNotKept`), before anything is waited for or
+/// sent, or the child can't be waited for, or the kill is refused (`crate::Tester::check`).
 pub fn end_within(child: &mut Child, bound: Duration) -> io::Result<Option<ExitStatus>> {
+    require_children_kept()?;
     if let Some(status) = child.try_wait()? {
         return Ok(Some(status));
     }

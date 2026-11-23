@@ -1,11 +1,15 @@
 //! `ended_within` and `end_within`: a child waited for is left unreaped until its owner reaps
-//! it, so a signal sent at the bound reaches only that child.
+//! it, so a signal sent at the bound reaches only that child. While the kernel reaps children
+//! itself, neither waits at all.
 
 use std::os::unix::process::ExitStatusExt as _;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use bazhen_test_signal::{Signal, end_within, ended_within};
+use bazhen_test_signal::{
+    ChildrenNotKept, Signal, end_within, ended_within, in_sigchld_ignored_run,
+    rerun_with_sigchld_ignored,
+};
 use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
 
 const BOUND: Duration = Duration::from_secs(10);
@@ -21,6 +25,30 @@ fn exiting_with(code: u8) -> std::io::Result<Child> {
 
 fn sleeping() -> std::io::Result<Child> {
     Command::new("sleep").arg("30").stdin(Stdio::null()).spawn()
+}
+
+/// Outlasts `SHORT`, and ends by itself: with SIGCHLD ignored, the kernel reaps it then, and no
+/// test may signal it.
+fn outlasting_short() -> std::io::Result<Child> {
+    Command::new("sleep").arg("2").stdin(Stdio::null()).spawn()
+}
+
+/// Whether `waited` is the refusal to wait while the kernel reaps children itself.
+fn refused<T>(waited: &std::io::Result<T>) -> bool {
+    let Err(error) = waited else {
+        return false;
+    };
+    let Some(inner) = error.get_ref() else {
+        return false;
+    };
+    inner.is::<ChildrenNotKept>()
+}
+
+/// Waits for `child` to end, which the kernel reaps itself while SIGCHLD is ignored, so the
+/// wait finds no child left: what shows the kernel did.
+fn reaped_by_the_kernel(child: &mut Child) -> bool {
+    let waited = child.wait().map_err(|e| e.raw_os_error());
+    waited == Err(Some(rustix::io::Errno::CHILD.raw_os_error()))
 }
 
 /// Whether `child` has ended and is still there to reap.
@@ -83,4 +111,46 @@ fn kills_and_reaps_a_child_still_running_at_the_bound() {
         reaped.and_then(|status| status.signal()),
         Some(Signal::KILL.as_raw())
     );
+}
+
+/// SIGCHLD ignored, the kernel would reap the child as it ends, and its pid could be another
+/// process's by the bound. The test runs itself again under a parent that ignored it.
+#[test]
+fn refuses_to_watch_a_child_while_sigchld_is_ignored() {
+    if !in_sigchld_ignored_run() {
+        assert!(bazhen_pid::children_kept().unwrap());
+        rerun_with_sigchld_ignored("refuses_to_watch_a_child_while_sigchld_is_ignored", false)
+            .unwrap();
+        return;
+    }
+    assert!(
+        !bazhen_pid::children_kept().unwrap(),
+        "the run left SIGCHLD kept"
+    );
+    let mut child = outlasting_short().unwrap();
+    let waited = ended_within(&child, SHORT);
+    assert!(refused(&waited), "{waited:?}");
+    assert!(reaped_by_the_kernel(&mut child));
+}
+
+/// Refused before the child is waited for or sent anything, as a KILL at the bound could reach
+/// another process.
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn refuses_to_end_a_child_while_sigchld_is_ignored() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    if !in_sigchld_ignored_run() {
+        assert!(bazhen_pid::children_kept().unwrap());
+        rerun_with_sigchld_ignored("refuses_to_end_a_child_while_sigchld_is_ignored", true)
+            .unwrap();
+        return;
+    }
+    assert!(
+        !bazhen_pid::children_kept().unwrap(),
+        "the run left SIGCHLD kept"
+    );
+    let mut child = outlasting_short().unwrap();
+    let ended = end_within(&mut child, SHORT);
+    assert!(refused(&ended), "{ended:?}");
+    assert!(reaped_by_the_kernel(&mut child));
 }

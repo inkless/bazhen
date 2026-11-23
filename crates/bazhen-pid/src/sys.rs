@@ -6,13 +6,15 @@
               socket_peercred builds one from the 0 the kernel answers for a peer outside it, and \
               std's peer_cred is unstable; and on macOS getpeereid and getsockopt's \
               LOCAL_PEERPID, the calls that name a socket peer's user and process, which rustix \
-              doesn't cover"
+              doesn't cover; and libc's sigaction, the one call that sets SIGCHLD's disposition \
+              and reads its SA_NOCLDWAIT flag, which rustix covers neither of"
 )]
 
 //! The kernel's answers, as the plain integers it gives them.
 
 use std::io;
 use std::os::fd::{AsRawFd as _, BorrowedFd};
+use std::ptr;
 
 use rustix::process::{Pid, RawPid};
 
@@ -139,4 +141,108 @@ pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<RawPid> {
         )));
     }
     Ok(pid)
+}
+
+/// SIGCHLD's action, as the kernel gave it back. Only an action read from the kernel can be set
+/// again, and the only changes it takes are a default handler and no `SA_NOCLDWAIT`, so a handler it
+/// names is one that was already valid to set, with the flags it was set with.
+#[derive(Clone, Copy)]
+pub(crate) struct SigchldAction(libc::sigaction);
+
+impl SigchldAction {
+    pub(crate) fn ignored(&self) -> bool {
+        self.0.sa_sigaction == libc::SIG_IGN
+    }
+
+    pub(crate) fn no_child_wait(&self) -> bool {
+        self.0.sa_flags & libc::SA_NOCLDWAIT != 0
+    }
+
+    /// This action, with `SIG_DFL` for its handler.
+    pub(crate) fn defaulted(mut self) -> Self {
+        self.0.sa_sigaction = libc::SIG_DFL;
+        self
+    }
+
+    /// This action, without `SA_NOCLDWAIT`.
+    pub(crate) fn without_no_child_wait(mut self) -> Self {
+        self.0.sa_flags &= !libc::SA_NOCLDWAIT;
+        self
+    }
+
+    /// Whether its handler is `handle`, the one `set_sigchld_for_test` sets for `Nothing`.
+    #[cfg(test)]
+    pub(crate) fn handled(&self) -> bool {
+        self.0.sa_sigaction == nothing()
+    }
+}
+
+/// What SIGCHLD does now.
+pub(crate) fn sigchld() -> io::Result<SigchldAction> {
+    let mut current = blank();
+    // SAFETY: a null new action changes nothing; `current` is valid for the write of the old one.
+    let read = unsafe { libc::sigaction(libc::SIGCHLD, ptr::null(), &raw mut current) };
+    if read != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(SigchldAction(current))
+}
+
+/// Sets SIGCHLD's action to `action`.
+pub(crate) fn set_sigchld(action: SigchldAction) -> io::Result<()> {
+    // SAFETY: `action` is one the kernel gave back, perhaps with `SIG_DFL` for its handler and
+    // without `SA_NOCLDWAIT`, so a handler it names is the one already set, and was valid to set.
+    let set = unsafe { libc::sigaction(libc::SIGCHLD, &raw const action.0, ptr::null_mut()) };
+    if set != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// The handlers a test may give SIGCHLD.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TestHandler {
+    Default,
+    Ignore,
+    /// `handle`, which does nothing.
+    Nothing,
+}
+
+/// Sets SIGCHLD to `handler`, with `SA_NOCLDWAIT` when `no_child_wait`, for a test, which nextest
+/// runs in a process of its own.
+#[cfg(test)]
+pub(crate) fn set_sigchld_for_test(handler: TestHandler, no_child_wait: bool) -> io::Result<()> {
+    let mut action = blank();
+    action.sa_sigaction = match handler {
+        TestHandler::Default => libc::SIG_DFL,
+        TestHandler::Ignore => libc::SIG_IGN,
+        TestHandler::Nothing => nothing(),
+    };
+    if no_child_wait {
+        action.sa_flags = libc::SA_NOCLDWAIT;
+    }
+    // SAFETY: `action` names `SIG_DFL`, `SIG_IGN` or `handle`, which does nothing and so is safe
+    // to run at any point, with no flag but `SA_NOCLDWAIT`; a null old action asks for nothing back.
+    let set = unsafe { libc::sigaction(libc::SIGCHLD, &raw const action, ptr::null_mut()) };
+    if set != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn nothing() -> libc::sighandler_t {
+    handle as extern "C" fn(libc::c_int) as libc::sighandler_t
+}
+
+/// A handler that does nothing, which is safe to run whenever a signal comes.
+#[cfg(test)]
+extern "C" fn handle(_: libc::c_int) {}
+
+/// A `sigaction` of `SIG_DFL`, no flags and an empty mask.
+fn blank() -> libc::sigaction {
+    // SAFETY: a `sigaction` is integers, a signal set and, on Linux, an optional function pointer,
+    // for each of which all zeros is valid: `SIG_DFL`, no flags, an empty set and no restorer.
+    unsafe { std::mem::zeroed() }
 }

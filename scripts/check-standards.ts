@@ -471,10 +471,6 @@ const UNSAFE_MODULES: Record<string, string> = {
     "Command::pre_exec, to make the detached daemon a session leader between fork and exec, as " +
     "Node's detached does, so no signal to the starting terminal reaches it; std's process_group " +
     "would leave it a group leader, which can't then call setsid",
-  "crates/bazhen-host-guard/src/sigchld.rs":
-    "libc's sigaction, the one call that gives SIGCHLD its default disposition with no " +
-    "SA_NOCLDWAIT, so the kernel keeps a daemon's exited children for it to wait for, and reads " +
-    "back whether it does; rustix covers neither",
   "crates/bazhen-holder/src/linux.rs":
     "a raw pidfd_send_signal syscall, the one way to send signal 0, which sends nothing, through " +
     "a pidfd, so the holder learns at start whether it may send through one; rustix's takes " +
@@ -497,7 +493,9 @@ const UNSAFE_MODULES: Record<string, string> = {
     "libc's getsockopt(SO_PEERCRED) on Linux, since rustix's socket_peercred builds one from the " +
     "0 the kernel answers for a peer outside it, and std's peer_cred is unstable; and on macOS " +
     "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process, " +
-    "which rustix doesn't cover",
+    "which rustix doesn't cover; and libc's sigaction, the one call that gives SIGCHLD its " +
+    "default disposition with no SA_NOCLDWAIT, so the kernel keeps a daemon's exited children " +
+    "for it to wait for, and reads back whether it does; rustix covers neither",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */

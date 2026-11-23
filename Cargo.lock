@@ -317,6 +317,7 @@ dependencies = [
 name = "bazhen-test-signal"
 version = "0.1.0"
 dependencies = [
+ "bazhen-pid",
  "rustix",
  "thiserror",
 ]

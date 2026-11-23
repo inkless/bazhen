@@ -200,8 +200,7 @@ mod tests {
     use tokio::process::Command;
 
     use super::{Ended, OUTPUT_MAX, OwnGroup, run_bounded, run_kept};
-    use crate::sigchld::{Careless, make_careless};
-    use crate::{Error, Target, Unsafe, keep_exited_children};
+    use crate::{Error, Target, Unsafe, children_kept, keep_exited_children};
 
     fn block_on<F: Future>(future: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
@@ -357,13 +356,22 @@ mod tests {
 
     /// Started by a parent that ignored SIGCHLD, as a daemon can be, the kernel would reap the
     /// leader itself; given its default first, the leader is held, and its group still reached.
+    /// The test runs itself again under such a parent.
     /// On macOS tokio's first spawn sets a SIGCHLD handler of its own, which holds the leader as
     /// well, so only Linux's run shows the default is what holds it.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn kills_a_member_after_its_leader_exits_once_an_ignored_sigchld_is_given_its_default() {
         bazhen_test_signal::require_sandbox().unwrap();
-        make_careless(Careless::Ignored).unwrap();
+        if !bazhen_test_signal::in_sigchld_ignored_run() {
+            bazhen_test_signal::rerun_with_sigchld_ignored(
+                "group::tests::kills_a_member_after_its_leader_exits_once_an_ignored_sigchld_is_given_its_default",
+                true,
+            )
+            .unwrap();
+            return;
+        }
+        assert!(!children_kept().unwrap(), "the run left SIGCHLD kept");
         keep_exited_children().unwrap();
         let file = pid_file("kept");
         let script = format!("sleep 30 & echo $! > '{}'", file.display());
@@ -376,13 +384,21 @@ mod tests {
     /// number may be another's, is refused. The member ends by itself soon after. Linux's alone:
     /// tokio waits on a child there through a pidfd, and leaves SIGCHLD ignored, where on macOS
     /// its first spawn sets a handler of its own, with no `SA_NOCLDWAIT`, and the kernel then
-    /// keeps the leader.
+    /// keeps the leader. The test runs itself again under a parent that ignored SIGCHLD.
     #[test]
     #[cfg(target_os = "linux")]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn refuses_the_group_of_a_leader_the_kernel_reaped_as_sigchld_was_ignored() {
         bazhen_test_signal::require_sandbox().unwrap();
-        make_careless(Careless::Ignored).unwrap();
+        if !bazhen_test_signal::in_sigchld_ignored_run() {
+            bazhen_test_signal::rerun_with_sigchld_ignored(
+                "group::tests::refuses_the_group_of_a_leader_the_kernel_reaped_as_sigchld_was_ignored",
+                true,
+            )
+            .unwrap();
+            return;
+        }
+        assert!(!children_kept().unwrap(), "the run left SIGCHLD kept");
         let run = block_on(run_bounded(sh("sleep 3 &"), Duration::from_secs(1)));
         assert!(
             matches!(

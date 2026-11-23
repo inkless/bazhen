@@ -3,13 +3,19 @@
 //! in the caller's PID namespace, as one outside a container the caller runs in has; rustix's
 //! `getsid`, `getpgid`, `getpgrp` and `socket_peercred` build their non-zero `Pid` from that 0
 //! unchecked, which is undefined behaviour, so these read the kernel through libc instead.
+//!
+//! And whether a child's pid stays its own until it is waited for: SIGCHLD's disposition
+//! (`children_kept`, `keep_exited_children`).
 
 use std::io;
 use std::os::fd::BorrowedFd;
 
 use rustix::process::{Pid, RawPid};
 
+mod sigchld;
 mod sys;
+
+pub use sigchld::{children_kept, keep_exited_children};
 
 /// `raw`, as the kernel answered it for `what`, when it is a pid this process can name.
 ///

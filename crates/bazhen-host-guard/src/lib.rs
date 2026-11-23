@@ -16,15 +16,14 @@ mod group;
 pub mod holder;
 pub mod ptys;
 pub mod scope;
-mod sigchld;
 
 use std::fmt;
 
 use rustix::io::Errno;
 use rustix::process::{Pid, RawPid, Signal};
 
+pub use bazhen_pid::{children_kept, keep_exited_children};
 pub use group::{Ended, run_bounded};
-pub use sigchld::{children_kept, keep_exited_children};
 
 /// What a signal was meant for: the process group a leader leads, or one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,11 +185,7 @@ mod tests {
 
     use rustix::io::Errno;
 
-    use super::sigchld::{Careless, handled, make_careless};
-    use super::{
-        Error, Own, Target, Unsafe, alive, children_kept, floor, is_alive, keep_exited_children,
-        send,
-    };
+    use super::{Error, Own, Target, Unsafe, alive, floor, is_alive, send};
 
     fn pid(raw: i32) -> Pid {
         Pid::from_raw(raw).unwrap()
@@ -302,23 +297,6 @@ mod tests {
         }
     }
 
-    /// A handler already set, as tokio's is once a runtime waits on a child, is what its
-    /// `Child::wait` hears an exit by: replaced, every wait would hang.
-    #[test]
-    fn keeps_a_handler_already_set_for_sigchld() {
-        make_careless(Careless::Handled).unwrap();
-        keep_exited_children().unwrap();
-        assert_eq!((handled().unwrap(), children_kept().unwrap()), (true, true));
-    }
-
-    #[test]
-    fn keeps_a_handler_already_set_for_sigchld_but_drops_its_no_child_wait() {
-        make_careless(Careless::HandledNoChildWait).unwrap();
-        assert!(!children_kept().unwrap());
-        keep_exited_children().unwrap();
-        assert_eq!((handled().unwrap(), children_kept().unwrap()), (true, true));
-    }
-
     /// Signal 0 sends nothing, and the floor refuses these before it would.
     #[test]
     fn asks_nothing_of_init_or_of_this_process() {
@@ -353,23 +331,6 @@ mod tests {
     fn names_a_group_and_a_process_apart() {
         assert_eq!(Target::Group(pid(42)).to_string(), "group 42");
         assert_eq!(Target::Process(pid(42)).to_string(), "process 42");
-    }
-
-    /// SIGCHLD's disposition is this test process's own, which nextest runs alone.
-    #[test]
-    fn keeps_exited_children_once_given_its_default_after_a_parent_ignored_sigchld() {
-        make_careless(Careless::Ignored).unwrap();
-        assert!(!children_kept().unwrap());
-        keep_exited_children().unwrap();
-        assert!(children_kept().unwrap());
-    }
-
-    #[test]
-    fn keeps_exited_children_once_given_its_default_after_a_parent_set_no_child_wait() {
-        make_careless(Careless::NoChildWait).unwrap();
-        assert!(!children_kept().unwrap());
-        keep_exited_children().unwrap();
-        assert!(children_kept().unwrap());
     }
 
     /// Signal 0 sends nothing, but a child exited and unreaped still holds its pid, so it is
