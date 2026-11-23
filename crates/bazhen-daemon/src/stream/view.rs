@@ -199,11 +199,12 @@ mod tests {
     use super::*;
     use crate::testing::runtime;
 
-    /// A socket whose sends of output finish only once the test lets each go.
+    /// A socket whose sends of output, and of frames, finish only once the test lets each go.
     #[derive(Default)]
     struct Socket {
         sent: Arc<Mutex<Vec<String>>>,
         let_go: Option<Arc<tokio::sync::Semaphore>>,
+        lets_frames_go: Option<Arc<tokio::sync::Semaphore>>,
     }
 
     impl ViewSocket for Socket {
@@ -220,12 +221,12 @@ mod tests {
             Ok(())
         }
 
-        fn frame(
-            &mut self,
-            frame: &StreamServerFrame,
-        ) -> impl Future<Output = Result<(), ()>> + Send {
+        async fn frame(&mut self, frame: &StreamServerFrame) -> Result<(), ()> {
+            if let Some(gate) = &self.lets_frames_go {
+                gate.acquire().await.unwrap().forget();
+            }
             self.sent.lock().unwrap().push(format!("{frame:?}"));
-            std::future::ready(Ok(()))
+            Ok(())
         }
     }
 
@@ -258,6 +259,27 @@ mod tests {
             gate.add_permits(1);
             assert!(as_far_as_it_goes(writing.as_mut()).await.is_none());
             assert_eq!((while_sending, outbox.unsent()), (4, 0));
+        });
+    }
+
+    #[test]
+    fn counts_a_frame_unsent_until_its_send_has_finished() {
+        runtime().block_on(async {
+            let (outbox, inbox) = queue(MOST_UNSENT);
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let mut socket = Socket {
+                lets_frames_go: Some(Arc::clone(&gate)),
+                ..Socket::default()
+            };
+            let frame = StreamServerFrame::SnapshotEnd;
+            let encoded = serde_json::to_string(&frame).unwrap().len();
+            outbox.notify(frame);
+            let mut writing = pin!(write_to(inbox, &mut socket));
+            assert!(as_far_as_it_goes(writing.as_mut()).await.is_none());
+            let while_sending = outbox.unsent();
+            gate.add_permits(1);
+            assert!(as_far_as_it_goes(writing.as_mut()).await.is_none());
+            assert_eq!((while_sending, outbox.unsent()), (encoded, 0));
         });
     }
 
