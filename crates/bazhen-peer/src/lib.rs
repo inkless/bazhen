@@ -18,12 +18,14 @@
 //! `newgrp` or `sg` shell does, is said to be withheld rather than refused: that says nothing of
 //! Codex, and the daemon takes the thread the call presents instead.
 
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
-use std::iter;
 use std::os::fd::BorrowedFd;
 use std::path::Path;
+use std::thread;
+use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 use bazhen_holder::process::Credentials;
@@ -32,6 +34,15 @@ use rustix::process::{Pid, geteuid};
 
 /// Past any real process tree's depth: a walk this long is a cycle, and is refused.
 pub const MAX_ANCESTORS: usize = 256;
+
+/// How many times `line_of` reads a caller's line before it refuses one that keeps changing.
+pub const LINE_TRIES: usize = 8;
+
+/// How long `line_of` waits after its first try, doubled after each one but the last: 127 ms in
+/// all, over `LINE_TRIES`. An exiting process has no arguments to show from when it gives up its
+/// memory until it hands its children on, which a loaded machine can stretch past a few tries
+/// made back to back.
+pub const FIRST_PAUSE: Duration = Duration::from_millis(1);
 
 /// The process at the other end of a connection, the session it is in (`None` for one led from
 /// outside the daemon's PID namespace, which no terminal the daemon runs can lead), what its line
@@ -102,9 +113,7 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     }
     let pid = bazhen_pid::peer_pid(socket)?;
     let started = started(pid, accepted)?;
-    let ancestors = ancestors(pid, process::parent)?;
-    let line: Vec<Pid> = iter::once(pid).chain(ancestors.iter().copied()).collect();
-    let codex = codex_of(&line, own_args, own_environ)?;
+    let (ancestors, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
     let peer = Peer {
         pid,
         session: bazhen_pid::session(Some(pid))?,
@@ -128,6 +137,14 @@ fn started(pid: Pid, accepted: u64) -> Result<u64, Refused> {
     Ok(started)
 }
 
+/// What one read of a process says of its place on a line: its parent, and when it started, in the
+/// finest unit the OS keeps, which a process that took its pid since would show another of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Step {
+    pub parent: Option<Pid>,
+    pub started: u64,
+}
+
 /// `pid`'s ancestors as `parent` names them, nearest first, through init or a process with no
 /// parent.
 ///
@@ -138,19 +155,63 @@ pub fn ancestors(
     pid: Pid,
     parent: impl Fn(Pid) -> io::Result<Option<Pid>>,
 ) -> Result<Vec<Pid>, Refused> {
-    let mut found = Vec::new();
+    let walked = walk(pid, |at| {
+        Ok(Step {
+            parent: parent(at)?,
+            started: 0,
+        })
+    })?;
+    Ok(walked.into_iter().skip(1).map(|(at, _)| at).collect())
+}
+
+/// `pid` and its ancestors as `step` reads each, nearest first, through init or a process with no
+/// parent, with when each started; init's, which no process can take over, isn't read.
+///
+/// # Errors
+///
+/// As `ancestors`.
+fn walk(pid: Pid, step: impl Fn(Pid) -> io::Result<Step>) -> Result<Vec<(Pid, u64)>, Refused> {
+    let mut walked = Vec::new();
     let mut at = pid;
     while !at.is_init() {
-        let Some(next) = parent(at)? else {
-            return Ok(found);
+        let Step { parent, started } = step(at)?;
+        walked.push((at, started));
+        let Some(next) = parent else {
+            return Ok(walked);
         };
-        if found.len() == MAX_ANCESTORS {
+        if walked.len() > MAX_ANCESTORS {
             return Err(Refused::Endless);
         }
-        found.push(next);
         at = next;
     }
-    Ok(found)
+    walked.push((at, 0));
+    Ok(walked)
+}
+
+/// `pid`'s parent and start in clock ticks since boot, from one read of its `stat`. A zombie has
+/// already handed its children on, so it is on no line.
+#[cfg(target_os = "linux")]
+fn step(pid: Pid) -> io::Result<Step> {
+    let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid()))?;
+    if start_time::has_exited(&stat) {
+        return Err(io::Error::other(format!("process {pid:?} has exited")));
+    }
+    let unread = |what: &str| io::Error::other(format!("process {pid:?} names no {what}"));
+    let parent = start_time::parent_field(&stat).ok_or_else(|| unread("parent"))?;
+    let started = start_time::start_ticks(&stat).ok_or_else(|| unread("start"))?;
+    Ok(Step {
+        parent: Pid::from_raw(parent),
+        started,
+    })
+}
+
+/// `pid`'s parent and its start in epoch seconds, the finest that macOS's readers here keep.
+#[cfg(target_os = "macos")]
+fn step(pid: Pid) -> io::Result<Step> {
+    Ok(Step {
+        parent: process::parent(pid)?,
+        started: u64::from(start_time::of(pid).map_err(io::Error::other)?),
+    })
 }
 
 /// Whether `args` are a Codex app-server's: `codex`, by the file name of `argv[0]`, with
@@ -233,6 +294,75 @@ pub fn codex_of(
     })
 }
 
+/// `pid`'s ancestors and what its line says of Codex, as `step`, `args` and `environ` read them,
+/// from a line that held still while it was read: walked, each process on it read, then walked
+/// again, and answered only when both walks name the same processes, each by its pid and its
+/// start, and every read succeeded.
+///
+/// A process that exits leaves the line: it shows no arguments from when it gives up its memory,
+/// and the kernel hands its children to another parent before it is a zombie, after which its pid
+/// says nothing of the caller. So a read that fails, or a second walk that differs, is tried again
+/// from the caller, `pause`d for `FIRST_PAUSE`, doubled after each try, up to `LINE_TRIES` times,
+/// and never pieced together from two walks: a process that took a pid meanwhile is on neither
+/// walk of a try that is answered. What is answered is the line a caller connecting a moment later
+/// would be read with. The caller is the one process that has to stay: once one read of it has said when
+/// it started, a read of it on any walk after, of any try, that says another time is of a process
+/// that took the pid its caller gave up.
+///
+/// # Errors
+///
+/// `Unreadable` when the caller's pid changed hands, or no try held still: then the last try's
+/// refusal, or that its walks differed.
+pub fn line_of(
+    pid: Pid,
+    step: impl Fn(Pid) -> io::Result<Step>,
+    args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
+    environ: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
+    pause: impl Fn(Duration),
+) -> Result<(Vec<Pid>, Codex), Refused> {
+    let caller = Cell::new(None);
+    let replaced = Cell::new(false);
+    let step = |at: Pid| {
+        let read = step(at)?;
+        if at == pid {
+            let pinned = caller.get().unwrap_or(read.started);
+            caller.set(Some(pinned));
+            replaced.set(replaced.get() || pinned != read.started);
+        }
+        Ok(read)
+    };
+    let mut refused = Refused::Endless;
+    let mut wait = FIRST_PAUSE;
+    for tried in 1..=LINE_TRIES {
+        let read = walk(pid, step).and_then(|walked| {
+            let line: Vec<Pid> = walked.iter().map(|&(at, _)| at).collect();
+            let codex = codex_of(&line, &args, &environ)?;
+            Ok((walked, codex))
+        });
+        let read = read.and_then(|read| Ok((walk(pid, step)?, read)));
+        if replaced.get() {
+            return Err(Refused::Unreadable(io::Error::other(
+                "the caller's pid was taken by another process while its line was read",
+            )));
+        }
+        refused = match read {
+            Ok((again, (walked, codex))) if again == walked => {
+                let ancestors = walked.into_iter().skip(1).map(|(at, _)| at).collect();
+                return Ok((ancestors, codex));
+            }
+            Ok(_) => Refused::Unreadable(io::Error::other(
+                "the caller's line changed while it was read",
+            )),
+            Err(refused) => refused,
+        };
+        if tried < LINE_TRIES {
+            pause(wait);
+            wait = wait.saturating_mul(2);
+        }
+    }
+    Err(refused)
+}
+
 /// Whether the kernel withholds a process's environment, its `environ` file `owner`'s, from a
 /// reader with credentials `ours` for the process's group alone. The kernel shows it only to a
 /// reader whose filesystem uid is the process's real, effective and saved uid, whose filesystem gid
@@ -311,9 +441,11 @@ fn own_args(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::os::fd::AsFd as _;
     use std::os::unix::net::UnixStream;
+    use std::rc::Rc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use rustix::process::{getpid, getppid, getsid};
@@ -842,5 +974,230 @@ mod tests {
     fn reads_this_process_s_own_arguments_as_its_user_s() {
         let ours: Vec<OsString> = std::env::args_os().collect();
         assert_eq!(own_args(getpid()).unwrap(), Some(ours));
+    }
+
+    const NO_CODEX: Codex = Codex {
+        server: None,
+        environment_withheld: false,
+    };
+
+    /// Arguments that read as a shell's for every pid but `pid`'s, which `then` answers, and
+    /// init's, another user's.
+    fn shells_but(
+        pid: i32,
+        then: impl Fn() -> io::Result<Option<Vec<OsString>>>,
+    ) -> impl Fn(Pid) -> io::Result<Option<Vec<OsString>>> {
+        move |p| match p.as_raw_pid() {
+            1 => Ok(None),
+            raw if raw == pid => then(),
+            _ => Ok(Some(os(&["sh"]))),
+        }
+    }
+
+    fn no_environment() -> impl Fn(Pid) -> io::Result<Option<Vec<OsString>>> {
+        |_| Ok(Some(Vec::new()))
+    }
+
+    /// A step to `parent`, of a process that started at `started`.
+    fn to(parent: i32, started: u64) -> Step {
+        Step {
+            parent: Pid::from_raw(parent),
+            started,
+        }
+    }
+
+    /// Each pause `line_of` asks for, which a test takes note of rather than waits out.
+    fn pauses() -> (Rc<RefCell<Vec<Duration>>>, impl Fn(Duration)) {
+        let taken = Rc::new(RefCell::new(Vec::new()));
+        let noted = Rc::clone(&taken);
+        (taken, move |pause| noted.borrow_mut().push(pause))
+    }
+
+    fn ms(each: &[u64]) -> Vec<Duration> {
+        each.iter().copied().map(Duration::from_millis).collect()
+    }
+
+    #[test]
+    fn reads_again_a_line_an_ancestor_left_while_its_arguments_were_read_and_answers_the_line_left()
+    {
+        let exited = Cell::new(false);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 if exited.get() => Ok(to(1, 5)),
+            50 => Ok(to(40, 5)),
+            40 if exited.get() => Err(io::Error::other("process 40 has exited")),
+            40 => Ok(to(30, 4)),
+            30 => Ok(to(1, 3)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = shells_but(40, || {
+            exited.set(true);
+            Ok(Some(Vec::new()))
+        });
+        let (taken, pause) = pauses();
+        let answer = line_of(pid(50), step, args, no_environment(), pause).unwrap();
+        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+        assert_eq!(*taken.borrow(), ms(&[1]));
+    }
+
+    #[test]
+    fn waits_out_an_ancestor_that_shows_no_arguments_while_it_exits_until_it_hands_the_caller_on() {
+        let reads = Cell::new(0);
+        let handed_on = || reads.get() >= 5;
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 if handed_on() => Ok(to(1, 5)),
+            50 => Ok(to(40, 5)),
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = shells_but(40, || {
+            reads.set(reads.get() + 1);
+            Ok(Some(Vec::new()))
+        });
+        let (taken, pause) = pauses();
+        let answer = line_of(pid(50), step, args, no_environment(), pause).unwrap();
+        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+        assert_eq!(*taken.borrow(), ms(&[1, 2, 4, 8, 16]));
+    }
+
+    #[test]
+    fn refuses_a_line_that_changes_each_time_it_is_read_after_tries_that_wait_127_ms_in_all() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                walks.set(walks.get() + 1);
+                Ok(to(if walks.get() % 2 == 1 { 40 } else { 41 }, 5))
+            }
+            40 | 41 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let (taken, pause) = pauses();
+        let refused = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            pause,
+        );
+        assert_eq!(
+            refused.map_err(|refused| refused.to_string()),
+            Err("a process on the caller's line can't be read: \
+                 the caller's line changed while it was read"
+                .to_owned())
+        );
+        assert_eq!(walks.get(), 2 * LINE_TRIES);
+        assert_eq!(*taken.borrow(), ms(&[1, 2, 4, 8, 16, 32, 64]));
+    }
+
+    #[test]
+    fn answers_no_line_pieced_from_an_ancestor_and_the_process_that_took_its_pid() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                walks.set(walks.get() + 1);
+                Ok(to(if walks.get() == 1 { 40 } else { 1 }, 5))
+            }
+            40 => Ok(to(99, 7)),
+            99 => Ok(to(1, 6)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = |p: Pid| match p.as_raw_pid() {
+            1 => Ok(None),
+            99 => Ok(Some(os(SERVER))),
+            _ => Ok(Some(os(&["sh"]))),
+        };
+        let answer = line_of(pid(50), step, args, no_environment(), |_| {}).unwrap();
+        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+    }
+
+    #[test]
+    fn answers_no_line_through_a_pid_another_process_took_in_place_between_the_walks() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => Ok(to(40, 5)),
+            40 => {
+                walks.set(walks.get() + 1);
+                Ok(to(1, if walks.get() == 1 { 3 } else { 4 }))
+            }
+            _ => Ok(to(0, 0)),
+        };
+        let args = |p: Pid| match p.as_raw_pid() {
+            1 => Ok(None),
+            40 if walks.get() == 1 => Ok(Some(os(SERVER))),
+            _ => Ok(Some(os(&["sh"]))),
+        };
+        let answer = line_of(pid(50), step, args, no_environment(), |_| {}).unwrap();
+        assert_eq!(answer, (vec![pid(40), pid(1)], NO_CODEX));
+    }
+
+    #[test]
+    fn refuses_a_caller_whose_pid_another_process_took_while_its_line_was_read() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                walks.set(walks.get() + 1);
+                Ok(to(1, if walks.get() == 1 { 5 } else { 6 }))
+            }
+            _ => Ok(to(0, 0)),
+        };
+        let refused = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            |_| {},
+        );
+        assert_eq!(
+            refused.map_err(|refused| refused.to_string()),
+            Err("a process on the caller's line can't be read: \
+                 the caller's pid was taken by another process while its line was read"
+                .to_owned())
+        );
+    }
+
+    #[test]
+    fn refuses_a_caller_whose_pid_another_process_took_after_a_try_that_failed() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                walks.set(walks.get() + 1);
+                Ok(if walks.get() == 1 {
+                    to(40, 5)
+                } else {
+                    to(1, 6)
+                })
+            }
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = shells_but(40, || Err(io::Error::other("gone")));
+        let refused = line_of(pid(50), step, args, no_environment(), |_| {});
+        assert_eq!(
+            refused.map_err(|refused| refused.to_string()),
+            Err("a process on the caller's line can't be read: \
+                 the caller's pid was taken by another process while its line was read"
+                .to_owned())
+        );
+    }
+
+    #[test]
+    fn refuses_a_line_that_holds_still_through_a_process_that_shows_no_arguments() {
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => Ok(to(40, 5)),
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let refused = line_of(
+            pid(50),
+            step,
+            shells_but(40, || Ok(Some(Vec::new()))),
+            no_environment(),
+            |_| {},
+        );
+        assert_eq!(
+            refused.map_err(|refused| refused.to_string()),
+            Err("a process on the caller's line can't be read: \
+                 process Pid(40) shows no arguments"
+                .to_owned())
+        );
     }
 }
