@@ -72,6 +72,34 @@ describe("typePaths", () => {
       { name: "Out", path: undefined },
     ]);
   });
+
+  it("skips an associated type's or a parameter's name before `=`, and reads the type after it", () => {
+    expect(
+      typePaths("Pin<Box<dyn Future<Output = Answer> + Send>>, Lend<A, Item<'a> =Frame>"),
+    ).toEqual([
+      { name: "Pin", path: ["Pin"] },
+      { name: "Box", path: ["Box"] },
+      { name: "Future", path: ["Future"] },
+      { name: "Answer", path: ["Answer"] },
+      { name: "Send", path: ["Send"] },
+      { name: "Lend", path: ["Lend"] },
+      { name: "A", path: ["A"] },
+      { name: "Frame", path: ["Frame"] },
+    ]);
+    expect(typePaths("<T = Vec<u8>>").map((p) => p.name)).toEqual(["Vec", "u8"]);
+  });
+
+  it("keeps a name followed by `==` or `=>`, or by `=` outside generic arguments", () => {
+    expect(typePaths("<A == B, C => D>; x: Output = y").map((p) => p.name)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "x",
+      "Output",
+      "y",
+    ]);
+  });
 });
 
 describe("ModuleTable.resolve", () => {

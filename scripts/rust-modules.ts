@@ -258,15 +258,22 @@ export function pathBefore(text: string, at: number, name: string): string[] | u
   }
 }
 
+// The name in generic arguments that an `=` binds: an associated type's (`Future<Output = T>`,
+// `Item<'a> = T`) or a parameter's with a default (`<T = U>`). It names no type; what follows does.
+const BOUND_NAME = /^\s*(?:<[^<>=]*>\s*)?=(?![=>])/;
+
 /**
- * Each path in `text` that ends at a name and isn't a keyword or a lifetime: `Vec<direct::Step>`
- * has `Vec` and `direct::Step`. `path` is `undefined` for one that can't be followed.
+ * Each path in `text` that ends at a name and isn't a keyword, a lifetime or a name `=` binds in
+ * generic arguments: `Vec<direct::Step>` has `Vec` and `direct::Step`, `Future<Output = T>` has
+ * `Future` and `T`. `path` is `undefined` for one that can't be followed.
  */
 export function typePaths(text: string): { name: string; path: string[] | undefined }[] {
   const out: { name: string; path: string[] | undefined }[] = [];
   for (const m of text.matchAll(/(?<!['\w#])[A-Za-z_]\w*/g)) {
     const name = m[0];
-    if (KEYWORDS.has(name) || /^\s*::/.test(text.slice(m.index + name.length))) continue;
+    const after = text.slice(m.index + name.length);
+    if (KEYWORDS.has(name) || /^\s*::/.test(after)) continue;
+    if (BOUND_NAME.test(after) && /[<,]\s*$/.test(text.slice(0, m.index))) continue;
     out.push({ name, path: pathBefore(text, m.index, name) });
   }
   return out;
