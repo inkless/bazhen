@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use crate::devices::{self, Holds, Standing, Stored};
 use crate::guard;
 use crate::pairing::{Attempt, Bucket, PairingCodes, random_bytes};
-use crate::routes::{Gate, Shared, fail, header, internal};
+use crate::routes::{Gate, Shared, fail, header, internal, refuse_upgrade};
 
 /// The longest code a request may carry, and name, as `PairRequest` bounds them.
 const CODE_MAX_UNITS: usize = 32;
@@ -154,7 +154,7 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
     }
     if required && verified.is_none() {
         if upgrade {
-            return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+            return refuse_upgrade(StatusCode::UNAUTHORIZED);
         }
         return fail(
             StatusCode::UNAUTHORIZED,
@@ -198,7 +198,7 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
 
 fn refused_origin(upgrade: bool, origin: &str) -> Response {
     if upgrade {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+        return refuse_upgrade(StatusCode::FORBIDDEN);
     }
     fail(StatusCode::FORBIDDEN, ErrorCode::OriginNotAllowed, origin)
 }
@@ -518,12 +518,14 @@ mod tests {
         }
     }
 
-    /// What a request was answered: its status, its `Set-Cookie` and `Retry-After`, and its body.
+    /// What a request was answered: its status, its `Set-Cookie`, `Retry-After` and `Connection`,
+    /// and its body.
     #[derive(Debug, PartialEq)]
     struct Answer {
         status: u16,
         cookie: Option<String>,
         retry_after: Option<String>,
+        connection: Option<String>,
         body: Value,
     }
 
@@ -551,7 +553,8 @@ mod tests {
                     .get(name)
                     .map(|v| v.to_str().unwrap().to_owned())
             };
-            let (cookie, retry_after) = (text("set-cookie"), text("retry-after"));
+            let (cookie, retry_after, connection) =
+                (text("set-cookie"), text("retry-after"), text("connection"));
             let status = response.status().as_u16();
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
                 .await
@@ -562,6 +565,7 @@ mod tests {
                 status,
                 cookie,
                 retry_after,
+                connection,
                 body,
             }
         })
@@ -811,6 +815,39 @@ mod tests {
                 over_a_store(false).get("/v1/health", &[]).status
             ),
             (403, 200, 200)
+        );
+    }
+
+    /// A paired device's upgrade that names no origin is told 403 alone, as the TypeScript daemon
+    /// refuses it; the same request that doesn't upgrade reads as it did, and a write that names
+    /// no origin is still told why.
+    #[test]
+    fn refuses_a_paired_upgrade_that_names_no_origin_with_403_alone() {
+        let daemon = over_a_store(true);
+        let (cookie, _) = daemon.paired();
+        let seen = |answer: Answer| (answer.status, answer.connection, answer.body);
+        let paired = [("cookie", cookie.as_str())];
+        assert_eq!(
+            [
+                seen(daemon.get("/v1/events", &[paired[0], ("upgrade", "websocket")])),
+                seen(daemon.get("/v1/events", &paired)),
+                seen(send(
+                    &daemon.http,
+                    "POST",
+                    "/v1/tasks",
+                    &[("host", HOST), paired[0]],
+                    Some(json!({"idempotencyKey": "t1", "title": "A task", "brief": "b"})),
+                )),
+            ],
+            [
+                (403, Some("close".to_owned()), json!("")),
+                (404, None, json!("404 Not Found")),
+                (
+                    403,
+                    None,
+                    json!({"error": "origin_not_allowed", "message": ""})
+                ),
+            ]
         );
     }
 

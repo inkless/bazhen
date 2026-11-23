@@ -150,7 +150,7 @@ pub(crate) fn app(bundle: &Bundle, state: &State) -> (Nullable<String>, Option<S
 /// The page at the request's path, from the bundle at `root`.
 pub(crate) async fn page(bundle: Arc<Bundle>, request: Request) -> Response {
     if !matches!(*request.method(), Method::GET | Method::HEAD) {
-        return crate::routes::not_found().await;
+        return crate::routes::not_found();
     }
     let path = request.uri().path().to_owned();
     match tokio::task::spawn_blocking(move || look(&bundle, &path)).await {
@@ -167,7 +167,7 @@ pub(crate) async fn page(bundle: Arc<Bundle>, request: Request) -> Response {
             )
                 .into_response()
         }
-        Ok(Page::Missing) => crate::routes::not_found().await,
+        Ok(Page::Missing) => crate::routes::not_found(),
         Ok(Page::NotBuilt) => (
             StatusCode::NOT_FOUND,
             HEADERS,
