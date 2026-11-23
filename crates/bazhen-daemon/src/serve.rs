@@ -31,6 +31,7 @@ use crate::shells::integration::{Integration, install_shell_integration};
 use crate::shells::{ShellError, Shells, ShellsDeps};
 use crate::terminals::Events;
 use crate::tokens;
+use crate::web::State;
 
 /// How the daemon serves: each listener's limits, how long its connections get to finish once
 /// a stop is asked for, and how often it reads its shells again.
@@ -338,7 +339,7 @@ async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToke
 
 /// The start-up lines on whom the daemon admits, whether they must pair, and what page it serves
 /// them.
-fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, bool)>) {
+fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
     if let Some(from) = startup.external_origins_from {
         tracing::info!(
             "bazhen: admitting external origins from {from}: {}",
@@ -355,15 +356,19 @@ fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, bool)>) {
             "bazhen: pairing not required on loopback (web.pairing = \"auto\", no external origins); a request forwarded from another machine must still pair"
         );
     }
-    if let Some((bundle, built)) = web {
-        if built {
+    match web {
+        Some((bundle, State::Served)) => {
             tracing::info!("bazhen: serving the web app from {}", bundle.display());
-        } else {
-            tracing::info!(
-                "bazhen: the web app isn't built ({}); `moon run :build` builds it, serving only the API until then",
-                bundle.display()
-            );
         }
+        Some((bundle, State::Unbuilt)) => tracing::info!(
+            "bazhen: the web app isn't built ({}); `moon run :build` builds it, serving only the API until then",
+            bundle.display()
+        ),
+        Some((bundle, State::Refused(why))) => tracing::warn!(
+            "bazhen: not serving the web app from {}: {why}; serving only the API until then",
+            bundle.display()
+        ),
+        None => {}
     }
 }
 
@@ -394,7 +399,7 @@ async fn listen(
         let bundle = doctor.bundle.clone();
         shared = shared
             .with_shells(Arc::clone(&running), doctor)
-            .with_web(&bundle);
+            .with_web(bundle);
         watching = Some((running, events));
     }
     let gate = Gate {
@@ -412,14 +417,14 @@ async fn listen(
     let web = match shared.web.clone() {
         Some(bundle) => {
             let read = Arc::clone(&bundle);
-            let built = tokio::task::spawn_blocking(move || crate::web::built(&read)).await;
-            Some((bundle, built.unwrap_or(false)))
+            let state = tokio::task::spawn_blocking(move || read.state()).await;
+            Some((bundle, state.unwrap_or(State::Unbuilt)))
         }
         None => None,
     };
     say_whom_it_serves(
         startup,
-        web.as_ref().map(|(bundle, built)| (&**bundle, *built)),
+        web.as_ref().map(|(bundle, state)| (bundle.dist(), state)),
     );
     tracing::info!(
         "bazhen daemon listening on {url} (data: {})",

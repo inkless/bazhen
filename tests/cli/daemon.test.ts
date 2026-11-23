@@ -384,6 +384,20 @@ describe("bazhen doctor", () => {
       ]);
     });
 
+    it("says why a build it found isn't served, in place of where it is", async () => {
+      const why =
+        "/tmp: other users may write it; the daemon serves only a build in a checkout of this user's that no other user can write";
+      expect(
+        await web({
+          externalOrigins: [],
+          from: null,
+          allowInsecureOrigins: false,
+          app: null,
+          appRefused: why,
+        }),
+      ).toEqual(["external origins: none (loopback only)", `web app: not served: ${why}`]);
+    });
+
     const lan = {
       url: "https://my-mac.local:7942",
       allow: ["192.168.1.0/24"],

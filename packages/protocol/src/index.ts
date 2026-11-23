@@ -123,6 +123,11 @@ export const DoctorResponse = z.object({
       /** The built web client the daemon serves, or null before `moon run :build`. Absent from an older daemon. */
       app: z.string().nullable().optional(),
       /**
+       * Why the web client built where the daemon looks isn't served: someone besides the
+       * daemon's user could change it. `app` is null then. Absent otherwise.
+       */
+      appRefused: z.string().optional(),
+      /**
        * The LAN listener under `web.listen = "lan"`, or null without one. `certificate` is null,
        * and `error` says why, when it isn't serving. No key material. Absent from an older daemon.
        */

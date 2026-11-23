@@ -13,6 +13,7 @@ use std::sync::Arc;
 use axum::extract::Request;
 use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use bazhen_fs_trust::{Refused, Untrusted, Writers, ancestry_refusal, untrusted};
 use bazhen_protocol::nullable::Nullable;
 
 /// What the page answers when there is no bundle to serve.
@@ -29,31 +30,130 @@ const HEADERS: [(&str, &str); 3] = [
 ];
 
 /// Where `moon run :build` leaves the web client: `apps/web/dist` in the checkout whose
-/// `target/<profile>` this binary runs from. A binary run from anywhere else names whatever is
-/// three directories up from it, where there is normally no build, so the page says to make one.
-pub(crate) fn bundle(exe: &Path) -> PathBuf {
-    exe.ancestors()
-        .nth(3)
-        .unwrap_or_else(|| Path::new("/"))
-        .join("apps/web/dist")
+/// `target/<profile>` this binary runs from, served only while no one but `uid` can change it.
+///
+/// Whoever else could write what the page serves would run their script on the daemon's own
+/// origin, where loopback may need no pairing to drive the API. So `dist` and all it holds must be
+/// `uid`'s and writable by no one else: the build leaves it so. Every directory from `dist` up to
+/// the checkout must be `uid`'s, and writable by no one outside its group. That trusts the group
+/// no further than the checkout already does: a member who can rename `apps/` aside and plant
+/// another can as well edit the source the daemon is built from. A binary run from anywhere
+/// else, as `/tmp/x/release/` or a `CARGO_TARGET_DIR` outside a checkout, names whatever is three
+/// directories up from it, and serves nothing another user could have put there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Bundle {
+    checkout: PathBuf,
+    dist: PathBuf,
+    uid: u32,
 }
 
-/// The bundle as doctor names it: its place once it's built, and null before.
-pub(crate) fn app(root: &Path) -> Nullable<String> {
-    if built(root) {
-        Nullable::Value(root.to_string_lossy().into_owned())
-    } else {
-        Nullable::Null
+/// What the bundle has to serve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum State {
+    Served,
+    Unbuilt,
+    /// There is a build, but someone besides the daemon's user could change it: why, and the fix.
+    Refused(String),
+}
+
+impl Bundle {
+    pub(crate) fn of(exe: &Path, uid: u32) -> Self {
+        let checkout = exe
+            .ancestors()
+            .nth(3)
+            .unwrap_or_else(|| Path::new("/"))
+            .to_path_buf();
+        Self {
+            dist: checkout.join("apps/web/dist"),
+            checkout,
+            uid,
+        }
+    }
+
+    pub(crate) fn dist(&self) -> &Path {
+        &self.dist
+    }
+
+    /// Whether it is built, and served. It blocks, reading the bundle.
+    pub(crate) fn state(&self) -> State {
+        if std::fs::symlink_metadata(&self.dist)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
+            return State::Unbuilt;
+        }
+        let refused = ancestry_refusal(&self.dist, &self.checkout, self.uid, Writers::Group)
+            .or_else(|| self.tree_refusal());
+        match refused {
+            Some(refused) => State::Refused(self.fix(&refused)),
+            None if bundled(&self.dist, "/index.html").is_some() => State::Served,
+            None => State::Unbuilt,
+        }
+    }
+
+    /// The first entry in `dist`, itself included, that isn't the user's alone to change. A
+    /// symlink in it is neither followed nor refused: the page serves only what one leads to
+    /// inside `dist`, which this has read on its own.
+    fn tree_refusal(&self) -> Option<Refused> {
+        let mut entries = vec![self.dist.clone()];
+        while let Some(path) = entries.pop() {
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(meta) => meta,
+                Err(source) => return Some(Refused::Unreadable { path, source }),
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if let Some(why) = untrusted(&meta, self.uid, Writers::Owner) {
+                return Some(Refused::Untrusted { path, why });
+            }
+            if meta.is_dir() {
+                match std::fs::read_dir(&path) {
+                    Ok(dir) => entries.extend(dir.filter_map(|e| e.ok().map(|e| e.path()))),
+                    Err(source) => return Some(Refused::Unreadable { path, source }),
+                }
+            }
+        }
+        None
+    }
+
+    /// What is refused, and what serves it again.
+    fn fix(&self, refused: &Refused) -> String {
+        let fix = match refused {
+            Refused::Untrusted {
+                path,
+                why: Untrusted::Writable,
+            } if path.starts_with(&self.dist) => format!(
+                "`chmod -R g-w,o-w {}` fixes it, as `moon run :build` leaves it",
+                self.dist.display()
+            ),
+            _ => "the daemon serves only a build in a checkout of this user's that no other user \
+                  can write"
+                .to_owned(),
+        };
+        format!("{refused}; {fix}")
+    }
+}
+
+/// The bundle as doctor names it: its place once it's served, null before, and why a build it
+/// found isn't served.
+pub(crate) fn app(bundle: &Bundle, state: &State) -> (Nullable<String>, Option<String>) {
+    match state {
+        State::Served => (
+            Nullable::Value(bundle.dist.to_string_lossy().into_owned()),
+            None,
+        ),
+        State::Unbuilt => (Nullable::Null, None),
+        State::Refused(why) => (Nullable::Null, Some(why.clone())),
     }
 }
 
 /// The page at the request's path, from the bundle at `root`.
-pub(crate) async fn page(root: Arc<Path>, request: Request) -> Response {
+pub(crate) async fn page(bundle: Arc<Bundle>, request: Request) -> Response {
     if !matches!(*request.method(), Method::GET | Method::HEAD) {
         return crate::routes::not_found().await;
     }
     let path = request.uri().path().to_owned();
-    match tokio::task::spawn_blocking(move || look(&root, &path)).await {
+    match tokio::task::spawn_blocking(move || look(&bundle, &path)).await {
         Ok(Page::File { body, kind, asset }) => {
             let cache = if asset {
                 "public, max-age=31536000, immutable"
@@ -92,7 +192,12 @@ enum Page {
     NotBuilt,
 }
 
-fn look(root: &Path, path: &str) -> Page {
+fn look(bundle: &Bundle, path: &str) -> Page {
+    // A build refused is served as none: its page could be anyone's.
+    if bundle.state() != State::Served {
+        return Page::NotBuilt;
+    }
+    let root = bundle.dist();
     let asset = path.starts_with(ASSETS);
     // A path naming a file that isn't there is a 404; only a view's path loads the app.
     let view = !asset && !path.rsplit('/').next().unwrap_or(path).contains('.');
@@ -109,14 +214,8 @@ fn look(root: &Path, path: &str) -> Page {
             kind: content_type(&file),
             asset,
         },
-        None if built(root) => Page::Missing,
-        None => Page::NotBuilt,
+        None => Page::Missing,
     }
-}
-
-/// Whether `root` holds a bundle the page can serve.
-pub(crate) fn built(root: &Path) -> bool {
-    bundled(root, "/index.html").is_some()
 }
 
 /// A path segment that can name only a file inside the directory it is in. A NUL can't reach a
@@ -236,25 +335,69 @@ mod tests {
     const INDEX: &str = "<!doctype html><title>Bazhen</title>";
     const SCRIPT: &str = "console.log('app')";
 
+    /// This process's uid, which the daemon serves a bundle for.
+    fn me() -> u32 {
+        rustix::process::getuid().as_raw()
+    }
+
+    fn chmod(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
     /// A built bundle as Vite lays one out, with a secret beside it that it must never serve.
     fn bundle(dir: &TempDir) -> PathBuf {
-        let root = dir.path().join("dist");
+        build(&dir.path().join("dist"))
+    }
+
+    /// The same, at `root`, left as `moon run :build` leaves it: no one but its owner may write
+    /// anything in it, whatever the umask.
+    fn build(root: &Path) -> PathBuf {
+        let dir = root.parent().unwrap();
+        let root = root.to_path_buf();
         std::fs::create_dir_all(root.join("assets")).unwrap();
         std::fs::write(root.join("index.html"), INDEX).unwrap();
         std::fs::write(root.join("assets/index-abc123.js"), SCRIPT).unwrap();
         std::fs::write(root.join(".env"), "SECRET=1").unwrap();
-        std::fs::write(dir.path().join("secret.txt"), "SECRET=1").unwrap();
-        std::os::unix::fs::symlink(dir.path().join("secret.txt"), root.join("linked.txt")).unwrap();
+        std::fs::write(dir.join("secret.txt"), "SECRET=1").unwrap();
+        std::os::unix::fs::symlink(dir.join("secret.txt"), root.join("linked.txt")).unwrap();
         // Names a still-encoded or Windows-style path would land on, were it read literally.
         std::fs::write(root.join("assets/up%2fsecret.txt"), "SECRET=1").unwrap();
         std::fs::write(root.join("assets/up\\secret.txt"), "SECRET=1").unwrap();
+        for entry in [&root, &root.join("assets")] {
+            chmod(entry, 0o755);
+        }
+        for file in [".env", "index.html", "assets/index-abc123.js"] {
+            chmod(&root.join(file), 0o644);
+        }
+        for file in ["assets/up%2fsecret.txt", "assets/up\\secret.txt"] {
+            chmod(&root.join(file), 0o644);
+        }
         root
+    }
+
+    /// The bundle the daemon finds from a binary in `checkout`'s `target/release`.
+    fn found(checkout: &Path) -> Bundle {
+        Bundle::of(&checkout.join("target/release/bazhen-daemon"), me())
+    }
+
+    /// The bundle at `root`, found in the checkout it is in.
+    fn at(root: &Path) -> Bundle {
+        Bundle {
+            checkout: root.parent().unwrap().to_path_buf(),
+            dist: root.to_path_buf(),
+            uid: me(),
+        }
     }
 
     /// The daemon's loopback HTTP routes over the bundle at `root`, with no browser paired.
     fn daemon(root: &Path, pairing_required: bool) -> Router {
-        let shared =
-            Shared::new("f".repeat(64).as_str(), Stop::default(), Writer::closed()).with_web(root);
+        serving(at(root), pairing_required)
+    }
+
+    fn serving(bundle: Bundle, pairing_required: bool) -> Router {
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), Writer::closed())
+            .with_web(bundle);
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required,
@@ -593,7 +736,8 @@ mod tests {
     #[test]
     fn looks_for_the_bundle_where_the_web_clients_build_leaves_it() {
         let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let built = super::bundle(&checkout.join("target/release/bazhen-daemon"));
+        let found = found(&checkout);
+        let built = found.dist();
         // Its parent, not `dist/..`, which the kernel resolves only once `dist` exists.
         let web = built.parent().unwrap();
         assert_eq!(
@@ -605,7 +749,7 @@ mod tests {
             [true; 3]
         );
         assert_eq!(
-            super::bundle(Path::new("/repo/target/debug/bazhen-daemon")),
+            Bundle::of(Path::new("/repo/target/debug/bazhen-daemon"), 0).dist(),
             Path::new("/repo/apps/web/dist")
         );
     }
@@ -625,14 +769,139 @@ mod tests {
     #[test]
     fn names_the_bundle_to_doctor_once_it_is_built_and_null_before() {
         let (dir, empty) = (TempDir::new("web"), TempDir::new("web-unbuilt"));
-        let root = bundle(&dir);
+        let (built, none) = (at(&bundle(&dir)), at(&unbuilt(&empty)));
         assert_eq!(
-            [app(&root), app(&unbuilt(&empty))],
+            [app(&built, &built.state()), app(&none, &none.state())],
             [
-                Nullable::Value(root.to_string_lossy().into_owned()),
-                Nullable::Null
+                (
+                    Nullable::Value(built.dist().to_string_lossy().into_owned()),
+                    None
+                ),
+                (Nullable::Null, None)
             ]
         );
+    }
+
+    /// A checkout as `moon run :build` leaves one under a umask of 002: the directories up to the
+    /// build writable by the user's group, and the build by no one but the user.
+    fn checkout(dir: &TempDir) -> Bundle {
+        let bundle = found(dir.path());
+        build(bundle.dist());
+        for entry in [
+            dir.path(),
+            &dir.path().join("apps"),
+            &dir.path().join("apps/web"),
+        ] {
+            chmod(entry, 0o775);
+        }
+        bundle
+    }
+
+    /// What the page, doctor and the start-up line make of `bundle`.
+    fn seen(bundle: &Bundle) -> (Answer, (Nullable<String>, Option<String>)) {
+        let page = ask(&serving(bundle.clone(), true), "GET", "/", &[]);
+        (page, app(bundle, &bundle.state()))
+    }
+
+    fn refused(why: &str) -> (Answer, (Nullable<String>, Option<String>)) {
+        let page = Answer {
+            status: 404,
+            headers: vec![],
+            body: NOT_BUILT.to_owned(),
+        };
+        (page, (Nullable::Null, Some(why.to_owned())))
+    }
+
+    const NOT_THEIRS: &str =
+        "the daemon serves only a build in a checkout of this user's that no other user can write";
+
+    #[test]
+    fn serves_a_build_in_a_checkout_its_owners_group_may_write_above_the_build() {
+        let dir = TempDir::new("web-checkout");
+        let bundle = checkout(&dir);
+        let (page, doctor) = seen(&bundle);
+        assert_eq!(
+            (page.status, page.body.as_str(), doctor),
+            (
+                200,
+                INDEX,
+                (
+                    Nullable::Value(bundle.dist().to_string_lossy().into_owned()),
+                    None
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn serves_nothing_from_a_checkout_other_users_may_write_and_names_the_directory() {
+        let dir = TempDir::new("web-shared");
+        let bundle = checkout(&dir);
+        // As /tmp is: anyone may make a directory in it.
+        chmod(dir.path(), 0o1777);
+        assert_eq!(
+            seen(&bundle),
+            refused(&format!(
+                "{}: other users may write it; {NOT_THEIRS}",
+                dir.path().display()
+            ))
+        );
+    }
+
+    /// The uid the daemon runs as is the seam: no test can make a directory another uid owns.
+    #[test]
+    fn serves_nothing_from_a_checkout_another_user_owns() {
+        let dir = TempDir::new("web-theirs");
+        let bundle = Bundle {
+            uid: me() + 1,
+            ..checkout(&dir)
+        };
+        assert_eq!(
+            seen(&bundle),
+            refused(&format!(
+                "{}: it belongs to uid {}; {NOT_THEIRS}",
+                dir.path().display(),
+                me()
+            ))
+        );
+    }
+
+    #[test]
+    fn serves_nothing_from_a_build_its_group_may_write_and_says_the_chmod_that_fixes_it() {
+        let (dir, file) = (TempDir::new("web-group"), TempDir::new("web-group-file"));
+        let (by_dir, by_file) = (checkout(&dir), checkout(&file));
+        chmod(&by_dir.dist().join("assets"), 0o775);
+        chmod(&by_file.dist().join("index.html"), 0o664);
+        let fix = |bundle: &Bundle, entry: &str| {
+            refused(&format!(
+                "{}: other users may write it; `chmod -R g-w,o-w {}` fixes it, as `moon run :build` leaves it",
+                bundle.dist().join(entry).display(),
+                bundle.dist().display()
+            ))
+        };
+        assert_eq!(
+            [seen(&by_dir), seen(&by_file)],
+            [fix(&by_dir, "assets"), fix(&by_file, "index.html")]
+        );
+    }
+
+    #[test]
+    fn serves_nothing_a_symlink_on_the_way_to_the_build_leads_to_however_sound_that_build_is() {
+        let (dir, elsewhere) = (TempDir::new("web-linked"), TempDir::new("web-elsewhere"));
+        let bundle = checkout(&dir);
+        let planted = build(&elsewhere.path().join("dist"));
+        chmod(elsewhere.path(), 0o755);
+        std::fs::remove_dir_all(bundle.dist()).unwrap();
+        std::os::unix::fs::symlink(&planted, bundle.dist()).unwrap();
+        assert_eq!(
+            seen(&bundle),
+            refused(&format!(
+                "{}: it is a symlink; {NOT_THEIRS}",
+                bundle.dist().display()
+            ))
+        );
+        // What it leads to would be served from where it is: it is the link that keeps it out.
+        assert_eq!(at(&planted).state(), State::Served);
     }
 
     #[test]

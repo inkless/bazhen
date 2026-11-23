@@ -147,6 +147,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bazhen-client",
+ "bazhen-fs-trust",
  "bazhen-holder-proto",
  "bazhen-host-guard",
  "bazhen-peer",
@@ -172,6 +173,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tungstenite",
+]
+
+[[package]]
+name = "bazhen-fs-trust"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]
@@ -273,6 +281,7 @@ name = "bazhen-runtime-holder"
 version = "0.1.0"
 dependencies = [
  "bazhen-client",
+ "bazhen-fs-trust",
  "bazhen-holder",
  "bazhen-holder-proto",
  "bazhen-host-guard",

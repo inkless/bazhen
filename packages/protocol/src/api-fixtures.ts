@@ -396,6 +396,7 @@ const nullDoctor = {
     allowInsecureOrigins: false,
     pairing: { mode: "auto", required: false },
     app: null,
+    appRefused: "/tmp: other users may write it",
     lan: null,
   },
   notifications: { desktop: false, notifier: null },

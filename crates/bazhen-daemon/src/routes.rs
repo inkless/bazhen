@@ -2,7 +2,6 @@
 //! mode makes its caller the owner, and one for loopback HTTP, behind the Host/Origin guard and
 //! the pairing gate (`http/app.ts`, `socket/routes.ts`).
 
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use axum::body::Bytes;
@@ -95,7 +94,7 @@ pub(crate) struct Shared {
     /// This machine's name, as the state names its environment's host.
     pub(crate) host: Arc<str>,
     /// Where the web client's build is, which loopback HTTP serves off the API.
-    pub(crate) web: Option<Arc<Path>>,
+    pub(crate) web: Option<Arc<crate::web::Bundle>>,
 }
 
 impl Shared {
@@ -131,9 +130,9 @@ impl Shared {
         self
     }
 
-    /// The same, serving the web client built at `bundle` off the API.
-    pub(crate) fn with_web(mut self, bundle: &Path) -> Self {
-        self.web = Some(Arc::from(bundle));
+    /// The same, serving the web client `bundle` holds off the API.
+    pub(crate) fn with_web(mut self, bundle: crate::web::Bundle) -> Self {
+        self.web = Some(Arc::new(bundle));
         self
     }
 
@@ -394,8 +393,8 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
     let bare = any(not_found).layer(middleware::from_fn_with_state(gated, paired::gate));
     let router = Router::new().nest("/v1", api).route("/v1/", bare);
     let router = match web {
-        Some(root) => {
-            router.fallback(move |request: Request| crate::web::page(Arc::clone(&root), request))
+        Some(bundle) => {
+            router.fallback(move |request: Request| crate::web::page(Arc::clone(&bundle), request))
         }
         None => router.fallback(not_found),
     };

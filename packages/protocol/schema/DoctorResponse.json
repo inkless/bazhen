@@ -224,6 +224,9 @@
             "null"
           ]
         },
+        "appRefused": {
+          "type": "string"
+        },
         "lan": {
           "anyOf": [
             {

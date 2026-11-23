@@ -1,7 +1,7 @@
 //! `GET /v1/daemon/doctor` (`socket/routes.ts`): what `bazhen doctor` shows of the daemon, its
 //! settings, its terminals and the holders they run on, and the environment it captured.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
@@ -24,8 +24,8 @@ pub(crate) struct Settled {
     pub(crate) config: ConfigFile,
     pub(crate) agents: AgentsSettings,
     pub(crate) web: Web,
-    /// Where the web client's build is, which doctor names once it is built.
-    pub(crate) bundle: PathBuf,
+    /// Where the web client's build is, which doctor names once it is served.
+    pub(crate) bundle: crate::web::Bundle,
     pub(crate) install: Install,
     pub(crate) env: CapturedEnv,
 }
@@ -93,11 +93,12 @@ impl Settled {
                 }),
                 // Read as doctor is asked, since a build needs no restart.
                 app: Nullable::Absent,
+                app_refused: None,
                 // This daemon has no LAN listener yet, so says nothing of one, as a daemon older
                 // than it.
                 lan: Nullable::Absent,
             },
-            bundle: crate::web::bundle(settings.exe),
+            bundle: crate::web::Bundle::of(settings.exe, rustix::process::getuid().as_raw()),
             install: settings.install,
             env: CapturedEnv {
                 captured_at: capture.at.clone(),
@@ -145,7 +146,11 @@ pub(crate) async fn doctor(State(shared): State<Shared>) -> Response {
         .collect();
     let mut settled = settled.as_ref().clone();
     let bundle = settled.bundle.clone();
-    settled.web.app = match tokio::task::spawn_blocking(move || crate::web::app(&bundle)).await {
+    (settled.web.app, settled.web.app_refused) = match tokio::task::spawn_blocking(move || {
+        crate::web::app(&bundle, &bundle.state())
+    })
+    .await
+    {
         Ok(app) => app,
         Err(err) => return internal(&err),
     };

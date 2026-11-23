@@ -19,6 +19,7 @@ axum = { version = "=0.8.9", default-features = false, features = [
   "ws",
 ] }
 bazhen-client = { path = "crates/bazhen-client" }
+bazhen-fs-trust = { path = "crates/bazhen-fs-trust" }
 bazhen-holder = { path = "crates/bazhen-holder" }
 bazhen-holder-engine = { path = "crates/bazhen-holder-engine" }
 bazhen-holder-proto = { path = "crates/bazhen-holder-proto" }

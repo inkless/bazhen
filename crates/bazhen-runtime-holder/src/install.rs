@@ -11,12 +11,13 @@ use std::ffi::OsString;
 use std::fs;
 use std::hash::{BuildHasher as _, Hasher as _, RandomState};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_client::sha256::{hex, sha256};
+use bazhen_fs_trust::{Writers, untrusted};
 use bazhen_holder::process;
 use bazhen_holder::start_time::{self, StartTimeError};
 use bazhen_host_guard::holder::{HOLDER_COMMAND, holder_build_of, is_holder_build};
@@ -122,10 +123,6 @@ fn is_bad(name: &str) -> bool {
         .is_some_and(|(build, tag)| is_holder_build(build) && tag.len() == 8 && is_hex(tag))
 }
 
-fn writable_by_others(mode: u32) -> bool {
-    mode & 0o022 != 0
-}
-
 /// The build `file` is: the first 16 hex digits of its SHA-256.
 fn build_of(file: &Path) -> io::Result<String> {
     let digest = sha256(&fs::read(file)?);
@@ -148,24 +145,15 @@ fn dir_refusal(dir: &Path, uid: u32) -> Option<String> {
         Ok(meta) => meta,
         Err(e) => return Some(format!("it can't be read: {e}")),
     };
-    if meta.file_type().is_symlink() {
-        return Some("it is a symlink".to_owned());
-    }
-    if !meta.is_dir() {
+    if !meta.file_type().is_symlink() && !meta.is_dir() {
         return Some("it isn't a directory".to_owned());
     }
-    if meta.uid() != uid {
-        return Some(format!("it belongs to uid {}", meta.uid()));
-    }
-    if writable_by_others(meta.mode()) {
-        return Some("other users may write it".to_owned());
-    }
-    None
+    untrusted(&meta, uid, Writers::Owner).map(|why| why.to_string())
 }
 
 /// Whether `path` holds `build` as installed: this user's, writable by no one else, its hash.
 fn holds(path: &Path, build: &str, uid: u32, command: &str) -> bool {
-    let ours = |meta: &fs::Metadata| meta.uid() == uid && !writable_by_others(meta.mode());
+    let ours = |meta: &fs::Metadata| untrusted(meta, uid, Writers::Owner).is_none();
     let binary = path.join(command);
     match (fs::symlink_metadata(path), fs::symlink_metadata(&binary)) {
         (Ok(dir), Ok(file)) if dir.is_dir() && ours(&dir) && file.is_file() && ours(&file) => {
@@ -464,7 +452,7 @@ fn prune_unused_with(
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{MetadataExt as _, symlink};
 
     use super::*;
     use crate::test_support::{TempDir, me};
