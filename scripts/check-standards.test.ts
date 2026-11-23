@@ -1971,6 +1971,122 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("reads a raw name as its name, where a carrier is written and where it is defined", () => {
+    const raw = {
+      ...repo,
+      "crates/p/src/lib.rs": `${lib}pub mod raw;\npub mod other;\n`,
+      "crates/p/src/other.rs": [
+        "pub mod raw { pub struct Packet; pub struct Plain; }",
+        "pub mod far { pub struct Plain { b: Vec<u8> } }",
+        "impl crate::r#raw::Packet { pub fn other_size(&self) -> usize { self.buf.len() } }",
+        "impl crate::r#raw::Plain { pub fn handed(&self) { send(self) } }",
+        "pub mod p { pub mod raw { pub struct Packet; } }",
+        "impl ::p::r#raw::Packet { pub fn rooted(&self) -> usize { self.buf.len() } }",
+      ].join("\n"),
+      "crates/p/src/raw.rs": [
+        "pub struct Frame { buf: Vec<u8> }",
+        "pub struct Plain { n: usize }",
+        "pub enum r#Odd { #[x([[1]])] A(Vec<u8>) }",
+        "type r#Bytes = Vec<u8>;",
+        "pub struct r#Packet { buf: Vec<u8> }",
+        "pub struct r#Open { pub buf: Vec<u8> }",
+        "pub struct Wide { pub r#buf: Vec<r#u8> }",
+        "pub enum r#Event { r#Data { b: Vec<u8> }, Tick }",
+        "pub struct Holds { f: r#Frame }",
+        "pub fn param(x: r#Frame) {}",
+        "pub fn nested(x: Vec<crate::r#raw::Frame>) {}",
+        "pub fn bound(x: impl Iterator<Item = r#Frame>) {}",
+        "pub fn byte_slice(x: &[r#u8]) {}",
+        "pub fn byte_vec(x: Vec<r#std::primitive::u8>) {}",
+        "pub fn byte_ptr(x: *const core::r#primitive::u8) {}",
+        "pub fn byte_items(x: impl Iterator<Item = r#u8>) {}",
+        "pub fn packet(p: Packet) {}",
+        "pub fn event(e: Event) {}",
+        "pub fn holds(h: Holds) {}",
+        "pub fn arm() { match next() { Event::r#Data { b } => look(b), _ => {} } }",
+        "impl r#Packet { pub fn size(&self) -> usize { self.buf.len() } }",
+        "type Alias = r#Frame;",
+        "pub fn plain(x: u16) {}",
+        "pub fn tick() { match next() { Event::Tick => {}, _ => {} } }",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, raw).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/other.rs::Packet::other_size",
+      "crates/p/src/other.rs::Packet::rooted",
+      "crates/p/src/raw.rs::Odd::A",
+      "crates/p/src/raw.rs::Open::buf",
+      "crates/p/src/raw.rs::Wide::r#buf",
+      "crates/p/src/raw.rs::Bytes",
+      "crates/p/src/raw.rs::Alias",
+      "crates/p/src/raw.rs::param",
+      "crates/p/src/raw.rs::nested",
+      "crates/p/src/raw.rs::bound",
+      "crates/p/src/raw.rs::byte_slice",
+      "crates/p/src/raw.rs::byte_vec",
+      "crates/p/src/raw.rs::byte_ptr",
+      "crates/p/src/raw.rs::byte_items",
+      "crates/p/src/raw.rs::packet",
+      "crates/p/src/raw.rs::event",
+      "crates/p/src/raw.rs::holds",
+      "crates/p/src/raw.rs::arm",
+      "crates/p/src/raw.rs::Packet::size",
+    ]);
+  });
+
+  it("flags a raw associated type holding bytes, and reads its name as a name, not as a type", () => {
+    const one = {
+      ...repo,
+      "crates/p/src/one.rs": [
+        "pub struct One;",
+        "impl Tr for One {",
+        "    type r#Item = u8;",
+        "    type r#Raw = Vec<u8>;",
+        "    fn one(&self, x: Self::Item) {}",
+        "    fn raw(&self, x: Self::Raw) {}",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, one).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/one.rs::One::raw",
+    ]);
+  });
+
+  it("takes an associated type holding bytes for a carrier, by its name wherever a path reaches it", () => {
+    const assoc = {
+      ...repo,
+      "crates/p/src/assoc.rs": [
+        "pub struct Frame { buf: Vec<u8> }",
+        "pub struct S;",
+        "impl Tr for S {",
+        "    type Item = Frame;",
+        "    type Next = Self::Item;",
+        "    type Raw = Vec<u8>;",
+        "    type Count = u16;",
+        "    fn own(&self, x: Self::Item) {}",
+        "    fn nested(&self, x: Vec<Self::Next>) {}",
+        "    fn bytes(&self, x: Self::Raw) {}",
+        "    fn qualified(&self, x: <Self as Tr>::Item) {}",
+        "    fn count(&self, x: Self::Count) {}",
+        "}",
+        "pub struct W<T>(T);",
+        "impl<T> Tr for W<T> { type Item = Frame; fn generic(&self, x: Self::Item) {} }",
+        "pub trait Pull { type Source: std::io::Read; fn pull(&self, s: Self::Source) {} }",
+        "pub trait Tr { type Item; fn default_method(&self, x: Self::Item) {} }",
+        "pub fn projected<T: Tr>(x: T::Item) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, assoc).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/assoc.rs::S::own",
+      "crates/p/src/assoc.rs::S::nested",
+      "crates/p/src/assoc.rs::S::bytes",
+      "crates/p/src/assoc.rs::S::qualified",
+      "crates/p/src/assoc.rs::W::generic",
+      "crates/p/src/assoc.rs::pull",
+      "crates/p/src/assoc.rs::default_method",
+      "crates/p/src/assoc.rs::projected",
+    ]);
+  });
+
   it("takes a generic reader bounded by a byte trait, and a type holding a carrier, for carriers", () => {
     const generic = {
       ...repo,
@@ -2261,6 +2377,8 @@ describe("decoderFailures", () => {
         "pub trait Count { fn count(&self) -> u32; }",
         "pub trait Spin { fn spin(&self) -> u32; }",
         "impl<T> Spin for T { fn spin(&self) -> u32 { 0 } }",
+        "pub trait Turn { fn turn(&self) -> u32; }",
+        "impl<r#U> Turn for r#U { fn turn(&self) -> u32 { 0 } }",
         "pub trait Total { fn total(self) -> u32; }",
         "impl Total for Runtime { fn total(self) -> u32 { 0 } }",
         "impl Runtime {",
@@ -2282,6 +2400,7 @@ describe("decoderFailures", () => {
         "    pub fn r#reset(&self) { forget(&self.controls) }",
         "    pub fn count(&self) -> u32 { 0 }",
         "    pub fn spin(&self) -> u32 { 0 }",
+        "    pub fn turn(&self) -> u32 { 0 }",
         "    pub fn total(&self) -> u32 { 0 }",
         "    pub fn into(&self) -> u32 { 0 }",
         "}",
@@ -2326,6 +2445,7 @@ describe("decoderFailures", () => {
         "    pub fn cloned(&self) -> Arc<Runtime> { self.runtime.clone() }",
         "    pub fn count(&self) -> u32 { self.runtime.count() }",
         "    pub fn spin(&self) -> u32 { self.runtime.spin() }",
+        "    pub fn turn(&self) -> u32 { self.runtime.turn() }",
         "    pub fn total(&self) -> u32 { self.runtime.total() }",
         "    pub fn into(&self) -> u32 { self.runtime.into() }",
         "    pub fn bytes(&self) -> usize { self.runtime.bytes.len() }",
@@ -2365,6 +2485,8 @@ describe("decoderFailures", () => {
         (f) => f.split(": ")[0],
       ),
     ).toEqual([
+      "crates/q/src/lib.rs::Snap",
+      "crates/q/src/lib.rs::Shot",
       "crates/q/src/lib.rs::Runtime::write",
       "crates/q/src/lib.rs::Runtime::close",
       "crates/q/src/lib.rs::Runtime::reset",
@@ -2390,6 +2512,7 @@ describe("decoderFailures", () => {
         "cloned",
         "count",
         "spin",
+        "turn",
         "total",
         "into",
         "bytes",
@@ -2571,6 +2694,29 @@ describe("decoderFailures", () => {
           ]),
         },
         { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "ext::peek!(Arc<Runtime>);"]) },
+      ],
+      "a macro called by a raw path": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "r#ext::peek!(Arc<Runtime>);"]) },
+      ],
+      "a macro called by a path with a raw module": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "crate::r#m::peek!(Arc<Runtime>);"]) },
+      ],
+      "a blanket impl for a raw pointer by a raw path": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+            "impl<T> Peek for ::r#std::sync::r#Arc<r#T> { fn size(&self) -> usize { 0 } }",
+          ]),
+        },
       ],
     };
     expect(
