@@ -18,6 +18,7 @@
 //! `newgrp` or `sg` shell does, is said to be withheld rather than refused: that says nothing of
 //! Codex, and the daemon takes the thread the call presents instead.
 
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
@@ -304,8 +305,9 @@ pub fn codex_of(
 /// from the caller, `pause`d for `FIRST_PAUSE`, doubled after each try, up to `LINE_TRIES` times,
 /// and never pieced together from two walks: a process that took a pid meanwhile is on neither
 /// walk of a try that is answered. What is answered is the line a caller connecting a moment later
-/// would be read with. The caller is the one process that has to stay: one that started at another
-/// time than on the first walk holds a pid its caller gave up.
+/// would be read with. The caller is the one process that has to stay: once one read of it has said when
+/// it started, a read of it on any walk after, of any try, that says another time is of a process
+/// that took the pid its caller gave up.
 ///
 /// # Errors
 ///
@@ -318,37 +320,39 @@ pub fn line_of(
     environ: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
     pause: impl Fn(Duration),
 ) -> Result<(Vec<Pid>, Codex), Refused> {
-    let mut caller = None;
-    let mut held = |walked: &[(Pid, u64)]| {
-        let started = walked.first().map(|&(_, started)| started);
-        if *caller.get_or_insert(started) == started {
-            Ok(())
-        } else {
-            Err(Refused::Unreadable(io::Error::other(
-                "the caller's pid was taken by another process while its line was read",
-            )))
+    let caller = Cell::new(None);
+    let replaced = Cell::new(false);
+    let step = |at: Pid| {
+        let read = step(at)?;
+        if at == pid {
+            let pinned = caller.get().unwrap_or(read.started);
+            caller.set(Some(pinned));
+            replaced.set(replaced.get() || pinned != read.started);
         }
+        Ok(read)
     };
     let mut refused = Refused::Endless;
     let mut wait = FIRST_PAUSE;
     for tried in 1..=LINE_TRIES {
-        let read = walk(pid, &step).and_then(|walked| {
+        let read = walk(pid, step).and_then(|walked| {
             let line: Vec<Pid> = walked.iter().map(|&(at, _)| at).collect();
             let codex = codex_of(&line, &args, &environ)?;
             Ok((walked, codex))
         });
-        refused = match read.and_then(|read| Ok((walk(pid, &step)?, read))) {
-            Ok((again, (walked, codex))) => {
-                held(&walked)?;
-                held(&again)?;
-                if again == walked {
-                    let ancestors = walked.into_iter().skip(1).map(|(at, _)| at).collect();
-                    return Ok((ancestors, codex));
-                }
-                Refused::Unreadable(io::Error::other(
-                    "the caller's line changed while it was read",
-                ))
+        let read = read.and_then(|read| Ok((walk(pid, step)?, read)));
+        if replaced.get() {
+            return Err(Refused::Unreadable(io::Error::other(
+                "the caller's pid was taken by another process while its line was read",
+            )));
+        }
+        refused = match read {
+            Ok((again, (walked, codex))) if again == walked => {
+                let ancestors = walked.into_iter().skip(1).map(|(at, _)| at).collect();
+                return Ok((ancestors, codex));
             }
+            Ok(_) => Refused::Unreadable(io::Error::other(
+                "the caller's line changed while it was read",
+            )),
             Err(refused) => refused,
         };
         if tried < LINE_TRIES {
@@ -437,7 +441,7 @@ fn own_args(pid: Pid) -> io::Result<Option<Vec<OsString>>> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::os::fd::AsFd as _;
     use std::os::unix::net::UnixStream;
@@ -1142,6 +1146,31 @@ mod tests {
             no_environment(),
             |_| {},
         );
+        assert_eq!(
+            refused.map_err(|refused| refused.to_string()),
+            Err("a process on the caller's line can't be read: \
+                 the caller's pid was taken by another process while its line was read"
+                .to_owned())
+        );
+    }
+
+    #[test]
+    fn refuses_a_caller_whose_pid_another_process_took_after_a_try_that_failed() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                walks.set(walks.get() + 1);
+                Ok(if walks.get() == 1 {
+                    to(40, 5)
+                } else {
+                    to(1, 6)
+                })
+            }
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = shells_but(40, || Err(io::Error::other("gone")));
+        let refused = line_of(pid(50), step, args, no_environment(), |_| {});
         assert_eq!(
             refused.map_err(|refused| refused.to_string()),
             Err("a process on the caller's line can't be read: \
