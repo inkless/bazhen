@@ -168,11 +168,17 @@ the page can't use is shown above the terminal, which goes on without it.
 
 ### Reaching Bazhen from another device
 
-On your home network, Bazhen can serve HTTPS itself: set `web.listen = "lan"` and the address
-ranges that may connect, and trust its certificate on the phone after checking its fingerprint
-([docs/lan.md](docs/lan.md)).
+The Rust daemon listens on `127.0.0.1` only and refuses `web.listen = "lan"`. To open it from
+another machine, forward a port to it over SSH, through Tailscale or another VPN when the machines
+aren't on one network: [docs/remote.md](docs/remote.md) is the supported route. The rest of this
+section, with [docs/lan.md](docs/lan.md) and [docs/caddy.md](docs/caddy.md), applies to the
+TypeScript daemon only.
 
-Otherwise Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
+On your home network, the TypeScript daemon can serve HTTPS itself: set `web.listen = "lan"` and the
+address ranges that may connect, and trust its certificate on the phone after checking its
+fingerprint ([docs/lan.md](docs/lan.md)).
+
+Otherwise the TypeScript daemon listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
 another host can't reach a loopback port. [docs/caddy.md](docs/caddy.md) sets up Caddy, with
 your own domain or without one. Build the web app (`moon run :build`), point the route at the
