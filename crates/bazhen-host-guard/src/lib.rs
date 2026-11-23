@@ -7,10 +7,11 @@
 //! its own or which processes it descends from. A process group is reached only while this process
 //! holds its leader unreaped (`group`), so the group's number can't since have become another's. A
 //! single process is reached only as a `bazhen-holder` checked by its name and start time
-//! (`holder`), or by signal 0, which sends nothing (`is_alive`). Holding a leader unreaped holds
-//! only while SIGCHLD is neither ignored nor set with `SA_NOCLDWAIT`: either way the kernel reaps
-//! children itself, and a group is then refused once its leader has exited. A daemon undoes both
-//! before it starts a child (`keep_exited_children`), and keeps any handler already set.
+//! (`holder`), checked again on Linux once a pidfd holds it and signalled through that pidfd, or
+//! by signal 0, which sends nothing (`is_alive`). Holding a leader unreaped holds only while
+//! SIGCHLD is neither ignored nor set with `SA_NOCLDWAIT`: either way the kernel reaps children
+//! itself, and a group is then refused once its leader has exited. A daemon undoes both before it
+//! starts a child (`keep_exited_children`), and keeps any handler already set.
 
 mod group;
 pub mod holder;
@@ -62,6 +63,10 @@ pub enum Unsafe {
     Unvouched,
     #[error("it was vouched for more than a second ago, so its pid may be another process's")]
     Stale,
+    #[error(
+        "what has its pid now can't be read, so it can't be shown to be the process vouched for"
+    )]
+    Unshown,
 }
 
 /// Why nothing was sent: the target was refused, which is a fault and never a target that has
@@ -123,19 +128,80 @@ fn floor(target: RawPid, own: &Own) -> Result<(), Unsafe> {
 fn send(leader: Pid, signal: Signal) -> Result<bool, Error> {
     let target = Target::Group(leader);
     floor(leader.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
-    match rustix::process::kill_process_group(leader, signal) {
-        Ok(()) => Ok(true),
-        Err(Errno::SRCH) => Ok(false),
-        Err(source) => Err(Error::Os { target, source }),
-    }
+    sent(target, rustix::process::kill_process_group(leader, signal))
 }
 
-/// Sends `signal` to `pid` alone, once the floor passes it. Only `holder` calls it, with a pid a
-/// proof says is a holder's, and `signal_child`. Whether the process was still there.
+/// Sends `signal` to `pid` alone, once the floor passes it. Only `signal_child` calls it, with a
+/// child held unreaped. Whether the process was still there.
 fn send_process(pid: Pid, signal: Signal) -> Result<bool, Error> {
     let target = Target::Process(pid);
     floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
-    match rustix::process::kill_process(pid, signal) {
+    sent(target, rustix::process::kill_process(pid, signal))
+}
+
+/// Sends `signal` to `pid` alone, once the floor passes it and only if `shows` holds of the
+/// process that has `pid` once it is pinned: a holder, which `holder` checks by its name and
+/// start time. On Linux a pidfd pins the process before `shows` reads it and the signal goes
+/// through that pidfd, so a pid reused at any point reaches nothing but the process `shows` read
+/// or one already gone. macOS has no such handle, so there `shows` and the send stay a moment
+/// apart.
+///
+/// Whether it was sent: `false` for a process gone, or one `shows` says isn't the one meant.
+fn send_pinned(
+    pid: Pid,
+    signal: Signal,
+    shows: impl FnOnce() -> Result<bool, Unsafe>,
+) -> Result<bool, Error> {
+    let target = Target::Process(pid);
+    floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
+    pin_then_send(target, pid, signal, shows)
+}
+
+#[cfg(target_os = "linux")]
+fn pin_then_send(
+    target: Target,
+    pid: Pid,
+    signal: Signal,
+    shows: impl FnOnce() -> Result<bool, Unsafe>,
+) -> Result<bool, Error> {
+    let pinned = match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
+        Ok(pinned) => pinned,
+        Err(refused) => return unpinned(target, refused),
+    };
+    if !shows().map_err(|why| Error::Unsafe { target, why })? {
+        return Ok(false);
+    }
+    sent(target, rustix::process::pidfd_send_signal(&pinned, signal))
+}
+
+/// What a refused pin says of its target. `INVAL` is a pid that now names a thread other than its
+/// process's leader, as a holder's pid reused for another process's thread would: the holder is
+/// gone, as with `SRCH`. Anything else, as no file descriptor left, is an error, since the target
+/// may still run.
+#[cfg(target_os = "linux")]
+fn unpinned(target: Target, refused: Errno) -> Result<bool, Error> {
+    match refused {
+        Errno::SRCH | Errno::INVAL => Ok(false),
+        source => Err(Error::Os { target, source }),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pin_then_send(
+    target: Target,
+    pid: Pid,
+    signal: Signal,
+    shows: impl FnOnce() -> Result<bool, Unsafe>,
+) -> Result<bool, Error> {
+    if !shows().map_err(|why| Error::Unsafe { target, why })? {
+        return Ok(false);
+    }
+    sent(target, rustix::process::kill_process(pid, signal))
+}
+
+/// What a send's answer says: whether its target was still there.
+fn sent(target: Target, answer: Result<(), Errno>) -> Result<bool, Error> {
+    match answer {
         Ok(()) => Ok(true),
         Err(Errno::SRCH) => Ok(false),
         Err(source) => Err(Error::Os { target, source }),
@@ -179,13 +245,14 @@ fn alive(target: Target, probed: Result<(), Errno>) -> Result<bool, Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::ExitStatusExt as _;
     use std::process::Command;
 
     use rustix::process::{Pid, Signal, getpgrp, getpid, getppid};
 
     use rustix::io::Errno;
 
-    use super::{Error, Own, Target, Unsafe, alive, floor, is_alive, send};
+    use super::{Error, Own, Target, Unsafe, alive, floor, is_alive, send, send_pinned};
 
     fn pid(raw: i32) -> Pid {
         Pid::from_raw(raw).unwrap()
@@ -297,6 +364,94 @@ mod tests {
         }
     }
 
+    /// The floor refuses first, so nothing is pinned or checked. SIGCONT changes nothing for a
+    /// running process, so even a floor that let this process through would harm nothing.
+    #[test]
+    fn refuses_a_pinned_send_to_this_process_before_checking_it() {
+        let checked = std::cell::Cell::new(false);
+        let sent = send_pinned(getpid(), Signal::CONT, || {
+            checked.set(true);
+            Ok(true)
+        });
+        assert_eq!(
+            (sent, checked.get()),
+            (
+                Err(Error::Unsafe {
+                    target: Target::Process(getpid()),
+                    why: Unsafe::This
+                }),
+                false
+            )
+        );
+    }
+
+    fn sleeping() -> (std::process::Child, Pid) {
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let raw = i32::try_from(child.id()).unwrap();
+        (child, pid(raw))
+    }
+
+    /// How long a process sent SIGKILL takes, at most, to be seen ended.
+    const ENDS: std::time::Duration = std::time::Duration::from_secs(5);
+    /// How long a process sent nothing is watched for an end that would show it was sent one.
+    const STILL: std::time::Duration = std::time::Duration::from_millis(500);
+
+    /// A pid freed before the send is never checked, as it would be by a check made before the
+    /// pin: whatever had it is gone, and nothing at it is read or sent.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn pins_a_process_before_checking_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        let raw = i32::try_from(child.id()).unwrap();
+        child.wait().unwrap();
+        let checked = std::cell::Cell::new(false);
+        let sent = send_pinned(pid(raw), Signal::KILL, || {
+            checked.set(true);
+            Ok(false)
+        });
+        assert_eq!((sent, checked.get()), (Ok(false), false));
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_nothing_to_a_pinned_process_not_shown_as_the_one_meant() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (mut child, at) = sleeping();
+        let declined = send_pinned(at, Signal::KILL, || Ok(false));
+        let refused = send_pinned(at, Signal::KILL, || Err(Unsafe::Unshown));
+        let ended = bazhen_test_signal::end_within(&mut child, STILL).unwrap();
+        assert_eq!(
+            (declined, refused, ended.map(|e| e.signal())),
+            (
+                Ok(false),
+                Err(Error::Unsafe {
+                    target: Target::Process(at),
+                    why: Unsafe::Unshown
+                }),
+                None
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_to_a_pinned_process_shown_as_the_one_meant() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (mut child, at) = sleeping();
+        let sent = send_pinned(at, Signal::KILL, || Ok(true));
+        let ended = bazhen_test_signal::end_within(&mut child, ENDS).unwrap();
+        assert_eq!(
+            (sent, ended.map(|e| e.signal())),
+            (Ok(true), Some(Some(Signal::KILL.as_raw())))
+        );
+    }
+
     /// Signal 0 sends nothing, and the floor refuses these before it would.
     #[test]
     fn asks_nothing_of_init_or_of_this_process() {
@@ -309,6 +464,31 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn takes_a_pid_gone_or_now_another_process_s_thread_for_gone_and_fails_closed_otherwise() {
+        let target = Target::Process(pid(4242));
+        let answers = [
+            Errno::SRCH,
+            Errno::INVAL,
+            Errno::MFILE,
+            Errno::NOMEM,
+            Errno::PERM,
+        ]
+        .map(|refused| super::unpinned(target, refused));
+        let os = |source| Err(Error::Os { target, source });
+        assert_eq!(
+            answers,
+            [
+                Ok(false),
+                Ok(false),
+                os(Errno::MFILE),
+                os(Errno::NOMEM),
+                os(Errno::PERM)
+            ]
+        );
     }
 
     /// A process of another user's is there, though this one may not signal it.

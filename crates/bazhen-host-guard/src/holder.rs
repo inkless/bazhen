@@ -2,7 +2,9 @@
 //! start time, before it is signalled: a pid reused since by anything else is left alone.
 //!
 //! A holder is reached only by a proof `vouch` makes from what the kernel says of its pid now,
-//! which one signal takes, once, within a second. The forms with seams, which take a reading of a
+//! which one signal takes, once, within a second. The signal goes only to a process shown again to
+//! be the holder as it is sent: on Linux, one a pidfd holds before it is read, so a pid reused
+//! within that second reaches nothing else. The forms with seams, which take a reading of a
 //! process and a send and so could vouch for any pid, stay in this module and its tests.
 
 use std::collections::BTreeMap;
@@ -175,6 +177,23 @@ fn is_holder(reading: &Reading, holder: HolderProcess) -> bool {
     }
 }
 
+/// Whether `reading`, made of a pid a send has pinned, shows `holder` still there: `false` for
+/// another process or none, which the holder has left; a refusal for one that can't be read,
+/// which may still be the holder.
+fn shown(holder: HolderProcess, reading: &Reading) -> Result<bool, Unsafe> {
+    match reading {
+        Reading::Unreadable(_) => Err(Unsafe::Unshown),
+        Reading::Running { .. } | Reading::Absent => Ok(is_holder(reading, holder)),
+    }
+}
+
+/// Sends `signal` to `holder` if the kernel shows it is still that holder once its pid is pinned.
+fn send_holder(holder: HolderProcess, signal: Signal) -> Result<bool, Error> {
+    crate::send_pinned(holder.pid, signal, || {
+        shown(holder, &read_process(holder.pid))
+    })
+}
+
 /// A proof for `made_for`, if `reading` shows the holder.
 fn vouched(holder: HolderProcess, made_for: HolderUse, reading: &Reading) -> Option<HolderProof> {
     is_holder(reading, holder).then(|| HolderProof::made_now(holder, made_for))
@@ -211,47 +230,48 @@ pub fn vouch(holder: HolderProcess, made_for: HolderUse) -> Option<HolderProof> 
     vouched(holder, made_for, &reading_of(holder, read_process)?)
 }
 
-/// Sends SIGKILL to the holder `proof` was made for, and to it alone. Whether it was still
-/// there.
+/// Sends SIGKILL to the holder `proof` was made for, and to it alone, once the kernel shows its
+/// pid is still that holder. Whether it was still there.
 ///
 /// # Errors
 ///
-/// When `proof` was made for a rebind, or is stale, or the floor refuses the pid, or the kernel
-/// refuses the send.
+/// When `proof` was made for a rebind, or is stale, or the floor refuses the pid, or what has
+/// the pid can't be read, or the kernel refuses the send.
 pub fn kill_holder(proof: HolderProof) -> Result<bool, Error> {
-    kill_holder_by(proof, std::time::Instant::now(), crate::send_process)
+    kill_holder_by(proof, std::time::Instant::now(), send_holder)
 }
 
 fn kill_holder_by(
     proof: HolderProof,
     now: std::time::Instant,
-    send: impl FnOnce(Pid, Signal) -> Result<bool, Error>,
+    send: impl FnOnce(HolderProcess, Signal) -> Result<bool, Error>,
 ) -> Result<bool, Error> {
-    send(proof.admits(HolderUse::Kill, now)?.pid, Signal::KILL)
+    send(proof.admits(HolderUse::Kill, now)?, Signal::KILL)
 }
 
-/// Sends SIGUSR1 to the holder `proof` was made for, which tells it to bind its socket again.
-/// Whether it was sent: nothing is to a holder this process started that hasn't said `ready`
-/// or has exited, since the proof was made too.
+/// Sends SIGUSR1 to the holder `proof` was made for, which tells it to bind its socket again,
+/// once the kernel shows its pid is still that holder. Whether it was sent: nothing is to a
+/// holder this process started that hasn't said `ready` or has exited, since the proof was made
+/// too, or to one gone.
 ///
 /// # Errors
 ///
-/// When `proof` was made for a kill, or is stale, or the floor refuses the pid, or the kernel
-/// refuses the send.
+/// When `proof` was made for a kill, or is stale, or the floor refuses the pid, or what has the
+/// pid can't be read, or the kernel refuses the send.
 pub fn rebind_holder(proof: HolderProof) -> Result<bool, Error> {
-    rebind_holder_by(proof, std::time::Instant::now(), crate::send_process)
+    rebind_holder_by(proof, std::time::Instant::now(), send_holder)
 }
 
 fn rebind_holder_by(
     proof: HolderProof,
     now: std::time::Instant,
-    send: impl FnOnce(Pid, Signal) -> Result<bool, Error>,
+    send: impl FnOnce(HolderProcess, Signal) -> Result<bool, Error>,
 ) -> Result<bool, Error> {
     let holder = proof.admits(HolderUse::Rebind, now)?;
     if unfit(holder) {
         return Ok(false);
     }
-    send(holder.pid, Signal::USR1)
+    send(holder, Signal::USR1)
 }
 
 /// Tells a holder to bind its socket again, as one whose socket file was deleted needs: SIGUSR1,
@@ -260,7 +280,8 @@ fn rebind_holder_by(
 ///
 /// # Errors
 ///
-/// When the floor refuses the pid, or the kernel refuses the send.
+/// When the floor refuses the pid, or what has the pid can't be read as it is sent, or the
+/// kernel refuses the send.
 pub async fn rebind_holder_socket(holder: HolderProcess) -> Result<bool, Error> {
     rebind_holder_with(holder, async |pid| read_process(pid), rebind_holder).await
 }
@@ -1335,7 +1356,7 @@ mod tests {
         Ending, HolderProcess, HolderProof, HolderUse, OwnChild, PROOF_LIFE, Reading, Recorded,
         Spawned, StartDeps, StartError, StartHolderOptions, StartedHolder, UNKNOWN_START,
         holder_build_of, holder_socket, holder_socket_refusal, holders_dir, installed_holder,
-        is_holder_build, kill_holder_by, read_process, rebind_holder_by, rebind_holder_with,
+        is_holder_build, kill_holder_by, read_process, rebind_holder_by, rebind_holder_with, shown,
         start_holder_with, vouched, whole_text,
     };
     use crate::{Error, Target, Unsafe};
@@ -1402,9 +1423,10 @@ mod tests {
     struct Sends(Mutex<Vec<(Pid, Signal)>>);
 
     impl Sends {
-        fn send(&self) -> impl FnOnce(Pid, Signal) -> Result<bool, Error> + '_ {
-            |pid, signal| {
-                self.0.lock().unwrap().push((pid, signal));
+        fn send(&self) -> impl FnOnce(HolderProcess, Signal) -> Result<bool, Error> + '_ {
+            |holder, signal| {
+                assert_eq!(holder, self::holder());
+                self.0.lock().unwrap().push((holder.pid, signal));
                 Ok(true)
             }
         }
@@ -1488,6 +1510,34 @@ mod tests {
                 "{other:?}"
             );
         }
+    }
+
+    /// Read again once its pid is pinned, a holder that has left is sent nothing, and one that
+    /// can't be read, which may still run, is refused rather than taken for gone.
+    #[test]
+    fn shows_a_pinned_pid_as_the_holder_only_where_the_kernel_shows_it_still() {
+        let shows = [
+            holder_at(START),
+            holder_at(START + super::START_SKEW_S),
+            holder_at(START + super::START_SKEW_S + 1),
+            running("bazhen-holderx", START),
+            stranger(),
+            Reading::Absent,
+            unreadable(),
+        ]
+        .map(|reading| shown(holder(), &reading));
+        assert_eq!(
+            shows,
+            [
+                Ok(true),
+                Ok(true),
+                Ok(false),
+                Ok(false),
+                Ok(false),
+                Ok(false),
+                Err(Unsafe::Unshown)
+            ]
+        );
     }
 
     /// Taken by value, a proof is spent by the one call that takes it.
@@ -2719,6 +2769,46 @@ mod tests {
         assert_eq!(super::kill_holder(proof), Ok(true));
         assert_eq!(child.wait().unwrap().signal(), Some(Signal::KILL.as_raw()));
         assert!(super::vouch(holder, HolderUse::Kill).is_none());
+    }
+
+    /// A process the test started, at a pid a fresh proof names: as a holder's pid reused by
+    /// another process after it was vouched for would be, but held unreaped, so the pid stays its
+    /// own whatever is sent.
+    fn stranger_vouched_for(made_for: HolderUse) -> (std::process::Child, HolderProof) {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_raw(RawPid::try_from(child.id()).unwrap()).unwrap();
+        let start = bazhen_holder::start_time::of(pid).unwrap().get();
+        let holder = HolderProcess { pid, start };
+        (child, vouched(holder, made_for, &holder_at(start)).unwrap())
+    }
+
+    /// How long a process sent nothing is watched for an end that would show it was sent one.
+    const STILL: Duration = Duration::from_millis(500);
+
+    /// The pid is read again once it is pinned, so a kill reaches only the holder still there.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn kills_nothing_at_a_vouched_pid_another_process_has_now() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (mut stranger, proof) = stranger_vouched_for(HolderUse::Kill);
+        let sent = super::kill_holder(proof);
+        let ended = bazhen_test_signal::end_within(&mut stranger, STILL).unwrap();
+        assert_eq!((sent, ended.map(|e| e.signal())), (Ok(false), None));
+    }
+
+    /// SIGUSR1 ends a process with no handler for it, as a holder's reused pid would have.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn rebinds_nothing_at_a_vouched_pid_another_process_has_now() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (mut stranger, proof) = stranger_vouched_for(HolderUse::Rebind);
+        let sent = super::rebind_holder(proof);
+        let ended = bazhen_test_signal::end_within(&mut stranger, STILL).unwrap();
+        assert_eq!((sent, ended.map(|e| e.signal())), (Ok(false), None));
     }
 
     /// The sleeper has no handler for SIGUSR1, so the rebind ends it, which shows it was sent.
