@@ -104,7 +104,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
 import { stripVTControlCharacters } from "node:util";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "@bazhen/host-guard";
-import { KILLS_ENV } from "./capped.ts";
+import { KILLS_ENV, OWN_SCOPE_FLAG } from "./capped.ts";
 import {
   TEST_BUILD,
   configFailures,
@@ -198,12 +198,23 @@ const MUTANT_TIMEOUT_MS = timeoutFrom(
 // nextest's libtest JSON is experimental; the version pins its shape.
 const LIBTEST_JSON_VERSION = "0.1";
 const KILL_GRACE_MS = 2000;
+// A mutant's nextest run runs under capped in a scope of its own. Stopped, capped passes SIGTERM to
+// its scope, kills what is left 10 s later, and stops the scope; killed before that, it leaves the
+// scope, and what a hung test started in it, running to the scope's time cap.
+const CAPPED_STOP_GRACE_MS = 30_000;
+// The falsify task's own cap: inside its scope, capped holds a run of its own to 90% of that.
+const MUTANT_RUN_MEMORY = "8G";
+// Runs each mutant's tests without a capped scope of their own, saving its half a second, for
+// tests of falsify's judging. It hides nothing: what a run leaves is then the falsify task's own
+// leftover, which fails that task.
+const UNCONTAINED_ENV = "BZ_FALSIFY_UNCONTAINED";
 
 const counted = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const secondsSince = (start: number) => Math.round((performance.now() - start) / 1000);
 
 // Beside this file, never the worktree's copy, which the branch's revert may have changed or removed.
 const REPORTER = fileURLToPath(new URL("falsify-reporter.ts", import.meta.url));
+const CAPPED = fileURLToPath(new URL("capped.ts", import.meta.url));
 const JUDGING = "BZ_FALSIFY_JUDGING";
 
 // Inherited, these point every git command at another repository or index: git exports them to
@@ -1346,7 +1357,7 @@ export function removeWorktree(dir: string, top: string): void {
 // The long steps run asynchronously so a SIGINT or SIGTERM is handled while they run. Each child
 // leads its own process group (pnpm and vitest start their own children), and a signal or a
 // timeout stops the whole group, then the temporary worktree is removed.
-let running: ChildProcess | undefined;
+let running: { child: ChildProcess; graceMs: number } | undefined;
 let cleanup: (() => void) | undefined;
 let signalled = false;
 
@@ -1354,10 +1365,10 @@ const exitCodeFor = (signal: unknown) =>
   signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : signal === "SIGHUP" ? 129 : undefined;
 
 /** SIGTERM to the child's group, then SIGKILL after a grace period. */
-async function stopGroup(child: ChildProcess): Promise<void> {
+async function stopGroup(child: ChildProcess, graceMs: number): Promise<void> {
   signalGroup(child, "SIGTERM");
   await new Promise<void>((done) => {
-    const timer = setTimeout(done, KILL_GRACE_MS);
+    const timer = setTimeout(done, graceMs);
     if (child.exitCode !== null || child.signalCode !== null) {
       clearTimeout(timer);
       done();
@@ -1373,7 +1384,7 @@ async function stopGroup(child: ChildProcess): Promise<void> {
 async function onSignal(signal: NodeJS.Signals): Promise<void> {
   signalled = true;
   try {
-    if (running) await stopGroup(running);
+    if (running) await stopGroup(running.child, running.graceMs);
   } finally {
     // A timeout may be stopping the same group, and signalGroup throws once it has gone.
     cleanup?.();
@@ -1397,7 +1408,12 @@ function run(
   args: string[],
   cwd: string,
   timeoutMs: number,
-  options: { env?: NodeJS.ProcessEnv; stdout?: number; stderr?: number } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    stdout?: number;
+    stderr?: number;
+    killGraceMs?: number;
+  } = {},
 ): Promise<Ran> {
   return new Promise((done) => {
     const child = spawnGroup(cmd, args, {
@@ -1405,13 +1421,14 @@ function run(
       env: options.env ?? isolatedEnv(),
       stdio: ["ignore", options.stdout ?? "ignore", options.stderr ?? "ignore"],
     });
-    running = child;
+    const graceMs = options.killGraceMs ?? KILL_GRACE_MS;
+    running = { child, graceMs };
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       // A signal may be stopping the same group, and signalGroup throws once it has gone; a
       // refused target is a fault, and surfaces.
-      stopGroup(child).catch(rethrowUnsafe);
+      stopGroup(child, graceMs).catch(rethrowUnsafe);
     }, timeoutMs);
     const finish = (ended: Omit<Ran, "ok" | "timedOut">) => {
       clearTimeout(timer);
@@ -1706,13 +1723,17 @@ async function capture(
   args: string[],
   dir: string,
   file: string,
-  options: { env: NodeJS.ProcessEnv; timeoutMs: number },
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number; killGraceMs?: number },
 ): Promise<{ ok: boolean; out: string; timedOut: boolean }> {
   const path = join(dir, file);
   const fd = openSync(path, "w");
   let ran: Ran;
   try {
-    ran = await run(cmd, args, dir, options.timeoutMs, { env: options.env, stdout: fd });
+    ran = await run(cmd, args, dir, options.timeoutMs, {
+      env: options.env,
+      stdout: fd,
+      ...(options.killGraceMs === undefined ? {} : { killGraceMs: options.killGraceMs }),
+    });
   } finally {
     closeSync(fd);
   }
@@ -1799,11 +1820,25 @@ async function runRustTests(
     "-E",
     nextestFilter(tests),
   ];
-  // Each test process's runner names the test in `kills` when a memory cap killed it.
-  const { out, timedOut } = await capture("cargo-nextest", args, dir, "falsify-results.json", {
-    env,
-    timeoutMs: MUTANT_TIMEOUT_MS,
-  });
+  // A hung test dies before its Drop stops what it started, and a holder it started is in a
+  // session of its own, out of every process group's reach: only stopping the scope the run had to
+  // itself ends it, before the next run, rather than leaving it to falsify's own run. The time cap
+  // only backs up falsify's own timeout. Each test process's runner names the test in `kills` when
+  // a memory cap killed it.
+  const backstop = `${Math.ceil(MUTANT_TIMEOUT_MS / 1000) + 60}s`;
+  const caps = ["--memory", MUTANT_RUN_MEMORY, "--time", backstop];
+  const contained = [CAPPED, OWN_SCOPE_FLAG, ...caps, "--", "cargo-nextest", ...args];
+  const { out, timedOut } =
+    process.env[UNCONTAINED_ENV] === "1"
+      ? await capture("cargo-nextest", args, dir, "falsify-results.json", {
+          env,
+          timeoutMs: MUTANT_TIMEOUT_MS,
+        })
+      : await capture(process.execPath, contained, dir, "falsify-results.json", {
+          env,
+          timeoutMs: MUTANT_TIMEOUT_MS,
+          killGraceMs: CAPPED_STOP_GRACE_MS,
+        });
   return { out, timedOut, memoryKilled: existsSync(kills) };
 }
 
