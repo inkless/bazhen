@@ -205,9 +205,10 @@ const HISTORY_LINES: u32 = 10_000;
 const HOLDER_MAX_HISTORY_LINES: u32 = 100_000;
 const CONFIG_FILE: &str = "config.toml";
 
-/// Why `web.listen = "lan"` is refused: this daemon has no LAN listener yet. The refusal goes once
-/// it has one, and the TypeScript daemon's checks of the LAN's port and ranges come with it.
-pub const LAN_REFUSAL: &str = "web.listen: this daemon doesn't serve the LAN yet; use the TypeScript daemon for web.listen = \"lan\"";
+/// Why `web.listen = "lan"` is refused: this daemon serves loopback only, which another machine
+/// reaches through a port forwarded to it over SSH. The forward keeps the daemon's port, since
+/// the Host allowlist takes only its own loopback address and port.
+pub const LAN_REFUSAL: &str = "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>";
 
 /// The settings a config file's bytes hold, read as the TypeScript daemon reads them: as UTF-8,
 /// with any byte that isn't replaced, then as TOML, then key by key.
@@ -476,7 +477,7 @@ impl OriginsFrom {
 mod tests {
     use bazhen_client::paths::{self, Inputs};
 
-    use super::{InvalidConfig, load_settings};
+    use super::{FileConfig, InvalidConfig, load_settings, parse_config, resolve_config};
 
     /// A directory of the test's own, removed when the test ends, whether or not it passed.
     struct TempDir(std::path::PathBuf);
@@ -538,6 +539,22 @@ mod tests {
         assert_eq!(settings.paths.bank, "/srv/bank");
         assert_eq!(settings.config.bank.as_deref(), Some("/srv/bank"));
         assert_eq!(settings.config.port, 7902);
+    }
+
+    #[test]
+    fn refuses_the_lan_from_the_file_or_the_environment_saying_to_forward_a_port_over_ssh() {
+        let lan = parse_config("/c/config.toml", b"web.listen = \"lan\"\n").unwrap();
+        let env = |name: &str| (name == "BAZHEN_WEB_LISTEN").then(|| "lan".to_owned());
+        let why = Err(InvalidConfig(
+            "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>".to_owned(),
+        ));
+        assert_eq!(
+            [
+                resolve_config(&lan, NO_ENV),
+                resolve_config(&FileConfig::default(), &env)
+            ],
+            [why.clone(), why]
+        );
     }
 
     #[test]

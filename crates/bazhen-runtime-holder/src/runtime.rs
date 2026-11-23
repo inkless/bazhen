@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_holder_proto::body::{
-    Argv, Env, ErrorCode, ExitStatus, Generation, HelloReply, HistoryLines, NonEmpty, PasteRequest,
-    Pid, ProcessSpec, Signal, Size, SpawnSpec, Stats, Theme, Versions,
+    Argv, Count, Env, ErrorCode, ExitStatus, Generation, HelloReply, HistoryLines, NonEmpty,
+    PasteRequest, Pid, ProcessSpec, Screen, Signal, Size, SpawnSpec, Stats, Theme, Versions,
 };
 use bazhen_holder_proto::{PROTOCOL_VERSION, negotiate};
 use bazhen_host_guard::holder::{
@@ -276,6 +276,20 @@ pub enum RuntimeError {
         terminal_id: TerminalId,
         reason: String,
     },
+    /// Its holder predates `what`, which was asked of it; restarting the terminal starts it on one
+    /// that has it (`TerminalPredates`).
+    #[error("terminal {terminal_id} runs on a holder that predates {what}: restart it to use them")]
+    Predates {
+        terminal_id: TerminalId,
+        what: &'static str,
+    },
+    /// Its screen can't be read just now, as when its holder has lost it; asking again may work
+    /// (`ScreenUnreadable`).
+    #[error("terminal {terminal_id}'s screen can't be read: {reason}")]
+    ScreenUnreadable {
+        terminal_id: TerminalId,
+        reason: String,
+    },
 }
 
 /// What saying `hello` at a socket found.
@@ -405,6 +419,17 @@ fn has_paste(agreed: &str) -> bool {
         .map(|v| v.to_string())
         .as_deref()
         == Some(PASTE_VERSION)
+}
+
+/// The holder protocol version that added `screen`, the read of a screen as text.
+const SCREEN_VERSION: &str = "1.4";
+
+/// Whether a holder that agreed `agreed` has `screen` (`holderHasScreen` in packages/protocol).
+fn has_screen(agreed: &str) -> bool {
+    negotiate(&[agreed], &[SCREEN_VERSION])
+        .map(|v| v.to_string())
+        .as_deref()
+        == Some(SCREEN_VERSION)
 }
 
 /// Why `text` may not be pasted, or `None` when it may, as `pasteTextRefusal` in
@@ -1229,6 +1254,52 @@ impl HolderRuntime {
         set
     }
 
+    /// The screen shown as plain text, after the newest `history` rows of history, read on a
+    /// reader's connection, which its holder answers after its process has exited too. It takes
+    /// no writer's slot and sends nothing to the terminal.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError::Predates`] for a holder before screen reads, and
+    /// [`RuntimeError::ScreenUnreadable`] for one that can't read it just now, or hangs up or
+    /// doesn't answer before it has; otherwise as `hello`'s.
+    pub async fn screen(
+        &self,
+        terminal: &HolderRef,
+        history: Count,
+    ) -> Result<Screen, RuntimeError> {
+        let (client, events) = self.holder_of(terminal).await?;
+        drop(events);
+        let terminal_id = &terminal.terminal_id;
+        let unreadable = |reason: String| RuntimeError::ScreenUnreadable {
+            terminal_id: terminal_id.clone(),
+            reason,
+        };
+        let read = if has_screen(client.hello().version.as_str()) {
+            match tokio::time::timeout(self.options.request, client.screen(history)).await {
+                Ok(Err(RequestError::Refused(said)))
+                    if matches!(
+                        said.code,
+                        ErrorCode::Unavailable | ErrorCode::SnapshotTooLarge | ErrorCode::Failed
+                    ) =>
+                {
+                    Err(unreadable(said.reason))
+                }
+                // A holder gone mid-read is a read to try again, as one that couldn't read it is.
+                Ok(Err(RequestError::Disconnected(gone))) => Err(unreadable(gone.to_string())),
+                Ok(answered) => answered.map_err(|e| refusal(terminal_id, e)),
+                Err(_) => Err(unreadable("its holder didn't answer in time".to_owned())),
+            }
+        } else {
+            Err(RuntimeError::Predates {
+                terminal_id: terminal_id.clone(),
+                what: "screen reads",
+            })
+        };
+        client.end();
+        read
+    }
+
     /// The title in the holder's `hello`: its current process's, whichever generation that is.
     ///
     /// # Errors
@@ -1630,6 +1701,7 @@ mod tests {
                     engine_resets: None,
                 },
             }],
+            Request::Screen { body, .. } => vec![screen_answer(id, body.history.get())],
             Request::Paste { body, .. } if body.text() == "cat" => vec![Reply::Error {
                 id,
                 body: ErrorBody::new(
@@ -1639,6 +1711,27 @@ mod tests {
                 ),
             }],
             _ => ok(request),
+        }
+    }
+
+    /// A fake holder's answer to a screen read, by the rows of history asked for: the screen
+    /// for none, and for each other a refusal.
+    fn screen_answer(id: bazhen_holder_proto::RequestId, history: u64) -> Reply {
+        let refused = |code: &str, message: &str| {
+            let mut body = ErrorBody::new("screen", ErrorCode::Failed, message);
+            code.clone_into(&mut body.code);
+            Reply::Error { id, body }
+        };
+        match history {
+            0 => Reply::Screen {
+                id,
+                body: Screen::new("$ make\nok\n", Count::new(0).unwrap()).unwrap(),
+            },
+            1 => refused("unavailable", "the holder has no engine"),
+            2 => refused("snapshot-too-large", "the screen is past its cap"),
+            3 => refused("failed", "the engine broke"),
+            4 => refused("newer-than-this-build", "a code this build doesn't know"),
+            _ => refused("invalid", "history is past the most"),
         }
     }
 
@@ -2339,6 +2432,144 @@ mod tests {
                     vec![]
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn reads_a_screen_as_text_and_a_refusal_to_read_one_now_as_unreadable_and_any_other_as_said() {
+        let read = |hello: HelloReply, history: u64| {
+            let (mut fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+            block_on(async {
+                fixture.serve(&id(1), Answering::Hello(Box::new(hello)));
+                let at = reference(&fixture, &id(1));
+                let read = fixture
+                    .runtime
+                    .screen(&at, Count::new(history).unwrap())
+                    .await;
+                fixture.runtime.shutdown().await;
+                let asked: Vec<u64> = fixture
+                    .seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| match r {
+                        Request::Screen { body, .. } => Some(body.history.get()),
+                        _ => None,
+                    })
+                    .collect();
+                let read = read
+                    .map(|screen| screen.text().to_owned())
+                    .map_err(|e| e.to_string());
+                (read, asked)
+            })
+        };
+        let mut before_screens = hello_of(&id(1));
+        before_screens.version = ProtocolVersion::new("1.3").unwrap();
+        let t = id(1);
+        let unreadable =
+            |reason: &str| Err(format!("terminal {t}'s screen can't be read: {reason}"));
+        assert_eq!(
+            [
+                read(hello_of(&id(1)), 0),
+                read(hello_of(&id(1)), 1),
+                read(hello_of(&id(1)), 2),
+                read(hello_of(&id(1)), 3),
+                read(hello_of(&id(1)), 4),
+                read(hello_of(&id(1)), 5),
+                read(before_screens, 0),
+            ],
+            [
+                (Ok("$ make\nok\n".to_owned()), vec![0]),
+                (unreadable("the holder has no engine"), vec![1]),
+                (unreadable("the screen is past its cap"), vec![2]),
+                (unreadable("the engine broke"), vec![3]),
+                (unreadable("a code this build doesn't know"), vec![4]),
+                (
+                    Err(format!(
+                        "terminal {t}: its holder refused screen: history is past the most"
+                    )),
+                    vec![5]
+                ),
+                (
+                    Err(format!(
+                        "terminal {t} runs on a holder that predates screen reads: restart it to use them"
+                    )),
+                    vec![]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_a_holder_that_hangs_up_mid_read_as_a_screen_to_read_again() {
+        let (fixture, _) = Fixture::new(FakeHost::default(), |_| {});
+        let (read, asked) = block_on(async {
+            let listener = UnixListener::bind(fixture.socket(&id(1))).unwrap();
+            let hello = hello_of(&id(1));
+            let mut serving = JoinSet::new();
+            serving.spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut holder = FakeHolder::new(stream);
+                drop(holder.answer_hello_with(|h| *h = hello).await);
+                // It takes the read, then hangs up without answering it.
+                holder.request().await
+            });
+            let at = reference(&fixture, &id(1));
+            let read = fixture.runtime.screen(&at, Count::new(0).unwrap()).await;
+            let asked = serving.join_next().await.unwrap().unwrap();
+            fixture.runtime.shutdown().await;
+            (read.map_err(|e| e.to_string()), asked)
+        });
+        assert!(matches!(asked, Request::Screen { .. }), "{asked:?}");
+        assert_eq!(
+            read,
+            Err(format!(
+                "terminal {}'s screen can't be read: holder connection ended: hung up",
+                id(1)
+            ))
+        );
+    }
+
+    #[test]
+    fn reads_a_holder_that_never_answers_a_screen_read_as_one_to_read_again_in_time() {
+        let (fixture, _) = Fixture::new(FakeHost::default(), |o| {
+            o.request = Duration::from_millis(50);
+        });
+        let (read, asked) = block_on(async {
+            let listener = UnixListener::bind(fixture.socket(&id(1))).unwrap();
+            let hello = hello_of(&id(1));
+            let (release, released) = tokio::sync::oneshot::channel::<()>();
+            let mut serving = JoinSet::new();
+            serving.spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut holder = FakeHolder::new(stream);
+                drop(holder.answer_hello_with(|h| *h = hello).await);
+                // It takes the read and never answers it, holding the connection open.
+                let asked = holder.request().await;
+                drop(released.await);
+                asked
+            });
+            let at = reference(&fixture, &id(1));
+            // Bounded here too, so a read with no bound of its own fails this test's assertion
+            // rather than waiting until the test is stuck.
+            let read = tokio::time::timeout(
+                Duration::from_secs(5),
+                fixture.runtime.screen(&at, Count::new(0).unwrap()),
+            )
+            .await
+            .map(|read| read.map_err(|e| e.to_string()));
+            release.send(()).unwrap();
+            let asked = serving.join_next().await.unwrap().unwrap();
+            fixture.runtime.shutdown().await;
+            (read, asked)
+        });
+        assert!(matches!(asked, Request::Screen { .. }), "{asked:?}");
+        assert_eq!(
+            read.map_err(|_| "the read waited past five seconds"),
+            Ok(Err(format!(
+                "terminal {}'s screen can't be read: its holder didn't answer in time",
+                id(1)
+            )))
         );
     }
 

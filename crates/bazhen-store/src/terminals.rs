@@ -350,6 +350,15 @@ pub struct ShellRow {
     pub foreground: Option<String>,
 }
 
+/// A terminal's incarnation as a runtime confirmed it, whatever kind of terminal it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRow {
+    /// The runtime it is on.
+    pub runtime: String,
+    /// Where that runtime keeps it, as the JSON text the runtime recorded.
+    pub locator: Option<String>,
+}
+
 /// The states of a terminal that holds, or may yet hold, a PTY.
 const OPEN_STATES: &str = "('creating', 'running', 'unknown', 'exited', 'closing')";
 
@@ -395,6 +404,27 @@ fn shell_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShellRow> {
 }
 
 impl Reads<'_> {
+    /// The incarnation terminal `id` runs in, an agent's or a shell's, or `None` for no terminal,
+    /// or one no runtime has confirmed (`runtimeRef`).
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn runtime_row(self, id: &str) -> rusqlite::Result<Option<RuntimeRow>> {
+        self.0
+            .query_row(
+                "SELECT runtime, locator FROM terminals WHERE id = ? AND runtime IS NOT NULL",
+                [id],
+                |row| {
+                    Ok(RuntimeRow {
+                        runtime: row.get(0)?,
+                        locator: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
     /// The shell `id` names, or `None` for none, or a terminal that isn't a shell.
     ///
     /// # Errors
@@ -964,6 +994,35 @@ mod tests {
             .unwrap();
         assert_eq!((state.as_str(), name.as_str()), ("closed", "build"));
         assert_eq!(updated, int(closed).unwrap());
+    }
+
+    #[test]
+    fn reads_a_terminal_s_runtime_once_one_confirmed_it_and_none_for_one_unknown() {
+        let dir = TempDir::new("terminal-runtime");
+        let (mut store, terminal) = opened(&dir);
+        let before = store.reads().runtime_row(terminal.as_str()).unwrap();
+        change(
+            &mut store,
+            &terminal,
+            TerminalChange::Running(incarnation("0")),
+        )
+        .unwrap();
+        let after = store.reads().runtime_row(terminal.as_str()).unwrap();
+        let unknown = store
+            .reads()
+            .runtime_row(TerminalId::mint(1, [9; 16]).as_str())
+            .unwrap();
+        assert_eq!(
+            (before, after, unknown),
+            (
+                None,
+                Some(RuntimeRow {
+                    runtime: "holder".to_owned(),
+                    locator: Some(serde_json::to_string(&locator("0")).unwrap()),
+                }),
+                None
+            )
+        );
     }
 
     #[test]

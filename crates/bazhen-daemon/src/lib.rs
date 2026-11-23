@@ -30,6 +30,7 @@ mod session;
 mod shell_routes;
 mod shells;
 pub mod tasks;
+mod terminal_routes;
 mod terminals;
 #[cfg(test)]
 mod testing;
