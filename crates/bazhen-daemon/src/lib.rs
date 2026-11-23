@@ -29,6 +29,7 @@ mod serve;
 mod session;
 mod shell_routes;
 mod shells;
+pub mod stream;
 pub mod tasks;
 mod terminal_routes;
 mod terminals;

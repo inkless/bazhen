@@ -949,6 +949,109 @@ const NOT_DECODERS: Record<string, string> = {
     "reads only the request's method and path, never its body; the file bytes look hands back go to the response as they are, unparsed",
   "crates/bazhen-daemon/src/web.rs::bundled":
     "reads a bundle file whole and hands its bytes back unparsed, as the response body; the path it takes is refused whole if a segment is empty, starts with a dot, or carries a backslash or %, and realpath(3) does the rest, held inside the bundle's own; its tests and a proptest climb out every way web.medium.test.ts does",
+  "crates/bazhen-daemon/src/stream/hub.rs::write":
+    "the trait method a terminal's stream writes the driver's input with, which has no body here; the hub calls it only with what without_replies, which its input target fuzzes, kept",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::clone":
+    "clones the Arc of the hub's state; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::join":
+    "hands the view to Shared::join; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::write":
+    "hands a view's input to Shared::write; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::engage":
+    "holds the hub's state, whose views hold output queued for them; moves the lease, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::declare_epoch":
+    "holds the hub's state, whose views hold output queued for them; sets the view's epoch, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::resize":
+    "holds the hub's state, whose views hold output queued for them; sets the view's size, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::leave":
+    "holds the hub's state, whose views hold output queued for them; ends the view, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::join":
+    "holds the hub's state, whose views hold output queued for them; hands the snapshot's VT to send_snapshot and the held output to pass whole, parsing neither",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::begin":
+    "cuts the output held for a view by seam, which slices it only at the offsets its stream gave; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::watch":
+    "holds the hub's state, whose views hold output queued for them; opens or finds the terminal's stream, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::open":
+    "keeps the snapshot its stream opened on whole, for a view to replay; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::take_events":
+    "hands each event its terminal's stream told to apply; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::apply":
+    "moves the stream's position on by the length of each output and hands the output whole to deliver; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::deliver":
+    "queues each output whole for a view, or hands it to pass; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::closed":
+    "holds the hub's state, whose views hold output queued for them; ends every view with a frame, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::take_snapshot":
+    "asks the stream for a snapshot and hands it back whole, comparing only its position and size; parses none of its VT",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::send_snapshot":
+    "cuts a snapshot's VT into pieces of a fixed size and queues each whole for its view; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::write":
+    "hands a view's input to input; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::input":
+    "hands a view's input to without_replies and has_keystrokes, which its input target fuzzes, and writes what without_replies kept; parses none itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::engage":
+    "holds the hub's state, whose views hold output queued for them; moves the lease, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::fit_to":
+    "holds the hub's state, whose views hold output queued for them; picks the view whose size the terminal takes, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::apply_size":
+    "holds the hub's state, whose views hold output queued for them; starts a resize, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::resized":
+    "holds the hub's state, whose views hold output queued for them; tells views a resize failed and starts the next, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::evict":
+    "holds the hub's state, whose views hold output queued for them; ends a view with a frame, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::end":
+    "holds the hub's state, whose views hold output queued for them; drops a view, its queue with it, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::on":
+    "runs a closure on a terminal's state, which holds output queued for its views; reads none of it itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::forget":
+    "removes a terminal's entry from the hub's map; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::forget_watched":
+    "removes a terminal's entry from the hub's map; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::let_go": "closes a terminal's stream; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Watched::lock":
+    "locks a terminal's state, which holds output queued for its views; reads none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Watched::until":
+    "runs a closure on a terminal's state whenever it moves; reads none of the output it holds itself",
+  "crates/bazhen-daemon/src/stream/hub.rs::State::view":
+    "finds a view by its id; reads none of the output it holds",
+  "crates/bazhen-daemon/src/stream/hub.rs::State::view_mut":
+    "finds a view by its id; reads none of the output it holds",
+  "crates/bazhen-daemon/src/stream/hub.rs::announce_lease":
+    "holds the hub's state, whose views hold output queued for them; queues each a lease frame, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::lease_frame":
+    "holds the hub's state, whose views hold output queued for them; builds a lease frame from its lease and device names, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::pass":
+    "queues output for a view whole, and frames for the rest; parses none of it",
+  "crates/bazhen-daemon/src/stream/screen.rs::Snapshot::new":
+    "keeps a snapshot's VT whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/screen.rs::Snapshot::vt":
+    "hands back a snapshot's VT whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/screen.rs::Snapshot::fmt":
+    "shows only how long a snapshot's VT is; reads none of it",
+  "crates/bazhen-daemon/src/stream/screen.rs::Opening::new":
+    "keeps a snapshot whole beside the size it was drawn at; parses nothing",
+  "crates/bazhen-daemon/src/stream/screen.rs::Opening::usable":
+    "compares a snapshot's position and size, and hands the snapshot back whole; reads none of its VT",
+  "crates/bazhen-daemon/src/stream/seam.rs::held_bytes":
+    "counts the bytes a held item adds; reads none of them",
+  "crates/bazhen-daemon/src/stream/seam.rs::seam":
+    "slices held output only at the offset a snapshot's position gives, which its seam property tests; parses none of it",
+  "crates/bazhen-daemon/src/stream/view.rs::Outbox::send":
+    "hands output whole to queue; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/view.rs::Outbox::send_piece":
+    "hands a snapshot's piece whole to queue; reads no bytes itself",
+  "crates/bazhen-daemon/src/stream/view.rs::Outbox::queue":
+    "counts output by its length and queues it whole for the view's writer; parses none of it",
+  "crates/bazhen-daemon/src/stream/view.rs::Outbox::notify":
+    "queues a frame the hub built for the view's writer; reads no bytes",
+  "crates/bazhen-daemon/src/stream/view.rs::Inbox::recv":
+    "hands back what the hub queued, whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/view.rs::Output::into_parts":
+    "hands back output the hub queued, whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/view.rs::output":
+    "the trait method a view's socket sends output with, which has no body here; it is handed output the hub queued whole, to send as it is",
+  "crates/bazhen-daemon/src/stream/view.rs::write_to":
+    "sends what the hub queued to a view's socket whole; parses none of it",
   "crates/bazhen-host-guard/src/ptys.rs::Machine::read_file":
     "reads a kernel counter file whole as text for count, which takes it only as a whole number; parses nothing itself",
   "crates/bazhen-host-guard/src/group.rs::read_out":

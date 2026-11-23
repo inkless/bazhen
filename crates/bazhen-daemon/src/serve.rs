@@ -161,9 +161,16 @@ fn prepare(startup: &Startup, wait: Duration) -> Result<(Lock, (Writer, writer::
     .map_err(|err| Refused::Said(err.to_string()))?;
     // No view outlives the daemon that served it: each still recorded as open ends, releasing its
     // lease, and its page reattaches for a fresh screen.
-    store
+    let ended = store
         .write(|w: &bazhen_store::Writer<'_>| w.end_open_attachments())
         .map_err(|err| Refused::Said(format!("bazhen can't end the views left open: {err}")))?;
+    // Said only when there were some: most starts follow a daemon whose views all closed.
+    if ended > 0 {
+        tracing::info!(
+            views = ended,
+            "bazhen: ended the views left open by the daemon before it"
+        );
+    }
     let store = writer::start(store, &path)
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?;
     Ok((lock, store))
@@ -1314,6 +1321,70 @@ mod tests {
         assert_eq!(
             (open, epoch, holder, ended.as_deref()),
             (vec![], 2, None, Some(r#"{"reason":"daemon_restart"}"#))
+        );
+    }
+
+    #[test]
+    fn says_how_many_views_left_open_it_ended_and_nothing_once_none_were() {
+        use bazhen_protocol::events::{AttachmentStarted, TerminalOpened};
+        use bazhen_protocol::ids::{AttachmentId, TerminalId};
+        use bazhen_protocol::stream::AttachmentMode;
+        use bazhen_store::{Actor, NewEvent, TerminalChange};
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        let home = TempDir::new("views-counted");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.paths.data).unwrap();
+        let terminal = TerminalId::mint(1, [3; 16]);
+        let mut before =
+            Store::open(&PathBuf::from(&startup.paths.data).join("bazhen.db")).unwrap();
+        before
+            .write(|w| -> Result<_, AppendError> {
+                let environment = w.local_environment()?;
+                w.append(&NewEvent::Terminal {
+                    terminal: terminal.clone(),
+                    actor: Actor::User,
+                    change: TerminalChange::Opened(TerminalOpened {
+                        environment_id: environment,
+                        cwd: "/home/me".to_owned(),
+                        linked_agent_id: None,
+                        theme: None,
+                        restart_of: None,
+                        runtime: Some("holder".to_owned()),
+                    }),
+                })?;
+                for n in 1..=2 {
+                    w.append(&NewEvent::AttachmentStarted {
+                        attachment: AttachmentId::mint(1, [n; 16]),
+                        payload: AttachmentStarted {
+                            terminal_id: terminal.clone(),
+                            mode: AttachmentMode::Interactive,
+                        },
+                    })?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        drop(before);
+        let said_ended = |said: &crate::shells::tests::Said| {
+            said.text()
+                .lines()
+                .filter(|line| line.contains("views left open"))
+                .map(|line| line.split_once("bazhen: ").map(|(_, said)| said.to_owned()))
+                .collect::<Vec<_>>()
+        };
+        let first = prepare(&startup, QUICK.drain).unwrap();
+        let after_first = said_ended(&said);
+        drop(first);
+        prepare(&startup, QUICK.drain).unwrap();
+        assert_eq!(
+            (after_first, said_ended(&said).len()),
+            (
+                vec![Some(
+                    "ended the views left open by the daemon before it views=2".to_owned()
+                )],
+                1
+            )
         );
     }
 
