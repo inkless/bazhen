@@ -2286,12 +2286,34 @@ describe("decoderFailures", () => {
     expect([
       failures(fuzzed, exempt, head("impl Peek for Arc<Runtime>")),
       failures(fuzzed, exempt, head("impl Peek for Arc<Runtime>>")),
+      failures(fuzzed, exempt, {
+        ...repo,
+        "crates/p/src/wrapped.rs": [
+          "pub fn wrapped(\n    n: u32,\n) -> (",
+          "    impl Iterator<Item = u32>,",
+          "    u32,",
+          ") { todo() }",
+        ].join("\n"),
+      }),
     ]).toEqual([
       [],
       [
         "crates/p/src/odd.rs:3: an impl whose head the decoder rule can't read, so it can't " +
           "tell what the impl is for or whether it takes bytes: balance its brackets.",
       ],
+      [],
+    ]);
+  });
+
+  it("takes no associated type of an impl whose head holds an array for an alias", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/assoc.rs":
+        "impl<T> Tr for W<T> where [u8; 4]: Sized {\n    type Item = Vec<u8>;\n}\n" +
+        "type Raw = Vec<u8>;\n",
+    };
+    expect(failures(fuzzed, exempt, tree)).toEqual([
+      expect.stringContaining("crates/p/src/assoc.rs::Raw: names a byte type"),
     ]);
   });
 
