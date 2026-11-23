@@ -333,9 +333,10 @@ async fn unrouted(headers: HeaderMap) -> Response {
     not_found()
 }
 
-/// A refused upgrade as the TypeScript daemon answers one (`http/upgrades.ts`'s `refuseUpgrade`):
-/// the status alone, with no body, and the connection closed once it is written. A client that
-/// asked for a WebSocket reads no error body, and Node ends the socket it handed over.
+/// A refused upgrade: the status with an empty body, as `http/upgrades.ts`'s `refuseUpgrade`
+/// sends, and the connection closed once it is written. The headers differ: TypeScript writes the
+/// status line alone and ends the socket, where hyper adds `content-length: 0` and closes the
+/// connection on `Connection: close`.
 pub(crate) fn refuse_upgrade(status: StatusCode) -> Response {
     (status, [(axum::http::header::CONNECTION, "close")]).into_response()
 }
