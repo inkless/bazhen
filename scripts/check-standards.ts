@@ -1273,6 +1273,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads /proc/<pid>/stat for parent_field, which proc_stat fuzzes",
   "crates/bazhen-holder/src/process.rs::parent":
     "reads /proc/<pid>/stat for has_exited and parent_field, which proc_stat fuzzes",
+  "crates/bazhen-peer/src/lib.rs::step":
+    "reads /proc/<pid>/stat for has_exited, parent_field and start_ticks, which proc_stat fuzzes",
   "crates/bazhen-holder/src/session.rs::supported":
     "reads /proc/self/stat for own_pid, which proc_stat fuzzes",
   "crates/bazhen-runtime-holder/src/client.rs::HolderEvents::recv":
