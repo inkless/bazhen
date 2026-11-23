@@ -1144,7 +1144,9 @@ mod tests {
     }
 
     /// The test container's: a copy of the tests' sleeper named as the holder, installed and run
-    /// from its build while the next build installs beside it.
+    /// from its build while the next build installs beside it. Of the kernel's list it reads only
+    /// this process and the sleeper: any other process of this user whose arguments can't be read
+    /// would rightly make the running builds unknown.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn keeps_a_build_a_live_holder_runs_while_the_next_installs_then_prunes_it_once_it_ends() {
@@ -1174,12 +1176,19 @@ mod tests {
         fs::write(&home.source, "the next build, which nothing here runs").unwrap();
         let next = home.install();
         age(&home.dir.join(&old.build));
-        let while_running = (
-            running_builds(&home.dir, me()),
-            prune_unused_holders(&home.dir, me(), Some(&next)),
-        );
+        let this = getpid();
+        let ours = [this, sleeper.pid()];
+        let running = || {
+            let listed =
+                process::pids().map(|pids| pids.into_iter().filter(|p| ours.contains(p)).collect());
+            running_builds_with(&home.dir, me(), this, listed, seen)
+        };
+        let prune =
+            |running| prune_unused_with(&home.dir, me(), Some(&next), running, SystemTime::now());
+        let builds = running();
+        let while_running = (builds.clone(), prune(builds));
         sleeper.end();
-        let after = prune_unused_holders(&home.dir, me(), Some(&next));
+        let after = prune(running());
         assert_eq!(
             (while_running, after, home.ls()),
             (
