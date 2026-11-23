@@ -7,6 +7,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -18,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RUST_TOOLS, type RustTool, TEST_BUILD, configFailures, gateEnv } from "./rust-gate.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -43,6 +44,7 @@ echo '{"packages":[{"name":"two"},{"name":"one"}]}'
 `;
 
 let xtask: string;
+let xtaskDir: string | undefined;
 let dir: string;
 let bin: string;
 let log: string;
@@ -65,9 +67,19 @@ function buildXtask(): string {
   return built;
 }
 
+// A copy of its own: cargo replaces target/debug/bazhen-xtask whenever another build of xtask, such
+// as cargo-config.medium.test.ts's `cargo xtask`, uplifts a different artifact there, and a spawn
+// between its removing the old one and linking the new one finds nothing to run.
 beforeAll(() => {
-  xtask = buildXtask();
+  xtaskDir = mkdtempSync(join(tmpdir(), "bz-xtask-bin-"));
+  xtask = join(xtaskDir, "bazhen-xtask");
+  copyFileSync(buildXtask(), xtask);
+  chmodSync(xtask, 0o755);
 }, 300_000);
+
+afterAll(() => {
+  if (xtaskDir !== undefined) rmSync(xtaskDir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "bz-xtask-gate-"));
@@ -125,6 +137,7 @@ function gate(command: string[], env: Record<string, string> = {}) {
   rmSync(log, { force: true });
   const [program = "", ...args] = command;
   const run = spawnSync(program, args, { encoding: "utf8", env: startEnv(env) });
+  if (run.error !== undefined) throw run.error;
   const logged = existsSync(log) ? parseLog(readFileSync(log, "utf8")) : [];
   return { status: run.status, stderr: run.stderr, logged };
 }
