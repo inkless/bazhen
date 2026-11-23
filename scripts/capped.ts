@@ -109,6 +109,16 @@ export function formatBytes(bytes: number): string {
   return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
 }
 
+/** `tmux ×3, bazhen-holder ×1`: each name once, the most frequent first. */
+export function nameCounts(names: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return [...counts]
+    .toSorted(([a, m], [b, n]) => n - m || a.localeCompare(b))
+    .map(([name, n]) => `${name} ×${n}`)
+    .join(", ");
+}
+
 export const formatDuration = (ms: number) =>
   ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
 
@@ -142,7 +152,8 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
     lines.push("capped: stopped at its CPU-time limit, set for a test whose runner had died");
   }
   if (!testBinary && ended.leftover > 0) {
-    lines.push(`capped: stopped ${ended.leftover} process(es) its command left running`);
+    const names = ended.left?.length ? `: ${nameCounts(ended.left)}` : "";
+    lines.push(`capped: stopped ${ended.leftover} process(es) its command left running${names}`);
   }
   if (ended.uncounted !== undefined) lines.push(`capped: ${ended.uncounted}`);
   return lines;

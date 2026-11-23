@@ -66,6 +66,7 @@ describe("a run through the capped scope around it", () => {
     const left = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env, true);
     const clean = await runThrough("sh", ["-c", "sleep 0"], cap, process.env, true);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
   });
 
   it("counts nothing for a test binary, whose runner reads its status alone", async () => {
@@ -107,6 +108,7 @@ describe("a capped run", () => {
     const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env, true);
     const clean = await runIn(mode, "sh", ["-c", "sleep 0"], cap, process.env, true);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
   });
 
   it("doesn't count what was ending as its command went", async () => {
@@ -202,9 +204,10 @@ describe("the fallback watchdog", () => {
     const left = await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
     const clean = await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
   });
 
-  it("doesn't count what was ending as its command went", async () => {
+  it("doesn't count what was ending as a watched command went", async () => {
     const ended = await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
     expect(ended.leftover).toBe(0);
   });

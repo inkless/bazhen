@@ -133,6 +133,14 @@ describe("what a run says when it ends", () => {
     expect(report({ ...ended, leftover: 2 }, cap, "through", true)).toEqual([]);
   });
 
+  it("names what a run's command left running, the most of one name first", () => {
+    const left = ["sleep", "tmux", "bazhen-holder", "tmux"];
+    expect(report({ ...ended, leftover: 4, left }, cap, "watched", false)).toEqual([
+      "capped: peak 3.0 GiB of 8.0 GiB",
+      "capped: stopped 4 process(es) its command left running: tmux ×2, bazhen-holder ×1, sleep ×1",
+    ]);
+  });
+
   it("names the CPU-time limit when a test dies of it", () => {
     expect(report({ ...ended, code: null, signal: "SIGXCPU" }, cap, "owned", true)).toEqual([
       "capped: stopped at its CPU-time limit, set for a test whose runner had died",

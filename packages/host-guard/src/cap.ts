@@ -13,6 +13,7 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
+import { basename } from "node:path";
 import {
   MIN_SYSTEMD,
   PROBE_SCRIPT,
@@ -45,6 +46,8 @@ export interface Ended {
    * doesn't count them.
    */
   readonly leftover: number;
+  /** The names of `leftover`'s processes, where it was counted. */
+  readonly left?: readonly string[];
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
 }
@@ -117,27 +120,40 @@ export function statInGroup(text: string, pgid: number): boolean {
   return Number(pgrp) === pgid && state !== "Z" && state !== "X";
 }
 
-/** How many live processes `ps -o pgid=,stat=`'s rows put in group `pgid`. */
-export const psGroupCount = (text: string, pgid: number) =>
-  [...text.matchAll(/^\s*(\d+)\s+(\S+)\s*$/gm)].filter(
-    ([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat),
-  ).length;
+/** A `/proc/<pid>/stat`'s command name: what lies between its first paren and its last. */
+export const statComm = (text: string) => text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
+
+/** The names of the live processes `ps -o pgid=,stat=,comm=`'s rows put in group `pgid`. */
+export const psGroupNames = (text: string, pgid: number) =>
+  [...text.matchAll(/^\s*(\d+)\s+(\S+)\s+(.+?)\s*$/gm)]
+    .filter(([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat))
+    .map(([, , , comm = ""]) => basename(comm));
 
 /**
- * How many live processes are in group `pgid`: a read of `/proc` or `ps`, no signal. Undefined
- * when `ps` couldn't be read.
+ * The names of the live processes in group `pgid`: a read of `/proc` or `ps`, no signal. Each
+ * name comes from the same read that put its process in the group. Undefined when `ps` couldn't
+ * be read.
  */
-async function groupCount(pgid: number): Promise<number | undefined> {
+async function groupMembers(pgid: number): Promise<string[] | undefined> {
   if (process.platform === "darwin") {
-    const ps = await output("ps", ["-A", "-o", "pgid=,stat="]);
-    return ps === undefined ? undefined : psGroupCount(ps, pgid);
+    const ps = await output("ps", ["-A", "-o", "pgid=,stat=,comm="]);
+    return ps === undefined ? undefined : psGroupNames(ps, pgid);
   }
-  let count = 0;
+  const names: string[] = [];
   for (const entry of readdirSync("/proc")) {
-    if (/^\d+$/.test(entry) && statInGroup(readText(`/proc/${entry}/stat`) ?? "", pgid)) count++;
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = readText(`/proc/${entry}/stat`) ?? "";
+    if (statInGroup(stat, pgid)) names.push(statComm(stat));
   }
-  return count;
+  return names;
 }
+
+/** The names of `pids`' processes, leaving out one gone before its name could be read. */
+export const namesOf = (pids: readonly string[], read = readText) =>
+  pids.flatMap((pid) => {
+    const name = read(`/proc/${pid}/comm`)?.trim();
+    return name ? [name] : [];
+  });
 
 /**
  * How long a run waits, once its command has gone and something is still in it, before it counts
@@ -146,13 +162,14 @@ async function groupCount(pgid: number): Promise<number | undefined> {
  */
 export const LEFTOVER_SETTLE_MS = 500;
 
-/** `count`'s answer once the end of the command has settled: a second read, after the settle. */
-async function settledCount<N extends number | undefined>(
-  count: () => N | Promise<N>,
-): Promise<N | 0> {
-  if ((await count()) === 0) return 0;
+/** What `list` finds once the end of the command has settled: a second read, after the settle. */
+async function settled<L extends readonly string[] | undefined>(
+  list: () => L | Promise<L>,
+): Promise<L> {
+  const first = await list();
+  if (first?.length === 0) return first;
   await new Promise((wait) => setTimeout(wait, LEFTOVER_SETTLE_MS));
-  return count();
+  return list();
 }
 
 function parentOf(pid: number): number | undefined {
@@ -363,7 +380,7 @@ export function runInScope(
       sample();
       clearInterval(poll);
       watcher?.close();
-      const leftover = asRun ? await settledCount(() => procs().length) : 0;
+      const left = asRun ? await settled(() => namesOf(procs())) : undefined;
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);
@@ -373,7 +390,8 @@ export function runInScope(
         kills === 0 && (asRun || signal === "SIGKILL")
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
-      done({ code, signal, peak, timedOut, leftover, ...journaled });
+      const named = left === undefined ? {} : { left };
+      done({ code, signal, peak, timedOut, leftover: left?.length ?? 0, ...named, ...journaled });
     };
     child.once("error", () => void finish(127, null));
     child.once("exit", (code, signal) => void finish(code, signal));
@@ -599,16 +617,17 @@ async function runGroup(
   clearInterval(watchdog);
   clearTimeout(timer);
   clearTimeout(escalation);
-  const counted =
-    countsLeftover && pid !== undefined ? await settledCount(() => groupCount(pid)) : undefined;
+  const left =
+    countsLeftover && pid !== undefined ? await settled(() => groupMembers(pid)) : undefined;
   // A group just seen empty isn't signalled: its pgid may already be another group's.
-  if (counted !== 0) stop("SIGKILL");
-  const leftover = counted ?? 0;
+  if (left?.length !== 0) stop("SIGKILL");
+  const leftover = left?.length ?? 0;
   offSignals();
   // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
   // counted an OOM kill is taken as that kill.
   if (watching === "none" && signal === "SIGKILL" && scopeKills() > scopeKillsBefore) kills = 1;
-  return { code, signal, peak, memoryKills: kills, timedOut, leftover };
+  const named = left === undefined ? {} : { left };
+  return { code, signal, peak, memoryKills: kills, timedOut, leftover, ...named };
 }
 
 /** Runs a command in a process group of its own, watching its tree and stopping the group. */

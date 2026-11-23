@@ -15,11 +15,13 @@ import {
   ownedArgv,
   oomKills,
   parsePs,
-  psGroupCount,
+  namesOf,
+  psGroupNames,
   smapsShmem,
   scopeArgv,
   sliceMemory,
   statAnon,
+  statComm,
   statInGroup,
   statParent,
   statusAnon,
@@ -372,10 +374,24 @@ describe("reading memory", () => {
     ]).toEqual([true, false, false]);
   });
 
-  it("counts ps's live rows in a group, and no zombie or other group", () => {
-    expect(
-      psGroupCount(["   42 S", "   42 Z+", "   43 S", "   42 R+", "garbage"].join("\n"), 42),
-    ).toBe(2);
+  it("names a process past a command with parens", () => {
+    expect(statComm("10 (a (b) 42) S 1 42 42 0 -1")).toBe("a (b) 42");
+  });
+
+  it("names ps's live rows in a group, and no zombie or other group", () => {
+    const rows = [
+      "   42 S    /usr/bin/tmux",
+      "   42 Z+   sh",
+      "   43 S    sleep",
+      "   42 R+   /opt/a b/bazhen-holder",
+      "garbage",
+    ];
+    expect(psGroupNames(rows.join("\n"), 42)).toEqual(["tmux", "bazhen-holder"]);
+  });
+
+  it("names each process listed, but one gone before its name was read", () => {
+    const comms: Record<string, string> = { "/proc/7/comm": "tmux\n", "/proc/9/comm": "sleep\n" };
+    expect(namesOf(["7", "8", "9"], (path) => comms[path])).toEqual(["tmux", "sleep"]);
   });
 
   it("reads a process's own anonymous memory, swapped out included, but no shared memory", () => {

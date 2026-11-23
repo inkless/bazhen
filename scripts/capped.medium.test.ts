@@ -157,6 +157,12 @@ describe("capped as a task's run", () => {
     });
   });
 
+  it("names what a run's command left running", () => {
+    expect(asRun("1m", "(exec sleep 30) &").stderr).toContain(
+      "capped: stopped 1 process(es) its command left running: sleep ×1",
+    );
+  });
+
   it.runIf(inScope)("fails a run whose command passed after a memory kill in its own scope", () => {
     expect(asTask([], OUTLIVES_RUNAWAY)).toMatchObject({
       status: 1,
