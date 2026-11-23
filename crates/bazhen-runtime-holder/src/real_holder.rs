@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bazhen_holder_proto::body::{ExitStatus, Generation, HistoryLines, Signal, Size};
+use bazhen_holder::ring::RING_BYTES;
+use bazhen_holder_proto::body::{Count, ExitStatus, Generation, HistoryLines, Signal, Size};
 use bazhen_host_guard::scope::{Containment, TerminalCaps, in_terminal_scope, probe_containment};
 use bazhen_protocol::ids::TerminalId;
 use tokio::sync::broadcast;
@@ -554,9 +555,13 @@ fn confirms_a_resize_by_the_size_the_readers_holder_reports() {
     });
 }
 
-/// What the ring test's program floods once told to: far past the 1 MiB its holder's ring holds,
-/// and short enough to end well inside `STUCK` on a loaded host.
+/// What the ring test's program floods once told to: far past what its holder's ring holds, and
+/// short enough to end well inside `STUCK` on a loaded host.
 const FLOOD: u64 = 8 << 20;
+
+/// What the ring test's program prints once its flood has ended: text no `y` line holds, and
+/// nothing typed or echoed, so the screen shows it only once the holder has read the flood.
+const FLOODED: &str = "flood-over";
 
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
@@ -572,7 +577,7 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
             runtime
                 .create(running(
                     &id(1),
-                    &format!("read line; yes | head -c {FLOOD}; exec cat"),
+                    &format!("read line; yes | head -c {FLOOD}; echo {FLOODED}; exec cat"),
                 ))
                 .await
                 .unwrap(),
@@ -580,11 +585,10 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
         let mut attached = runtime.attach(&made, None).await.unwrap();
         // This thread blocked from before the flood, the stream reads nothing past the attach
         // while a connection of the test's own tells the program to flood and waits until the
-        // holder has read all of it: its line echoed as `\r\n`, and each `y\n` written as `y\r\n`.
+        // holder's screen shows what the program prints after it, so the holder has read it all.
         let from = attached.offset.get();
-        let all = from + 2 + FLOOD * 3 / 2;
         let socket = made.locator.socket.clone();
-        let reached = std::thread::spawn(move || {
+        let (flooded, reached) = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -598,21 +602,27 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
                     let (client, _events) = connect(&socket, &options).await.unwrap();
                     assert!(client.hello().writer, "the writer slot was taken");
                     client.input(b"\n").unwrap();
-                    // Bounded within `STUCK`: a total other than `all` is told by the assertion
+                    // Bounded within `STUCK`: a flood that never ends is told by the assertion
                     // below, not a hang.
-                    let reached = polled(
+                    let looking = &client;
+                    let flooded = polled(
                         Duration::from_secs(40),
-                        || offset_of(&client),
-                        |&at| at >= all,
+                        move || async move {
+                            let shown = looking.screen(Count::new(0).unwrap()).await.unwrap();
+                            shown.text().contains(FLOODED)
+                        },
+                        |&flooded| flooded,
                     )
                     .await;
+                    let reached = offset_of(&client).await;
                     client.end();
-                    reached
+                    (flooded, reached)
                 })
         })
         .join()
         .unwrap();
-        assert_eq!(reached, all);
+        let ring = u64::try_from(RING_BYTES).unwrap();
+        assert_eq!((flooded, reached - from > 2 * ring), (true, true));
         let closed = loop {
             match attached.events.recv().await.unwrap() {
                 StreamEvent::Closed(why) => break why,
