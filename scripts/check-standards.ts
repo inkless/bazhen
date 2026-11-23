@@ -3009,7 +3009,7 @@ export function moonFailures(paths: readonly string[], read: (path: string) => s
     }
     if ("outputStyle" in options && options["outputStyle"] !== "stream") {
       out.push(
-        `${file}: the "${name}" task sets \`options.outputStyle\` to something but "stream": ` +
+        `${file}: the "${name}" task sets \`options.outputStyle\` to anything but "stream": ` +
           "`none` and `hash` print no log, and a failing task's log is what says why.",
       );
     }

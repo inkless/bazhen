@@ -1460,8 +1460,8 @@ describe("moonFailures", () => {
       failures(web('command = "vite"\noptions = { cache = false, outputStyle = "none" }')),
       failures(web('command = "vite"\noptions = { cache = false, outputStyle = "hash" }')),
     ]).toEqual([
-      [expect.stringContaining('the "t" task sets `options.outputStyle`')],
-      [expect.stringContaining('the "t" task sets `options.outputStyle`')],
+      [expect.stringContaining('`options.outputStyle` to anything but "stream"')],
+      [expect.stringContaining('`options.outputStyle` to anything but "stream"')],
     ]);
   });
 
