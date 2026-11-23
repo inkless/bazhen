@@ -127,8 +127,9 @@ export default defineConfig<object, DaemonOptions>({
   testDir: ".",
   testMatch: "*.spec.ts",
   workers: 1,
-  // Ends a hung run, setup and teardown included, with a report, 5 minutes inside the CI job's cap.
-  globalTimeout: 15 * 60_000,
+  // Ends a hung run with a report before the CI step's 17-minute cap: the clock starts after the
+  // ~1 minute of setup and ~4.5 of builds, so 10 leaves teardown 1.5 minutes. A normal run takes 5.
+  globalTimeout: 10 * 60_000,
   // `list` streams each test as it starts and ends; the report and traces are what CI uploads.
   reporter: [["list"], ["html", { open: "never" }]],
   globalSetup: "./global-setup.ts",

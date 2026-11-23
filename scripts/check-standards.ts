@@ -2885,7 +2885,7 @@ const MOON_TASK_OPTIONS = new Set([
   "interactive",
   "runInCI",
   "internal",
-  // Only where moon prints a task's output, not whether it runs.
+  // Only where moon prints a task's output, and only as "stream", which hides none of it.
   "outputStyle",
 ]);
 // The only package.json scripts: pnpm's own install hook, which moon can't start.
@@ -3005,6 +3005,12 @@ export function moonFailures(paths: readonly string[], read: (path: string) => s
       out.push(
         `${file}: the "${name}" task sets \`options.${key}\`, which scripts/check-standards.ts ` +
           "doesn't read; add it to MOON_TASK_OPTIONS there, with why it can't let a task pass unrun.",
+      );
+    }
+    if ("outputStyle" in options && options["outputStyle"] !== "stream") {
+      out.push(
+        `${file}: the "${name}" task sets \`options.outputStyle\` to something but "stream": ` +
+          "`none` and `hash` print no log, and a failing task's log is what says why.",
       );
     }
     if (options["cache"] !== false) {

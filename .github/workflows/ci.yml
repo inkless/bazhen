@@ -238,7 +238,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
+      # Under the job's 20 minutes, so the upload below still gets its turn when a run hangs.
       - run: moon run :test-e2e
+        timeout-minutes: 17
       # The report and traces of a run that failed or hit its time limit; always(), since a hang
       # is what they are for. Anyone can download them: they hold only the run's throwaway
       # daemons' device cookie and pairing codes, and screens of synthetic sessions, and no

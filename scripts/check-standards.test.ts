@@ -1455,6 +1455,16 @@ describe("moonFailures", () => {
     ).toEqual([]);
   });
 
+  it("refuses an output style that prints no log", () => {
+    expect([
+      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "none" }')),
+      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "hash" }')),
+    ]).toEqual([
+      [expect.stringContaining('the "t" task sets `options.outputStyle`')],
+      [expect.stringContaining('the "t" task sets `options.outputStyle`')],
+    ]);
+  });
+
   it("refuses a task moon could replay from its cache", () => {
     expect([
       failures(web('command = "vite build"')),
