@@ -1940,6 +1940,32 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("doesn't take an associated type named like a carrier for it, but takes the type bound to it", () => {
+    const output = {
+      ...repo,
+      "crates/p/src/out.rs": [
+        "pub struct Output { buf: Vec<u8> }",
+        "pub fn feed(o: Output) {}",
+        "pub fn wait<F: Future<Output = u32>>(f: F) {}",
+        "type Outputs = Box<dyn Iterator<Item = Output>>;",
+      ].join("\n"),
+      "crates/p/src/other.rs": [
+        "pub fn spawn(f: Pin<Box<dyn Future<Output = ()> + Send>>) {}",
+        "pub fn run<F>(f: F) where F: Future<Output = ()> {}",
+        "type Boxed = Pin<Box<dyn Future<Output = ()> + Send>>;",
+        "type Made = ty!(x, Output = 1);",
+        "pub struct Holds { f: ty!(x, Output = 1) }",
+        "pub fn hold(h: Holds) {}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, output).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/out.rs::Outputs",
+      "crates/p/src/out.rs::feed",
+      "crates/p/src/other.rs::Made",
+      "crates/p/src/other.rs::hold",
+    ]);
+  });
+
   it("takes a generic reader bounded by a byte trait, and a type holding a carrier, for carriers", () => {
     const generic = {
       ...repo,

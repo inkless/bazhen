@@ -55,6 +55,8 @@ describe("useTree", () => {
   });
 });
 
+const typeNames = (text: string) => typePaths(text).map((p) => p.name);
+
 describe("typePaths", () => {
   it("finds each path ending at a name, skipping keywords and lifetimes", () => {
     expect(typePaths("&'a mut Vec<direct::Step<T>>, ::q::Frame")).toEqual([
@@ -70,6 +72,71 @@ describe("typePaths", () => {
       { name: "T", path: ["T"] },
       { name: "Tr", path: ["Tr"] },
       { name: "Out", path: undefined },
+    ]);
+  });
+
+  it("skips an associated type's or a parameter's name before `=`, and reads the type after it", () => {
+    expect(
+      typePaths("Pin<Box<dyn Future<Output = Answer> + Send>>, Lend<A, Item<'a> =Frame>"),
+    ).toEqual([
+      { name: "Pin", path: ["Pin"] },
+      { name: "Box", path: ["Box"] },
+      { name: "Future", path: ["Future"] },
+      { name: "Answer", path: ["Answer"] },
+      { name: "Send", path: ["Send"] },
+      { name: "Lend", path: ["Lend"] },
+      { name: "A", path: ["A"] },
+      { name: "Frame", path: ["Frame"] },
+    ]);
+    expect(typePaths("<T = Vec<u8>>").map((p) => p.name)).toEqual(["Vec", "u8"]);
+    expect(
+      typePaths("<F: Fn() -> u8, O = u32>, Vec<(u8, Box<dyn Tr<A = [u8; 2]>>)>").map((p) => p.name),
+    ).toEqual(["F", "Fn", "u8", "u32", "Vec", "u8", "Box", "Tr", "u8"]);
+  });
+
+  it("skips a binding's name, but keeps one before `==`, `=>` or an `=` outside generic arguments", () => {
+    expect([
+      typeNames("Tr<Item = u8, A == B, C => D>; x: Output = y"),
+      typeNames("Tr<Item = u8>, ty!(a, Output = 1), Vec<(a, Output = 1)>"),
+    ]).toEqual([
+      ["Tr", "u8", "A", "B", "C", "D", "x", "Output", "y"],
+      ["Tr", "u8", "ty", "a", "Output", "Vec", "a", "Output"],
+    ]);
+  });
+
+  it("skips a parameter's name before its default, but keeps its bound", () => {
+    expect(typeNames("<T: Read = File, U: io::Read = File, V = File>")).toEqual([
+      "T",
+      "Read",
+      "File",
+      "U",
+      "Read",
+      "File",
+      "File",
+    ]);
+  });
+
+  it("skips a binding's name in generic arguments, but keeps one in a macro's", () => {
+    expect([
+      typeNames("Tr<Item = u8, Vec<ty!(a, Output = 1)>>"),
+      typeNames("Tr<Item = u8>, ty!(a < Output = 1)"),
+      typeNames("Tr<Item = u8>, ty!(a, Output<u8> = 1)"),
+      typeNames("Tr<Item = u8>, ty![<a, Output = 1>]"),
+    ]).toEqual([
+      ["Tr", "u8", "Vec", "ty", "a", "Output"],
+      ["Tr", "u8", "ty", "a", "Output"],
+      ["Tr", "u8", "ty", "a", "Output", "u8"],
+      ["Tr", "u8", "ty", "a", "Output"],
+    ]);
+  });
+
+  it("skips a binding's name, but keeps one after brackets that don't pair", () => {
+    expect(typeNames("Tr<Item = u8, X<{ 1 > 0 }, Output = u8>>")).toEqual([
+      "Tr",
+      "u8",
+      "X",
+      "Output",
+      "u8",
     ]);
   });
 });
