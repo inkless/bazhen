@@ -22,7 +22,7 @@ import {
   typePaths,
   type UseBinding,
 } from "./rust-modules.ts";
-import { isIdent, itemEnd, newlinesIn, rustCode } from "./rust-source.ts";
+import { isIdent, itemEnd, newlinesIn, RUST_WHITESPACE, rustCode } from "./rust-source.ts";
 import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
@@ -1532,10 +1532,16 @@ const PUBLIC_BYTE_FIELDS: Record<string, string> = {
     "a built-in theme's RGB, which Theme::colours makes in-process",
 };
 
+// Rust's whitespace as a regex class: `\s` has U+00A0 but not the marks U+200E and U+200F.
+const SPACE = `[${[...RUST_WHITESPACE].join("")}]`;
+
 // Where an impl item starts, its head read on by implHead. An impl block's associated types are
 // its trait's, so they aren't aliases. (A trait's own associated types take no `= …` on stable, so
 // the alias pattern never matches them.)
-const IMPL_START = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b/gm;
+const IMPL_START = new RegExp(
+  `(?<=^|[;{}])${SPACE}*(?:(?:pub(?:\\([^)]*\\))?|unsafe)${SPACE}+)*impl\\b`,
+  "gm",
+);
 
 // Types a function takes that carry bytes from outside the process: anything holding u8s, a
 // reader of any kind, a handle that can only be read (stdin, a child's output), or a WebSocket,
@@ -2355,7 +2361,7 @@ function implHeads(code: string): { start: number; open: number | undefined; end
   const starts = new RegExp(IMPL_START.source, IMPL_START.flags);
   for (let m = starts.exec(code); m !== null; m = starts.exec(code)) {
     let before = m.index - 1;
-    while (before >= 0 && /\s/.test(code[before] ?? "")) before--;
+    while (before >= 0 && RUST_WHITESPACE.has(code[before] ?? "")) before--;
     const head = implHead(code, m.index + m[0].length);
     starts.lastIndex = head.end;
     if (head.open === undefined && before >= 0 && !";{}]".includes(code[before] ?? "")) continue;
@@ -2366,23 +2372,44 @@ function implHeads(code: string): { start: number; open: number | undefined; end
 
 /**
  * Where an impl's head that goes on from `from` ends: `open` is its body's `{`, or `undefined`
- * where it can't be read, at `end`. Brackets are counted (a `>` after `-` is an arrow's), and a
+ * where it can't be read, at `end`. Brackets are matched (a `>` after `-` is an arrow's), and a
  * brace block inside them is skipped whole, so neither an array's `;` nor a const expression's
- * `>` ends the head. A `;` or `}` outside them, a closer with nothing open, or the end of the code
- * can't be read.
+ * `>` ends the head. After an array's `;` comes its length, an expression, where `<` and `>` are
+ * operators (`[u8; 8 >> 1]`). A `;` or `}` outside them, a closer that doesn't match, or the end
+ * of the code can't be read.
  */
 function implHead(code: string, from: number): { open: number | undefined; end: number } {
-  let depth = 0;
+  const open: Bracket[] = [];
   for (let i = from; i < code.length; i++) {
-    const c = code[i];
-    if (c === "(" || c === "[" || c === "<") depth++;
-    else if (c === ")" || c === "]" || (c === ">" && code[i - 1] !== "-")) {
-      if (--depth < 0) return { open: undefined, end: i };
-    } else if (c === "{" && depth === 0) return { open: i, end: i };
-    else if (c === "{") i = closingBrace(code, i + 1) - 1;
-    else if (c === "}" || (c === ";" && depth === 0)) return { open: undefined, end: i };
+    const c = code[i] ?? "";
+    const top = open.at(-1);
+    if (c === "{" && top === undefined) return { open: i, end: i };
+    if (c === "{") i = closingBrace(code, i + 1) - 1;
+    else if (!takeBracket(open, c, code[i - 1])) return { open: undefined, end: i };
   }
   return { open: undefined, end: code.length };
+}
+
+interface Bracket {
+  closer: string;
+  /** Whether it is in an array's length, where `<` and `>` are operators. */
+  expression: boolean;
+}
+
+/**
+ * Takes `c`, after `previous`, into the brackets `open` in a type: false where it can't be read
+ * there, a closer that doesn't match or a `;` or `}` outside an array.
+ */
+function takeBracket(open: Bracket[], c: string, previous: string | undefined): boolean {
+  const top = open.at(-1);
+  const expression = top?.expression ?? false;
+  const closer = { "(": ")", "[": "]", "<": expression ? undefined : ">" }[c];
+  if (closer !== undefined) open.push({ closer, expression });
+  else if (c === ")" || c === "]" || (c === ">" && !expression && previous !== "-")) {
+    return open.pop()?.closer === c;
+  } else if (c === ";" && top?.closer === "]") top.expression = true;
+  else if (c === ";" || c === "}") return false;
+  return true;
 }
 
 /** The line of each impl in `code` whose head can't be read. */
@@ -2393,7 +2420,7 @@ function unreadImplLines(code: string): number[] {
   for (const { start, open } of implHeads(code)) {
     if (open !== undefined) continue;
     let at = start;
-    while (/\s/.test(code[at] ?? "")) at++;
+    while (RUST_WHITESPACE.has(code[at] ?? "")) at++;
     for (; counted < at; counted++) if (code[counted] === "\n") line++;
     lines.push(line);
   }
@@ -2569,7 +2596,7 @@ interface ImplParts {
  * of the trait it implements, if any, and the type it is for, less any `where` clause.
  */
 function implParts(head: string): ImplParts {
-  let rest = bracesBlanked(head.replace(/^[\s\S]*?\bimpl\b\s*/, ""));
+  let rest = expressionsBlanked(head.replace(/^[\s\S]*?\bimpl\b\s*/, ""));
   const params = new Set<string>();
   let bounded = false;
   if (rest.startsWith("<")) {
@@ -2612,14 +2639,19 @@ function implParts(head: string): ImplParts {
   };
 }
 
-/** `text` with what each brace block holds blanked, so a const expression's `<` isn't a bracket. */
-function bracesBlanked(text: string): string {
+/**
+ * `text`, an impl's head, with each const expression in it blanked: what a brace block holds, and
+ * an array's length. So a `<` or `>` in one (`{ 1 > 0 }`, `[u8; 1 << 2]`) isn't a bracket.
+ */
+function expressionsBlanked(text: string): string {
   let out = "";
-  for (let i = 0, depth = 0; i < text.length; i++) {
+  const open: Bracket[] = [];
+  for (let i = 0, braces = 0; i < text.length; i++) {
     const c = text[i] ?? "";
-    if (c === "}" && depth > 0) depth--;
-    out += depth > 0 ? " " : c;
-    if (c === "{") depth++;
+    if (braces === 0 && c !== "{") takeBracket(open, c, text[i - 1]);
+    if (c === "}" && braces > 0) braces--;
+    out += braces > 0 || (open.at(-1)?.expression ?? false) ? " " : c;
+    if (c === "{") braces++;
   }
   return out;
 }

@@ -1721,6 +1721,14 @@ describe("byteTakers", () => {
     expect(byteTakers(source)).toEqual(["T::peek", "Gate::pull"]);
   });
 
+  it("reads an array's length in an impl's head as an expression, its << and >> operators", () => {
+    const source = [
+      "impl<T> Peek for T where T: AsRef<[u8; 8 >> 1]> { fn peek(&self) -> u32 { 0 } }",
+      "impl<T> Look for T where T: AsRef<[u16; 1 << 2]> { fn look(&self) -> u32 { 0 } }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["T::peek"]);
+  });
+
   it("reads an impl a macro's body writes on a line of its own, after a ( or a $(", () => {
     const source = [
       "macro_rules! readers {",
@@ -2326,6 +2334,32 @@ describe("decoderFailures", () => {
           "tell what the impl is for or whether it takes bytes: balance its brackets.",
       ],
       [],
+    ]);
+  });
+
+  it("reads an impl after a direction mark, on a line of its own, after an attribute or before it", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/marks.rs": [
+        "pub trait Peek { fn peek(&self) -> u32; }",
+        "\u200e",
+        "impl<T> Peek for T where T: AsRef<[u8; 4]> { fn peek(&self) -> u32 { 0 } }",
+        "\u200f",
+        "impl Peek for Arc<Runtime>> { fn peek(&self) -> u32 { 0 } }",
+        "#[cfg(unix)]\u200e",
+        "impl Peek for Arc<Holder>> { fn peek(&self) -> u32 { 0 } }",
+        "pub struct Reader<R> { r: R }\u200e impl<R: Read> Reader<R> { pub fn pull(&mut self) {} }",
+      ].join("\n"),
+    };
+    expect(
+      failures(fuzzed, exempt, tree)
+        .map((f) => f.slice(0, f.indexOf(": ")))
+        .toSorted(),
+    ).toEqual([
+      "crates/p/src/marks.rs:5",
+      "crates/p/src/marks.rs:7",
+      "crates/p/src/marks.rs::Reader::pull",
+      "crates/p/src/marks.rs::T::peek",
     ]);
   });
 
@@ -3047,6 +3081,7 @@ describe("decoderFailures", () => {
     const plain = "pub struct Runtime { controls: Controls }";
     const shim = "impl Runtime { pub fn size(&self) -> usize { 0 } }";
     const peek = "pub trait Peek<const B: bool> { fn size(&self) -> usize; }";
+    const generic = "pub trait Peek<T> { fn size(&self) -> usize; }";
     const cases: Record<string, [Record<string, string>, Record<string, string>]> = {
       "a Deref whose where clause names an array": [
         { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
@@ -3057,6 +3092,16 @@ describe("decoderFailures", () => {
             "    type Target = Controls;",
             "    fn deref(&self) -> &Controls { &self.controls }",
             "}",
+          ]),
+        },
+      ],
+      "a trait impl whose trait takes an array with a shift in its length": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, generic]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            generic,
+            "impl Peek<[u8; 1 << 2]> for Runtime { fn size(&self) -> usize { 0 } }",
           ]),
         },
       ],
