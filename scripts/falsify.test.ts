@@ -41,6 +41,7 @@ import {
   uncontrolledTests,
   type VitestReport,
 } from "./falsify.ts";
+import { report as cappedReport } from "./capped.ts";
 
 const FILE = "packages/core/src/x.test.ts";
 
@@ -347,17 +348,32 @@ describe("noOutputReason", () => {
   });
 });
 
+// capped's own report, so that a change to its wording fails here rather than letting a leak by.
+const reported = (leftover: number, left?: string[]) =>
+  [
+    ...cappedReport(
+      {
+        code: 0,
+        signal: null,
+        peak: 2 ** 30,
+        memoryKills: 0,
+        timedOut: false,
+        leftover,
+        ...(left === undefined ? {} : { left }),
+      },
+      { memory: 8 * 2 ** 30, timeMs: 360_000 },
+      "scope",
+      false,
+    ),
+    "",
+  ].join("\n");
+
 describe("leftRunning", () => {
   it("reads what capped's report says a run left running, by name or by count", () => {
-    const named = [
-      "capped: peak 1.2 GiB of 7.2 GiB",
-      "capped: stopped 4 process(es) its command left running: bazhen-holder ×2, cat ×2",
-      "capped: the run fails, though its command passed: its command left processes running",
-    ].join("\n");
     expect([
-      leftRunning(named),
-      leftRunning("capped: stopped 3 process(es) its command left running"),
-      leftRunning("capped: peak 1.2 GiB of 7.2 GiB\n"),
+      leftRunning(reported(4, ["bazhen-holder", "cat", "bazhen-holder", "cat"])),
+      leftRunning(reported(3)),
+      leftRunning(reported(0)),
     ]).toEqual(["bazhen-holder ×2, cat ×2", "3 process(es)", undefined]);
   });
 });
