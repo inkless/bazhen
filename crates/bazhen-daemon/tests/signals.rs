@@ -1,6 +1,7 @@
 //! The daemon as a process, stopped by a signal as `main.ts` is: SIGTERM or SIGINT ends it with 0
 //! and says which, and one heard while it drains ends it at once.
 
+use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -84,8 +85,16 @@ fn daemon_by(home: &Home, mut command: Command) -> Res<Child> {
             return Err(format!("the daemon exited: {:?}", child.wait_with_output()?).into());
         }
         if started.elapsed() > BOUND {
-            let _ = ended_within_bound(child);
-            return Err("the daemon never answered on its socket".into());
+            let doing = doing(child.id(), home);
+            let ended = ended_within_bound(child);
+            // A killed daemon can't remove its socket, and the start removes any socket left
+            // before it binds, so one there now was bound since the bound passed: slow, not stuck.
+            let late = home.socket().exists();
+            return Err(format!(
+                "the daemon never answered on its socket within {BOUND:?}\n{doing}\n\
+                 bound its socket by the time it ended: {late}\nended: {ended:?}"
+            )
+            .into());
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -93,7 +102,7 @@ fn daemon_by(home: &Home, mut command: Command) -> Res<Child> {
 }
 
 /// The child's exit code and what it said on stderr, once it ends; `None` for the code if it
-/// hadn't by the bound, when it is killed.
+/// hadn't by the bound, when it is killed, with what it had said by then.
 fn ended_within_bound(child: Child) -> Res<(Option<i32>, String)> {
     let (tell, exited) = mpsc::channel();
     let pid = child.id();
@@ -108,7 +117,114 @@ fn ended_within_bound(child: Child) -> Res<(Option<i32>, String)> {
     // The child is the test's own and unreaped, so its pid is still its own.
     bazhen_test_signal::signal(pid, Signal::KILL).map_err(|e| format!("{e:?}"))?;
     waiter.join().map_err(|_| "the waiter panicked")?;
-    Ok((None, String::new()))
+    let said = exited
+        .try_recv()
+        .ok()
+        .and_then(Result::ok)
+        .map_or_default(|output| String::from_utf8_lossy(&output.stderr).into_owned());
+    Ok((None, said))
+}
+
+/// What the test can read of its own child `pid` while it runs, without signalling it, and every
+/// file under `home` but the builds copied there: where a start that never answered had got to.
+fn doing(pid: u32, home: &Home) -> String {
+    let mut files = String::new();
+    list(&home.0, &home.0, &home.0.join("target"), &mut files);
+    format!("{}\nunder {}:\n{files}", process(pid), home.0.display())
+}
+
+/// Each of `pid`'s threads, as Linux's `/proc` shows them: its name, its state, the kernel function
+/// it sleeps in, and how long it has run on a CPU and waited for one; then each child it has, by
+/// name and state, read best-effort: those pids are its, not the test's, and may be gone or
+/// reused by the time they are read. Where there is no `/proc`, why none were read.
+fn process(pid: u32) -> String {
+    let read = |path: &Path| {
+        std::fs::read_to_string(path).map_or_else(|e| format!("({e})"), |s| s.trim().to_owned())
+    };
+    // The state is the first field after the name, which is in parentheses and may hold either.
+    let state = |stat: &str| {
+        stat.rsplit_once(") ")
+            .and_then(|(_, rest)| rest.split(' ').next())
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let tasks = match std::fs::read_dir(format!("/proc/{pid}/task")) {
+        Ok(tasks) => tasks,
+        Err(e) => return format!("pid {pid}: no threads to read ({e})"),
+    };
+    let mut threads: Vec<_> = tasks.flatten().map(|task| task.path()).collect();
+    threads.sort();
+    let mut out = format!("pid {pid}, {} thread(s):", threads.len());
+    let mut children = Vec::new();
+    for thread in threads {
+        let sched = read(&thread.join("schedstat"));
+        let mut ns = sched.split(' ').map(|n| {
+            n.parse().map_or_else(
+                |_| "?".to_owned(),
+                |n| format!("{:.2?}", Duration::from_nanos(n)),
+            )
+        });
+        let (ran, waited) = (ns.next(), ns.next());
+        let _ = write!(
+            out,
+            "\n  {} {:?} state {} in {} ran {} waited {}",
+            thread
+                .file_name()
+                .map_or("?".into(), |n| n.to_string_lossy()),
+            read(&thread.join("comm")),
+            state(&read(&thread.join("stat"))),
+            read(&thread.join("wchan")),
+            ran.unwrap_or_default(),
+            waited.unwrap_or_default(),
+        );
+        if let Ok(pids) = std::fs::read_to_string(thread.join("children")) {
+            children.extend(
+                pids.split_whitespace()
+                    .filter_map(|p| p.parse::<u32>().ok()),
+            );
+        }
+    }
+    for child in children {
+        let at = PathBuf::from(format!("/proc/{child}"));
+        let _ = write!(
+            out,
+            "\n  child {child} {:?} state {}",
+            read(&at.join("comm")),
+            state(&read(&at.join("stat")))
+        );
+    }
+    out
+}
+
+/// Every file under `dir` but `skip`, as its path from `root` and its size, one a line.
+fn list(root: &Path, dir: &Path, skip: &Path, out: &mut String) {
+    let mut entries: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries.flatten().map(|e| e.path()).collect(),
+        Err(e) => {
+            let _ = writeln!(out, "  {} ({e})", dir.display());
+            return;
+        }
+    };
+    entries.sort();
+    for path in entries.into_iter().filter(|p| p != skip) {
+        let shown = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_dir() => {
+                let _ = writeln!(out, "  {shown}/");
+                list(root, &path, skip, out);
+            }
+            Ok(meta) => {
+                let _ = writeln!(out, "  {shown} {}", meta.len());
+            }
+            Err(e) => {
+                let _ = writeln!(out, "  {shown} ({e})");
+            }
+        }
+    }
 }
 
 /// The daemon stopped by `signal`, named `name`: its code, whether it said so, and whether its
