@@ -96,6 +96,8 @@ pub(crate) struct Shared {
     pub(crate) host: Arc<str>,
     /// Where the web client's build is, which loopback HTTP serves off the API.
     pub(crate) web: Option<Arc<crate::web::Bundle>>,
+    /// The terminals' live views, where this daemon runs terminals.
+    pub(crate) streams: Option<crate::stream::route::Streams>,
 }
 
 impl Shared {
@@ -117,6 +119,7 @@ impl Shared {
             doctor: None,
             host: Arc::from(hostname()),
             web: None,
+            streams: None,
         }
     }
 
@@ -247,7 +250,7 @@ async fn stream(
     };
     // A device's stream is held, to close when the device is revoked or lapses.
     let device = match viewer {
-        Some(Extension(Viewer::Device { id, required })) => Some(shared.pairing.holds.hold(
+        Some(Extension(Viewer::Device { id, required, .. })) => Some(shared.pairing.holds.hold(
             id.as_str(),
             shared.stop.token(),
             required,
@@ -349,6 +352,10 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/caller", get(callers::caller))
         .route("/v1/state", get(state))
         .route("/v1/events", get(stream))
+        .route(
+            "/v1/terminals/{id}/stream",
+            get(crate::stream::route::stream),
+        )
         .route("/v1/tasks", post(create_task))
         .route("/v1/pairing/codes", post(paired::issue))
         .route("/v1/devices", get(paired::list))
@@ -397,6 +404,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/caller", get(callers::caller))
         .route("/state", get(state))
         .route("/events", get(stream))
+        .route("/terminals/{id}/stream", get(crate::stream::route::stream))
         .route("/tasks", post(create_task))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))

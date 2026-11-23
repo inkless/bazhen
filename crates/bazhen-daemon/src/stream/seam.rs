@@ -7,21 +7,22 @@ use bazhen_holder_proto::body::{Exited, Size};
 /// What a respawn does to a view's terminal before the next process starts: back to its main
 /// screen, every mode and colour as a fresh terminal has it, and the screen cleared, its history
 /// kept. `RESPAWN_RESET` in `packages/core/src/runtime.ts`.
-pub const RESPAWN_RESET: &[u8] = b"\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\
+pub(crate) const RESPAWN_RESET: &[u8] =
+    b"\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\
 \x1b[?1004l\x1b[?2004l\x1b]104\x07\x1b]110\x07\x1b]111\x07\x1b]112\x07\x1b[H\x1b[2J";
 
 /// Where a stream is: the next byte the process of `generation` prints is at `offset`. Ordered
 /// by generation, then offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Position {
-    pub generation: u64,
-    pub offset: u64,
+pub(crate) struct Position {
+    pub(crate) generation: u64,
+    pub(crate) offset: u64,
 }
 
 impl Position {
     /// Where the process of `generation` starts.
     #[must_use]
-    pub const fn start(generation: u64) -> Self {
+    pub(crate) const fn start(generation: u64) -> Self {
         Self {
             generation,
             offset: 0,
@@ -30,7 +31,7 @@ impl Position {
 
     /// Where the stream is once `len` more bytes of this generation have come.
     #[must_use]
-    pub fn after(self, len: usize) -> Self {
+    pub(crate) fn after(self, len: usize) -> Self {
         let len = u64::try_from(len).unwrap_or(u64::MAX);
         Self {
             offset: self.offset.saturating_add(len),
@@ -43,7 +44,7 @@ impl Position {
 /// generation's offset 0, before that process's first byte, and takes up no offsets itself. An
 /// exit is held in order with the output around it, and takes up none either.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Held {
+pub(crate) enum Held {
     Geometry(Size),
     Data { at: Position, bytes: Vec<u8> },
     Reset { generation: u64 },
@@ -52,7 +53,7 @@ pub enum Held {
 
 /// The bytes a held item adds to what the view lags by.
 #[must_use]
-pub fn held_bytes(item: &Held) -> usize {
+pub(crate) fn held_bytes(item: &Held) -> usize {
     match item {
         Held::Data { bytes, .. } => bytes.len(),
         Held::Reset { .. } => RESPAWN_RESET.len(),
@@ -62,7 +63,7 @@ pub fn held_bytes(item: &Held) -> usize {
 
 /// Whether output held from `from` up to `now` can carry on from a snapshot taken at `taken`.
 #[must_use]
-pub fn seamable(from: Position, now: Position, taken: Position) -> bool {
+pub(crate) fn seamable(from: Position, now: Position, taken: Position) -> bool {
     from <= taken && taken <= now
 }
 
@@ -73,7 +74,7 @@ pub fn seamable(from: Position, now: Position, taken: Position) -> bool {
 /// output that hasn't arrived. The first `queued_before` items were held before the snapshot was
 /// asked for, so a geometry among them is one the snapshot was taken at or after.
 #[must_use]
-pub fn seam(
+pub(crate) fn seam(
     held: Vec<Held>,
     from: Position,
     now: Position,

@@ -401,12 +401,15 @@ async fn listen(
     let tracker = TaskTracker::new();
     let mut watching = None;
     if let Some(runner) = runner {
+        let streaming = runner.streams.clone();
         let (running, events, doctor) =
             shells(startup, &store, runner, &tracker, stop.token()).await?;
         let bundle = doctor.bundle.clone();
         shared = shared
             .with_shells(Arc::clone(&running), doctor)
             .with_web(bundle);
+        shared.streams =
+            crate::stream::on_holders(&store, streaming, &running, &tracker, stop.token());
         watching = Some((running, events));
     }
     let gate = Gate {
@@ -443,6 +446,7 @@ async fn listen(
     let token = stop.token();
     let retiring = token.clone();
     let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
+    let streams = shared.streams.clone();
     if let Some((running, events)) = watching {
         tracker.spawn(every_tick(
             Arc::clone(&running),
@@ -478,11 +482,24 @@ async fn listen(
     tracker.close();
     token.cancelled().await;
     drain(&tracker, serving.drain, &hurry).await;
-    if let Some(running) = ending {
-        // Holders run on; only the daemon's watches of them and its connections end here.
-        let _ = tokio::time::timeout(serving.drain, running.terminals().shutdown()).await;
-    }
+    end_terminals(streams, ending, serving.drain, &hurry).await;
     Ok(stop.reason().unwrap_or(Reason::Requested))
+}
+
+/// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's
+/// watches of them and its connections, each for no longer than `within`. Holders run on.
+async fn end_terminals(
+    streams: Option<crate::stream::route::Streams>,
+    shells: Option<Arc<Shells>>,
+    within: Duration,
+    hurry: &CancellationToken,
+) {
+    if let Some(streams) = streams {
+        hurry.run_until_cancelled(streams.close(within)).await;
+    }
+    if let Some(shells) = shells {
+        let _ = tokio::time::timeout(within, shells.terminals().shutdown()).await;
+    }
 }
 
 /// Waits for the listeners' connections to end, for no longer than `within`, and no longer at all
@@ -677,6 +694,7 @@ mod tests {
             budget: Arc::new(budget),
             doctor,
             shell: "/bin/sh".to_owned(),
+            streams: None,
         }
     }
 

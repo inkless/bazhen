@@ -35,7 +35,7 @@ use super::seam::{Held, Position, RESPAWN_RESET, held_bytes, seam};
 use super::view::{Behind, Outbox};
 
 /// A terminal's stream, which every view of it shares.
-pub trait TerminalStream: Send + Sync + 'static {
+pub(crate) trait TerminalStream: Send + Sync + 'static {
     type Error: Display + Send + 'static;
 
     /// The terminal's size, as the stream last knew it applied: what a snapshot taken now is
@@ -59,13 +59,13 @@ pub trait TerminalStream: Send + Sync + 'static {
 }
 
 /// What a terminal's stream tells, in order. They must keep being taken, or the stream stalls.
-pub trait TerminalEvents: Send + 'static {
+pub(crate) trait TerminalEvents: Send + 'static {
     fn recv(&mut self) -> impl Future<Output = Option<StreamEvent>> + Send;
 }
 
 /// One thing a terminal's stream tells.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StreamEvent {
+pub(crate) enum StreamEvent {
     /// Output, whose first byte is at `at`.
     Data {
         at: Position,
@@ -88,7 +88,7 @@ pub enum StreamEvent {
 
 /// Why a stream closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamEnd {
+pub(crate) enum StreamEnd {
     Ended,
     /// It fell too far behind the terminal's output.
     Behind,
@@ -96,19 +96,19 @@ pub enum StreamEnd {
 
 /// A stream just opened, with the snapshot it opened on.
 #[derive(Debug)]
-pub struct Opened<S, E> {
-    pub snapshot: Snapshot,
+pub(crate) struct Opened<S, E> {
+    pub(crate) snapshot: Snapshot,
     /// The size the snapshot was drawn at. The stream's own may have moved on by the time it
     /// is read.
-    pub size: Size,
+    pub(crate) size: Size,
     /// How much history above its screen the terminal keeps.
-    pub history_lines: u64,
-    pub stream: S,
-    pub events: E,
+    pub(crate) history_lines: u64,
+    pub(crate) stream: S,
+    pub(crate) events: E,
 }
 
 /// Where the hub opens terminals' streams.
-pub trait Runtime: Send + Sync + 'static {
+pub(crate) trait Runtime: Send + Sync + 'static {
     type Stream: TerminalStream;
     type Events: TerminalEvents;
     type Error: Display + Send + 'static;
@@ -122,7 +122,7 @@ pub trait Runtime: Send + Sync + 'static {
 }
 
 /// What the hub records about attachments and leases; the daemon writes it to the store.
-pub trait AttachmentLog: Send + Sync + 'static {
+pub(crate) trait AttachmentLog: Send + Sync + 'static {
     type Error: Display + Send + 'static;
 
     fn started(&self, attachment: &AttachmentId, terminal: &TerminalId, mode: AttachmentMode);
@@ -136,10 +136,13 @@ pub trait AttachmentLog: Send + Sync + 'static {
     /// # Errors
     ///
     /// When it can't be read; the terminal isn't opened.
-    fn epoch(&self, terminal: &TerminalId) -> Result<Epoch, Self::Error>;
+    fn epoch(
+        &self,
+        terminal: &TerminalId,
+    ) -> impl Future<Output = Result<Epoch, Self::Error>> + Send;
 
     /// Whether the terminal is being closed, so its stream's end ends views as closed.
-    fn closing(&self, terminal: &TerminalId) -> bool;
+    fn closing(&self, terminal: &TerminalId) -> impl Future<Output = bool> + Send;
 
     /// Its process exited, as its stream told: recorded before any view is told, to act on.
     fn exited(
@@ -151,22 +154,22 @@ pub trait AttachmentLog: Send + Sync + 'static {
 
 /// One view of a terminal, as it asks to open.
 #[derive(Debug)]
-pub struct Viewer {
-    pub mode: AttachmentMode,
+pub(crate) struct Viewer {
+    pub(crate) mode: AttachmentMode,
     /// The name of the paired device the view is on, if it is on one.
-    pub device_name: Option<String>,
-    pub outbox: Outbox,
+    pub(crate) device_name: Option<String>,
+    pub(crate) outbox: Outbox,
 }
 
 /// Who input comes from. Every write passes the lease, the filter and the epoch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Writer {
+pub(crate) enum Writer {
     View(AttachmentId),
 }
 
 /// Why a view's own side ended: it closed, or its socket stopped answering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LeaveReason {
+pub(crate) enum LeaveReason {
     ClientClosed,
     TimedOut,
 }
@@ -183,14 +186,14 @@ impl From<LeaveReason> for AttachmentEndReason {
 /// An open view: its attachment, and the token that lets it end that attachment when it comes
 /// back.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Attachment {
-    pub id: AttachmentId,
-    pub resume_token: String,
+pub(crate) struct Attachment {
+    pub(crate) id: AttachmentId,
+    pub(crate) resume_token: String,
 }
 
 /// Why a view didn't open.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum JoinError {
+pub(crate) enum JoinError {
     /// It ended while it opened; it was never told it is attached.
     #[error("the view ended while it opened")]
     Ended,
@@ -205,25 +208,25 @@ pub enum JoinError {
 
 /// How far the hub lets views fall behind, how many it serves, and how long it keeps a stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HubOptions {
+pub(crate) struct HubOptions {
     /// A view this far behind its terminal's output is ended, never sent a stream with a hole.
-    pub max_unsent_bytes: usize,
+    pub(crate) max_unsent_bytes: usize,
     /// The most views a terminal may have; one more is turned away.
-    pub max_views: usize,
+    pub(crate) max_views: usize,
     /// The most snapshot bytes not yet written to their views, across every terminal. Over it,
     /// views whose snapshots have stalled are ended to make room, and failing that the view that
     /// opens is turned away. It can be passed for a while: a snapshot that opens while none is
     /// being sent is taken whatever its size, and one let in on the room stalled views would free
     /// stays in if one of them is spared, its snapshot having moved on since it was chosen.
-    pub max_snapshot_bytes: usize,
+    pub(crate) max_snapshot_bytes: usize,
     /// A snapshot goes to its view a piece of this many bytes at a time, each once the last is
     /// written.
-    pub snapshot_chunk_bytes: usize,
+    pub(crate) snapshot_chunk_bytes: usize,
     /// A view whose snapshot has had nothing written for this long has stalled.
-    pub snapshot_stall: Duration,
+    pub(crate) snapshot_stall: Duration,
     /// How long a stream outlives its last view, unless another stream of its terminal sends
     /// output first.
-    pub linger: Duration,
+    pub(crate) linger: Duration,
 }
 
 impl Default for HubOptions {
@@ -253,7 +256,7 @@ impl Default for HubOptions {
 /// opens meanwhile gets a stream of its own. So a stream that has sent output is never closed in
 /// favour of one that hasn't yet, and the program is not left without a working stream the moment
 /// a view closes.
-pub struct Hub<R: Runtime, L> {
+pub(crate) struct Hub<R: Runtime, L> {
     shared: Arc<Shared<R, L>>,
 }
 
@@ -411,7 +414,7 @@ enum Taking {
 
 impl<R: Runtime, L: AttachmentLog> Hub<R, L> {
     /// The hub's tasks run on `tasks`.
-    pub fn new(runtime: R, log: L, options: HubOptions, tasks: TaskTracker) -> Self {
+    pub(crate) fn new(runtime: R, log: L, options: HubOptions, tasks: TaskTracker) -> Self {
         Self {
             shared: Arc::new(Shared {
                 runtime,
@@ -433,7 +436,7 @@ impl<R: Runtime, L: AttachmentLog> Hub<R, L> {
     ///
     /// [`JoinError`]: the view ended while it opened, or was turned away, or the terminal's
     /// stream or screen couldn't be had.
-    pub async fn join(
+    pub(crate) async fn join(
         &self,
         terminal: &TerminalId,
         viewer: Viewer,
@@ -445,19 +448,24 @@ impl<R: Runtime, L: AttachmentLog> Hub<R, L> {
 
     /// Input from `writer`, which reaches the program only from the driver, under the epoch it
     /// was granted, without the replies a terminal sends.
-    pub fn write(&self, terminal: &TerminalId, writer: &Writer, input: &[u8]) {
+    pub(crate) fn write(&self, terminal: &TerminalId, writer: &Writer, input: &[u8]) {
         self.shared.write(terminal, writer, input);
     }
 
     /// The person engaged the view: an interactive one takes the lease.
-    pub fn engage(&self, terminal: &TerminalId, attachment: &AttachmentId) {
+    pub(crate) fn engage(&self, terminal: &TerminalId, attachment: &AttachmentId) {
         self.shared.on(terminal, |hub, watched, state| {
             hub.engage(watched, state, attachment);
         });
     }
 
     /// The epoch the view's following input is typed under.
-    pub fn declare_epoch(&self, terminal: &TerminalId, attachment: &AttachmentId, epoch: u64) {
+    pub(crate) fn declare_epoch(
+        &self,
+        terminal: &TerminalId,
+        attachment: &AttachmentId,
+        epoch: u64,
+    ) {
         self.shared.on(terminal, |_, _, state| {
             if let Some(view) = state.view_mut(attachment) {
                 view.declared = Some(Epoch::new(epoch));
@@ -466,7 +474,7 @@ impl<R: Runtime, L: AttachmentLog> Hub<R, L> {
     }
 
     /// The view's window is `size`; the terminal takes it if the view sets its size.
-    pub fn resize(&self, terminal: &TerminalId, attachment: &AttachmentId, size: Size) {
+    pub(crate) fn resize(&self, terminal: &TerminalId, attachment: &AttachmentId, size: Size) {
         self.shared.on(terminal, |hub, watched, state| {
             if let Some(view) = state.view_mut(attachment) {
                 view.size = size;
@@ -476,10 +484,35 @@ impl<R: Runtime, L: AttachmentLog> Hub<R, L> {
     }
 
     /// The view's own side ended.
-    pub fn leave(&self, terminal: &TerminalId, attachment: &AttachmentId, reason: LeaveReason) {
+    pub(crate) fn leave(
+        &self,
+        terminal: &TerminalId,
+        attachment: &AttachmentId,
+        reason: LeaveReason,
+    ) {
         self.shared.on(terminal, |hub, watched, state| {
             hub.end(watched, state, attachment, reason.into());
         });
+    }
+
+    /// Closes every stream, parked or still viewed, as the daemon stops: a parked one doesn't
+    /// wait out its linger, and each view still open ends as its stream does.
+    pub(crate) fn close(&self) {
+        let parked: Vec<_> = lock(&self.shared.parked)
+            .drain()
+            .flat_map(|(_, streams)| streams)
+            .collect();
+        for found in parked {
+            found.timer.abort();
+            found.watched.stream.close();
+        }
+        let watched: Vec<_> = lock(&self.shared.watched)
+            .values()
+            .filter_map(|slot| slot.opened.get()?.as_ref().ok().cloned())
+            .collect();
+        for watched in watched {
+            watched.stream.close();
+        }
     }
 }
 
@@ -705,7 +738,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         terminal: &TerminalId,
         size: Option<Size>,
     ) -> Result<Arc<Watched<R::Stream>>, JoinError> {
-        let epoch = self.log.epoch(terminal).map_err(|err| {
+        let epoch = self.log.epoch(terminal).await.map_err(|err| {
             JoinError::Open(format!("bazhen can't read who last drove it: {err}"))
         })?;
         let Opened {
@@ -757,12 +790,15 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
             if let StreamEvent::Exited(exit) = &event {
                 self.record_exit(&watched.terminal, exit).await;
             }
-            let closed = matches!(event, StreamEvent::Closed(_));
-            self.apply(watched, event);
-            watched.moved();
-            if closed {
+            if let StreamEvent::Closed(end) = event {
+                // Read before the terminal's lock is taken: it may wait on the store.
+                let closing = self.log.closing(&watched.terminal).await;
+                self.closed(watched, &mut watched.lock(), end, closing);
+                watched.moved();
                 return;
             }
+            self.apply(watched, event);
+            watched.moved();
         }
     }
 
@@ -798,7 +834,8 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
                     });
                 }
             }
-            StreamEvent::Closed(end) => self.closed(watched, &mut state, end),
+            // Taken by `take_events`, which reads whether the terminal is closing first.
+            StreamEvent::Closed(end) => self.closed(watched, &mut state, end, false),
         }
         drop(state);
         // Its first output shows the stream works; the parked ones before it may go. It may be
@@ -846,15 +883,17 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         }
     }
 
-    /// The stream closed: every view's stream ends with it.
+    /// The stream closed: every view's stream ends with it, as closed if its terminal is
+    /// `closing`.
     fn closed(
         self: &Arc<Self>,
         watched: &Arc<Watched<R::Stream>>,
         state: &mut State,
         end: StreamEnd,
+        closing: bool,
     ) {
         // The stream also ends when the holder is lost while the terminal lives on.
-        let reason = if self.log.closing(&watched.terminal) {
+        let reason = if closing {
             AttachmentEndReason::TerminalClosed
         } else if end == StreamEnd::Behind {
             AttachmentEndReason::EvictedSlow
@@ -1428,7 +1467,7 @@ fn random<const N: usize>() -> Result<[u8; N], JoinError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The hub, driven through a fake runtime whose terminal keeps everything it printed and
     //! draws a snapshot by replaying it, as `FakeRuntime` does in `packages/core/src/testing`.
     //! Each view's socket is a recorder that writes whatever it is sent at once and declares its
@@ -1450,14 +1489,14 @@ mod tests {
     const STILL_LOADING: &str =
         "too many views are still loading their screens; reopen this terminal in a moment";
 
-    fn size(cols: u64, rows: u64) -> Size {
+    pub(crate) fn size(cols: u64, rows: u64) -> Size {
         Size {
             cols: Cols::new(cols).unwrap(),
             rows: Rows::new(rows).unwrap(),
         }
     }
 
-    fn standard() -> Size {
+    pub(crate) fn standard() -> Size {
         size(80, 24)
     }
 
@@ -1587,10 +1626,10 @@ mod tests {
 
     /// A runtime with one terminal, whose program echoes nothing.
     #[derive(Clone)]
-    struct Fake(Arc<Mutex<Terminal>>);
+    pub(crate) struct Fake(Arc<Mutex<Terminal>>);
 
     impl Fake {
-        fn new(history: &str, history_lines: u64) -> Self {
+        pub(crate) fn new(history: &str, history_lines: u64) -> Self {
             Self(Arc::new(Mutex::new(Terminal {
                 size: standard(),
                 history: history.to_owned(),
@@ -1674,7 +1713,7 @@ mod tests {
             t.tell(&StreamEvent::Respawned { generation });
         }
 
-        fn vanish(&self) {
+        pub(crate) fn vanish(&self) {
             self.terminal().vanish();
         }
 
@@ -1742,11 +1781,11 @@ mod tests {
             self.terminal().refuse_resizes = Some(why.to_owned());
         }
 
-        fn written(&self) -> Vec<String> {
+        pub(crate) fn written(&self) -> Vec<String> {
             self.terminal().written.clone()
         }
 
-        fn resizes(&self) -> Vec<Size> {
+        pub(crate) fn resizes(&self) -> Vec<Size> {
             self.terminal().resizes.clone()
         }
 
@@ -1767,7 +1806,7 @@ mod tests {
         }
     }
 
-    struct FakeStream {
+    pub(crate) struct FakeStream {
         terminal: Fake,
         client: usize,
     }
@@ -1864,7 +1903,7 @@ mod tests {
         }
     }
 
-    struct FakeEvents(mpsc::UnboundedReceiver<StreamEvent>);
+    pub(crate) struct FakeEvents(mpsc::UnboundedReceiver<StreamEvent>);
 
     impl TerminalEvents for FakeEvents {
         async fn recv(&mut self) -> Option<StreamEvent> {
@@ -1925,7 +1964,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Book {
+    pub(crate) struct Book {
         events: Vec<String>,
         closing: bool,
         refuse_exits: Option<String>,
@@ -1936,14 +1975,14 @@ mod tests {
 
     /// What the hub records, as lines.
     #[derive(Clone, Default)]
-    struct Log(Arc<Mutex<Book>>);
+    pub(crate) struct Log(Arc<Mutex<Book>>);
 
     impl Log {
         fn push(&self, event: String) {
             self.0.lock().unwrap().events.push(event);
         }
 
-        fn events(&self) -> Vec<String> {
+        pub(crate) fn events(&self) -> Vec<String> {
             self.0.lock().unwrap().events.clone()
         }
 
@@ -1971,12 +2010,12 @@ mod tests {
             self.push(format!("granted {attachment} {}", epoch.get()));
         }
 
-        fn epoch(&self, _: &TerminalId) -> Result<Epoch, String> {
-            Ok(Epoch::new(4))
+        fn epoch(&self, _: &TerminalId) -> impl Future<Output = Result<Epoch, String>> + Send {
+            std::future::ready(Ok(Epoch::new(4)))
         }
 
-        fn closing(&self, _: &TerminalId) -> bool {
-            self.0.lock().unwrap().closing
+        fn closing(&self, _: &TerminalId) -> impl Future<Output = bool> + Send {
+            std::future::ready(self.0.lock().unwrap().closing)
         }
 
         async fn exited(&self, terminal: &TerminalId, exit: &Exited) -> Result<(), String> {

@@ -320,6 +320,11 @@ impl Holder {
         }
     }
 
+    /// The runtime, which views of its terminals stream from.
+    pub(crate) fn runtime(&self) -> Arc<HolderRuntime> {
+        Arc::clone(&self.runtime)
+    }
+
     /// Forgets `terminal_id` in what each receiver of its events keeps, once it is closed.
     fn forget(&self, terminal_id: &TerminalId) {
         let mut told = self.told.lock().unwrap_or_else(PoisonError::into_inner);

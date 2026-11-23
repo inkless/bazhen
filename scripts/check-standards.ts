@@ -1069,6 +1069,57 @@ const NOT_DECODERS: Record<string, string> = {
     "the trait method a view's socket sends output with, which has no body here; it is handed output the hub queued whole, to send as it is",
   "crates/bazhen-daemon/src/stream/view.rs::write_to":
     "sends what the hub queued to a view's socket whole; parses none of it",
+  "crates/bazhen-daemon/src/serve.rs::listen":
+    "builds and stops what the daemon serves, among it the holder runtime views stream from, and passes that runtime on; reads no bytes",
+  "crates/bazhen-daemon/src/serve.rs::shells":
+    "hands the runner, holder runtime and all, to Shells; reads no bytes",
+  "crates/bazhen-daemon/src/stream.rs::on_holders":
+    "builds the hub over the holder runtime it is given; reads no bytes",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStreams::new":
+    "keeps the store and the HolderRuntime it is given; reads no bytes",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStreams::attach":
+    "reads the recorded locator through HolderLocator::decode, serde_json of text the daemon wrote, then opens a stream through HolderRuntime::attach, whose frames FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and hands its snapshot on whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStream::size":
+    "the HolderStream's own size, which it was told in frames FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes; reads no bytes",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStream::write":
+    "hands a view's input whole to HolderStream::write; parses none of it",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStream::resize":
+    "asks HolderStream::resize, whose answer FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes; reads no bytes",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStream::snapshot":
+    "takes a snapshot through HolderStream::snapshot, whose frames FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and hands its bytes on whole; parses none of them",
+  "crates/bazhen-daemon/src/stream/holder.rs::HolderStream::close":
+    "closes the HolderStream; reads no bytes",
+  "crates/bazhen-daemon/src/stream/holder.rs::StreamEvents::recv":
+    "takes the next event StreamEvents decoded from frames FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and hands it to told; parses nothing",
+  "crates/bazhen-daemon/src/stream/holder.rs::told":
+    "moves a holder stream's event, its output whole, into the hub's; parses none of it",
+  "crates/bazhen-daemon/src/stream/hub.rs::Hub::close":
+    "holds the hub's state, whose views hold output queued for them; closes each stream, reading none of that output",
+  "crates/bazhen-daemon/src/stream/route.rs::join":
+    "the Views trait's join, which has no body here, and the route's join, which asks whether the terminal runs, then hands the view to Views::join; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::write":
+    "the Views trait's write, which has no body here and is handed a view's input whole, and the socket's writer, which sends what the hub queued and what the route sends itself whole; parses none of it",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::join":
+    "hands the view to Hub::join; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::write":
+    "hands a view's input whole to Hub::write; parses none of it",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::engage":
+    "hands the view to Hub::engage; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::declare_epoch":
+    "hands the view's epoch to Hub::declare_epoch; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::resize":
+    "hands the view's size to Hub::resize; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::leave":
+    "hands the view to Hub::leave; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Hub::close": "calls Hub::close; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::View::heard":
+    "parses a text frame through read, serde_json of a str, and hands a binary frame's input whole to Views::write; parses none of the input",
+  "crates/bazhen-daemon/src/stream/route.rs::View::said":
+    "moves the view as a frame read already parsed says; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::View::hello":
+    "checks a hello read already parsed and starts the view's join; reads no bytes",
+  "crates/bazhen-daemon/src/stream/route.rs::Socket::output":
+    "sends output the hub queued as one binary frame, whole; parses none of it",
   "crates/bazhen-host-guard/src/ptys.rs::Machine::read_file":
     "reads a kernel counter file whole as text for count, which takes it only as a whole number; parses nothing itself",
   "crates/bazhen-host-guard/src/group.rs::read_out":
@@ -1501,6 +1552,8 @@ const NOT_DECODERS: Record<string, string> = {
     "maps the builds HolderRuntime::builds reads, which FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, to running holders; parses nothing",
   "crates/bazhen-daemon/src/holder.rs::Holder::events":
     "boxes the HolderTold that told makes; reads no bytes",
+  "crates/bazhen-daemon/src/holder.rs::Holder::runtime":
+    "hands out the HolderRuntime it keeps, for views to stream from; reads no bytes",
   "crates/bazhen-daemon/src/peer.rs::Peers::read":
     "hands a connection's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":

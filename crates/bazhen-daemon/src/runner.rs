@@ -35,6 +35,8 @@ pub(crate) struct Runner {
     pub(crate) doctor: Settled,
     /// The shell a new terminal tab would run.
     pub(crate) shell: String,
+    /// The holder runtime its terminals' views stream from; none for a fake's.
+    pub(crate) streams: Option<Arc<HolderRuntime>>,
 }
 
 /// The holder runtime, with the build installed for its new terminals, or why the daemon can't
@@ -81,8 +83,10 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
         install,
         capture: &captured,
     });
+    let holder = Holder::new(runtime, config.history_lines);
     Ok(Runner {
-        terminals: Arc::new(Holder::new(runtime, config.history_lines)),
+        streams: Some(holder.runtime()),
+        terminals: Arc::new(holder),
         budget: Arc::new(budget),
         doctor,
         shell: login_shell(&captured.env),

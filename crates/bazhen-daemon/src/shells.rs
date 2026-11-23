@@ -46,7 +46,7 @@ use crate::terminals::{Event, Events, Exit, Recorded, ShellSpec, TerminalError, 
 use crate::writer::Writer;
 
 /// The runtime every shell this daemon opens is created on.
-const RUNTIME: &str = "holder";
+pub(crate) const RUNTIME: &str = "holder";
 
 /// Why a command on a shell did nothing, in the kinds its answer tells apart.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

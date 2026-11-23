@@ -43,7 +43,12 @@ pub(crate) struct Pairing {
 /// on loopback, or the owner on the socket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Viewer {
-    Device { id: DeviceId, required: bool },
+    /// A paired device, by the name it was paired with, which views of terminals carry.
+    Device {
+        id: DeviceId,
+        name: String,
+        required: bool,
+    },
     OwnerLoopback,
 }
 
@@ -70,7 +75,10 @@ pub(crate) struct Gated {
 }
 
 /// What the store says of the device a token names, read off the writer's thread.
-async fn stored(shared: &Shared, token: &str) -> Result<Option<(DeviceId, Stored)>, Box<Response>> {
+async fn stored(
+    shared: &Shared,
+    token: &str,
+) -> Result<Option<(DeviceId, String, Stored)>, Box<Response>> {
     let store = shared.store.clone();
     let hash = devices::hash_token(token);
     let read =
@@ -79,6 +87,7 @@ async fn stored(shared: &Shared, token: &str) -> Result<Option<(DeviceId, Stored
         Ok(Ok(found)) => Ok(found.map(|row| {
             (
                 row.id,
+                row.name,
                 Stored {
                     revoked: row.revoked,
                     secure: row.secure,
@@ -142,14 +151,14 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
         };
         let now = now_ms();
         let standing = devices::standing(
-            found.as_ref().map(|(_, s)| s),
+            found.as_ref().map(|(_, _, s)| s),
             presented.secure,
             remote,
             touch,
             now,
         );
-        if let (Some((id, _)), Standing::Stands | Standing::Touch) = (found, standing) {
-            verified = Some((id, standing == Standing::Touch));
+        if let (Some((id, name, _)), Standing::Stands | Standing::Touch) = (found, standing) {
+            verified = Some((id, name, standing == Standing::Touch));
         }
     }
     if required && verified.is_none() {
@@ -166,7 +175,7 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
         return refused_origin(upgrade, "");
     }
     let refresh = match &verified {
-        Some((id, true)) => {
+        Some((id, _, true)) => {
             let id = id.clone();
             match gated
                 .shared
@@ -181,8 +190,9 @@ pub(crate) async fn gate(State(gated): State<Gated>, mut request: Request, next:
         }
         _ => None,
     };
-    let viewer = verified.map_or(Viewer::OwnerLoopback, |(id, _)| Viewer::Device {
+    let viewer = verified.map_or(Viewer::OwnerLoopback, |(id, name, _)| Viewer::Device {
         id,
+        name,
         required,
     });
     request.extensions_mut().insert(viewer);
