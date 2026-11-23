@@ -10,6 +10,7 @@ name = "bazhen-test-sleeper"
 path = "src/bin/sleeper.rs"
 
 [dependencies]
+bazhen-pid = { workspace = true }
 rustix = { workspace = true }
 thiserror = { workspace = true }
 
