@@ -130,6 +130,17 @@ describe("typePaths", () => {
     ]);
   });
 
+  it("reads a raw name as its name, through a path, keyword or not", () => {
+    expect(typePaths("Vec<r#Frame>, r#type, crate::r#m::Step, Tr<r#Item = r#Out>")).toEqual([
+      { name: "Vec", path: ["Vec"] },
+      { name: "Frame", path: ["Frame"] },
+      { name: "type", path: ["type"] },
+      { name: "Step", path: ["crate", "m", "Step"] },
+      { name: "Tr", path: ["Tr"] },
+      { name: "Out", path: ["Out"] },
+    ]);
+  });
+
   it("skips a binding's name, but keeps one after brackets that don't pair", () => {
     expect(typeNames("Tr<Item = u8, X<{ 1 > 0 }, Output = u8>>")).toEqual([
       "Tr",
@@ -356,6 +367,49 @@ describe("ModuleTable.resolve", () => {
     const detached = moduleOf(table, "crates/a/src/detached.rs");
     expect(resolve(table, detached, "crate::moved::Moved").unresolved).toEqual(["Moved"]);
     expect(resolve(table, detached, "D").items).toEqual(["crates/a/src/detached.rs::D"]);
+  });
+
+  it("binds a type or module declared by a raw name by its name", () => {
+    const table = tableOf({
+      [LIB]: [
+        "pub struct r#Frame;",
+        "pub mod r#m { pub enum r#Step {} }",
+        "mod r#io;",
+        "extern crate serde as r#sd;",
+        "extern crate r#serde;",
+        "use g::*;",
+        "mod g { pub mod serde { pub struct Value; } }",
+      ].join("\n"),
+      "crates/a/src/io.rs": "pub union r#Word { a: u8 }\n",
+    });
+    const lib = moduleOf(table, LIB);
+    const paths = ["Frame", "m::Step", "io::Word", "sd::Value", "serde::Value"];
+    expect(paths.map((p) => resolve(table, lib, p))).toEqual([
+      { items: [`${LIB}::Frame`], unresolved: [] },
+      { items: [`${LIB}::m::Step`], unresolved: [] },
+      { items: [`${LIB}::io::Word`], unresolved: [] },
+      { items: [], unresolved: [] },
+      { items: [], unresolved: [] },
+    ]);
+  });
+
+  it("keeps an impl's or a trait's associated types apart, binding no name", () => {
+    const table = tableOf({
+      [LIB]: [
+        "pub struct S;",
+        "impl Tr for S { type Item = u8; fn f(&self) { type Local = u16; } }",
+        "pub trait Tr { type Item: Read; }",
+      ].join("\n"),
+    });
+    expect([
+      table.assocs.map((i) => `${i.module.id}::${i.text}`),
+      table.items.map((i) => i.name),
+      resolve(table, moduleOf(table, LIB), "Item"),
+    ]).toEqual([
+      [`${LIB}::type Item = u8;`, `${LIB}::type Item: Read;`],
+      ["S", "Local", "Tr"],
+      { items: [], unresolved: ["Item"] },
+    ]);
   });
 
   it("gives main.rs and lib.rs crate roots of their own", () => {

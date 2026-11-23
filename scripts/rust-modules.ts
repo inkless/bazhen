@@ -102,7 +102,7 @@ const PATH = /#\s*\[\s*(?:path\b|cfg_attr\s*\([^\]]*\bpath\s*=)/;
 const ALWAYS_EXTERNAL = new Set(["std", "core", "alloc"]);
 
 const ITEM_TOKENS =
-  /[{}]|\b(?:(mod)\s+(\w+)\s*(?=[{;])|(struct|enum|trait|type)\s+(\w+)|(union)\s+(\w+)(?=\s*[<{])|(use)\b|extern\s+crate\s+(\w+)(?:\s+as\s+(\w+))?\s*;)/g;
+  /[{}]|\b(?:(mod)\s+(?:r#)?(\w+)\s*(?=[{;])|(struct|enum|trait|type)\s+(?:r#)?(\w+)|(union)\s+(?:r#)?(\w+)(?=\s*[<{])|(use)\b|extern\s+crate\s+(?:r#)?(\w+)(?:\s+as\s+(?:r#)?(\w+))?\s*;)/g;
 
 /**
  * The attributes written on the item whose first keyword is at `at`, past its visibility and
@@ -234,9 +234,9 @@ export function useTree(
 }
 
 /**
- * The path ending at the name at `at` in `text`: the names before it joined by `::`, with `""`
- * first for a path from the root (`::x::Y`). `undefined` when a `>` comes before a `::`
- * (`<T as Trait>::Out`, `a::<T>::B`), which can't be followed.
+ * The path ending at the name at `at` in `text`: the names before it joined by `::`, each raw one
+ * (`r#m`) by its name, with `""` first for a path from the root (`::x::Y`). `undefined` when a `>`
+ * comes before a `::` (`<T as Trait>::Out`, `a::<T>::B`), which can't be followed.
  */
 export function pathBefore(text: string, at: number, name: string): string[] | undefined {
   const segments = [name];
@@ -254,6 +254,7 @@ export function pathBefore(text: string, at: number, name: string): string[] | u
       return segments;
     }
     segments.unshift(text.slice(k, j));
+    if (text.slice(k - 2, k) === "r#") k -= 2;
     i = k;
   }
 }
@@ -291,14 +292,15 @@ function inGenericArgs(text: string, at: number): boolean {
 /**
  * Each path in `text` that ends at a name and isn't a keyword, a lifetime or a name `=` binds in
  * generic arguments: `Vec<direct::Step>` has `Vec` and `direct::Step`, `Future<Output = T>` has
- * `Future` and `T`. `path` is `undefined` for one that can't be followed.
+ * `Future` and `T`. A raw name is its name (`r#Frame` is `Frame`) and never a keyword (`r#type`).
+ * `path` is `undefined` for one that can't be followed.
  */
 export function typePaths(text: string): { name: string; path: string[] | undefined }[] {
   const out: { name: string; path: string[] | undefined }[] = [];
-  for (const m of text.matchAll(/(?<!['\w#])[A-Za-z_]\w*/g)) {
-    const name = m[0];
-    const after = text.slice(m.index + name.length);
-    if (KEYWORDS.has(name) || /^\s*::/.test(after)) continue;
+  for (const m of text.matchAll(/(?<!['\w#])(r#)?([A-Za-z_]\w*)/g)) {
+    const name = m[2] ?? "";
+    const after = text.slice(m.index + m[0].length);
+    if ((m[1] === undefined && KEYWORDS.has(name)) || /^\s*::/.test(after)) continue;
     if (
       BOUND_NAME.test(after) &&
       /[<,]\s*$/.test(text.slice(0, m.index)) &&
@@ -319,6 +321,11 @@ export function typePaths(text: string): { name: string; path: string[] | undefi
  */
 export class ModuleTable {
   readonly items: Item[] = [];
+  /**
+   * The associated types of every impl and trait body: no path written in a module names one, so
+   * they bind no name, and a path to one (`Self::Item`, `T::Item`) leaves its name unresolved.
+   */
+  readonly assocs: Item[] = [];
   private readonly modules: Module[] = [];
   private readonly regions = new Map<string, Region[]>();
   private readonly libs = new Map<string, Module>();
@@ -514,7 +521,6 @@ export class ModuleTable {
       }
       const kind = m[3] ?? m[5];
       if (isItemKind(kind)) {
-        if (kind === "type" && solid.at(-1) === "assoc") continue;
         const item: Item = {
           name: m[4] ?? m[6] ?? "",
           kind,
@@ -523,6 +529,10 @@ export class ModuleTable {
           at: m.index,
           text: code.slice(m.index, itemEnd(code, m.index)),
         };
+        if (kind === "type" && solid.at(-1) === "assoc") {
+          this.assocs.push(item);
+          continue;
+        }
         this.items.push(item);
         push(module.items, item.name, { value: item, conditional });
         continue;

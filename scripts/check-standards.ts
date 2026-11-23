@@ -1518,8 +1518,12 @@ interface Carriers {
   named: Map<Item, Set<string>>;
 }
 
-/** What the decoder rule reads an item's bytes from: an enum's head and its fields' types. */
-function itemTypes(item: Item): string {
+/**
+ * What the decoder rule reads an item's bytes from: an enum's head and its fields' types, an
+ * alias's type, and an associated type's bounds and type (`type R: Read`, `type Item = Frame`).
+ */
+function itemTypes(item: Item, assoc: boolean): string {
+  if (assoc) return item.text.replace(/^type\s+(?:r#)?\w+/, "");
   if (item.kind === "type") return /=([\s\S]*)$/.exec(item.text)?.[1] ?? "";
   if (item.kind !== "enum") return item.text.slice(item.kind.length + 1).replace(/^\s*\w+/, "");
   const variants = enumVariants(item.text);
@@ -1539,19 +1543,23 @@ const resolveNamed = (table: ModuleTable, module: Module, { name, path }: Named)
 /**
  * The carriers among the workspace's types, found by resolving each name in a type from the
  * module it is written in. A name that can't be resolved is taken for every carrier of that name,
- * so what resolution can't settle counts as it would by name alone.
+ * so what resolution can't settle counts as it would by name alone. An associated type is one of
+ * them, since only such a name reaches it: `Self::Item`, whatever impl sets it, is every `Item`.
  */
 function carriersOf(table: ModuleTable): Carriers {
-  const types = table.items.filter((i) => i.kind !== "trait");
+  const assocs = new Set(table.assocs);
+  const types = [...table.items.filter((i) => i.kind !== "trait"), ...assocs];
   const named = new Map(
     types.map((item) => [
       item,
-      typePaths(itemTypes(item)).map((n) => resolveNamed(table, item.module, n)),
+      typePaths(itemTypes(item, assocs.has(item))).map((n) => resolveNamed(table, item.module, n)),
     ]),
   );
   const found = new Set(
     types.filter((i) =>
-      BYTES_IN.test(i.kind === "struct" || i.kind === "union" ? i.text : itemTypes(i)),
+      BYTES_IN.test(
+        i.kind === "struct" || i.kind === "union" ? i.text : itemTypes(i, assocs.has(i)),
+      ),
     ),
   );
   // A type holding a carrier carries bytes too, however deep: repeat until nothing is added.
@@ -2143,7 +2151,7 @@ function bindsByteVariant(
   if (enums.length === 0) return false;
   const bound = atBindings(body);
   const path = new RegExp(
-    `\\b(${enums.join("|")})${TURBOFISH}\\s*::\\s*(\\w+)\\b${TURBOFISH}(?!\\s*::)`,
+    `\\b(${enums.join("|")})${TURBOFISH}\\s*::\\s*(?:r#)?(\\w+)\\b${TURBOFISH}(?!\\s*::)`,
     "g",
   );
   for (const m of body.matchAll(path)) {
@@ -2181,11 +2189,14 @@ function implBlocks(code: string): {
 }[] {
   return [...code.matchAll(IMPL_BLOCK)].map((m) => {
     const head = m[0].replace(/^[\s\S]*?\bimpl\b\s*/, "").replace(/^<(?:[^<>]|<[^<>]*>)*>\s*/, "");
-    const type = /(?:\bfor\s+)?((?:[\w:]+::)?)(\w+)\s*(?:<|where\b|$)/.exec(
+    const type = /(?:\bfor\s+)?((?:::\s*)?(?:(?:r#)?\w+\s*::\s*)*)(\w+)\s*(?:<|where\b|$)/.exec(
       head.split(/\bfor\b/).pop() ?? "",
     );
     const name = type?.[2] ?? "";
-    const prefix = (type?.[1] ?? "").split("::").slice(0, -1);
+    const prefix = (type?.[1] ?? "")
+      .split("::")
+      .slice(0, -1)
+      .map((p) => rawless(p.trim()));
     return {
       start: m.index,
       end: itemEnd(code, m.index + m[0].length),
@@ -2396,7 +2407,7 @@ function implParts(head: string): ImplParts {
 // A trait impl's type that is one of its own parameters, behind at most a reference or a std
 // pointer, so that it is implemented for every type, a carrier and its Arc among them.
 const BLANKET =
-  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:(?:[\w:]+::)?(?:Arc|Rc|Box|Pin)\s*<\s*(\w+)\s*>|(\w+))$/;
+  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:(?:[\w:]+::)?(?:Arc|Rc|Box|Pin)\s*<\s*(?:r#)?(\w+)\s*>|(?:r#)?(\w+))$/;
 
 /**
  * Whether a method's signature `sig`, at `at` in its file, may hand bytes to its caller or take
@@ -2681,7 +2692,7 @@ export function decoderFailures(
         );
       }
     }
-    for (const item of code.matchAll(/\benum\s+(\w+)/g)) {
+    for (const item of code.matchAll(/\benum\s+(?:r#)?(\w+)/g)) {
       const parsed = enumVariants(code.slice(item.index, itemEnd(code, item.index)));
       for (const v of (parsed?.variants ?? []).filter((w) => w.fields === undefined)) {
         if (BYTES_IN.test(v.text.slice(v.name.length))) {
@@ -2692,7 +2703,7 @@ export function decoderFailures(
         }
       }
     }
-    for (const struct of code.matchAll(/\bstruct\s+(\w+)/g)) {
+    for (const struct of code.matchAll(/\bstruct\s+(?:r#)?(\w+)/g)) {
       const item = code.slice(struct.index, itemEnd(code, struct.index));
       const parsed = structFields(item);
       if (parsed === undefined && BYTES_IN.test(item)) {
@@ -2713,7 +2724,7 @@ export function decoderFailures(
         }
       }
     }
-    for (const alias of code.matchAll(/\btype\s+(\w+)[^=;]*=([^;]*);/g)) {
+    for (const alias of code.matchAll(/\btype\s+(?:r#)?(\w+)[^=;]*=([^;]*);/g)) {
       if (BYTES_IN.test(alias[2] ?? "") || scope.names(alias[2] ?? "", alias.index)) {
         out.push(
           `${file}::${alias[1]}: names a byte type, which hides it from the decoder rule. ` +
