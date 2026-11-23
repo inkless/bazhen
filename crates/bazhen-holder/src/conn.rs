@@ -1431,6 +1431,19 @@ mod tests {
         assert!(conn.is_finished(now), "the end of input was never read");
     }
 
+    /// One being hung up hands nothing more over, so its peer's hang-up drops it.
+    #[test]
+    fn a_connection_being_hung_up_is_dropped_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, peer) = pair(now);
+        conn.open(0);
+        conn.queue(vec![1; 10]);
+        conn.hang_up(now);
+        drop(peer);
+        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK], now);
+        assert!(conn.is_gone());
+    }
+
     /// Past the mark a connection's requests wait unread, so its socket reports the peer's hang-up
     /// with them still waiting.
     #[test]
