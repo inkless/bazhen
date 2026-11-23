@@ -1,7 +1,8 @@
 //! The holder's child on real PTYs: its session and terminal, its fds and signals, how its exit
 //! is seen, and how a close ends it. Every wait has a deadline. A guard kills the group of any
-//! child a test leaves running; a job a test starts on purpose ends by itself once the test lets
-//! go of the file it wrote its pid to, or within 30 s.
+//! child a test leaves running; a job a test starts on purpose ends by itself within 30 s, and
+//! the grandchild that ignores `SIGHUP` sooner, once the test lets go of the file it wrote its
+//! pid to.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
