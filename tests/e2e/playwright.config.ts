@@ -127,7 +127,11 @@ export default defineConfig<object, DaemonOptions>({
   testDir: ".",
   testMatch: "*.spec.ts",
   workers: 1,
-  reporter: "list",
+  // Ends a hung run with a report before the CI step's 17-minute cap: the clock starts after the
+  // ~1 minute of setup and ~4.5 of builds, so 10 leaves teardown 1.5 minutes. A normal run takes 5.
+  globalTimeout: 10 * 60_000,
+  // `list` streams each test as it starts and ends; the report and traces are what CI uploads.
+  reporter: [["list"], ["html", { open: "never" }]],
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   // Each project is named for its runtime, which is how a spec finds its daemon.
@@ -139,6 +143,8 @@ export default defineConfig<object, DaemonOptions>({
       : { testMatch: [...RUNTIME_AGNOSTIC_SPECS, "*.holder.spec.ts"] }),
     use: {
       ...devices["Desktop Chrome"],
+      trace: "retain-on-failure",
+      screenshot: "only-on-failure",
       baseURL: webOrigin(daemon),
       storageState: storageState(daemon.home),
       home: daemon.home,

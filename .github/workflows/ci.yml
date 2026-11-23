@@ -238,7 +238,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/moon
       - run: pnpm --filter @bazhen/e2e-tests exec playwright install --with-deps chromium
+      # Under the job's 20 minutes, so the upload below still gets its turn when a run hangs.
       - run: moon run :test-e2e
+        timeout-minutes: 17
+      # The report and traces of a run that failed or hit its time limit; always(), since a hang
+      # is what they are for. Anyone can download them: they hold only the run's throwaway
+      # daemons' device cookie and pairing codes, and screens of synthetic sessions, and no
+      # secret reaches this job's tests.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-report
+          path: |
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The branch's falsify, and the base's for a branch that changes falsify (scripts/falsify-base.ts),
   # each on a runner of its own: one triggered base run does the head's work over again, and the two
