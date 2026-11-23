@@ -54,7 +54,7 @@ pub fn rerun_with_sigchld_ignored(test: &str, ignored: bool) -> Result<(), Rerun
     if !ran.status.success() {
         return Err(RerunFailed::Failed(output));
     }
-    if !output.contains("1 passed") {
+    if !output.contains(" 1 passed;") {
         return Err(RerunFailed::NotRun {
             test: test.to_owned(),
             output,
