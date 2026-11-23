@@ -1458,6 +1458,19 @@ const unionFields = (a: Fields, b: Fields): Fields =>
 /** A name as a type is written: the path ending at it, `undefined` when it can't be followed. */
 type Named = { name: string; path: string[] | undefined };
 
+/** An identifier as Rust reads it: `r#type` is `type`. */
+const rawless = (name: string) => name.replace(/^r#/, "");
+
+/**
+ * Each byte field, by name, of a struct carrier whose type names struct carriers only by a plain
+ * path, behind at most a reference, `Box`, `Arc` or `Rc`: the carriers it may be. A use of such a
+ * field may be shown not to reach their bytes (`Scope.reaches`); any other byte field's can't.
+ */
+type Views = Map<string, Item[]>;
+
+/** A carrier's byte fields, and the views of those that have one. */
+type Carrier = { fields: Fields; views: Views };
+
 /**
  * What the names written in one file mean to the decoder rule. A carrier is a type holding bytes
  * from outside, by a field of a byte type or of another carrier: an enum, whose variants are read
@@ -1468,7 +1481,14 @@ interface Scope {
   /** Whether a type written in `text`, at `at` in the file's code, is a carrier. */
   names(text: string, at: number): boolean;
   /** The fields holding the bytes of the type `named`, at `at`, names; `null` if not a carrier. */
-  carrier(named: Named, at: number): { fields: Fields } | null;
+  carrier(named: Named, at: number): Carrier | null;
+  /**
+   * Whether the use of a field, from `from` to `to` in `body`, whose view is `items` may reach
+   * their bytes. It may unless it reads a field of theirs that holds none, or calls a method that
+   * every one of them has inherently, whose signature can't hand bytes either way and which isn't a
+   * decoder itself, where no trait may answer the call instead.
+   */
+  reaches(items: Item[], body: string, from: number, to: number): boolean;
   /** The byte-carrying variants of the enum `named`, at `at`, names, each with its byte fields. */
   variants(named: Named, at: number): Map<string, Fields> | undefined;
   /** The name of each enum with a byte-carrying variant. */
@@ -1478,6 +1498,7 @@ interface Scope {
 const NO_CARRIERS: Scope = {
   names: () => false,
   carrier: () => null,
+  reaches: () => true,
   variants: () => undefined,
   enums: new Set(),
 };
@@ -1488,6 +1509,9 @@ interface Carriers {
   variants: Map<Item, Map<string, Fields>>;
   byName: Map<string, Fields>;
   variantsByName: Map<string, Map<string, Fields>>;
+  views: Map<Item, Views>;
+  /** Each struct carrier's fields, by name. */
+  named: Map<Item, Set<string>>;
 }
 
 /** What the decoder rule reads an item's bytes from: an enum's head and its fields' types. */
@@ -1548,14 +1572,27 @@ function carriersOf(table: ModuleTable): Carriers {
   const holds = (type: string, module: Module) =>
     BYTES_IN.test(type) || typePaths(type).some((n) => isCarrier(resolveNamed(table, module, n)));
   const fields = new Map<Item, Fields>();
+  const fieldNames = new Map<Item, Set<string>>();
   for (const item of found) {
     const struct = item.kind === "struct" ? structFields(item.text) : undefined;
+    if (struct === undefined || holds(struct.head, item.module)) {
+      fields.set(item, undefined);
+      continue;
+    }
     fields.set(
       item,
-      struct === undefined || holds(struct.head, item.module)
-        ? undefined
-        : new Set(struct.fields.filter((f) => holds(f.type, item.module)).map((f) => f.name)),
+      new Set(struct.fields.filter((f) => holds(f.type, item.module)).map((f) => f.name)),
     );
+    fieldNames.set(item, new Set(struct.fields.map((f) => rawless(f.name))));
+  }
+  const views = new Map<Item, Views>();
+  for (const item of fieldNames.keys()) {
+    const byField: Views = new Map();
+    for (const f of structFields(item.text)?.fields ?? []) {
+      const viewed = holds(f.type, item.module) ? viewOf(table, item.module, f.type) : undefined;
+      if (viewed?.every((i) => fieldNames.has(i)) === true) byField.set(rawless(f.name), viewed);
+    }
+    views.set(item, byField);
   }
   const byName = new Map<string, Fields>();
   for (const [item, f] of fields) {
@@ -1583,7 +1620,58 @@ function carriersOf(table: ModuleTable): Carriers {
     variants.set(item, byVariant);
     variantsByName.set(item.name, mergeVariants(variantsByName.get(item.name), byVariant));
   }
-  return { fields, variants, byName, variantsByName };
+  return { fields, variants, byName, variantsByName, views, named: fieldNames };
+}
+
+// A field's type that names one type by a plain path, behind at most a reference, an Arc, an Rc
+// or a Box, whose methods a call on the field reaches by auto-deref, with none of the wrapper's own
+// in the way. Anything else (a Mutex, an Option, a generic) answers calls with methods of its own.
+const VIEWED =
+  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:((?:(?:r#)?\w+\s*::\s*)*)(Arc|Rc|Box)\s*<\s*([^<>]*?)\s*>|([^<>]*?))$/;
+
+const fromStdPath = (path: string[]) => /^(?:std|core|alloc)$/.test(path[0] ?? "");
+
+/**
+ * The items a field's `type`, written in `module`, names when it has VIEWED's shape and its wrapper
+ * is std's: written by a std path, or brought in by a `use` of one (`Box` needs none). `undefined`
+ * when it doesn't, or when a name in it can't be resolved.
+ */
+function viewOf(table: ModuleTable, module: Module, type: string): Item[] | undefined {
+  const shape = VIEWED.exec(type.trim());
+  const inner = shape?.[3] ?? shape?.[4];
+  if (shape === null || inner === undefined) return undefined;
+  const wrapper = shape[2];
+  if (wrapper !== undefined) {
+    const prefix = (shape[1] ?? "").split("::").map((p) => rawless(p.trim()));
+    const bound = module.uses.get(wrapper)?.map((b) => b.value.path) ?? [];
+    const fromStd =
+      prefix.length > 1
+        ? fromStdPath(prefix)
+        : bound.length > 0
+          ? bound.every(fromStdPath)
+          : wrapper === "Box" && module.globs.length === 0;
+    if (!fromStd) return undefined;
+  }
+  const path = inner.split("::").map((p) => rawless(p.trim()));
+  const r = resolveNamed(table, module, { name: path.at(-1) ?? "", path });
+  return r.unresolved.size === 0 && r.items.length > 0 ? r.items : undefined;
+}
+
+/**
+ * Two carriers' views, as one: a field keeps its view only where every carrier holding bytes in it
+ * gives it one.
+ */
+function mergeViews(a: Carrier, b: Carrier): Views {
+  const holds = (c: Carrier, field: string) =>
+    c.fields === undefined || [...c.fields].some((f) => rawless(f) === field);
+  const out: Views = new Map();
+  for (const field of new Set([...a.views.keys(), ...b.views.keys()])) {
+    const va = a.views.get(field);
+    const vb = b.views.get(field);
+    if ((va === undefined && holds(a, field)) || (vb === undefined && holds(b, field))) continue;
+    out.set(field, [...(va ?? []), ...(vb ?? [])]);
+  }
+  return out;
 }
 
 /** Two enums' byte-carrying variants, as one: either's fields may be the one a pattern binds. */
@@ -1596,8 +1684,97 @@ function mergeVariants(
   return out;
 }
 
-/** What the names in `file` mean, each resolved from the module it is written in. */
-function fileScope(table: ModuleTable, carriers: Carriers, file: string): Scope {
+/** What a use of a field with a view is checked against: the same for every file. */
+interface Through {
+  /** Whether views are read: not on the first pass, which finds the decoders without them. */
+  active: boolean;
+  /** The decoders the last pass found, by key (`file::Type::fn`). */
+  takers: Set<string>;
+  /** Each viewed carrier's inherent methods, by name: each one's key, and whether it exposes bytes. */
+  methods: Map<Item, Map<string, { key: string; exposes: boolean }[]>>;
+  /** The names an impl of a trait for a type naming the item may answer; `undefined`: any. */
+  traits: Map<Item, Set<string> | undefined>;
+  /** The names an impl of a trait for every type may answer; `undefined`: any. */
+  blanket: Set<string> | undefined;
+}
+
+const unionNames = (a: Set<string> | undefined, b: Set<string> | undefined) =>
+  a === undefined || b === undefined ? undefined : new Set([...a, ...b]);
+
+// The methods a trait may answer for a carrier, or a reference, an Arc, an Rc or a Box of one, by
+// an impl the scan can't read: one std writes for every type, a derive writes, or std writes for
+// the wrapper. A carrier's own method of one of these names may lose the call to it.
+const TRAIT_METHODS = new Set(
+  (
+    "as_mut as_ref borrow borrow_mut clamp clone clone_from clone_into cmp deref deref_mut drop " +
+    "eq fmt ge gt hash hash_slice into le lt max min ne partial_cmp to_owned to_string try_into " +
+    "type_id"
+  ).split(" "),
+);
+
+// The std traits with no method outside TRAIT_METHODS, so that an impl of one answers no other
+// name. An impl of any other trait from outside the workspace may answer any.
+const STD_TRAITS = new Set(
+  (
+    "AsMut AsRef Borrow BorrowMut Clone Copy Debug Default Deref DerefMut Display Drop Eq From " +
+    "Hash Ord PartialEq PartialOrd Send Sync Unpin"
+  ).split(" "),
+);
+
+// Types of std a `use` may bring in that aren't traits. Any other name from outside the workspace
+// a `use` brings in may be a trait, whose methods the scan can't read.
+const STD_TYPES = new Set(
+  (
+    "Arc AtomicBool AtomicI64 AtomicU32 AtomicU64 AtomicUsize BTreeMap BTreeSet BinaryHeap Cell " +
+    "Condvar Cow Duration HashMap HashSet Instant LazyLock Mutex MutexGuard OnceCell OnceLock " +
+    "Ordering OsStr OsString Path PathBuf PhantomData Pin PoisonError Rc RefCell RwLock " +
+    "SystemTime VecDeque Weak"
+  ).split(" "),
+);
+
+/**
+ * Whether a `use` in `file`, or in a module of the workspace a glob of its brings in, may bring a
+ * trait from outside the workspace into scope: by a glob, as `_`, or by a name that isn't one of
+ * STD_TYPES. Its methods, which the scan can't read, may answer a call on a field. A name a module
+ * of the workspace holds that isn't an item (a const, a function) is no trait; one it brings in by
+ * a `use` of its own is that `use`'s.
+ */
+function foreignTraits(table: ModuleTable, file: string): boolean {
+  const seen = new Set<UseBinding>();
+  const foreignUse = (module: Module, b: UseBinding): boolean => {
+    if (seen.has(b)) return false;
+    seen.add(b);
+    const r = table.resolve(module, b.path);
+    if (r.items.length > 0 || r.modules.length > 0) {
+      return b.name === "*" && r.modules.some((m) => m.bindings.some((g) => foreignUse(m, g)));
+    }
+    const last = rawless(b.path.at(-1) ?? "");
+    const holders = b.path.length > 1 ? table.resolve(module, b.path.slice(0, -1)).modules : [];
+    if (b.name !== "*" && holders.length > 0) {
+      return holders.some((m) => (m.uses.get(last) ?? []).some((u) => foreignUse(m, u.value)));
+    }
+    return (
+      b.name === "*" ||
+      b.renamed?.endsWith(" as _") === true ||
+      (/^[A-Z]/.test(last) && !(fromStdPath(b.path) && STD_TYPES.has(last)))
+    );
+  };
+  return table.modulesIn(file).some((m) => m.bindings.some((b) => foreignUse(m, b)));
+}
+
+/** Whether the code at `at` in `body` is inside a macro's brackets, whose tokens it may rearrange. */
+function inMacro(body: string, at: number): boolean {
+  for (let open = enclosingBracket(body, at); open !== -1; open = enclosingBracket(body, open)) {
+    if (/!\s*$/.test(body.slice(0, open))) return true;
+  }
+  return false;
+}
+
+/**
+ * What the names in `file` mean, each resolved from the module it is written in, and, once
+ * `through` is active, which uses of a field with a view may reach its bytes.
+ */
+function fileScope(table: ModuleTable, carriers: Carriers, file: string, through?: Through): Scope {
   const resolutions = (named: Named, at: number) => {
     const modules = table.modulesAt(file, at);
     return modules.length === 0
@@ -1605,20 +1782,51 @@ function fileScope(table: ModuleTable, carriers: Carriers, file: string): Scope 
       : modules.map((m) => resolveNamed(table, m, named));
   };
   const carrier = (named: Named, at: number) => {
-    let out: { fields: Fields } | null = null;
-    const add = (f: Fields) => {
-      out = out === null ? { fields: f } : { fields: unionFields(out.fields, f) };
+    let out: Carrier | null = null;
+    const add = (fields: Fields, views: Views) => {
+      out =
+        out === null
+          ? { fields, views }
+          : { fields: unionFields(out.fields, fields), views: mergeViews(out, { fields, views }) };
     };
     for (const r of resolutions(named, at)) {
-      for (const item of r.items) if (carriers.fields.has(item)) add(carriers.fields.get(item));
+      for (const item of r.items) {
+        if (carriers.fields.has(item)) {
+          add(carriers.fields.get(item), carriers.views.get(item) ?? new Map());
+        }
+      }
       for (const name of r.unresolved)
-        if (carriers.byName.has(name)) add(carriers.byName.get(name));
+        if (carriers.byName.has(name)) add(carriers.byName.get(name), new Map());
     }
     return out;
+  };
+  let opaque: boolean | undefined;
+  const reaches = (items: Item[], body: string, from: number, to: number) => {
+    if (through?.active !== true || /\buse\b/.test(body) || inMacro(body, from)) return true;
+    opaque ??= foreignTraits(table, file);
+    if (opaque) return true;
+    const next = new RegExp(String.raw`^\s*\.\s*(?:r#)?(\w+)(${TURBOFISH}\s*\()?`).exec(
+      body.slice(to),
+    );
+    const name = next?.[1];
+    if (name === undefined) return true;
+    if (next?.[2] === undefined) {
+      const held = (i: Item) =>
+        [...(carriers.fields.get(i) ?? [name])].some((f) => rawless(f) === name);
+      return !items.every((i) => carriers.named.get(i)?.has(name) === true && !held(i));
+    }
+    const { methods, traits, blanket, takers } = through;
+    if (TRAIT_METHODS.has(name) || blanket === undefined || blanket.has(name)) return true;
+    return !items.every((i) => {
+      if (traits.has(i) && (traits.get(i)?.has(name) ?? true)) return false;
+      const own = methods.get(i)?.get(name) ?? [];
+      return own.length > 0 && own.every((m) => !m.exposes && !takers.has(m.key));
+    });
   };
   return {
     names: (text, at) => typePaths(text).some((n) => carrier(n, at) !== null),
     carrier,
+    reaches,
     variants: (named, at) => {
       let out: Map<string, Fields> | undefined;
       for (const r of resolutions(named, at)) {
@@ -1758,23 +1966,28 @@ function enumVariants(item: string): { head: string; variants: Variant[] } | und
 
 /**
  * Whether a method body reaches the bytes of `self`, whose type holds them in `fields`
- * (`undefined`: in any use of `self`). It does by one of those fields, by `self` itself handed on
- * or matched, or by calling a method of its own that does (`calls`) or one it doesn't know.
+ * (`undefined`: in any use of `self`). It does by `self` itself handed on or matched, by calling a
+ * method of its own that does (`calls`) or one it doesn't know, or by a use of one of those fields,
+ * from `from` to `to` in `body`, that `field` says may reach them.
  */
 function reachesBytes(
   body: string,
   fields: Set<string> | undefined,
   calls: (method: string) => boolean,
+  field: (name: string, from: number, to: number) => boolean = () => true,
 ): boolean {
   if (fields === undefined) return true;
   if (/\bself\b(?!\s*(?:\.|::))/.test(body)) return true;
+  const held = [...fields].map(rawless);
   if (
-    fields.size > 0 &&
-    new RegExp(`\\bself\\s*\\.\\s*(?:${[...fields].join("|")})\\b`).test(body)
+    held.length > 0 &&
+    [...body.matchAll(new RegExp(`\\bself\\s*\\.\\s*(?:r#)?(${held.join("|")})\\b`, "g"))].some(
+      (m) => field(m[1] ?? "", m.index, m.index + m[0].length),
+    )
   ) {
     return true;
   }
-  return [...body.matchAll(/\bself\s*\.\s*(\w+)\s*(?:::\s*<[^()]*>\s*)?\(/g)].some(([, m]) =>
+  return [...body.matchAll(/\bself\s*\.\s*(?:r#)?(\w+)\s*(?:::\s*<[^()]*>\s*)?\(/g)].some(([, m]) =>
     calls(m ?? ""),
   );
 }
@@ -1953,9 +2166,14 @@ function bindsByteVariant(
  * Each impl block in `code`: where it spans, the type it is for, and whether its generics or
  * `where` clause bound a parameter by a byte trait (`impl<R: Read> Reader<R>`).
  */
-function implBlocks(
-  code: string,
-): { start: number; end: number; type: string; named: Named; byteBound: boolean }[] {
+function implBlocks(code: string): {
+  start: number;
+  end: number;
+  head: string;
+  type: string;
+  named: Named;
+  byteBound: boolean;
+}[] {
   return [...code.matchAll(IMPL_BLOCK)].map((m) => {
     const head = m[0].replace(/^[\s\S]*?\bimpl\b\s*/, "").replace(/^<(?:[^<>]|<[^<>]*>)*>\s*/, "");
     const type = /(?:\bfor\s+)?((?:[\w:]+::)?)(\w+)\s*(?:<|where\b|$)/.exec(
@@ -1966,6 +2184,7 @@ function implBlocks(
     return {
       start: m.index,
       end: itemEnd(code, m.index + m[0].length),
+      head: m[0],
       type: name,
       named: { name, path: [...prefix, name] },
       byteBound: BYTES_IN.test(m[0]),
@@ -2028,18 +2247,13 @@ const inside = (i: number, spans: { start: number; end: number }[]) =>
  */
 export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[] {
   const code = withoutTests(rustCode(source));
-  const blocks = implBlocks(code);
+  const { blocks, fns, bodies } = rustFunctions(code);
   const carrierOf = new Map(
-    blocks.map((b) => [b, b.byteBound ? { fields: undefined } : scope.carrier(b.named, b.start)]),
+    blocks.map((b) => [
+      b,
+      b.byteBound ? { fields: undefined, views: new Map() } : scope.carrier(b.named, b.start),
+    ]),
   );
-  const fns = [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
-    const { end, takes } = signature(code.slice(m.index));
-    const open = m.index + end;
-    const close = code[open] === "{" ? itemEnd(code, open) : open;
-    const block = blocks.find((b) => b.start < m.index && m.index < b.end);
-    return { m, fn: m[1] ?? "", block, takes, open, close, body: code.slice(open, close) };
-  });
-  const bodies = fns.map((f) => ({ start: f.open, end: f.close }));
   const own = new Set(
     fns
       .filter(({ m }) => !inside(m.index, blocks) && !inside(m.index, bodies))
@@ -2058,12 +2272,16 @@ export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[]
     grew = false;
     for (const f of selfMethods.filter((s) => !viaSelf.has(s))) {
       const type = f.block?.type ?? "";
-      const fields = f.block === undefined ? undefined : carrierOf.get(f.block)?.fields;
+      const held = f.block === undefined ? undefined : carrierOf.get(f.block);
       const calls = (name: string) => {
         const called = methods(type).filter((g) => g.fn === name);
         return called.length === 0 || called.some((g) => viaSelf.has(g));
       };
-      if (reachesBytes(f.body, fields, calls)) {
+      const field = (name: string, from: number, to: number) => {
+        const items = held?.views.get(name);
+        return items === undefined || scope.reaches(items, f.body, from, to);
+      };
+      if (reachesBytes(f.body, held?.fields, calls, field)) {
         viaSelf.add(f);
         grew = true;
       }
@@ -2095,15 +2313,189 @@ export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[]
   });
 }
 
+/**
+ * The impl blocks and functions of a Rust file's code, and where each function's body spans. A
+ * function is in the first block around it, and named as rustc reads it (`fn r#type` is `type`).
+ */
+function rustFunctions(code: string) {
+  const blocks = implBlocks(code);
+  const fns = [...code.matchAll(/\bfn\s+(?:r#)?(\w+)/g)].map((m) => {
+    const { end, takes } = signature(code.slice(m.index));
+    const open = m.index + end;
+    const close = code[open] === "{" ? itemEnd(code, open) : open;
+    const block = blocks.find((b) => b.start < m.index && m.index < b.end);
+    const sig = code.slice(m.index, open);
+    return { m, fn: m[1] ?? "", block, takes, sig, open, close, body: code.slice(open, close) };
+  });
+  return { blocks, fns, bodies: fns.map((f) => ({ start: f.open, end: f.close })) };
+}
+
 /** Every function in a Rust file's non-test code, a method named with its type. */
 function definedFunctions(source: string): string[] {
-  const code = withoutTests(rustCode(source));
-  const blocks = implBlocks(code);
-  return [...code.matchAll(/\bfn\s+(\w+)/g)].map((m) => {
-    const owner = blocks.find((b) => b.start < m.index && m.index < b.end)?.type;
-    return owner === undefined ? (m[1] ?? "") : `${owner}::${m[1] ?? ""}`;
-  });
+  return rustFunctions(withoutTests(rustCode(source))).fns.map(({ fn, block }) =>
+    block === undefined ? fn : `${block.type}::${fn}`,
+  );
 }
+
+/**
+ * An impl's head, read for what may answer a call: the type parameters it declares, the last name
+ * of the trait it implements, if any, and the type it is for, less any `where` clause.
+ */
+function implParts(head: string): {
+  params: Set<string>;
+  trait: string | undefined;
+  type: string;
+} {
+  let rest = head.replace(/^[\s\S]*?\bimpl\b\s*/, "");
+  const params = new Set<string>();
+  if (rest.startsWith("<")) {
+    let end = 0;
+    for (let depth = 0; end < rest.length; end++) {
+      if (rest[end] === "<") depth++;
+      else if (rest[end] === ">" && rest[end - 1] !== "-" && --depth === 0) break;
+    }
+    for (const part of topLevelParts(rest.slice(1, end))) {
+      const name = /^(?:r#)?(\w+)/.exec(part)?.[1];
+      if (name !== undefined && name !== "const") params.add(name);
+    }
+    rest = rest.slice(end + 1);
+  }
+  let forAt = -1;
+  let whereAt = rest.length;
+  for (let i = 0, depth = 0; i < rest.length; i++) {
+    const c = rest[i] ?? "";
+    if ("<([".includes(c)) depth++;
+    else if ((c === ">" && rest[i - 1] !== "-") || ")]".includes(c)) depth--;
+    else if (depth === 0 && /\w/.test(c) && !/[\w#]/.test(rest[i - 1] ?? " ")) {
+      const word = /^\w+/.exec(rest.slice(i))?.[0];
+      if (word === "where") {
+        whereAt = i;
+        break;
+      }
+      if (word === "for" && forAt === -1 && !/^for\s*</.test(rest.slice(i))) forAt = i;
+    }
+  }
+  const trait = forAt === -1 ? undefined : rest.slice(0, forAt).trim();
+  return {
+    params,
+    trait:
+      trait === undefined
+        ? undefined
+        : rawless(/((?:r#)?\w+)\s*(?:<[\s\S]*)?$/.exec(trait)?.[1] ?? ""),
+    type: rest.slice(forAt === -1 ? 0 : forAt + 3, whereAt).trim(),
+  };
+}
+
+// A trait impl's type that is one of its own parameters, behind at most a reference or a std
+// pointer, so that it is implemented for every type, a carrier and its Arc among them.
+const BLANKET =
+  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:(?:[\w:]+::)?(?:Arc|Rc|Box|Pin)\s*<\s*(\w+)\s*>|(\w+))$/;
+
+/**
+ * Whether a method's signature `sig`, at `at` in its file, may hand bytes to its caller or take
+ * them: it names a byte type, a carrier, a type alias that `alias` says does, `u8`, `Self`, an
+ * `impl` or `dyn` type, a qualified path (`<T as Trait>::Out`), or a type parameter of its own.
+ */
+function exposes(sig: string, at: number, scope: Scope, alias: (n: Named) => boolean): boolean {
+  return (
+    BYTES_IN.test(sig) ||
+    /\b(?:u8|Self|dyn|impl|as|where)\b/.test(sig) ||
+    /^fn\s+(?:r#)?\w+\s*<\s*(?:'\w+\s*(?::[^,>]*)?,\s*)*(?!')[^\s>]/.test(sig) ||
+    scope.names(sig, at) ||
+    typePaths(sig).some(alias)
+  );
+}
+
+/**
+ * The workspace's methods and trait impls a use of a field with a view is checked against, read
+ * from each of `codes`' files with its scope.
+ */
+function throughOf(
+  table: ModuleTable,
+  codes: Map<string, string>,
+  scopes: Map<string, Scope>,
+): Pick<Through, "methods" | "traits" | "blanket"> {
+  const through: Pick<Through, "methods" | "traits" | "blanket"> = {
+    methods: new Map(),
+    traits: new Map(),
+    blanket: new Set(),
+  };
+  const declared = new Map<string, Set<string> | undefined>();
+  for (const t of table.items.filter((i) => i.kind === "trait")) {
+    const name = rawless(t.name);
+    const fns = /\w\s*!\s*[({[]/.test(t.text)
+      ? undefined
+      : new Set([...t.text.matchAll(/\bfn\s+(?:r#)?(\w+)/g)].map((m) => m[1] ?? ""));
+    declared.set(name, declared.has(name) ? unionNames(declared.get(name), fns) : fns);
+  }
+  const resolvedIn = (file: string, named: Named, at: number) =>
+    table.modulesAt(file, at).flatMap((m) => {
+      const r = resolveNamed(table, m, named);
+      return [...r.items, ...table.items.filter((i) => r.unresolved.has(i.name))];
+    });
+  // A type alias exposes what the type it names does, read where the alias is written.
+  const aliasIn =
+    (file: string, at: number, seen: Set<Item>) =>
+    (n: Named): boolean =>
+      resolvedIn(file, n, at).some((i) => {
+        if (i.kind !== "type") return false;
+        const target = /=([\s\S]*);\s*$/.exec(i.text)?.[1];
+        const scope = scopes.get(i.file);
+        if (target === undefined || scope === undefined || seen.has(i)) return true;
+        return exposes(target, i.at, scope, aliasIn(i.file, i.at, new Set([...seen, i])));
+      });
+  for (const [file, code] of codes) {
+    const scope = scopes.get(file) ?? NO_CARRIERS;
+    const resolved = (named: Named, at: number) => resolvedIn(file, named, at);
+    const alias = (at: number) => aliasIn(file, at, new Set());
+    const { blocks, fns, bodies } = rustFunctions(code);
+    for (const block of blocks) {
+      const parts = implParts(block.head);
+      const own = fns.filter((f) => f.block === block && !inside(f.m.index, bodies));
+      if (parts.trait === undefined) {
+        for (const item of resolved(block.named, block.start)) {
+          const byName = through.methods.get(item) ?? new Map();
+          through.methods.set(item, byName);
+          for (const f of own) {
+            byName.set(f.fn, [
+              ...(byName.get(f.fn) ?? []),
+              {
+                key: `${file}::${block.type}::${f.fn}`,
+                exposes: exposes(f.sig, f.m.index, scope, alias(f.m.index)),
+              },
+            ]);
+          }
+        }
+        continue;
+      }
+      const names = new Set(own.map((f) => f.fn));
+      const answered = declared.has(parts.trait)
+        ? unionNames(declared.get(parts.trait), names)
+        : STD_TRAITS.has(parts.trait)
+          ? names
+          : undefined;
+      const base = BLANKET.exec(parts.type);
+      const param = base?.[1] ?? base?.[2];
+      if (param !== undefined && parts.params.has(param)) {
+        through.blanket = unionNames(through.blanket, answered);
+        continue;
+      }
+      for (const n of typePaths(parts.type)) {
+        for (const item of resolved(n, block.start)) {
+          through.traits.set(
+            item,
+            through.traits.has(item) ? unionNames(through.traits.get(item), answered) : answered,
+          );
+        }
+      }
+    }
+  }
+  return through;
+}
+
+/** Each decoder of `takers`, by file, as its key: `file::Type::fn`. */
+const keysOf = (takers: Map<string, string[]>) =>
+  new Set([...takers].flatMap(([file, fns]) => fns.map((fn) => `${file}::${fn}`)));
 
 /**
  * Why a function that takes bytes has no fuzz target and no reason it needs none, why a `pub` byte
@@ -2136,8 +2528,32 @@ export function decoderFailures(
     })),
   );
   const carriers = carriersOf(table);
+  const scopes = new Map<string, Scope>();
+  const through: Through = {
+    active: false,
+    takers: new Set(),
+    methods: new Map(),
+    traits: new Map(),
+    blanket: new Set(),
+  };
+  for (const file of product) scopes.set(file, fileScope(table, carriers, file, through));
+  Object.assign(through, throughOf(table, codes, scopes));
+  // A use of a field may reach its bytes by calling a decoder, which the scan is finding: start
+  // from the decoders with no view read, the most there can be, and read views against the last
+  // pass's until a pass finds no fewer. A cycle of calls between types so stays a decoder.
+  const takersOf = () =>
+    new Map(product.map((file) => [file, byteTakers(read(file), scopes.get(file))]));
+  let takers = takersOf();
+  through.active = true;
+  for (let keys = keysOf(takers); ;) {
+    through.takers = keys;
+    takers = takersOf();
+    const next = keysOf(takers);
+    if (next.size === keys.size) break;
+    keys = next;
+  }
   for (const file of product) {
-    const scope = fileScope(table, carriers, file);
+    const scope = scopes.get(file) ?? NO_CARRIERS;
     const code = blankItems(codes.get(file) ?? "", IMPL_BLOCK);
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
     for (const { statement, bindings } of useStatements(table, file)) {
@@ -2210,7 +2626,7 @@ export function decoderFailures(
         );
       }
     }
-    for (const fn of byteTakers(read(file), scope)) {
+    for (const fn of takers.get(file) ?? []) {
       const key = `${file}::${fn}`;
       found.add(key);
       if (!(key in fuzzed) && !(key in notDecoders)) {
