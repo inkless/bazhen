@@ -123,10 +123,14 @@ export const psGroupCount = (text: string, pgid: number) =>
     ([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat),
   ).length;
 
-/** How many live processes are in group `pgid`: a read of `/proc` or `ps`, no signal. */
-async function groupCount(pgid: number): Promise<number> {
+/**
+ * How many live processes are in group `pgid`: a read of `/proc` or `ps`, no signal. Undefined
+ * when `ps` couldn't be read.
+ */
+async function groupCount(pgid: number): Promise<number | undefined> {
   if (process.platform === "darwin") {
-    return psGroupCount((await output("ps", ["-A", "-o", "pgid=,stat="])) ?? "", pgid);
+    const ps = await output("ps", ["-A", "-o", "pgid=,stat="]);
+    return ps === undefined ? undefined : psGroupCount(ps, pgid);
   }
   let count = 0;
   for (const entry of readdirSync("/proc")) {
@@ -143,7 +147,9 @@ async function groupCount(pgid: number): Promise<number> {
 export const LEFTOVER_SETTLE_MS = 500;
 
 /** `count`'s answer once the end of the command has settled: a second read, after the settle. */
-async function settledCount(count: () => number | Promise<number>): Promise<number> {
+async function settledCount<N extends number | undefined>(
+  count: () => N | Promise<N>,
+): Promise<N | 0> {
   if ((await count()) === 0) return 0;
   await new Promise((wait) => setTimeout(wait, LEFTOVER_SETTLE_MS));
   return count();
@@ -593,9 +599,11 @@ async function runGroup(
   clearInterval(watchdog);
   clearTimeout(timer);
   clearTimeout(escalation);
-  const leftover =
-    countsLeftover && pid !== undefined ? await settledCount(() => groupCount(pid)) : 0;
-  stop("SIGKILL");
+  const counted =
+    countsLeftover && pid !== undefined ? await settledCount(() => groupCount(pid)) : undefined;
+  // A group just seen empty isn't signalled: its pgid may already be another group's.
+  if (counted !== 0) stop("SIGKILL");
+  const leftover = counted ?? 0;
   offSignals();
   // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
   // counted an OOM kill is taken as that kill.

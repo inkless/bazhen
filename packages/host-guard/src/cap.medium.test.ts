@@ -19,6 +19,12 @@ import {
 } from "./cap.ts";
 import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
+// Passed through, and watched, so a test can see which groups a run signals.
+vi.mock("./signal.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./signal.ts")>();
+  return { ...real, signalGroup: vi.fn<typeof real.signalGroup>(real.signalGroup) };
+});
+
 const MIB = 1024 ** 2;
 const cap = { memory: 128 * MIB, timeMs: 30_000 };
 // 16 MiB every 20 ms, up to 1 GiB: past the cap within a second, and slow enough that the
@@ -37,7 +43,7 @@ const scopesLeft = () =>
 /** A command that leaves one process running once it has gone. */
 const LEAVES_ONE = "(exec sleep 30) &";
 /** One whose child is still ending as it goes, well inside a run's settle. */
-const ENDS_SOON = "(exec sleep 0.1) &";
+const ENDS_SOON = "(exec sleep 0.02) &";
 
 let mode: Mode;
 let dir: string;
@@ -201,6 +207,15 @@ describe("the fallback watchdog", () => {
   it("doesn't count what was ending as its command went", async () => {
     const ended = await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
     expect(ended.leftover).toBe(0);
+  });
+
+  it("signals no group it has seen empty, and one it left something in", async () => {
+    vi.mocked(signalGroup).mockClear();
+    await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
+    await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
+    expect(vi.mocked(signalGroup)).not.toHaveBeenCalled();
+    await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(vi.mocked(signalGroup)).toHaveBeenCalledWith(expect.anything(), "SIGKILL");
   });
 
   it("leaves a run under its cap alone", async () => {
