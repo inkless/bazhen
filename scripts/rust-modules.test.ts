@@ -94,54 +94,46 @@ describe("typePaths", () => {
     ).toEqual(["F", "Fn", "u8", "u32", "Vec", "u8", "Box", "Tr", "u8"]);
   });
 
-  it("keeps a name followed by `==` or `=>`, or by `=` outside generic arguments", () => {
-    expect(typePaths("<A == B, C => D>; x: Output = y").map((p) => p.name)).toEqual([
-      "A",
-      "B",
-      "C",
-      "D",
-      "x",
-      "Output",
-      "y",
-    ]);
-    expect(typePaths("ty!(a, Output = 1), Vec<(a, Output = 1)>").map((p) => p.name)).toEqual([
-      "ty",
-      "a",
-      "Output",
-      "Vec",
-      "a",
-      "Output",
+  it("skips a binding's name, but keeps one before `==`, `=>` or an `=` outside generic arguments", () => {
+    expect([
+      typeNames("Tr<Item = u8, A == B, C => D>; x: Output = y"),
+      typeNames("Tr<Item = u8>, ty!(a, Output = 1), Vec<(a, Output = 1)>"),
+    ]).toEqual([
+      ["Tr", "u8", "A", "B", "C", "D", "x", "Output", "y"],
+      ["Tr", "u8", "ty", "a", "Output", "Vec", "a", "Output"],
     ]);
   });
 
-  it("keeps a parameter's bound before its default", () => {
-    expect(typePaths("<T: Read = File, U: io::Read = File>").map((p) => p.name)).toEqual([
+  it("skips a parameter's name before its default, but keeps its bound", () => {
+    expect(typeNames("<T: Read = File, U: io::Read = File, V = File>")).toEqual([
       "T",
       "Read",
       "File",
       "U",
       "Read",
       "File",
+      "File",
     ]);
   });
 
-  it("keeps a name inside a macro's arguments, where `<` and `,` may be any token", () => {
+  it("skips a binding's name in generic arguments, but keeps one in a macro's", () => {
     expect([
-      typeNames("Vec<ty!(a, Output = 1)>"),
-      typeNames("ty!(a < Output = 1)"),
-      typeNames("ty!(a, Output<u8> = 1)"),
-      typeNames("ty![<a, Output = 1>]"),
+      typeNames("Tr<Item = u8, Vec<ty!(a, Output = 1)>>"),
+      typeNames("Tr<Item = u8>, ty!(a < Output = 1)"),
+      typeNames("Tr<Item = u8>, ty!(a, Output<u8> = 1)"),
+      typeNames("Tr<Item = u8>, ty![<a, Output = 1>]"),
     ]).toEqual([
-      ["Vec", "ty", "a", "Output"],
-      ["ty", "a", "Output"],
-      ["ty", "a", "Output", "u8"],
-      ["ty", "a", "Output"],
+      ["Tr", "u8", "Vec", "ty", "a", "Output"],
+      ["Tr", "u8", "ty", "a", "Output"],
+      ["Tr", "u8", "ty", "a", "Output", "u8"],
+      ["Tr", "u8", "ty", "a", "Output"],
     ]);
   });
 
-  it("keeps a name whose brackets don't pair, since what opens it can't be told", () => {
-    expect(typePaths("Tr<X<{ 1 > 0 }, Output = u8>>").map((p) => p.name)).toEqual([
+  it("skips a binding's name, but keeps one after brackets that don't pair", () => {
+    expect(typeNames("Tr<Item = u8, X<{ 1 > 0 }, Output = u8>>")).toEqual([
       "Tr",
+      "u8",
       "X",
       "Output",
       "u8",
