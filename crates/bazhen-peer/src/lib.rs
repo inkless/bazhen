@@ -305,14 +305,16 @@ pub fn codex_of(
 /// from the caller, `pause`d for `FIRST_PAUSE`, doubled after each try, up to `LINE_TRIES` times,
 /// and never pieced together from two walks: a process that took a pid meanwhile is on neither
 /// walk of a try that is answered. What is answered is the line a caller connecting a moment later
-/// would be read with. The caller is the one process that has to stay: once one read of it has said when
-/// it started, a read of it on any walk after, of any try, that says another time is of a process
-/// that took the pid its caller gave up.
+/// would be read with. The caller is the one process that has to stay. A read of it that fails
+/// says it has exited, and it never comes back, so it is refused then, with no pause: a try after
+/// could only read a process that took its pid. So the first read of it, before any pause, says
+/// when it started, and a read of it on any walk after, of any try, that says another time is of a
+/// process that took the pid its caller gave up.
 ///
 /// # Errors
 ///
-/// `Unreadable` when the caller's pid changed hands, or no try held still: then the last try's
-/// refusal, or that its walks differed.
+/// `Unreadable` when the caller can't be read or its pid changed hands, or no try held still: then
+/// the last try's refusal, or that its walks differed.
 pub fn line_of(
     pid: Pid,
     step: impl Fn(Pid) -> io::Result<Step>,
@@ -322,8 +324,16 @@ pub fn line_of(
 ) -> Result<(Vec<Pid>, Codex), Refused> {
     let caller = Cell::new(None);
     let replaced = Cell::new(false);
+    let gone = Cell::new(false);
     let step = |at: Pid| {
-        let read = step(at)?;
+        let read = match step(at) {
+            Ok(read) => read,
+            Err(e) if at == pid => {
+                gone.set(true);
+                return Err(io::Error::other(format!("the caller has gone: {e}")));
+            }
+            Err(e) => return Err(e),
+        };
         if at == pid {
             let pinned = caller.get().unwrap_or(read.started);
             caller.set(Some(pinned));
@@ -355,6 +365,9 @@ pub fn line_of(
             )),
             Err(refused) => refused,
         };
+        if gone.get() {
+            return Err(refused);
+        }
         if tried < LINE_TRIES {
             pause(wait);
             wait = wait.saturating_mul(2);
@@ -1177,6 +1190,73 @@ mod tests {
                  the caller's pid was taken by another process while its line was read"
                 .to_owned())
         );
+    }
+
+    #[test]
+    fn refuses_at_once_a_caller_it_can_t_read_never_answering_the_process_that_takes_its_pid() {
+        let caller_reads = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                caller_reads.set(caller_reads.get() + 1);
+                if caller_reads.get() == 1 {
+                    Err(io::Error::other("process Pid(50) has exited"))
+                } else {
+                    Ok(to(40, 6))
+                }
+            }
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let args = |p: Pid| match p.as_raw_pid() {
+            1 => Ok(None),
+            40 => Ok(Some(os(SERVER))),
+            _ => Ok(Some(os(&["sh"]))),
+        };
+        let (taken, pause) = pauses();
+        let refused = line_of(pid(50), step, args, no_environment(), pause);
+        assert_eq!(
+            refused.as_ref().map_err(ToString::to_string),
+            Err("a process on the caller's line can't be read: \
+                 the caller has gone: process Pid(50) has exited"
+                .to_owned())
+        );
+        assert!(matches!(refused, Err(Refused::Unreadable(_))));
+        assert_eq!(*taken.borrow(), ms(&[]));
+        assert_eq!(caller_reads.get(), 1);
+    }
+
+    #[test]
+    fn refuses_with_no_pause_a_caller_that_goes_between_the_walks_of_a_try() {
+        let caller_reads = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => {
+                caller_reads.set(caller_reads.get() + 1);
+                if caller_reads.get() == 1 {
+                    Ok(to(40, 5))
+                } else {
+                    Err(io::Error::other("process Pid(50) has exited"))
+                }
+            }
+            40 => Ok(to(1, 4)),
+            _ => Ok(to(0, 0)),
+        };
+        let (taken, pause) = pauses();
+        let refused = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            pause,
+        );
+        assert_eq!(*taken.borrow(), ms(&[]));
+        assert_eq!(caller_reads.get(), 2);
+        assert_eq!(
+            refused.as_ref().map_err(ToString::to_string),
+            Err("a process on the caller's line can't be read: \
+                 the caller has gone: process Pid(50) has exited"
+                .to_owned())
+        );
+        assert!(matches!(refused, Err(Refused::Unreadable(_))));
     }
 
     #[test]
