@@ -1861,6 +1861,61 @@ const heldRuntime = (struct: string, extra: string[]) =>
     ...extra,
   ].join("\n");
 
+// A Cargo.lock locking each of `packages`: a name, a version, and the lines after them, by default
+// those of a crate from crates.io with the checksum `sum`.
+const lockOf = (packages: [string, string, string?][]) =>
+  [
+    "version = 4",
+    ...packages.map(
+      ([name, version, rest = `source = "${CRATES_IO}"\nchecksum = "sum"`]) =>
+        `\n[[package]]\nname = "${name}"\nversion = "${version}"\n${rest}`,
+    ),
+  ].join("\n");
+const CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index";
+
+// The failures for each entry of ext read at 1.0.0, from crates.io with the checksum `sum`, when
+// Cargo.lock takes it `from` elsewhere.
+const taken = (from: string) =>
+  ["name", "gone"].map(
+    (name) =>
+      `scripts/check-standards.ts: FOREIGN_MACROS read ext::${name} in ext 1.0.0 from ` +
+      `crates.io with checksum sum, but Cargo.lock takes it from ${from}: read the ` +
+      "expansion of the source it takes, and pin that if it still writes no impl.",
+  );
+
+// The failures for each entry of ext when `manifest` renames a crate to or from ext.
+const renamesOf = (file: string) =>
+  ["name", "gone"].map(
+    (name) =>
+      `${file}: renames a crate to or from ext, which FOREIGN_MACROS trusts ext::${name} ` +
+      "by, so the name may be another crate's: take the crate by its own name.",
+  );
+
+// The manifest of crate r, depending on `deps`.
+const manifestOf = (deps: string) => ({
+  "crates/r/Cargo.toml": `[package]\nname = "r"\n\n[dependencies]\n${deps}\n`,
+});
+
+// The failures for each entry of ext read at 1.0.0 when Cargo.lock locks `locked` instead.
+const moved = (locked: string) =>
+  ["name", "gone"].map(
+    (name) =>
+      `scripts/check-standards.ts: FOREIGN_MACROS read ext::${name} in ext 1.0.0, but ` +
+      `Cargo.lock locks ${locked}: read its expansion at the locked version again, and pin ` +
+      "that version if it still writes no impl.",
+  );
+
+// A type holding a runtime under `attribute` whose `leak` reads a field of it that holds no bytes.
+const counted = (attribute: string) =>
+  [
+    "use std::sync::Arc;",
+    "pub struct Controls { tx: Vec<u8> }",
+    attribute,
+    "pub struct Runtime { controls: Controls, count: usize }",
+    "pub struct Holder { runtime: Arc<Runtime> }",
+    "impl Holder { pub fn leak(&self) -> usize { self.runtime.count } }",
+  ].join("\n");
+
 describe("decoderFailures", () => {
   const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
   const repo: Record<string, string> = {
@@ -1873,7 +1928,16 @@ describe("decoderFailures", () => {
     notDecoders: Record<string, string>,
     tree = repo,
     publicFields: Record<string, string> = {},
-  ) => decoderFailures(Object.keys(tree), (p) => tree[p] ?? "", fuzzed, notDecoders, publicFields);
+    foreign: Parameters<typeof decoderFailures>[5] = {},
+  ) =>
+    decoderFailures(
+      Object.keys(tree),
+      (p) => tree[p] ?? "",
+      fuzzed,
+      notDecoders,
+      publicFields,
+      foreign,
+    );
   const fuzzed = { "crates/p/src/lib.rs::decode": "decode" };
   const exempt = { "crates/p/src/lib.rs::send": "an encoder" };
 
@@ -2454,7 +2518,7 @@ describe("decoderFailures", () => {
         "    pub fn shared(&self) -> Arc<Runtime> { Arc::clone(&self.runtime) }",
         "    pub async fn waited(&self) { self.runtime.await }",
         "    pub fn matched(&self) { match *self.runtime { _ => {} } }",
-        "    pub fn logged(&self) { log!(self.runtime.id()) }",
+        '    pub fn logged(&self) { println!("{}", self.runtime.id()) }',
         "    pub fn imported(&self) -> u64 { use q::Probe; self.runtime.id() }",
         "    pub fn locked(&self) -> u64 { self.locked.lock().id() }",
         "    pub fn lost(&self) -> u64 { self.lost.id() }",
@@ -2576,9 +2640,22 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  // A crate `r` that depends on `ext`, whose `name!` a review has read at the version locked, and
+  // on `other`, whose macros nobody has.
+  const withDeps = {
+    "crates/r/Cargo.toml": '[package]\nname = "r"\n\n[dependencies]\next = "1"\nother = "1"\n',
+    "Cargo.lock": lockOf([["ext", "1.0.0"]]),
+  };
+  const readExt = {
+    "ext::name": {
+      read: { ext: { version: "1.0.0", checksum: "sum" } },
+      reason: "read ext@1.0.0 src/lib.rs: expansion writes no impl",
+    },
+  };
+
   // Whether `Holder::leak` of heldRuntime, in `written` added to the repo, takes bytes.
   const leaks = (written: Record<string, string>) =>
-    failures(fuzzed, exempt, { ...repo, ...written }).some((f) =>
+    failures(fuzzed, exempt, { ...repo, ...withDeps, ...written }, {}, readExt).some((f) =>
       f.startsWith("crates/r/src/lib.rs::Holder::leak: "),
     );
 
@@ -2727,6 +2804,385 @@ describe("decoderFailures", () => {
         ]),
       ),
     ).toEqual(Object.fromEntries(Object.keys(cases).map((name) => [name, [false, true]])));
+  });
+
+  it("reads no method of a bounded impl, or of a type an attribute it can't read is on", () => {
+    const generic =
+      "pub struct Runtime<K = ()> { controls: Controls, kind: std::marker::PhantomData<K> }";
+    const plain = "pub struct Runtime { controls: Controls }";
+    const shim = "impl Runtime { pub fn size(&self) -> usize { 0 } }";
+    const apart = (use: string, derive: string) => ({
+      "crates/r/src/lib.rs": heldRuntime("mod rt;\nuse crate::rt::Runtime;", []),
+      "crates/r/src/rt.rs": [
+        "use crate::Controls;",
+        use,
+        `#[derive(${derive})]`,
+        "pub struct Runtime { controls: Controls }",
+        shim,
+      ].join("\n"),
+    });
+    const cases: Record<string, [Record<string, string>, Record<string, string>]> = {
+      "a bound on the impl's parameter": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(generic, [
+            "pub trait Kind {}",
+            "impl<K> Runtime<K> { pub fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(generic, [
+            "pub trait Kind {}",
+            "impl<K: Kind> Runtime<K> { pub fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+      ],
+      "a where clause on the impl": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(generic, [
+            "pub trait Kind {}",
+            "impl<K> Runtime<K> { pub fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(generic, [
+            "pub trait Kind {}",
+            "impl<K> Runtime<K> where K: Kind { pub fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+      ],
+      "a derive from outside std": [
+        { "crates/r/src/lib.rs": heldRuntime(`#[derive(Debug, Clone)]\n${plain}`, [shim]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(`#[derive(Debug, derive_more::Deref)]\n${plain}`, [
+            shim,
+          ]),
+        },
+      ],
+      "a derive a cfg_attr may add": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(`#[cfg_attr(unix, derive(Clone))]\n${plain}`, [shim]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(
+            `#[cfg_attr(unix, derive(derive_more::Deref))]\n${plain}`,
+            [shim],
+          ),
+        },
+      ],
+      "a derive by a name a use rebinds": [apart("", "Clone"), apart("use other::Clone;", "Clone")],
+      "an attribute macro on the type": [
+        { "crates/r/src/lib.rs": heldRuntime(`#[must_use]\n#[repr(C)]\n${plain}`, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(`#[ext::wrap]\n${plain}`, [shim]) },
+      ],
+      "a field read of a type an attribute macro may rewrite": [
+        { "crates/r/src/lib.rs": counted("#[repr(C)]") },
+        { "crates/r/src/lib.rs": counted("#[wrap]") },
+      ],
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(cases).map(([name, [clean, tricked]]) => [
+          name,
+          [leaks(clean), leaks(tricked)],
+        ]),
+      ),
+    ).toEqual(Object.fromEntries(Object.keys(cases).map((name) => [name, [false, true]])));
+  });
+
+  it("takes every type to answer any name once a macro or attribute it can't read is called", () => {
+    const plain = "pub struct Runtime { controls: Controls }";
+    const shim = "impl Runtime { pub fn size(&self) -> usize { 0 } }";
+    const held = (...extra: string[]) => ({
+      "crates/r/src/lib.rs": heldRuntime(plain, [shim, ...extra]),
+    });
+    const peek = "pub trait Peek { fn size(&self) -> usize; }";
+    const peekImpl = "impl Peek for Arc<Runtime> { fn size(&self) -> usize { 0 } }";
+    const counts = "pub fn count() -> usize { vec![1u32].len() }";
+    const named = "pub fn name() -> String { ext::name!() }";
+    const cases: Record<string, [Record<string, string>, Record<string, string>]> = {
+      "a macro of another crate in a function body": [
+        held(named),
+        held(peek, "pub fn setup() { other::peek!(Arc<Runtime>); }"),
+      ],
+      "a macro of another crate in a const": [
+        held('pub const NAME: &str = concat!("r");'),
+        held("pub const N: usize = other::count!(Arc<Runtime>);"),
+      ],
+      "a foreign macro's crate locked at a version nobody read": [
+        held(named),
+        { ...held(named), "Cargo.lock": lockOf([["ext", "1.0.1"]]) },
+      ],
+      "a foreign macro's crate name a use rebinds": [held(named), held("use other as ext;", named)],
+      "a foreign macro's crate a manifest renames": [
+        held(named),
+        {
+          ...held(named),
+          "crates/r/Cargo.toml":
+            '[package]\nname = "r"\n\n[dependencies]\next = { package = "evil", version = "1" }\n',
+          "Cargo.lock": lockOf([
+            ["ext", "1.0.0"],
+            ["evil", "1.0.0"],
+          ]),
+        },
+      ],
+      "a foreign macro's crate a manifest takes another under the name of": [
+        held(named),
+        {
+          ...held(named),
+          "crates/q/Cargo.toml":
+            '[package]\nname = "q"\n\n[dependencies]\nevil = { package = "ext", version = "1" }\n',
+        },
+      ],
+      "a foreign macro beside a manifest whose renames can't be read": [
+        held(named),
+        {
+          ...held(named),
+          "crates/q/Cargo.toml":
+            '[package]\nname = "q"\n\n[dependencies]\nx = { package = 1, version = "1" }\n',
+        },
+      ],
+      "a foreign macro brought in from the root": [
+        held("use ::ext::name;", "pub fn n() -> String { name!() }"),
+        held("use ::other::name;", "pub fn n() -> String { name!() }"),
+      ],
+      "a foreign macro named bare": [
+        held("use ext::name;", "pub fn n() -> String { name!() }"),
+        held("use other::name;", "pub fn n() -> String { name!() }"),
+      ],
+      "a macro of the crate's own handed an impl": [
+        held(counts),
+        held(
+          peek,
+          "macro_rules! items { ($($t:tt)*) => { $($t)* }; }",
+          `pub fn setup() { items!(${peekImpl}); }`,
+        ),
+      ],
+      "a macro of the crate's own named as std's": [
+        held(counts),
+        held(
+          peek,
+          "macro_rules! vec { ($($t:tt)*) => { $($t)* }; }",
+          `pub fn setup() { vec!(${peekImpl}); }`,
+        ),
+      ],
+      "a std macro a use rebinds": [held(counts), held("use other::vec;", counts)],
+      "a std macro a re-export rebinds": [
+        held(
+          "mod util { pub use std::format; }",
+          "use crate::util::format;",
+          'pub fn n() -> String { format!("r") }',
+        ),
+        held(
+          "mod util { pub use other::format; }",
+          "use crate::util::format;",
+          'pub fn n() -> String { format!("r") }',
+        ),
+      ],
+      "a std macro a glob may rebind": [
+        { ...held("mod m;"), "crates/r/src/m.rs": counts },
+        { ...held("mod m;"), "crates/r/src/m.rs": `use other::*;\n${counts}` },
+      ],
+      "a std macro outside the prelude": [
+        held("use std::pin::pin;", "pub fn p() { let _f = pin!(async {}); }"),
+        held("pub fn p() { let _f = pin!(async {}); }"),
+      ],
+      "a macro by a path into the crate": [
+        held("pub fn p() -> usize { std::vec![1u32].len() }"),
+        held("pub fn p() -> usize { crate::vec![1u32].len() }"),
+      ],
+      "a re-export that goes round": [
+        held("mod a { pub use std::vec; }", "use crate::a::vec;", counts),
+        held(
+          "mod a { pub use crate::b::vec; }",
+          "mod b { pub use crate::a::vec; }",
+          "use crate::a::vec;",
+          counts,
+        ),
+      ],
+      "a foreign macro's crate a glob may rebind": [
+        { ...held("mod m;"), "crates/r/src/m.rs": named },
+        { ...held("mod m;"), "crates/r/src/m.rs": `use other::*;\n${named}` },
+      ],
+      "a foreign macro's crate name an item of ours takes": [
+        held(named),
+        held("#[allow(non_camel_case_types)]\npub struct ext;", named),
+      ],
+      "an attribute macro inside a module": [
+        { ...held("mod m;"), "crates/r/src/m.rs": `#![allow(unused)]\n${counts}` },
+        { ...held("mod m;"), "crates/r/src/m.rs": `#![other::thing]\n${counts}` },
+      ],
+      "a macro of the crate's own by macro, named as std's": [
+        held(counts),
+        held(peek, "macro vec($($t:tt)*) { $($t)* }", `pub fn setup() { vec!(${peekImpl}); }`),
+      ],
+      "a file no module declares": [
+        { ...held(), "crates/r/src/stray.rs": named },
+        { ...held(), "crates/r/src/stray.rs": "pub fn s() { other::peek!(Arc<Runtime>); }" },
+      ],
+      "an attribute macro on a function": [
+        held("#[must_use]\npub fn count() -> usize { 0 }"),
+        held("#[other::export]\npub fn count() -> usize { 0 }"),
+      ],
+      "a derive helper a use rebinds": [
+        held('#[derive(serde::Serialize)]\npub struct Msg { #[serde(rename = "n")] n: u32 }'),
+        held(
+          "use other::serde;",
+          '#[derive(serde::Serialize)]\npub struct Msg { #[serde(rename = "n")] n: u32 }',
+        ),
+      ],
+      "a keyword before a !": [
+        held("pub fn not(x: bool) -> bool { if !(x) { return !(x); } x }"),
+        held("pub fn not(x: bool) -> bool { iff!(x) }"),
+      ],
+      "a macro with space before its !": [
+        held('pub fn n() -> String { format !("n") }'),
+        held("pub fn not(x: bool) -> bool { iff !(x) }"),
+      ],
+      "a ! that follows no name": [
+        held("pub fn not(x: bool, y: bool) -> bool { x && !(y) || !![x][0] }"),
+        held("pub fn not(x: bool, y: bool) -> bool { x && m!(y) }"),
+      ],
+      "a macro by a raw name": [
+        held('pub fn n() -> String { std::r#format!("n") }'),
+        held('pub fn n() -> String { other::r#format!("n") }'),
+      ],
+      "a macro whose path can't be read back": [
+        held('pub fn n() -> String { std::format!("n") }'),
+        held('pub fn n() -> String { <other::Fmt>::format!("n") }'),
+      ],
+      "a macro by a raw keyword": [
+        held("pub fn not(x: bool) -> bool { if !(x) { return false; } x }"),
+        held("use other::r#if;", "pub fn not(x: bool) -> bool { r#if!(x) }"),
+      ],
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(cases).map(([name, [clean, tricked]]) => [
+          name,
+          [leaks(clean), leaks(tricked)],
+        ]),
+      ),
+    ).toEqual(Object.fromEntries(Object.keys(cases).map((name) => [name, [false, true]])));
+  });
+
+  // The failures of a crate calling `ext::name!`, with two entries for ext read at 1.0.0, one of a
+  // macro nobody calls, under a Cargo.lock locking `lock`.
+  const readAt = (
+    lock: [string, string, string?][],
+    reason = "read ext@1.0.0 src/lib.rs: expansion writes no impl",
+    manifests: Record<string, string> = {},
+  ) =>
+    failures(
+      fuzzed,
+      exempt,
+      {
+        ...repo,
+        ...withDeps,
+        ...manifests,
+        "Cargo.lock": lockOf(lock),
+        "crates/r/src/lib.rs": "pub fn name() -> String { ext::name!() }",
+      },
+      {},
+      {
+        "ext::name": { read: { ext: { version: "1.0.0", checksum: "sum" } }, reason },
+        "ext::gone": {
+          read: { ext: { version: "1.0.0", checksum: "sum" } },
+          reason: "read ext@1.0.0 src/lib.rs: expansion writes no impl",
+        },
+      },
+    );
+
+  it("holds each foreign macro to the version of its crate a review read", () => {
+    const stale =
+      "scripts/check-standards.ts: FOREIGN_MACROS lists ext::gone, which no product code calls.";
+    expect(readAt([["ext", "1.0.0"]])).toEqual([stale]);
+    expect(readAt([["ext", "1.0.1"]])).toEqual([...moved("ext 1.0.1"), stale]);
+    expect(
+      readAt([
+        ["ext", "1.0.0"],
+        ["ext", "1.0.1"],
+      ]),
+    ).toEqual([...moved("ext 1.0.0, 1.0.1"), stale]);
+    expect(readAt([])).toEqual([...moved("no ext"), stale]);
+    const unsaid =
+      "scripts/check-standards.ts: FOREIGN_MACROS's reason for ext::name doesn't say it read " +
+      "ext@1.0.0: write it as `read <crate>@<version> <file>: expansion writes no impl`.";
+    expect(
+      readAt([["ext", "1.0.0"]], "read ext@0.9.0 src/lib.rs: expansion writes no impl"),
+    ).toEqual([unsaid, stale]);
+    expect(readAt([["ext", "1.0.0"]], "looked at ext@1.0.0 src/lib.rs")).toEqual([unsaid, stale]);
+  });
+
+  it("holds each foreign macro to the crates.io package a review read, under its own name", () => {
+    const stale =
+      "scripts/check-standards.ts: FOREIGN_MACROS lists ext::gone, which no product code calls.";
+    const git = 'source = "git+https://example.com/ext#0a1b"';
+    expect(readAt([["ext", "1.0.0", git]])).toEqual([
+      ...taken("git+https://example.com/ext#0a1b with checksum none"),
+      stale,
+    ]);
+    // A `[patch]` or `[replace]` by a path locks the package with no source and no checksum.
+    expect(readAt([["ext", "1.0.0", ""]])).toEqual([
+      ...taken("no registry with checksum none"),
+      stale,
+    ]);
+    // A lock written by hand, giving a git source the checksum read.
+    expect(readAt([["ext", "1.0.0", `${git}\nchecksum = "sum"`]])).toEqual([
+      ...taken("git+https://example.com/ext#0a1b with checksum sum"),
+      stale,
+    ]);
+    // A `[replace]` keeps the source and builds the package it names instead.
+    const replaced = `source = "${CRATES_IO}"\nchecksum = "sum"\nreplace = "ext 1.0.0 (git+https://example.com/ext#0a1b)"`;
+    expect(readAt([["ext", "1.0.0", replaced]])).toEqual([
+      ...taken(
+        `${CRATES_IO} with checksum sum, replaced by ext 1.0.0 (git+https://example.com/ext#0a1b)`,
+      ),
+      stale,
+    ]);
+    const other = `source = "${CRATES_IO}"\nchecksum = "other"`;
+    expect(readAt([["ext", "1.0.0", other]])).toEqual([
+      ...taken(`${CRATES_IO} with checksum other`),
+      stale,
+    ]);
+    const lock: [string, string][] = [
+      ["ext", "1.0.0"],
+      ["evil", "1.0.0"],
+    ];
+    expect(
+      readAt(lock, undefined, manifestOf('ext = { package = "evil", version = "1" }')),
+    ).toEqual([...renamesOf("crates/r/Cargo.toml"), stale]);
+    expect(
+      readAt(lock, undefined, manifestOf('ext = "1"\nevil = { package = "ext", version = "1" }')),
+    ).toEqual([...renamesOf("crates/r/Cargo.toml"), stale]);
+    expect(readAt(lock, undefined, manifestOf('ext = "1"\nevil = "1"'))).toEqual([stale]);
+    // A macro named through a crate other than the one read, which re-exports it.
+    const through = (deps: string) =>
+      failures(
+        fuzzed,
+        exempt,
+        {
+          ...repo,
+          ...manifestOf(deps),
+          "Cargo.lock": lockOf([...lock, ["ext_impl", "1.0.0"]]),
+          "crates/r/src/lib.rs": "pub fn name() -> String { ext::name!() }",
+        },
+        {},
+        {
+          "ext::name": {
+            read: { ext_impl: { version: "1.0.0", checksum: "sum" } },
+            reason: "read ext_impl@1.0.0 src/lib.rs: expansion writes no impl",
+          },
+        },
+      );
+    expect(through('ext = "1"')).toEqual([]);
+    expect(through('ext = "1"\nimpl2 = { package = "ext_impl", version = "1" }')).toEqual([
+      "crates/r/Cargo.toml: renames a crate to or from ext_impl, which FOREIGN_MACROS trusts " +
+        "ext::name by, so the name may be another crate's: take the crate by its own name.",
+    ]);
+    expect(through('ext = { package = "evil", version = "1" }')).toEqual([
+      "crates/r/Cargo.toml: renames a crate to or from ext, which FOREIGN_MACROS trusts " +
+        "ext::name by, so the name may be another crate's: take the crate by its own name.",
+    ]);
   });
 
   it("follows a field's methods through every type that holds it, and keeps a cycle", () => {
