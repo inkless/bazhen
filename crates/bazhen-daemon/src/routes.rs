@@ -93,6 +93,8 @@ pub(crate) struct Shared {
     pub(crate) doctor: Option<Arc<crate::doctor::Settled>>,
     /// This machine's name, as the state names its environment's host.
     pub(crate) host: Arc<str>,
+    /// Where the web client's build is, which loopback HTTP serves off the API.
+    pub(crate) web: Option<Arc<crate::web::Bundle>>,
 }
 
 impl Shared {
@@ -113,6 +115,7 @@ impl Shared {
             shells: None,
             doctor: None,
             host: Arc::from(hostname()),
+            web: None,
         }
     }
 
@@ -124,6 +127,12 @@ impl Shared {
     ) -> Self {
         self.shells = Some(shells);
         self.doctor = Some(Arc::new(doctor));
+        self
+    }
+
+    /// The same, serving the web client `bundle` holds off the API.
+    pub(crate) fn with_web(mut self, bundle: crate::web::Bundle) -> Self {
+        self.web = Some(Arc::new(bundle));
         self
     }
 
@@ -310,7 +319,7 @@ async fn create_task(
     }
 }
 
-async fn not_found() -> Response {
+pub(crate) async fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
 
@@ -355,8 +364,10 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
 
 /// The loopback HTTP listener's routes, behind the guard. The API is a router nested at `/v1`,
 /// and the pairing gate is on it, so whatever axum routes there, its fallback included, is gated:
-/// no test of the path's text can miss one.
+/// no test of the path's text can miss one. Every other path is the web client's, served to a
+/// browser yet to pair so it can.
 pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
+    let web = shared.web.clone();
     let gate = Arc::new(gate);
     let gated = Gated {
         gate: Arc::clone(&gate),
@@ -380,11 +391,14 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .layer(middleware::from_fn_with_state(gated.clone(), paired::gate));
     // The nest takes `/v1` and `/v1/<rest>` but not `/v1/` itself, which Hono's `/v1/*` gates.
     let bare = any(not_found).layer(middleware::from_fn_with_state(gated, paired::gate));
-    Router::new()
-        .nest("/v1", api)
-        .route("/v1/", bare)
-        .fallback(not_found)
-        .layer(middleware::from_fn_with_state(gate, guarded))
+    let router = Router::new().nest("/v1", api).route("/v1/", bare);
+    let router = match web {
+        Some(bundle) => {
+            router.fallback(move |request: Request| crate::web::page(Arc::clone(&bundle), request))
+        }
+        None => router.fallback(not_found),
+    };
+    router.layer(middleware::from_fn_with_state(gate, guarded))
 }
 
 /// A header as Node gives it to the TypeScript daemon: every line of it joined with ", ", each

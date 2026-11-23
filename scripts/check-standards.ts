@@ -831,6 +831,10 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to reported; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::decline":
     "hands its body to reported; decodes nothing itself",
+  "crates/bazhen-daemon/src/web.rs::page":
+    "reads only the request's method and path, never its body; the file bytes look hands back go to the response as they are, unparsed",
+  "crates/bazhen-daemon/src/web.rs::bundled":
+    "reads a bundle file whole and hands its bytes back unparsed, as the response body; the path it takes is refused whole if a segment is empty, starts with a dot, or carries a backslash or %, and realpath(3) does the rest, held inside the bundle's own; its tests and a proptest climb out every way web.medium.test.ts does",
   "crates/bazhen-host-guard/src/ptys.rs::Machine::read_file":
     "reads a kernel counter file whole as text for count, which takes it only as a whole number; parses nothing itself",
   "crates/bazhen-host-guard/src/group.rs::read_out":

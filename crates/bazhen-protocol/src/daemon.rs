@@ -177,6 +177,9 @@ pub struct Web {
         deserialize_with = "Nullable::present"
     )]
     pub app: Nullable<String>,
+    /// Why the build where the daemon looks isn't served, `app` null then; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_refused: Option<String>,
     /// The LAN listener, null without one; absent from an older daemon.
     #[serde(
         default,

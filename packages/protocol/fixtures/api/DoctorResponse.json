@@ -400,6 +400,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -492,6 +493,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -2352,6 +2354,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -2444,6 +2447,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -2551,6 +2555,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -2643,6 +2648,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {
@@ -3710,6 +3716,7 @@
           }
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null,
         "fieldFromANewerDaemon": {
           "any": [
@@ -3847,6 +3854,7 @@
           "required": false
         },
         "app": null,
+        "appRefused": "/tmp: other users may write it",
         "lan": null
       },
       "notifications": {

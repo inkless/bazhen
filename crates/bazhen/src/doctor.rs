@@ -256,6 +256,9 @@ fn web_lines(web: &Web) -> Vec<String> {
         ));
     }
     match &web.app {
+        Nullable::Null if let Some(why) = &web.app_refused => {
+            out.push(format!("web app: not served: {why}"));
+        }
         Nullable::Null => out.push(
             "web app: not built; `moon run :build` builds it, and the daemon serves only the API until \
              then"

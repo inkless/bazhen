@@ -6,8 +6,9 @@
 script = "node --no-turbo-fast-api-calls node_modules/vite/bin/vite.js < /dev/null"
 options = { cache = false, persistent = true, runInCI = false }
 
+# The daemon serves a build no one but its owner may write, whatever the umask made it.
 [tasks.build]
-command = "node_modules/.bin/vite build"
+script = "node_modules/.bin/vite build && chmod -R g-w,o-w dist"
 options = { cache = false }
 
 [tasks.preview]

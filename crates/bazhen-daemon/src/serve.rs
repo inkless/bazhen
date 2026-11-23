@@ -31,6 +31,7 @@ use crate::shells::integration::{Integration, install_shell_integration};
 use crate::shells::{ShellError, Shells, ShellsDeps};
 use crate::terminals::Events;
 use crate::tokens;
+use crate::web::State;
 
 /// How the daemon serves: each listener's limits, how long its connections get to finish once
 /// a stop is asked for, and how often it reads its shells again.
@@ -336,6 +337,41 @@ async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToke
     }
 }
 
+/// The start-up lines on whom the daemon admits, whether they must pair, and what page it serves
+/// them.
+fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
+    if let Some(from) = startup.external_origins_from {
+        tracing::info!(
+            "bazhen: admitting external origins from {from}: {}",
+            startup.external_origins.join(", ")
+        );
+    }
+    if startup.pairing_required {
+        tracing::info!(
+            "bazhen: pairing required on every origin (web.pairing = \"{}\")",
+            startup.pairing
+        );
+    } else {
+        tracing::info!(
+            "bazhen: pairing not required on loopback (web.pairing = \"auto\", no external origins); a request forwarded from another machine must still pair"
+        );
+    }
+    match web {
+        Some((bundle, State::Served)) => {
+            tracing::info!("bazhen: serving the web app from {}", bundle.display());
+        }
+        Some((bundle, State::Unbuilt)) => tracing::info!(
+            "bazhen: the web app isn't built ({}); `moon run :build` builds it, serving only the API until then",
+            bundle.display()
+        ),
+        Some((bundle, State::Refused(why))) => tracing::warn!(
+            "bazhen: not serving the web app from {}: {why}; serving only the API until then",
+            bundle.display()
+        ),
+        None => {}
+    }
+}
+
 /// Serves the socket and loopback HTTP until a stop, then drains them, and says why it stopped.
 /// With `runner`, it runs shells on its terminals, and ends the runtime's watches at the drain.
 async fn listen(
@@ -360,7 +396,10 @@ async fn listen(
     if let Some(runner) = runner {
         let (running, events, doctor) =
             shells(startup, &store, runner, &tracker, stop.token()).await?;
-        shared = shared.with_shells(Arc::clone(&running), doctor);
+        let bundle = doctor.bundle.clone();
+        shared = shared
+            .with_shells(Arc::clone(&running), doctor)
+            .with_web(bundle);
         watching = Some((running, events));
     }
     let gate = Gate {
@@ -375,22 +414,18 @@ async fn listen(
     let http = TcpListener::bind((guard::LOOPBACK, startup.port))
         .await
         .map_err(|err| Refused::Said(format!("bazhen can't listen on {url}: {err}")))?;
-    if let Some(from) = startup.external_origins_from {
-        tracing::info!(
-            "bazhen: admitting external origins from {from}: {}",
-            startup.external_origins.join(", ")
-        );
-    }
-    if startup.pairing_required {
-        tracing::info!(
-            "bazhen: pairing required on every origin (web.pairing = \"{}\")",
-            startup.pairing
-        );
-    } else {
-        tracing::info!(
-            "bazhen: pairing not required on loopback (web.pairing = \"auto\", no external origins); a request forwarded from another machine must still pair"
-        );
-    }
+    let web = match shared.web.clone() {
+        Some(bundle) => {
+            let read = Arc::clone(&bundle);
+            let state = tokio::task::spawn_blocking(move || read.state()).await;
+            Some((bundle, state.unwrap_or(State::Unbuilt)))
+        }
+        None => None,
+    };
+    say_whom_it_serves(
+        startup,
+        web.as_ref().map(|(bundle, state)| (bundle.dist(), state)),
+    );
     tracing::info!(
         "bazhen daemon listening on {url} (data: {})",
         startup.paths.data
@@ -917,6 +952,8 @@ mod tests {
                     &doctor["holder"]["reason"],
                     &doctor["runtimes"],
                     &doctor["web"]["pairing"]["mode"],
+                    // Null, not absent: this daemon serves a web client, unbuilt here.
+                    doctor["web"].get("app"),
                 ),
                 (
                     &serde_json::json!(1),
@@ -927,6 +964,7 @@ mod tests {
                         {"kind": "holder", "state": "not-running", "version": "holder/1.4", "workarounds": []},
                     ]),
                     &serde_json::json!("auto"),
+                    Some(&serde_json::Value::Null),
                 ),
                 "{doctor}"
             );
