@@ -17,8 +17,9 @@ export function hookClient(): string {
 
 /**
  * The hook client as a shell command, which a harness runs through a shell with the event
- * appended, so its path stays whole whatever it holds.
+ * appended, so its path stays whole whatever it holds. The client replaces that shell, so the
+ * harness is its parent: the script's waiter knows its harness has gone by that parent changing.
  */
 export function hookCommand(client: string): string {
-  return word(client);
+  return `exec ${word(client)}`;
 }

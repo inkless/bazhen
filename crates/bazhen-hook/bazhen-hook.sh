@@ -85,10 +85,19 @@ late() {
   head -n 1 "$dir/head" 2>/dev/null | grep -q '^HTTP/[0-9.]* 503 '
 }
 
+# The harness runs the client in place of its shell, so the harness is this script's parent. Once
+# that parent has gone and another took the script over, nothing is left to read a reply. A
+# parent that can't be read is no news.
+orphaned() {
+  parent=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')
+  case "$parent" in '' | *[!0-9]*) return 1 ;; esac
+  [ "$parent" -ne "$PPID" ]
+}
+
 # A waiter retries until its deadline when the daemon can't be reached, drops the request, or cuts
-# a reply short, as it does across a restart; never on a reply it would refuse. On a 503 it asks
-# again 1, 2, 4, 8 and 16 seconds later, then gives up, as the binary does. Any other hook gives
-# up at once.
+# a reply short, as it does across a restart; never on a reply it would refuse, nor once its
+# harness has gone. On a 503 it asks again 1, 2, 4, 8 and 16 seconds later, then gives up, as the
+# binary does. Any other hook gives up at once.
 if [ "$1" = wait ]; then
   deadline=$(($(date +%s) + 82800))
   pause=1
@@ -106,6 +115,7 @@ if [ "$1" = wait ]; then
       wait_for=1
     fi
     [ "$(date +%s)" -lt $((deadline - 1)) ] || exit 0
+    orphaned && exit 0
     sleep "$wait_for"
   done
 else
