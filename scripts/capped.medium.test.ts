@@ -149,6 +149,12 @@ const startsSession = (flags: string) =>
 const LEFT_SLEEP = "capped: stopped 1 process(es) its command left running: sleep ×1";
 const OUTLIVES_RUNAWAY = `"${process.execPath}" -e '${RUNAWAY}'; exit 0`;
 const FAILS = "capped: the run fails, though its command passed:";
+// How often a task's run, whose command starts an inner run with `flags` that starts a session,
+// says a sleep was left running, and how the task's run ends.
+const sessionOutcome = (flags: string) => {
+  const task = asTask([], startsSession(flags));
+  return { said: task.stderr.split(LEFT_SLEEP).length - 1, status: task.status };
+};
 
 describe("capped as a task's run", () => {
   it("fails a run whose command passed once it reached its time cap", () => {
@@ -178,19 +184,15 @@ describe("capped as a task's run", () => {
     });
   });
 
-  it.runIf(inScope)("leaves what a run's session started to the task's run around it", () => {
-    const task = asTask([], startsSession(""));
-    expect(task.stderr.split(LEFT_SLEEP)).toHaveLength(2);
-    expect(task.status).toBe(1);
-  });
-
   it.runIf(inScope)(
-    "ends what a run with a scope of its own started, before the task's run ends",
+    "ends what a run with a scope of its own started, which a run without one leaves to the task's",
     () => {
-      // Said once, by the inner run that stopped it; the task's run found nothing left.
-      const task = asTask([], startsSession("--own-scope"));
-      expect(task.stderr.split(LEFT_SLEEP)).toHaveLength(2);
-      expect(task.status).toBe(0);
+      // Said once each time: without the flag by the task's run, which then fails; with it by the
+      // inner run that stopped it, so the task's run found nothing left.
+      expect({ without: sessionOutcome(""), with: sessionOutcome("--own-scope") }).toEqual({
+        without: { said: 1, status: 1 },
+        with: { said: 1, status: 0 },
+      });
     },
   );
 
