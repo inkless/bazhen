@@ -239,7 +239,17 @@ struct Shared<R: Runtime, L> {
 
 /// How opening a terminal's stream went; joins that come while it opens wait for the one opening
 /// it, and are told the same.
-type Slot<S> = OnceCell<Result<Arc<Watched<S>>, JoinError>>;
+struct Slot<S> {
+    opened: OnceCell<Result<Arc<Watched<S>>, JoinError>>,
+}
+
+impl<S> Default for Slot<S> {
+    fn default() -> Self {
+        Self {
+            opened: OnceCell::new(),
+        }
+    }
+}
 
 struct Watched<S> {
     terminal: TerminalId,
@@ -557,6 +567,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         // join opens afresh. A waiter that opened again itself would hold a stream no longer in
         // the map, which nothing could reach or close.
         let watched = slot
+            .opened
             .get_or_init(|| {
                 opened = true;
                 self.open(terminal, size)
@@ -994,7 +1005,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         act: impl FnOnce(&Arc<Self>, &Arc<Watched<R::Stream>>, &mut State),
     ) {
         let slot = lock(&self.watched).get(terminal).cloned();
-        if let Some(Ok(watched)) = slot.as_ref().and_then(|slot| slot.get()) {
+        if let Some(Ok(watched)) = slot.as_ref().and_then(|slot| slot.opened.get()) {
             act(self, watched, &mut watched.lock());
         }
     }
@@ -1010,7 +1021,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         let mut map = lock(&self.watched);
         let current = map
             .get(&watched.terminal)
-            .and_then(|slot| slot.get())
+            .and_then(|slot| slot.opened.get())
             .is_some_and(|w| w.as_ref().is_ok_and(|w| Arc::ptr_eq(w, watched)));
         if current {
             map.remove(&watched.terminal);
