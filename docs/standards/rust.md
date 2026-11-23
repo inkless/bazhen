@@ -625,7 +625,8 @@ What differs:
     whether the struct carries bytes at all, so it can't see an attribute macro adding a byte
     field. An impl's head is read with its brackets counted, so an array (`where [u8; 4]: Sized`)
     or a const block (`Gate<{ N > 1 }>`) in it is read too; a head it still can't read, its
-    brackets unbalanced, fails the check with its file and line.
+    brackets unbalanced, fails the check with its file and line. A nightly `default impl` or
+    `const impl` isn't read at all.
   - The targets live in `crates/<name>/fuzz/fuzz_targets/<target>.rs` (cargo-fuzz's layout),
     with seed inputs in `fuzz/seeds/<target>/`. The fuzz crate is a workspace of its own, its
     dependencies pinned exactly. A target asserts what must hold of every input, not only

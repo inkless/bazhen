@@ -1728,6 +1728,9 @@ describe("byteTakers", () => {
       "        impl<R: Read> Reader<R> {",
       "            pub fn pull(&mut self) {}",
       "        }",
+      "        impl<T> Peek for T where T: AsRef<[u8; 4]> {",
+      "            fn peek(&self) -> u32 { 0 }",
+      "        }",
       "    );",
       "    ($($t:ident),*) => {",
       "        $(",
@@ -1738,7 +1741,7 @@ describe("byteTakers", () => {
       "    };",
       "}",
     ].join("\n");
-    expect(byteTakers(source)).toEqual(["Reader::pull", "Feed::feed"]);
+    expect(byteTakers(source)).toEqual(["Reader::pull", "T::peek", "Feed::feed"]);
   });
 
   it("reads a file of impl heads it can't finish in time linear in its length", () => {
