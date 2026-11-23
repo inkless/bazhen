@@ -1007,6 +1007,8 @@ const NOT_DECODERS: Record<string, string> = {
     "removes a terminal's entry from the hub's map; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::forget_watched":
     "removes a terminal's entry from the hub's map; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Joining::drop":
+    "holds the hub's state, whose views hold output queued for them; ends a view whose join was dropped, reading none of that output",
   "crates/bazhen-daemon/src/stream/hub.rs::let_go": "closes a terminal's stream; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Watched::lock":
     "locks a terminal's state, which holds output queued for its views; reads none of it",

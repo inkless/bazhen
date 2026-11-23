@@ -78,12 +78,20 @@ impl Outbox {
         Ok(())
     }
 
-    /// A frame, which is small and never refused, so a view is always told why it ends.
+    /// A frame, never refused, so a view is always told why it ends. It counts unsent by the
+    /// JSON it goes out as until it is sent, as a browser's `bufferedAmount` counts it.
     pub(crate) fn notify(&self, frame: StreamServerFrame) {
-        let _ = self.tx.send(Out::Frame(frame));
+        let len = serde_json::to_string(&frame).map_or(0, |text| text.len());
+        self.unsent.fetch_add(len, Ordering::AcqRel);
+        let sent = Sent {
+            len,
+            unsent: Arc::clone(&self.unsent),
+            written: None,
+        };
+        let _ = self.tx.send(Out::Frame { frame, sent });
     }
 
-    /// Output given to the view that its writer has not finished sending.
+    /// What was given to the view, output and frames, that its writer has not finished sending.
     #[must_use]
     pub fn unsent(&self) -> usize {
         self.unsent.load(Ordering::Acquire)
@@ -104,11 +112,15 @@ impl Inbox {
     }
 }
 
-/// One thing for a view's socket: output as a binary message, or a frame as a text one.
+/// One thing for a view's socket: output as a binary message, or a frame as a text one. Each
+/// counts unsent until its [`Sent`] is dropped.
 #[derive(Debug)]
 pub enum Out {
     Output(Output),
-    Frame(StreamServerFrame),
+    Frame {
+        frame: StreamServerFrame,
+        sent: Sent,
+    },
 }
 
 /// Output for a view, counted unsent until what [`Output::into_parts`] gives with it is dropped.
@@ -164,7 +176,10 @@ pub trait ViewSocket: Send {
 pub async fn write_to<S: ViewSocket>(mut inbox: Inbox, socket: &mut S) -> Result<(), S::Error> {
     while let Some(out) = inbox.recv().await {
         match out {
-            Out::Frame(frame) => socket.frame(&frame).await?,
+            Out::Frame { frame, sent } => {
+                socket.frame(&frame).await?;
+                drop(sent);
+            }
             Out::Output(output) => {
                 let (output, sent) = output.into_parts();
                 socket.output(output).await?;
@@ -257,7 +272,7 @@ mod tests {
         while let Ok(out) = inbox.rx.try_recv() {
             queued.push(match out {
                 Out::Output(output) => String::from_utf8(output.into_parts().0).unwrap(),
-                Out::Frame(frame) => format!("{frame:?}"),
+                Out::Frame { frame, .. } => format!("{frame:?}"),
             });
         }
         assert_eq!(
@@ -268,6 +283,28 @@ mod tests {
                 vec!["abc".to_owned(), "SnapshotEnd".to_owned()]
             )
         );
+    }
+
+    #[test]
+    fn counts_a_frame_unsent_by_its_encoding_until_it_is_sent_but_never_refuses_one() {
+        runtime().block_on(async {
+            let frame = StreamServerFrame::Notice {
+                message: "resize failed: writer lost".to_owned(),
+            };
+            let encoded = serde_json::to_string(&frame).unwrap().len();
+            let (outbox, inbox) = queue(encoded);
+            outbox.notify(frame.clone());
+            outbox.notify(frame);
+            let queued = outbox.unsent();
+            let refused = outbox.send(b"x".to_vec());
+            let mut socket = Socket::default();
+            let mut writing = pin!(write_to(inbox, &mut socket));
+            assert!(as_far_as_it_goes(writing.as_mut()).await.is_none());
+            assert_eq!(
+                (queued, refused, outbox.unsent(), outbox.send(b"x".to_vec())),
+                (2 * encoded, Err(Behind), 0, Ok(()))
+            );
+        });
     }
 
     #[test]

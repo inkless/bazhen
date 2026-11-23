@@ -32,10 +32,11 @@ pub trait TerminalStream: Send + Sync + 'static {
     type Error: Display + Send + 'static;
 
     /// The terminal's size, as the stream last knew it applied: what a snapshot taken now is
-    /// drawn at.
+    /// drawn at. Called under the terminal's lock, so it must not block.
     fn size(&self) -> Size;
 
-    /// Input for the program.
+    /// Input for the program. Called under the terminal's lock, so it must not block: it hands
+    /// the input on to be written.
     fn write(&self, input: &[u8]);
 
     /// Resolves once the terminal has the size, and the stream's event saying so is queued.
@@ -236,8 +237,9 @@ struct Shared<R: Runtime, L> {
     watched: Mutex<HashMap<TerminalId, Arc<Slot<R::Stream>>>>,
 }
 
-/// A terminal's stream, once open; joins that come while it opens wait for the one opening it.
-type Slot<S> = OnceCell<Arc<Watched<S>>>;
+/// How opening a terminal's stream went; joins that come while it opens wait for the one opening
+/// it, and are told the same.
+type Slot<S> = OnceCell<Result<Arc<Watched<S>>, JoinError>>;
 
 struct Watched<S> {
     terminal: TerminalId,
@@ -287,6 +289,30 @@ struct Seamed {
     taken: Position,
     queued: usize,
     geometry: Size,
+}
+
+/// A view whose join hasn't finished. A join dropped part way, as when its socket goes, ends the
+/// view as its leaving would: nothing else knows of it, its held output would grow for good, and
+/// its stream would never close.
+struct Joining<R: Runtime, L: AttachmentLog> {
+    hub: Arc<Shared<R, L>>,
+    watched: Arc<Watched<R::Stream>>,
+    id: AttachmentId,
+    done: bool,
+}
+
+impl<R: Runtime, L: AttachmentLog> Drop for Joining<R, L> {
+    fn drop(&mut self) {
+        if !self.done {
+            let mut state = self.watched.lock();
+            self.hub.end(
+                &self.watched,
+                &mut state,
+                &self.id,
+                AttachmentEndReason::ClientClosed,
+            );
+        }
+    }
 }
 
 /// Why taking a view's snapshot stopped.
@@ -417,6 +443,12 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
             }
             (from, exited, replacing)
         };
+        let mut joining = Joining {
+            hub: Arc::clone(self),
+            watched: Arc::clone(&watched),
+            id: id.clone(),
+            done: false,
+        };
         if let Some(exit) = &exited {
             self.record_exit(terminal, exit).await;
         }
@@ -457,6 +489,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
             attachment_id: id.clone(),
             resume_token: Some(resume_token.clone()),
         });
+        joining.done = true;
         Ok(Attachment { id, resume_token })
     }
 
@@ -519,13 +552,17 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
     ) -> Result<(Arc<Watched<R::Stream>>, bool), JoinError> {
         let slot = Arc::clone(lock(&self.watched).entry(terminal.clone()).or_default());
         let mut opened = false;
+        // Every join waiting on an open shares its outcome, as the TypeScript hub's shared
+        // promise does: one that failed fails them all, and the slot is forgotten so the next
+        // join opens afresh. A waiter that opened again itself would hold a stream no longer in
+        // the map, which nothing could reach or close.
         let watched = slot
-            .get_or_try_init(|| {
+            .get_or_init(|| {
                 opened = true;
                 self.open(terminal, size)
             })
             .await
-            .cloned();
+            .clone();
         match watched {
             Ok(watched) if !watched.lock().closed => Ok((watched, opened)),
             Ok(_) => {
@@ -957,7 +994,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         act: impl FnOnce(&Arc<Self>, &Arc<Watched<R::Stream>>, &mut State),
     ) {
         let slot = lock(&self.watched).get(terminal).cloned();
-        if let Some(watched) = slot.as_ref().and_then(|slot| slot.get()) {
+        if let Some(Ok(watched)) = slot.as_ref().and_then(|slot| slot.get()) {
             act(self, watched, &mut watched.lock());
         }
     }
@@ -974,7 +1011,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         let current = map
             .get(&watched.terminal)
             .and_then(|slot| slot.get())
-            .is_some_and(|w| Arc::ptr_eq(w, watched));
+            .is_some_and(|w| w.as_ref().is_ok_and(|w| Arc::ptr_eq(w, watched)));
         if current {
             map.remove(&watched.terminal);
         }
@@ -1703,6 +1740,8 @@ mod tests {
         epoch: u64,
         id: Option<AttachmentId>,
         on_output: Option<Box<dyn FnMut() + Send>>,
+        /// Each send of output waits for a permit from this, when it is set.
+        stalls: Option<Arc<Semaphore>>,
     }
 
     impl Recorder {
@@ -1716,7 +1755,10 @@ mod tests {
     impl ViewSocket for Recorder {
         type Error = ();
 
-        fn output(&mut self, output: Vec<u8>) -> impl Future<Output = Result<(), ()>> + Send {
+        async fn output(&mut self, output: Vec<u8>) -> Result<(), ()> {
+            if let Some(gate) = &self.stalls {
+                gate.acquire().await.unwrap().forget();
+            }
             {
                 let mut record = self.seen.record();
                 record
@@ -1728,7 +1770,7 @@ mod tests {
             if let Some(hook) = &mut self.on_output {
                 hook();
             }
-            std::future::ready(Ok(()))
+            Ok(())
         }
 
         fn frame(
@@ -1767,6 +1809,9 @@ mod tests {
         declares: bool,
         resumes: Option<Resumes>,
         on_output: Option<Box<dyn FnMut() + Send>>,
+        /// The most output it may have unsent.
+        most_unsent: usize,
+        stalls: Option<Arc<Semaphore>>,
     }
 
     impl Ask {
@@ -1778,6 +1823,23 @@ mod tests {
                 declares: true,
                 resumes: None,
                 on_output: None,
+                most_unsent: MOST_UNSENT,
+                stalls: None,
+            }
+        }
+
+        /// Its socket sends output only with a permit from `gate`.
+        fn stalling(self, gate: &Arc<Semaphore>) -> Self {
+            Self {
+                stalls: Some(Arc::clone(gate)),
+                ..self
+            }
+        }
+
+        fn lagging_by(self, most_unsent: usize) -> Self {
+            Self {
+                most_unsent,
+                ..self
             }
         }
 
@@ -1850,7 +1912,20 @@ mod tests {
 
         /// Starts a view opening; what it returns resolves once the join has.
         fn start(&self, ask: Ask) -> (oneshot::Receiver<Result<Attachment, JoinError>>, Seen) {
-            let (outbox, inbox) = view::queue(MOST_UNSENT);
+            let (_, joined, seen) = self.joining(ask);
+            (joined, seen)
+        }
+
+        /// Starts a view opening, and returns the task that opens it too.
+        fn joining(
+            &self,
+            ask: Ask,
+        ) -> (
+            tokio::task::JoinHandle<()>,
+            oneshot::Receiver<Result<Attachment, JoinError>>,
+            Seen,
+        ) {
+            let (outbox, inbox) = view::queue(ask.most_unsent);
             let seen = Seen::default();
             let mut socket = Recorder {
                 seen: seen.clone(),
@@ -1860,6 +1935,7 @@ mod tests {
                 epoch: 0,
                 id: None,
                 on_output: ask.on_output,
+                stalls: ask.stalls,
             };
             self.tasks.spawn(async move {
                 let _ = write_to(inbox, &mut socket).await;
@@ -1874,10 +1950,10 @@ mod tests {
                 outbox,
             };
             let (at, resumes) = (ask.size, ask.resumes);
-            self.tasks.spawn(async move {
+            let join = self.tasks.spawn(async move {
                 let _ = answer.send(hub.join(&terminal, viewer, at, resumes).await);
             });
-            (joined, seen)
+            (join, joined, seen)
         }
 
         async fn open(&self, ask: Ask) -> (Result<Attachment, JoinError>, Seen) {
@@ -1989,6 +2065,52 @@ mod tests {
     /// Each non-blank row a browser holds after writing what a view was sent.
     fn screen_of(view: &Seen) -> Vec<String> {
         rows_of(&mut replayed(&view.output()), 10_000)
+    }
+
+    /// The fake's runtime, whose first open fails once every task that can run has run.
+    #[derive(Clone)]
+    struct Flaky {
+        inner: Fake,
+        fails: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Runtime for Flaky {
+        type Stream = FakeStream;
+        type Events = FakeEvents;
+        type Error = String;
+
+        async fn attach(
+            &self,
+            terminal: &TerminalId,
+            at: Option<Size>,
+        ) -> Result<Opened<FakeStream, FakeEvents>, String> {
+            yields(8).await;
+            if self.fails.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return Err("the holder went away".to_owned());
+            }
+            self.inner.attach(terminal, at).await
+        }
+    }
+
+    /// An interactive view whose socket writes whatever it is sent, for a hub of any runtime.
+    fn viewer(tasks: &TaskTracker) -> Viewer {
+        let (outbox, inbox) = view::queue(MOST_UNSENT);
+        let mut socket = Recorder {
+            seen: Seen::default(),
+            declares: None,
+            epoch: 0,
+            id: None,
+            on_output: None,
+            stalls: None,
+        };
+        tasks.spawn(async move {
+            let _ = write_to(inbox, &mut socket).await;
+        });
+        Viewer {
+            mode: AttachmentMode::Interactive,
+            device_name: None,
+            outbox,
+        }
     }
 
     mod terminal_hub {
@@ -2576,6 +2698,196 @@ mod tests {
                         true,
                         Some(format!("ended {} terminal_closed", a.id)),
                         0
+                    )
+                );
+            });
+        }
+        #[test]
+        fn gives_every_join_waiting_on_an_open_that_fails_its_failure_and_opens_afresh_after() {
+            runtime().block_on(async {
+                let rt = Fake::new("earlier output", 100);
+                let flaky = Flaky {
+                    inner: rt.clone(),
+                    fails: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                };
+                let tasks = TaskTracker::new();
+                let hub = Hub::new(flaky, Log::default(), HubOptions::default(), tasks.clone());
+                let terminal = TerminalId::mint(1, [7; 16]);
+                let joins: Vec<_> = (0..2)
+                    .map(|_| {
+                        let (hub, terminal, viewer) =
+                            (hub.clone(), terminal.clone(), viewer(&tasks));
+                        tasks.spawn(
+                            async move { hub.join(&terminal, viewer, standard(), None).await },
+                        )
+                    })
+                    .collect();
+                let mut joined = vec![];
+                for join in joins {
+                    joined.push(join.await.unwrap().map(|a| a.id));
+                }
+                let next = hub
+                    .join(&terminal, viewer(&tasks), standard(), None)
+                    .await
+                    .unwrap();
+                settle().await;
+                hub.leave(&terminal, &next.id, LeaveReason::ClientClosed);
+                settle().await;
+                let failed = Err(JoinError::Open("the holder went away".to_owned()));
+                assert_eq!(
+                    (joined, rt.attaches().len(), rt.closes()),
+                    (vec![failed.clone(), failed], 1, 1)
+                );
+            });
+        }
+
+        #[test]
+        fn ends_a_view_whose_join_is_dropped_while_its_snapshot_is_on_its_way() {
+            runtime().block_on(async {
+                let h = H::new();
+                let first = h.interactive().await;
+                h.rt.hold_snapshots();
+                let (join, _, late) = h.joining(Ask::interactive());
+                settle().await;
+                join.abort();
+                settle().await;
+                h.rt.release();
+                h.leave(&first).await;
+                assert_eq!(
+                    (late.closed(), h.log.starting("ended").len(), h.rt.closes()),
+                    (true, 2, 1)
+                );
+            });
+        }
+
+        #[test]
+        fn closes_the_stream_when_the_join_of_its_only_view_is_dropped() {
+            runtime().block_on(async {
+                let h = H::new();
+                let gate = Arc::new(Semaphore::new(0));
+                let (join, _, _) = h.joining(Ask::interactive().stalling(&gate));
+                settle().await;
+                join.abort();
+                settle().await;
+                assert_eq!((h.log.starting("ended").len(), h.rt.closes()), (1, 1));
+            });
+        }
+
+        #[test]
+        fn ends_a_view_too_far_behind_its_live_output_and_tells_it_why() {
+            runtime().block_on(async {
+                let h = H::new();
+                let other = h.interactive().await;
+                // Its screen goes out; the output after it waits.
+                let gate = Arc::new(Semaphore::new(1));
+                let slow = h
+                    .view(Ask::observer().lagging_by(400).stalling(&gate))
+                    .await;
+                h.print(&"a".repeat(250)).await;
+                h.print(&"b".repeat(250)).await;
+                gate.add_permits(8);
+                settle().await;
+                assert_eq!(
+                    (
+                        slow.seen.last_frame(),
+                        slow.seen.closed(),
+                        h.log.events().last().cloned(),
+                        other.seen.last_output()
+                    ),
+                    (
+                        Some(StreamServerFrame::Ended {
+                            reason: EndedReason::EvictedSlow
+                        }),
+                        true,
+                        Some(format!("ended {} evicted_slow", slow.id)),
+                        Some("b".repeat(250))
+                    )
+                );
+            });
+        }
+
+        #[test]
+        fn ends_a_view_whose_output_held_while_it_opened_is_more_than_it_may_lag_by() {
+            runtime().block_on(async {
+                let h = H::new();
+                h.interactive().await;
+                h.rt.hold_snapshots();
+                let (joined, late) = h.start(Ask::observer().lagging_by(512));
+                settle().await;
+                h.rt.take();
+                for _ in 0..3 {
+                    h.print(&"x".repeat(200)).await;
+                }
+                h.rt.release();
+                let joined = joined.await.unwrap();
+                settle().await;
+                assert_eq!(
+                    (
+                        joined,
+                        late.attached(),
+                        late.last_frame(),
+                        h.log.events().last().map(|e| e.ends_with(" evicted_slow"))
+                    ),
+                    (
+                        Err(JoinError::Ended),
+                        false,
+                        Some(StreamServerFrame::Ended {
+                            reason: EndedReason::EvictedSlow
+                        }),
+                        Some(true)
+                    )
+                );
+            });
+        }
+
+        #[test]
+        fn ends_a_view_whose_screen_is_more_than_it_may_lag_by() {
+            runtime().block_on(async {
+                let h = H::new();
+                let (joined, late) = h.open(Ask::observer().lagging_by(16)).await;
+                assert_eq!(
+                    (
+                        joined,
+                        late.attached(),
+                        late.last_frame(),
+                        h.log.events().last().map(|e| e.ends_with(" evicted_slow"))
+                    ),
+                    (
+                        Err(JoinError::Ended),
+                        false,
+                        Some(StreamServerFrame::Ended {
+                            reason: EndedReason::EvictedSlow
+                        }),
+                        Some(true)
+                    )
+                );
+            });
+        }
+
+        #[test]
+        fn sizes_the_terminal_to_a_driver_that_comes_back_at_another_size_before_its_snapshot() {
+            runtime().block_on(async {
+                let h = H::new();
+                let laptop = h.interactive().await;
+                h.engage(&laptop).await;
+                let token = laptop.seen.token();
+                let back = h
+                    .view(
+                        Ask::interactive()
+                            .at(size(100, 30))
+                            .resuming(&laptop.id, token),
+                    )
+                    .await;
+                assert_eq!(
+                    (
+                        back.seen.geometries().first().cloned(),
+                        h.rt.resizes(),
+                        h.rt.asked()
+                    ),
+                    (
+                        Some(geometry(100, 30)),
+                        vec![size(100, 30)],
+                        vec!["resize 100x30".to_owned(), "snapshot".to_owned()]
                     )
                 );
             });
