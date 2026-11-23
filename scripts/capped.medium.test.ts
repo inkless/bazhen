@@ -23,14 +23,14 @@ const RUNAWAY =
   "const a = []; setInterval(() => a.length < 64 ? a.push(Buffer.alloc(16 << 20, 1)) : process.exit(0), 20)";
 const SMALL = { memory: 128 * 1024 ** 2, timeMs: 30_000 };
 /** A run of its own: a sibling scope beside the one this test runs in, else what the host offers. */
-const outerMode = async () => (inScope ? "scope" : (await chooseMode(SMALL, false)).mode);
+const outerMode = async () => (inScope ? "scope" : (await chooseMode(SMALL, "run")).mode);
 const dir = mkdtempSync(join(tmpdir(), "bz-capped-"));
 // Inside a capped scope a test binary runs through, whatever the host offers.
 const inScope = cappedScope() !== undefined;
 // Whether this runner caps its test itself, or runs it through inside the capped scope around it.
 let capsItself: boolean;
 beforeAll(async () => {
-  capsItself = (await chooseMode(TEST_BINARY_CAP, true)).mode !== "through";
+  capsItself = (await chooseMode(TEST_BINARY_CAP, "test-binary")).mode !== "through";
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -139,6 +139,11 @@ const asTask = (flags: string[], script: string) =>
     ].concat(flags, ["--", "sh", "-c", script]),
     { encoding: "utf8" },
   );
+// A run inside the task's run whose command starts a process in a session of its own, as a
+// holder does, and which fails on it or not: the task's command passes regardless.
+const startsSession = (flags: string) =>
+  `"${capped}" ${flags} --memory 128M --time 1m -- sh -c 'setsid sleep 30 &'; exit 0`;
+const LEFT_SLEEP = "capped: stopped 1 process(es) its command left running: sleep ×1";
 const OUTLIVES_RUNAWAY = `"${process.execPath}" -e '${RUNAWAY}'; exit 0`;
 const FAILS = "capped: the run fails, though its command passed:";
 
@@ -169,6 +174,22 @@ describe("capped as a task's run", () => {
       stderr: expect.stringContaining(`${FAILS} its memory cap killed a process in it`),
     });
   });
+
+  it.runIf(inScope)("leaves what a run's session started to the task's run around it", () => {
+    const task = asTask([], startsSession(""));
+    expect(task.stderr.split(LEFT_SLEEP)).toHaveLength(2);
+    expect(task.status).toBe(1);
+  });
+
+  it.runIf(inScope)(
+    "ends what a run with a scope of its own started, before the task's run ends",
+    () => {
+      // Said once, by the inner run that stopped it; the task's run found nothing left.
+      const task = asTask([], startsSession("--own-scope"));
+      expect(task.stderr.split(LEFT_SLEEP)).toHaveLength(2);
+      expect(task.status).toBe(0);
+    },
+  );
 
   it.runIf(inScope)("passes a run that counts its memory kills after one in its own scope", () => {
     expect(asTask(["--memory-kills-counted"], OUTLIVES_RUNAWAY)).toMatchObject({

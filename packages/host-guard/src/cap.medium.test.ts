@@ -50,7 +50,7 @@ let dir: string;
 
 beforeAll(async () => {
   // A run of its own: inside a capped scope (this one's), chooseMode would run it through.
-  mode = cappedScope() === undefined ? (await chooseMode(cap, false)).mode : "scope";
+  mode = cappedScope() === undefined ? (await chooseMode(cap, "run")).mode : "scope";
   dir = mkdtempSync(join(tmpdir(), "bz-cap-"));
 });
 
