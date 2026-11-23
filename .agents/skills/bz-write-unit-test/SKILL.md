@@ -54,10 +54,11 @@ check rejects a pull request whose new test passes without your change.
   `runtime` fake in `app.test.ts`. No fake timers: pass time and IDs in.
 - **A source file with runtime code needs a sibling test.** `moon run :check` names any that lack
   one.
-- **A guard's break may change only the reverted source the test imports directly.** Falsify
-  refuses a break of the test, of anything in a folder named testing (`packages/core/src/testing/`) or a `*fixture*` file, or of a file it never
-  loads. A break that slows code down must fail the test's bound in seconds: a timeout is no
-  verdict.
+- **A guard's break may change only the reverted source the test imports directly, and must change
+  its code.** Falsify refuses a break of the test, of anything in a folder named testing
+  (`packages/core/src/testing/`) or a `*fixture*` file, of a file the test never loads, or of
+  comments and layout alone. A break that slows code down must fail the test's bound in seconds: a
+  timeout is no verdict.
 
 ## Rationalizations
 

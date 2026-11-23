@@ -58,7 +58,8 @@
 // commit whose message holds fenced ```diff blocks against HEAD and a line
 // `Guard: <file> › <title>: <what the break does>`. Before anything runs, each break is checked
 // for shape and paths (text changes to the reverted source the test imports directly, none of it
-// named as test support) and applied to a scratch index, whose files join the signalling check.
+// named as test support), must change some file's tokens, not only its comments or layout, and is
+// applied to a scratch index, whose files join the signalling check.
 // After the revert run, in the same worktree, the guarded tests run once at HEAD, where they must
 // pass, then under each break alone on HEAD. A test is GUARDED only when it fails under each of
 // its breaks on an AssertionError at its own frame; a pass, a timeout or a thrown error leaves it
@@ -128,7 +129,7 @@ import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
 import { isSignallingSource } from "./signal-paths.ts";
 import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
 import { DAEMON, LIST, SELECTOR, listed as listedFiles } from "./rust-daemon.ts";
-import { testCalls, type TestCall } from "./test-calls.ts";
+import { codeTokens, testCalls, type TestCall } from "./test-calls.ts";
 import {
   failedOnAssertion,
   inTestCode,
@@ -791,7 +792,7 @@ export const GUARD_FORM = "Guard: <file> › <title>: <what the break does>";
 const GUARD_LINE = /^Guard: (.+)$/;
 const FENCE_OPEN = "```diff";
 const FENCE_CLOSE = "```";
-export const MAX_GUARD_BREAKS = 10;
+const MAX_GUARD_BREAKS = 10;
 
 /**
  * Each commit's guards, from `git log --format=%H%x00%B%x00`. A commit's break is every fenced
@@ -2403,6 +2404,19 @@ function breakPaths(patch: string): string[] | string {
   return paths;
 }
 
+/**
+ * Whether `after` holds code `before` doesn't: other tokens, comments and layout aside, or, for a
+ * file that isn't TypeScript the scanner can read, other text once whitespace is gone. A break
+ * that changes neither leaves the code it claims to break as it was.
+ */
+export function changesCode(before: string, after: string): boolean {
+  const [was, now] = [codeTokens(before), codeTokens(after)];
+  if (typeof was === "string" || typeof now === "string") {
+    return before.replaceAll(/\s+/g, "") !== after.replaceAll(/\s+/g, "");
+  }
+  return was.length !== now.length || was.some((token, i) => token !== now[i]);
+}
+
 /** A guard's break, the tests it names, and why it can't run for each test it can't. */
 export type GuardPlan = {
   commit: string;
@@ -2474,16 +2488,19 @@ function checkedGuards(
             if (signalExitCode(error) !== undefined) throw error;
             applied = false;
             refuseAll(
-              `the break in ${short} doesn't apply to HEAD. Git's message cleanup collapses ` +
-                "blank lines: commit it with --cleanup=verbatim",
+              `the break in ${short} doesn't apply to HEAD. If git's message cleanup collapsed ` +
+                "its blank lines, commit it with --cleanup=verbatim",
             );
           }
           if (applied) {
+            let changed = false;
             for (const path of paths) {
-              if (isSignallingSource(path, scratchIndexGit(index, ["show", `:${path}`]))) {
-                signalling.push(path);
-              }
+              const broken = scratchIndexGit(index, ["show", `:${path}`]);
+              if (isSignallingSource(path, broken)) signalling.push(path);
+              if (changesCode(atHead(path) ?? "", broken)) changed = true;
             }
+            if (!changed)
+              refuseAll(`the break in ${short} changes no code, only comments or layout`);
           }
         } finally {
           rmSync(folder, { recursive: true, force: true });
@@ -2643,9 +2660,10 @@ async function main(args: string[]): Promise<number> {
       ),
     atHead,
   );
-  if (guards.plans.length > MAX_GUARD_BREAKS) {
+  const breaks = guards.plans.filter((g) => g.patch !== "").length;
+  if (breaks > MAX_GUARD_BREAKS) {
     console.error(
-      `falsify: ${guards.plans.length} commits carry a guard's break, and falsify runs at most ` +
+      `falsify: ${breaks} commits carry a guard's break, and falsify runs at most ` +
         `${MAX_GUARD_BREAKS}. Give guards that break the same code one commit.`,
     );
     return 1;

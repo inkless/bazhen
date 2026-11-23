@@ -128,6 +128,12 @@ function tokenize(source: string): Token[] | string {
   }
 }
 
+/** A source's tokens as written, comments and layout aside; or why it can't be read. */
+export function codeTokens(source: string): string[] | string {
+  const tokens = tokenize(source);
+  return typeof tokens === "string" ? tokens : tokens.map(({ text }) => text);
+}
+
 /** For each opening token's index, its closing token's; or why the brackets don't balance. */
 function closers(tokens: Token[]): Map<number, number> | string {
   const closing = new Map<number, number>();

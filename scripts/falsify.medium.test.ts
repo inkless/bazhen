@@ -2814,8 +2814,11 @@ const GUARD = `Guard: ${TEST} › caps: marks v broken`;
 // The new test passes at the base and at HEAD, and fails while the source holds MARK.
 const SURVIVES = { STUB_STATUS: "passed", STUB_FAIL_IF: MARK };
 
+/** `line` with MARK in a string of its own, which changes its tokens. */
+const marked = (line: string) => `${line} "${MARK}";`;
+
 /** A ```diff block changing `from`, the first line of `file` at HEAD, to `to`. */
-const breakOf = ({ file = SOURCE, from = V2, to = `${V2} // ${MARK}` } = {}) =>
+const breakOf = ({ file = SOURCE, from = V2, to = marked(from) } = {}) =>
   lines("```diff", `--- a/${file}`, `+++ b/${file}`, "@@ -1 +1 @@", `-${from}`, `+${to}`, "```");
 
 /** An empty commit on the branch whose message holds `blocks`, then the lines `guards`. */
@@ -2848,6 +2851,23 @@ function guardVerdict(extra: Record<string, string> = {}, test = TEST) {
   return { status: result.status, line: line.trim(), leftovers: leftovers() };
 }
 
+/** Falsify's verdict on `caps` under one guard's marker break, and that guard's commit. */
+function underOneBreak(extra: Record<string, string>) {
+  const commit = guardCommit([breakOf()]);
+  return { commit, ...guardVerdict(extra) };
+}
+
+/** The verdict on `caps` when its guard doesn't hold, for the reason `why`. */
+const unheld = (why: string) => ({
+  status: 1,
+  line: `SURVIVED ${TEST} › caps (its guard doesn't hold: ${why})`,
+  leftovers: [],
+});
+const noVerdict = (commit: string) =>
+  `it has no pass or fail under the break in ${commit} (a timeout, or no result)`;
+const notItsOwn = (commit: string) =>
+  `it fails under the break in ${commit}, but not on an assertion of its own`;
+
 /** The source each vitest run under a guard's break saw, in order. */
 const sourcesUnderBreaks = () =>
   stubLog()
@@ -2879,7 +2899,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
           `+++ b/${SOURCE}`,
           "@@ -1,2 +1,2 @@",
           `-${V2}`,
-          `+${V2} // ${MARK}`,
+          `+${marked(V2)}`,
           " ",
           "```",
         ),
@@ -2889,7 +2909,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
     );
     const message = git(fx.linked, "log", "-1", "--format=%B");
     expect({
-      emptied: message.includes(`+${V2} // ${MARK}\n\n\`\`\``),
+      emptied: message.includes(`+${marked(V2)}\n\n\`\`\``),
       ...guardVerdict(),
     }).toEqual({
       emptied: true,
@@ -2899,52 +2919,48 @@ describe("falsify on a branch that guards a test of behaviour the base already h
     });
   });
 
-  it.each([
-    ["it passes under the break", { STUB_FAIL_IF: "NOT THERE" }, "it passes under the break in"],
-    [
-      "it times out under the break",
-      { STUB_FAIL_AS: `Error: Test timed out in 30000ms.\\n    at ${TEST}:3:5` },
-      "it has no pass or fail under the break in",
-    ],
-    [
-      "it fails on a TypeError at its own frame",
-      { STUB_FAIL_AS: `TypeError: v is undefined\\n    at ${TEST}:3:5` },
-      "but not on an assertion of its own",
-    ],
-    [
-      "it fails on an assertion in a helper",
-      {
-        STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at packages/a/src/helper.ts:1:1\\n    at ${TEST}:3:5`,
-      },
-      "but not on an assertion of its own",
-    ],
-    [
-      "its file throws as it loads",
-      { STUB_FAIL_LOAD: "1" },
-      "it has no pass or fail under the break in",
-    ],
-    [
-      "it times out after a soft assertion fails",
-      {
-        STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at ${TEST}:3:5","Error: Test timed out in 30000ms.`,
-      },
-      "it has no pass or fail under the break in",
-    ],
-    [
-      "it fails at HEAD without the break",
-      { STUB_FAIL_IF: V2 },
-      "it doesn't pass at HEAD without a break",
-    ],
-  ])("leaves a guarded test SURVIVED when %s", (_, extra, why) => {
-    guardCommit([breakOf()]);
-    const verdict = guardVerdict(extra);
-    expect({ ...verdict, line: verdict.line.slice(0, 9), why: verdict.line.includes(why) }).toEqual(
-      {
-        status: 1,
-        line: "SURVIVED ",
-        why: true,
-        leftovers: [],
-      },
+  it("leaves a guarded test SURVIVED when it passes under the break", () => {
+    const { commit, ...verdict } = underOneBreak({ STUB_FAIL_IF: "NOT THERE" });
+    expect(verdict).toEqual(unheld(`it passes under the break in ${commit}`));
+  });
+
+  it("leaves a guarded test SURVIVED when it times out under the break", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `Error: Test timed out in 30000ms.\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails on a TypeError at its own frame", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `TypeError: v is undefined\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(notItsOwn(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails on an assertion in a helper", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at packages/a/src/helper.ts:1:1\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(notItsOwn(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when its file throws as it loads", () => {
+    const { commit, ...verdict } = underOneBreak({ STUB_FAIL_LOAD: "1" });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it times out after a soft assertion fails", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at ${TEST}:3:5","Error: Test timed out in 30000ms.`,
+    });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails at HEAD without the break", () => {
+    const { commit: _, ...verdict } = underOneBreak({ STUB_FAIL_IF: V2 });
+    expect(verdict).toEqual(
+      unheld("it doesn't pass at HEAD without a break, so a break failing it shows nothing"),
     );
   });
 
@@ -2978,7 +2994,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
       ],
     ] as const;
     const refused = breaks.map(([file, from, why]) => {
-      const commit = guardCommit([breakOf({ file, from, to: `${from} // ${MARK}` })]);
+      const commit = guardCommit([breakOf({ file, from })]);
       const verdict = guardVerdict();
       git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
       writeFileSync(fx.log, "");
@@ -2995,7 +3011,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
       ["package.json", "{}"],
       ["tests/support/x.ts", "export const s = 1;"],
     ].map(([file = "", from = ""]) => {
-      const commit = guardCommit([breakOf({ file, from, to: `${from} // ${MARK}` })]);
+      const commit = guardCommit([breakOf({ file, from })]);
       const verdict = guardVerdict();
       git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
       return verdict.line.endsWith(
@@ -3060,7 +3076,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
   it("refuses a break that doesn't apply to HEAD, saying how to commit one", () => {
     const commit = guardCommit([breakOf({ from: "export const v = 7;" })]);
     expect(guardVerdict().line).toContain(
-      `the break in ${commit} doesn't apply to HEAD. Git's message cleanup collapses blank lines: commit it with --cleanup=verbatim`,
+      `the break in ${commit} doesn't apply to HEAD. If git's message cleanup collapsed its blank lines, commit it with --cleanup=verbatim`,
     );
   });
 
@@ -3071,18 +3087,18 @@ describe("falsify on a branch that guards a test of behaviour the base already h
   });
 
   it("runs each break alone, on HEAD reset after the one before", () => {
-    guardCommit([breakOf({ to: `${V2} // ${MARK} one` })]);
-    guardCommit([breakOf({ to: `${V2} // ${MARK} two` })]);
+    guardCommit([breakOf({ to: `${V2} "${MARK} one";` })]);
+    guardCommit([breakOf({ to: `${V2} "${MARK} two";` })]);
     const verdict = guardVerdict();
     expect({ verdict, sources: sourcesUnderBreaks() }).toEqual({
       verdict: { status: 0, line: `GUARDED  ${TEST} › caps`, leftovers: [] },
-      sources: [`${V2} // ${MARK} two`, `${V2} // ${MARK} one`],
+      sources: [`${V2} "${MARK} two";`, `${V2} "${MARK} one";`],
     });
   });
 
   it("keeps a test only when every Guard: naming it holds", () => {
     guardCommit([breakOf()]);
-    const harmless = guardCommit([breakOf({ to: `${V2} // harmless` })]);
+    const harmless = guardCommit([breakOf({ to: `${V2} "harmless";` })]);
     const { status, line } = guardVerdict();
     expect({ status, line }).toEqual({
       status: 1,
@@ -3114,6 +3130,34 @@ describe("falsify on a branch that guards a test of behaviour the base already h
         "Guard: tests::b_is_two: a Rust test's path (it names no new TypeScript test)",
       ),
     }).toEqual({ status: 1, killed: true, stray: true });
+  });
+
+  it("refuses a break that changes only comments or layout", () => {
+    const commit = guardCommit([breakOf({ to: `${V2} // ${MARK}` })]);
+    expect(guardVerdict()).toEqual(
+      unheld(`the break in ${commit} changes no code, only comments or layout`),
+    );
+  });
+
+  it("runs as many breaks as falsify allows", () => {
+    for (let i = 0; i < MAX_BREAKS; i++) guardCommit([breakOf({ to: `${V2} "${MARK} ${i}";` })]);
+    const verdict = guardVerdict();
+    expect({ ...verdict, runs: sourcesUnderBreaks().length }).toEqual({
+      status: 0,
+      line: `GUARDED  ${TEST} › caps`,
+      leftovers: [],
+      runs: MAX_BREAKS,
+    });
+  });
+
+  it("counts toward its cap only the commits that carry a break", () => {
+    for (let i = 0; i < MAX_BREAKS; i++) guardCommit([breakOf({ to: `${V2} "${MARK} ${i}";` })]);
+    const bare = guardCommit([]);
+    const { output } = againstBase(SURVIVES);
+    expect({
+      capped: output.includes("commits carry a guard's break"),
+      refused: output.includes(`commit ${bare} holds no \`\`\`diff block`),
+    }).toEqual({ capped: false, refused: true });
   });
 
   it("refuses more breaks than falsify runs, before it installs anything", () => {
@@ -3186,7 +3230,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
     const guard = lines(
       "test: guard",
       "",
-      breakOf({ from: v3, to: `${v3} // ${MARK}` }),
+      breakOf({ from: v3 }),
       `Guard: ${LISTED_TEST} › caps: marks v broken`,
     );
     const result = changeDaemon(

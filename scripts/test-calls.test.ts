@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { testCalls, type TestCall } from "./test-calls.ts";
+import { codeTokens, testCalls, type TestCall } from "./test-calls.ts";
 
 const lines = (...text: string[]) => `${text.join("\n")}\n`;
 
@@ -214,5 +214,19 @@ describe("testCalls", () => {
       'brackets that don\'t balance (a stray ")")',
       "brackets left open at its end",
     ]);
+  });
+});
+
+describe("codeTokens", () => {
+  it("reads the same tokens through a change of comments or layout", () => {
+    expect(codeTokens("const v = 2; // two\n")).toEqual(codeTokens("/* v */ const  v=\n  2;"));
+  });
+
+  it("reads a changed string as a changed token", () => {
+    expect(codeTokens('const v = "a b";')).not.toEqual(codeTokens('const v = "a  b";'));
+  });
+
+  it("says why it can't read a source with an unterminated literal", () => {
+    expect(codeTokens('const v = "a;')).toBe("an unterminated literal at offset 10");
   });
 });

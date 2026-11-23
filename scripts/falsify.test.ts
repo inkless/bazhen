@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   brokenPathRefusal,
+  changesCode,
   classify,
+  closedBlock,
   crateBinaries,
   failedInTest,
   failedOnOwnAssertion,
-  closedBlock,
   guardErrors,
   guardsOf,
   isFailsTest,
@@ -1809,5 +1810,19 @@ describe("closedBlock", () => {
       "old mode 100644",
       "new mode 100755",
     ]);
+  });
+});
+
+describe("changesCode", () => {
+  it("is false for a change of comments or layout alone", () => {
+    expect(changesCode("export const v = 2;\n", "export const v = 2; // BROKEN\n")).toBe(false);
+  });
+
+  it("is true for a changed token", () => {
+    expect(changesCode("export const v = 2;\n", "export const v = 3;\n")).toBe(true);
+  });
+
+  it("compares a file it can't read as TypeScript by its text without whitespace", () => {
+    expect([changesCode('"a', '"a '), changesCode('"a', '"b')]).toEqual([false, true]);
   });
 });
