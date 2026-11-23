@@ -202,12 +202,16 @@ const KILL_GRACE_MS = 2000;
 // its scope, kills what is left 10 s later, and stops the scope; killed before that, it leaves the
 // scope, and what a hung test started in it, running to the scope's time cap.
 const CAPPED_STOP_GRACE_MS = 30_000;
-// The falsify task's own cap: inside its scope, capped holds a run of its own to 90% of that.
+// The falsify task's own cap: inside its scope, capped holds a run of its own to 90% of that. The
+// run's scope is beside the task's, which meanwhile holds only falsify and capped, waiting on it.
 const MUTANT_RUN_MEMORY = "8G";
-// Runs each mutant's tests without a capped scope of their own, saving its half a second, for
-// tests of falsify's judging. It hides nothing: what a run leaves is then the falsify task's own
-// leftover, which fails that task.
+// Runs a mutant's tests without a capped scope of their own, saving its half a second, for tests
+// of falsify's judging. It can't hide a leftover from the falsify task's run: what an uncontained
+// run leaves stays where that run counts, as far as it can count (its scope under systemd, only its
+// process group elsewhere, which a process in a session of its own escapes either way).
 const UNCONTAINED_ENV = "BZ_FALSIFY_UNCONTAINED";
+// The most a mutant's run's time cap may be: a watchdog's timer holds no more.
+const MAX_BACKSTOP_S = Math.floor(TIMER_MAX_MS / 1000);
 
 const counted = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const secondsSince = (start: number) => Math.round((performance.now() - start) / 1000);
@@ -1784,12 +1788,13 @@ fail-fast = false
 
 /**
  * Runs `tests` once in `dir` and returns nextest's libtest-json-plus output, however it exited,
- * and whether it ran out of time.
+ * and whether it ran out of time. `mutated` says a mutant is applied.
  */
 async function runRustTests(
   dir: string,
   top: string,
   tests: RustTest[],
+  mutated = false,
 ): Promise<{ out: string; timedOut: boolean; memoryKilled: boolean }> {
   const kills = join(dir, "falsify-memory-kills");
   rmSync(kills, { force: true });
@@ -1820,16 +1825,16 @@ async function runRustTests(
     "-E",
     nextestFilter(tests),
   ];
-  // A hung test dies before its Drop stops what it started, and a holder it started is in a
-  // session of its own, out of every process group's reach: only stopping the scope the run had to
-  // itself ends it, before the next run, rather than leaving it to falsify's own run. The time cap
-  // only backs up falsify's own timeout. Each test process's runner names the test in `kills` when
-  // a memory cap killed it.
-  const backstop = `${Math.ceil(MUTANT_TIMEOUT_MS / 1000) + 60}s`;
-  const caps = ["--memory", MUTANT_RUN_MEMORY, "--time", backstop];
+  // A test a mutant hangs dies before its Drop stops what it started, and a holder it started is in
+  // a session of its own, out of every process group's reach: only stopping a scope the run had to
+  // itself ends it, before the next run. A run without a mutant isn't contained, so what it leaves
+  // is the test's own leak, which fails falsify's own run. The time cap only backs up falsify's
+  // own timeout. Each test process's runner names the test in `kills` when a memory cap killed it.
+  const backstopS = Math.min(Math.ceil(MUTANT_TIMEOUT_MS / 1000) + 60, MAX_BACKSTOP_S);
+  const caps = ["--memory", MUTANT_RUN_MEMORY, "--time", `${backstopS}s`];
   const contained = [CAPPED, OWN_SCOPE_FLAG, ...caps, "--", "cargo-nextest", ...args];
   const { out, timedOut } =
-    process.env[UNCONTAINED_ENV] === "1"
+    !mutated || process.env[UNCONTAINED_ENV] === "1"
       ? await capture("cargo-nextest", args, dir, "falsify-results.json", {
           env,
           timeoutMs: MUTANT_TIMEOUT_MS,
@@ -1971,7 +1976,7 @@ async function mutateRustTests(
     let ranOutOfTime = false;
     let ranOutOfMemory = false;
     const failedUnder = async (tests: RustTest[]) => {
-      const tried = await runRustTests(dir, top, tests);
+      const tried = await runRustTests(dir, top, tests, true);
       ranOutOfTime ||= tried.timedOut;
       ranOutOfMemory ||= tried.memoryKilled;
       const failed = new Set(

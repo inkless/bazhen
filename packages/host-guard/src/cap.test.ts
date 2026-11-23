@@ -229,6 +229,14 @@ describe("how a run is capped", () => {
     await expect(chooseMode(cap, "own-scope", inScope)).resolves.toEqual({ mode: "scope" });
   });
 
+  it("watches a run that asks for a scope of its own where systemd won't give one, even inside a scope", async () => {
+    const refused = deps({ inScope: () => true, probe: async () => no });
+    await expect(chooseMode(cap, "own-scope", refused)).resolves.toEqual({
+      mode: "watched",
+      note: "systemd-run is missing",
+    });
+  });
+
   it("chooses for a run that asks for a scope of its own outside one as for any run", async () => {
     await expect(chooseMode(cap, "own-scope", deps({ probe: async () => no }))).resolves.toEqual({
       mode: "watched",
