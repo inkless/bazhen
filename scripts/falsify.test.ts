@@ -25,6 +25,7 @@ import {
   counterparts,
   noOutputReason,
   timeoutFrom,
+  leftRunning,
   parseArgs,
   parseNameStatus,
   projectsOf,
@@ -343,6 +344,21 @@ describe("noOutputReason", () => {
       "it wrote no listing",
       "its report couldn't be read (EISDIR)",
     ]);
+  });
+});
+
+describe("leftRunning", () => {
+  it("reads what capped's report says a run left running, by name or by count", () => {
+    const named = [
+      "capped: peak 1.2 GiB of 7.2 GiB",
+      "capped: stopped 4 process(es) its command left running: bazhen-holder ×2, cat ×2",
+      "capped: the run fails, though its command passed: its command left processes running",
+    ].join("\n");
+    expect([
+      leftRunning(named),
+      leftRunning("capped: stopped 3 process(es) its command left running"),
+      leftRunning("capped: peak 1.2 GiB of 7.2 GiB\n"),
+    ]).toEqual(["bazhen-holder ×2, cat ×2", "3 process(es)", undefined]);
   });
 });
 

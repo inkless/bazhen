@@ -144,6 +144,23 @@ describe("testEvents", () => {
       { test: "bazhen-hook tests::b", event: "failed", stdout: "x" },
     ]);
   });
+
+  it("keeps the reason nextest gives for a test it ended", () => {
+    const ended = JSON.stringify({
+      type: "test",
+      event: "failed",
+      name: "bazhen-hook::bazhen_hook$tests::slow",
+      reason: "time limit exceeded",
+    });
+    expect(testEvents(ended, TARGETS)).toEqual([
+      {
+        test: "bazhen-hook tests::slow",
+        event: "failed",
+        stdout: "",
+        reason: "time limit exceeded",
+      },
+    ]);
+  });
 });
 
 // A crate's source as rustfmt writes it: product code, a test module, and product code after it.

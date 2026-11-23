@@ -243,7 +243,10 @@ if [ "$2" = run ]; then
     if [ -n "$at" ] && [ "\${STUB_FLAKY:-}" = 1 ]; then
       if [ -e "$STUB_LOG.flaked" ]; then at=""; else : > "$STUB_LOG.flaked"; fi
     fi
-    if [ -n "$at" ]; then
+    # As nextest reports a test it ended at its time limit.
+    if [ "$name" = "\${STUB_SLOW_UNMUTATED:-}" ] && ! grep -q MUTATED ${LIB}; then
+      printf '{"type":"test","event":"failed","name":"hook::hook$%s","reason":"time limit exceeded"}\\n' "$name"
+    elif [ -n "$at" ]; then
       printf '{"type":"test","event":"failed","name":"hook::hook$%s","stdout":"panicked at %s: assertion failed"}\\n' "$name" "$at"
     else
       printf '{"type":"test","event":"ok","name":"hook::hook$%s"}\\n' "$name"
@@ -1425,25 +1428,52 @@ describe("falsify judging new Rust tests by mutating the change", () => {
   );
 
   it.runIf(inCappedScope)(
-    "leaves what a run without a mutant started to the run around falsify, as a leak of its own",
+    "fails on what a run without a mutant left running, naming the run's tests",
     async () => {
       mutatedBranch(
         ["tests::b_is_two"],
         [mutantOfB("replace b -> u8 with 0")],
         [`MUTATED|tests::b_is_two|${ASSERTION}`],
       );
-      const result = againstBase({ ...CONTAINED, STUB_SESSION_UNMUTATED: "8" });
+      const result = againstBase({ ...CONTAINED, STUB_SESSION_UNMUTATED: "30" });
       const sessions = [...stubLog().matchAll(/^SESSION (\d+)$/gm)].map(([, pid]) => Number(pid));
-      expect({ status: result.status, alive: sessions.map((pid) => isAlive(pid)) }).toEqual({
-        status: 0,
-        alive: [true, true],
+      expect({
+        status: result.status,
+        leaks: result.output.match(/^ {2}the \w+ run of .* left .* running$/gm),
+        sessions: sessions.length,
+      }).toEqual({
+        status: 1,
+        leaks: [
+          "  the unmutated run of hook tests::b_is_two left sleep ×1 running",
+          "  the recheck run of hook tests::b_is_two left sleep ×1 running",
+        ],
+        sessions: 2,
       });
-      // Gone by itself before this test ends, so the run around it isn't charged with it.
-      await expect
-        .poll(() => sessions.some((pid) => isAlive(pid)), { timeout: 15_000, interval: 500 })
-        .toBe(false);
+      await expect.poll(() => sessions.some((pid) => isAlive(pid)), { timeout: 2000 }).toBe(false);
     },
-    30_000,
+  );
+
+  it.runIf(inCappedScope)(
+    "only logs what a run without a mutant left running when a test of it was ended at its time limit",
+    async () => {
+      mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
+      const result = againstBase({
+        ...CONTAINED,
+        STUB_SESSION_UNMUTATED: "30",
+        STUB_SLOW_UNMUTATED: "tests::b_is_two",
+      });
+      const session = Number(/^SESSION (\d+)$/m.exec(stubLog())?.[1]);
+      expect({
+        started: session > 1,
+        logged: result.output.includes(
+          "falsify: the unmutated run of hook tests::b_is_two left sleep ×1 running, stopped with " +
+            "it, after a test was ended at its time limit",
+        ),
+        failsOnIt: result.output.includes("left processes running"),
+        invalid: result.output.includes("tests::b_is_two (Rust: fails or doesn't run unmutated"),
+      }).toEqual({ started: true, logged: true, failsOnIt: false, invalid: true });
+      await expect.poll(() => isAlive(session), { timeout: 2000 }).toBe(false);
+    },
   );
 
   it("says a mutant's run timed out, and judges the test by the others", () => {
