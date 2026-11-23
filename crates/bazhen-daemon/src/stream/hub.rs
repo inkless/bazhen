@@ -295,6 +295,13 @@ struct Loading<S> {
     since: Instant,
 }
 
+/// A view chosen to end for its stalled snapshot, as it was when chosen.
+struct Stalled<S> {
+    watched: Arc<Watched<S>>,
+    id: AttachmentId,
+    since: Instant,
+}
+
 /// How opening a terminal's stream went; joins that come while it opens wait for the one opening
 /// it, and are told the same.
 struct Slot<S> {
@@ -942,12 +949,16 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
             if let Either::Right(_) = select(written, pin!(gone)).await {
                 return Err(JoinError::Ended);
             }
-            if let Some(view) = watched.lock().view_mut(id) {
+            // Under the terminal's lock, so a view ending for a stalled snapshot is seen to
+            // have moved on, or ends before it does.
+            let mut state = watched.lock();
+            if let Some(view) = state.view_mut(id) {
                 view.snapshot_bytes = 0;
             }
             if let Some(loading) = lock(&self.loading).iter_mut().find(|l| &l.id == id) {
                 loading.since = Instant::now();
             }
+            drop(state);
         }
         self.unload(id);
         Ok(())
@@ -964,46 +975,74 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         id: &AttachmentId,
         bytes: usize,
     ) -> bool {
+        let Some(stalled) = self.admit(watched, id, bytes) else {
+            return false;
+        };
+        self.end_stalled(stalled);
+        true
+    }
+
+    /// Counts a snapshot of `bytes` for `id` as being sent if it fits, or would once the views
+    /// it returns, whose snapshots have stalled, are ended; `None` if it would not.
+    fn admit(
+        &self,
+        watched: &Arc<Watched<R::Stream>>,
+        id: &AttachmentId,
+        bytes: usize,
+    ) -> Option<Vec<Stalled<R::Stream>>> {
         let now = Instant::now();
         let fits = |held: usize| {
             held == 0 || held.saturating_add(bytes) <= self.options.max_snapshot_bytes
         };
-        let ending = {
-            let mut loading = lock(&self.loading);
-            let mut pending = 0;
-            let mut freeable = 0;
-            let mut stalled = vec![];
-            for l in loading.iter() {
-                pending += l.bytes;
-                if now.saturating_duration_since(l.since) < self.options.snapshot_stall {
-                    continue;
-                }
-                freeable += l.bytes;
-                stalled.push(l);
+        let mut loading = lock(&self.loading);
+        let mut pending = 0;
+        let mut freeable = 0;
+        let mut stalled = vec![];
+        for l in loading.iter() {
+            pending += l.bytes;
+            if now.saturating_duration_since(l.since) < self.options.snapshot_stall {
+                continue;
             }
-            if !fits(pending - freeable) {
-                return false;
-            }
-            let mut ending = vec![];
-            for l in stalled {
-                if fits(pending) {
-                    break;
-                }
-                pending -= l.bytes;
-                ending.push((Arc::clone(&l.watched), l.id.clone()));
-            }
-            loading.push(Loading {
-                id: id.clone(),
-                watched: Arc::clone(watched),
-                bytes,
-                since: now,
-            });
-            ending
-        };
-        for (other, stalled) in &ending {
-            self.evict(other, &mut other.lock(), stalled);
+            freeable += l.bytes;
+            stalled.push(l);
         }
-        true
+        if !fits(pending - freeable) {
+            return None;
+        }
+        let mut ending = vec![];
+        for l in stalled {
+            if fits(pending) {
+                break;
+            }
+            pending -= l.bytes;
+            ending.push(Stalled {
+                watched: Arc::clone(&l.watched),
+                id: l.id.clone(),
+                since: l.since,
+            });
+        }
+        loading.push(Loading {
+            id: id.clone(),
+            watched: Arc::clone(watched),
+            bytes,
+            since: now,
+        });
+        Some(ending)
+    }
+
+    /// Ends each view chosen for its stalled snapshot, under its terminal's lock, unless it has
+    /// moved on since: written a piece, or the last of it, in the meantime. A view is told it is
+    /// attached, and has a piece counted written, only under that lock.
+    fn end_stalled(self: &Arc<Self>, stalled: Vec<Stalled<R::Stream>>) {
+        for chosen in stalled {
+            let mut state = chosen.watched.lock();
+            let still = lock(&self.loading)
+                .iter()
+                .any(|l| l.id == chosen.id && l.since == chosen.since);
+            if still {
+                self.evict(&chosen.watched, &mut state, &chosen.id);
+            }
+        }
     }
 
     /// The view's snapshot is no longer being sent.
@@ -3715,6 +3754,71 @@ mod tests {
                         snapshot,
                         Err(JoinError::Ended)
                     )
+                );
+            });
+        }
+
+        /// Chooses the views to end for a snapshot of `bytes` to `newcomer`, lets `meanwhile` run,
+        /// then ends those chosen; how many were, and the newcomer's room given back.
+        async fn chosen_then_ended<F: Future<Output = ()>>(
+            h: &H,
+            bytes: usize,
+            meanwhile: F,
+        ) -> usize {
+            let shared = &h.hub.shared;
+            let slot = lock(&shared.watched).get(&h.terminal).cloned().unwrap();
+            let watched = Arc::clone(slot.opened.get().unwrap().as_ref().unwrap());
+            let newcomer = AttachmentId::mint(1, [9; 16]);
+            let chosen = shared.admit(&watched, &newcomer, bytes).unwrap();
+            let count = chosen.len();
+            meanwhile.await;
+            shared.end_stalled(chosen);
+            shared.unload(&newcomer);
+            count
+        }
+
+        #[test]
+        fn spares_a_view_chosen_for_its_stalled_snapshot_that_writes_a_piece_before_it_is_ended() {
+            paused().block_on(async {
+                let (h, snapshot) = measured(|snap| budget(snap * 3 / 2));
+                let reading = h.loading(Ask::observer()).await;
+                h.later(1000).await;
+                let chosen = chosen_then_ended(&h, snapshot, reading.write()).await;
+                reading.catch_up().await;
+                let joined = reading.joined.await.unwrap();
+                assert_eq!(
+                    (
+                        chosen,
+                        evicted(&h.log),
+                        joined.map(|_| ()),
+                        reading.seen.closed()
+                    ),
+                    (1, 0, Ok(()), false)
+                );
+            });
+        }
+
+        #[test]
+        fn spares_a_view_chosen_for_its_stalled_snapshot_that_finishes_before_it_is_ended() {
+            paused().block_on(async {
+                let (h, snapshot) = measured(|snap| budget(snap * 3 / 2));
+                let reading = h.loading(Ask::observer()).await;
+                h.later(1000).await;
+                let chosen = chosen_then_ended(&h, snapshot, reading.catch_up()).await;
+                let joined = reading.joined.await.unwrap();
+                settle().await;
+                assert_eq!(
+                    (
+                        chosen,
+                        evicted(&h.log),
+                        joined.map(|_| ()),
+                        reading.seen.closed(),
+                        reading
+                            .seen
+                            .last_frame()
+                            .map(|f| matches!(f, StreamServerFrame::Attached { .. }))
+                    ),
+                    (1, 0, Ok(()), false, Some(true))
                 );
             });
         }

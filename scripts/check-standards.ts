@@ -1003,6 +1003,10 @@ const NOT_DECODERS: Record<string, string> = {
     "holds the hub's state, whose views hold output queued for them; drops a view, its queue with it, reading none of that output",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::make_room":
     "weighs the sizes of the snapshots being sent against the cap and ends stalled views; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::admit":
+    "weighs the sizes of the snapshots being sent against the cap and picks the stalled views to end; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::end_stalled":
+    "ends the views picked for stalled snapshots that haven't moved on, by id and time; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::unload":
     "takes a view out of those whose snapshots are being sent, by its id; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::park":
