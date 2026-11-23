@@ -1658,14 +1658,22 @@ mod tests {
                     let deadline = Instant::now() + Duration::from_secs(15);
                     while self.kept(id).as_deref() != line {
                         if Instant::now() >= deadline {
-                            let screen = match self.shown(id).await {
-                                Ok(screen) => screen,
-                                Err(e) => format!("(no screen: {e})"),
-                            };
+                            let screen =
+                                match tokio::time::timeout(Duration::from_secs(5), self.shown(id))
+                                    .await
+                                {
+                                    Ok(Ok(screen)) => screen,
+                                    Ok(Err(e)) => format!("(no screen: {e})"),
+                                    Err(_) => {
+                                        "(no screen: the holder didn't answer in 5 s)".to_owned()
+                                    }
+                                };
+                            let said = self.said.text();
+                            let lines: Vec<&str> = said.lines().collect();
+                            let tail = lines[lines.len().saturating_sub(200)..].join("\n");
                             panic!(
-                                "kept {:?}, not {line:?}\nthe screen shows:\n{screen}\nthe daemon said:\n{}",
+                                "kept {:?}, not {line:?}\nthe screen shows:\n{screen}\nthe daemon's last 200 lines said:\n{tail}",
                                 self.kept(id),
-                                self.said.text()
                             );
                         }
                         tokio::time::sleep(Duration::from_millis(50)).await;
