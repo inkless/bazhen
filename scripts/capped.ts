@@ -20,8 +20,9 @@
 // `--own-scope` gives a run a scope of its own even inside a capped scope, where it would otherwise
 // run through that scope in a group of its own. A group can't reach what its command starts in a
 // session of its own, such as a holder, and the enclosing run would count that as its own command's
-// leftover; stopping a scope of its own ends it with the run. Its cap is still at most 90% of the
-// enclosing scope's (`clampMemory`), and outside a scope the flag changes nothing.
+// leftover; stopping a scope of its own ends it with the run. Its cap is at most 90% of the
+// enclosing scope's (`clampMemory`), but adds to that scope's rather than counting within it, so it
+// is for a run the enclosing command waits on. Outside a scope the flag changes nothing.
 //
 // host-guard is imported by path, not by package name, and needs only node: built-ins: cargo-mutants
 // runs the tests in a copy of the tree that may leave out node_modules, and CI's macOS Rust job

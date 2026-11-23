@@ -204,10 +204,12 @@ if [ "$2" = run ]; then
   if grep -q MUTATED ${LIB}; then hang="\${STUB_HANG:-}"; else hang="\${STUB_HANG_UNMUTATED:-}"; fi
   # As capped's runner names a test process a memory cap killed.
   if grep -q MUTATED ${LIB} && [ "\${STUB_MEMORY_KILL:-}" = 1 ]; then echo hook >> "$BZ_CAPPED_KILLS"; fi
-  # As a test's holder does: a process in a session of its own, which outlives the test.
-  if grep -q MUTATED ${LIB} && [ "\${STUB_SESSION:-}" = 1 ]; then
-    # Without job control it leads no group, so setsid keeps its pid and $! names it.
-    setsid sleep 30 > /dev/null 2>&1 &
+  # As a test's holder does: a process in a session of its own, which outlives the test, under a
+  # mutant or, as a leak of the test's own, without one. Without job control it leads no group, so
+  # setsid keeps its pid and $! names it.
+  if grep -q MUTATED ${LIB}; then session="\${STUB_SESSION:-}"; else session="\${STUB_SESSION_UNMUTATED:-}"; fi
+  if [ -n "$session" ]; then
+    setsid sleep "$session" > /dev/null 2>&1 &
     echo "SESSION $!" >> "$STUB_LOG"
   fi
   if [ "$hang" = 1 ]; then
@@ -1408,17 +1410,40 @@ describe("falsify judging new Rust tests by mutating the change", () => {
 
   it.runIf(inCappedScope)(
     "stops what a mutant's run started in a session of its own once that run ends",
-    () => {
+    async () => {
       mutatedBranch(
         ["tests::b_is_two"],
         [mutantOfB("replace b -> u8 with 0")],
         [`MUTATED|tests::b_is_two|${ASSERTION}`],
       );
-      const result = againstBase({ ...CONTAINED, STUB_SESSION: "1" });
+      const result = againstBase({ ...CONTAINED, STUB_SESSION: "30" });
       const session = Number(/^SESSION (\d+)$/m.exec(stubLog())?.[1]);
       expect({ status: result.status, started: session > 1 }).toEqual({ status: 0, started: true });
-      expect(isAlive(session)).toBe(false);
+      // Stopped, though perhaps not yet reaped.
+      await expect.poll(() => isAlive(session), { timeout: 2000 }).toBe(false);
     },
+  );
+
+  it.runIf(inCappedScope)(
+    "leaves what a run without a mutant started to the run around falsify, as a leak of its own",
+    async () => {
+      mutatedBranch(
+        ["tests::b_is_two"],
+        [mutantOfB("replace b -> u8 with 0")],
+        [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      );
+      const result = againstBase({ ...CONTAINED, STUB_SESSION_UNMUTATED: "8" });
+      const sessions = [...stubLog().matchAll(/^SESSION (\d+)$/gm)].map(([, pid]) => Number(pid));
+      expect({ status: result.status, alive: sessions.map((pid) => isAlive(pid)) }).toEqual({
+        status: 0,
+        alive: [true, true],
+      });
+      // Gone by itself before this test ends, so the run around it isn't charged with it.
+      await expect
+        .poll(() => sessions.some((pid) => isAlive(pid)), { timeout: 15_000, interval: 500 })
+        .toBe(false);
+    },
+    30_000,
   );
 
   it("says a mutant's run timed out, and judges the test by the others", () => {
@@ -1444,11 +1469,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
 
   it("says the unmutated run timed out, rather than that the test fails", () => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    const result = againstBase({
-      ...CONTAINED,
-      STUB_HANG_UNMUTATED: "1",
-      FALSIFY_RUST_TIMEOUT_MS: "2000",
-    });
+    const result = againstBase({ STUB_HANG_UNMUTATED: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
     expect({
       status: result.status,
       timedOut: result.output.includes(
@@ -1695,7 +1716,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       branch();
       const child = spawn("node", [FALSIFY, "--base", fx.base], {
         cwd: fx.linked,
-        env: env({ ...CONTAINED, STUB_HANG: "1", STUB_HANG_VITEST: "1", STUB_STUBBORN: "1" }),
+        env: env({ STUB_HANG: "1", STUB_HANG_VITEST: "1", STUB_STUBBORN: "1" }),
         stdio: "ignore",
       });
       const exited = once(child, "exit");

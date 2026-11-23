@@ -434,9 +434,11 @@ of its own, and a runaway dies alone.
   scope in `bazhen-tests.slice`, with no swap. Past its cap the kernel kills only the scope's
   biggest process, and the run goes on to report it. A capped command inside a capped scope runs
   in that scope, under its cap, unless it passes `--own-scope`: then it gets a scope of its own
-  beside that one, capped at 90% of it, and stopping that scope as the run ends ends everything in
-  it, a process in a session of its own included. falsify runs each mutant's Rust tests so, since a
-  hung test dies before its holders are stopped. The slice holds all capped runs together to
+  beside that one, and stopping that scope as the run ends ends everything in it, a process in a
+  session of its own included. Its cap is held to 90% of the enclosing one, but adds to it rather
+  than counting within it, so only the slice holds the two together: it is for a run the enclosing
+  command waits on. falsify runs each mutant's Rust tests so, since a test the mutant hangs dies
+  before its holders are stopped. The slice holds all capped runs together to
   60% of the machine. Elsewhere (macOS, CI runners, containers) a watchdog sums the anonymous
   memory of the run's process tree, and past the cap kills the whole run. A run prints its peak,
   and the cap that fired, if one did: `capped: peak 1.2 GiB of 8 GiB`.

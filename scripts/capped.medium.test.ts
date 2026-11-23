@@ -141,8 +141,11 @@ const asTask = (flags: string[], script: string) =>
   );
 // A run inside the task's run whose command starts a process in a session of its own, as a
 // holder does, and which fails on it or not: the task's command passes regardless.
+// It waits until the sleep leads its session, so the inner run's own count can't find it still in
+// its group.
 const startsSession = (flags: string) =>
-  `"${capped}" ${flags} --memory 128M --time 1m -- sh -c 'setsid sleep 30 &'; exit 0`;
+  `"${capped}" ${flags} --memory 128M --time 1m -- sh -c '` +
+  `setsid sleep 30 & until [ "$(ps -o sid= -p $!)" -eq $! ]; do sleep 0.05; done'; exit 0`;
 const LEFT_SLEEP = "capped: stopped 1 process(es) its command left running: sleep ×1";
 const OUTLIVES_RUNAWAY = `"${process.execPath}" -e '${RUNAWAY}'; exit 0`;
 const FAILS = "capped: the run fails, though its command passed:";
