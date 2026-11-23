@@ -12,10 +12,10 @@ let log = "";
 beforeAll(async () => {
   daemon = await Daemon.start();
   log = join(daemon.work, "keys.log");
-  const program = await daemon.program([process.execPath, probe, log]);
+  const program = await daemon.shellProgram([process.execPath, probe, log]);
   terminalId = program.terminalId;
   await waitUntil(
-    async () => (await daemon.screen(program.agentId)).includes("key-probe ready"),
+    async () => (await daemon.screen(program)).includes("key-probe ready"),
     "the key probe",
   );
 });

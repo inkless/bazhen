@@ -28,10 +28,10 @@ async function opened(
  * Waits until `view` shows what the terminal has on screen: a view that opens before the program
  * has drawn gets the screen as it stood, still empty.
  */
-async function drawn(view: View, agentId: string, at = size): Promise<void> {
+async function drawn(view: View, terminalId: string, at = size): Promise<void> {
   await expect
     .poll(async () => (await replay(view.received(), at)).screen)
-    .toEqual(captured(await daemon.screen(agentId)));
+    .toEqual(captured(await daemon.screen({ terminalId })));
 }
 
 /** The numbers of every `n <number>` line a view shows. */
@@ -45,13 +45,13 @@ async function numbers(view: View): Promise<number[]> {
 
 /** Replays a taller attachment and compares its relative redraw with the live holder. */
 async function tallerAttach(region: string) {
-  const { agentId, terminalId } = await daemon.program([
+  const { terminalId } = await daemon.shellProgram([
     "sh",
     "-c",
     `while [ "$(stty size)" != "5 40" ]; do sleep 0.05; done; stty -echo; seq 20; printf '${region}\\033[5;1Hready'; read -r line; printf '\\033[1A\\rredraw\\033[2B\\r\\ninput\\033[4;1H\\r\\nfinished'; sleep 600`,
   ]);
   const first = await opened(terminalId, "interactive", { cols: 40, rows: 5 });
-  await expect.poll(() => daemon.screen(agentId)).toContain("ready");
+  await expect.poll(() => daemon.screen({ terminalId })).toContain("ready");
   const taller = { cols: 40, rows: 10 };
   const driver = await opened(terminalId, "interactive", taller);
   await driver.drive();
@@ -59,8 +59,8 @@ async function tallerAttach(region: string) {
   await expect.poll(() => driver.output()).toContain("finished");
   const shown = await replay(driver.received(), taller);
   const holder = {
-    screen: captured(await daemon.screen(agentId)),
-    cursor: await daemon.cursor(agentId),
+    screen: captured(await daemon.screen({ terminalId })),
+    cursor: await daemon.cursor({ terminalId }),
   };
   first.close();
   driver.close();
@@ -79,22 +79,22 @@ describe("what a view shows when it opens", () => {
   });
 
   it("shows all the history the terminal holds above the screen, with the cursor where it is", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       `seq -f "line %.0f" 1 ${HISTORY_LINES + 1000}; printf "prompt> "; sleep 600`,
     ]);
     await waitUntil(
-      async () => (await daemon.screen(agentId)).includes("prompt>"),
+      async () => (await daemon.screen({ terminalId })).includes("prompt>"),
       "the program's output",
     );
     const first = await opened(terminalId, "interactive");
-    await drawn(first, agentId);
+    await drawn(first, terminalId);
     const late = await opened(terminalId, "observe");
     const shown = await replay(late.snapshot(), size);
     expect([shown.lines, shown.cursor]).toEqual([
-      captured(await daemon.screen(agentId, HISTORY_LINES)),
-      await daemon.cursor(agentId),
+      captured(await daemon.screen({ terminalId }, HISTORY_LINES)),
+      await daemon.cursor({ terminalId }),
     ]);
     // The whole history, not a part: the terminal holds HISTORY_LINES, less any lines it moved back
     // onto the screen as the view made it taller.
@@ -104,7 +104,7 @@ describe("what a view shows when it opens", () => {
   });
 
   it("puts the cursor where a view open all along has it, after a full line", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       `sleep 2; printf '%0${size.cols}d' 0; sleep 600`,
@@ -112,10 +112,10 @@ describe("what a view shows when it opens", () => {
     // Open before the program draws, so it reads the line as it is written, not from a snapshot.
     const first = await opened(terminalId, "interactive");
     await waitUntil(
-      async () => (await daemon.screen(agentId)).includes("0".repeat(size.cols)),
+      async () => (await daemon.screen({ terminalId })).includes("0".repeat(size.cols)),
       "the line",
     );
-    await drawn(first, agentId);
+    await drawn(first, terminalId);
     const late = await opened(terminalId, "observe");
     // The line filled the row, so the cursor waits to wrap: one past the last column, as tmux
     // reports it too, until the next character lands on the row below.
@@ -131,7 +131,7 @@ describe("what a view shows when it opens", () => {
   });
 
   it("lays out rows holding emoji and wide characters exactly as the terminal does", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       "sleep 2; printf 'a😀b  c\\n日本語x\\nflag 🇯🇵 end\\n\\033[4;10Hmoved'; sleep 600",
@@ -139,8 +139,11 @@ describe("what a view shows when it opens", () => {
     // Open before the program draws: what it shows is the output itself, read as a browser reads
     // it, which the terminal's screen and a later view's snapshot must both match.
     const first = await opened(terminalId, "interactive");
-    await waitUntil(async () => (await daemon.screen(agentId)).includes("moved"), "the output");
-    await drawn(first, agentId);
+    await waitUntil(
+      async () => (await daemon.screen({ terminalId })).includes("moved"),
+      "the output",
+    );
+    await drawn(first, terminalId);
     const late = await opened(terminalId, "observe");
     expect((await replay(late.snapshot(), size)).screen).toEqual(
       (await replay(first.received(), size)).screen,
@@ -150,7 +153,7 @@ describe("what a view shows when it opens", () => {
   });
 
   it("shows a view that opens on a busy terminal everything the first view shows, once", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       'i=0; while [ $i -lt 1500 ]; do i=$((i+1)); echo "n $i"; sleep 0.002; done; echo done; sleep 600',
@@ -158,12 +161,12 @@ describe("what a view shows when it opens", () => {
     const first = await opened(terminalId, "interactive");
     // The history, not the screen: at 2 ms a line, "n 300" is on screen for less than a poll.
     await waitUntil(
-      async () => (await daemon.screen(agentId, 2000)).includes("n 300\n"),
+      async () => (await daemon.screen({ terminalId }, 2000)).includes("n 300\n"),
       "the program to be busy",
     );
     const late = await opened(terminalId, "observe");
     await waitUntil(
-      async () => (await daemon.screen(agentId)).includes("done"),
+      async () => (await daemon.screen({ terminalId })).includes("done"),
       "the program to finish",
     );
     await expect.poll(async () => (await replay(late.received(), size)).screen).toContain("done");
@@ -174,14 +177,17 @@ describe("what a view shows when it opens", () => {
   });
 
   it("keeps the mouse protocol the program set for a view that opens later", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       "printf '\\033[?1000h\\033[?1006hmouse on'; sleep 600",
     ]);
-    await waitUntil(async () => (await daemon.screen(agentId)).includes("mouse on"), "the program");
+    await waitUntil(
+      async () => (await daemon.screen({ terminalId })).includes("mouse on"),
+      "the program",
+    );
     const first = await opened(terminalId, "interactive");
-    await drawn(first, agentId);
+    await drawn(first, terminalId);
     await expect.poll(() => first.output()).toContain("\x1b[?1006h");
     const late = await opened(terminalId, "observe");
     expect(late.snapshot().toString("latin1")).toContain("\x1b[?1006h");
@@ -190,7 +196,7 @@ describe("what a view shows when it opens", () => {
   });
 
   it("shows the screen at the driver's size after the driver resizes it", async () => {
-    const { agentId, terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       [
@@ -202,13 +208,13 @@ describe("what a view shows when it opens", () => {
     const laptop = await opened(terminalId, "interactive");
     await laptop.drive();
     await waitUntil(
-      async () => (await daemon.screen(agentId)).includes("bottom of 30 rows"),
+      async () => (await daemon.screen({ terminalId })).includes("bottom of 30 rows"),
       "the redraw",
     );
-    await drawn(laptop, agentId);
+    await drawn(laptop, terminalId);
     const late = await opened(terminalId, "observe");
     expect((await replay(late.snapshot(), size)).screen).toEqual(
-      captured(await daemon.screen(agentId)),
+      captured(await daemon.screen({ terminalId })),
     );
     phone.close();
     laptop.close();

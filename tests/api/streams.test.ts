@@ -83,7 +83,7 @@ async function steady(count: () => number): Promise<number> {
 
 describe("a view's stream over time", () => {
   it("carries the program's switches of screen in a view's bytes, with no screen frame", async () => {
-    const { terminalId } = await daemon.program([
+    const { terminalId } = await daemon.shellProgram([
       "sh",
       "-c",
       "sleep 1; printf '\\033[?1049hfull screen'; sleep 1; printf '\\033[?1049lback'; sleep 600",
@@ -102,7 +102,7 @@ describe("a view's stream over time", () => {
   });
 
   it("ends a view whose socket stops reading, and keeps serving the others", async () => {
-    const { terminalId } = await daemon.program(FLOOD);
+    const { terminalId } = await daemon.shellProgram(FLOOD);
     const stalled = await opened(terminalId, "observe", BIG);
     const live = await opened(terminalId, "interactive", BIG);
     const events = await eventsFromNow();
@@ -128,8 +128,8 @@ describe("a view's stream over time", () => {
   });
 
   it("refuses a view of a terminal whose program's session is gone", async () => {
-    const { agentId, terminalId } = await daemon.program(["sleep", "600"]);
-    await daemon.endTerminal(agentId);
+    const { terminalId } = await daemon.shellProgram(["sleep", "600"]);
+    await daemon.endTerminal({ terminalId });
     const view = await daemon.view(terminalId, "observe");
     await view.closed();
     expect(view.frames.at(-1)).toEqual({
@@ -139,7 +139,7 @@ describe("a view's stream over time", () => {
   });
 
   it("leaves its holder no connection of a view after views come, go and fall behind", async () => {
-    const { terminalId } = await daemon.program(FLOOD);
+    const { terminalId } = await daemon.shellProgram(FLOOD);
     const once = await opened(terminalId, "observe");
     once.close();
     await once.closed();

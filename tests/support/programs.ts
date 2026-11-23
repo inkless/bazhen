@@ -28,29 +28,76 @@ export function programsOnPath(home: string, claude: string): string {
 }
 
 /**
- * Queues `argv` for the next agent the daemon of `home` launches. `launch` launches it and
- * answers its id; the program must have gone to that agent, or the queue is emptied and this
- * throws, since a program left queued would run in place of the next Claude Code.
+ * A `$SHELL` under `home` that runs the program `runAsNextShell` queued, as a shell terminal's own
+ * process, or else `shell` with the arguments it was given. The queued script is claimed by a
+ * rename, which only one shell can win, under the id of the terminal that won it. Only a shell
+ * terminal claims it: an agent's process, or a shell started outside a terminal, runs `shell`.
  */
-export async function runAsNextAgent(
-  home: string,
+export function programShell(home: string, shell: string): string {
+  const dir = programsOf(home);
+  mkdirSync(dir, { recursive: true });
+  const shim = join(dir, "shell");
+  const taken = `${shellWord(dir)}"/taken-$BAZHEN_TERMINAL_ID"`;
+  writeFileSync(
+    shim,
+    `#!/bin/sh\n` +
+      `if [ -n "\${BAZHEN_TERMINAL_ID-}" ] && [ -z "\${BAZHEN_AGENT_ID-}" ] &&\n` +
+      `  mv ${shellWord(`${dir}/next-shell`)} ${taken} 2>/dev/null; then\n` +
+      `  exec /bin/sh ${taken}\n` +
+      `fi\n` +
+      `exec ${shellWord(shell)} "$@"\n`,
+  );
+  chmodSync(shim, 0o755);
+  return shim;
+}
+
+/**
+ * Queues `argv` in `dir`'s `queue`, runs `open`, and answers the id it answered once the program
+ * has gone to it. If it went nowhere the queue is emptied and this throws, since a program left
+ * queued would run in place of the next Claude Code or shell; if it went to another, this throws.
+ */
+async function runQueued(
+  dir: string,
+  queue: string,
   argv: readonly string[],
-  launch: () => Promise<string>,
+  open: () => Promise<string>,
   waitUntil: (done: () => boolean, what: string) => Promise<unknown>,
 ): Promise<string> {
-  const dir = programsOf(home);
-  const next = join(dir, "next");
+  const next = join(dir, queue);
   writeFileSync(next, `exec ${argv.map(shellWord).join(" ")}\n`);
-  let agentId: string;
+  let id: string;
   try {
-    agentId = await launch();
+    id = await open();
     await waitUntil(() => !existsSync(next), "a launch to take the program");
   } catch (error) {
     rmSync(next, { force: true });
     throw error;
   }
-  if (!existsSync(join(dir, `taken-${agentId}`))) {
-    throw new Error(`another launch took the program meant for ${agentId}`);
+  if (!existsSync(join(dir, `taken-${id}`))) {
+    throw new Error(`another launch took the program meant for ${id}`);
   }
-  return agentId;
+  return id;
 }
+
+/**
+ * Queues `argv` for the next agent the daemon of `home` launches. `launch` launches it and
+ * answers its id; the program must have gone to that agent, or this throws.
+ */
+export const runAsNextAgent = (
+  home: string,
+  argv: readonly string[],
+  launch: () => Promise<string>,
+  waitUntil: (done: () => boolean, what: string) => Promise<unknown>,
+): Promise<string> => runQueued(programsOf(home), "next", argv, launch, waitUntil);
+
+/**
+ * Queues `argv` for the next shell the daemon of `home` opens, which runs it as its terminal's
+ * process in place of the shell. `open` opens it and answers its terminal's id; the program must
+ * have gone to that terminal, or this throws.
+ */
+export const runAsNextShell = (
+  home: string,
+  argv: readonly string[],
+  open: () => Promise<string>,
+  waitUntil: (done: () => boolean, what: string) => Promise<unknown>,
+): Promise<string> => runQueued(programsOf(home), "next-shell", argv, open, waitUntil);

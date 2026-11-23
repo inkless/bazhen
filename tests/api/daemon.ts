@@ -42,6 +42,7 @@ import {
   LaunchAgentResponse,
   StreamServerFrame,
   PairingCodeResponse,
+  ShellCommandResponse,
   StateSnapshot,
   TerminalScreen,
 } from "@bazhen/protocol";
@@ -50,7 +51,12 @@ import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.t
 import { closeHolderAt, closeHoldersUnder, leftBehind } from "../support/holder-close.ts";
 import { giveTranscript } from "../support/transcript.ts";
 import { LogTail } from "../support/log-tail.ts";
-import { programsOnPath, runAsNextAgent } from "../support/programs.ts";
+import {
+  programShell,
+  programsOnPath,
+  runAsNextAgent,
+  runAsNextShell,
+} from "../support/programs.ts";
 import { replay } from "./fixtures/browser.ts";
 import { testDaemonBin } from "../support/test-daemon.ts";
 
@@ -83,6 +89,18 @@ export async function freePort(): Promise<number> {
 }
 
 let programs = 0;
+
+/**
+ * An agent, by its id, or a terminal, by an object naming it, as `program` and `shellProgram`
+ * answer one.
+ */
+export type ScreenOf = string | { readonly terminalId: string };
+
+/** The shell a login session's `$SHELL` names, as the daemon would run it: `/bin/sh` if none. */
+const loginShell = () => {
+  const shell = loginEnv()["SHELL"];
+  return shell?.startsWith("/") === true ? shell : "/bin/sh";
+};
 
 /** One HTTP request over a daemon's Unix socket, as the CLI and the hook client make them. */
 export function overSocket(
@@ -357,6 +375,8 @@ export class Daemon {
   #config = "";
   /** What the daemon runs with; the CLI reaches this daemon with it too. */
   readonly env: Record<string, string>;
+  /** The `$SHELL` that runs what `shellProgram` queues. */
+  readonly #programShell: string;
   private port = 0;
   private process: ChildProcess | undefined;
   #exited: Promise<ExitStatus> | undefined;
@@ -376,8 +396,10 @@ export class Daemon {
       programsOnPath(home, join(bin, "claude")),
       ...(opts.withoutTmux === true ? [absentTmux(home)] : []),
     ];
+    this.#programShell = programShell(home, loginShell());
     this.env = {
       ...homeEnv(home),
+      SHELL: this.#programShell,
       PATH: `${first.join(":")}:${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       ...agentHomes(home, this.work, { anthropic: opts.modelUrl, responses: opts.responsesUrl }),
       ...(opts.claudeDebugLog === true && { DEBUG: "1" }),
@@ -1057,9 +1079,9 @@ export class Daemon {
     }
   }
 
-  /** What the agent's terminal shows, after up to `history` rows above it; nothing before it has one. */
-  async screen(agentId: string, history = 0): Promise<string> {
-    const terminalId = this.terminalOf(agentId);
+  /** What the terminal shows, after up to `history` rows above it; nothing before it has one. */
+  async screen(of: ScreenOf, history = 0): Promise<string> {
+    const terminalId = typeof of === "string" ? this.terminalOf(of) : of.terminalId;
     return terminalId === undefined ? "" : this.terminalScreen(terminalId, history);
   }
 
@@ -1087,9 +1109,9 @@ export class Daemon {
       : (await holderLook(holder)).title;
   }
 
-  /** Where the agent's program has its cursor: column and row on the screen, from zero. */
-  async cursor(agentId: string): Promise<[number, number]> {
-    const terminalId = this.requireTerminal(agentId);
+  /** Where the terminal's program has its cursor: column and row on the screen, from zero. */
+  async cursor(of: ScreenOf): Promise<[number, number]> {
+    const terminalId = typeof of === "string" ? this.requireTerminal(of) : of.terminalId;
     const holder = this.holderAt(terminalId);
     if (holder !== undefined) return (await holderLook(holder)).cursor;
     const out = this.tmux(
@@ -1292,6 +1314,30 @@ export class Daemon {
   }
 
   /**
+   * A shell terminal running `argv` in place of the shell, on either runtime: the shell the daemon
+   * opens is its `$SHELL`, which runs `argv` instead of the login shell. The terminal is one the
+   * daemon knows and streams, with no agent, so it works on a daemon that launches none.
+   */
+  async shellProgram(argv: readonly string[]): Promise<{ terminalId: string }> {
+    if (this.env["SHELL"] !== this.#programShell) {
+      throw new Error("this daemon's $SHELL isn't the one that runs a queued program");
+    }
+    const terminalId = await runAsNextShell(
+      this.home,
+      argv,
+      async () => {
+        const shell = await this.request("/v1/shells", {
+          method: "POST",
+          body: { idempotencyKey: `shell-program-${++programs}`, cwd: this.work },
+        });
+        return ShellCommandResponse.parse(shell.body).terminalId;
+      },
+      waitUntil,
+    );
+    return { terminalId };
+  }
+
+  /**
    * Runs another program in a tmux agent's pane, killing its own: the terminal Bazhen knows stays
    * the same, but the process in it isn't the one the daemon recorded.
    */
@@ -1333,15 +1379,15 @@ export class Daemon {
   }
 
   /**
-   * Ends the agent's terminal from outside the daemon, as a user would by hand: its holder closed
-   * by its own protocol, or its tmux session killed.
+   * Ends the terminal from outside the daemon, as a user would by hand: its holder closed by its
+   * own protocol, or its tmux session killed.
    */
-  async endTerminal(agentId: string): Promise<void> {
-    const terminalId = this.requireTerminal(agentId);
+  async endTerminal(of: ScreenOf): Promise<void> {
+    const terminalId = typeof of === "string" ? this.requireTerminal(of) : of.terminalId;
     const holder = this.holderAt(terminalId);
     if (holder !== undefined) return closeHolderAt(holder);
     const session = this.session(terminalId);
-    if (session === undefined) throw new Error(`no tmux session for ${agentId}`);
+    if (session === undefined) throw new Error(`no tmux session for ${terminalId}`);
     this.tmux("kill-session", "-t", session);
   }
 
