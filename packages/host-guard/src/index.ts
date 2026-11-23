@@ -84,6 +84,7 @@ export {
   type Cap,
   type Ended,
   type Mode,
+  type RunKind,
   type Verdict,
 } from "./cap.ts";
 export { parseLsofCwds, processCwds } from "./cwd.ts";

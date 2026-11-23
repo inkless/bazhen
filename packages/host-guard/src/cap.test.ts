@@ -201,31 +201,43 @@ describe("the probe's verdict", () => {
 
 describe("how a run is capped", () => {
   it("runs a test binary inside a capped scope as it is, so the scope's cap holds its tests", async () => {
-    await expect(chooseMode(cap, true, deps({ inScope: () => true }))).resolves.toEqual({
+    await expect(chooseMode(cap, "test-binary", deps({ inScope: () => true }))).resolves.toEqual({
       mode: "through",
     });
   });
 
   it("runs a whole command inside a capped scope through, so that scope's cap holds it", async () => {
-    await expect(chooseMode(cap, false, deps({ inScope: () => true }))).resolves.toEqual({
+    await expect(chooseMode(cap, "run", deps({ inScope: () => true }))).resolves.toEqual({
       mode: "through",
     });
   });
 
   it("gives a test binary outside a scope one of its own where systemd caps", async () => {
-    await expect(chooseMode(cap, true, deps({ probe: async () => ok }))).resolves.toEqual({
+    await expect(chooseMode(cap, "test-binary", deps({ probe: async () => ok }))).resolves.toEqual({
       mode: "scope",
     });
   });
 
   it("has the runner cap a test binary itself where systemd can't, its watched run or none", async () => {
     await expect(
-      chooseMode(cap, true, deps({ watchdog: () => 7, probe: async () => no })),
+      chooseMode(cap, "test-binary", deps({ watchdog: () => 7, probe: async () => no })),
     ).resolves.toEqual({ mode: "owned", note: "systemd-run is missing" });
   });
 
+  it("gives a run that asks for a scope of its own one inside a capped scope, beside that scope", async () => {
+    const inScope = deps({ inScope: () => true, probe: async () => ok });
+    await expect(chooseMode(cap, "own-scope", inScope)).resolves.toEqual({ mode: "scope" });
+  });
+
+  it("chooses for a run that asks for a scope of its own outside one as for any run", async () => {
+    await expect(chooseMode(cap, "own-scope", deps({ probe: async () => no }))).resolves.toEqual({
+      mode: "watched",
+      note: "systemd-run is missing",
+    });
+  });
+
   it("watches a whole command where systemd can't cap it, and says why", async () => {
-    await expect(chooseMode(cap, false, deps({ probe: async () => no }))).resolves.toEqual({
+    await expect(chooseMode(cap, "run", deps({ probe: async () => no }))).resolves.toEqual({
       mode: "watched",
       note: "systemd-run is missing",
     });
