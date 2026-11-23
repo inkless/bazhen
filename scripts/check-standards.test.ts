@@ -4701,6 +4701,18 @@ const releasing = (release: string) =>
     "#[test]\nfn a() { h.rt.release(); }",
   ].join("\n");
 
+/** The closers the signal scan passes over, each as a file names it and the `use` that names it. */
+const CLOSERS = [
+  { type: "Semaphore", use: "use tokio::sync::Semaphore;" },
+  { type: "TaskTracker", use: "use tokio_util::task::TaskTracker;" },
+];
+
+/** The lines of the tests in `source`, one file, that must be marked. */
+const flagged = (source: string) =>
+  unmarkedSignallingTests(["crates/h/src/x.rs"], () => source).map(
+    (f) => f.split(": ")[0]?.split(":")[1] ?? f,
+  );
+
 const unmarked = (sources: Record<string, string>) =>
   unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
     (f) => f.split(": ")[0],
@@ -4802,25 +4814,30 @@ describe("tests that signal processes they didn't start", () => {
     // A tracker's close(), with nothing in its parentheses, only stops it taking tasks. Any other
     // call on it, a close of what isn't one, or of one the file never types, still counts.
     const source = [
+      "use tokio_util::task::TaskTracker;",
+      "struct Pool { tracker: TaskTracker }",
+      "impl Pool { fn end(&self) { self.tracker\n.close( ); } }",
       "fn drained(tracker: &TaskTracker) { tracker.close(); }",
-      "#[test]\nfn a() { drained(&tracker); }",
+      "async fn serving() -> (u16, TaskTracker) { (0, TaskTracker::new()) }",
+      "#[test]\nfn a() { drained(&tracker); pool.end(); }",
       "#[test]\nfn b() { let t = TaskTracker::new();\n t.close(); }",
-      "#[test]\nfn c() { self.tracker\n.close( ); }",
-      "#[test]\nfn d() { tracker.close(now); }",
-      "#[test]\nfn e() { tracker.signal(9); }",
-      "#[test]\nfn f() { tracker.respawn(x); }",
-      "#[test]\nfn g() { tracker.close_step(); }",
-      "#[test]\nfn h() { holder.tracker.close(); }",
-      "#[test]\nfn i() { child.close(); }",
+      "#[test]\nfn c() { let (stop, t) = (Token::new(), TaskTracker::new());\n t.close(); }",
+      "#[test]\nfn d() { let (_, t) = serving().await;\n t.close(); }",
+      "#[test]\nfn e() { let t = TaskTracker::new(); t.close(now); }",
+      "#[test]\nfn f() { let t = TaskTracker::new(); t.signal(9); }",
+      "#[test]\nfn g() { let t = TaskTracker::new(); t.respawn(x); }",
+      "#[test]\nfn h() { let t = TaskTracker::new(); t.close_step(); }",
+      "#[test]\nfn i() { holder.tracker.close(); }",
+      "#[test]\nfn j() { child.close(); }",
     ].join("\n");
     const untyped = "#[test]\nfn a() { tracker.close(); }";
     expect(unmarked({ "crates/h/src/serve.rs": source, "crates/h/src/x.rs": untyped })).toEqual([
-      "crates/h/src/serve.rs:10",
-      "crates/h/src/serve.rs:12",
-      "crates/h/src/serve.rs:14",
-      "crates/h/src/serve.rs:16",
       "crates/h/src/serve.rs:18",
       "crates/h/src/serve.rs:20",
+      "crates/h/src/serve.rs:22",
+      "crates/h/src/serve.rs:24",
+      "crates/h/src/serve.rs:26",
+      "crates/h/src/serve.rs:28",
       "crates/h/src/x.rs:1",
     ]);
   });
@@ -4829,23 +4846,88 @@ describe("tests that signal processes they didn't start", () => {
     // A semaphore's close(), with nothing in its parentheses, only refuses more permits. Any other
     // call on it, or a close of one the file never types, still counts.
     const source = [
+      "use tokio::sync::{Semaphore, mpsc};",
       "struct Slow { gate: Arc<Semaphore> }",
       "impl Slow { fn disconnect(&self) { self.gate.close(); } }",
-      "fn shut(gate: &Arc<Semaphore>) { gate.close(); }",
+      "fn shut(gate: &Arc<tokio::sync::Semaphore>) { gate.close(); }",
       "#[test]\nfn a() { shut(&gate); slow.disconnect(); }",
       "#[test]\nfn b() { let g = Arc::new(Semaphore::new(0));\n g.close(); }",
-      "#[test]\nfn c() { let g = tokio::sync::Semaphore::new(1);\n g.close(); }",
-      "#[test]\nfn d() { gate.close(now); }",
-      "#[test]\nfn e() { gate.close_step(); }",
+      "#[test]\nfn c() { let g = ::tokio::sync::Semaphore::new(1);\n g.close(); }",
+      "#[test]\nfn d() { let g = Semaphore::new(1); g.close(now); }",
+      "#[test]\nfn e() { let g = Semaphore::new(1); g.close_step(); }",
       "#[test]\nfn f() { child.close(); }",
     ].join("\n");
     const untyped = "#[test]\nfn a() { gate.close(); }";
     expect(unmarked({ "crates/h/src/hub.rs": source, "crates/h/src/x.rs": untyped })).toEqual([
-      "crates/h/src/hub.rs:12",
-      "crates/h/src/hub.rs:14",
-      "crates/h/src/hub.rs:16",
+      "crates/h/src/hub.rs:13",
+      "crates/h/src/hub.rs:15",
+      "crates/h/src/hub.rs:17",
       "crates/h/src/x.rs:1",
     ]);
+  });
+
+  describe("a close of what the scan can't be sure is a semaphore or a task tracker", () => {
+    // Each case is run for both types, and beside it the nearest case that is surely one, so
+    // what makes it count is the one difference between them.
+    it("must be marked when the file never brings the type in from tokio", () => {
+      for (const { type, use } of CLOSERS) {
+        const source = `fn f(holder: Arc<${type}>) { holder.close(); }\n#[test]\nfn a() { f(h); }`;
+        expect([flagged(source), flagged(`${use}\n${source}`)]).toEqual([["2"], []]);
+      }
+    });
+
+    it("must be marked when only a struct literal's field of that name is made as one", () => {
+      for (const { type, use } of CLOSERS) {
+        const made = (binding: string) =>
+          flagged(`${use}\n#[test]\nfn a() { ${binding};\n child.close(); }`);
+        expect([
+          made(`let x = X { child: ${type}::new(0) }`),
+          made(`let child = ${type}::new(0)`),
+        ]).toEqual([["2"], []]);
+      }
+    });
+
+    it("must be marked when a type of that name may come from elsewhere", () => {
+      for (const { type, use } of CLOSERS) {
+        const source = `fn f(gate: ${type}) { gate.close(); }\n#[test]\nfn a() { f(g); }`;
+        expect(
+          [
+            `use crate::holder::${type};`,
+            `${use}\nuse crate::holder::*;`,
+            `${use}\nuse crate::holder::{Other as ${type}};`,
+            `${use}\nstruct ${type};`,
+            `${use}\nuse super::*;`,
+          ].map((head) => flagged(`${head}\n${source}`)),
+        ).toEqual([["3"], ["4"], ["4"], ["4"], []]);
+      }
+    });
+
+    it("must be marked when its field is one only on a type other than its impl's", () => {
+      for (const { type, use } of CLOSERS) {
+        const source = (impl: string) =>
+          flagged(
+            `${use}\nstruct A { holder: ${type} }\nstruct B { holder: Client }\n` +
+              `impl ${impl} { fn end(&self) { self.holder.close(); } }\n#[test]\nfn a() { b.end(); }`,
+          );
+        expect([source("B"), source("C"), source("A")]).toEqual([["5"], ["5"], []]);
+      }
+    });
+
+    it("must be marked when its name is bound more than once in its function", () => {
+      for (const { type, use } of CLOSERS) {
+        const source = (body: string) =>
+          flagged(`${use}\n#[test]\nfn a() { let holder = ${type}::new(); ${body} }`);
+        expect(
+          [
+            "let holder = spawn_holder(); holder.close();",
+            "run(|holder| holder.close());",
+            "for holder in holders { holder.close(); }",
+            "match x { Some(holder) => holder.close(), None => {} }",
+            "holder.close();",
+          ].map(source),
+        ).toEqual([["2"], ["2"], ["2"], ["2"], []]);
+      }
+    });
   });
 
   describe("closes listed as signalling nothing", () => {
