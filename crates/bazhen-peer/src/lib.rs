@@ -305,11 +305,13 @@ pub fn codex_of(
 /// from the caller, `pause`d for `FIRST_PAUSE`, doubled after each try, up to `LINE_TRIES` times,
 /// and never pieced together from two walks: a process that took a pid meanwhile is on neither
 /// walk of a try that is answered. What is answered is the line a caller connecting a moment later
-/// would be read with. The caller is the one process that has to stay. A read of it that fails
-/// says it has exited, and it never comes back, so it is refused then, with no pause: a try after
-/// could only read a process that took its pid. So the first read of it, before any pause, says
-/// when it started, and a read of it on any walk after, of any try, that says another time is of a
-/// process that took the pid its caller gave up.
+/// would be read with. The caller is the one process that has to stay. A read of it that fails is
+/// taken for its exit, and refused then, with no pause: a process that has exited never comes back,
+/// so a try after could only read one that took its pid. That refuses a rare caller a try after
+/// would have answered, one whose leader shows as a zombie for the moment another of its threads
+/// takes its place by an `exec`, which is the safe way to be wrong. So the first read of the
+/// caller, before any pause, says when it started, and a read of it on any walk after, of any try,
+/// that says another time is of a process that took the pid its caller gave up.
 ///
 /// # Errors
 ///
@@ -330,7 +332,9 @@ pub fn line_of(
             Ok(read) => read,
             Err(e) if at == pid => {
                 gone.set(true);
-                return Err(io::Error::other(format!("the caller has gone: {e}")));
+                return Err(io::Error::other(format!(
+                    "the caller can't be read (it may have exited): {e}"
+                )));
             }
             Err(e) => return Err(e),
         };
@@ -1217,7 +1221,7 @@ mod tests {
         assert_eq!(
             refused.as_ref().map_err(ToString::to_string),
             Err("a process on the caller's line can't be read: \
-                 the caller has gone: process Pid(50) has exited"
+                 the caller can't be read (it may have exited): process Pid(50) has exited"
                 .to_owned())
         );
         assert!(matches!(refused, Err(Refused::Unreadable(_))));
@@ -1281,7 +1285,7 @@ mod tests {
         assert_eq!(
             refused.as_ref().map_err(ToString::to_string),
             Err("a process on the caller's line can't be read: \
-                 the caller has gone: process Pid(50) has exited"
+                 the caller can't be read (it may have exited): process Pid(50) has exited"
                 .to_owned())
         );
         assert!(matches!(refused, Err(Refused::Unreadable(_))));
