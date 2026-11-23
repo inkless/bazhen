@@ -1159,6 +1159,12 @@ const MAX_READ_PER_TURN: u64 = 256 << 10;
 /// byte budget apart. The client's own delays only widen a gap, so the closest pair measures the
 /// holder. The hellos are asked once the flood has begun, and each has to find it moved on from
 /// the one before, or a holder whose flood had stopped would pass.
+///
+/// It tells the fix from the base only with a debug engine, which the test binary runs: slow
+/// enough that every turn of the base reads its whole byte budget, while a turn bounded by time
+/// reads about a chunk. A release engine outruns the pty, so its turns stop short of the budget
+/// either way. Answering a newcomer in the turn that accepts it is pinned on its own by
+/// `server::tests::a_writer_that_reconnects_after_the_turn_s_poll_finds_its_slot_free`.
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_flooding_holder_answers_a_hello_within_a_turn_of_its_output() {

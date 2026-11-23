@@ -211,7 +211,7 @@ impl Server {
     /// When `poll` fails for any reason but an interrupting signal.
     pub fn turn(&mut self, holder: &mut Holder<Screen>) -> io::Result<bool> {
         let ready = self.wait(holder)?;
-        self.after_poll(&ready, holder)
+        Ok(self.after_poll(&ready, holder))
     }
 
     /// Waits for the next thing to do, but no later than the loop or the holder must turn.
@@ -228,7 +228,7 @@ impl Server {
     }
 
     /// Does what a `poll` found to do; true once a `close` is done.
-    fn after_poll(&mut self, ready: &Ready, holder: &mut Holder<Screen>) -> io::Result<bool> {
+    fn after_poll(&mut self, ready: &Ready, holder: &mut Holder<Screen>) -> bool {
         let now = Instant::now();
         holder.after_poll(ready.master, now);
         self.publish(holder);
@@ -258,7 +258,12 @@ impl Server {
             let open = self.conns.len();
             self.accept(now);
             if self.conns.len() > open {
-                let since = self.poll_conns(holder)?;
+                // Without the second look the newcomers wait for the next turn's `poll`, as
+                // they would have before it: no reason to end the holder mid-turn.
+                let since = self.poll_conns(holder).unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not look at the connections again");
+                    Vec::new()
+                });
                 for (i, revents) in since.into_iter().enumerate() {
                     if i < open && revents.is_empty() {
                         continue;
@@ -288,7 +293,7 @@ impl Server {
         self.release_writer();
         self.conns.retain(|conn| !conn.is_finished(now));
         if self.close_done(holder, now) {
-            return Ok(true);
+            return true;
         }
         if self.closing.is_none() && now >= self.recheck_at {
             if let Some(socket) = &mut self.socket {
@@ -296,7 +301,7 @@ impl Server {
             }
             self.recheck_at = now + RECHECK_EVERY;
         }
-        Ok(false)
+        false
     }
 
     /// Reports the title and the screen, where they changed since last reported, to every
@@ -2504,7 +2509,7 @@ mod tests {
         let ready = held.server.wait(&held.holder).unwrap();
         drop(old);
         let mut new = asks_to_write(&held);
-        assert!(!held.server.after_poll(&ready, &mut held.holder).unwrap());
+        assert!(!held.server.after_poll(&ready, &mut held.holder));
         let mut decoder = bazhen_holder_proto::reply_decoder();
         let mut replies = Vec::new();
         read_into(&mut new, &mut decoder, &mut replies);
