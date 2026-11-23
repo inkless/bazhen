@@ -1365,6 +1365,22 @@ const NOT_DECODERS: Record<string, string> = {
     "reads stdin to hand the user's command and report, parsing none of it",
   "crates/bazhen-peer/src/main.rs::main":
     "hands stdin's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
+  "crates/bazhen-daemon/src/holder.rs::Holder::new":
+    "keeps the HolderRuntime and history depth it is given; reads no bytes",
+  "crates/bazhen-daemon/src/holder.rs::Holder::told":
+    "subscribes to the runtime's events, and keeps a reread that lists the terminals through HolderRuntime::inventory, whose hellos FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::close":
+    "reads the recorded locator through holder_ref's HolderLocator::decode, serde_json of text the daemon wrote, then closes the terminal through HolderRuntime::close, whose answers FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and forgets it in what each events receiver keeps; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::health":
+    "maps the report HolderRuntime::health reads from hellos, which FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, to the daemon's; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::reachable":
+    "reads the recorded locator through holder_ref's HolderLocator::decode, serde_json of text the daemon wrote, then asks HolderRuntime::health, which reads hellos FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, whether the recorded terminals' holders answer; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::compatibility":
+    "maps what HolderRuntime::compatibility reads from hellos, which FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, to ids; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::holders":
+    "maps the builds HolderRuntime::builds reads, which FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, to running holders; parses nothing",
+  "crates/bazhen-daemon/src/holder.rs::Holder::events":
+    "boxes the HolderTold that told makes; reads no bytes",
   "crates/bazhen-daemon/src/peer.rs::Peers::read":
     "hands a connection's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":
