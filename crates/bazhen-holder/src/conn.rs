@@ -1470,15 +1470,16 @@ mod tests {
     }
 
     /// One that stopped reading but keeps sending is owed nothing, so it holds no memory, and is
-    /// dropped `WENT_WITHIN` after the write failed, so it holds the writer slot no longer.
+    /// dropped `WENT_WITHIN` after it was found gone, so it holds the writer slot no longer. A
+    /// failed write finding it gone is tested where what it sent is handed over.
     #[test]
     fn a_peer_that_stops_reading_and_keeps_sending_is_owed_nothing_and_dropped_in_time() {
         let now = Instant::now();
         let (mut conn, mut peer) = pair(now);
         conn.open(0);
-        peer.shutdown(std::net::Shutdown::Read).unwrap();
         conn.queue(vec![1; 10]);
-        conn.flush(now, &no_output());
+        conn.lose_peer(now, &"it stopped reading");
+        assert_eq!(conn.queued(), 0);
         assert!(conn.may_send());
         assert_eq!(conn.deadline(), Some(now + WENT_WITHIN));
         let mut buffer = vec![0; READ_CHUNK];
