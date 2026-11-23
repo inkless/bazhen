@@ -89,7 +89,7 @@ late() {
 # that parent has gone and another took the script over, nothing is left to read a reply. A
 # parent that can't be read is no news.
 orphaned() {
-  parent=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')
+  parent=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ' 2>/dev/null)
   case "$parent" in '' | *[!0-9]*) return 1 ;; esac
   [ "$parent" -ne "$PPID" ]
 }
