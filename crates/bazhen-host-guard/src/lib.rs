@@ -166,13 +166,24 @@ fn pin_then_send(
 ) -> Result<bool, Error> {
     let pinned = match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
         Ok(pinned) => pinned,
-        Err(Errno::SRCH) => return Ok(false),
-        Err(source) => return Err(Error::Os { target, source }),
+        Err(refused) => return unpinned(target, refused),
     };
     if !shows().map_err(|why| Error::Unsafe { target, why })? {
         return Ok(false);
     }
     sent(target, rustix::process::pidfd_send_signal(&pinned, signal))
+}
+
+/// What a refused pin says of its target. `INVAL` is a pid that now names a thread other than its
+/// process's leader, as a holder's pid reused for another process's thread would: the holder is
+/// gone, as with `SRCH`. Anything else, as no file descriptor left, is an error, since the target
+/// may still run.
+#[cfg(target_os = "linux")]
+fn unpinned(target: Target, refused: Errno) -> Result<bool, Error> {
+    match refused {
+        Errno::SRCH | Errno::INVAL => Ok(false),
+        source => Err(Error::Os { target, source }),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -453,6 +464,31 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn takes_a_pid_gone_or_now_another_process_s_thread_for_gone_and_fails_closed_otherwise() {
+        let target = Target::Process(pid(4242));
+        let answers = [
+            Errno::SRCH,
+            Errno::INVAL,
+            Errno::MFILE,
+            Errno::NOMEM,
+            Errno::PERM,
+        ]
+        .map(|refused| super::unpinned(target, refused));
+        let os = |source| Err(Error::Os { target, source });
+        assert_eq!(
+            answers,
+            [
+                Ok(false),
+                Ok(false),
+                os(Errno::MFILE),
+                os(Errno::NOMEM),
+                os(Errno::PERM)
+            ]
+        );
     }
 
     /// A process of another user's is there, though this one may not signal it.

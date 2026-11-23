@@ -2786,8 +2786,8 @@ mod tests {
         (child, vouched(holder, made_for, &holder_at(start)).unwrap())
     }
 
-    /// How long a process sent SIGKILL or SIGUSR1 takes, at most, to be seen ended.
-    const ENDS: Duration = Duration::from_millis(500);
+    /// How long a process sent nothing is watched for an end that would show it was sent one.
+    const STILL: Duration = Duration::from_millis(500);
 
     /// The pid is read again once it is pinned, so a kill reaches only the holder still there.
     #[test]
@@ -2796,7 +2796,7 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut stranger, proof) = stranger_vouched_for(HolderUse::Kill);
         let sent = super::kill_holder(proof);
-        let ended = bazhen_test_signal::end_within(&mut stranger, ENDS).unwrap();
+        let ended = bazhen_test_signal::end_within(&mut stranger, STILL).unwrap();
         assert_eq!((sent, ended.map(|e| e.signal())), (Ok(false), None));
     }
 
@@ -2807,7 +2807,7 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         let (mut stranger, proof) = stranger_vouched_for(HolderUse::Rebind);
         let sent = super::rebind_holder(proof);
-        let ended = bazhen_test_signal::end_within(&mut stranger, ENDS).unwrap();
+        let ended = bazhen_test_signal::end_within(&mut stranger, STILL).unwrap();
         assert_eq!((sent, ended.map(|e| e.signal())), (Ok(false), None));
     }
 
