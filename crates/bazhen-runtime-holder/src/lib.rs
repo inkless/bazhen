@@ -10,6 +10,9 @@
 //!   whose `holders` directory each holder binds its socket in;
 //! - `runtime`: the terminals, each in a holder of its own: created, found, acted on, and
 //!   watched, through one connection to each, for what its holder says unasked (`watch`);
+//! - `stream`: a terminal's streams, each reading on a connection of its own from its snapshot,
+//!   and sending through one control connection the terminal's streams share, which holds the
+//!   holder's writer slot;
 //! - `locator`: where a terminal's holder is, as the daemon records it.
 //!
 //! The client is async, on tokio, as only the daemon is; install and prune block, and run off
@@ -28,11 +31,14 @@ mod locator;
 mod request_ids;
 mod runtime;
 mod sockets;
+mod stream;
 mod tags;
 mod watch;
 
 #[cfg(test)]
 mod fake_holder;
+#[cfg(test)]
+mod fake_host;
 #[cfg(test)]
 mod real_holder;
 #[cfg(test)]
@@ -54,5 +60,9 @@ pub use runtime::{
     StaleReason, TerminalSpec,
 };
 pub use sockets::{HolderRoot, UnsafeHolderDir};
+pub use stream::{
+    Attached, ControlError, ControlGuard, DRAIN, HolderStream, Position, StreamEnd, StreamError,
+    StreamEvent, StreamEvents, StreamFailure, WRITER_RETRY,
+};
 pub use tags::{TerminalTags, decode_tags, encode_tags, unlinked};
 pub use watch::{EVENTS_KEPT, RuntimeEvent};
