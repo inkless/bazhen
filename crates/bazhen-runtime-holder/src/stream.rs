@@ -976,6 +976,10 @@ impl HolderStream {
     /// A snapshot taken on the control connection, held until this stream has delivered
     /// everything before it, so its events go on from where it ends.
     ///
+    /// Keep taking its `StreamEvents` while this waits, in another task: they hold at most
+    /// `EVENTS_QUEUED`, and the stream reads no further than they have room for, so a wait with
+    /// more than that before the snapshot's offset resolves only as they are taken.
+    ///
     /// # Errors
     ///
     /// `Closed` once the stream has closed, and only once `StreamEvent::Closed` is queued for its
@@ -2417,7 +2421,9 @@ mod tests {
             until(|| !fixture.seen.inputs().is_empty()).await;
             let [writer] = fixture.seen.writers().try_into().unwrap();
             fixture.runtime.close(&fixture.terminal).await.unwrap();
-            writer.hung_up.cancelled().await;
+            timeout(Duration::from_secs(5), writer.hung_up.cancelled())
+                .await
+                .expect("never hung up");
             assert!(
                 fixture
                     .seen
@@ -2478,7 +2484,12 @@ mod tests {
             // Its connection is still opening as the guard drops.
             guard.write(b"ls\n");
             drop(guard);
-            until(|| !fixture.seen.inputs().is_empty()).await;
+            timeout(
+                Duration::from_secs(5),
+                until(|| !fixture.seen.inputs().is_empty()),
+            )
+            .await
+            .expect("no input arrived");
             assert_eq!(fixture.seen.inputs(), [b"ls\n"]);
             let [writer] = fixture.seen.writers().try_into().unwrap();
             writer.hung_up.cancelled().await;
