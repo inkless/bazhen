@@ -7,7 +7,8 @@ Tailscale. The forward carries the page and its API, and the daemon needs no ext
 for it. Build the web app first (`moon run :build`): the daemon serves whatever was built last, and
 answers that it isn't built until then.
 
-`web.listen = "lan"` is not supported by this daemon: it refuses to start with it.
+`web.listen = "lan"`, `web.lan_port` and `web.lan_allow` are not supported by this daemon: it
+refuses to start with any of them.
 [docs/lan.md](lan.md) describes the TypeScript daemon's LAN listener, which this daemon doesn't
 have. A proxy such as Caddy ([docs/caddy.md](caddy.md)) with external origins is another route; this
 page needs neither.
