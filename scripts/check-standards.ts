@@ -991,6 +991,8 @@ const NOT_DECODERS: Record<string, string> = {
     "shows a holder's first line, lossily, as a JSON string in an error; parses nothing",
   "crates/bazhen-host-guard/src/lib.rs::send_process":
     "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+  "crates/bazhen-host-guard/src/lib.rs::send_pinned":
+    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-host-guard/src/lib.rs::is_alive":
     "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-holder/src/process.rs::comm":
