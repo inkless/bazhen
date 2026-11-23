@@ -240,7 +240,7 @@ async fn stream(
     viewer: Option<Extension<Viewer>>,
 ) -> Response {
     let Ok(upgrade) = upgrade else {
-        return not_found().await;
+        return not_found();
     };
     let Some(cursor) = query.ok().and_then(|Query(query)| events::cursor(&query)) else {
         return StatusCode::BAD_REQUEST.into_response();
@@ -320,8 +320,25 @@ async fn create_task(
     }
 }
 
-pub(crate) async fn not_found() -> Response {
+pub(crate) fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
+}
+
+/// What a path no route serves answers. An upgrade there is refused bare, as the TypeScript
+/// daemon refuses an upgrade it routes nowhere.
+async fn unrouted(headers: HeaderMap) -> Response {
+    if headers.contains_key("upgrade") {
+        return refuse_upgrade(StatusCode::NOT_FOUND);
+    }
+    not_found()
+}
+
+/// A refused upgrade: the status with an empty body, as `http/upgrades.ts`'s `refuseUpgrade`
+/// sends, and the connection closed once it is written. The headers differ: TypeScript writes the
+/// status line alone and ends the socket, where hyper adds `content-length: 0` and closes the
+/// connection on `Connection: close`.
+pub(crate) fn refuse_upgrade(status: StatusCode) -> Response {
+    (status, [(axum::http::header::CONNECTION, "close")]).into_response()
 }
 
 /// The socket's routes. Stop is here only: over HTTP, anything able to send a request could end
@@ -358,8 +375,8 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/terminals/{id}/screen", get(terminal_routes::screen))
         .route("/v1/daemon/doctor", get(crate::doctor::doctor))
         .route("/v1/daemon/stop", post(stop))
-        .fallback(not_found)
-        .method_not_allowed_fallback(not_found)
+        .fallback(unrouted)
+        .method_not_allowed_fallback(unrouted)
         .with_state(shared.clone())
         .layer(middleware::from_fn_with_state(shared, callers::guard))
 }
@@ -388,18 +405,18 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/shells/{id}/restart", post(shell_routes::restart))
         .route("/shells/{id}/rename", post(shell_routes::rename))
         .route("/terminals/{id}/screen", get(terminal_routes::screen))
-        .fallback(not_found)
-        .method_not_allowed_fallback(not_found)
+        .fallback(unrouted)
+        .method_not_allowed_fallback(unrouted)
         .with_state(shared)
         .layer(middleware::from_fn_with_state(gated.clone(), paired::gate));
     // The nest takes `/v1` and `/v1/<rest>` but not `/v1/` itself, which Hono's `/v1/*` gates.
-    let bare = any(not_found).layer(middleware::from_fn_with_state(gated, paired::gate));
+    let bare = any(unrouted).layer(middleware::from_fn_with_state(gated, paired::gate));
     let router = Router::new().nest("/v1", api).route("/v1/", bare);
     let router = match web {
         Some(bundle) => {
             router.fallback(move |request: Request| crate::web::page(Arc::clone(&bundle), request))
         }
-        None => router.fallback(not_found),
+        None => router.fallback(unrouted),
     };
     router.layer(middleware::from_fn_with_state(gate, guarded))
 }
@@ -424,32 +441,35 @@ fn is_safe(method: &Method) -> bool {
 }
 
 /// The Host and Origin allowlists: 421 for a Host the daemon isn't, 403 for an action from an
-/// origin it doesn't admit.
+/// origin it doesn't admit. A refused upgrade is told the status alone.
 async fn guarded(State(gate): State<Arc<Gate>>, request: Request, next: Next) -> Response {
     let headers = request.headers();
     let host = header(headers, "host");
     let origin = header(headers, "origin");
-    let acting = !is_safe(request.method()) || headers.contains_key("upgrade");
-    match guard::refusal(
+    let upgrade = headers.contains_key("upgrade");
+    let acting = !is_safe(request.method()) || upgrade;
+    let Some(refusal) = guard::refusal(
         &gate.allow,
         Arrival {
             host: host.as_deref(),
             origin: origin.as_deref(),
             acting,
         },
-    ) {
-        Some(Refusal::HostNotAllowed) => fail(
+    ) else {
+        return next.run(request).await;
+    };
+    let (status, error, named) = match refusal {
+        Refusal::HostNotAllowed => (
             StatusCode::MISDIRECTED_REQUEST,
             ErrorCode::HostNotAllowed,
-            host.as_deref().unwrap_or_default(),
+            host,
         ),
-        Some(Refusal::OriginNotAllowed) => fail(
-            StatusCode::FORBIDDEN,
-            ErrorCode::OriginNotAllowed,
-            origin.as_deref().unwrap_or_default(),
-        ),
-        None => next.run(request).await,
+        Refusal::OriginNotAllowed => (StatusCode::FORBIDDEN, ErrorCode::OriginNotAllowed, origin),
+    };
+    if upgrade {
+        return refuse_upgrade(status);
     }
+    fail(status, error, named.as_deref().unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -647,31 +667,138 @@ mod tests {
         assert!(!stop.token().is_cancelled());
     }
 
+    const UPGRADE: (&str, &str) = ("upgrade", "websocket");
+
+    /// What a router answers `request` with as the wire carries it: the status, the `Connection`
+    /// header, and the body's text.
+    fn answer(router: Router, request: Request) -> (u16, Option<String>, String) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let response = router.oneshot(request).await.unwrap();
+            let status = response.status().as_u16();
+            let connection = response
+                .headers()
+                .get("connection")
+                .map(|v| v.to_str().unwrap().to_owned());
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                connection,
+                String::from_utf8_lossy(&bytes).into_owned(),
+            )
+        })
+    }
+
+    /// The status alone, on a connection then closed, as the TypeScript daemon refuses an upgrade.
+    fn bare(status: u16) -> (u16, Option<String>, String) {
+        (status, Some("close".to_owned()), String::new())
+    }
+
     #[test]
     fn refuses_another_host_with_421_and_an_action_from_another_origin_with_403() {
         let evil = [("host", HOST), ("origin", "https://evil.example")];
+        let elsewhere = [("host", "evil.example")];
         assert_eq!(
             [
-                send(
-                    http(false),
-                    request("GET", "/v1/health", &[("host", "evil.example")])
-                ),
+                send(http(false), request("GET", "/v1/health", &elsewhere)),
                 send(http(false), request("GET", "/v1/health", &[])),
                 send(http(false), request("POST", "/v1/health", &evil)),
-                send(
-                    http(false),
-                    request(
-                        "GET",
-                        "/v1/health",
-                        &[evil[0], evil[1], ("upgrade", "websocket")]
-                    )
-                ),
             ],
             [
                 (421, refused("host_not_allowed", "evil.example")),
                 (421, refused("host_not_allowed", "")),
                 (403, refused("origin_not_allowed", "https://evil.example")),
-                (403, refused("origin_not_allowed", "https://evil.example")),
+            ]
+        );
+        assert_eq!(
+            [
+                answer(http(false), request("GET", "/v1/health", &elsewhere)).1,
+                answer(http(false), request("POST", "/v1/health", &evil)).1,
+            ],
+            [None, None]
+        );
+        assert_eq!(
+            [
+                answer(
+                    http(false),
+                    request("GET", "/v1/events", &[elsewhere[0], UPGRADE])
+                ),
+                answer(http(false), request("GET", "/v1/events", &[UPGRADE])),
+                answer(
+                    http(false),
+                    request("GET", "/v1/events", &[evil[0], evil[1], UPGRADE])
+                ),
+            ],
+            [bare(421), bare(421), bare(403)]
+        );
+    }
+
+    /// Where pairing is required, an upgrade with no device's cookie is told 401 alone, and the
+    /// same request that doesn't upgrade is still told to pair.
+    #[test]
+    fn refuses_an_unpaired_upgrade_with_401_alone_and_tells_a_request_to_pair() {
+        assert_eq!(
+            answer(
+                http(true),
+                request("GET", "/v1/events", &[("host", HOST), UPGRADE])
+            ),
+            bare(401)
+        );
+        assert_eq!(
+            answer(http(true), request("GET", "/v1/events", &[("host", HOST)])),
+            (
+                401,
+                None,
+                refused("unpaired", "pair this browser: run `bazhen devices pair`").to_string()
+            )
+        );
+    }
+
+    /// An upgrade to a path no route serves is told 404 alone on either listener, and a request
+    /// that doesn't upgrade is told it in words, as Hono tells it.
+    #[test]
+    fn refuses_an_upgrade_no_route_serves_with_404_alone_on_either_listener() {
+        let not_found = (404, None, "404 Not Found".to_owned());
+        assert_eq!(
+            [
+                answer(
+                    http(false),
+                    request("GET", "/v1/nowhere", &[("host", HOST), UPGRADE])
+                ),
+                answer(
+                    http(false),
+                    request("GET", "/v1/", &[("host", HOST), UPGRADE])
+                ),
+                answer(
+                    http(false),
+                    request("GET", "/v1/tasks", &[("host", HOST), UPGRADE])
+                ),
+                answer(
+                    socket_router(shared()),
+                    request("GET", "/v1/nowhere", &[UPGRADE])
+                ),
+            ],
+            [bare(404), bare(404), bare(404), bare(404)]
+        );
+        assert_eq!(
+            [
+                answer(
+                    http(false),
+                    request("GET", "/v1/nowhere", &[("host", HOST)])
+                ),
+                answer(http(false), request("GET", "/v1/", &[("host", HOST)])),
+                answer(http(false), request("GET", "/v1/tasks", &[("host", HOST)])),
+                answer(socket_router(shared()), request("GET", "/v1/nowhere", &[])),
+            ],
+            [
+                not_found.clone(),
+                not_found.clone(),
+                not_found.clone(),
+                not_found
             ]
         );
     }
