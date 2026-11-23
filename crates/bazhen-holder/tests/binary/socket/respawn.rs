@@ -10,8 +10,8 @@ use bazhen_holder_proto::body::{
 use bazhen_holder_proto::{Reply, Request};
 
 use super::{
-    Client, FLOOD, LEAVES_A_STRAGGLER, exited_hello, exited_in, gone, is_ok, kill_straggler, pid,
-    serving, serving_with, straggler, wait_gone,
+    Client, FLOOD, LEAVES_A_STRAGGLER, exited_hello, exited_in, gone, is_ok, serving, serving_with,
+    straggler, wait_gone,
 };
 use crate::{Result, home, start_time, sweep};
 
@@ -321,14 +321,13 @@ fn respawned_past_a_straggler(
     crate::Started,
     Client,
     rustix::process::Pid,
-    rustix::process::Pid,
     std::path::PathBuf,
 )> {
     let file = home.join("straggler");
     let path = file.to_str().ok_or("a path that isn't UTF-8")?;
     let (holder, socket) = serving(home, &["sh", "-c", LEAVES_A_STRAGGLER, path])?;
     let left = straggler(&file)?;
-    let old = pid(exited_hello(&socket)?.child_pid.get())?;
+    exited_hello(&socket)?;
     if gone(left) {
         return Err("the straggler died with its child".into());
     }
@@ -342,7 +341,7 @@ fn respawned_past_a_straggler(
     if !matches!(client.reply()?, Reply::Ok { id, .. } if id == respawn.id()) {
         return Err("the respawn wasn't answered ok".into());
     }
-    Ok((holder, client, left, old, socket))
+    Ok((holder, client, left, socket))
 }
 
 #[test]
@@ -351,10 +350,8 @@ fn a_respawn_ends_what_the_old_generation_left_running() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("rsstraggler").unwrap();
-    let (_holder, _client, left, old, socket) = respawned_past_a_straggler(&home).unwrap();
-    let ended = wait_gone(left);
-    kill_straggler(left, old);
-    ended.unwrap();
+    let (_holder, _client, left, socket) = respawned_past_a_straggler(&home).unwrap();
+    wait_gone(left).unwrap();
     let now = Client::connect(&socket).unwrap().hello(false).unwrap();
     assert_eq!((now.generation.get(), now.exit), (1, None));
 }
@@ -365,12 +362,11 @@ fn a_close_right_after_a_respawn_ends_the_old_generation_before_the_holder_exits
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("rsclosestraggler").unwrap();
-    let (mut holder, mut client, left, old, _) = respawned_past_a_straggler(&home).unwrap();
+    let (mut holder, mut client, left, _) = respawned_past_a_straggler(&home).unwrap();
     let close = Request::Close { id: client.id() };
     client.send(&close).unwrap();
     let (code, _) = holder.exit().unwrap();
     let ended = gone(left);
-    kill_straggler(left, old);
     assert_eq!(code, Some(0));
     assert!(
         ended,

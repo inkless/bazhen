@@ -1,7 +1,8 @@
 //! The holder's child on real PTYs: its session and terminal, its fds and signals, how its exit
 //! is seen, and how a close ends it. Every wait has a deadline. A guard kills the group of any
-//! child a test leaves running; a job a test starts on purpose in a group of its own ends by
-//! itself within 30 s.
+//! child a test leaves running; a job a test starts on purpose ends by itself within 30 s, and
+//! the grandchild that ignores `SIGHUP` sooner, once the test lets go of the file it wrote its
+//! pid to.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -271,14 +272,6 @@ fn fds_of(pid: Pid) -> Result<BTreeSet<RawFd>> {
     Ok(fds)
 }
 
-/// Kills a grandchild a test left on purpose, if it is still in the child's group: a pid that has
-/// left the group may already be another process's.
-fn kill_grandchild(grandchild: Pid, child: Pid) {
-    if getpgid(Some(grandchild)).is_ok_and(|group| group == child) {
-        let _ = bazhen_test_signal::signal(grandchild.as_raw_nonzero().get(), Signal::KILL);
-    }
-}
-
 /// Waits, for at most `DEADLINE`, until `pid` has died: gone, or a zombie its new parent hasn't
 /// reaped yet, which happens where PID 1 is slow to reap or never does.
 fn wait_gone(pid: Pid) -> Result<()> {
@@ -300,9 +293,11 @@ fn wait_gone(pid: Pid) -> Result<()> {
 }
 
 /// Starts a grandchild that ignores `SIGHUP` and writes its own pid to the file named by `$0` once
-/// it does, so a test that reads the pid knows the grandchild can no longer be hung up.
-const HUP_IGNORING_GRANDCHILD: &str =
-    r#"(trap '' HUP; exec sh -c 'echo $$ > "$1"; exec sleep 30' sh "$0") &"#;
+/// it does, so a test that reads the pid knows the grandchild can no longer be hung up. It runs
+/// until that file is gone, or for 30 s, so a test ends what it left by letting its `Scratch` go
+/// rather than by signalling a pid that may be another process's by then.
+const HUP_IGNORING_GRANDCHILD: &str = r#"(trap '' HUP; exec sh -c 'echo $$ > "$1"; i=0
+    while [ -e "$1" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done' sh "$0") &"#;
 
 /// Prints which of signals 1–31 the process running it has blocked, as `blocked=2,15`.
 const BLOCKED_PROBE: &str = r#"my $old = POSIX::SigSet->new;
@@ -429,9 +424,7 @@ fn the_exit_is_seen_while_a_grandchild_still_holds_the_terminal() {
     let mut running = start(&["sh", "-c", &script, file.arg()]).unwrap();
     assert_eq!(wait_exit(&mut running).unwrap(), exited(3).unwrap());
     let grandchild = pid_in(file.path()).unwrap();
-    let alive = test_kill_process(grandchild);
-    kill_grandchild(grandchild, running.child.pid());
-    alive.unwrap();
+    test_kill_process(grandchild).unwrap();
 }
 
 #[test]
@@ -571,9 +564,7 @@ fn a_close_kills_the_childs_whole_group_once_the_grace_is_over() {
         .child
         .close_step(now + CLOSE_GRACE, &mut Listing::new());
     assert_eq!(wait_exit(&mut running).unwrap(), signalled("SIGKILL"));
-    let gone = wait_gone(grandchild);
-    kill_grandchild(grandchild, running.child.pid());
-    gone.unwrap();
+    wait_gone(grandchild).unwrap();
 }
 
 /// The holder may be started with signals blocked, and exec keeps a mask. This test runs itself
