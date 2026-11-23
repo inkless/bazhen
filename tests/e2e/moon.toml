@@ -3,4 +3,6 @@
 [tasks.test-e2e]
 command = "node ../../scripts/capped.ts --memory 10G --time 30m -- node_modules/.bin/playwright test"
 deps = ["root:build-hook", "root:build-holder-release"]
-options = { cache = false, runDepsInParallel = false }
+# Streamed, so a hung run's log names the test it stopped in; moon prints a buffered task's output
+# only once the task has ended.
+options = { cache = false, runDepsInParallel = false, outputStyle = "stream" }

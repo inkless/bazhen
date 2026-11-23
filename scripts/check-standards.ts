@@ -2885,6 +2885,8 @@ const MOON_TASK_OPTIONS = new Set([
   "interactive",
   "runInCI",
   "internal",
+  // Only where moon prints a task's output, not whether it runs.
+  "outputStyle",
 ]);
 // The only package.json scripts: pnpm's own install hook, which moon can't start.
 export const PACKAGE_SCRIPTS: Record<string, Record<string, string>> = {

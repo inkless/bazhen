@@ -1449,6 +1449,12 @@ describe("moonFailures", () => {
     expect(failures({})).toEqual([]);
   });
 
+  it("accepts a task that sets how moon prints its output", () => {
+    expect(
+      failures(web('command = "vite"\noptions = { cache = false, outputStyle = "stream" }')),
+    ).toEqual([]);
+  });
+
   it("refuses a task moon could replay from its cache", () => {
     expect([
       failures(web('command = "vite build"')),
