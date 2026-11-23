@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   REAPER_ENV,
   SHIM,
+  TEST_HOST_MODE_ENV,
+  actsAsHost,
   decodeMarker,
   encodeMarker,
   onPath,
@@ -140,5 +142,24 @@ describe("probeRefusal", () => {
     ["another namespace's /proc", `1 (node) R 0 1 1`, stat(777, "S", 4242), "pid namespace"],
   ])("refuses %s", (_, selfStat, orphan, why) => {
     expect(probeRefusal(4242, selfStat, orphan)).toContain(why);
+  });
+});
+
+describe("actsAsHost", () => {
+  it.each([undefined, "", "0", "1", "yes"])(
+    "acts as on the host outside a sandbox, whatever the test-only variable says (%j)",
+    (value) => {
+      expect(actsAsHost({ [TEST_HOST_MODE_ENV]: value }, false)).toBe(true);
+    },
+  );
+
+  it.each([
+    [undefined, false],
+    ["", false],
+    ["0", false],
+    ["yes", false],
+    ["1", true],
+  ])("in a sandbox, acts as on the host only where the test-only variable is %j", (value, host) => {
+    expect(actsAsHost({ [TEST_HOST_MODE_ENV]: value }, true)).toBe(host);
   });
 });

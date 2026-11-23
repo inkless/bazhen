@@ -16,6 +16,20 @@ import { heard } from "./child.ts";
 /** Carries, across the re-exec, the pid it was made for and the `LC_CTYPE` python may change. */
 export const REAPER_ENV = "BZ_CAPPED_REAPER";
 
+/**
+ * For tests only: set to `1` in a sandbox, it makes a run there act as on the host, so the host's
+ * way can be tested where tests may run. It works only where `inSignalSandbox()` holds, where all
+ * it does is make the run stop less; on a host the run acts as one already.
+ */
+export const TEST_HOST_MODE_ENV = "BZ_CAPPED_TEST_HOST_MODE";
+
+/**
+ * Whether a run acts as on the host: a subreaper that names what leaves it, leaves out the daemons
+ * the user shares, and stops none of it. Outside a sandbox always, whatever `env` says.
+ */
+export const actsAsHost = (env: NodeJS.ProcessEnv, inSandbox: boolean) =>
+  !inSandbox || env[TEST_HOST_MODE_ENV] === "1";
+
 /** What the marker holds: `lcCtype` is null where `LC_CTYPE` was unset. */
 export interface Marker {
   readonly pid: number;

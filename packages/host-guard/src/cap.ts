@@ -26,6 +26,7 @@ import {
   type ProbeReading,
 } from "./scope.ts";
 import { heard } from "./child.ts";
+import { actsAsHost } from "./reaper.ts";
 import { inSignalSandbox } from "./sandbox.ts";
 import { candidateOf, mayBeShared, ownState, sharedAmong } from "./shared.ts";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "./signal.ts";
@@ -237,7 +238,7 @@ async function sharedDaemons(live: readonly Descendant[]): Promise<Set<number>> 
  * and what is below them.
  */
 async function escapedFrom(countedNow: () => (d: Descendant) => boolean) {
-  const host = !inSignalSandbox();
+  const host = actsAsHost(process.env, inSignalSandbox());
   const escaped = await settled(async () => {
     const counted = countedNow();
     const stats = procStats();

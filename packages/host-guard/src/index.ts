@@ -89,6 +89,8 @@ export {
 } from "./cap.ts";
 export {
   REAPER_ENV,
+  TEST_HOST_MODE_ENV,
+  actsAsHost,
   onPath,
   probeReaper,
   reaperStart,

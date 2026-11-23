@@ -24,6 +24,14 @@
 // enclosing scope's (`clampMemory`), but adds to that scope's rather than counting within it, so it
 // is for a run the enclosing command waits on. Outside a scope the flag changes nothing.
 //
+// On a Linux host a run is a subreaper (packages/host-guard/src/reaper.ts): whatever its command
+// started and left running, even in a session, cgroup or scope of its own, is still its, and fails
+// it, named with its pid. A daemon the user shares (shared.ts) is left out, and nothing of this is
+// stopped: on the host a run signals none of it. A run that can't be one fails. On macOS a run
+// sees only its own group or scope. A run in a sandbox isn't one, since it would hold every orphan
+// it adopts as a zombie; `BZ_CAPPED_TEST_HOST_MODE=1`, for tests only, makes one there act as on
+// the host, and outside a sandbox it is ignored.
+//
 // host-guard is imported by path, not by package name, and needs only node: built-ins: cargo-mutants
 // runs the tests in a copy of the tree that may leave out node_modules, and CI's macOS Rust job
 // runs the Rust gates without installing it.
@@ -32,6 +40,7 @@ import {
   cappedScope,
   chooseMode,
   clampMemory,
+  actsAsHost,
   dieBy,
   inSignalSandbox,
   onPath,
@@ -233,7 +242,7 @@ export function exitStatus(
  */
 async function becomeReaper(invocation: Invocation): Promise<{ sees: boolean; why?: string }> {
   if (process.platform !== "linux" || invocation.kind !== "run") return { sees: false };
-  if (inSignalSandbox()) return { sees: false };
+  if (!actsAsHost(process.env, inSignalSandbox())) return { sees: false };
   const nodeArgv = [...process.execArgv, ...process.argv.slice(1)];
   const python = onPath("python3", process.env.PATH);
   const start = reaperStart(process.env, process.pid, process.execPath, nodeArgv, python);
