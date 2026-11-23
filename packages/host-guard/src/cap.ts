@@ -11,7 +11,7 @@
 // signals a pid read from a listing.
 
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
 import { basename } from "node:path";
 import {
@@ -120,14 +120,20 @@ export function statInGroup(text: string, pgid: number): boolean {
   return Number(pgrp) === pgid && state !== "Z" && state !== "X";
 }
 
+/** What a process with an empty name, or one that can't be read, is named: it still counts. */
+export const UNNAMED = "?";
+
+const orUnnamed = (name: string) => (name.trim() === "" ? UNNAMED : name);
+
 /** A `/proc/<pid>/stat`'s command name: what lies between its first paren and its last. */
-export const statComm = (text: string) => text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
+export const statComm = (text: string) =>
+  orUnnamed(text.slice(text.indexOf("(") + 1, text.lastIndexOf(")")));
 
 /** The names of the live processes `ps -o pgid=,stat=,comm=`'s rows put in group `pgid`. */
 export const psGroupNames = (text: string, pgid: number) =>
-  [...text.matchAll(/^\s*(\d+)\s+(\S+)\s+(.+?)\s*$/gm)]
+  [...text.matchAll(/^[ \t]*(\d+)[ \t]+(\S+)[ \t]*(.*?)[ \t]*$/gm)]
     .filter(([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat))
-    .map(([, , , comm = ""]) => basename(comm));
+    .map(([, , , comm = ""]) => orUnnamed(basename(comm)));
 
 /**
  * The names of the live processes in group `pgid`: a read of `/proc` or `ps`, no signal. Each
@@ -148,11 +154,24 @@ async function groupMembers(pgid: number): Promise<string[] | undefined> {
   return names;
 }
 
-/** The names of `pids`' processes, leaving out one gone before its name could be read. */
-export const namesOf = (pids: readonly string[], read = readText) =>
+const errorCode = (error: unknown) =>
+  error instanceof Error && "code" in error ? error.code : undefined;
+
+/**
+ * The names of `pids`' processes, leaving out only one gone before its name could be read. One
+ * whose name can't be read for any other reason still counts, as `UNNAMED`.
+ */
+export const namesOf = (
+  pids: readonly string[],
+  read: (path: string) => string = (path) => readFileSync(path, "utf8"),
+) =>
   pids.flatMap((pid) => {
-    const name = read(`/proc/${pid}/comm`)?.trim();
-    return name ? [name] : [];
+    try {
+      return [orUnnamed(read(`/proc/${pid}/comm`).replace(/\n$/, ""))];
+    } catch (error) {
+      const code = errorCode(error);
+      return code === "ENOENT" || code === "ESRCH" ? [] : [UNNAMED];
+    }
   });
 
 /**

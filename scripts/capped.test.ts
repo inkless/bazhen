@@ -141,6 +141,14 @@ describe("what a run says when it ends", () => {
     ]);
   });
 
+  it("escapes a name's control characters, so it can't forge a line", () => {
+    const left = ["x\ncapped: a forged line", "tab\there"];
+    expect(report({ ...ended, leftover: 2, left }, cap, "scope", false)).toContain(
+      "capped: stopped 2 process(es) its command left running: " +
+        "tab\\x09here ×1, x\\x0acapped: a forged line ×1",
+    );
+  });
+
   it("names the CPU-time limit when a test dies of it", () => {
     expect(report({ ...ended, code: null, signal: "SIGXCPU" }, cap, "owned", true)).toEqual([
       "capped: stopped at its CPU-time limit, set for a test whose runner had died",

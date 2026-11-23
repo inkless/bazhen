@@ -26,12 +26,23 @@ import {
   statParent,
   statusAnon,
   treeRows,
+  UNNAMED,
   type ModeDeps,
   type Verdict,
 } from "./cap.ts";
 import { MIN_SYSTEMD, cgroupOf } from "./scope.ts";
 
 const GIB = 1024 ** 3;
+
+const fail = (path: string, code: string): never => {
+  throw Object.assign(new Error(`${code}: ${path}`), { code });
+};
+
+/** A reader of `files`, which fails as a gone process's file does for any path not in it. */
+const readerOf =
+  (files: Record<string, () => string>) =>
+  (path: string): string =>
+    (files[path] ?? (() => fail(path, "ENOENT")))();
 const cap = { memory: 8 * GIB, timeMs: 20 * 60_000 };
 const SCOPE =
   "/user.slice/user-1000.slice/user@1000.service/bazhen.slice/bazhen-tests.slice/" +
@@ -378,6 +389,10 @@ describe("reading memory", () => {
     expect(statComm("10 (a (b) 42) S 1 42 42 0 -1")).toBe("a (b) 42");
   });
 
+  it("names a process with an empty name as unnamed", () => {
+    expect(statComm("10 () S 1 42 42 0 -1")).toBe(UNNAMED);
+  });
+
   it("names ps's live rows in a group, and no zombie or other group", () => {
     const rows = [
       "   42 S    /usr/bin/tmux",
@@ -389,9 +404,24 @@ describe("reading memory", () => {
     expect(psGroupNames(rows.join("\n"), 42)).toEqual(["tmux", "bazhen-holder"]);
   });
 
+  it("names ps's row of a process with an empty name, which still counts", () => {
+    const rows = ["   42 S", "   43 S    sleep", "   42 S+   ", "   42 S    tmux"];
+    expect(psGroupNames(rows.join("\n"), 42)).toEqual([UNNAMED, UNNAMED, "tmux"]);
+  });
+
   it("names each process listed, but one gone before its name was read", () => {
-    const comms: Record<string, string> = { "/proc/7/comm": "tmux\n", "/proc/9/comm": "sleep\n" };
-    expect(namesOf(["7", "8", "9"], (path) => comms[path])).toEqual(["tmux", "sleep"]);
+    const read = readerOf({ "/proc/7/comm": () => "tmux\n", "/proc/9/comm": () => "sleep\n" });
+    expect(namesOf(["7", "8", "9"], read)).toEqual(["tmux", "sleep"]);
+  });
+
+  it("counts a listed process whose name reads empty or can't be read", () => {
+    const read = readerOf({
+      "/proc/7/comm": () => "\n",
+      "/proc/8/comm": () => fail("/proc/8/comm", "EACCES"),
+      "/proc/9/comm": () => fail("/proc/9/comm", "ESRCH"),
+      "/proc/10/comm": () => "tmux\n",
+    });
+    expect(namesOf(["7", "8", "9", "10"], read)).toEqual([UNNAMED, UNNAMED, "tmux"]);
   });
 
   it("reads a process's own anonymous memory, swapped out included, but no shared memory", () => {

@@ -109,13 +109,17 @@ export function formatBytes(bytes: number): string {
   return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
 }
 
+/** A process's name with its control characters escaped, so it can't forge a line of output. */
+const printable = (name: string) =>
+  name.replace(/\p{Cc}/gu, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+
 /** `tmux ×3, bazhen-holder ×1`: each name once, the most frequent first. */
 export function nameCounts(names: readonly string[]): string {
   const counts = new Map<string, number>();
   for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
   return [...counts]
     .toSorted(([a, m], [b, n]) => n - m || a.localeCompare(b))
-    .map(([name, n]) => `${name} ×${n}`)
+    .map(([name, n]) => `${printable(name)} ×${n}`)
     .join(", ");
 }
 
