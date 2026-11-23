@@ -709,7 +709,8 @@ const MACRO_MODULES: Record<string, string> = {};
 
 /** A macro of another crate whose expansion a review read: the crates read, at their versions. */
 export interface ForeignMacro {
-  read: Record<string, string>;
+  /** Each crate whose source was read, by name: the version, and its crates.io checksum. */
+  read: Record<string, { version: string; checksum: string }>;
   reason: string;
 }
 
@@ -719,42 +720,101 @@ export interface ForeignMacro {
 // version Cargo.lock moves off fails until the expansion is read again at the new one.
 const FOREIGN_MACROS: Record<string, ForeignMacro> = {
   "tracing::debug": {
-    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    read: {
+      tracing: {
+        version: "0.1.44",
+        checksum: "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
+      },
+      "tracing-core": {
+        version: "0.1.36",
+        checksum: "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+      },
+    },
     reason:
       "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
       "identify_callsite!): expansion writes no impl",
   },
   "tracing::error": {
-    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    read: {
+      tracing: {
+        version: "0.1.44",
+        checksum: "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
+      },
+      "tracing-core": {
+        version: "0.1.36",
+        checksum: "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+      },
+    },
     reason:
       "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
       "identify_callsite!): expansion writes no impl",
   },
   "tracing::info": {
-    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    read: {
+      tracing: {
+        version: "0.1.44",
+        checksum: "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
+      },
+      "tracing-core": {
+        version: "0.1.36",
+        checksum: "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+      },
+    },
     reason:
       "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
       "identify_callsite!): expansion writes no impl",
   },
   "tracing::warn": {
-    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    read: {
+      tracing: {
+        version: "0.1.44",
+        checksum: "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
+      },
+      "tracing-core": {
+        version: "0.1.36",
+        checksum: "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+      },
+    },
     reason:
       "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
       "identify_callsite!): expansion writes no impl",
   },
   "tokio::select": {
-    read: { tokio: "1.54.1", "tokio-macros": "2.7.2" },
+    read: {
+      tokio: {
+        version: "1.54.1",
+        checksum: "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
+      },
+      "tokio-macros": {
+        version: "2.7.2",
+        checksum: "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e",
+      },
+    },
     reason:
       "read tokio@1.54.1 src/macros/select.rs and tokio-macros@2.7.2 src/select.rs (an enum " +
       "and a type alias): expansion writes no impl",
   },
   "serde_json::json": {
-    read: { serde_json: "1.0.154" },
+    read: {
+      serde_json: {
+        version: "1.0.154",
+        checksum: "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6",
+      },
+    },
     reason:
       "read serde_json@1.0.154 src/macros.rs (json!, json_internal!): expansion writes no impl",
   },
   "clap::value_parser": {
-    read: { clap: "4.6.7", clap_builder: "4.6.7" },
+    read: {
+      clap: {
+        version: "4.6.7",
+        checksum: "aa8876b300ab35ba921adea3dfd70157a46249b33f95c9084ae5709785478946",
+      },
+      clap_builder: {
+        version: "4.6.7",
+        checksum: "ec0797fb7aeb1406c84efac526901f7ec3ead2124f946b494e72879d4b54704d",
+      },
+    },
     reason:
       "read clap@4.6.7 src/lib.rs (pub use clap_builder::*) and clap_builder@4.6.7 " +
       "src/builder/value_parser.rs (value_parser!, a block of a use and a call): expansion " +
@@ -2576,7 +2636,8 @@ const STD_DERIVES = new Set("Clone Copy Debug Default Eq Hash Ord PartialEq Part
 // the derive reads and the compiler drops.
 const DERIVE_HELPERS = new Set("backtrace default error from serde source".split(" "));
 
-const MACRO_CALL = /((?:(?:r#)?\w+\s*::\s*)*(?:r#)?\w+)\s*!\s*[({[]/g;
+// The `!` of a macro call, its path read back from it, so a long run of names is read once.
+const MACRO_BANG = /!\s*[({[]/g;
 
 // Words that may come right before a `!` that negates, as `if !(x)` does.
 const KEYWORDS = new Set(
@@ -2719,10 +2780,17 @@ function unreadImpls(
     called.add(origin);
     return trusted.has(origin);
   };
-  for (const m of code.matchAll(MACRO_CALL)) {
-    const path = (m[1] ?? "").split("::").map((p) => p.trim());
-    if (path.length === 1 && KEYWORDS.has(path[0] ?? "")) continue;
-    if (!knownIn(table, file, m.index, path, known)) unread = true;
+  for (const m of code.matchAll(MACRO_BANG)) {
+    let end = m.index;
+    while (end > 0 && /\s/.test(code[end - 1] ?? "")) end--;
+    let start = end;
+    while (start > 0 && /\w/.test(code[start - 1] ?? "")) start--;
+    const name = code.slice(start, end);
+    if (name === "") continue;
+    const raw = code.slice(start - 2, start) === "r#";
+    if (!raw && KEYWORDS.has(name)) continue;
+    const path = pathBefore(code, raw ? start - 2 : start, name);
+    if (path === undefined || !knownIn(table, file, m.index, path, known)) unread = true;
   }
   for (const attribute of attributesIn(code)) {
     const ok = knownAttribute(
@@ -2866,21 +2934,35 @@ function throughOf(
   return through;
 }
 
-/** Each package's locked versions, by name, as Cargo.lock records them. */
-function lockedVersions(lock: string): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+interface Locked {
+  version: string;
+  source: string | undefined;
+  checksum: string | undefined;
+}
+
+// Where Cargo.lock says a package from crates.io comes from. A git or path source, or a path
+// `[patch]`, has another or none, and code no review read.
+const CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index";
+
+/** Each package Cargo.lock locks, by name: its version, source and checksum. */
+function lockedPackages(lock: string): Map<string, Locked[]> {
+  const out = new Map<string, Locked[]>();
   for (const block of lock.split(/^\[\[package\]\]$/m).slice(1)) {
-    const name = /^name = "([^"]+)"$/m.exec(block)?.[1];
-    const version = /^version = "([^"]+)"$/m.exec(block)?.[1];
-    if (name !== undefined && version !== undefined)
-      out.set(name, [...(out.get(name) ?? []), version]);
+    const field = (key: string) => new RegExp(`^${key} = "([^"]+)"$`, "m").exec(block)?.[1];
+    const name = field("name");
+    const version = field("version");
+    if (name !== undefined && version !== undefined) {
+      const locked = { version, source: field("source"), checksum: field("checksum") };
+      out.set(name, [...(out.get(name) ?? []), locked]);
+    }
   }
   return out;
 }
 
 /**
- * The paths of `foreign` whose every crate read is the one version Cargo.lock locks, and whose
- * reason says it read each; why each other isn't goes into `out`.
+ * The paths of `foreign` whose every crate read is the one package Cargo.lock locks, at the version
+ * and with the checksum read, from crates.io; whose reason says it read each; and no crate of which
+ * a manifest renames, or takes under its name. Why each other isn't goes into `out`.
  */
 function pinnedMacros(
   paths: string[],
@@ -2888,19 +2970,50 @@ function pinnedMacros(
   foreign: Record<string, ForeignMacro>,
   out: string[],
 ): Set<string> {
-  const lock = paths.includes("Cargo.lock") ? lockedVersions(read("Cargo.lock")) : new Map();
+  const lock: Map<string, Locked[]> = paths.includes("Cargo.lock")
+    ? lockedPackages(read("Cargo.lock"))
+    : new Map();
+  const manifests = paths
+    .filter((p) => /(?:^|\/)Cargo\.toml$/.test(p))
+    .map((p) => [p, manifestNames(p, read(p))] as const);
+  const unreadable = manifests.some(([, m]) => m.failures.length > 0);
+  const renamed = new Map<string, string>();
+  for (const [manifest, { renames }] of manifests) {
+    for (const [key, name] of renames) {
+      for (const n of [key, name]) renamed.set(n.replace(/-/g, "_"), manifest);
+    }
+  }
   const pinned = new Set<string>();
   for (const [path, { read: crates, reason }] of Object.entries(foreign)) {
-    let held = Object.keys(crates).length > 0;
-    for (const [name, version] of Object.entries(crates)) {
-      const locked: string[] = lock.get(name) ?? [];
-      if (locked.length !== 1 || locked[0] !== version) {
+    let held = Object.keys(crates).length > 0 && !unreadable;
+    for (const name of new Set([path.split("::")[0] ?? "", ...Object.keys(crates)])) {
+      const manifest = renamed.get(name.replace(/-/g, "_"));
+      if (manifest !== undefined) {
+        held = false;
+        out.push(
+          `${manifest}: renames a crate to or from ${name}, which FOREIGN_MACROS trusts ${path} ` +
+            "by, so the name may be another crate's: take the crate by its own name.",
+        );
+      }
+    }
+    for (const [name, { version, checksum }] of Object.entries(crates)) {
+      const locked = lock.get(name) ?? [];
+      if (locked.length !== 1 || locked[0]?.version !== version) {
         held = false;
         out.push(
           `scripts/check-standards.ts: FOREIGN_MACROS read ${path} in ${name} ${version}, but ` +
             `Cargo.lock locks ${locked.length === 0 ? "no " : ""}${name}` +
-            `${locked.length === 0 ? "" : ` ${locked.join(", ")}`}: read its expansion at the ` +
-            "locked version again, and pin that version if it still writes no impl.",
+            `${locked.length === 0 ? "" : ` ${locked.map((l) => l.version).join(", ")}`}: read ` +
+            "its expansion at the locked version again, and pin that version if it still writes " +
+            "no impl.",
+        );
+      } else if (locked[0]?.source !== CRATES_IO || locked[0].checksum !== checksum) {
+        held = false;
+        out.push(
+          `scripts/check-standards.ts: FOREIGN_MACROS read ${path} in ${name} ${version} from ` +
+            `crates.io with checksum ${checksum}, but Cargo.lock takes it from ` +
+            `${locked[0]?.source ?? "no registry"} with checksum ${locked[0]?.checksum ?? "none"}: ` +
+            "read the expansion of the source it takes, and pin that if it still writes no impl.",
         );
       }
       if (

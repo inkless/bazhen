@@ -610,18 +610,21 @@ What differs:
     (`impl<O: Output> Holder<O>`), or one for a single instance (`impl Runtime<Fast>`), doesn't
     count. Nothing else may answer the call either: no `Deref`, no trait impl for the type or for
     every type that may answer that name, no trait a `use` in the file may bring in from another
-    crate, and no attribute on the type but
-    the compiler's own and std's derives, so a serde or thiserror derive counts against it. Any
-    macro, anywhere in the workspace, that is neither std's nor listed in `FOREIGN_MACROS` may
-    write an impl the rule can't read, and so may an attribute that is neither the compiler's own
-    nor a derive's helper. A call of one of the workspace's own macros counts too, since its body
-    may assemble an impl from the tokens it is handed. Any of these makes every such call reach.
-    `FOREIGN_MACROS` holds each macro to the versions of the crates whose source a review read,
-    and fails when Cargo.lock locks another, until someone reads the expansion again. What the
-    rule still takes on trust: a listed macro by its path, a derive's helper (`serde`, `error`,
-    `from`, `source`, `backtrace`, `default`) by its name, and a derive to write impls only for
-    the type it is on. And it reads a struct as written when it decides whether the struct carries
-    bytes at all, so it can't see an attribute macro adding a byte field.
+    crate, and no attribute on the type but the compiler's own and std's derives, so a serde or
+    thiserror derive counts against it. Any macro, anywhere in the workspace, that is neither
+    std's nor listed in `FOREIGN_MACROS` may write an impl the rule can't read, and so may an
+    attribute that is neither the compiler's own nor a derive's helper. A call of one of the
+    workspace's own macros counts too, since its body may assemble an impl from the tokens it is
+    handed. Any of these makes every such call reach. `FOREIGN_MACROS` holds each macro to the
+    crates whose source a review read: the version, from crates.io, with the checksum Cargo.lock
+    had. It fails when the lock takes another version or source, or another checksum, and when a
+    manifest renames one of those crates or takes another under its name, until someone reads the
+    expansion again. What the rule still takes on trust: a listed macro by its path, a derive's
+    helper (`serde`, `error`, `from`, `source`, `backtrace`, `default`) by its name, and a derive
+    to write impls only for the type it is on. It reads a struct as written when it decides
+    whether the struct carries bytes at all, so it can't see an attribute macro adding a byte
+    field. And it doesn't read an impl whose head holds a `;` or a `{`, as `where [u8; 4]: Sized`
+    does, so a `Deref` written that way goes unseen.
   - The targets live in `crates/<name>/fuzz/fuzz_targets/<target>.rs` (cargo-fuzz's layout),
     with seed inputs in `fuzz/seeds/<target>/`. The fuzz crate is a workspace of its own, its
     dependencies pinned exactly. A target asserts what must hold of every input, not only

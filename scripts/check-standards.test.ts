@@ -1861,12 +1861,40 @@ const heldRuntime = (struct: string, extra: string[]) =>
     ...extra,
   ].join("\n");
 
-// A Cargo.lock locking each of `versions`, a name and its version.
-const lockOf = (versions: [string, string][]) =>
+// A Cargo.lock locking each of `packages`: a name, a version, and the lines after them, by default
+// those of a crate from crates.io with the checksum `sum`.
+const lockOf = (packages: [string, string, string?][]) =>
   [
     "version = 4",
-    ...versions.map(([name, version]) => `\n[[package]]\nname = "${name}"\nversion = "${version}"`),
+    ...packages.map(
+      ([name, version, rest = `source = "${CRATES_IO}"\nchecksum = "sum"`]) =>
+        `\n[[package]]\nname = "${name}"\nversion = "${version}"\n${rest}`,
+    ),
   ].join("\n");
+const CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index";
+
+// The failures for each entry of ext read at 1.0.0, from crates.io with the checksum `sum`, when
+// Cargo.lock takes it `from` elsewhere.
+const taken = (from: string) =>
+  ["name", "gone"].map(
+    (name) =>
+      `scripts/check-standards.ts: FOREIGN_MACROS read ext::${name} in ext 1.0.0 from ` +
+      `crates.io with checksum sum, but Cargo.lock takes it from ${from}: read the ` +
+      "expansion of the source it takes, and pin that if it still writes no impl.",
+  );
+
+// The failures for each entry of ext when `manifest` renames a crate to or from ext.
+const renamesOf = (file: string) =>
+  ["name", "gone"].map(
+    (name) =>
+      `${file}: renames a crate to or from ext, which FOREIGN_MACROS trusts ext::${name} ` +
+      "by, so the name may be another crate's: take the crate by its own name.",
+  );
+
+// The manifest of crate r, depending on `deps`.
+const manifestOf = (deps: string) => ({
+  "crates/r/Cargo.toml": `[package]\nname = "r"\n\n[dependencies]\n${deps}\n`,
+});
 
 // The failures for each entry of ext read at 1.0.0 when Cargo.lock locks `locked` instead.
 const moved = (locked: string) =>
@@ -2620,7 +2648,7 @@ describe("decoderFailures", () => {
   };
   const readExt = {
     "ext::name": {
-      read: { ext: "1.0.0" },
+      read: { ext: { version: "1.0.0", checksum: "sum" } },
       reason: "read ext@1.0.0 src/lib.rs: expansion writes no impl",
     },
   };
@@ -2885,6 +2913,34 @@ describe("decoderFailures", () => {
         { ...held(named), "Cargo.lock": lockOf([["ext", "1.0.1"]]) },
       ],
       "a foreign macro's crate name a use rebinds": [held(named), held("use other as ext;", named)],
+      "a foreign macro's crate a manifest renames": [
+        held(named),
+        {
+          ...held(named),
+          "crates/r/Cargo.toml":
+            '[package]\nname = "r"\n\n[dependencies]\next = { package = "evil", version = "1" }\n',
+          "Cargo.lock": lockOf([
+            ["ext", "1.0.0"],
+            ["evil", "1.0.0"],
+          ]),
+        },
+      ],
+      "a foreign macro's crate a manifest takes another under the name of": [
+        held(named),
+        {
+          ...held(named),
+          "crates/q/Cargo.toml":
+            '[package]\nname = "q"\n\n[dependencies]\nevil = { package = "ext", version = "1" }\n',
+        },
+      ],
+      "a foreign macro beside a manifest whose renames can't be read": [
+        held(named),
+        {
+          ...held(named),
+          "crates/q/Cargo.toml":
+            '[package]\nname = "q"\n\n[dependencies]\nx = { package = 1, version = "1" }\n',
+        },
+      ],
       "a foreign macro brought in from the root": [
         held("use ::ext::name;", "pub fn n() -> String { name!() }"),
         held("use ::other::name;", "pub fn n() -> String { name!() }"),
@@ -2978,6 +3034,26 @@ describe("decoderFailures", () => {
         held("pub fn not(x: bool) -> bool { if !(x) { return !(x); } x }"),
         held("pub fn not(x: bool) -> bool { iff!(x) }"),
       ],
+      "a macro with space before its !": [
+        held('pub fn n() -> String { format !("n") }'),
+        held("pub fn not(x: bool) -> bool { iff !(x) }"),
+      ],
+      "a ! that follows no name": [
+        held("pub fn not(x: bool, y: bool) -> bool { x && !(y) || !![x][0] }"),
+        held("pub fn not(x: bool, y: bool) -> bool { x && m!(y) }"),
+      ],
+      "a macro by a raw name": [
+        held('pub fn n() -> String { std::r#format!("n") }'),
+        held('pub fn n() -> String { other::r#format!("n") }'),
+      ],
+      "a macro whose path can't be read back": [
+        held('pub fn n() -> String { std::format!("n") }'),
+        held('pub fn n() -> String { <other::Fmt>::format!("n") }'),
+      ],
+      "a macro by a raw keyword": [
+        held("pub fn not(x: bool) -> bool { if !(x) { return false; } x }"),
+        held("use other::r#if;", "pub fn not(x: bool) -> bool { r#if!(x) }"),
+      ],
     };
     expect(
       Object.fromEntries(
@@ -2992,8 +3068,9 @@ describe("decoderFailures", () => {
   // The failures of a crate calling `ext::name!`, with two entries for ext read at 1.0.0, one of a
   // macro nobody calls, under a Cargo.lock locking `lock`.
   const readAt = (
-    lock: [string, string][],
+    lock: [string, string, string?][],
     reason = "read ext@1.0.0 src/lib.rs: expansion writes no impl",
+    manifests: Record<string, string> = {},
   ) =>
     failures(
       fuzzed,
@@ -3001,14 +3078,15 @@ describe("decoderFailures", () => {
       {
         ...repo,
         ...withDeps,
+        ...manifests,
         "Cargo.lock": lockOf(lock),
         "crates/r/src/lib.rs": "pub fn name() -> String { ext::name!() }",
       },
       {},
       {
-        "ext::name": { read: { ext: "1.0.0" }, reason },
+        "ext::name": { read: { ext: { version: "1.0.0", checksum: "sum" } }, reason },
         "ext::gone": {
-          read: { ext: "1.0.0" },
+          read: { ext: { version: "1.0.0", checksum: "sum" } },
           reason: "read ext@1.0.0 src/lib.rs: expansion writes no impl",
         },
       },
@@ -3033,6 +3111,81 @@ describe("decoderFailures", () => {
       readAt([["ext", "1.0.0"]], "read ext@0.9.0 src/lib.rs: expansion writes no impl"),
     ).toEqual([unsaid, stale]);
     expect(readAt([["ext", "1.0.0"]], "looked at ext@1.0.0 src/lib.rs")).toEqual([unsaid, stale]);
+  });
+
+  it("reads a long run of names before a ! in linear time", () => {
+    // Read from each name it may start at, a run takes seconds: 120 KB of a name took 9 s, and
+    // 280 KB of raw path segments 52 s. Read back from the `!`, each takes milliseconds.
+    for (const run of ["a".repeat(120_000), "r#a :: ".repeat(40_000)]) {
+      const tree = { ...repo, "crates/r/src/lib.rs": `pub fn f() { ${run}; ${run}b!(); }` };
+      const start = performance.now();
+      failures(fuzzed, exempt, tree);
+      expect(performance.now() - start).toBeLessThan(3000);
+    }
+  });
+
+  it("holds each foreign macro to the crates.io package a review read, under its own name", () => {
+    const stale =
+      "scripts/check-standards.ts: FOREIGN_MACROS lists ext::gone, which no product code calls.";
+    const git = 'source = "git+https://example.com/ext#0a1b"';
+    expect(readAt([["ext", "1.0.0", git]])).toEqual([
+      ...taken("git+https://example.com/ext#0a1b with checksum none"),
+      stale,
+    ]);
+    // A `[patch]` or `[replace]` by a path locks the package with no source and no checksum.
+    expect(readAt([["ext", "1.0.0", ""]])).toEqual([
+      ...taken("no registry with checksum none"),
+      stale,
+    ]);
+    // A lock written by hand, giving a git source the checksum read.
+    expect(readAt([["ext", "1.0.0", `${git}\nchecksum = "sum"`]])).toEqual([
+      ...taken("git+https://example.com/ext#0a1b with checksum sum"),
+      stale,
+    ]);
+    const other = `source = "${CRATES_IO}"\nchecksum = "other"`;
+    expect(readAt([["ext", "1.0.0", other]])).toEqual([
+      ...taken(`${CRATES_IO} with checksum other`),
+      stale,
+    ]);
+    const lock: [string, string][] = [
+      ["ext", "1.0.0"],
+      ["evil", "1.0.0"],
+    ];
+    expect(
+      readAt(lock, undefined, manifestOf('ext = { package = "evil", version = "1" }')),
+    ).toEqual([...renamesOf("crates/r/Cargo.toml"), stale]);
+    expect(
+      readAt(lock, undefined, manifestOf('ext = "1"\nevil = { package = "ext", version = "1" }')),
+    ).toEqual([...renamesOf("crates/r/Cargo.toml"), stale]);
+    expect(readAt(lock, undefined, manifestOf('ext = "1"\nevil = "1"'))).toEqual([stale]);
+    // A macro named through a crate other than the one read, which re-exports it.
+    const through = (deps: string) =>
+      failures(
+        fuzzed,
+        exempt,
+        {
+          ...repo,
+          ...manifestOf(deps),
+          "Cargo.lock": lockOf([...lock, ["ext_impl", "1.0.0"]]),
+          "crates/r/src/lib.rs": "pub fn name() -> String { ext::name!() }",
+        },
+        {},
+        {
+          "ext::name": {
+            read: { ext_impl: { version: "1.0.0", checksum: "sum" } },
+            reason: "read ext_impl@1.0.0 src/lib.rs: expansion writes no impl",
+          },
+        },
+      );
+    expect(through('ext = "1"')).toEqual([]);
+    expect(through('ext = "1"\nimpl2 = { package = "ext_impl", version = "1" }')).toEqual([
+      "crates/r/Cargo.toml: renames a crate to or from ext_impl, which FOREIGN_MACROS trusts " +
+        "ext::name by, so the name may be another crate's: take the crate by its own name.",
+    ]);
+    expect(through('ext = { package = "evil", version = "1" }')).toEqual([
+      "crates/r/Cargo.toml: renames a crate to or from ext, which FOREIGN_MACROS trusts " +
+        "ext::name by, so the name may be another crate's: take the crate by its own name.",
+    ]);
   });
 
   it("follows a field's methods through every type that holds it, and keeps a cycle", () => {
