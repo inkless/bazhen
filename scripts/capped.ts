@@ -33,6 +33,10 @@ import {
   chooseMode,
   clampMemory,
   dieBy,
+  onPath,
+  probeReaper,
+  reaperStart,
+  replaceEnv,
   runIn,
   type Cap,
   type Ended,
@@ -186,6 +190,14 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
     lines.push(`capped: stopped ${ended.leftover} process(es) its command left running${names}`);
   }
   if (ended.uncounted !== undefined) lines.push(`capped: ${ended.uncounted}`);
+  if (!testBinary && ended.escaped?.length) {
+    lines.push(
+      `capped: ${ended.escaped.length} process(es) of the run left its scope or group, ` +
+        `not yet counted: ${nameCounts(ended.escaped)}`,
+    );
+  }
+  if (!testBinary && ended.zombies)
+    lines.push(`capped: ${ended.zombies} zombie(s) held at the end`);
   return lines;
 }
 
@@ -207,9 +219,32 @@ export function exitStatus(
   return { status };
 }
 
+/**
+ * Makes a run on Linux a subreaper before it spawns anything: re-execs it through python3 once, or,
+ * back from that, restores its env and checks the flag took. Whether it is one, and if not, why.
+ */
+async function becomeReaper(invocation: Invocation): Promise<{ sees: boolean; why?: string }> {
+  if (process.platform !== "linux" || invocation.kind !== "run") return { sees: false };
+  const nodeArgv = [...process.execArgv, ...process.argv.slice(1)];
+  const python = onPath("python3", process.env.PATH);
+  const start = reaperStart(process.env, process.pid, process.execPath, nodeArgv, python);
+  if (start.kind === "none") return { sees: false, why: start.why };
+  if (start.kind === "exec") {
+    if (process.execve === undefined) return { sees: false, why: "this Node can't execve" };
+    process.execve(start.file, start.argv, start.env);
+  }
+  replaceEnv(process.env, start.env);
+  const why = await probeReaper();
+  return why === undefined ? { sees: true } : { sees: false, why };
+}
+
 async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   const { command, args } = invocation;
   const testBinary = invocation.kind === "test-binary";
+  const reaper = await becomeReaper(invocation);
+  if (reaper.why !== undefined) {
+    console.error(`capped: can't see processes that leave its run here: ${reaper.why}`);
+  }
   const cap = { ...invocation.cap, memory: clampMemory(invocation.cap.memory) };
   const chosen = await chooseMode(
     cap,
@@ -219,7 +254,7 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   if (chosen.note !== undefined && !testBinary) {
     console.error(`capped: ${chosen.note}, so a watchdog checks memory instead`);
   }
-  const ended = await runIn(chosen.mode, command, args, cap, process.env, !testBinary);
+  const ended = await runIn(chosen.mode, command, args, cap, process.env, !testBinary, reaper.sees);
   const enclosing = chosen.mode === "through" ? cappedScope() : undefined;
   const reported = { ...cap, memory: enclosing ?? cap.memory };
   for (const line of report(ended, reported, chosen.mode, testBinary)) console.error(line);

@@ -50,6 +50,13 @@ export interface Ended {
   readonly left?: readonly string[];
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
+  /**
+   * The names of the run's live processes outside its scope or group once its command had gone,
+   * where this process is a subreaper and so can see them: reported, not yet counted.
+   */
+  readonly escaped?: readonly string[];
+  /** This process's children left as zombies at the run's end, where it is a subreaper. */
+  readonly zombies?: number;
 }
 
 export type Verdict = { readonly ok: true } | { readonly ok: false; readonly why: string };
@@ -152,6 +159,80 @@ async function groupMembers(pgid: number): Promise<string[] | undefined> {
     if (statInGroup(stat, pgid)) names.push(statComm(stat));
   }
   return names;
+}
+
+/** A live process below this one: its pid, group and name, from its `/proc/<pid>/stat`. */
+export interface Descendant {
+  readonly pid: number;
+  readonly pgid: number;
+  readonly name: string;
+}
+
+/**
+ * From every process's `/proc/<pid>/stat`, `root`'s live descendants, leaving out `skipped` and
+ * everything below them, and how many of `root`'s own children are zombies. A zombie holds nothing,
+ * but a subreaper's stay until it exits.
+ */
+export function descendantsIn(
+  stats: ReadonlyMap<number, string>,
+  root: number,
+  skipped: ReadonlySet<number>,
+): { live: Descendant[]; zombies: number } {
+  const children = new Map<number, number[]>();
+  for (const [pid, stat] of stats) {
+    const parent = statParent(stat);
+    children.set(parent, [...(children.get(parent) ?? []), pid]);
+  }
+  const live: Descendant[] = [];
+  let zombies = 0;
+  const stack = [...(children.get(root) ?? [])];
+  for (let pid = stack.pop(); pid !== undefined; pid = stack.pop()) {
+    const stat = stats.get(pid) ?? "";
+    const [state = "", , pgrp] = statFields(stat);
+    if (state === "Z" || state === "X") {
+      if (statParent(stat) === root) zombies++;
+      continue;
+    }
+    if (skipped.has(pid)) continue;
+    live.push({ pid, pgid: Number(pgrp), name: statComm(stat) });
+    stack.push(...(children.get(pid) ?? []));
+  }
+  return { live, zombies };
+}
+
+/** Every process's `/proc/<pid>/stat`, by pid: one scan, no signal. */
+function procStats(): Map<number, string> {
+  const stats = new Map<number, string>();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = readText(`/proc/${entry}/stat`);
+    if (stat !== undefined) stats.set(Number(entry), stat);
+  }
+  return stats;
+}
+
+/** Whether a descendant is one of `pids`, as a scope's `cgroup.procs` lists them. */
+const listedIn = (pids: readonly string[]) => {
+  const listed = new Set(pids.map(Number));
+  return (d: Descendant) => listed.has(d.pid);
+};
+
+/** This process's live descendants but its helpers, and its zombie children. */
+const descendants = () => descendantsIn(procStats(), process.pid, helpers);
+
+/**
+ * The names of the run's processes that `counted` didn't already hold, once the end of the command
+ * has settled, and this process's zombie children then.
+ */
+async function escapedFrom(countedNow: () => (d: Descendant) => boolean) {
+  let zombies = 0;
+  const escaped = await settled(() => {
+    const counted = countedNow();
+    const read = descendants();
+    zombies = read.zombies;
+    return read.live.filter((d) => !counted(d)).map((d) => d.name);
+  });
+  return { escaped, zombies };
 }
 
 const errorCode = (error: unknown) =>
@@ -275,17 +356,27 @@ export function judgeProbe(
   return { ok: true };
 }
 
+/**
+ * The pids of this process's own helpers (`systemctl`, `journalctl`, `ps`) while Node holds them:
+ * they are not the run's. Each leaves once reaped, so a pid reused since can't hide one of the run.
+ */
+const helpers = new Set<number>();
+
 function output(
   command: string,
   args: readonly string[],
   timeout = STEP_TIMEOUT_MS,
 ): Promise<string | undefined> {
   return new Promise((done) => {
-    heard(
+    const helper = heard(
       execFile(command, args, { timeout }, (error, stdout) =>
         done(error === null ? stdout : undefined),
       ),
     );
+    const pid = helper.pid;
+    if (pid === undefined) return;
+    helpers.add(pid);
+    helper.once("exit", () => helpers.delete(pid));
   });
 }
 
@@ -359,6 +450,7 @@ export function runInScope(
   cap: Cap,
   env: NodeJS.ProcessEnv,
   asRun = false,
+  seesEscapes = false,
 ): Promise<Ended> {
   const unit = unitName();
   const uid = process.getuid?.() ?? 0;
@@ -403,6 +495,7 @@ export function runInScope(
       clearInterval(poll);
       watcher?.close();
       const left = asRun ? await settled(() => namesOf(procs(), procs)) : undefined;
+      const escapes = asRun && seesEscapes ? await escapedFrom(() => listedIn(procs())) : {};
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);
@@ -413,7 +506,8 @@ export function runInScope(
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
       const named = left === undefined ? {} : { left };
-      done({ code, signal, peak, timedOut, leftover: left?.length ?? 0, ...named, ...journaled });
+      const leftover = left?.length ?? 0;
+      done({ code, signal, peak, timedOut, leftover, ...named, ...journaled, ...escapes });
     };
     child.once("error", () => void finish(127, null));
     child.once("exit", (code, signal) => void finish(code, signal));
@@ -591,6 +685,7 @@ async function runGroup(
   env: NodeJS.ProcessEnv,
   watching: Watch,
   countsLeftover: boolean,
+  seesEscapes = false,
 ): Promise<Ended> {
   const scopeKillsBefore = watching === "none" ? scopeKills() : 0;
   const child = spawnGroup(bin, argv, {
@@ -641,6 +736,8 @@ async function runGroup(
   clearTimeout(escalation);
   const left =
     countsLeftover && pid !== undefined ? await settled(() => groupMembers(pid)) : undefined;
+  const inGroup = () => (d: Descendant) => d.pgid === pid;
+  const escapes = countsLeftover && seesEscapes ? await escapedFrom(inGroup) : {};
   // A group just seen empty isn't signalled: its pgid may already be another group's.
   if (left?.length !== 0) stop("SIGKILL");
   const leftover = left?.length ?? 0;
@@ -649,7 +746,7 @@ async function runGroup(
   // counted an OOM kill is taken as that kill.
   if (watching === "none" && signal === "SIGKILL" && scopeKills() > scopeKillsBefore) kills = 1;
   const named = left === undefined ? {} : { left };
-  return { code, signal, peak, memoryKills: kills, timedOut, leftover, ...named };
+  return { code, signal, peak, memoryKills: kills, timedOut, leftover, ...named, ...escapes };
 }
 
 /** Runs a command in a process group of its own, watching its tree and stopping the group. */
@@ -658,8 +755,9 @@ export function runWatched(
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  seesEscapes = false,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "tree", true);
+  return runGroup(command, args, cap, env, "tree", true, seesEscapes);
 }
 
 /**
@@ -757,8 +855,9 @@ export function runThrough(
   cap: Cap,
   env: NodeJS.ProcessEnv,
   asRun = false,
+  seesEscapes = false,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "none", asRun);
+  return runGroup(command, args, cap, env, "none", asRun, seesEscapes);
 }
 
 /**
@@ -806,6 +905,8 @@ export async function chooseMode(
 /**
  * Runs `command` as `mode` says. `asRun` is for a run rather than a test binary: it counts what
  * the command left, and under systemd every kill the command outlived (`runInScope`).
+ * `seesEscapes`, for a run in a process that is a subreaper (reaper.ts), also reads what the run
+ * has outside its scope or group.
  */
 export function runIn(
   mode: Mode,
@@ -814,11 +915,12 @@ export function runIn(
   cap: Cap,
   env: NodeJS.ProcessEnv,
   asRun = false,
+  seesEscapes = false,
 ): Promise<Ended> {
-  if (mode === "scope") return runInScope(command, args, cap, env, asRun);
-  if (mode === "watched") return runWatched(command, args, cap, env);
+  if (mode === "scope") return runInScope(command, args, cap, env, asRun, seesEscapes);
+  if (mode === "watched") return runWatched(command, args, cap, env, seesEscapes);
   if (mode === "owned") return runOwned(command, args, cap, env);
-  return runThrough(command, args, cap, env, asRun);
+  return runThrough(command, args, cap, env, asRun, seesEscapes);
 }
 
 /**

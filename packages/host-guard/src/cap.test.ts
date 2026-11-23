@@ -7,6 +7,7 @@ import {
   chooseMode,
   clampMemory,
   cpuLimit,
+  descendantsIn,
   fallbackWatchdog,
   isAncestor,
   journalArgs,
@@ -462,5 +463,68 @@ describe("reading memory", () => {
   it("reads a process's proportional share of the shared memory it maps", () => {
     const rollup = "Rss:\t 1000 kB\nPss:\t 400 kB\nPss_Anon:\t 100 kB\nPss_Shmem:\t 75 kB\n";
     expect(smapsShmem(rollup)).toBe(75 * 1024);
+  });
+});
+
+const procStat = (pid: number, name: string, state: string, ppid: number, pgrp = pid) =>
+  `${pid} (${name}) ${state} ${ppid} ${pgrp} ${pgrp} 0 -1 4194560`;
+const procStats = (...lines: string[]) =>
+  new Map(lines.map((line) => [Number(line.slice(0, line.indexOf(" "))), line]));
+
+describe("descendantsIn", () => {
+  it("reads every live process below the root, whatever its group, and none beside it", () => {
+    const read = descendantsIn(
+      procStats(
+        procStat(100, "capped", "S", 50),
+        procStat(101, "vitest", "S", 100),
+        procStat(102, "tmux: server", "S", 100, 102),
+        procStat(103, "sh", "S", 102, 103),
+        procStat(200, "bystander", "S", 50, 100),
+        procStat(201, "its child", "S", 200, 100),
+      ),
+      100,
+      new Set(),
+    );
+    expect(
+      read.live.map((d) => [d.pid, d.pgid, d.name]).toSorted(([a], [b]) => Number(a) - Number(b)),
+    ).toEqual([
+      [101, 101, "vitest"],
+      [102, 102, "tmux: server"],
+      [103, 103, "sh"],
+    ]);
+    expect(read.zombies).toBe(0);
+  });
+
+  it("counts the root's zombie children, and counts them as nothing live", () => {
+    const read = descendantsIn(
+      procStats(
+        procStat(300, "cat", "Z", 100),
+        procStat(301, "x", "X", 100),
+        procStat(302, "deep", "Z", 303),
+        procStat(303, "sleep", "S", 100),
+      ),
+      100,
+      new Set(),
+    );
+    expect(read.live.map((d) => d.pid)).toEqual([303]);
+    expect(read.zombies).toBe(2);
+  });
+
+  it("leaves out a helper and what is below it", () => {
+    const read = descendantsIn(
+      procStats(
+        procStat(400, "systemctl", "S", 100),
+        procStat(401, "pager", "S", 400),
+        procStat(402, "x", "S", 100),
+      ),
+      100,
+      new Set([400]),
+    );
+    expect(read.live.map((d) => d.pid)).toEqual([402]);
+  });
+
+  it("reads a name holding spaces and parens", () => {
+    const read = descendantsIn(procStats(procStat(500, "a) b (c", "S", 100)), 100, new Set());
+    expect(read.live).toEqual([{ pid: 500, pgid: 500, name: "a) b (c" }]);
   });
 });

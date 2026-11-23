@@ -87,6 +87,14 @@ export {
   type RunKind,
   type Verdict,
 } from "./cap.ts";
+export {
+  REAPER_ENV,
+  onPath,
+  probeReaper,
+  reaperStart,
+  replaceEnv,
+  type ReaperStart,
+} from "./reaper.ts";
 export { parseLsofCwds, processCwds } from "./cwd.ts";
 export {
   hostPtyReader,
