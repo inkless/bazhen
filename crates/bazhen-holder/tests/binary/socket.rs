@@ -1151,6 +1151,50 @@ fn a_subscriber_to_a_flood_is_sent_all_of_it_in_order_or_told_of_a_gap() {
     assert!(stream.zeros);
 }
 
+/// The most a holder reads of its child's output in one turn, as its `MAX_READ_PER_TURN` says.
+const MAX_READ_PER_TURN: u64 = 256 << 10;
+
+/// A flooding holder answers a `hello` within about two chunks of its output, however long its
+/// engine takes over them: of hellos asked back to back, the closest pair is less than one turn's
+/// byte budget apart. The client's own delays only widen a gap, so the closest pair measures the
+/// holder. The hellos are asked once the flood has begun, and each has to find it moved on from
+/// the one before, or a holder whose flood had stopped would pass.
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn a_flooding_holder_answers_a_hello_within_a_turn_of_its_output() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    sweep().unwrap();
+    let home = home("hello-flood").unwrap();
+    let script = "yes | head -c 268435456";
+    let (mut holder, socket) = serving_with(&home, &["sh", "-c", script], &FLOOD).unwrap();
+    let offset =
+        |socket: &Path| -> Result<u64> { Ok(Client::connect(socket)?.hello(false)?.offset.get()) };
+    // A hello answered before the child has written anything finds the flood not yet begun.
+    let flowing = Instant::now() + DEADLINE;
+    let started = std::iter::repeat_with(|| offset(&socket))
+        .find(|offset| !matches!(offset, Ok(0)) || Instant::now() >= flowing)
+        .and_then(Result::ok);
+    let offsets = (0..5)
+        .map(|_| offset(&socket))
+        .collect::<Result<Vec<_>>>()
+        .unwrap_or_else(|error| panic!("{error}; {}", why(&mut holder, &socket)));
+    let gaps: Vec<u64> = offsets
+        .windows(2)
+        .map(|w| w[1].saturating_sub(w[0]))
+        .collect();
+    let closest = gaps.iter().min().copied().unwrap_or(u64::MAX);
+    assert_eq!(
+        (
+            started.is_some_and(|offset| offset > 0),
+            gaps.iter().all(|&gap| gap > 0),
+            closest < MAX_READ_PER_TURN
+        ),
+        (true, true, true),
+        "the flood begun, moving on between hellos, and the closest pair under a turn's budget: \
+         {gaps:?}"
+    );
+}
+
 /// The holder never stops reading the child for a subscriber that has stopped reading: another
 /// connection sees the flood end, and the stalled one, once it reads again, gets a gap.
 #[test]

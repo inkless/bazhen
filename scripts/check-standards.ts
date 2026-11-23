@@ -1106,6 +1106,12 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/holder.rs::Holder::after_poll":
     "reads the master into the Output, a sink that parses nothing; reaps the child",
   "crates/bazhen-holder/src/server.rs::Server::accept": "accepts connections; reads no bytes",
+  "crates/bazhen-holder/src/server.rs::Server::poll_conns": "waits on fds; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::wait": "waits on fds; reads nothing",
+  "crates/bazhen-holder/src/server.rs::Server::after_poll":
+    "runs the turn; bytes it reads go to Connection::receive and the ring",
+  "crates/bazhen-holder/src/server.rs::Server::read_and_serve":
+    "serves a connection; bytes it reads go to Connection::receive",
   "crates/bazhen-holder/src/server.rs::Server::close_done":
     "checks whether a close is done; reads nothing",
   "crates/bazhen-holder/src/server.rs::Server::release_writer":
