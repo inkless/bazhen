@@ -3247,12 +3247,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn ends_a_view_whose_join_is_dropped_while_its_snapshot_is_on_its_way() {
-            bazhen_test_signal::require_sandbox().unwrap();
             paused().block_on(async {
                 let h = H::new();
                 let first = h.interactive().await;
@@ -3318,12 +3314,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn ends_a_view_whose_output_held_while_it_opened_is_more_than_it_may_lag_by() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = H::new();
                 h.interactive().await;
@@ -3513,12 +3505,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn counts_output_held_during_a_view_s_snapshot_as_unsent() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = lagging_by_100();
                 h.interactive().await;
@@ -3537,12 +3525,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn stops_counting_output_held_during_a_view_s_snapshot_once_it_has_been_passed_on() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = lagging_by_100();
                 h.interactive().await;
@@ -4010,12 +3994,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls Slow::disconnect, whose Semaphore close the signal scan can't tell
-        // from a holder stream's close; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn lets_a_view_whose_socket_closes_mid_snapshot_finish_opening_and_frees_its_room() {
-            bazhen_test_signal::require_sandbox().unwrap();
             paused().block_on(async {
                 let (h, _) = measured(|snap| budget(snap * 3 / 2));
                 let closing = h.loading(Ask::observer()).await;
@@ -4100,12 +4080,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn opens_a_view_on_output_from_both_sides_of_the_point_its_snapshot_was_taken_at() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = H::new();
                 let first = h.interactive().await;
@@ -4162,14 +4138,9 @@ mod tests {
             )
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release through respawned_around_a_snapshot,
-        // which the signal scan can't tell from Shared::release closing a holder stream; it
-        // signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn opens_a_view_of_a_terminal_respawned_before_its_snapshot_was_taken_as_the_views_already_open()
          {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let (first, late) = respawned_around_a_snapshot(false).await;
                 let respawned = Some("respawned more".to_owned());
@@ -4177,14 +4148,9 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release through respawned_around_a_snapshot,
-        // which the signal scan can't tell from Shared::release closing a holder stream; it
-        // signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn opens_a_view_of_a_terminal_respawned_after_its_snapshot_was_taken_as_the_views_already_open()
          {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let (first, late) = respawned_around_a_snapshot(true).await;
                 let respawned = Some("respawned more".to_owned());
@@ -4238,12 +4204,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn never_holds_a_view_to_output_its_snapshot_already_shows() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = H::with_options(
                     Fake::new("earlier output", 10_000),
@@ -4473,12 +4435,8 @@ mod tests {
             });
         }
 
-        // Sandbox-only by name alone: it calls the fake runtime's release, which the signal scan can't tell from
-        // Shared::release closing a holder stream; it signals nothing.
         #[test]
-        #[ignore = "signals processes; runs in moon run :test-real -- rust"]
         fn holds_it_for_a_view_whose_snapshot_is_on_its_way_behind_the_output_before_it() {
-            bazhen_test_signal::require_sandbox().unwrap();
             runtime().block_on(async {
                 let h = H::new();
                 h.interactive().await;
