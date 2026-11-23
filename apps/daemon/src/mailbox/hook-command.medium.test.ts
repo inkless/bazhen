@@ -1,4 +1,4 @@
-import { execFileSync, type ChildProcess } from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
@@ -194,14 +194,14 @@ const noLength = raw(
 );
 
 describe("hook command", () => {
-  it("runs the client through a shell even when its path has spaces, quotes and $", () => {
+  it("runs the client in place of the shell, even when its path has spaces, quotes and $", () => {
     dir = mkdtempSync("/tmp/bz-hook-");
     const odd = join(dir, `it's a "dir" $HOME`);
     mkdirSync(odd);
     const client = join(odd, "client");
-    writeFileSync(client, '#!/bin/sh\nprintf %s "$1"\n', { mode: 0o755 });
-    const out = execFileSync("/bin/sh", ["-c", `${hookCommand(client)} wait`]);
-    expect(out.toString()).toBe("wait");
+    writeFileSync(client, '#!/bin/sh\nprintf "%s %s" "$1" "$$"\n', { mode: 0o755 });
+    const shell = spawnSync("/bin/sh", ["-c", `${hookCommand(client)} wait`]);
+    expect(shell.stdout.toString()).toBe(`wait ${shell.pid}`);
   });
 
   it("runs the built binary, so the binary's cases below aren't the script's again", () => {
