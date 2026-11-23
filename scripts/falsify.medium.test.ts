@@ -22,7 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAlive, signalOwnChild } from "@bazhen/host-guard";
+import { cappedScope, isAlive, signalOwnChild } from "@bazhen/host-guard";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installCommand } from "./rust-gate.ts";
 import { binariesOf, manifestNames, namedBinaries } from "./falsify.ts";
@@ -187,6 +187,12 @@ exit 1
 
 const LIB = "crates/x/src/lib.rs";
 
+// falsify runs each mutant's tests in a capped scope of their own, at half a second a run, which
+// these tests skip but for those of the containment itself and of stopping a run, which it changes.
+const CONTAINED = { BZ_FALSIFY_UNCONTAINED: "0" };
+// A capped scope's run of its own is one systemd stops: elsewhere a session escapes it.
+const inCappedScope = cappedScope() !== undefined;
+
 const STUB_NEXTEST = `#!/bin/sh
 echo "NEXTEST: $*" >> "$STUB_LOG"
 [ "\${STUB_NEXTEST_FAIL:-}" = 1 ] && exit 1
@@ -198,6 +204,12 @@ if [ "$2" = run ]; then
   if grep -q MUTATED ${LIB}; then hang="\${STUB_HANG:-}"; else hang="\${STUB_HANG_UNMUTATED:-}"; fi
   # As capped's runner names a test process a memory cap killed.
   if grep -q MUTATED ${LIB} && [ "\${STUB_MEMORY_KILL:-}" = 1 ]; then echo hook >> "$BZ_CAPPED_KILLS"; fi
+  # As a test's holder does: a process in a session of its own, which outlives the test.
+  if grep -q MUTATED ${LIB} && [ "\${STUB_SESSION:-}" = 1 ]; then
+    # Without job control it leads no group, so setsid keeps its pid and $! names it.
+    setsid sleep 30 > /dev/null 2>&1 &
+    echo "SESSION $!" >> "$STUB_LOG"
+  fi
   if [ "$hang" = 1 ]; then
     # Trapped before HANGING is logged: a test signals as soon as it reads HANGING, and a SIGTERM
     # that lands first would end the stub without TERMED.
@@ -351,6 +363,7 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     STUB_LOG: fx.log,
     STUB_STATUS: "failed",
     CARGO_HOME: join(fx.root, "cargo-home"),
+    BZ_FALSIFY_UNCONTAINED: "1",
     ...extra,
   };
 }
@@ -1393,9 +1406,24 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     }).toEqual({ status: 1, asks: true, runs: 4 });
   });
 
+  it.runIf(inCappedScope)(
+    "stops what a mutant's run started in a session of its own once that run ends",
+    () => {
+      mutatedBranch(
+        ["tests::b_is_two"],
+        [mutantOfB("replace b -> u8 with 0")],
+        [`MUTATED|tests::b_is_two|${ASSERTION}`],
+      );
+      const result = againstBase({ ...CONTAINED, STUB_SESSION: "1" });
+      const session = Number(/^SESSION (\d+)$/m.exec(stubLog())?.[1]);
+      expect({ status: result.status, started: session > 1 }).toEqual({ status: 0, started: true });
+      expect(isAlive(session)).toBe(false);
+    },
+  );
+
   it("says a mutant's run timed out, and judges the test by the others", () => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    const result = againstBase({ STUB_HANG: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
+    const result = againstBase({ ...CONTAINED, STUB_HANG: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
     expect({
       status: result.status,
       timedOut: result.output.includes(
@@ -1416,7 +1444,11 @@ describe("falsify judging new Rust tests by mutating the change", () => {
 
   it("says the unmutated run timed out, rather than that the test fails", () => {
     mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
-    const result = againstBase({ STUB_HANG_UNMUTATED: "1", FALSIFY_RUST_TIMEOUT_MS: "2000" });
+    const result = againstBase({
+      ...CONTAINED,
+      STUB_HANG_UNMUTATED: "1",
+      FALSIFY_RUST_TIMEOUT_MS: "2000",
+    });
     expect({
       status: result.status,
       timedOut: result.output.includes(
@@ -1635,7 +1667,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       mutatedBranch(["tests::b_is_two"], [mutantOfB("replace b -> u8 with 0")]);
       const child = spawn("node", [FALSIFY, "--base", fx.base], {
         cwd: fx.linked,
-        env: env({ STUB_HANG: "1" }),
+        env: env({ ...CONTAINED, STUB_HANG: "1" }),
         stdio: "ignore",
       });
       const exited = once(child, "exit");
@@ -1663,7 +1695,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       branch();
       const child = spawn("node", [FALSIFY, "--base", fx.base], {
         cwd: fx.linked,
-        env: env({ STUB_HANG: "1", STUB_HANG_VITEST: "1", STUB_STUBBORN: "1" }),
+        env: env({ ...CONTAINED, STUB_HANG: "1", STUB_HANG_VITEST: "1", STUB_STUBBORN: "1" }),
         stdio: "ignore",
       });
       const exited = once(child, "exit");
