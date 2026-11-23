@@ -39,7 +39,11 @@ export interface Ended {
   readonly peak: number;
   readonly memoryKills: number;
   readonly timedOut: boolean;
-  /** The processes still in the run once its command had gone, which the run then stopped. */
+  /**
+   * The processes still in the run's own scope or group once its command had gone and they had had
+   * `LEFTOVER_SETTLE_MS` to end, which the run then stopped. A test binary's is 0: its runner
+   * doesn't count them.
+   */
   readonly leftover: number;
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
@@ -129,6 +133,20 @@ async function groupCount(pgid: number): Promise<number> {
     if (/^\d+$/.test(entry) && statInGroup(readText(`/proc/${entry}/stat`) ?? "", pgid)) count++;
   }
   return count;
+}
+
+/**
+ * How long a run waits, once its command has gone and something is still in it, before it counts
+ * that again: a process killed, or ending, as the command exits is gone by then, so it isn't left
+ * over. A run whose command left nothing doesn't wait.
+ */
+export const LEFTOVER_SETTLE_MS = 500;
+
+/** `count`'s answer once the end of the command has settled: a second read, after the settle. */
+async function settledCount(count: () => number | Promise<number>): Promise<number> {
+  if ((await count()) === 0) return 0;
+  await new Promise((wait) => setTimeout(wait, LEFTOVER_SETTLE_MS));
+  return count();
 }
 
 function parentOf(pid: number): number | undefined {
@@ -285,15 +303,17 @@ function onSignals(handler: (signal: NodeJS.Signals) => void, ownGroup: boolean)
  * reaches it too.
  *
  * A kill the command outlived goes uncounted when the command exits before the counter is read
- * again, taking the scope with it. `everyKill` reads the journal after any run that saw none, at
- * about half a second a run; without it, only after one whose command died by SIGKILL.
+ * again, taking the scope with it. `asRun`, for a run rather than a test binary, reads the journal
+ * after any run that saw none, at about half a second a run, and counts what the command left;
+ * without it, the journal is read only after a command that died by SIGKILL, and nothing is
+ * counted.
  */
 export function runInScope(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
-  everyKill = false,
+  asRun = false,
 ): Promise<Ended> {
   const unit = unitName();
   const uid = process.getuid?.() ?? 0;
@@ -312,6 +332,8 @@ export function runInScope(
       // The scope isn't there yet, or is already gone: the poll keeps reading.
     }
   };
+  // A zombie isn't listed, and the scope may already have gone with its last process.
+  const procs = () => (readText(`${dir}/cgroup.procs`) ?? "").split("\n").filter(Boolean);
   const kill = (signal: NodeJS.Signals) =>
     output("systemctl", ["--user", "kill", `--signal=${signal}`, unit]);
   let escalation: NodeJS.Timeout | undefined;
@@ -330,20 +352,19 @@ export function runInScope(
   const poll = setInterval(sample, 20);
   return new Promise((done) => {
     const finish = async (code: number | null, signal: NodeJS.Signals | null) => {
+      // Before the settle and the stop, which may wait out a leftover ignoring SIGTERM.
+      const timedOut = Date.now() - started >= cap.timeMs;
       sample();
       clearInterval(poll);
       watcher?.close();
-      // A zombie isn't listed, and the scope may already have gone with its last process.
-      const procs = readText(`${dir}/cgroup.procs`) ?? "";
-      const leftover = procs.split("\n").filter(Boolean).length;
+      const leftover = asRun ? await settledCount(() => procs().length) : 0;
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);
       clearTimeout(escalation);
       offSignals();
-      const timedOut = Date.now() - started >= cap.timeMs;
       const journaled =
-        kills === 0 && (everyKill || signal === "SIGKILL")
+        kills === 0 && (asRun || signal === "SIGKILL")
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
       done({ code, signal, peak, timedOut, leftover, ...journaled });
@@ -514,7 +535,8 @@ type Watch = "tree" | "root" | "none";
  * Runs `bin` in a process group of its own and, but for `none`, watches its memory. Past the
  * memory cap the group gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes
  * more); past the time cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if
- * it hasn't gone. Once the command has gone, whatever it left in its group is counted and killed.
+ * it hasn't gone. Once the command has gone, whatever it left in its group is killed, and with
+ * `countsLeftover` counted first.
  */
 async function runGroup(
   bin: string,
@@ -522,6 +544,7 @@ async function runGroup(
   cap: Cap,
   env: NodeJS.ProcessEnv,
   watching: Watch,
+  countsLeftover: boolean,
 ): Promise<Ended> {
   const scopeKillsBefore = watching === "none" ? scopeKills() : 0;
   const child = spawnGroup(bin, argv, {
@@ -570,7 +593,8 @@ async function runGroup(
   clearInterval(watchdog);
   clearTimeout(timer);
   clearTimeout(escalation);
-  const leftover = pid === undefined ? 0 : await groupCount(pid);
+  const leftover =
+    countsLeftover && pid !== undefined ? await settledCount(() => groupCount(pid)) : 0;
   stop("SIGKILL");
   offSignals();
   // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
@@ -586,7 +610,7 @@ export function runWatched(
   cap: Cap,
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "tree");
+  return runGroup(command, args, cap, env, "tree", true);
 }
 
 /**
@@ -664,7 +688,7 @@ export function runOwned(
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
   const [bin, argv] = ownedArgv(command, args, cap);
-  return runGroup(bin, argv, cap, env, "root");
+  return runGroup(bin, argv, cap, env, "root", false);
 }
 
 /** The OOM kills the capped scope this process runs in has counted so far. */
@@ -676,14 +700,16 @@ function scopeKills(read = readText): number {
 /**
  * Runs a command inside the capped scope around it, so the scope's memory cap holds it, in a
  * group of its own that keeps its own time cap: a scope's runtime is the outer run's, and longer.
+ * `asRun`, for a run rather than a test binary, counts what the command left in its group.
  */
 export function runThrough(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  asRun = false,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "none");
+  return runGroup(command, args, cap, env, "none", asRun);
 }
 
 /**
@@ -720,18 +746,22 @@ export async function chooseMode(
   return { mode: testBinary ? "owned" : "watched", note: verdict.why };
 }
 
+/**
+ * Runs `command` as `mode` says. `asRun` is for a run rather than a test binary: it counts what
+ * the command left, and under systemd every kill the command outlived (`runInScope`).
+ */
 export function runIn(
   mode: Mode,
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
-  everyKill = false,
+  asRun = false,
 ): Promise<Ended> {
-  if (mode === "scope") return runInScope(command, args, cap, env, everyKill);
+  if (mode === "scope") return runInScope(command, args, cap, env, asRun);
   if (mode === "watched") return runWatched(command, args, cap, env);
   if (mode === "owned") return runOwned(command, args, cap, env);
-  return runThrough(command, args, cap, env);
+  return runThrough(command, args, cap, env, asRun);
 }
 
 /**

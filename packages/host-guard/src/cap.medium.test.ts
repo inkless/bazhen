@@ -36,6 +36,8 @@ const scopesLeft = () =>
 
 /** A command that leaves one process running once it has gone. */
 const LEAVES_ONE = "(exec sleep 30) &";
+/** One whose child is still ending as it goes, well inside a run's settle. */
+const ENDS_SOON = "(exec sleep 0.1) &";
 
 let mode: Mode;
 let dir: string;
@@ -55,9 +57,14 @@ describe("a run through the capped scope around it", () => {
   });
 
   it("counts what a command it runs through left in its group, and nothing when it left nothing", async () => {
-    const left = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env);
-    const clean = await runThrough("sh", ["-c", "sleep 0"], cap, process.env);
+    const left = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env, true);
+    const clean = await runThrough("sh", ["-c", "sleep 0"], cap, process.env, true);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+  });
+
+  it("counts nothing for a test binary, whose runner reads its status alone", async () => {
+    const ended = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(ended.leftover).toBe(0);
   });
 });
 
@@ -91,9 +98,14 @@ describe("a capped run", () => {
   }, 30_000);
 
   it("counts what its command left running, and nothing when it left nothing", async () => {
-    const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env);
-    const clean = await runIn(mode, "sh", ["-c", "sleep 0"], cap, process.env);
+    const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env, true);
+    const clean = await runIn(mode, "sh", ["-c", "sleep 0"], cap, process.env, true);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+  });
+
+  it("doesn't count what was ending as its command went", async () => {
+    const ended = await runIn(mode, "sh", ["-c", ENDS_SOON], cap, process.env, true);
+    expect(ended.leftover).toBe(0);
   });
 
   it("leaves no scope behind, whether it exited, ran out of time or was killed", () => {
@@ -132,10 +144,9 @@ describe("a test binary its runner caps", () => {
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   });
 
-  it("counts what it left in its group once it has gone, and nothing when it left nothing", async () => {
-    const left = await runOwned("sh", ["-c", LEAVES_ONE], cap, process.env);
-    const clean = await runOwned("sh", ["-c", "sleep 0"], cap, process.env);
-    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+  it("counts nothing it left, which its runner doesn't read", async () => {
+    const ended = await runOwned("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(ended.leftover).toBe(0);
   });
 
   it("runs under the limits that hold it when no runner watches it", () => {
@@ -185,6 +196,11 @@ describe("the fallback watchdog", () => {
     const left = await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
     const clean = await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
     expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+  });
+
+  it("doesn't count what was ending as its command went", async () => {
+    const ended = await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
+    expect(ended.leftover).toBe(0);
   });
 
   it("leaves a run under its cap alone", async () => {
