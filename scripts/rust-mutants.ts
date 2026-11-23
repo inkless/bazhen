@@ -79,7 +79,8 @@ export function libtestTargets(report: unknown): Map<string, string> {
 const PANIC = /\bpanicked at /;
 const LOCATION = /([\w./-]+\.rs):(\d+):\d+/g;
 
-export type TestEvent = { test: string; event: string; stdout: string };
+/** A test's result; `reason` is nextest's, as "time limit exceeded" for a test it ended. */
+export type TestEvent = { test: string; event: string; stdout: string; reason?: string };
 
 /**
  * Each test's result in the output of a nextest `--message-format libtest-json-plus` run, the test
@@ -102,7 +103,13 @@ export function testEvents(output: string, targets: Map<string, string>): TestEv
     const target = split < 0 ? undefined : targets.get(name.slice(0, split));
     if (target === undefined || typeof parsed["event"] !== "string") continue;
     const stdout = typeof parsed["stdout"] === "string" ? parsed["stdout"] : "";
-    events.push({ test: `${target} ${name.slice(split + 1)}`, event: parsed["event"], stdout });
+    const reason = typeof parsed["reason"] === "string" ? { reason: parsed["reason"] } : {};
+    events.push({
+      test: `${target} ${name.slice(split + 1)}`,
+      event: parsed["event"],
+      stdout,
+      ...reason,
+    });
   }
   return events;
 }

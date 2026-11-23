@@ -780,19 +780,27 @@ const realDeps: ModeDeps = {
 };
 
 /**
+ * What is being capped: a test binary its runner starts, a run, or a run that needs a scope of its
+ * own even inside a capped scope.
+ */
+export type RunKind = "test-binary" | "run" | "own-scope";
+
+/**
  * How to run under `cap`, and, when systemd can't cap here, why. Inside a capped scope a command
  * runs through, so the scope's cap holds it too: a scope of its own would be a sibling, outside
- * that cap. Anywhere else it gets a scope of its own, or a watch where systemd can't cap.
+ * that cap. An `own-scope` run takes one all the same, because a group inside the scope can't reach
+ * what its command starts in a session of its own, and only stopping a scope of its own ends that.
+ * Anywhere else a command gets a scope of its own, or a watch where systemd can't cap.
  */
 export async function chooseMode(
   cap: Cap,
-  testBinary: boolean,
+  kind: RunKind,
   deps: ModeDeps = realDeps,
 ): Promise<{ mode: Mode; note?: string }> {
-  if (deps.inScope()) return { mode: "through" };
+  if (kind !== "own-scope" && deps.inScope()) return { mode: "through" };
   const verdict = await deps.probe(cap);
   if (verdict.ok) return { mode: "scope" };
-  return { mode: testBinary ? "owned" : "watched", note: verdict.why };
+  return { mode: kind === "test-binary" ? "owned" : "watched", note: verdict.why };
 }
 
 /**

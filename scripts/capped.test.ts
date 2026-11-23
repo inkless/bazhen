@@ -26,6 +26,7 @@ describe("capped's arguments", () => {
       kind: "run",
       cap,
       memoryKillsCounted: false,
+      ownScope: false,
       command: "vitest",
       args: ["run", "--x"],
     });
@@ -36,6 +37,7 @@ describe("capped's arguments", () => {
       kind: "test-binary",
       cap: TEST_BINARY_CAP,
       memoryKillsCounted: false,
+      ownScope: false,
       command: "/t/deps/a-1f",
       args: ["--list"],
     });
@@ -52,6 +54,19 @@ describe("capped's arguments", () => {
     expect(() => parseArgs(first)).toThrow("usage");
     const binary = ["--test-binary", "--memory-kills-counted", "--", "/t/a"];
     expect(() => parseArgs(binary)).toThrow("usage");
+  });
+
+  it("takes a run's word that it wants a scope of its own, before its caps alone", () => {
+    const own = ["--own-scope", "--memory", "8G", "--time", "20m", "--", "x"];
+    expect(parseArgs(own)).toMatchObject({ kind: "run", cap, ownScope: true });
+    expect(parseArgs([...own.slice(0, 5), "--memory-kills-counted", "--", "x"])).toMatchObject({
+      ownScope: true,
+      memoryKillsCounted: true,
+    });
+    const after = ["--memory", "8G", "--time", "20m", "--own-scope", "--", "x"];
+    expect(() => parseArgs(after)).toThrow("usage");
+    expect(() => parseArgs(["--own-scope", "--test-binary", "--", "/t/a"])).toThrow("usage");
+    expect(() => parseArgs(["--test-binary", "--own-scope", "--", "/t/a"])).toThrow("usage");
   });
 
   it("drops the `--` pnpm hands on, but not one the command itself is given", () => {

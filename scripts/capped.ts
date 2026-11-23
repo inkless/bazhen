@@ -3,7 +3,7 @@
 // test that runs away dies alone.
 //
 // Usage:
-//   node scripts/capped.ts --memory <n>G --time <n>m [--memory-kills-counted] --
+//   node scripts/capped.ts [--own-scope] --memory <n>G --time <n>m [--memory-kills-counted] --
 //     <command> [args...]
 //   scripts/capped.ts --test-binary [--memory <n>M] -- <binary> [args...]
 // `--test-binary` is the form for cargo's target runner: cargo test, nextest and cargo-mutants
@@ -16,6 +16,13 @@
 // reached its time cap, or when its command left processes running. `--memory-kills-counted` is
 // for a task that counts its tests' memory kills as outcomes, as the mutation tasks do; the time
 // cap and leftovers still fail it.
+//
+// `--own-scope` gives a run a scope of its own even inside a capped scope, where it would otherwise
+// run through that scope in a group of its own. A group can't reach what its command starts in a
+// session of its own, such as a holder, and the enclosing run would count that as its own command's
+// leftover; stopping a scope of its own ends it with the run. Its cap is at most 90% of the
+// enclosing scope's (`clampMemory`), but adds to that scope's rather than counting within it, so it
+// is for a run the enclosing command waits on. Outside a scope the flag changes nothing.
 //
 // host-guard is imported by path, not by package name, and needs only node: built-ins: cargo-mutants
 // runs the tests in a copy of the tree that may leave out node_modules, and CI's macOS Rust job
@@ -65,15 +72,19 @@ export type Invocation = {
   cap: Cap;
   /** Whether a memory kill is an outcome the command counts, which doesn't fail the run. */
   memoryKillsCounted: boolean;
+  /** Whether a run gets a scope of its own even inside a capped scope. */
+  ownScope: boolean;
   command: string;
   args: string[];
 };
 
 /** scripts/check-standards.ts allows it only on the tasks in `COUNTED_KILLS_TASKS` there. */
 export const COUNTED_KILLS_FLAG = "--memory-kills-counted";
+export const OWN_SCOPE_FLAG = "--own-scope";
 
 const USAGE =
-  `usage: node scripts/capped.ts --memory <n>G --time <n>m [${COUNTED_KILLS_FLAG}] -- ` +
+  `usage: node scripts/capped.ts [${OWN_SCOPE_FLAG}] --memory <n>G --time <n>m ` +
+  `[${COUNTED_KILLS_FLAG}] -- ` +
   "<command> [args...], " +
   "or scripts/capped.ts --test-binary [--memory <n>M] -- <binary> [args...]";
 
@@ -86,20 +97,29 @@ export function parseArgs(argv: readonly string[]): Invocation {
   if (split < 0 || command === undefined) throw new Error(USAGE);
   if (options[0] === "--test-binary") {
     const [, m, memory = ""] = options;
-    const binary = { kind: "test-binary", memoryKillsCounted: false, command, args } as const;
+    const binary = {
+      kind: "test-binary",
+      memoryKillsCounted: false,
+      ownScope: false,
+      command,
+      args,
+    } as const;
     if (options.length === 1) return { ...binary, cap: TEST_BINARY_CAP };
     if (options.length !== 3 || m !== "--memory") throw new Error(USAGE);
     return { ...binary, cap: { ...TEST_BINARY_CAP, memory: parseSize(memory) } };
   }
-  const [m, memory = "", t, time = "", counted] = options;
+  const ownScope = options[0] === OWN_SCOPE_FLAG;
+  const caps = ownScope ? options.slice(1) : options;
+  const [m, memory = "", t, time = "", counted] = caps;
   const memoryKillsCounted = counted === COUNTED_KILLS_FLAG;
-  if (options.length !== (memoryKillsCounted ? 5 : 4) || m !== "--memory" || t !== "--time") {
+  if (caps.length !== (memoryKillsCounted ? 5 : 4) || m !== "--memory" || t !== "--time") {
     throw new Error(USAGE);
   }
   return {
     kind: "run",
     cap: { memory: parseSize(memory), timeMs: parseDuration(time) },
     memoryKillsCounted,
+    ownScope,
     command,
     args,
   };
@@ -191,7 +211,10 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   const { command, args } = invocation;
   const testBinary = invocation.kind === "test-binary";
   const cap = { ...invocation.cap, memory: clampMemory(invocation.cap.memory) };
-  const chosen = await chooseMode(cap, testBinary);
+  const chosen = await chooseMode(
+    cap,
+    invocation.ownScope ? "own-scope" : testBinary ? "test-binary" : "run",
+  );
   // Once a run, not once a test process.
   if (chosen.note !== undefined && !testBinary) {
     console.error(`capped: ${chosen.note}, so a watchdog checks memory instead`);

@@ -25,6 +25,7 @@ import {
   counterparts,
   noOutputReason,
   timeoutFrom,
+  leftRunning,
   parseArgs,
   parseNameStatus,
   projectsOf,
@@ -40,6 +41,7 @@ import {
   uncontrolledTests,
   type VitestReport,
 } from "./falsify.ts";
+import { report as cappedReport } from "./capped.ts";
 
 const FILE = "packages/core/src/x.test.ts";
 
@@ -343,6 +345,36 @@ describe("noOutputReason", () => {
       "it wrote no listing",
       "its report couldn't be read (EISDIR)",
     ]);
+  });
+});
+
+// capped's own report, so that a change to its wording fails here rather than letting a leak by.
+const reported = (leftover: number, left?: string[]) =>
+  [
+    ...cappedReport(
+      {
+        code: 0,
+        signal: null,
+        peak: 2 ** 30,
+        memoryKills: 0,
+        timedOut: false,
+        leftover,
+        ...(left === undefined ? {} : { left }),
+      },
+      { memory: 8 * 2 ** 30, timeMs: 360_000 },
+      "scope",
+      false,
+    ),
+    "",
+  ].join("\n");
+
+describe("leftRunning", () => {
+  it("reads what capped's report says a run left running, by name or by count", () => {
+    expect([
+      leftRunning(reported(4, ["bazhen-holder", "cat", "bazhen-holder", "cat"])),
+      leftRunning(reported(3)),
+      leftRunning(reported(0)),
+    ]).toEqual(["bazhen-holder ×2, cat ×2", "3 process(es)", undefined]);
   });
 });
 
