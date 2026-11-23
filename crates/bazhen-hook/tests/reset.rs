@@ -16,8 +16,8 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -119,14 +119,17 @@ fn wait_on_a_reset(client: &str, name: &str) -> Result<(Option<i32>, usize)> {
         .process_group(0)
         .spawn()?;
     child.stdin.take().ok_or("no stdin")?.write_all(b"{}")?;
-    let leader = child.id();
-    let (done, exited) = mpsc::channel();
-    thread::spawn(move || done.send(child.wait()));
-    let status = exited.recv_timeout(DEADLINE).map_err(|_| {
-        // TERM, which the script traps to remove its own temporary directory.
-        let stopped = bazhen_test_signal::signal_group(leader, bazhen_test_signal::Signal::TERM);
-        format!("{client} was still running after {DEADLINE:?}; stopping it: {stopped:?}")
-    })??;
+    if !bazhen_test_signal::ended_within(&child, DEADLINE)? {
+        // Unreaped, so it still leads its group. TERM, which the script traps to remove its own
+        // temporary directory.
+        let stopped =
+            bazhen_test_signal::signal_group(child.id(), bazhen_test_signal::Signal::TERM);
+        return Err(format!(
+            "{client} was still running after {DEADLINE:?}; stopping it: {stopped:?}"
+        )
+        .into());
+    }
+    let status = child.wait()?;
     Ok((status.code(), requests.load(Ordering::SeqCst)))
 }
 

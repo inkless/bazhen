@@ -6,7 +6,6 @@ use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -103,26 +102,28 @@ fn daemon_by(home: &Home, mut command: Command) -> Res<Child> {
 
 /// The child's exit code and what it said on stderr, once it ends; `None` for the code if it
 /// hadn't by the bound, when it is killed, with what it had said by then.
-fn ended_within_bound(child: Child) -> Res<(Option<i32>, String)> {
-    let (tell, exited) = mpsc::channel();
-    let pid = child.id();
-    let waiter = thread::spawn(move || {
-        let _ = tell.send(child.wait_with_output());
-    });
-    if let Ok(output) = exited.recv_timeout(BOUND) {
-        let output = output?;
-        let said = String::from_utf8_lossy(&output.stderr).into_owned();
-        return Ok((output.status.code(), said));
-    }
-    // The child is the test's own and unreaped, so its pid is still its own.
-    bazhen_test_signal::signal(pid, Signal::KILL).map_err(|e| format!("{e:?}"))?;
-    waiter.join().map_err(|_| "the waiter panicked")?;
-    let said = exited
-        .try_recv()
-        .ok()
-        .and_then(Result::ok)
-        .map_or_default(|output| String::from_utf8_lossy(&output.stderr).into_owned());
-    Ok((None, said))
+fn ended_within_bound(mut child: Child) -> Res<(Option<i32>, String)> {
+    let stderr = drained(child.stderr.take());
+    let stdout = drained(child.stdout.take());
+    let ended = bazhen_test_signal::end_within(&mut child, BOUND)?;
+    stdout.join().map_err(|_| "the stdout reader panicked")?;
+    let said = stderr.join().map_err(|_| "the stderr reader panicked")?;
+    Ok((
+        ended.and_then(|status| status.code()),
+        String::from_utf8_lossy(&said).into_owned(),
+    ))
+}
+
+/// Everything `pipe` gives until it closes, read on a thread of its own so that a child writing
+/// to it is never stopped by a full pipe.
+fn drained(pipe: Option<impl std::io::Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        bytes
+    })
 }
 
 /// What the test can read of its own child `pid` while it runs, without signalling it, and every
