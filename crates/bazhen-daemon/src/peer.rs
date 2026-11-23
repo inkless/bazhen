@@ -250,7 +250,7 @@ pub(crate) fn reading_of(peer: &Peer, terminals: &TerminalPids) -> Reading {
 }
 
 /// The reading the guard takes: a peer that can't be read for sure is refused, never the human's,
-/// and one not read in time is late.
+/// and one not read in time is late. Each is logged with why, since the caller may not say.
 ///
 /// # Errors
 ///
@@ -260,10 +260,15 @@ pub(crate) fn reading<E>(
     terminals: impl FnOnce() -> Result<TerminalPids, E>,
 ) -> Result<Reading, E> {
     Ok(match read {
-        PeerRead::Late => Reading::Late,
-        PeerRead::Unread(why) => Reading::Refused(format!(
-            "the caller's process can't be read for sure: {why}"
-        )),
+        PeerRead::Late => {
+            tracing::warn!("a caller's process wasn't read in time; it was told to try again");
+            Reading::Late
+        }
+        PeerRead::Unread(why) => {
+            let why = format!("the caller's process can't be read for sure: {why}");
+            tracing::warn!("refused a caller: {why}");
+            Reading::Refused(why)
+        }
         PeerRead::Read(peer) => reading_of(&peer, &terminals()?),
     })
 }
@@ -533,7 +538,9 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_peer_it_cant_read_for_sure_never_taking_it_for_the_human() {
+    fn refuses_a_peer_it_cant_read_for_sure_never_taking_it_for_the_human_and_says_why() {
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
         let read = |read| reading(read, || Ok::<_, ()>(terminals())).unwrap();
         assert_eq!(
             [
@@ -546,6 +553,13 @@ mod tests {
                 Reading::Late,
                 agent(),
             ]
+        );
+        assert_eq!(
+            [
+                said.times("refused a caller: the caller's process can't be read for sure: why"),
+                said.times("a caller's process wasn't read in time; it was told to try again"),
+            ],
+            [1, 1]
         );
         assert_eq!(
             reading(PeerRead::Read(chain(100, 100, &[1])), || Err("store")),
