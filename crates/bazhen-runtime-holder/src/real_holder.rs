@@ -461,15 +461,14 @@ fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
         };
         let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
         let from = attached.offset.get();
-        // Bounded: a holder that never reads it leaves the snapshot nothing behind, which the
-        // assertion below tells.
         let client = &client;
-        polled(
+        let echoed = polled(
             Duration::from_secs(10),
             || offset_of(client),
             |&at| at > from,
         )
         .await;
+        assert_ne!(echoed, from);
         client.end();
         let (held, snapshot, mut taken) = {
             let mut waiting = std::pin::pin!(attached.stream.snapshot());
@@ -548,6 +547,10 @@ fn confirms_a_resize_by_the_size_the_readers_holder_reports() {
     });
 }
 
+/// What the ring test's program floods once told to: far past the 1 MiB its holder's ring holds,
+/// and short enough to end well inside `STUCK` on a loaded host.
+const FLOOD: u64 = 8 << 20;
+
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
@@ -556,55 +559,44 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
     let runtime = runtime(&dir, None);
     let holders = Holders::default();
     block_on(async {
-        // It floods only once told to, after the attach, and stops past what the ring holds: a
-        // holder flooding can take past the product's bound to answer the attach or the close
-        // on a loaded host.
+        // It floods only once told to, and then stops: a holder flooding can take past the
+        // product's bound to answer the attach or the close on a loaded host.
         let made = holders.keep(
             runtime
                 .create(running(
                     &id(1),
-                    "read line; yes | head -c 33554432; exec cat",
+                    &format!("read line; yes | head -c {FLOOD}; exec cat"),
                 ))
                 .await
                 .unwrap(),
         );
         let mut attached = runtime.attach(&made, None).await.unwrap();
-        attached.stream.write(b"\n");
-        // The write goes out on this thread, so it runs until a connection of its own sees the
-        // flood start; `from` is then past all the stream has read.
-        let options = ClientOptions {
-            connect: CONNECT_FOR,
-            ..ClientOptions::default()
-        };
-        let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
-        let attached_at = attached.offset.get();
-        let from = polled(
-            Duration::from_secs(10),
-            || offset_of(&client),
-            |&at| at > attached_at,
-        )
-        .await;
-        client.end();
-        // This thread blocked, the stream reads nothing until the holder has written past all
-        // its ring holds, as a second connection's snapshots show.
+        // This thread blocked from before the flood, the stream reads nothing past the attach
+        // while a connection of the test's own tells the program to flood and waits until the
+        // holder has read all of it: its line echoed as `\r\n`, and each `y\n` written as `y\r\n`.
+        let from = attached.offset.get();
+        let all = from + 2 + FLOOD * 3 / 2;
         let socket = made.locator.socket.clone();
-        let thread_options = options.clone();
-        let past = from + 4 * (1 << 20);
         let reached = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let connected = connect(&socket, &thread_options).await;
-                    assert_eq!(connected.as_ref().err().map(ToString::to_string), None);
-                    let (client, _events) = connected.unwrap();
-                    // Bounded: a flood that never starts is told by the assertion below, not a
-                    // hang.
+                    let options = ClientOptions {
+                        connect: CONNECT_FOR,
+                        writer: true,
+                        ..ClientOptions::default()
+                    };
+                    let (client, _events) = connect(&socket, &options).await.unwrap();
+                    assert!(client.hello().writer, "the writer slot was taken");
+                    client.input(b"\n").unwrap();
+                    // Bounded within `STUCK`: a total other than `all` is told by the assertion
+                    // below, not a hang.
                     let reached = polled(
-                        Duration::from_secs(60),
+                        Duration::from_secs(40),
                         || offset_of(&client),
-                        |&at| at > past,
+                        |&at| at >= all,
                     )
                     .await;
                     client.end();
@@ -613,7 +605,7 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
         })
         .join()
         .unwrap();
-        assert_eq!((from > attached.offset.get(), reached > past), (true, true));
+        assert_eq!(reached, all);
         let closed = loop {
             match attached.events.recv().await.unwrap() {
                 StreamEvent::Closed(why) => break why,
@@ -624,21 +616,6 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
         assert_eq!(closed, StreamEnd::Behind);
         assert!(attached.events.recv().await.is_none());
         assert!(attached.stream.is_closed());
-        // Closed only once the flood has ended: two looks 200 ms apart find it where it was.
-        let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
-        let looking = &client;
-        let still = polled(
-            Duration::from_secs(120),
-            move || async move {
-                let before = offset_of(looking).await;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                (before, offset_of(looking).await)
-            },
-            |(before, after)| before == after,
-        )
-        .await;
-        assert_eq!(still.0, still.1);
-        client.end();
         holders.close(&runtime, &made).await.unwrap();
         runtime.shutdown().await;
     });
