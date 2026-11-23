@@ -190,6 +190,8 @@ const LIB = "crates/x/src/lib.rs";
 // falsify runs each mutant's tests in a capped scope of their own, at half a second a run, which
 // these tests skip but for those of the containment itself and of stopping a run, which it changes.
 const CONTAINED = { BZ_FALSIFY_UNCONTAINED: "0" };
+// A test whose runs are each contained: a capped scope costs seconds a run on CI.
+const CONTAINED_TIMEOUT_MS = 20_000;
 // A capped scope's run of its own is one systemd stops: elsewhere a session escapes it.
 const inCappedScope = cappedScope() !== undefined;
 
@@ -1425,6 +1427,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       // Stopped, though perhaps not yet reaped.
       await expect.poll(() => isAlive(session), { timeout: 2000 }).toBe(false);
     },
+    CONTAINED_TIMEOUT_MS,
   );
 
   it.runIf(inCappedScope)(
@@ -1451,6 +1454,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       });
       await expect.poll(() => sessions.some((pid) => isAlive(pid)), { timeout: 2000 }).toBe(false);
     },
+    CONTAINED_TIMEOUT_MS,
   );
 
   it.runIf(inCappedScope)(
@@ -1474,6 +1478,7 @@ describe("falsify judging new Rust tests by mutating the change", () => {
       }).toEqual({ started: true, logged: true, failsOnIt: false, invalid: true });
       await expect.poll(() => isAlive(session), { timeout: 2000 }).toBe(false);
     },
+    CONTAINED_TIMEOUT_MS,
   );
 
   it("says a mutant's run timed out, and judges the test by the others", () => {
