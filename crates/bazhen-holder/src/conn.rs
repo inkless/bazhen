@@ -150,14 +150,28 @@ pub struct Connection {
     went: Option<Went>,
 }
 
-/// A peer a write to has failed is written nothing more and owed nothing, but what it sent before
-/// it went is still read and handed over, in order, until its end of input or `until`: a writer
-/// that types and hangs up at once may go before its last keys are read.
+/// A peer that has gone, found by a failed write or a hang-up while it wasn't read, is written
+/// nothing more and owed nothing, but what it sent before it went is still read and handed over,
+/// in order, until its end of input or `until`: a writer that types and hangs up at once may go
+/// before its last keys are read. A request that only asks is passed over: nothing would reach it
+/// of the answer.
 #[derive(Debug, Clone, Copy)]
 struct Went {
     until: Instant,
     /// Requests handed over since.
     handed_over: u64,
+}
+
+/// Whether `request` does nothing but get an answer.
+const fn only_asks(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::Subscribe { .. }
+            | Request::Snapshot { .. }
+            | Request::Stats { .. }
+            | Request::Foreground { .. }
+            | Request::Screen { .. }
+    )
 }
 
 impl Connection {
@@ -390,15 +404,23 @@ impl Connection {
     }
 
     /// Does what `poll` found for it, `revents`: reads while it reads. One that no longer reads
-    /// and whose peer has gone is dropped: its socket would report the hang-up every turn.
-    pub fn polled(&mut self, revents: PollFlags, buffer: &mut [u8]) {
+    /// and whose peer has hung up would report the hang-up every turn: it is owed nothing from
+    /// then on, so what it sent is read on (`lose_peer`), or, if none of it would be handed over,
+    /// it is dropped.
+    pub fn polled(&mut self, revents: PollFlags, buffer: &mut [u8], now: Instant) {
         if revents.is_empty() {
             return;
         }
-        if !self.reading() && revents.intersects(PollFlags::HUP | PollFlags::ERR) {
-            tracing::info!("a peer hung up while it wasn't read; dropping its connection");
-            self.drop_now();
-            return;
+        if !self.reading()
+            && self.went.is_none()
+            && revents.intersects(PollFlags::HUP | PollFlags::ERR)
+        {
+            if !self.reads_on() {
+                tracing::info!("a peer hung up while it wasn't read; dropping its connection");
+                self.drop_now();
+                return;
+            }
+            self.lose_peer(now, &"it hung up while it wasn't read");
         }
         self.receive(buffer);
     }
@@ -497,7 +519,7 @@ impl Connection {
     fn end_input(&mut self) {
         self.input_ended = true;
         if let Some(went) = self.went {
-            tracing::warn!(
+            tracing::info!(
                 handed_over = went.handed_over,
                 "a peer that went before it was written to has ended: every request it sent was \
                  handed over"
@@ -523,17 +545,22 @@ impl Connection {
             return Some(Ok(held));
         }
         self.held_from = None;
-        let next = self.next.take();
-        if matches!(next, Some(Err(_))) {
-            self.refused = true;
+        loop {
+            let next = self.next.take();
+            if matches!(next, Some(Err(_))) {
+                self.refused = true;
+            }
+            self.take_next();
+            if let Some(went) = &mut self.went
+                && let Some(request) = &next
+            {
+                if request.as_ref().is_ok_and(only_asks) {
+                    continue;
+                }
+                went.handed_over += 1;
+            }
+            return next;
         }
-        if let Some(went) = &mut self.went
-            && next.is_some()
-        {
-            went.handed_over += 1;
-        }
-        self.take_next();
-        next
     }
 
     /// Queues a frame to be written after those already queued. The queue has no cap of its own:
@@ -724,11 +751,11 @@ impl Connection {
             }
             let pending = self.out.get(self.written..).unwrap_or_default();
             let cut = pending.get(..pending.len().min(budget)).unwrap_or_default();
-            match (&self.stream).write(cut) {
-                Ok(0) => {
-                    self.lose_peer(now, &io::ErrorKind::WriteZero.into());
-                    return;
-                }
+            let wrote = match (&self.stream).write(cut) {
+                Ok(0) => Err(io::ErrorKind::WriteZero.into()),
+                wrote => wrote,
+            };
+            match wrote {
                 Ok(n) => {
                     self.stuck_since = None;
                     budget -= n;
@@ -749,24 +776,30 @@ impl Connection {
                     self.stuck_since.get_or_insert(now);
                     return;
                 }
-                Err(error) => {
+                // The peer has gone, or stopped reading for good, and may have sent requests this
+                // turn hasn't read.
+                Err(error) if self.reads_on() => {
                     self.lose_peer(now, &error);
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "a write failed; dropping its connection");
+                    self.drop_now();
                     return;
                 }
             }
         }
     }
 
-    /// A write failed: the peer has gone, or stopped reading for good. What it is owed is dropped,
-    /// and what it sent is read on, while it is: it may have sent requests this turn hasn't read.
-    fn lose_peer(&mut self, now: Instant, error: &io::Error) {
-        let read_on = matches!(self.phase, Phase::Opening { .. } | Phase::Open) && !self.refused;
-        if !read_on {
-            tracing::warn!(%error, "a write failed; dropping its connection");
-            self.drop_now();
-            return;
-        }
-        tracing::info!(%error, "a write failed: its peer has gone; reading on what it sent");
+    /// Whether what its peer sends is still read and handed over: open or opening, and nothing it
+    /// sent was refused.
+    fn reads_on(&self) -> bool {
+        matches!(self.phase, Phase::Opening { .. } | Phase::Open) && !self.refused
+    }
+
+    /// Its peer has gone, as `why` says: what it is owed is dropped, and what it sent is read on.
+    fn lose_peer(&mut self, now: Instant, why: &dyn std::fmt::Display) {
+        tracing::info!(%why, "its peer has gone; reading on what it sent");
         self.went = Some(Went {
             until: now + WENT_WITHIN,
             handed_over: 0,
@@ -1343,7 +1376,8 @@ mod tests {
     }
 
     /// A writer that types and hangs up at once may go between a turn's `poll` and its write of a
-    /// report to it: the write fails before its last keys are read.
+    /// report to it: the write fails before its last keys are read. A request that only asks gets
+    /// nothing done for it.
     #[test]
     fn hands_over_what_a_peer_sent_before_it_went_though_a_write_to_it_failed_first() {
         let now = Instant::now();
@@ -1367,9 +1401,58 @@ mod tests {
         let handed: Vec<Request> = std::iter::from_fn(|| conn.next_request())
             .map(Result::unwrap)
             .collect();
-        assert_eq!(handed, sent);
+        let [echo, _, typed] = sent;
+        assert_eq!(handed, [echo, typed]);
         assert_eq!(conn.queued(), 0, "still owed to a peer that went");
         conn.receive(&mut vec![0; READ_CHUNK]);
+        assert!(!conn.is_gone(), "its reset was taken for a failed read");
+        assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    /// A snapshot held for room keeps the requests after it from being read, so its socket reports
+    /// the peer's hang-up with them still waiting.
+    #[test]
+    fn hands_over_what_waits_behind_a_held_snapshot_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        let typed = input_request(2, b"true\r");
+        let snapshot = Request::Snapshot { id: RequestId(1) };
+        peer.write_all(&[snapshot.encode().unwrap(), typed.encode().unwrap()].concat())
+            .unwrap();
+        let mut buffer = vec![0; READ_CHUNK];
+        conn.receive(&mut buffer);
+        let held = conn.next_request().unwrap().unwrap();
+        conn.hold(held, now);
+        drop(peer);
+        conn.polled(PollFlags::IN | PollFlags::HUP, &mut buffer, now);
+        assert_eq!(conn.next_request().map(Result::unwrap), Some(typed));
+        conn.receive(&mut buffer);
+        assert!(conn.is_finished(now), "the end of input was never read");
+    }
+
+    /// Past the mark a connection's requests wait unread, so its socket reports the peer's hang-up
+    /// with them still waiting.
+    #[test]
+    fn hands_over_what_waits_past_the_mark_once_its_peer_hangs_up() {
+        let now = Instant::now();
+        let (mut conn, mut peer) = pair(now);
+        conn.open(0);
+        let sent = [input_request(1, b"echo a\r"), input_request(2, b"true\r")];
+        for request in &sent {
+            peer.write_all(&request.encode().unwrap()).unwrap();
+        }
+        let mut buffer = vec![0; READ_CHUNK];
+        conn.receive(&mut buffer);
+        conn.queue(vec![1; QUEUE_MARK]);
+        assert!(conn.next_request().is_none(), "answered past the mark");
+        drop(peer);
+        conn.polled(PollFlags::IN | PollFlags::HUP, &mut buffer, now);
+        let handed: Vec<Request> = std::iter::from_fn(|| conn.next_request())
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(handed, sent);
+        conn.receive(&mut buffer);
         assert!(conn.is_finished(now), "the end of input was never read");
     }
 
@@ -1701,7 +1784,7 @@ mod tests {
             let revents = fds[0].revents();
             assert!(revents.contains(PollFlags::HUP), "{revents:?}");
         }
-        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK]);
+        conn.polled(PollFlags::HUP, &mut vec![0; READ_CHUNK], now);
         assert!(conn.is_finished(now), "it would spin on the hang-up");
     }
 
