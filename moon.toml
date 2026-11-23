@@ -157,15 +157,15 @@ options = { cache = false }
 # it got. Their 120m is the budget CI's falsify-half job timeout is derived from
 # (.github/workflows/ci.yml): change them together.
 [tasks.test-falsify]
-command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify.ts"
+command = "node scripts/capped.ts --memory 8G --time 120m --memory-kills-counted -- node scripts/falsify.ts"
 options = { cache = false, outputStyle = "stream" }
 
 [tasks.test-falsify-base]
-command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts"
+command = "node scripts/capped.ts --memory 8G --time 120m --memory-kills-counted -- node scripts/falsify-base.ts"
 options = { cache = false, outputStyle = "stream" }
 
 [tasks.test-mutants-holder]
-command = "node scripts/capped.ts --memory 12G --time 115m -- node scripts/holder-mutants.ts"
+command = "node scripts/capped.ts --memory 12G --time 115m --memory-kills-counted -- node scripts/holder-mutants.ts"
 options = { cache = false }
 
 [tasks.soak]

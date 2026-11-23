@@ -3,13 +3,19 @@
 // test that runs away dies alone.
 //
 // Usage:
-//   node scripts/capped.ts --memory <n>G --time <n>m -- <command> [args...]
+//   node scripts/capped.ts --memory <n>G --time <n>m [--memory-kills-counted] --
+//     <command> [args...]
 //   scripts/capped.ts --test-binary [--memory <n>M] -- <binary> [args...]
 // `--test-binary` is the form for cargo's target runner: cargo test, nextest and cargo-mutants
 // start every test binary through it, so a test process outside any capped run, a hand-typed
 // `cargo mutants` included, gets a cap of its own. Inside a capped scope it runs the binary as it
 // is, held by the scope's cap. A run with a memory kill appends the command to the file
 // `BZ_CAPPED_KILLS` names, for falsify to read.
+//
+// A run fails, whatever its command's status, when its memory cap killed a process in it, when it
+// reached its time cap, or when its command left processes running. `--memory-kills-counted` is
+// for a task that counts its tests' memory kills as outcomes, as the mutation tasks do; the time
+// cap and leftovers still fail it.
 //
 // host-guard is imported by path, not by package name, and needs only node: built-ins: cargo-mutants
 // runs the tests in a copy of the tree that may leave out node_modules, and CI's macOS Rust job
@@ -57,12 +63,18 @@ export function parseDuration(text: string): number {
 export type Invocation = {
   kind: "run" | "test-binary";
   cap: Cap;
+  /** Whether a memory kill is an outcome the command counts, which doesn't fail the run. */
+  memoryKillsCounted: boolean;
   command: string;
   args: string[];
 };
 
+/** scripts/check-standards.ts allows it only on the tasks in `COUNTED_KILLS_TASKS` there. */
+export const COUNTED_KILLS_FLAG = "--memory-kills-counted";
+
 const USAGE =
-  "usage: node scripts/capped.ts --memory <n>G --time <n>m -- <command> [args...], " +
+  `usage: node scripts/capped.ts --memory <n>G --time <n>m [${COUNTED_KILLS_FLAG}] -- ` +
+  "<command> [args...], " +
   "or scripts/capped.ts --test-binary [--memory <n>M] -- <binary> [args...]";
 
 export function parseArgs(argv: readonly string[]): Invocation {
@@ -74,16 +86,20 @@ export function parseArgs(argv: readonly string[]): Invocation {
   if (split < 0 || command === undefined) throw new Error(USAGE);
   if (options[0] === "--test-binary") {
     const [, m, memory = ""] = options;
-    if (options.length === 1) return { kind: "test-binary", cap: TEST_BINARY_CAP, command, args };
+    const binary = { kind: "test-binary", memoryKillsCounted: false, command, args } as const;
+    if (options.length === 1) return { ...binary, cap: TEST_BINARY_CAP };
     if (options.length !== 3 || m !== "--memory") throw new Error(USAGE);
-    const cap = { ...TEST_BINARY_CAP, memory: parseSize(memory) };
-    return { kind: "test-binary", cap, command, args };
+    return { ...binary, cap: { ...TEST_BINARY_CAP, memory: parseSize(memory) } };
   }
-  const [m, memory = "", t, time = ""] = options;
-  if (options.length !== 4 || m !== "--memory" || t !== "--time") throw new Error(USAGE);
+  const [m, memory = "", t, time = "", counted] = options;
+  const memoryKillsCounted = counted === COUNTED_KILLS_FLAG;
+  if (options.length !== (memoryKillsCounted ? 5 : 4) || m !== "--memory" || t !== "--time") {
+    throw new Error(USAGE);
+  }
   return {
     kind: "run",
     cap: { memory: parseSize(memory), timeMs: parseDuration(time) },
+    memoryKillsCounted,
     command,
     args,
   };
@@ -91,6 +107,26 @@ export function parseArgs(argv: readonly string[]): Invocation {
 
 export function formatBytes(bytes: number): string {
   return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
+}
+
+/**
+ * A process's name with its control and format characters escaped, so it can't forge a line of
+ * output or reorder one (a bidi override).
+ */
+const printable = (name: string) =>
+  name.replace(/[\p{Cc}\p{Cf}]/gu, (c) => {
+    const code = c.codePointAt(0) ?? 0;
+    return code < 0x100 ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u{${code.toString(16)}}`;
+  });
+
+/** `tmux ×3, bazhen-holder ×1`: each name once, the most frequent first. */
+export function nameCounts(names: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return [...counts]
+    .toSorted(([a, m], [b, n]) => n - m || a.localeCompare(b))
+    .map(([name, n]) => `${printable(name)} ×${n}`)
+    .join(", ");
 }
 
 export const formatDuration = (ms: number) =>
@@ -125,8 +161,30 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
   } else if (ended.signal === "SIGXCPU") {
     lines.push("capped: stopped at its CPU-time limit, set for a test whose runner had died");
   }
+  if (!testBinary && ended.leftover > 0) {
+    const names = ended.left?.length ? `: ${nameCounts(ended.left)}` : "";
+    lines.push(`capped: stopped ${ended.leftover} process(es) its command left running${names}`);
+  }
   if (ended.uncounted !== undefined) lines.push(`capped: ${ended.uncounted}`);
   return lines;
+}
+
+/**
+ * How a run ends: as its command did, unless the command succeeded and the run failed all the
+ * same, which `why` then says. A test binary ends as it did: a cap that fires on one kills it.
+ */
+export function exitStatus(
+  ended: Ended,
+  invocation: Invocation,
+): { status: number | NodeJS.Signals; why?: string } {
+  const status = ended.signal ?? ended.code ?? 1;
+  if (status !== 0 || invocation.kind === "test-binary") return { status };
+  if (ended.memoryKills > 0 && !invocation.memoryKillsCounted) {
+    return { status: 1, why: "its memory cap killed a process in it" };
+  }
+  if (ended.timedOut) return { status: 1, why: "it reached its time cap" };
+  if (ended.leftover > 0) return { status: 1, why: "its command left processes running" };
+  return { status };
 }
 
 async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
@@ -138,7 +196,7 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   if (chosen.note !== undefined && !testBinary) {
     console.error(`capped: ${chosen.note}, so a watchdog checks memory instead`);
   }
-  const ended = await runIn(chosen.mode, command, args, cap, process.env);
+  const ended = await runIn(chosen.mode, command, args, cap, process.env, !testBinary);
   const enclosing = chosen.mode === "through" ? cappedScope() : undefined;
   const reported = { ...cap, memory: enclosing ?? cap.memory };
   for (const line of report(ended, reported, chosen.mode, testBinary)) console.error(line);
@@ -146,7 +204,9 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   if (kills !== undefined && ended.memoryKills > 0) {
     appendFileSync(kills, `${[command, ...args].join(" ")}\n`);
   }
-  return ended.signal ?? ended.code ?? 1;
+  const { status, why } = exitStatus(ended, invocation);
+  if (why !== undefined) console.error(`capped: the run fails, though its command passed: ${why}`);
+  return status;
 }
 
 async function main(argv: readonly string[]): Promise<number | NodeJS.Signals> {

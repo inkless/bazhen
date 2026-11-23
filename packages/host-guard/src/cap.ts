@@ -11,8 +11,9 @@
 // signals a pid read from a listing.
 
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { availableParallelism, totalmem } from "node:os";
+import { basename } from "node:path";
 import {
   MIN_SYSTEMD,
   PROBE_SCRIPT,
@@ -39,6 +40,14 @@ export interface Ended {
   readonly peak: number;
   readonly memoryKills: number;
   readonly timedOut: boolean;
+  /**
+   * The processes still in the run's own scope or group once its command had gone and they had had
+   * `LEFTOVER_SETTLE_MS` to end, which the run then stopped. A test binary's is 0: its runner
+   * doesn't count them.
+   */
+  readonly leftover: number;
+  /** The names of `leftover`'s processes, where it was counted. */
+  readonly left?: readonly string[];
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
 }
@@ -99,9 +108,91 @@ export function cappedScope(read = readText): number | undefined {
   return Number.isSafeInteger(max) && max > 0 ? max : undefined;
 }
 
+/** A `/proc/<pid>/stat`'s fields after the command, whose parens may hold spaces and parens. */
+const statFields = (text: string) => text.slice(text.lastIndexOf(")") + 2).split(" ");
+
 /** A `/proc/<pid>/stat`'s parent pid: the second field after the command's closing paren. */
-export const statParent = (text: string) =>
-  Number(text.slice(text.lastIndexOf(")") + 2).split(" ")[1]);
+export const statParent = (text: string) => Number(statFields(text)[1]);
+
+/** Whether a `/proc/<pid>/stat` is a live process in group `pgid`; a zombie holds nothing. */
+export function statInGroup(text: string, pgid: number): boolean {
+  const [state = "", , pgrp] = statFields(text);
+  return Number(pgrp) === pgid && state !== "Z" && state !== "X";
+}
+
+/** What a process with an empty name, or one that can't be read, is named: it still counts. */
+export const UNNAMED = "?";
+
+const orUnnamed = (name: string) => (name.trim() === "" ? UNNAMED : name);
+
+/** A `/proc/<pid>/stat`'s command name: what lies between its first paren and its last. */
+export const statComm = (text: string) =>
+  orUnnamed(text.slice(text.indexOf("(") + 1, text.lastIndexOf(")")));
+
+/** The names of the live processes `ps -o pgid=,stat=,comm=`'s rows put in group `pgid`. */
+export const psGroupNames = (text: string, pgid: number) =>
+  [...text.matchAll(/^[ \t]*(\d+)[ \t]+(\S+)[ \t]*(.*?)[ \t]*$/gm)]
+    .filter(([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat))
+    .map(([, , , comm = ""]) => orUnnamed(basename(comm)));
+
+/**
+ * The names of the live processes in group `pgid`: a read of `/proc` or `ps`, no signal. Each
+ * name comes from the same read that put its process in the group. Undefined when `ps` couldn't
+ * be read.
+ */
+async function groupMembers(pgid: number): Promise<string[] | undefined> {
+  if (process.platform === "darwin") {
+    const ps = await output("ps", ["-A", "-o", "pgid=,stat=,comm="]);
+    return ps === undefined ? undefined : psGroupNames(ps, pgid);
+  }
+  const names: string[] = [];
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = readText(`/proc/${entry}/stat`) ?? "";
+    if (statInGroup(stat, pgid)) names.push(statComm(stat));
+  }
+  return names;
+}
+
+const errorCode = (error: unknown) =>
+  error instanceof Error && "code" in error ? error.code : undefined;
+
+/**
+ * The names of `pids`' processes, leaving out only one gone before its name could be read: one
+ * `listed` no longer lists. One whose name can't be read for any other reason, or whose `/proc`
+ * entry is hidden from this user (hidepid) while `listed` still lists it, counts as `UNNAMED`.
+ */
+export const namesOf = (
+  pids: readonly string[],
+  listed: () => readonly string[],
+  read: (path: string) => string = (path) => readFileSync(path, "utf8"),
+) =>
+  pids.flatMap((pid) => {
+    try {
+      return [orUnnamed(read(`/proc/${pid}/comm`).replace(/\n$/, ""))];
+    } catch (error) {
+      const code = errorCode(error);
+      const gone = (code === "ENOENT" || code === "ESRCH") && !listed().includes(pid);
+      return gone ? [] : [UNNAMED];
+    }
+  });
+
+/**
+ * How long a run waits, once its command has gone and something is still in it, before it counts
+ * that again: a process killed, or ending, as the command exits is gone by then, so it isn't left
+ * over. A run whose command left nothing doesn't wait.
+ */
+export const LEFTOVER_SETTLE_MS = 500;
+
+/** What `list` finds once the end of the command has settled: a second read, after the settle. */
+async function settled<L extends readonly string[] | undefined>(
+  list: () => L | Promise<L>,
+): Promise<L> {
+  const first = await list();
+  if (first?.length === 0) return first;
+  await new Promise((wait) => setTimeout(wait, LEFTOVER_SETTLE_MS));
+  return list();
+}
 
 function parentOf(pid: number): number | undefined {
   if (process.platform === "linux") {
@@ -252,14 +343,22 @@ function onSignals(handler: (signal: NodeJS.Signals) => void, ownGroup: boolean)
  * Runs a command in a capped scope. Signals reach the whole scope through systemd, which also
  * reaches processes in other groups (nextest gives each test its own), and a scope that outlives
  * a stop request by 10 s is killed. Once the command has gone, so does its scope: whatever it
- * left behind would otherwise run on to the time cap, holding cargo's lock. The child stays in
- * this process's group, so a signal to the group, from nextest or a terminal, reaches it too.
+ * left behind, counted first, would otherwise run on to the time cap, holding cargo's lock. The
+ * child stays in this process's group, so a signal to the group, from nextest or a terminal,
+ * reaches it too.
+ *
+ * A kill the command outlived goes uncounted when the command exits before the counter is read
+ * again, taking the scope with it. `asRun`, for a run rather than a test binary, reads the journal
+ * after any run that saw none, at about half a second a run, and counts what the command left;
+ * without it, the journal is read only after a command that died by SIGKILL, and nothing is
+ * counted.
  */
 export function runInScope(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  asRun = false,
 ): Promise<Ended> {
   const unit = unitName();
   const uid = process.getuid?.() ?? 0;
@@ -278,6 +377,8 @@ export function runInScope(
       // The scope isn't there yet, or is already gone: the poll keeps reading.
     }
   };
+  // A zombie isn't listed, and the scope may already have gone with its last process.
+  const procs = () => (readText(`${dir}/cgroup.procs`) ?? "").split("\n").filter(Boolean);
   const kill = (signal: NodeJS.Signals) =>
     output("systemctl", ["--user", "kill", `--signal=${signal}`, unit]);
   let escalation: NodeJS.Timeout | undefined;
@@ -296,21 +397,23 @@ export function runInScope(
   const poll = setInterval(sample, 20);
   return new Promise((done) => {
     const finish = async (code: number | null, signal: NodeJS.Signals | null) => {
+      // Before the settle and the stop, which may wait out a leftover ignoring SIGTERM.
+      const timedOut = Date.now() - started >= cap.timeMs;
       sample();
       clearInterval(poll);
       watcher?.close();
+      const left = asRun ? await settled(() => namesOf(procs(), procs)) : undefined;
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);
       clearTimeout(escalation);
       offSignals();
-      const timedOut = Date.now() - started >= cap.timeMs;
-      // A scope whose last process was the one killed can go before its counter is read.
       const journaled =
-        kills === 0 && signal === "SIGKILL"
+        kills === 0 && (asRun || signal === "SIGKILL")
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
-      done({ code, signal, peak, timedOut, ...journaled });
+      const named = left === undefined ? {} : { left };
+      done({ code, signal, peak, timedOut, leftover: left?.length ?? 0, ...named, ...journaled });
     };
     child.once("error", () => void finish(127, null));
     child.once("exit", (code, signal) => void finish(code, signal));
@@ -478,7 +581,8 @@ type Watch = "tree" | "root" | "none";
  * Runs `bin` in a process group of its own and, but for `none`, watches its memory. Past the
  * memory cap the group gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes
  * more); past the time cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if
- * it hasn't gone. Once the command has gone, whatever it left in its group is killed with it.
+ * it hasn't gone. Once the command has gone, whatever it left in its group is killed, and with
+ * `countsLeftover` counted first.
  */
 async function runGroup(
   bin: string,
@@ -486,6 +590,7 @@ async function runGroup(
   cap: Cap,
   env: NodeJS.ProcessEnv,
   watching: Watch,
+  countsLeftover: boolean,
 ): Promise<Ended> {
   const scopeKillsBefore = watching === "none" ? scopeKills() : 0;
   const child = spawnGroup(bin, argv, {
@@ -534,12 +639,17 @@ async function runGroup(
   clearInterval(watchdog);
   clearTimeout(timer);
   clearTimeout(escalation);
-  stop("SIGKILL");
+  const left =
+    countsLeftover && pid !== undefined ? await settled(() => groupMembers(pid)) : undefined;
+  // A group just seen empty isn't signalled: its pgid may already be another group's.
+  if (left?.length !== 0) stop("SIGKILL");
+  const leftover = left?.length ?? 0;
   offSignals();
   // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
   // counted an OOM kill is taken as that kill.
   if (watching === "none" && signal === "SIGKILL" && scopeKills() > scopeKillsBefore) kills = 1;
-  return { code, signal, peak, memoryKills: kills, timedOut };
+  const named = left === undefined ? {} : { left };
+  return { code, signal, peak, memoryKills: kills, timedOut, leftover, ...named };
 }
 
 /** Runs a command in a process group of its own, watching its tree and stopping the group. */
@@ -549,7 +659,7 @@ export function runWatched(
   cap: Cap,
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "tree");
+  return runGroup(command, args, cap, env, "tree", true);
 }
 
 /**
@@ -627,7 +737,7 @@ export function runOwned(
   env: NodeJS.ProcessEnv,
 ): Promise<Ended> {
   const [bin, argv] = ownedArgv(command, args, cap);
-  return runGroup(bin, argv, cap, env, "root");
+  return runGroup(bin, argv, cap, env, "root", false);
 }
 
 /** The OOM kills the capped scope this process runs in has counted so far. */
@@ -639,14 +749,16 @@ function scopeKills(read = readText): number {
 /**
  * Runs a command inside the capped scope around it, so the scope's memory cap holds it, in a
  * group of its own that keeps its own time cap: a scope's runtime is the outer run's, and longer.
+ * `asRun`, for a run rather than a test binary, counts what the command left in its group.
  */
 export function runThrough(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  asRun = false,
 ): Promise<Ended> {
-  return runGroup(command, args, cap, env, "none");
+  return runGroup(command, args, cap, env, "none", asRun);
 }
 
 /**
@@ -683,17 +795,22 @@ export async function chooseMode(
   return { mode: testBinary ? "owned" : "watched", note: verdict.why };
 }
 
+/**
+ * Runs `command` as `mode` says. `asRun` is for a run rather than a test binary: it counts what
+ * the command left, and under systemd every kill the command outlived (`runInScope`).
+ */
 export function runIn(
   mode: Mode,
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  asRun = false,
 ): Promise<Ended> {
-  if (mode === "scope") return runInScope(command, args, cap, env);
+  if (mode === "scope") return runInScope(command, args, cap, env, asRun);
   if (mode === "watched") return runWatched(command, args, cap, env);
   if (mode === "owned") return runOwned(command, args, cap, env);
-  return runThrough(command, args, cap, env);
+  return runThrough(command, args, cap, env, asRun);
 }
 
 /**

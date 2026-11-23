@@ -10,6 +10,7 @@ import { parse as parseToml } from "smol-toml";
 import { MIGRATIONS, NUMBERED_MIGRATIONS } from "../apps/daemon/src/store/migrations.ts";
 import { cssDeclarations } from "../apps/web/src/ui/token-sheet.ts";
 import { gateEnv } from "./rust-gate.ts";
+import { COUNTED_KILLS_FLAG } from "./capped.ts";
 import { mergeBase } from "./falsify.ts";
 import { isMain } from "./is-main.ts";
 import {
@@ -3783,20 +3784,41 @@ export const MUTANTS_CONFIG = ['test_tool = "nextest"'];
 // most at these caps.
 const TEST_RUNNER =
   /\b(?:vitest|playwright|cargo-(?:nextest|mutants|fuzz)|cargo\s+(?:\+\S+\s+)?(?:test|bench|nextest|mutants|fuzz)|(?:cargo xtask|xtask\.sh) gate test|falsify\.ts|hook-bench\.ts|engine-replay\.ts|test-real\.ts)\b/;
-const CAPPED_STEP = /^node (?:\.\.\/)*scripts\/capped\.ts --memory (\d+)G --time (\d+)m -- \S/;
+const CAPPED_STEP = new RegExp(
+  "^node (?:\\.\\./)*scripts/capped\\.ts --memory (\\d+)G --time (\\d+)m" +
+    `(?: ${COUNTED_KILLS_FLAG})? -- \\S`,
+);
 export const MAX_CAP = { gib: 24, minutes: 120 };
+
+// The root's tasks whose command counts its tests' memory kills as outcomes, as a mutation run
+// does, and so may pass capped's flag that keeps such a kill from failing the run. Anywhere else a
+// memory kill fails the run that saw it.
+export const COUNTED_KILLS_TASKS: ReadonlySet<string> = new Set([
+  "test-falsify",
+  "test-falsify-base",
+  "test-mutants-holder",
+]);
 
 /**
  * Why a package.json's scripts, or moon's tasks as `noun` says, would start tests without a cap,
- * or with one too big to bite.
+ * or with one too big to bite, or would let a memory kill pass where `countsKills` doesn't name
+ * the script.
  */
 export function cappedScriptFailures(
   file: string,
   scripts: Record<string, string>,
   noun = "script",
+  countsKills: ReadonlySet<string> = new Set(),
 ): string[] {
   const out: string[] = [];
   for (const [name, script] of Object.entries(scripts)) {
+    if (script.includes(COUNTED_KILLS_FLAG) && !countsKills.has(name)) {
+      out.push(
+        `${file}: the "${name}" ${noun} passes capped \`${COUNTED_KILLS_FLAG}\`, which only a ` +
+          "root task that counts its tests' memory kills may (COUNTED_KILLS_TASKS in " +
+          "scripts/check-standards.ts): anywhere else a memory kill fails the run.",
+      );
+    }
     if (!TEST_RUNNER.test(script)) continue;
     if (/[|;\n\r`]|\$\(|(?<!&)&(?!&)/.test(script)) {
       out.push(
@@ -4018,7 +4040,8 @@ export function moonFailures(paths: readonly string[], read: (path: string) => s
           "env runs another command than that task's own.",
       );
     }
-    out.push(...cappedScriptFailures(file, { [name]: taskCommand(task) }, "task"));
+    const countsKills = target === `${ROOT_PROJECT}:${name}` ? COUNTED_KILLS_TASKS : undefined;
+    out.push(...cappedScriptFailures(file, { [name]: taskCommand(task) }, "task", countsKills));
   }
   const rootTask = (name: string) => tasks.get(`${ROOT_PROJECT}:${name}`)?.task;
   for (const [name, command] of Object.entries(RUST_GATE_TASKS)) {

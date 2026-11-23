@@ -19,6 +19,12 @@ import {
 } from "./cap.ts";
 import { isAlive, signalGroup, spawnGroup } from "./signal.ts";
 
+// Passed through, and watched, so a test can see which groups a run signals.
+vi.mock("./signal.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./signal.ts")>();
+  return { ...real, signalGroup: vi.fn<typeof real.signalGroup>(real.signalGroup) };
+});
+
 const MIB = 1024 ** 2;
 const cap = { memory: 128 * MIB, timeMs: 30_000 };
 // 16 MiB every 20 ms, up to 1 GiB: past the cap within a second, and slow enough that the
@@ -33,6 +39,11 @@ const scopesLeft = () =>
     ["--user", "list-units", "--all", "--no-legend", `bazhen-capped-${process.pid}-*`],
     { encoding: "utf8" },
   ).stdout ?? "";
+
+/** A command that leaves one process running once it has gone. */
+const LEAVES_ONE = "(exec sleep 30) &";
+/** One whose child is still ending as it goes, well inside a run's settle. */
+const ENDS_SOON = "(exec sleep 0.02) &";
 
 let mode: Mode;
 let dir: string;
@@ -50,6 +61,18 @@ describe("a run through the capped scope around it", () => {
     const ended = await runThrough("sleep", ["30"], { ...cap, timeMs: 1_000 }, process.env);
     expect(ended).toMatchObject({ timedOut: true, signal: "SIGTERM" });
   });
+
+  it("counts what a command it runs through left in its group, and nothing when it left nothing", async () => {
+    const left = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env, true);
+    const clean = await runThrough("sh", ["-c", "sleep 0"], cap, process.env, true);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
+  });
+
+  it("counts nothing for a test binary, whose runner reads its status alone", async () => {
+    const ended = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(ended.leftover).toBe(0);
+  });
 });
 
 describe("a capped run", () => {
@@ -61,7 +84,8 @@ describe("a capped run", () => {
 
   it("under systemd loses only its biggest process; a watchdog stops all of it", async () => {
     const mark = join(dir, "went-on");
-    const script = `"${process.execPath}" -e '${RUNAWAY}'; touch "${mark}"`;
+    // sh says it lost the runaway; the test reads that from the mark.
+    const script = `exec 2>/dev/null; "${process.execPath}" -e '${RUNAWAY}'; touch "${mark}"`;
     await runIn(mode, "sh", ["-c", script], cap, process.env);
     expect(existsSync(mark)).toBe(mode === "scope");
   });
@@ -79,6 +103,18 @@ describe("a capped run", () => {
     const pid = Number(readFileSync(pidFile, "utf8"));
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   }, 30_000);
+
+  it("counts what its command left running, and nothing when it left nothing", async () => {
+    const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env, true);
+    const clean = await runIn(mode, "sh", ["-c", "sleep 0"], cap, process.env, true);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
+  });
+
+  it("doesn't count what was ending as its command went", async () => {
+    const ended = await runIn(mode, "sh", ["-c", ENDS_SOON], cap, process.env, true);
+    expect(ended.leftover).toBe(0);
+  });
 
   it("leaves no scope behind, whether it exited, ran out of time or was killed", () => {
     expect(scopesLeft()).toBe("");
@@ -114,6 +150,11 @@ describe("a test binary its runner caps", () => {
     await vi.waitFor(() => expect(pidIn(pidFile)).toBeGreaterThan(1));
     const pid = pidIn(pidFile);
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
+  });
+
+  it("counts nothing it left, which its runner doesn't read", async () => {
+    const ended = await runOwned("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(ended.leftover).toBe(0);
   });
 
   it("runs under the limits that hold it when no runner watches it", () => {
@@ -157,6 +198,27 @@ describe("the fallback watchdog", () => {
     // Killed, it lingers only until whatever inherited it reaps it.
     const pid = Number(readFileSync(pidFile, "utf8"));
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
+  });
+
+  it("counts what a watched command left in its group, and nothing when it left nothing", async () => {
+    const left = await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
+    const clean = await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+    expect([left.left, clean.left]).toEqual([["sleep"], []]);
+  });
+
+  it("doesn't count what was ending as a watched command went", async () => {
+    const ended = await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
+    expect(ended.leftover).toBe(0);
+  });
+
+  it("signals no group it has seen empty, and one it left something in", async () => {
+    vi.mocked(signalGroup).mockClear();
+    await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
+    await runWatched("sh", ["-c", ENDS_SOON], cap, process.env);
+    expect(vi.mocked(signalGroup)).not.toHaveBeenCalled();
+    await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
+    expect(vi.mocked(signalGroup)).toHaveBeenCalledWith(expect.anything(), "SIGKILL");
   });
 
   it("leaves a run under its cap alone", async () => {

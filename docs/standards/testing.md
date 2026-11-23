@@ -437,6 +437,13 @@ of its own, and a runaway dies alone.
   60% of the machine. Elsewhere (macOS, CI runners, containers) a watchdog sums the anonymous
   memory of the run's process tree, and past the cap kills the whole run. A run prints its peak,
   and the cap that fired, if one did: `capped: peak 1.2 GiB of 8 GiB`.
+- **A run fails when a cap fired,** even when its command passed: a process in it was killed at
+  its memory cap, it reached its time cap, or its command left processes running in the run's own
+  scope or process group half a second after it, which the run counts and stops. A process that
+  left both escapes the count. A mutation task counts its tests' memory kills as outcomes, so it passes
+  `--memory-kills-counted`, and a memory kill alone doesn't fail it. `moon run :check` refuses the
+  flag on any task but those in `COUNTED_KILLS_TASKS` (`scripts/check-standards.ts`). A test
+  binary ends as it did, and its runner, which reads its status, has the say.
 - **A cap is a ceiling, not a budget.** A script's cap is about twice its measured peak, and at
   least 4 GiB. A test that needs more than that is the bug, not the cap.
 - **A control that tests a cap runs under one,** like any other test.
