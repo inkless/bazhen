@@ -12,11 +12,12 @@ use std::time::Duration;
 
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, waitid};
 
-/// Why a child can't be waited for a bound here: the kernel reaps every child itself as it exits.
+/// Why a child can't be waited for a bound here: the kernel may reap every child itself as it
+/// exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
     "Refusing to wait for a child: SIGCHLD is ignored or set with SA_NOCLDWAIT, so the kernel \
-     reaps each child as it exits, and by the bound its pid may be another process's. Run the \
+     may reap each child as it exits, and by the bound its pid may be another process's. Run the \
      tests from a process that leaves SIGCHLD at its default"
 )]
 pub struct ChildrenNotKept;

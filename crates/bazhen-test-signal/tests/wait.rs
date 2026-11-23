@@ -27,8 +27,7 @@ fn sleeping() -> std::io::Result<Child> {
     Command::new("sleep").arg("30").stdin(Stdio::null()).spawn()
 }
 
-/// Outlasts `SHORT`, and ends by itself: with SIGCHLD ignored, the kernel reaps it then, and no
-/// test may signal it.
+/// Outlasts `SHORT`, and ends by itself, so no test signals it.
 fn outlasting_short() -> std::io::Result<Child> {
     Command::new("sleep").arg("2").stdin(Stdio::null()).spawn()
 }
@@ -44,11 +43,16 @@ fn refused<T>(waited: &std::io::Result<T>) -> bool {
     inner.is::<ChildrenNotKept>()
 }
 
-/// Waits for `child` to end, which the kernel reaps itself while SIGCHLD is ignored, so the
-/// wait finds no child left: what shows the kernel did.
-fn reaped_by_the_kernel(child: &mut Child) -> bool {
-    let waited = child.wait().map_err(|e| e.raw_os_error());
-    waited == Err(Some(rustix::io::Errno::CHILD.raw_os_error()))
+/// Waits for `child` to end, and whether the wait went as an ignored SIGCHLD has it go. Linux
+/// reaps the child itself as it ends, so the wait finds no child left, which shows the kernel did.
+/// macOS keeps it for its parent's wait.
+fn waited_as_an_ignored_sigchld_has_it(child: &mut Child) -> bool {
+    let waited = child.wait().map(|_| ()).map_err(|e| e.raw_os_error());
+    #[cfg(target_os = "linux")]
+    let expected = Err(Some(rustix::io::Errno::CHILD.raw_os_error()));
+    #[cfg(target_os = "macos")]
+    let expected = Ok(());
+    waited == expected
 }
 
 /// Whether `child` has ended and is still there to reap.
@@ -113,8 +117,8 @@ fn kills_and_reaps_a_child_still_running_at_the_bound() {
     );
 }
 
-/// SIGCHLD ignored, the kernel would reap the child as it ends, and its pid could be another
-/// process's by the bound. The test runs itself again under a parent that ignored it.
+/// SIGCHLD ignored, the kernel may reap the child as it ends, as Linux does, and its pid could be
+/// another process's by the bound. The test runs itself again under a parent that ignored it.
 #[test]
 fn refuses_to_watch_a_child_while_sigchld_is_ignored() {
     if !in_sigchld_ignored_run() {
@@ -130,7 +134,7 @@ fn refuses_to_watch_a_child_while_sigchld_is_ignored() {
     let mut child = outlasting_short().unwrap();
     let waited = ended_within(&child, SHORT);
     assert!(refused(&waited), "{waited:?}");
-    assert!(reaped_by_the_kernel(&mut child));
+    assert!(waited_as_an_ignored_sigchld_has_it(&mut child));
 }
 
 /// Refused before the child is waited for or sent anything, as a KILL at the bound could reach
@@ -152,5 +156,5 @@ fn refuses_to_end_a_child_while_sigchld_is_ignored() {
     let mut child = outlasting_short().unwrap();
     let ended = end_within(&mut child, SHORT);
     assert!(refused(&ended), "{ended:?}");
-    assert!(reaped_by_the_kernel(&mut child));
+    assert!(waited_as_an_ignored_sigchld_has_it(&mut child));
 }
