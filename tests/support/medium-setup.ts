@@ -31,9 +31,18 @@ export function setup(): void {
 }
 
 export function teardown(): void {
-  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
-  if (outer === undefined) return;
-  if (outer.tmpdir === undefined) delete process.env["TMPDIR"];
-  else process.env["TMPDIR"] = outer.tmpdir;
-  outer = undefined;
+  let failure: unknown;
+  for (const dir of made.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (outer !== undefined) {
+    if (outer.tmpdir === undefined) delete process.env["TMPDIR"];
+    else process.env["TMPDIR"] = outer.tmpdir;
+    outer = undefined;
+  }
+  if (failure !== undefined) throw failure;
 }
