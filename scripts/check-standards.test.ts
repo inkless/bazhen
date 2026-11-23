@@ -2033,15 +2033,22 @@ describe("decoderFailures", () => {
     ]);
   });
 
-  it("reads a raw associated type's name as its name, not as a type it holds", () => {
+  it("flags a raw associated type holding bytes, and reads its name as a name, not as a type", () => {
     const one = {
       ...repo,
       "crates/p/src/one.rs": [
         "pub struct One;",
-        "impl Tr for One { type r#Item = u8; fn one(&self, x: Self::Item) {} }",
+        "impl Tr for One {",
+        "    type r#Item = u8;",
+        "    type r#Raw = Vec<u8>;",
+        "    fn one(&self, x: Self::Item) {}",
+        "    fn raw(&self, x: Self::Raw) {}",
+        "}",
       ].join("\n"),
     };
-    expect(failures(fuzzed, exempt, one)).toEqual([]);
+    expect(failures(fuzzed, exempt, one).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/one.rs::One::raw",
+    ]);
   });
 
   it("takes an associated type holding bytes for a carrier, by its name wherever a path reaches it", () => {
