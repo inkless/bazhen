@@ -25,10 +25,18 @@ let server: Server | undefined;
 /** Servers `connections` opened beside `server`. */
 const listeners: Server[] = [];
 let dir = "";
+/** Every directory the test made: a test that serves twice replaces `dir` and would lose the first. */
+const dirs: string[] = [];
+/** Under /tmp, as a socket path holds at most 103 bytes. */
+const tempDir = () => {
+  const made = mkdtempSync("/tmp/bz-peer-");
+  dirs.push(made);
+  return made;
+};
 afterEach(() => {
   server?.close();
   for (const listener of listeners.splice(0)) listener.close();
-  rmSync(dir, { recursive: true, force: true });
+  for (const made of dirs.splice(0)) rmSync(made, { recursive: true, force: true });
   dir = "";
 });
 
@@ -48,7 +56,7 @@ async function guarded(peer: (connection: Socket) => Promise<PeerReading>) {
   guardCallers(app, { agentOf: () => undefined, untokened: () => false }, peer);
   app.post("/v1/daemon/stop", (c) => c.json({ caller: c.get("caller") }));
   app.post("/v1/daemon/env", async (c) => c.json({ bytes: (await c.req.text()).length }));
-  dir = mkdtempSync("/tmp/bz-peer-");
+  dir = tempDir();
   const socket = join(dir, "bazhen.sock");
   const listener = getRequestListener(app.fetch);
   server = createServer((req, res) => void listener(req, res));
@@ -255,7 +263,7 @@ describe("bazhen-peer, on the socket", () => {
 /** The daemon's ends of `count` connections this process makes to a socket of its own. */
 const connections = (count: number) =>
   new Promise<Socket[]>((resolve) => {
-    dir ||= mkdtempSync("/tmp/bz-peer-");
+    dir ||= tempDir();
     const socket = join(dir, `s${listeners.length}.sock`);
     const accepted: Socket[] = [];
     const held = createServer();
@@ -286,7 +294,7 @@ describe("readPeer, after the body is read", () => {
       await readPeer(PEER_SOURCE, c.env.incoming.socket);
       return c.json({ bytes });
     });
-    dir = mkdtempSync("/tmp/bz-peer-");
+    dir = tempDir();
     const socket = join(dir, "bazhen.sock");
     const listener = getRequestListener(app.fetch);
     server = createServer((req, res) => void listener(req, res));
@@ -416,7 +424,7 @@ function stallEveryTurn(ms: number): () => void {
 
 /** A process listening on a socket of its own, its argv as `argv0` and `args` give it. */
 async function listening(argv0: string, ...args: string[]) {
-  dir = mkdtempSync("/tmp/bz-peer-");
+  dir = tempDir();
   const socket = join(dir, "s.sock");
   const listen = `
     import { createServer } from "node:net";
