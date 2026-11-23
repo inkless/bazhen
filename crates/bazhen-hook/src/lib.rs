@@ -6,6 +6,7 @@
 //! The reply's framing is documented beside `HookReply` in packages/protocol/src/mail.ts. Its
 //! decoders are public so the fuzz targets in `fuzz/` can reach them.
 
+mod orphan;
 pub mod pane_ready;
 pub mod pane_title;
 pub mod shell_report;
@@ -36,7 +37,8 @@ pub const LIMITS: Limits = Limits {
 };
 /// Only a backstop: the harness's own timeout for each hook ends it first.
 const HOOK_DEADLINE: Duration = Duration::from_mins(10);
-/// The waiter outlives a daemon restart by reconnecting, and gives up before its hook's timeout.
+/// The waiter outlives a daemon restart by reconnecting, and gives up before its hook's timeout,
+/// or as soon as nothing can read its reply.
 const WAIT_DEADLINE: Duration = Duration::from_hours(23);
 const ACK_DEADLINE: Duration = Duration::from_secs(5);
 /// `PostToolUse` runs on every tool call, and a fold it misses waits for a wake, so a slow daemon
@@ -75,6 +77,9 @@ fn run() -> Option<i32> {
     let mut payload = Vec::new();
     io::stdin().read_to_end(&mut payload).ok()?;
     let request = hook_request(&payload, &agent, &event, id(), parent_id());
+    if event == "wait" {
+        orphan::exit_when_unread();
+    }
     let deadline = match event.as_str() {
         "wait" => WAIT_DEADLINE,
         "PostToolUse" => FOLD_DEADLINE,
