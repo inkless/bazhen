@@ -5216,8 +5216,10 @@ function patternRegions(text: string, body: number): [number, number][] {
     const at = m.index + m[0].length;
     regions.push([at, at + patternEnd(text.slice(at), /^(?:\Win\b|[\s\S];)/)]);
   }
-  for (const m of text.matchAll(/\|([^|]+)\|/g)) {
-    regions.push([m.index, m.index + m[0].length]);
+  // Any pipe may open a closure's parameters, whatever `||` or `|` came before it, so each span
+  // from one to the next counts, overlapping.
+  for (const m of text.matchAll(/\|(?=([^|]*)\|)/g)) {
+    regions.push([m.index, m.index + 1 + (m[1] ?? "").length + 1]);
   }
   for (const m of text.matchAll(/\b(?:r#)?\w+\s*!\s*[([{]/g)) {
     const open = m.index + m[0].length - 1;

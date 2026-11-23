@@ -4921,6 +4921,19 @@ describe("tests that signal processes they didn't start", () => {
       }
     });
 
+    it("must be marked when a closure's parameter binds its name again after another pipe", () => {
+      for (const { type, use } of CLOSERS) {
+        expect(
+          [
+            "let f = || go(); g(|client| client.close());",
+            "let n = a | b; let f = |client| client.close();",
+            "let f = |x| x; let n = a | b; g(|client| client.close());",
+            "let f = || go(); let n = a | b; g(|other| client.close());",
+          ].map((body) => rebinding(type, use, body)),
+        ).toEqual([["3"], ["3"], ["3"], []]);
+      }
+    });
+
     it("must be marked when a struct pattern binds its name again", () => {
       for (const { type, use } of CLOSERS) {
         expect(
