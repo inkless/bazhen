@@ -303,7 +303,10 @@ mean no style is ever up for discussion in a review.
 ## Unsafe
 
 `unsafe_code` is denied everywhere. A crate that needs FFI, as one that opens PTYs and manages
-process groups does, keeps all of its `unsafe` in **one named module**, and that module:
+process groups does, keeps its `unsafe` in **one named module** where it can. It may split the
+`unsafe` into more, by platform (a cfg'd `linux.rs` and `macos.rs`) or by a separate FFI concern
+(the PTY child's pre-exec in `pty.rs`); `unsafe` for a concern that has a module goes there, and
+a new file is for a new concern. Every unsafe module:
 
 - is listed in `UNSAFE_MODULES` in `scripts/check-standards.ts`, with why it needs `unsafe`;
 - sets `#![expect(unsafe_code, reason = "...")]`, the only suppression the check accepts, and
