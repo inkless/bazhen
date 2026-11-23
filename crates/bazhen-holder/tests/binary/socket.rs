@@ -1171,7 +1171,9 @@ fn a_flooding_holder_answers_a_hello_within_a_turn_of_its_output() {
     bazhen_test_signal::require_sandbox().unwrap();
     sweep().unwrap();
     let home = home("hello-flood").unwrap();
-    let script = "yes | head -c 268435456";
+    // Through cat, which copies in blocks: BSD head writes to a terminal a line at a time, a
+    // trickle the holder keeps up with, so two hellos could find the same offset.
+    let script = "yes | head -c 268435456 | cat";
     let (mut holder, socket) = serving_with(&home, &["sh", "-c", script], &FLOOD).unwrap();
     let offset =
         |socket: &Path| -> Result<u64> { Ok(Client::connect(socket)?.hello(false)?.offset.get()) };
