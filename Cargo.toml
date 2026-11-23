@@ -123,3 +123,8 @@ strip = true
 [profile.release-holder]
 inherits = "release"
 panic = "unwind"
+
+# Every daemon start hashes the whole holder build with bazhen-client's SHA-256, and a debug
+# holder is tens of megabytes: unoptimized, that hash is most of a test daemon's start.
+[profile.dev.package.bazhen-client]
+opt-level = 3
