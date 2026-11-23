@@ -1226,6 +1226,34 @@ mod tests {
     }
 
     #[test]
+    fn reads_again_a_line_through_an_ancestor_it_can_t_read_as_it_exits_and_answers_the_line_left()
+    {
+        let handed_on = Cell::new(false);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 if handed_on.get() => Ok(to(1, 5)),
+            50 => Ok(to(40, 5)),
+            40 => {
+                handed_on.set(true);
+                Err(io::Error::other("process Pid(40) has exited"))
+            }
+            _ => Ok(to(0, 0)),
+        };
+        let (taken, pause) = pauses();
+        let answer = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            pause,
+        );
+        assert_eq!(
+            answer.map_err(|refused| refused.to_string()),
+            Ok((vec![pid(1)], NO_CODEX))
+        );
+        assert_eq!(*taken.borrow(), ms(&[1]));
+    }
+
+    #[test]
     fn refuses_with_no_pause_a_caller_that_goes_between_the_walks_of_a_try() {
         let caller_reads = Cell::new(0);
         let step = |p: Pid| match p.as_raw_pid() {
