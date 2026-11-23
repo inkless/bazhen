@@ -1076,6 +1076,8 @@ const NOT_DECODERS: Record<string, string> = {
     "chooses and encodes the next frame from the queue and the ring; reads no bytes",
   "crates/bazhen-holder/src/conn.rs::Connection::flush":
     "writes frames this holder encoded; reads nothing",
+  "crates/bazhen-holder/src/conn.rs::Connection::lose_peer":
+    "drops the frames this holder encoded for a peer a write to failed; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::interest":
     "says what poll should wait for; reads nothing",
   "crates/bazhen-holder/src/conn.rs::Connection::is_finished":
