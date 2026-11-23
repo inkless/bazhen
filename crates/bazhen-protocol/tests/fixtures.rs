@@ -18,7 +18,7 @@ use bazhen_protocol::daemon::{
 use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
-use bazhen_protocol::input::has_keystrokes;
+use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
     MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
     WaitMessagesRequest, WaitMessagesResponse,
@@ -323,15 +323,30 @@ fn detach_keys_are_read_as_the_daemon_reads_them_and_shown_as_it_shows_them() {
     }
 }
 
+/// A view's input as the TypeScript reads it: one byte per character.
+fn latin1(text: &str) -> Result<Vec<u8>> {
+    text.chars()
+        .map(|c| u8::try_from(u32::from(c)).map_err(|_| format!("{c:?} isn't one byte")))
+        .collect()
+}
+
 #[test]
 fn input_holds_keystrokes_as_the_protocol_reads_it() {
     for case in cases("keystrokes").unwrap() {
-        // One byte per character, as the TypeScript reads a view's input.
-        let bytes: Vec<u8> = input(&case)
-            .chars()
-            .map(|c| u8::try_from(u32::from(c)).unwrap())
-            .collect();
+        let bytes = latin1(input(&case)).unwrap();
         assert_eq!(has_keystrokes(&bytes), case["keystrokes"] == true, "{case}");
+    }
+}
+
+#[test]
+fn input_keeps_what_the_protocol_keeps_once_the_terminal_s_replies_are_taken_out() {
+    for case in cases("keystrokes").unwrap() {
+        let kept = case["withoutReplies"].as_str().unwrap();
+        assert_eq!(
+            without_replies(&latin1(input(&case)).unwrap()),
+            latin1(kept).unwrap(),
+            "{case}"
+        );
     }
 }
 

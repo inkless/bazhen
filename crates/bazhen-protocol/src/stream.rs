@@ -18,6 +18,17 @@ pub enum AttachmentMode {
     Interactive,
 }
 
+impl AttachmentMode {
+    /// The mode as the protocol spells it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::Interactive => "interactive",
+        }
+    }
+}
+
 /// A view's own earlier attachment, which it ends as it reattaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

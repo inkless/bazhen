@@ -16,9 +16,10 @@ pub fn has_keystrokes(input: &[u8]) -> bool {
     !strip(&without_replies(input), event_report).is_empty()
 }
 
-/// `input` without the terminal's replies to queries; a paste is kept whole, to its end or to the
-/// end of the input.
-fn without_replies(input: &[u8]) -> Vec<u8> {
+/// `input` without the terminal's replies to queries: what reaches the program from a view. A
+/// paste is kept whole, to its end or to the end of the input.
+#[must_use]
+pub fn without_replies(input: &[u8]) -> Vec<u8> {
     let mut kept = Vec::with_capacity(input.len());
     let mut rest = input;
     loop {

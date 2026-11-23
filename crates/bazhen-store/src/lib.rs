@@ -3,6 +3,7 @@
 //! the other's database. Blocking, as `SQLite` is: an async caller runs it on a thread of its own.
 
 mod agents;
+mod attachments;
 mod devices;
 mod events;
 #[cfg(test)]

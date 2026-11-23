@@ -39,7 +39,7 @@ import {
   WaitMessagesResponse,
 } from "./mail.ts";
 import { DEVICE_PAIRED, DismissNoticeRequest, DismissNoticeResponse } from "./notices.ts";
-import { hasKeystrokes } from "./input.ts";
+import { hasKeystrokes, withoutReplies } from "./input.ts";
 import { isOrigin, isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
 import { TerminalScreen } from "./terminals.ts";
@@ -1332,6 +1332,9 @@ const KEY_INPUTS = [
   `${E}[?62;22cq`,
   `${E}[200~${E}[I${E}[201~`,
   `${E}[200~unended`,
+  `${E}[200~${E}[0n${E}[201~`,
+  `${E}[200~x${E}[201~${E}[0n`,
+  `${E}[0n${E}[200~${E}[0n`,
 ];
 
 /** Detach sequences: each kind of key, each refusal, and what only ASCII's case folding refuses. */
@@ -1397,7 +1400,11 @@ export function checkFixtures() {
         : { input, ok: false },
     ),
     quoteNote: QUOTE_INPUTS.map((input) => ({ input, quoted: quoteNote(input) })),
-    keystrokes: KEY_INPUTS.map((input) => ({ input, keystrokes: hasKeystrokes(input) })),
+    keystrokes: KEY_INPUTS.map((input) => ({
+      input,
+      keystrokes: hasKeystrokes(input),
+      withoutReplies: withoutReplies(input),
+    })),
     detachKeys: DETACH_INPUTS.map((input) => {
       const read = readDetachKeys(input);
       return "problem" in read

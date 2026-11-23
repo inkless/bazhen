@@ -5,10 +5,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agents::EnvironmentKind;
-use crate::ids::{AgentId, AssignmentId, DeviceId, EnvironmentId, TaskId, TerminalId};
+use crate::ids::{
+    AgentId, AssignmentId, AttachmentId, DeviceId, EnvironmentId, TaskId, TerminalId,
+};
 use crate::notices::{NoticeCloseReason, NoticeCloser, NoticeDevice};
 use crate::record::Record;
 use crate::shells::TuiTheme;
+use crate::stream::AttachmentMode;
 
 /// Why the stream couldn't resume from a cursor: older than retention, or not from this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -403,3 +406,40 @@ pub struct TerminalRenamed {
 /// empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TerminalNoted {}
+
+/// The payload of `attachment.started`: a view of a terminal, watching or driving it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentStarted {
+    pub terminal_id: TerminalId,
+    pub mode: AttachmentMode,
+}
+
+/// Why an attachment ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentEndReason {
+    ClientClosed,
+    TerminalClosed,
+    AttachFailed,
+    DaemonRestart,
+    Disconnected,
+    EvictedSlow,
+    TimedOut,
+    Replaced,
+}
+
+/// The payload of `attachment.ended`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentEnded {
+    pub reason: AttachmentEndReason,
+}
+
+/// The payload of `lease.granted`: the attachment that now drives the terminal, and the epoch its
+/// input is typed under, higher than any granted on the terminal before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaseGranted {
+    pub attachment_id: AttachmentId,
+    pub epoch: u64,
+}
