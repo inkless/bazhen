@@ -34,6 +34,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 bazhen-test-signal = { workspace = true }
+proptest = { workspace = true }
 tungstenite = { workspace = true }
 
 [lints]
