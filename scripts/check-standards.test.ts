@@ -1842,6 +1842,20 @@ const answeredHolder = (head: string) =>
 const flaggedIn = (file: string, methods: string[]) =>
   methods.map((m) => `crates/r/src/${file}.rs::${m}`);
 
+// A type holding a runtime that holds bytes and has `Controls::size` by Deref, if `extra` gives it
+// one, whose `leak` calls `size` on it: a call rustc may send to a method other than the one the
+// scan reads.
+const heldRuntime = (struct: string, extra: string[]) =>
+  [
+    "use std::sync::Arc;",
+    "pub struct Controls { tx: Vec<u8> }",
+    "impl Controls { pub fn size(&self) -> usize { self.tx.len() } }",
+    struct,
+    "pub struct Holder { runtime: Arc<Runtime> }",
+    "impl Holder { pub fn leak(&self) -> usize { self.runtime.size() } }",
+    ...extra,
+  ].join("\n");
+
 describe("decoderFailures", () => {
   const lib = "pub fn decode(b: &[u8]) {}\nfn send(b: &[u8]) {}\nfn other(x: u8) {}\n";
   const repo: Record<string, string> = {
@@ -2406,6 +2420,136 @@ describe("decoderFailures", () => {
       ...flaggedIn("written", ["Wrapped::deref", "Holder::id", "Holder::deref", "Holder::other"]),
       ...flaggedIn("preluded", ["Wrapped::deref", "Holder::id", "Holder::deref", "Holder::other"]),
     ]);
+  });
+
+  // Whether `Holder::leak` of heldRuntime, in `written` added to the repo, takes bytes.
+  const leaks = (written: Record<string, string>) =>
+    failures(fuzzed, exempt, { ...repo, ...written }).some((f) =>
+      f.startsWith("crates/r/src/lib.rs::Holder::leak: "),
+    );
+
+  it("takes a field's method for a decoder where rustc may call another of its name", () => {
+    const plain = "pub struct Runtime { controls: Controls }";
+    const shim = "impl Runtime { pub fn size(&self) -> usize { 0 } }";
+    const deref = [
+      "impl std::ops::Deref for Runtime {",
+      "    type Target = Controls;",
+      "    fn deref(&self) -> &Controls { &self.controls }",
+      "}",
+    ];
+    const peek = [
+      "pub trait Peek { fn size(&self) -> usize; }",
+      "pub fn setup() { peek!(Arc<Runtime>); }",
+    ];
+    const peekImpl = "impl Peek for $t { fn size(&self) -> usize { 0 } }";
+    const cases: Record<string, [Record<string, string>, Record<string, string>]> = {
+      "a cfg on the impl": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, ["#[cfg(windows)]", shim]) },
+      ],
+      "a cfg on the method": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            "impl Runtime {",
+            "    #[cfg(windows)]",
+            "    #[inline]",
+            "    pub fn size(&self) -> usize { 0 }",
+            "}",
+          ]),
+        },
+      ],
+      "a cfg on the impl's module": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, ["mod win;"]),
+          "crates/r/src/win.rs": "mod imp;",
+          "crates/r/src/win/imp.rs": `use crate::Runtime;\n${shim}`,
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, ["#[cfg(windows)]", "mod win;"]),
+          "crates/r/src/win.rs": "mod imp;",
+          "crates/r/src/win/imp.rs": `use crate::Runtime;\n${shim}`,
+        },
+      ],
+      "an impl for one instance": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(
+            "pub struct Runtime<K = ()> { controls: Controls, kind: std::marker::PhantomData<K> }",
+            ["impl<K> Runtime<K> { pub fn size(&self) -> usize { 0 } }"],
+          ),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(
+            "pub struct Runtime<K = ()> { controls: Controls, kind: std::marker::PhantomData<K> }",
+            ["pub struct Fast;", "impl Runtime<Fast> { pub fn size(&self) -> usize { 0 } }"],
+          ),
+        },
+      ],
+      "a Deref to a carrier": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, ...deref]) },
+      ],
+      "a trait impl for an alias": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+            "pub type Shared = Arc<Runtime>;",
+            "impl Peek for Shared { fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+      ],
+      "a macro_rules! writing an impl": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "macro_rules! two { () => { 2 }; }",
+            'const NAME: &str = concat!("r");',
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            ...peek,
+            `macro_rules! peek { ($t:ty) => (${peekImpl}); }`,
+          ]),
+        },
+      ],
+      "a macro writing an impl from its fragments": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            ...peek,
+            `macro peek($t:ty) { ${peekImpl} }`,
+          ]),
+        },
+      ],
+      "a macro of another crate called where an item may be": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "thread_local! { static N: u32 = 0; }",
+            "pub fn name() -> String { ext::name!() }",
+          ]),
+        },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "ext::peek!(Arc<Runtime>);"]) },
+      ],
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(cases).map(([name, [clean, tricked]]) => [
+          name,
+          [leaks(clean), leaks(tricked)],
+        ]),
+      ),
+    ).toEqual(Object.fromEntries(Object.keys(cases).map((name) => [name, [false, true]])));
   });
 
   it("follows a field's methods through every type that holds it, and keeps a cycle", () => {

@@ -1713,11 +1713,12 @@ const TRAIT_METHODS = new Set(
 );
 
 // The std traits with no method outside TRAIT_METHODS, so that an impl of one answers no other
-// name. An impl of any other trait from outside the workspace may answer any.
+// name. An impl of any other trait from outside the workspace may answer any, and so may one of
+// Deref or DerefMut: a call the type's own methods don't answer goes on to its target's.
 const STD_TRAITS = new Set(
   (
-    "AsMut AsRef Borrow BorrowMut Clone Copy Debug Default Deref DerefMut Display Drop Eq From " +
-    "Hash Ord PartialEq PartialOrd Send Sync Unpin"
+    "AsMut AsRef Borrow BorrowMut Clone Copy Debug Default Display Drop Eq From Hash Ord " +
+    "PartialEq PartialOrd Send Sync Unpin"
   ).split(" "),
 );
 
@@ -2337,15 +2338,17 @@ function definedFunctions(source: string): string[] {
   );
 }
 
+interface ImplParts {
+  params: Set<string>;
+  trait: string | undefined;
+  type: string;
+}
+
 /**
  * An impl's head, read for what may answer a call: the type parameters it declares, the last name
  * of the trait it implements, if any, and the type it is for, less any `where` clause.
  */
-function implParts(head: string): {
-  params: Set<string>;
-  trait: string | undefined;
-  type: string;
-} {
+function implParts(head: string): ImplParts {
   let rest = head.replace(/^[\s\S]*?\bimpl\b\s*/, "");
   const params = new Set<string>();
   if (rest.startsWith("<")) {
@@ -2406,6 +2409,83 @@ function exposes(sig: string, at: number, scope: Scope, alias: (n: Named) => boo
   );
 }
 
+// An attribute that may leave out what it is on: `#[cfg(…)]`, or a `cfg_attr`, which may add one.
+const CFG_ATTRIBUTE = /#\s*\[\s*cfg(?:_attr)?\s*\(/;
+
+// What may come between a function's attributes and its `fn`.
+const FN_QUALIFIERS =
+  /(?:(?:pub(?:\s*\([^)]*\))?|async|const|unsafe|default|extern(?:\s*"[^"]*")?)\s+)*$/;
+
+/** The attributes written right before `at` in `code`, outer ones first. */
+function attributesBefore(code: string, at: number): string {
+  let start = at;
+  for (;;) {
+    let close = start;
+    while (close > 0 && /\s/.test(code[close - 1] ?? "")) close--;
+    if (code[close - 1] !== "]") break;
+    let open = close - 1;
+    for (let depth = 0; open >= 0; open--) {
+      if (code[open] === "]") depth++;
+      else if (code[open] === "[" && --depth === 0) break;
+    }
+    let hash = open - 1;
+    while (hash >= 0 && /\s/.test(code[hash] ?? "")) hash--;
+    if (code[hash] !== "#") break;
+    start = hash;
+  }
+  return code.slice(start, at);
+}
+
+/** Whether a module, or one it is in, may be left out by a `cfg`. */
+function cfgModule(module: Module | undefined): boolean {
+  const parent = module?.parent;
+  if (module === undefined || parent === undefined) return false;
+  const declared = [...parent.children.values()].flat().filter((b) => b.value === module);
+  return declared.some((b) => b.conditional) || cfgModule(parent);
+}
+
+/**
+ * Whether an inherent impl's methods are a type's under every build and for every one of its
+ * instances: no `cfg` may leave the impl or its module out, and each type argument of its type is
+ * one of the impl's own parameters (`impl Runtime<Fast>` is not every `Runtime`'s).
+ */
+function everyInstance(code: string, at: number, modules: Module[], parts: ImplParts): boolean {
+  if (CFG_ATTRIBUTE.test(attributesBefore(code, at)) || modules.some(cfgModule)) return false;
+  const args = /<([\s\S]*)>\s*$/.exec(parts.type)?.[1];
+  return args === undefined || topLevelParts(args).every((a) => parts.params.has(a.trim()));
+}
+
+/** Whether a `cfg` may leave out the function whose `fn` is at `at` in `code`. */
+function cfgFunction(code: string, at: number): boolean {
+  const before = code.slice(Math.max(0, at - 200), at);
+  const qualifiers = FN_QUALIFIERS.exec(before)?.[0].length ?? 0;
+  return CFG_ATTRIBUTE.test(attributesBefore(code, at - qualifiers));
+}
+
+// A macro called where an item may be, outside a function body, may write an impl the scan
+// can't read; this one writes none.
+const ITEM_MACROS = new Set(["thread_local"]);
+
+/**
+ * Whether `code` may hold an impl the scan can't read, for a type it can't tell: an impl written
+ * with a macro's `$` fragments, a `macro_rules!` whose body writes one, or a macro called where an
+ * item may be, outside a function body.
+ */
+function macroImpls(code: string, bodies: { start: number; end: number }[]): boolean {
+  if ([...code.matchAll(IMPL_BLOCK)].some((m) => m[0].includes("$"))) return true;
+  for (const m of code.matchAll(/\bmacro_rules\s*!/g)) {
+    if (/\bimpl\b/.test(code.slice(m.index, itemEnd(code, m.index)))) return true;
+  }
+  return [...code.matchAll(/\b(?:r#)?(\w+)\s*!\s*[({[]/g)].some(
+    (m) =>
+      !ITEM_MACROS.has(m[1] ?? "") &&
+      !inside(m.index, bodies) &&
+      /(?:^|[;{}\]])\s*(?:(?:\$?\w+)?\s*::\s*(?:\w+\s*::\s*)*)?$/.test(
+        code.slice(Math.max(0, m.index - 200), m.index),
+      ),
+  );
+}
+
 /**
  * The workspace's methods and trait impls a use of a field with a view is checked against, read
  * from each of `codes`' files with its scope.
@@ -2433,6 +2513,14 @@ function throughOf(
       const r = resolveNamed(table, m, named);
       return [...r.items, ...table.items.filter((i) => r.unresolved.has(i.name))];
     });
+  // The items a name may be, and through a type alias, the items the type it names may be.
+  const aliased = (file: string, n: Named, at: number, seen: Set<Item>): Item[] =>
+    resolvedIn(file, n, at).flatMap((i) => {
+      const target = i.kind === "type" ? /=([\s\S]*);\s*$/.exec(i.text)?.[1] : undefined;
+      if (target === undefined || seen.has(i)) return [i];
+      const next = new Set([...seen, i]);
+      return [i, ...typePaths(target).flatMap((m) => aliased(i.file, m, i.at, next))];
+    });
   // A type alias exposes what the type it names does, read where the alias is written.
   const aliasIn =
     (file: string, at: number, seen: Set<Item>) =>
@@ -2449,14 +2537,17 @@ function throughOf(
     const resolved = (named: Named, at: number) => resolvedIn(file, named, at);
     const alias = (at: number) => aliasIn(file, at, new Set());
     const { blocks, fns, bodies } = rustFunctions(code);
+    if (macroImpls(code, bodies)) through.blanket = undefined;
     for (const block of blocks) {
       const parts = implParts(block.head);
       const own = fns.filter((f) => f.block === block && !inside(f.m.index, bodies));
       if (parts.trait === undefined) {
+        const modules = table.modulesAt(file, block.start);
+        if (!everyInstance(code, block.start, modules, parts)) continue;
         for (const item of resolved(block.named, block.start)) {
           const byName = through.methods.get(item) ?? new Map();
           through.methods.set(item, byName);
-          for (const f of own) {
+          for (const f of own.filter((g) => !cfgFunction(code, g.m.index))) {
             byName.set(f.fn, [
               ...(byName.get(f.fn) ?? []),
               {
@@ -2481,7 +2572,7 @@ function throughOf(
         continue;
       }
       for (const n of typePaths(parts.type)) {
-        for (const item of resolved(n, block.start)) {
+        for (const item of aliased(file, n, block.start, new Set())) {
           through.traits.set(
             item,
             through.traits.has(item) ? unionNames(through.traits.get(item), answered) : answered,
