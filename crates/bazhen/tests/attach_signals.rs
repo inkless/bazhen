@@ -177,21 +177,9 @@ fn read_until_closed(master: &OwnedFd) -> Res<thread::JoinHandle<String>> {
 }
 
 /// How `child` exited, if it did within BOUND; it is killed otherwise.
-fn exited_within_bound(child: Child) -> Res<Option<i32>> {
-    let (tell, exited) = mpsc::channel();
-    let pid = child.id();
-    let waiter = thread::spawn(move || {
-        let mut child = child;
-        let code = child.wait().map(|status| status.code());
-        let _ = tell.send(code);
-    });
-    if let Ok(code) = exited.recv_timeout(BOUND) {
-        return Ok(code?);
-    }
-    // The child is the test's own and unreaped, so its pid is still its own.
-    bazhen_test_signal::signal(pid, Signal::KILL).map_err(|e| format!("{e:?}"))?;
-    waiter.join().map_err(|_| "the waiter panicked")?;
-    Ok(None)
+fn exited_within_bound(mut child: Child) -> Res<Option<i32>> {
+    let ended = bazhen_test_signal::end_within(&mut child, BOUND)?;
+    Ok(ended.and_then(|status| status.code()))
 }
 
 /// A home with a fake daemon, flooding when `flood`, and an attach to it.

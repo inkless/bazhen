@@ -5,12 +5,18 @@
 //!
 //! It also says whether a test that signals processes it didn't start may run here at all:
 //! `require_sandbox`, which each such test calls first.
+//!
+//! And it waits a bound for a child the test started without reaping it (`ended_within`,
+//! `end_within`), so a signal sent when the bound passes still reaches that child.
 
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
+mod wait;
+
 pub use rustix::process::Signal;
 use rustix::process::{Pid, getpgid, getpgrp, getpid, getppid};
+pub use wait::{end_within, ended_within};
 
 /// Marks a host that exists to be thrown away: the test container, or a CI runner.
 pub const DISPOSABLE_HOST_MARKER: &str = "/etc/bazhen-disposable-host";
