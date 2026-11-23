@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TEST_BINARY_CAP,
+  exitStatus,
   formatDuration,
   parseArgs,
   parseDuration,
@@ -24,6 +25,7 @@ describe("capped's arguments", () => {
     expect(parseArgs(["--memory", "8G", "--time", "20m", "--", "vitest", "run", "--x"])).toEqual({
       kind: "run",
       cap,
+      memoryKillsCounted: false,
       command: "vitest",
       args: ["run", "--x"],
     });
@@ -33,6 +35,7 @@ describe("capped's arguments", () => {
     expect(parseArgs(["--test-binary", "--", "/t/deps/a-1f", "--list"])).toEqual({
       kind: "test-binary",
       cap: TEST_BINARY_CAP,
+      memoryKillsCounted: false,
       command: "/t/deps/a-1f",
       args: ["--list"],
     });
@@ -40,6 +43,15 @@ describe("capped's arguments", () => {
       cap: { memory: 128 * 1024 ** 2, timeMs: TEST_BINARY_CAP.timeMs },
     });
     expect(() => parseArgs(["--test-binary", "--time", "1m", "--", "/t/a"])).toThrow("usage");
+  });
+
+  it("takes a run's word that it counts its memory kills, after its caps alone", () => {
+    const counted = ["--memory", "8G", "--time", "20m", "--memory-kills-counted", "--", "x"];
+    expect(parseArgs(counted)).toMatchObject({ kind: "run", memoryKillsCounted: true });
+    const first = ["--memory-kills-counted", "--memory", "8G", "--time", "20m", "--", "x"];
+    expect(() => parseArgs(first)).toThrow("usage");
+    const binary = ["--test-binary", "--memory-kills-counted", "--", "/t/a"];
+    expect(() => parseArgs(binary)).toThrow("usage");
   });
 
   it("drops the `--` pnpm hands on, but not one the command itself is given", () => {
@@ -130,5 +142,36 @@ describe("what a run says when it ends", () => {
   it("gives a short time cap in seconds", () => {
     expect(formatDuration(2_000)).toBe("2 s");
     expect(formatDuration(120 * 60_000)).toBe("120 min");
+  });
+});
+
+const RUN = parseArgs(["--memory", "8G", "--time", "20m", "--", "vitest"]);
+const COUNTING = { ...RUN, memoryKillsCounted: true };
+const BINARY = parseArgs(["--test-binary", "--", "/t/a"]);
+
+describe("how a run ends", () => {
+  it("keeps a failed command's status, and a test binary's, whatever its caps did", () => {
+    const fired = { ...ended, memoryKills: 1, timedOut: true, leftover: 1 };
+    expect([
+      exitStatus({ ...fired, code: 3 }, RUN),
+      exitStatus({ ...fired, code: null, signal: "SIGKILL" }, RUN),
+      exitStatus(fired, BINARY),
+    ]).toEqual([{ status: 3 }, { status: "SIGKILL" }, { status: 0 }]);
+  });
+
+  it("fails a passed run on an uncounted memory kill, its time cap or a leftover", () => {
+    expect([
+      exitStatus({ ...ended, memoryKills: 1 }, RUN),
+      exitStatus({ ...ended, memoryKills: 1 }, COUNTING),
+      exitStatus({ ...ended, memoryKills: 1, timedOut: true }, COUNTING),
+      exitStatus({ ...ended, memoryKills: 1, leftover: 1 }, COUNTING),
+      exitStatus(ended, RUN),
+    ]).toEqual([
+      { status: 1, why: "its memory cap killed a process in it" },
+      { status: 0 },
+      { status: 1, why: "it reached its time cap" },
+      { status: 1, why: "its command left processes running" },
+      { status: 0 },
+    ]);
   });
 });

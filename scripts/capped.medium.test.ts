@@ -2,7 +2,7 @@
 // run, which is the capped run a test binary finds around it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,14 +83,20 @@ describe("capped as cargo's test runner", () => {
     // runs its test through, and where systemd can't cap, it caps the test itself.
     const outer = await outerMode();
     const kills = join(dir, "kills-through");
+    const said = join(dir, "said-through");
     await runIn(
       outer,
-      capped,
-      ["--test-binary", "--memory", "128M", "--", process.execPath, "-e", RUNAWAY],
+      "sh",
+      ["-c", 'exec 2>"$0" "$@"', said, capped, "--test-binary", "--memory", "128M", "--"].concat(
+        process.execPath,
+        "-e",
+        RUNAWAY,
+      ),
       SMALL,
       { ...process.env, [KILLS_ENV]: kills },
     );
     expect(existsSync(kills)).toBe(true);
+    expect(readFileSync(said, "utf8")).toMatch(/^capped: killed .* 128 MiB memory cap$/m);
   });
 
   it("names no test that a SIGKILL from elsewhere ended", () => {
@@ -103,6 +109,65 @@ describe("capped as cargo's test runner", () => {
     expect(spawnSync(capped, ["sh", "-c", "true"], { encoding: "utf8" })).toMatchObject({
       status: 2,
       stderr: expect.stringContaining("usage"),
+    });
+  });
+});
+
+/** A run as a task's: inside this one's scope it runs through, and keeps its own time cap. */
+const asRun = (time: string, script: string) =>
+  spawnSync(capped, ["--memory", "1G", "--time", time, "--", "sh", "-c", script], {
+    encoding: "utf8",
+  });
+/**
+ * A run started outside this one's scope, so that it caps a scope of its own as a moon task's
+ * does, where the kernel kills only the biggest process and the command can pass regardless.
+ */
+const asTask = (flags: string[], script: string) =>
+  spawnSync(
+    "systemd-run",
+    [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "--",
+      capped,
+      "--memory",
+      "128M",
+      "--time",
+      "1m",
+    ].concat(flags, ["--", "sh", "-c", script]),
+    { encoding: "utf8" },
+  );
+const OUTLIVES_RUNAWAY = `"${process.execPath}" -e '${RUNAWAY}'; exit 0`;
+const FAILS = "capped: the run fails, though its command passed:";
+
+describe("capped as a task's run", () => {
+  it("fails a run whose command passed once it reached its time cap", () => {
+    expect(asRun("1s", 'trap "exit 0" TERM; sleep 30 & wait')).toMatchObject({
+      status: 1,
+      stderr: expect.stringContaining(`${FAILS} it reached its time cap`),
+    });
+  });
+
+  it("fails a run whose command passed but left a process running", () => {
+    expect(asRun("1m", "(exec sleep 30) &")).toMatchObject({
+      status: 1,
+      stderr: expect.stringContaining(`${FAILS} its command left processes running`),
+    });
+  });
+
+  it.runIf(inScope)("fails a run whose command passed after a memory kill in its own scope", () => {
+    expect(asTask([], OUTLIVES_RUNAWAY)).toMatchObject({
+      status: 1,
+      stderr: expect.stringContaining(`${FAILS} its memory cap killed a process in it`),
+    });
+  });
+
+  it.runIf(inScope)("passes a run that counts its memory kills after one in its own scope", () => {
+    expect(asTask(["--memory-kills-counted"], OUTLIVES_RUNAWAY)).toMatchObject({
+      status: 0,
+      stderr: expect.stringContaining("capped: killed 1 process(es) at the 128 MiB memory cap"),
     });
   });
 });

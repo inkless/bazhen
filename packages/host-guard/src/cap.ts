@@ -280,14 +280,20 @@ function onSignals(handler: (signal: NodeJS.Signals) => void, ownGroup: boolean)
  * Runs a command in a capped scope. Signals reach the whole scope through systemd, which also
  * reaches processes in other groups (nextest gives each test its own), and a scope that outlives
  * a stop request by 10 s is killed. Once the command has gone, so does its scope: whatever it
- * left behind, counted first, would otherwise run on to the time cap, holding cargo's lock. The child stays in
- * this process's group, so a signal to the group, from nextest or a terminal, reaches it too.
+ * left behind, counted first, would otherwise run on to the time cap, holding cargo's lock. The
+ * child stays in this process's group, so a signal to the group, from nextest or a terminal,
+ * reaches it too.
+ *
+ * A kill the command outlived goes uncounted when the command exits before the counter is read
+ * again, taking the scope with it. `everyKill` reads the journal after any run that saw none, at
+ * about half a second a run; without it, only after one whose command died by SIGKILL.
  */
 export function runInScope(
   command: string,
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  everyKill = false,
 ): Promise<Ended> {
   const unit = unitName();
   const uid = process.getuid?.() ?? 0;
@@ -336,9 +342,8 @@ export function runInScope(
       clearTimeout(escalation);
       offSignals();
       const timedOut = Date.now() - started >= cap.timeMs;
-      // A scope whose last process was the one killed can go before its counter is read.
       const journaled =
-        kills === 0 && signal === "SIGKILL"
+        kills === 0 && (everyKill || signal === "SIGKILL")
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
       done({ code, signal, peak, timedOut, leftover, ...journaled });
@@ -721,8 +726,9 @@ export function runIn(
   args: readonly string[],
   cap: Cap,
   env: NodeJS.ProcessEnv,
+  everyKill = false,
 ): Promise<Ended> {
-  if (mode === "scope") return runInScope(command, args, cap, env);
+  if (mode === "scope") return runInScope(command, args, cap, env, everyKill);
   if (mode === "watched") return runWatched(command, args, cap, env);
   if (mode === "owned") return runOwned(command, args, cap, env);
   return runThrough(command, args, cap, env);

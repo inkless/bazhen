@@ -1401,6 +1401,25 @@ describe("cappedScriptFailures", () => {
     ).toEqual(Array.from({ length: 6 }, () => expect.stringContaining("`&&` alone")));
   });
 
+  it("keeps a run that counts its memory kills where it may, and flags one anywhere else", () => {
+    const counted = "node scripts/capped.ts --memory 8G --time 120m --memory-kills-counted --";
+    const may = new Set(["test-falsify"]);
+    const flagged = [expect.stringContaining("passes capped `--memory-kills-counted`")];
+    expect([
+      cappedScriptFailures(
+        "moon.toml",
+        { "test-falsify": `${counted} node scripts/falsify.ts` },
+        "task",
+        may,
+      ),
+      cappedScriptFailures("moon.toml", { "test-medium": `${counted} vitest run` }, "task", may),
+      cappedScriptFailures("moon.toml", { capped: `${counted} sh -c true` }, "task", may),
+      cappedScriptFailures("package.json", {
+        "test-falsify": `${counted} node scripts/falsify.ts`,
+      }),
+    ]).toEqual([[], flagged, flagged, flagged]);
+  });
+
   it("refuses a cap too big to bite", () => {
     expect([
       overCap(MAX_CAP.gib, MAX_CAP.minutes),
@@ -1452,6 +1471,22 @@ describe("moonFailures", () => {
 
   it("accepts the standard's workspace, tasks, moon pin and package.json", () => {
     expect(failures({})).toEqual([]);
+  });
+
+  it("keeps the root's mutation tasks counting memory kills, and flags any other task", () => {
+    const counted = cappedVitest("--memory 8G --time 120m --memory-kills-counted").replace(
+      "../../",
+      "",
+    );
+    const command = (name: string) => task(name, `command = "${counted}"\n${uncached}`);
+    const flagged = [expect.stringContaining("passes capped `--memory-kills-counted`")];
+    expect([
+      failures({
+        "moon.toml": `${root}\n${command("test-falsify")}\n${command("test-mutants-holder")}`,
+      }),
+      failures({ "moon.toml": `${root}\n${command("test-medium")}` }),
+      failures({ "apps/web/moon.toml": command("test-falsify") }),
+    ]).toEqual([[], flagged, flagged]);
   });
 
   it("accepts a task that sets how moon prints its output", () => {
