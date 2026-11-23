@@ -2938,10 +2938,12 @@ interface Locked {
   version: string;
   source: string | undefined;
   checksum: string | undefined;
+  replace: string | undefined;
 }
 
 // Where Cargo.lock says a package from crates.io comes from. A git or path source, or a path
-// `[patch]`, has another or none, and code no review read.
+// `[patch]`, has another or none, and code no review read; a `[replace]` keeps it, and adds a
+// `replace` naming the package built instead.
 const CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index";
 
 /** Each package Cargo.lock locks, by name: its version, source and checksum. */
@@ -2952,7 +2954,12 @@ function lockedPackages(lock: string): Map<string, Locked[]> {
     const name = field("name");
     const version = field("version");
     if (name !== undefined && version !== undefined) {
-      const locked = { version, source: field("source"), checksum: field("checksum") };
+      const locked = {
+        version,
+        source: field("source"),
+        checksum: field("checksum"),
+        replace: field("replace"),
+      };
       out.set(name, [...(out.get(name) ?? []), locked]);
     }
   }
@@ -3007,12 +3014,17 @@ function pinnedMacros(
             "its expansion at the locked version again, and pin that version if it still writes " +
             "no impl.",
         );
-      } else if (locked[0]?.source !== CRATES_IO || locked[0].checksum !== checksum) {
+      } else if (
+        locked[0]?.source !== CRATES_IO ||
+        locked[0].checksum !== checksum ||
+        locked[0].replace !== undefined
+      ) {
         held = false;
         out.push(
           `scripts/check-standards.ts: FOREIGN_MACROS read ${path} in ${name} ${version} from ` +
             `crates.io with checksum ${checksum}, but Cargo.lock takes it from ` +
-            `${locked[0]?.source ?? "no registry"} with checksum ${locked[0]?.checksum ?? "none"}: ` +
+            `${locked[0]?.source ?? "no registry"} with checksum ${locked[0]?.checksum ?? "none"}` +
+            `${locked[0]?.replace === undefined ? "" : `, replaced by ${locked[0].replace}`}: ` +
             "read the expansion of the source it takes, and pin that if it still writes no impl.",
         );
       }

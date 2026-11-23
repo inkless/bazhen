@@ -3142,6 +3142,14 @@ describe("decoderFailures", () => {
       ...taken("git+https://example.com/ext#0a1b with checksum sum"),
       stale,
     ]);
+    // A `[replace]` keeps the source and builds the package it names instead.
+    const replaced = `source = "${CRATES_IO}"\nchecksum = "sum"\nreplace = "ext 1.0.0 (git+https://example.com/ext#0a1b)"`;
+    expect(readAt([["ext", "1.0.0", replaced]])).toEqual([
+      ...taken(
+        `${CRATES_IO} with checksum sum, replaced by ext 1.0.0 (git+https://example.com/ext#0a1b)`,
+      ),
+      stale,
+    ]);
     const other = `source = "${CRATES_IO}"\nchecksum = "other"`;
     expect(readAt([["ext", "1.0.0", other]])).toEqual([
       ...taken(`${CRATES_IO} with checksum other`),
