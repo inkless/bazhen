@@ -6,8 +6,9 @@
 //! lock, so a view's output, its geometry and its lease frames go out in one order. A view opens on
 //! a snapshot seamed to the output held for it while the snapshot was on its way.
 //!
-//! Locks are taken in one order: a terminal's, then the snapshots being sent or the parked
-//! streams, and never two terminals' at once.
+//! Locks are taken in one order: a terminal's, then the watched streams, the parked streams or
+//! the snapshots being sent. Each of those three is held only to read or change it, never while
+//! another lock is taken, and two terminals' are never held at once.
 
 use std::collections::HashMap;
 use std::fmt::{self, Display};
