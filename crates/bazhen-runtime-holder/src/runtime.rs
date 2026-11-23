@@ -626,6 +626,18 @@ pub struct HolderRuntime {
     controls: Arc<Controls>,
 }
 
+/// Forgets a terminal's control connection once dropped, as a close ends.
+struct Forgetting<'a> {
+    controls: &'a Controls,
+    terminal_id: &'a TerminalId,
+}
+
+impl Drop for Forgetting<'_> {
+    fn drop(&mut self) {
+        self.controls.forget(self.terminal_id);
+    }
+}
+
 impl HolderRuntime {
     pub fn new(options: RuntimeOptions) -> Self {
         Self::with_host(options, Arc::new(System))
@@ -1175,13 +1187,17 @@ impl HolderRuntime {
             Err(e) => return Err(e),
         };
         drop(events);
+        // Its control connection is hung up however this ends, a close dropped part-way too.
+        let _forget = Forgetting {
+            controls: &self.controls,
+            terminal_id,
+        };
         // Closed on purpose: no exit or loss of it is told, by its watch or by one an inventory
         // in flight would start.
         let closing = self.watches.closing(terminal);
         let closed = self.bounded(terminal_id, client.close()).await;
         let ended = tokio::time::timeout(self.options.request, client.ended()).await;
         client.end();
-        self.controls.forget(terminal_id);
         closed?;
         ended.map_err(|_| RuntimeError::Unanswered {
             terminal_id: terminal_id.clone(),

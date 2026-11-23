@@ -26,12 +26,12 @@ use bazhen_protocol::ids::TerminalId;
 use futures_util::Stream as _;
 use futures_util::future::select;
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
+use tokio_util::sync::{CancellationToken, PollSender, WaitForCancellationFutureOwned};
 use tokio_util::task::TaskTracker;
 
 use crate::client::{
-    Answer, ClientOptions, ConnectError, HolderClient, HolderEvent, HolderEvents, HolderRefusal,
-    HolderSnapshot, InputError, MAX_UNSENT_BYTES, RequestError, connect,
+    Answer, ClientOptions, ConnectError, EVENTS_QUEUED, HolderClient, HolderEvent, HolderEvents,
+    HolderRefusal, HolderSnapshot, InputError, MAX_UNSENT_BYTES, RequestError, connect,
 };
 use crate::locator::HolderLocator;
 
@@ -162,10 +162,11 @@ impl Attached {
     }
 }
 
-/// What a stream tells, as `StreamEvent`s, from its snapshot on, unbounded: a consumer drains
-/// it or drops it. It ends after `Closed`.
+/// What a stream tells, as `StreamEvent`s, from its snapshot on. Up to `EVENTS_QUEUED` wait for a
+/// consumer that hasn't taken them, past which the stream reads no more from its holder, which
+/// then skips it past what it can't hold: the stream ends `Behind`. It ends after `Closed`.
 #[derive(Debug)]
-pub struct StreamEvents(mpsc::UnboundedReceiver<StreamEvent>);
+pub struct StreamEvents(mpsc::Receiver<StreamEvent>);
 
 impl StreamEvents {
     pub async fn recv(&mut self) -> Option<StreamEvent> {
@@ -266,13 +267,15 @@ impl Writer {
 
 #[derive(Debug)]
 enum Command {
+    /// One user's write, whole, so no other's goes out in the middle of it.
     Input(Vec<u8>),
     Resize {
         size: Size,
         reply: oneshot::Sender<Result<(), ControlError>>,
     },
     Snapshot(oneshot::Sender<Result<Answer<HolderSnapshot>, ControlError>>),
-    /// No user is left: hang up and stop, cancelling the token once the connection has closed.
+    /// No user is left: send what is queued, for `drain` at most, then hang up and stop,
+    /// cancelling the token once the connection has closed.
     End(CancellationToken),
     /// The terminal closed: hang up and drop what is queued, cancelling the token once the
     /// connection has closed, and go on for the users left.
@@ -318,6 +321,8 @@ impl Control {
             commands: received,
             tasks: tasks.clone(),
             stopped: Box::pin(cancel.clone().cancelled_owned()),
+            ending: None,
+            listening: true,
         };
         tasks.spawn(actor.run());
         control
@@ -338,21 +343,17 @@ impl Control {
         if bytes.is_empty() {
             return;
         }
-        {
-            let mut queued = lock(&self.shared.queued);
-            if *queued + bytes.len() > MAX_UNSENT_BYTES {
-                drop(queued);
-                self.shared
-                    .fail(ControlError::OverUnsent { len: bytes.len() });
-                return;
-            }
-            *queued += bytes.len();
+        let mut queued = lock(&self.shared.queued);
+        if *queued + bytes.len() > MAX_UNSENT_BYTES {
+            drop(queued);
+            self.shared
+                .fail(ControlError::OverUnsent { len: bytes.len() });
+            return;
         }
-        for part in bytes.chunks(INPUT_PART) {
-            if self.commands.send(Command::Input(part.to_vec())).is_err() {
-                // Its task has stopped, and nothing will be sent.
-                self.shared.unqueue(part.len());
-            }
+        // Sent under the lock, as one command, so the task takes users' writes whole and in the
+        // order they were counted. One that has stopped sends nothing.
+        if self.commands.send(Command::Input(bytes.to_vec())).is_ok() {
+            *queued += bytes.len();
         }
     }
 
@@ -392,6 +393,8 @@ enum Busy {
 
 enum Wake {
     Stopped,
+    /// An ending's `drain` has passed.
+    Deadline,
     Command(Option<Command>),
     Connected(Result<Writer, ControlError>),
     Busy(Busy),
@@ -399,7 +402,8 @@ enum Wake {
 }
 
 enum Op {
-    Input(Vec<u8>),
+    /// A write, sent from `sent` on in parts of `INPUT_PART` at most.
+    Input { bytes: Vec<u8>, sent: usize },
     Resize {
         size: Size,
         reply: oneshot::Sender<Result<(), ControlError>>,
@@ -422,21 +426,49 @@ struct Actor {
     commands: mpsc::UnboundedReceiver<Command>,
     tasks: TaskTracker,
     stopped: Pin<Box<WaitForCancellationFutureOwned>>,
+    /// Set once no user is left, while what is queued goes out.
+    ending: Option<Ending>,
+    /// Until every handle is dropped, which an ending outlives.
+    listening: bool,
+}
+
+/// An actor sending what is queued before it hangs up, until `deadline`.
+struct Ending {
+    /// Cancels the `End`'s token once dropped, after the connection has closed.
+    _closed: tokio_util::sync::DropGuard,
+    deadline: Pin<Box<tokio::time::Sleep>>,
 }
 
 impl Actor {
     async fn run(mut self) {
         loop {
             match poll_fn(|cx| self.poll_wake(cx)).await {
+                // The last user's handles go with its guard, after its `End`.
+                Wake::Command(None) if self.ending.is_some() => self.listening = false,
                 Wake::Stopped | Wake::Command(None) => return,
                 Wake::Command(Some(Command::End(closed))) => {
-                    let _closed = closed.drop_guard();
-                    self.drop_queue(&ControlError::Ended);
-                    let closing = pin!(self.closing());
-                    let _ = select(closing, self.stopped.as_mut()).await;
+                    self.ending = Some(Ending {
+                        _closed: closed.drop_guard(),
+                        deadline: Box::pin(tokio::time::sleep(self.opening.drain)),
+                    });
+                }
+                Wake::Deadline => {
+                    // A connection still opening, or asking again for the writer slot, is given up.
+                    self.connecting = None;
+                    let unsent = self.unsent();
+                    if unsent > 0 {
+                        tracing::warn!(
+                            bytes = unsent,
+                            "dropped input the holder hadn't taken once its terminal's last user left"
+                        );
+                        self.shared.fail(ControlError::Ended);
+                    }
+                    self.end().await;
                     return;
                 }
                 Wake::Command(Some(Command::Retire(closed))) => {
+                    // A user left opens no connection before this one has closed.
+                    self.after = Some(closed.clone());
                     self.drop_queue(&ControlError::Retired);
                     let closing = self.closing();
                     let stopped = self.stopped_token();
@@ -466,7 +498,31 @@ impl Actor {
                 Wake::Busy(Busy::Resized) | Wake::Event(Some(_)) => {}
             }
             self.pump();
+            let sent = self.queue.is_empty() && self.busy.is_none() && self.connecting.is_none();
+            if self.ending.is_some() && sent {
+                self.end().await;
+                return;
+            }
         }
+    }
+
+    /// Hangs up, and stops once the connection has closed, or the runtime has stopped.
+    async fn end(&mut self) {
+        let _ending = self.ending.take();
+        self.drop_queue(&ControlError::Ended);
+        let closing = pin!(self.closing());
+        let _ = select(closing, self.stopped.as_mut()).await;
+    }
+
+    /// The input queued and not yet written.
+    fn unsent(&self) -> usize {
+        self.queue
+            .iter()
+            .map(|op| match op {
+                Op::Input { bytes, sent } => bytes.len() - sent,
+                Op::Resize { .. } => 0,
+            })
+            .sum()
     }
 
     /// A token cancelled as `stopped` is, for a task of its own.
@@ -477,6 +533,11 @@ impl Actor {
     fn poll_wake(&mut self, cx: &mut Context<'_>) -> Poll<Wake> {
         if self.stopped.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Wake::Stopped);
+        }
+        if let Some(ending) = &mut self.ending
+            && ending.deadline.as_mut().poll(cx).is_ready()
+        {
+            return Poll::Ready(Wake::Deadline);
         }
         if let Some(connecting) = &mut self.connecting
             && let Poll::Ready(connected) = connecting.as_mut().poll(cx)
@@ -496,12 +557,15 @@ impl Actor {
         {
             return Poll::Ready(Wake::Event(event));
         }
+        if !self.listening {
+            return Poll::Pending;
+        }
         self.commands.poll_recv(cx).map(Wake::Command)
     }
 
     fn take(&mut self, command: Command) {
         match command {
-            Command::Input(part) => self.queue.push_back(Op::Input(part)),
+            Command::Input(bytes) => self.queue.push_back(Op::Input { bytes, sent: 0 }),
             Command::Resize { size, reply } => self.queue.push_back(Op::Resize { size, reply }),
             Command::Snapshot(reply) => match self.open() {
                 Some(writer) => drop(reply.send(Ok(writer.client.snapshot()))),
@@ -549,7 +613,9 @@ impl Actor {
             };
             match self.queue.front() {
                 None => return,
-                Some(Op::Input(part)) if writer.client.room() < part.len() + PART_OVERHEAD => {
+                Some(Op::Input { bytes, sent })
+                    if writer.client.room() < part(bytes, *sent).len() + PART_OVERHEAD =>
+                {
                     let drained = writer.client.drained();
                     let drain = self.opening.drain;
                     self.busy = Some(Box::pin(async move {
@@ -557,7 +623,7 @@ impl Actor {
                         Busy::Drained { timed_out }
                     }));
                 }
-                Some(Op::Input(_)) => self.send_head(),
+                Some(Op::Input { .. }) => self.send_head(),
                 Some(Op::Resize { size, .. }) => {
                     let answer = writer.client.resize(*size);
                     let Some(Op::Resize { reply, .. }) = self.queue.pop_front() else {
@@ -573,18 +639,22 @@ impl Actor {
         }
     }
 
-    /// Writes the input at the head of the queue, room or not: past a drain, the connection has
-    /// room for it, or has ended and refuses it.
+    /// Writes the next part of the input at the head of the queue, room or not: past a drain, the
+    /// connection has room for it, or has ended and refuses it.
     fn send_head(&mut self) {
         let Some(writer) = &self.writer else { return };
-        let Some(Op::Input(part)) = self.queue.front() else {
+        let Some(Op::Input { bytes, sent }) = self.queue.front_mut() else {
             return;
         };
-        let sent = writer.client.input(part);
-        let len = part.len();
-        self.queue.pop_front();
+        let next = part(bytes, *sent);
+        let written = writer.client.input(next);
+        let len = next.len();
+        *sent += len;
+        if *sent == bytes.len() {
+            self.queue.pop_front();
+        }
         self.shared.unqueue(len);
-        match sent {
+        match written {
             Ok(_) => self.shared.succeed(),
             Err(e) => {
                 let error = ControlError::Input(Arc::new(e));
@@ -600,7 +670,7 @@ impl Actor {
         let mut dropped = 0;
         for op in self.queue.drain(..) {
             match op {
-                Op::Input(part) => dropped += part.len(),
+                Op::Input { bytes, sent } => dropped += bytes.len() - sent,
                 Op::Resize { reply, .. } => drop(reply.send(Err(error.clone()))),
             }
         }
@@ -676,6 +746,12 @@ impl Actor {
             }
         })
     }
+}
+
+/// The part of `bytes` sent next, once `sent` of them have been.
+fn part(bytes: &[u8], sent: usize) -> &[u8] {
+    let rest = bytes.get(sent..).unwrap_or_default();
+    rest.get(..INPUT_PART).unwrap_or(rest)
 }
 
 /// The control connections of the runtime's terminals, each kept while a user holds a guard of
@@ -902,7 +978,8 @@ impl HolderStream {
     ///
     /// # Errors
     ///
-    /// `Closed` once the stream has closed, and only once `StreamEvent::Closed` is in its events;
+    /// `Closed` once the stream has closed, and only once `StreamEvent::Closed` is queued for its
+    /// events, behind those it has not taken;
     /// otherwise when the control connection or the holder fails it.
     pub async fn snapshot(&self) -> Result<HolderSnapshot, StreamError> {
         if self.is_closed() {
@@ -965,7 +1042,7 @@ pub(crate) async fn attach(
         state: Mutex::new(ViewState { size, exited: None }),
         guard: Mutex::new(Some(guard)),
     });
-    let (out, told) = mpsc::unbounded_channel();
+    let (out, told) = mpsc::channel(EVENTS_QUEUED);
     let (commands, received) = mpsc::unbounded_channel();
     let (attached, snapshot) = oneshot::channel();
     let pump = Pump {
@@ -975,9 +1052,10 @@ pub(crate) async fn attach(
         }),
         reader,
         events,
-        out,
+        out: PollSender::new(out),
+        undelivered: VecDeque::new(),
         view: Arc::clone(&view),
-        commands: received,
+        commands: Some(received),
         notices: Some(notices),
         failing: false,
         at: None,
@@ -1018,6 +1096,8 @@ struct Confirming {
 
 enum Woke {
     Stopped,
+    /// Closed, with every event delivered that can be.
+    Delivered,
     Command(Option<StreamCommand>),
     Attached(Result<(), RequestError>),
     Confirmed(Confirming, Result<Stats, RequestError>),
@@ -1029,9 +1109,12 @@ enum Woke {
 struct Pump {
     reader: HolderClient,
     events: HolderEvents,
-    out: mpsc::UnboundedSender<StreamEvent>,
+    out: PollSender<StreamEvent>,
+    /// Events made while `out` was full, in order; the reader's are read only once it is empty.
+    undelivered: VecDeque<StreamEvent>,
     view: Arc<View>,
-    commands: mpsc::UnboundedReceiver<StreamCommand>,
+    /// Until the stream's handle is dropped.
+    commands: Option<mpsc::UnboundedReceiver<StreamCommand>>,
     notices: Option<mpsc::UnboundedReceiver<Notice>>,
     /// Whether a failure has been told that no success has cleared.
     failing: bool,
@@ -1049,10 +1132,22 @@ struct Pump {
 
 impl Pump {
     async fn run(mut self) {
-        while !self.ended {
+        loop {
             match poll_fn(|cx| self.poll_wake(cx)).await {
-                Woke::Stopped | Woke::Command(None | Some(StreamCommand::Close)) => {
+                Woke::Stopped => {
+                    // The runtime is stopping: what doesn't fit is dropped.
                     self.close(StreamEnd::Ended);
+                    return;
+                }
+                Woke::Delivered => return,
+                Woke::Command(None) => {
+                    self.commands = None;
+                    self.close(StreamEnd::Ended);
+                }
+                // Closed, what waits on the stream fails.
+                Woke::Command(Some(StreamCommand::Hold { .. })) if self.ended => {}
+                Woke::Command(Some(StreamCommand::Confirm { reply, .. })) if self.ended => {
+                    let _ = reply.send(Err(StreamError::Closed));
                 }
                 Woke::Command(Some(StreamCommand::Hold { at, reply })) => {
                     if self.at.is_some_and(|now| now >= at) {
@@ -1072,7 +1167,9 @@ impl Pump {
                 Woke::Attached(subscribed) => self.attached(subscribed),
                 Woke::Confirmed(confirming, answered) => self.confirmed(confirming, answered),
                 Woke::Event(Some(event)) => self.handle(event),
-                Woke::Event(None) => self.close(StreamEnd::Ended),
+                Woke::Command(Some(StreamCommand::Close)) | Woke::Event(None) => {
+                    self.close(StreamEnd::Ended);
+                }
                 Woke::Notice(Some(Notice::Failed(failure))) => {
                     if !self.failing {
                         self.failing = true;
@@ -1089,8 +1186,28 @@ impl Pump {
         if self.stopped.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Woke::Stopped);
         }
-        if let Poll::Ready(command) = self.commands.poll_recv(cx) {
+        while !self.undelivered.is_empty() {
+            match self.out.poll_reserve(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(event) = self.undelivered.pop_front() {
+                        let _ = self.out.send_item(event);
+                    }
+                }
+                // A consumer that dropped its events has the rest dropped.
+                Poll::Ready(Err(_)) => self.undelivered.clear(),
+                Poll::Pending => break,
+            }
+        }
+        if self.ended && self.undelivered.is_empty() {
+            return Poll::Ready(Woke::Delivered);
+        }
+        if let Some(commands) = &mut self.commands
+            && let Poll::Ready(command) = commands.poll_recv(cx)
+        {
             return Poll::Ready(Woke::Command(command));
+        }
+        if self.ended {
+            return Poll::Pending;
         }
         if let Some(Attaching { subscribed, .. }) = &mut self.attaching
             && let Poll::Ready(subscribed) = Pin::new(subscribed).poll(cx)
@@ -1105,7 +1222,10 @@ impl Pump {
                 return Poll::Ready(Woke::Confirmed(confirming, answered));
             }
         }
-        if let Poll::Ready(event) = Pin::new(&mut self.events).poll_next(cx) {
+        // Room for what the event makes, or no consumer to make it for: otherwise the reader's
+        // events wait in its connection, which reads no more from the holder once they fill it.
+        let room = self.undelivered.is_empty() && self.out.poll_reserve(cx).is_ready();
+        if room && let Poll::Ready(event) = Pin::new(&mut self.events).poll_next(cx) {
             return Poll::Ready(Woke::Event(event));
         }
         if let Some(notices) = &mut self.notices
@@ -1272,9 +1392,24 @@ impl Pump {
         }
     }
 
-    fn push(&self, event: StreamEvent) {
-        // A consumer that dropped its events has the rest dropped as they come.
-        let _ = self.out.send(event);
+    /// Delivers `event` after those still undelivered, or keeps it until there is room.
+    fn push(&mut self, event: StreamEvent) {
+        self.undelivered.push_back(event);
+        while let Some(event) = self.undelivered.pop_front() {
+            let Some(out) = self.out.get_ref() else {
+                self.undelivered.clear();
+                return;
+            };
+            match out.try_send(event) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(event)) => {
+                    self.undelivered.push_front(event);
+                    return;
+                }
+                // A consumer that dropped its events has the rest dropped as they come.
+                Err(mpsc::error::TrySendError::Closed(_)) => self.undelivered.clear(),
+            }
+        }
     }
 
     /// Ends the stream, once: its events end with `Closed(why)`, then what waits on it fails.
@@ -1361,6 +1496,8 @@ mod tests {
         /// Whether it hangs up the reader once it has subscribed.
         hang_up: bool,
         hold_stats: bool,
+        /// Whether it leaves a `close` unanswered.
+        hold_close: bool,
     }
 
     impl Answers {
@@ -1378,6 +1515,7 @@ mod tests {
                 after: Vec::new(),
                 hang_up: false,
                 hold_stats: false,
+                hold_close: false,
             }
         }
     }
@@ -1402,6 +1540,8 @@ mod tests {
         reading: Arc<watch::Sender<bool>>,
         /// Cancelled once it has hung up, either side.
         hung_up: CancellationToken,
+        /// How many of the replies the test gave it it has written.
+        sent: Arc<AtomicUsize>,
     }
 
     impl Conn {
@@ -1510,6 +1650,7 @@ mod tests {
             }
             Request::Stats { .. } if answers.hold_stats => Vec::new(),
             Request::Stats { .. } => vec![stats(id)],
+            Request::Close { .. } if answers.hold_close => Vec::new(),
             Request::Input { .. } => Vec::new(),
             _ => vec![ok(id, &request.name())],
         }
@@ -1539,6 +1680,7 @@ mod tests {
                 outbox,
                 reading: Arc::new(reading),
                 hung_up: CancellationToken::new(),
+                sent: Arc::default(),
             };
             conns.push(conn.clone());
             conn
@@ -1585,11 +1727,16 @@ mod tests {
                     let closed = matches!(request, Request::Close { .. });
                     conn.requests.lock().unwrap().push(request);
                     holder.send(&replies).await;
-                    if closed || (subscribed && answers.hang_up) {
+                    if (closed && !answers.hold_close) || (subscribed && answers.hang_up) {
                         return;
                     }
                 }
-                Woke::Outgoing(Some(Outgoing::Replies(replies))) => holder.send(&replies).await,
+                Woke::Outgoing(Some(Outgoing::Replies(replies))) => {
+                    for reply in replies {
+                        holder.send(&[reply]).await;
+                        conn.sent.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 Woke::Outgoing(Some(Outgoing::HangUp) | None) => return,
                 Woke::Reading => {}
             }
@@ -1617,11 +1764,20 @@ mod tests {
     impl Fixture {
         /// The terminal of `attachable`, answering as `edit` makes `Answers`.
         fn attachable(edit: impl FnOnce(&mut Answers)) -> Self {
+            Self::with(|_| {}, edit)
+        }
+
+        /// As `attachable`, the runtime's options as `options` makes them.
+        fn with(
+            options: impl FnOnce(&mut RuntimeOptions),
+            edit: impl FnOnce(&mut Answers),
+        ) -> Self {
             let dir = TempDir::new();
             let root = HolderRoot::of(&dir.path().join("run"), me());
             root.make_private(me()).unwrap();
             let mut runtime_options = RuntimeOptions::new(root.clone());
             runtime_options.hello = Duration::from_secs(5);
+            options(&mut runtime_options);
             let runtime = HolderRuntime::with_host(runtime_options, Arc::new(FakeHost::default()));
             let terminal_id = TerminalId::mint(1, [1; 16]);
             let mut answers = Answers::of(&terminal_id);
@@ -2268,6 +2424,189 @@ mod tests {
                     .log()
                     .contains(&format!("hung up {}", writer.index))
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn writes_through_a_terminals_control_connection_with_no_stream_open() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let fixture = Fixture::attachable(|_| {});
+            let guard = fixture.runtime.control(&fixture.terminal).unwrap();
+            guard.write(b"ls\n");
+            until(|| !fixture.seen.inputs().is_empty()).await;
+            assert_eq!(fixture.seen.inputs(), [b"ls\n"]);
+            let [writer] = fixture.seen.writers().try_into().unwrap();
+            assert_eq!(writer.names(), ["input"]);
+            assert_eq!(guard.failure().map(|f| f.cause.to_string()), None);
+        });
+    }
+
+    #[test]
+    fn takes_each_write_whole_so_no_other_users_input_goes_out_inside_it() {
+        let hello = fake_hello();
+        let (commands, mut received) = mpsc::unbounded_channel();
+        let control = Control {
+            locator: HolderLocator::of(PathBuf::from("/nowhere"), &hello),
+            commands,
+            shared: Arc::default(),
+        };
+        let other = control.clone();
+        let big: Vec<u8> = (0..=u8::MAX).cycle().take(2 * INPUT_PART + 1).collect();
+        control.write(&big);
+        other.write(b"b");
+        let mut taken = Vec::new();
+        while let Ok(command) = received.try_recv() {
+            match command {
+                Command::Input(bytes) => taken.push(bytes),
+                other => panic!("took {other:?}"),
+            }
+        }
+        assert_eq!(taken.len(), 2);
+        assert!(taken[0] == big, "the first write was taken in parts");
+        assert_eq!(taken[1], b"b");
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_what_a_guard_wrote_before_it_dropped() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let fixture = Fixture::attachable(|_| {});
+            let guard = fixture.runtime.control(&fixture.terminal).unwrap();
+            // Its connection is still opening as the guard drops.
+            guard.write(b"ls\n");
+            drop(guard);
+            until(|| !fixture.seen.inputs().is_empty()).await;
+            assert_eq!(fixture.seen.inputs(), [b"ls\n"]);
+            let [writer] = fixture.seen.writers().try_into().unwrap();
+            writer.hung_up.cancelled().await;
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn gives_up_the_input_a_dropped_guard_left_once_its_drain_has_passed() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let drain = Duration::from_millis(300);
+            let fixture = Fixture::with(|o| o.drain = drain, |a| a.grants = false);
+            let guard = fixture.runtime.control(&fixture.terminal).unwrap();
+            guard.write(b"ls\n");
+            let dropped = Instant::now();
+            drop(guard);
+            // The next control connection opens once the last has closed.
+            let next = fixture.runtime.control(&fixture.terminal).unwrap();
+            next.write(b"pwd\n");
+            sleep(Duration::from_secs(3)).await;
+            let asked = fixture.seen.asked_at.lock().unwrap().clone();
+            // Asked at 0, 50 and 250 ms; the ask at 1050 is past the drain, and never made.
+            let ending: Vec<_> = asked
+                .iter()
+                .take_while(|at| **at - dropped < drain)
+                .collect();
+            assert_eq!(ending.len(), 3, "{asked:?}");
+            let opened = asked[3] - dropped;
+            assert!(
+                opened >= drain && opened < drain + Duration::from_millis(40),
+                "the next opened {opened:?} after the drop"
+            );
+            assert_eq!(fixture.seen.inputs(), Vec::<Vec<u8>>::new());
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn ends_a_stream_whose_consumer_stalls_behind_once_it_reads_again() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let fixture = Fixture::attachable(|a| a.offset = 0);
+            let mut attached = fixture.attach(None).await;
+            let reader = fixture.seen.reader();
+            let frame = 4096;
+            let frames = 2000;
+            let mut replies: Vec<Reply> = (0..frames)
+                .map(|n| Reply::Data {
+                    offset: Offset::new(u64::try_from(n * frame).unwrap()).unwrap(),
+                    bytes: vec![b'x'; frame],
+                })
+                .collect();
+            let end = Offset::new(u64::try_from(frames * frame).unwrap()).unwrap();
+            let gap = Gap {
+                from: end,
+                to: Offset::new(end.get() + 1).unwrap(),
+            };
+            replies.push(Reply::Gap(gap));
+            reader.send(replies);
+            // Nothing read: what the stream holds is bounded, so the holder is held up too.
+            sleep(Duration::from_secs(2)).await;
+            let sent = reader.sent.load(Ordering::Relaxed);
+            assert!(
+                sent < frames,
+                "the holder wrote all {sent} with nothing read"
+            );
+            let mut data = 0;
+            let closed = loop {
+                match attached.events.recv().await.expect("the events ended") {
+                    StreamEvent::Data { .. } => data += 1,
+                    StreamEvent::Closed(why) => break why,
+                    other => panic!("told {}", told(&other)),
+                }
+            };
+            assert_eq!((data, closed), (frames, StreamEnd::Behind));
+            assert!(attached.events.recv().await.is_none());
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn reconnects_the_users_left_of_a_closed_terminal_only_once_its_old_connection_hung_up() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let fixture = Fixture::attachable(|_| {});
+            let guard = fixture.runtime.control(&fixture.terminal).unwrap();
+            guard.write(b"a");
+            until(|| !fixture.seen.inputs().is_empty()).await;
+            let [old] = fixture.seen.writers().try_into().unwrap();
+            // A holder that has stopped reading holds the old connection's hang-up behind its
+            // input.
+            old.reading.send_replace(false);
+            guard.write(&vec![0; 4 << 20]);
+            sleep(Duration::from_millis(50)).await;
+            fixture.runtime.close(&fixture.terminal).await.unwrap();
+            guard.write(b"b");
+            sleep(Duration::from_millis(200)).await;
+            assert_eq!(fixture.seen.writers().len(), 1);
+            assert!(!old.hung_up.is_cancelled());
+            old.reading.send_replace(true);
+            until(|| fixture.seen.writers().len() == 2).await;
+            let log = fixture.seen.log();
+            let hung_up = log
+                .iter()
+                .position(|l| *l == format!("hung up {}", old.index));
+            let writer = log.iter().rposition(|l| l.ends_with(" writer"));
+            assert!(hung_up.is_some() && hung_up < writer, "{log:?}");
+            let new = fixture.seen.writers().remove(1);
+            until(|| !new.inputs().is_empty()).await;
+            assert_eq!(new.inputs(), [b"b"]);
+        });
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn hangs_up_the_control_connection_of_a_terminal_whose_close_was_dropped_part_way() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        run(async {
+            let fixture = Fixture::attachable(|a| a.hold_close = true);
+            let guard = fixture.runtime.control(&fixture.terminal).unwrap();
+            guard.write(b"a");
+            until(|| !fixture.seen.inputs().is_empty()).await;
+            let [writer] = fixture.seen.writers().try_into().unwrap();
+            let closing = fixture.runtime.close(&fixture.terminal);
+            assert!(timeout(Duration::from_millis(200), closing).await.is_err());
+            assert!(fixture.seen.requests().iter().any(|r| r == "close"));
+            writer.hung_up.cancelled().await;
         });
     }
 }

@@ -1505,6 +1505,8 @@ const NOT_DECODERS: Record<string, string> = {
     "turns /dev/urandom's bytes into hex for a scope's unit name; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::Starting::start":
     "starts a holder and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
+  "crates/bazhen-runtime-holder/src/runtime.rs::Forgetting::drop":
+    "forgets a terminal's control connection through Controls::forget as a close ends; reads no bytes",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::listed":
     "lists the holders' directory and reads hellos through connect, whose frames FrameDecoder::next_frame decodes, which the proto crate's frame target fuzzes; parses nothing",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::health":
@@ -1520,7 +1522,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::acquire":
     "builds the control connection's Opening from the runtime's options and asks Controls::acquire for a guard; reads no bytes",
   "crates/bazhen-runtime-holder/src/runtime.rs::HolderRuntime::close":
-    "closes the holder through its client, whose answers FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and forgets its control connection; parses nothing",
+    "closes the holder through its client, whose answers FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, forgetting its control connection through Forgetting however it ends; parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Attached::vt":
     "returns the VT of the attach's snapshot, which FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decoded, as a slice; reads none of it",
   "crates/bazhen-runtime-holder/src/stream.rs::StreamEvents::recv":
@@ -1532,7 +1534,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/stream.rs::Control::is":
     "compares two handles' shared state by pointer; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Control::write":
-    "counts the caller's input against the unsent cap and queues it split into parts of INPUT_PART bytes; reads none",
+    "counts the caller's input against the unsent cap and queues it whole, as one command sent under the lock; reads none",
   "crates/bazhen-runtime-holder/src/stream.rs::Control::resize":
     "queues a resize for the control task and awaits its reply; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Control::snapshot":
@@ -1540,25 +1542,31 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/stream.rs::Control::stop":
     "sends the task its End or Retire, cancelling the token if the task has stopped; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::run":
-    "acts on commands and on the writer's HolderEvents, decoded by FrameDecoder::next_frame (the proto crate's frame target fuzzes it), by their variant; parses nothing",
+    "acts on commands, an ending's deadline and the writer's HolderEvents, decoded by FrameDecoder::next_frame (the proto crate's frame target fuzzes it), by their variant; parses nothing",
+  "crates/bazhen-runtime-holder/src/stream.rs::Actor::end":
+    "drops what is left queued and hangs up, resolving once the connection has closed; reads no bytes",
+  "crates/bazhen-runtime-holder/src/stream.rs::Actor::unsent":
+    "sums the lengths of the queued writes not yet sent; reads none of their bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::poll_wake":
-    "polls the task's futures, channel and the writer's HolderEvents for the next thing to act on; parses nothing",
+    "polls the task's futures, an ending's deadline, its channel and the writer's HolderEvents for the next thing to act on; parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::take":
-    "moves a command's input part or resize onto the queue, or answers a snapshot from the open connection; reads no bytes",
+    "moves a command's write or resize onto the queue, or answers a snapshot from the open connection; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::open":
     "returns the writer while its client says it is open; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::connected":
     "keeps the connection connect opened, or fails what waits with its error; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::pump":
-    "compares a queued part's length with the client's room and hands parts and resizes to the client in order; reads none",
+    "compares the length of a queued write's next part with the client's room and hands parts and resizes to the client in order; reads none",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::send_head":
-    "hands the queued input part to HolderClient::input and uncounts its length; reads none of it",
+    "hands the next part of the queued write to HolderClient::input and uncounts its length; reads none of it",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::drop_queue":
-    "drops the queued input, counting only its length, and fails resizes and snapshots waiting; reads none",
+    "drops the queued input, counting only the length of what is unsent, and fails resizes and snapshots waiting; reads none",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::closing":
     "hangs up the writer and any connection still opening, resolving once their sockets close; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Actor::connect":
     "opens a connection through connect, whose hello FrameDecoder::next_frame (the proto crate's frame target fuzzes it) decodes, and checks that hello's holder and writer fields; parses nothing",
+  "crates/bazhen-runtime-holder/src/stream.rs::part":
+    "slices the next INPUT_PART bytes of a write, past those already sent; reads none of them",
   "crates/bazhen-runtime-holder/src/stream.rs::Controls::acquire":
     "finds or starts a terminal's control connection and registers a user of it; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Controls::release":
@@ -1594,7 +1602,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::run":
     "acts on the stream's commands, notices and the reader's HolderEvents, decoded by FrameDecoder::next_frame (the proto crate's frame target fuzzes it), by their variant; parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::poll_wake":
-    "polls the stream's commands, answers, HolderEvents and notices for the next thing to act on; parses nothing",
+    "polls the stream's commands, answers, notices and, while its consumer's channel has room, HolderEvents, delivering what waits; parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::attached":
     "takes HolderEvents waiting, decoded by FrameDecoder::next_frame (the proto crate's frame target fuzzes it), up to the attach's snapshot and hands that snapshot on; parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::confirmed":
@@ -1604,7 +1612,7 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::before_snapshot":
     "keeps the attach's snapshot or a resize's size from a HolderEvent decoded by FrameDecoder::next_frame (the proto crate's frame target fuzzes it); parses nothing",
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::push":
-    "sends a StreamEvent on the stream's channel; reads no bytes",
+    "delivers a StreamEvent on the stream's bounded channel, or keeps it in order until there is room; reads no bytes",
   "crates/bazhen-runtime-holder/src/stream.rs::Pump::close":
     "hangs up the reader, pushes Closed and fails what waits on the stream; reads no bytes",
   "crates/bazhen-runtime-holder/src/watch.rs::next":
