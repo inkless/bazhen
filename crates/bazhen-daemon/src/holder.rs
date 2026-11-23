@@ -1405,6 +1405,7 @@ mod tests {
                 root: PathBuf,
                 shell: String,
                 db: PathBuf,
+                said: Said,
             }
 
             impl Daemon {
@@ -1450,7 +1451,7 @@ mod tests {
                 }
 
                 /// Starts it, within a runtime, serving its socket and closing shells as they exit.
-                fn start(dir: &Path, shell: &str) -> Self {
+                fn start(dir: &Path, shell: &str, said: &Said) -> Self {
                     let db = dir.join("bazhen.db");
                     let (store, thread) =
                         crate::writer::start(bazhen_store::Store::open(&db).unwrap(), &db).unwrap();
@@ -1465,6 +1466,7 @@ mod tests {
                         root: dir.to_owned(),
                         shell: shell.to_owned(),
                         db,
+                        said: said.clone(),
                     };
                     daemon.serve();
                     daemon
@@ -1598,21 +1600,33 @@ mod tests {
                     };
                     let (client, events) =
                         connect(&self.locator(id).socket, &options).await.unwrap();
+                    assert!(
+                        client.hello().writer,
+                        "{id}: the holder kept the writer slot for another connection"
+                    );
                     client.input(text.as_bytes()).unwrap();
                     client.drained().await;
                     client.end();
+                    client.closed().await;
                     drop(events);
                 }
 
                 async fn screen(&self, id: &str) -> String {
-                    let (client, events) =
-                        connect(&self.locator(id).socket, &ClientOptions::default())
-                            .await
-                            .unwrap();
-                    let screen = client.screen(Count::new(0).unwrap()).await.unwrap();
+                    self.shown(id).await.unwrap()
+                }
+
+                async fn shown(&self, id: &str) -> Result<String, String> {
+                    let at = self
+                        .recorded(id)
+                        .ok_or_else(|| "no holder is recorded".to_owned())?;
+                    let locator = HolderLocator::decode(&at.locator).map_err(|e| e.to_string())?;
+                    let (client, events) = connect(&locator.socket, &ClientOptions::default())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let screen = client.screen(Count::new(0).unwrap()).await;
                     client.end();
                     drop(events);
-                    screen.text().to_owned()
+                    Ok(screen.map_err(|e| e.to_string())?.text().to_owned())
                 }
 
                 async fn last_line(&self, id: &str) -> String {
@@ -1643,11 +1657,17 @@ mod tests {
                 async fn until_kept(&self, id: &str, line: Option<&str>) {
                     let deadline = Instant::now() + Duration::from_secs(15);
                     while self.kept(id).as_deref() != line {
-                        assert!(
-                            Instant::now() < deadline,
-                            "kept {:?}, not {line:?}",
-                            self.kept(id)
-                        );
+                        if Instant::now() >= deadline {
+                            let screen = match self.shown(id).await {
+                                Ok(screen) => screen,
+                                Err(e) => format!("(no screen: {e})"),
+                            };
+                            panic!(
+                                "kept {:?}, not {line:?}\nthe screen shows:\n{screen}\nthe daemon said:\n{}",
+                                self.kept(id),
+                                self.said.text()
+                            );
+                        }
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 }
@@ -1702,7 +1722,7 @@ mod tests {
                     let said = Said::default();
                     let _logging = said.logging();
                     runtime().block_on(async {
-                        let mut daemon = Daemon::start(dir.path(), &shell);
+                        let mut daemon = Daemon::start(dir.path(), &shell, &said);
                         test(&mut daemon, kind, &said).await;
                         daemon.end().await;
                     });
@@ -1890,7 +1910,7 @@ mod tests {
                     let said = Said::default();
                     let _logging = said.logging();
                     runtime().block_on(async {
-                        let mut daemon = Daemon::start(dir.path(), &shell);
+                        let mut daemon = Daemon::start(dir.path(), &shell, &said);
                         let plain = daemon.driven("plain").await;
                         daemon.types(&plain, "echo plain-ascii\r").await;
                         daemon.until_kept(&plain, Some("echo plain-ascii")).await;
