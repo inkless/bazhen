@@ -9,6 +9,7 @@
 //             that directly imports a reverted file, or runs one it names with `new URL`, can
 //             survive; one that passes otherwise is unrelated to the source change and comes out
 //             INVALID.
+//   GUARDED   it survived, and fails under every break a `Guard:` commit gives it (below). Good.
 //   INVALID   no verdict: it couldn't load, timed out, was skipped, its title couldn't be read or
 //             isn't unique, it hadn't finished when its project's run left no report (falsify
 //             says why; the tests that had are judged from what falsify-reporter.ts recorded as
@@ -52,6 +53,16 @@
 // with a panic in test code, else INVALID, needing a Control trailer naming it by its full path,
 // `Control: tests::name: <what you broke> -> <how the test failed>`
 // (docs/standards/rust.md § Tests).
+//
+// A SURVIVED test that guards behaviour the base already has may land with a break of its own: a
+// commit whose message holds fenced ```diff blocks against HEAD and a line
+// `Guard: <file> › <title>: <what the break does>`. Before anything runs, each break is checked
+// for shape and paths (text changes to the reverted source the test imports directly, none of it
+// named as test support) and applied to a scratch index, whose files join the signalling check.
+// After the revert run, in the same worktree, the guarded tests run once at HEAD, where they must
+// pass, then under each break alone on HEAD. A test is GUARDED only when it fails under each of
+// its breaks on an AssertionError at its own frame; a pass, a timeout or a thrown error leaves it
+// SURVIVED. A `Guard:` naming nothing judged, or a test that didn't survive, fails falsify.
 //
 // A test is new when its title is: HEAD's copy of the file has more tests with that title than
 // the base's, read from both copies' test calls (scripts/test-calls.ts), however git's diff aligns
@@ -114,6 +125,7 @@ import {
 } from "./rust-gate.ts";
 import { isMain } from "./is-main.ts";
 import { inSandbox, judgeableHere, signallingWork } from "./falsify-signals.ts";
+import { isSignallingSource } from "./signal-paths.ts";
 import { RESULTS_FILE_ENV, UNFINISHED, partialReport } from "./falsify-reporter.ts";
 import { DAEMON, LIST, SELECTOR, listed as listedFiles } from "./rust-daemon.ts";
 import { testCalls, type TestCall } from "./test-calls.ts";
@@ -132,7 +144,7 @@ import {
   type RustTest,
 } from "./rust-mutants.ts";
 
-export type Outcome = "KILLED" | "SURVIVED" | "INVALID";
+export type Outcome = "KILLED" | "SURVIVED" | "INVALID" | "GUARDED";
 export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
@@ -740,6 +752,140 @@ export function controlLine(t: { file: string; title: string }): string {
   return `Control: ${t.file} › ${title}: <what you broke> -> <how it failed>`;
 }
 
+const HUNK_HEAD = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
+
+/**
+ * A fenced block's lines as `git apply` should read them. Git's message cleanup strips the space a
+ * blank context line starts with. Inside a hunk `git apply` still reads the empty line as blank
+ * context, but at the end of the block it can't tell one from the blank lines before the fence,
+ * and a hunk short of its trailing context only matches at the end of a file. So the empty lines
+ * the last hunk's header says it still lacks are context again, and the rest go.
+ */
+export function closedBlock(lines: readonly string[]): string[] {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1] === "") end--;
+  const kept = lines.slice(0, end);
+  let start = -1;
+  for (let i = kept.length - 1; i >= 0 && start < 0; i--) {
+    if (HUNK_HEAD.test(kept[i] ?? "")) start = i;
+  }
+  if (start < 0) return kept;
+  const [, before = "1", after = "1"] = HUNK_HEAD.exec(kept[start] ?? "") ?? [];
+  let old = 0;
+  let next = 0;
+  for (const line of kept.slice(start + 1)) {
+    if (line === "" || line.startsWith(" ")) {
+      old++;
+      next++;
+    } else if (line.startsWith("-")) old++;
+    else if (line.startsWith("+")) next++;
+  }
+  const lacking = Math.min(Number(before) - old, Number(after) - next, lines.length - end);
+  return [...kept, ...Array.from({ length: Math.max(lacking, 0) }, () => " ")];
+}
+
+/** A commit's guards: the subjects of its `Guard:` lines, and the break they share. */
+export type Guard = { commit: string; subjects: string[]; patch: string };
+
+export const GUARD_FORM = "Guard: <file> › <title>: <what the break does>";
+const GUARD_LINE = /^Guard: (.+)$/;
+const FENCE_OPEN = "```diff";
+const FENCE_CLOSE = "```";
+export const MAX_GUARD_BREAKS = 10;
+
+/**
+ * Each commit's guards, from `git log --format=%H%x00%B%x00`. A commit's break is every fenced
+ * ```` ```diff ```` block of its message, in order (`closedBlock`); one left open is no block.
+ */
+export function guardsOf(log: string): Guard[] {
+  const fields = log.split("\0");
+  const guards: Guard[] = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const commit = (fields[i] ?? "").trim();
+    if (commit === "") continue;
+    const subjects: string[] = [];
+    const blocks: string[][] = [];
+    let block: string[] | undefined;
+    for (const line of (fields[i + 1] ?? "").split("\n")) {
+      if (block === undefined) {
+        if (line === FENCE_OPEN) block = [];
+        else {
+          const subject = GUARD_LINE.exec(line)?.[1];
+          if (subject !== undefined) subjects.push(subject);
+        }
+      } else if (line === FENCE_CLOSE) {
+        blocks.push(closedBlock(block));
+        block = undefined;
+      } else block.push(line);
+    }
+    // A block left open is no break, and its lines are the message's again.
+    for (const line of block ?? []) {
+      const subject = GUARD_LINE.exec(line)?.[1];
+      if (subject !== undefined) subjects.push(subject);
+    }
+    if (subjects.length === 0) continue;
+    const patch = blocks.flat();
+    guards.push({ commit, subjects, patch: patch.length === 0 ? "" : `${patch.join("\n")}\n` });
+  }
+  return guards;
+}
+
+/**
+ * Why a break may not change `path`, for a test whose related reverts are `related`; undefined
+ * when it may. A break of anything but the change the test was judged against, or of what the
+ * test feeds itself through, could fail it without the guarded code being touched.
+ */
+export function brokenPathRefusal(path: string, related: readonly string[]): string | undefined {
+  if (/(?:^|\/)testing\//.test(path) || /fixture/i.test(posix.basename(path))) {
+    return `${path} is test support`;
+  }
+  if (!related.includes(path)) {
+    return `${path} isn't source the branch changed that the test imports`;
+  }
+  return undefined;
+}
+
+/** Whether `git apply --summary` says a patch does more than modify files' text. */
+export const reshapes = (summary: string): boolean => summary.trim() !== "";
+
+/** The paths `git apply --numstat -z` names, or undefined when one is binary or renamed. */
+export function numstatPaths(numstat: string): string[] | undefined {
+  const paths: string[] = [];
+  const fields = numstat.split("\0");
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i] ?? "";
+    if (field === "") continue;
+    const stat = /^(-|\d+)\t(-|\d+)\t(.*)$/.exec(field);
+    if (stat === null) return undefined;
+    if (stat[1] === "-" || stat[3] === "") return undefined;
+    paths.push(stat[3] ?? "");
+  }
+  return paths;
+}
+
+/** Whether a test's call in `source`, under `title`, is written with `.fails`. */
+export function isFailsTest(source: string, title: string): boolean {
+  const calls = testCalls(source);
+  if (typeof calls === "string") return false;
+  return calls.some((c) => {
+    if (c.title !== title) return false;
+    const parsed: unknown = JSON.parse(c.body);
+    const tokens = Array.isArray(parsed)
+      ? parsed.filter((token): token is string => typeof token === "string")
+      : [];
+    const head = tokens.slice(0, Math.max(tokens.indexOf("("), 0));
+    return head.includes("fails");
+  });
+}
+
+/**
+ * Whether a failure is an assertion of the test's own: an `AssertionError`, chai's or
+ * `node:assert`'s, thrown where the test file's code is the first frame outside node and its
+ * modules. A TypeError, a throw at load or a helper's throw isn't.
+ */
+export const failedOnOwnAssertion = (messages: readonly string[], file: string): boolean =>
+  messages.some((m) => /^\s*AssertionError\b/.test(m) && failedInTest(m, file));
+
 export type VitestReport = {
   testResults: {
     name: string;
@@ -869,6 +1015,10 @@ export type Judged = TestRef & {
   note?: string;
   noReport?: string | undefined;
   failure?: string | undefined;
+  /** Why a guard naming a surviving test didn't make it GUARDED. */
+  guard?: string;
+  /** The breaks a GUARDED test failed under, each by its commit, with what failed it. */
+  guardedBy?: { commit: string; failure: string | undefined }[];
 };
 
 /** The Rust daemon's binary, as `<profile>/<name>` under target/. */
@@ -2175,6 +2325,176 @@ export function mergeBase(ref?: string): string {
   return git(["merge-base", target, "HEAD"]).trim();
 }
 
+const GUARD_INDEX_PREFIX = "bz-falsify-guard-";
+
+/** `git` with input on stdin, in `cwd`, with `env`. */
+const gitWith = (args: string[], cwd: string, env: NodeJS.ProcessEnv, input?: string) =>
+  execFileSync("git", args, {
+    cwd,
+    env,
+    input: input ?? "",
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+/**
+ * `git` on a scratch index of falsify's own. `isolatedEnv()` strips GIT_INDEX_FILE, so without
+ * this a `read-tree` would replace the developer's index and an `apply --cached` stage a break
+ * there. Refuses any index that isn't in a folder falsify made under the temp dir, or is the
+ * checkout's own.
+ */
+function scratchIndexGit(index: string, args: string[], input?: string): string {
+  const folder = dirname(index);
+  const own = resolve(git(["rev-parse", "--git-path", "index"]).trim());
+  if (
+    !isAbsolute(index) ||
+    !basename(folder).startsWith(GUARD_INDEX_PREFIX) ||
+    dirname(realpathSync(folder)) !== realpathSync(tmpdir()) ||
+    resolve(index) === own ||
+    (existsSync(dirname(own)) && realpathSync(dirname(own)) === realpathSync(folder))
+  ) {
+    throw new Error(`falsify: refusing to use ${index} as a scratch index`);
+  }
+  return gitWith(args, process.cwd(), { ...isolatedEnv(), GIT_INDEX_FILE: index }, input);
+}
+
+/**
+ * `git` in falsify's temporary worktree, and nowhere else: before every call, the worktree's top
+ * level must be `dir`, a folder falsify made under the temp dir. A reset or apply that reached the
+ * developer's checkout would destroy their uncommitted work.
+ */
+function worktreeGit(dir: string, args: string[], input?: string): string {
+  const top = realpathSync(git(["rev-parse", "--show-toplevel"], dir).trim());
+  if (
+    top !== realpathSync(dir) ||
+    !basename(top).startsWith(WORKTREE_PREFIX) ||
+    dirname(top) !== realpathSync(tmpdir())
+  ) {
+    throw new Error(
+      `falsify: refusing to run git ${args[0] ?? ""} outside its worktree, in ${top}`,
+    );
+  }
+  return gitWith(args, dir, isolatedEnv(), input);
+}
+
+/**
+ * The files a break modifies, as `git apply` reads it without applying it, or why it may not be
+ * a break: it doesn't read as a patch, or it does more than modify text.
+ */
+function breakPaths(patch: string): string[] | string {
+  const apply = (flags: string[]) =>
+    gitWith(["apply", "--recount", ...flags, "-"], process.cwd(), isolatedEnv(), patch);
+  let paths: string[] | undefined;
+  let summary: string;
+  try {
+    paths = numstatPaths(apply(["--numstat", "-z"]));
+    summary = apply(["--summary"]);
+  } catch (error) {
+    if (signalExitCode(error) !== undefined) throw error;
+    return "doesn't read as a patch";
+  }
+  if (paths === undefined || reshapes(summary)) {
+    return (
+      "must only modify text: it may not create, delete, rename or copy a file, change a " +
+      "mode, or be binary"
+    );
+  }
+  return paths;
+}
+
+/** A guard's break, the tests it names, and why it can't run for each test it can't. */
+export type GuardPlan = {
+  commit: string;
+  patch: string;
+  tests: TestRef[];
+  paths: string[];
+  refusals: Map<string, string>;
+};
+
+/**
+ * The guards that name new tests, each checked before anything runs: its break must modify text
+ * only, of files each test is related to and not its support, apply to HEAD, and not be of a
+ * `.fails` test. `strays` are the subjects that name no new test; `signalling` the files a break
+ * leaves signalling.
+ */
+function checkedGuards(
+  guards: Guard[],
+  targets: TestRef[],
+  head: string,
+  related: (t: TestRef) => string[],
+  atHead: (path: string) => string | undefined,
+): { plans: GuardPlan[]; strays: string[]; signalling: string[] } {
+  const strays: string[] = [];
+  const signalling: string[] = [];
+  const plans: GuardPlan[] = [];
+  for (const guard of guards) {
+    const tests: TestRef[] = [];
+    for (const subject of guard.subjects) {
+      const test = namedBy(subject, targets);
+      if (test === undefined) strays.push(`Guard: ${subject}`);
+      else if (!tests.includes(test)) tests.push(test);
+    }
+    if (tests.length === 0) continue;
+    const short = guard.commit.slice(0, 12);
+    // The first reason a test's guard can't run is the one it is told.
+    const refusals = new Map<string, string>();
+    const refuse = (t: TestRef, why: string) => {
+      if (!refusals.has(keyOf(t))) refusals.set(keyOf(t), why);
+    };
+    const refuseAll = (why: string) => {
+      for (const t of tests) refuse(t, why);
+    };
+    let paths: string[] = [];
+    if (guard.patch === "") {
+      refuseAll(`commit ${short} holds no \`\`\`diff block`);
+    } else {
+      const read = breakPaths(guard.patch);
+      if (typeof read === "string") {
+        refuseAll(`the break in ${short} ${read}`);
+      } else {
+        paths = read;
+        for (const t of tests) {
+          const why = paths
+            .map((path) => brokenPathRefusal(path, related(t)))
+            .find((w) => w !== undefined);
+          if (why !== undefined) refuse(t, `the break in ${short}: ${why}`);
+          else if (isFailsTest(atHead(t.file) ?? "", t.title)) {
+            refuse(t, "it is written with .fails, which inverts its result");
+          }
+        }
+        const folder = mkdtempSync(join(tmpdir(), GUARD_INDEX_PREFIX));
+        try {
+          const index = join(folder, "index");
+          scratchIndexGit(index, ["read-tree", head]);
+          let applied = true;
+          try {
+            scratchIndexGit(index, ["apply", "--cached", "--recount", "-"], guard.patch);
+          } catch (error) {
+            if (signalExitCode(error) !== undefined) throw error;
+            applied = false;
+            refuseAll(
+              `the break in ${short} doesn't apply to HEAD. Git's message cleanup collapses ` +
+                "blank lines: commit it with --cleanup=verbatim",
+            );
+          }
+          if (applied) {
+            for (const path of paths) {
+              if (isSignallingSource(path, scratchIndexGit(index, ["show", `:${path}`]))) {
+                signalling.push(path);
+              }
+            }
+          }
+        } finally {
+          rmSync(folder, { recursive: true, force: true });
+        }
+      }
+    }
+    plans.push({ commit: guard.commit, patch: guard.patch, tests, paths, refusals });
+  }
+  return { plans, strays, signalling };
+}
+
 async function main(args: string[]): Promise<number> {
   let options: { base?: string; harness?: true };
   try {
@@ -2310,14 +2630,35 @@ async function main(args: string[]): Promise<number> {
   const runsBinaries = wanted.length > 0;
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
   const reverts = revertsOf(changes, { rust: runsBinaries });
+  const guards = checkedGuards(
+    guardsOf(git(["log", "--format=%H%x00%B%x00", `${base}..${head}`])),
+    targets,
+    head,
+    (t) =>
+      relatedReverts(
+        t.file,
+        atHead(t.file) ?? "",
+        reverts.flatMap(pathsOf),
+        workspacePackages(top),
+      ),
+    atHead,
+  );
+  if (guards.plans.length > MAX_GUARD_BREAKS) {
+    console.error(
+      `falsify: ${guards.plans.length} commits carry a guard's break, and falsify runs at most ` +
+        `${MAX_GUARD_BREAKS}. Give guards that break the same code one commit.`,
+    );
+    return 1;
+  }
   if (targets.length > 0 && reverts.length > 0) {
     const work = signallingWork(
-      reverts.flatMap(pathsOf),
+      [...reverts.flatMap(pathsOf), ...guards.plans.flatMap((g) => g.paths)],
       targets.map((t) => t.file),
       [base, head],
       fileAt,
     );
-    if (!judgeableHere(work)) return 1;
+    const sources = [...new Set([...work.sources, ...guards.signalling])];
+    if (!judgeableHere({ ...work, sources })) return 1;
   }
   let rust: RustJudgement = {
     verdicts: [],
@@ -2346,7 +2687,11 @@ async function main(args: string[]): Promise<number> {
   const rustTests = rust.verdicts;
   if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
-    return 0;
+    if (guards.strays.length === 0) return 0;
+    console.error(
+      `\nThese Guard: lines name no new TypeScript test:\n${guards.strays.map((l) => `  ${l}`).join("\n")}`,
+    );
+    return 1;
   }
 
   const results: Judged[] = [];
@@ -2591,6 +2936,87 @@ async function main(args: string[]): Promise<number> {
               ),
         );
       }
+      // A surviving test a guard names: HEAD must pass it, and each break that names it must fail
+      // it on an assertion of its own. Each break runs alone, on HEAD reset in between.
+      const guardsOn = (t: TestRef) =>
+        guards.plans.filter((g) => g.tests.some((n) => keyOf(n) === keyOf(t)));
+      const candidates: Judged[] = [];
+      for (const r of results) {
+        if (r.outcome !== "SURVIVED" || guardsOn(r).length === 0) continue;
+        const refused = guardsOn(r)
+          .map((g) => g.refusals.get(keyOf(r)))
+          .find((reason) => reason !== undefined);
+        if (refused !== undefined) r.guard = refused;
+        else if ((binaries.get(r.file)?.reached.length ?? 0) > 0 || onList.has(r.file)) {
+          r.guard = "it runs a Rust binary or both daemons, which a guard's run can't build";
+        } else candidates.push(r);
+      }
+      if (candidates.length > 0) {
+        const inProjects = (files: Set<string>) =>
+          [...projects].flatMap(([project, inProject]): [string, string[]][] => {
+            const these = inProject.filter((file) => files.has(file));
+            return these.length > 0 ? [[project, these]] : [];
+          });
+        const guardEnv = vitestEnv ?? isolatedEnv();
+        worktreeGit(dir, ["reset", "--quiet", "--hard", head]);
+        const control = await runProjects(
+          inProjects(new Set(candidates.map((t) => t.file))),
+          guardEnv,
+          { tag: "guard-head-", on: " at HEAD, for its guards" },
+        );
+        const passingAtHead = candidates.filter((t) => {
+          if (resultOf(control.report, t.file, t.title)?.status === "passed") return true;
+          t.guard = "it doesn't pass at HEAD without a break, so a break failing it shows nothing";
+          return false;
+        });
+        const under = new Map<string, { commit: string; failure: string | undefined }[]>();
+        for (const [index, g] of guards.plans.entries()) {
+          const guarded = passingAtHead.filter((t) => g.tests.some((n) => keyOf(n) === keyOf(t)));
+          if (guarded.length === 0) continue;
+          const short = g.commit.slice(0, 12);
+          try {
+            worktreeGit(dir, ["apply", "--recount", "-"], g.patch);
+          } catch (error) {
+            if (signalExitCode(error) !== undefined) throw error;
+            for (const t of guarded)
+              t.guard ??= `the break in ${short} doesn't apply in the worktree`;
+            continue;
+          }
+          try {
+            const { report: broken } = await runProjects(
+              inProjects(new Set(guarded.map((t) => t.file))),
+              guardEnv,
+              { tag: `guard-${index}-`, on: ` under the break in ${short}` },
+            );
+            for (const t of guarded) {
+              const outcome = classify(broken, t.file, t.title);
+              const failures = resultOf(broken, t.file, t.title)?.failureMessages ?? [];
+              if (outcome === "KILLED" && failedOnOwnAssertion(failures, t.file)) {
+                under.set(keyOf(t), [
+                  ...(under.get(keyOf(t)) ?? []),
+                  { commit: short, failure: failureLine(broken, t.file, t.title) },
+                ]);
+              } else {
+                t.guard ??=
+                  outcome === "SURVIVED"
+                    ? `it passes under the break in ${short}`
+                    : outcome === "KILLED"
+                      ? `it fails under the break in ${short}, but not on an assertion of its own`
+                      : `it has no pass or fail under the break in ${short} (a timeout, or no result)`;
+              }
+            }
+          } finally {
+            worktreeGit(dir, ["reset", "--quiet", "--hard", head]);
+          }
+        }
+        for (const t of passingAtHead) {
+          const failedUnder = under.get(keyOf(t));
+          if (t.guard === undefined && failedUnder !== undefined) {
+            t.outcome = "GUARDED";
+            t.guardedBy = failedUnder;
+          }
+        }
+      }
     } finally {
       cleanup?.();
       process.off("SIGINT", handleSignal);
@@ -2610,8 +3036,19 @@ async function main(args: string[]): Promise<number> {
           : r.unbuilt
             ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
             : "");
-    console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}`);
+    const guard = r.guard === undefined ? "" : ` (its guard doesn't hold: ${r.guard})`;
+    console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}${guard}`);
     if (r.failure !== undefined) console.log(`           failed: ${r.failure}`);
+    for (const { commit, failure } of r.guardedBy ?? []) {
+      console.log(`           under the break in ${commit}: ${failure ?? "(no message)"}`);
+    }
+  }
+  const unguarded = guardErrors(guards, results);
+  if (unguarded.length > 0) {
+    console.error(
+      "\nA guard is for a new test that passes without the change. These Guard: lines name " +
+        `none:\n${unguarded.map((line) => `  ${line}`).join("\n")}`,
+    );
   }
   if (rust.total > 0) {
     console.log(
@@ -2642,7 +3079,10 @@ async function main(args: string[]): Promise<number> {
   if (survived.length > 0) {
     console.error(
       "\nThese tests pass without the change, so they cannot detect it. Make each one assert the " +
-        "behaviour the change introduces (bz-write-unit-test).",
+        "behaviour the change introduces (bz-write-unit-test). To keep one that guards behaviour " +
+        "the base already has, add a commit whose message holds a ```diff block breaking the code " +
+        `it guards, and the line \`${GUARD_FORM}\`: falsify applies the break, and the test must ` +
+        "fail under it on an assertion of its own.",
     );
     const renames = survived.flatMap((r) => renameOf(r) ?? []);
     if (renames.length > 0) {
@@ -2693,7 +3133,25 @@ async function main(args: string[]): Promise<number> {
       console.error(`${MOVED_OR_RENAMED}\n${moved.map((line) => `  ${line}`).join("\n")}`);
     }
   }
-  return uncontrolledRust.length > 0 || uncontrolled.length > 0 ? 1 : 0;
+  return uncontrolledRust.length > 0 || uncontrolled.length > 0 || unguarded.length > 0 ? 1 : 0;
+}
+
+/**
+ * The `Guard:` lines that name no new TypeScript test, or a test that didn't survive, so its
+ * guard shows nothing: each as written, or with the test it names and its verdict.
+ */
+export function guardErrors(
+  guards: { plans: { tests: TestRef[] }[]; strays: string[] },
+  results: Judged[],
+): string[] {
+  const named = guards.plans.flatMap((g) => g.tests);
+  const errors = guards.strays.map((line) => `${line} (it names no new TypeScript test)`);
+  for (const t of named.filter((n, i) => named.findIndex((m) => keyOf(m) === keyOf(n)) === i)) {
+    const outcome = results.find((r) => keyOf(r) === keyOf(t))?.outcome;
+    if (outcome === "SURVIVED" || outcome === "GUARDED") continue;
+    errors.push(`${t.file} › ${t.title} (${outcome ?? "not judged"})`);
+  }
+  return errors;
 }
 
 /** The exit code for a signal that killed a synchronous child (git), or undefined. */

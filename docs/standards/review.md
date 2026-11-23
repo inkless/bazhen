@@ -15,7 +15,10 @@ already checked (listed at the end).
    the falsify result, or the `Control:` trailer naming the test, says the same, and that the
    break the trailer records would fail that test on its assertion. For a test KILLED
    `(on the Rust daemon)`, does the line under it fail on what the test asserts, not on a surface
-   the base's daemon didn't serve at all? Is each test the
+   the base's daemon didn't serve at all? For a GUARDED test, does its `Guard:` commit's break
+   undo the behaviour the test names, in the code under test and not in support code that only
+   feeds the test, and does the assertion line falsify prints under it fail on that behaviour?
+   Falsify checks the break's paths by name only (`testing.md` § Falsification). Is each test the
    smallest size that can fail for the right reason (`testing.md` § Sizes)? Does each test
    falsify prints as RENAMED have a new title that says what its unchanged body does? For one
    that moved to another file or into a `describe`, do the names its body uses still mean what
@@ -44,6 +47,7 @@ already checked (listed at the end).
    standards updated in the same commit?
 
 The commit body says why the change was made, and records any `Control:` and `Renamed:` trailers.
+A guard's break and its `Guard:` line go in a commit of their own.
 
 ## Already checked by tooling
 

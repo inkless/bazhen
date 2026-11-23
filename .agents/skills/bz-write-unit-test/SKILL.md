@@ -25,7 +25,13 @@ check rejects a pull request whose new test passes without your change.
 5. Implement until it passes, then run `moon run :check`.
 6. **Commit, then run `moon run :test-falsify` before pushing.** It reruns the branch's new tests
    against the source at the branch's base, as CI does on the pull request:
-   - **SURVIVED** — the test doesn't depend on your change. Fix the assertion.
+   - **SURVIVED** — the test doesn't depend on your change. Fix the assertion. If it guards
+     behaviour the base already has, keep it with a checked break instead
+     (`docs/standards/testing.md` § Falsification): commit, with `--allow-empty
+     --cleanup=verbatim`, a message holding the break as a ` ```diff ` block against HEAD
+     and the line `Guard: <file> › <title>: <what the break does>`. Falsify applies the break
+     and prints the test GUARDED only if it fails on its own assertion inside the 30 s
+     `testTimeout`, not on a timeout or a thrown error.
    - **INVALID** (a brand-new function) — break your code by hand, confirm the test fails on its
      assertion, restore the code, and record a trailer in a commit on the branch naming the
      test, one per INVALID test, as falsify prints the line it needs:
@@ -48,6 +54,10 @@ check rejects a pull request whose new test passes without your change.
   `runtime` fake in `app.test.ts`. No fake timers: pass time and IDs in.
 - **A source file with runtime code needs a sibling test.** `moon run :check` names any that lack
   one.
+- **A guard's break may change only the reverted source the test imports directly.** Falsify
+  refuses a break of the test, of anything in a folder named testing (`packages/core/src/testing/`) or a `*fixture*` file, or of a file it never
+  loads. A break that slows code down must fail the test's bound in seconds: a timeout is no
+  verdict.
 
 ## Rationalizations
 
@@ -58,3 +68,4 @@ check rejects a pull request whose new test passes without your change.
 | "I'll `.skip` it for now"                    | Lint fails on `.skip`. Fix it or delete it                         |
 | "A mock is quicker"                          | A mock tests your assumptions about the code, not the code         |
 | "The falsify check is wrong here"            | Record a control with a trailer. Never use `--no-verify`           |
+| "It guards old behaviour, so it can't fail"  | Then write the break that makes it fail, as a `Guard:` commit      |

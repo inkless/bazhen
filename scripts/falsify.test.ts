@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  brokenPathRefusal,
   classify,
   crateBinaries,
   failedInTest,
+  failedOnOwnAssertion,
+  closedBlock,
+  guardErrors,
+  guardsOf,
+  isFailsTest,
+  numstatPaths,
   onBothDaemons,
   unrunReason,
   failureLine,
@@ -1575,5 +1582,232 @@ describe("whether a failure failed in the test file itself", () => {
         `AssertionError: no\n    at /w/tests/api/other-${file.slice("tests/api/".length)}:3:5`,
       ].map((m) => failedInTest(m, file)),
     ).toEqual([false, false, false, false]);
+  });
+});
+
+const FENCE = "```";
+
+/** A `git log --format=%H%x00%B%x00` record. */
+const commit = (hash: string, ...body: string[]) => `${hash}\0${body.join("\n")}\n\0\n`;
+
+describe("guardsOf", () => {
+  it("gives a commit's Guard: subjects the break its fenced diff blocks make together", () => {
+    const log = commit(
+      "c1",
+      "test: guard",
+      "",
+      `${FENCE}diff`,
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      FENCE,
+      `${FENCE}diff`,
+      "--- a/y.ts",
+      "+++ b/y.ts",
+      "@@ -1 +1 @@",
+      "-c",
+      "+d",
+      FENCE,
+      "",
+      "Guard: x.test.ts › one: swaps a",
+      "Guard: x.test.ts › two: swaps a",
+    );
+    expect(guardsOf(log)).toEqual([
+      {
+        commit: "c1",
+        subjects: ["x.test.ts › one: swaps a", "x.test.ts › two: swaps a"],
+        patch:
+          "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/y.ts\n+++ b/y.ts\n@@ -1 +1 @@\n-c\n+d\n",
+      },
+    ]);
+  });
+
+  it("ends a block at its last line, without the blank lines before its fence", () => {
+    const log = commit(
+      "c1",
+      `${FENCE}diff`,
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,3 +1,3 @@",
+      " a",
+      "",
+      "-b",
+      "+c",
+      "",
+      "",
+      FENCE,
+      "Guard: x.test.ts › one",
+    );
+    expect(guardsOf(log)[0]?.patch).toBe("--- a/x.ts\n+++ b/x.ts\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n");
+  });
+
+  it("gives a guard whose commit has no block, or only one left open, no break", () => {
+    const log =
+      commit("c1", "Guard: x.test.ts › one") +
+      commit("c2", `${FENCE}diff`, "--- a/x.ts", "Guard: x.test.ts › two");
+    expect(guardsOf(log).map((g) => [g.commit, g.patch])).toEqual([
+      ["c1", ""],
+      ["c2", ""],
+    ]);
+  });
+
+  it("reads no guard in a commit without a Guard: line, nor one a block holds", () => {
+    const log =
+      commit("c1", `${FENCE}diff`, "Guard: x.test.ts › one", FENCE) +
+      commit("c2", "Control: x.test.ts › one: broke it -> failed", " Guard: x.test.ts › one");
+    expect(guardsOf(log)).toEqual([]);
+  });
+});
+
+describe("brokenPathRefusal", () => {
+  const related = [
+    "packages/a/src/x.ts",
+    "apps/d/src/store/fixture.ts",
+    "packages/c/src/testing/fake.ts",
+  ];
+
+  it("lets a break change source the test imports that the branch changed", () => {
+    expect(brokenPathRefusal("packages/a/src/x.ts", related)).toBeUndefined();
+  });
+
+  it("refuses test support, even when the test imports it and the branch changed it", () => {
+    expect(
+      [
+        "apps/d/src/store/fixture.ts",
+        "packages/c/src/testing/fake.ts",
+        "packages/p/src/api-Fixtures.ts",
+      ].map((path) => brokenPathRefusal(path, [...related, "packages/p/src/api-Fixtures.ts"])),
+    ).toEqual([
+      "apps/d/src/store/fixture.ts is test support",
+      "packages/c/src/testing/fake.ts is test support",
+      "packages/p/src/api-Fixtures.ts is test support",
+    ]);
+  });
+
+  it("refuses a file the test isn't related to", () => {
+    expect(brokenPathRefusal("packages/a/src/y.ts", related)).toBe(
+      "packages/a/src/y.ts isn't source the branch changed that the test imports",
+    );
+  });
+});
+
+describe("numstatPaths", () => {
+  it("reads the paths a patch modifies", () => {
+    expect(numstatPaths("1\t1\ta.ts\u00002\t0\tb/c.ts\u0000")).toEqual(["a.ts", "b/c.ts"]);
+  });
+
+  it("is undefined for a binary or a renamed file", () => {
+    expect([
+      numstatPaths("-\t-\tlogo.png\u0000"),
+      numstatPaths("1\t1\t\u0000a.ts\u0000b.ts\u0000"),
+    ]).toEqual([undefined, undefined]);
+  });
+});
+
+describe("isFailsTest", () => {
+  it("tells a test written with .fails from one that isn't", () => {
+    const source =
+      'it.fails("inverted", () => {});\ntest.concurrent.fails("too", () => {});\nit("plain", () => {});\n';
+    expect(["inverted", "too", "plain"].map((title) => isFailsTest(source, title))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+});
+
+/** A stack frame at `where`. */
+const at = (where: string) => `    at ${where}:3:5`;
+
+describe("failedOnOwnAssertion", () => {
+  const file = "packages/a/src/x.test.ts";
+
+  it("is an AssertionError, chai's or node:assert's, at the test's own frame", () => {
+    expect([
+      failedOnOwnAssertion([`AssertionError: expected 1 to be 2\n${at(`/w/${file}`)}`], file),
+      failedOnOwnAssertion(
+        [`AssertionError [ERR_ASSERTION]: false == true\n${at(`/w/${file}`)}`],
+        file,
+      ),
+    ]).toEqual([true, true]);
+  });
+
+  it("isn't another error at the test's frame, nor an assertion in a helper", () => {
+    expect([
+      failedOnOwnAssertion([`TypeError: x is undefined\n${at(`/w/${file}`)}`], file),
+      failedOnOwnAssertion(
+        [
+          `AssertionError: expected 1 to be 2\n${at("/w/packages/a/src/helper.ts")}\n${at(`/w/${file}`)}`,
+        ],
+        file,
+      ),
+      failedOnOwnAssertion([], file),
+    ]).toEqual([false, false, false]);
+  });
+});
+
+describe("guardErrors", () => {
+  const t = { file: FILE, title: "t" };
+
+  it("names a Guard: that names no new test, and a test it names that didn't survive", () => {
+    expect(
+      guardErrors(
+        { plans: [{ tests: [t, { file: FILE, title: "u" }] }], strays: ["Guard: nothing"] },
+        [
+          { ...t, outcome: "KILLED" },
+          { file: FILE, title: "u", outcome: "GUARDED" },
+        ],
+      ),
+    ).toEqual(["Guard: nothing (it names no new TypeScript test)", `${FILE} › t (KILLED)`]);
+  });
+
+  it("names nothing for a guard of a surviving test", () => {
+    expect(
+      guardErrors({ plans: [{ tests: [t] }], strays: [] }, [{ ...t, outcome: "SURVIVED" }]),
+    ).toEqual([]);
+  });
+});
+
+describe("closedBlock", () => {
+  const hunk = ["--- a/x.ts", "+++ b/x.ts"];
+
+  it("takes back as blank context the empty lines its last hunk's header says it lacks", () => {
+    expect(closedBlock([...hunk, "@@ -1,2 +1,2 @@", "-a", "+b", "", ""])).toEqual([
+      ...hunk,
+      "@@ -1,2 +1,2 @@",
+      "-a",
+      "+b",
+      " ",
+    ]);
+  });
+
+  it("drops the empty lines after a hunk its header says is whole", () => {
+    expect(closedBlock([...hunk, "@@ -1 +1 @@", "-a", "+b", ""])).toEqual([
+      ...hunk,
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+    ]);
+  });
+
+  it("counts the empty lines inside a hunk as the blank context they are", () => {
+    expect(closedBlock([...hunk, "@@ -1,3 +1,3 @@", " a", "", "-b", "+c", ""])).toEqual([
+      ...hunk,
+      "@@ -1,3 +1,3 @@",
+      " a",
+      "",
+      "-b",
+      "+c",
+    ]);
+  });
+
+  it("drops the empty lines of a block that holds no hunk", () => {
+    expect(closedBlock(["diff --git a/x b/x", "old mode 100644", "new mode 100755", ""])).toEqual([
+      "diff --git a/x b/x",
+      "old mode 100644",
+      "new mode 100755",
+    ]);
   });
 });
