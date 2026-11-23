@@ -131,14 +131,55 @@ pub(crate) async fn screen(
 mod tests {
     use std::sync::Arc;
 
+    use bazhen_protocol::terminals::SCREEN_HISTORY_MAX;
+    use proptest::prelude::*;
     use serde_json::{Value, json};
     use tower::ServiceExt as _;
+
+    use super::history;
 
     use crate::routes::{Gate, Stop, http_router, socket_router};
     use crate::shells::tests::{Harness, setup};
     use crate::terminals::TerminalError;
 
     const UNKNOWN: &str = "term_0190a1b2c3d47abc8def0123456789ad";
+
+    /// TS's rule for `?history=`, `/^\d{1,5}$/` and at most the most, written from the regex:
+    /// one to five characters, each an ASCII digit.
+    fn rule(raw: &str) -> Option<u32> {
+        let digits = raw.chars().all(|c| c.is_ascii_digit());
+        if !digits || !(1..=5).contains(&raw.chars().count()) {
+            return None;
+        }
+        let rows: u32 = raw.parse().unwrap();
+        (rows <= SCREEN_HISTORY_MAX).then_some(rows)
+    }
+
+    /// A `history` value: mostly digits, with what a parser might wrongly take as part of a
+    /// number (a sign, a space, a newline, a digit from another script) mixed in.
+    fn raw_history() -> impl Strategy<Value = String> {
+        prop_oneof!["[0-9]{0,8}", "[0-9+\\- \n\t.e٣０]{0,7}", "\\PC{0,6}",]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4096))]
+
+        /// Whatever `history` a query carries, alone or after another, it is read as TS's rule
+        /// reads it, and only the first counts.
+        #[test]
+        fn reads_any_history_as_the_whole_number_typescript_s_rule_allows(
+            raw in raw_history(),
+            later in raw_history(),
+        ) {
+            let pair = |value: &str| ("history".to_owned(), value.to_owned());
+            prop_assert_eq!(history(&[pair(&raw)]), rule(&raw), "{:?}", raw);
+            prop_assert_eq!(
+                history(&[("rows".to_owned(), later.clone()), pair(&raw), pair(&later)]),
+                rule(&raw),
+                "{:?} then {:?}", raw, later
+            );
+        }
+    }
 
     fn shared(h: &Harness) -> crate::routes::Shared {
         crate::routes::Shared {

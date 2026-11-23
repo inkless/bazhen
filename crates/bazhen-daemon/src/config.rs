@@ -206,8 +206,9 @@ const HOLDER_MAX_HISTORY_LINES: u32 = 100_000;
 const CONFIG_FILE: &str = "config.toml";
 
 /// Why `web.listen = "lan"` is refused: this daemon serves loopback only, which another machine
-/// reaches through a port forwarded to it over SSH.
-pub const LAN_REFUSAL: &str = "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port to its loopback address over SSH (ssh -L)";
+/// reaches through a port forwarded to it over SSH. The forward keeps the daemon's port, since
+/// the Host allowlist takes only its own loopback address and port.
+pub const LAN_REFUSAL: &str = "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>";
 
 /// The settings a config file's bytes hold, read as the TypeScript daemon reads them: as UTF-8,
 /// with any byte that isn't replaced, then as TOML, then key by key.
@@ -545,7 +546,7 @@ mod tests {
         let lan = parse_config("/c/config.toml", b"web.listen = \"lan\"\n").unwrap();
         let env = |name: &str| (name == "BAZHEN_WEB_LISTEN").then(|| "lan".to_owned());
         let why = Err(InvalidConfig(
-            "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port to its loopback address over SSH (ssh -L)".to_owned(),
+            "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>".to_owned(),
         ));
         assert_eq!(
             [

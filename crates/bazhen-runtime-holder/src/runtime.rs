@@ -2531,6 +2531,49 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_holder_that_never_answers_a_screen_read_as_one_to_read_again_in_time() {
+        let (fixture, _) = Fixture::new(FakeHost::default(), |o| {
+            o.request = Duration::from_millis(50);
+        });
+        let (read, asked) = block_on(async {
+            let listener = UnixListener::bind(fixture.socket(&id(1))).unwrap();
+            let hello = hello_of(&id(1));
+            let (release, released) = tokio::sync::oneshot::channel::<()>();
+            let mut serving = JoinSet::new();
+            serving.spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut holder = FakeHolder::new(stream);
+                drop(holder.answer_hello_with(|h| *h = hello).await);
+                // It takes the read and never answers it, holding the connection open.
+                let asked = holder.request().await;
+                drop(released.await);
+                asked
+            });
+            let at = reference(&fixture, &id(1));
+            // Bounded here too, so a read with no bound of its own fails this test's assertion
+            // rather than waiting until the test is stuck.
+            let read = tokio::time::timeout(
+                Duration::from_secs(5),
+                fixture.runtime.screen(&at, Count::new(0).unwrap()),
+            )
+            .await
+            .map(|read| read.map_err(|e| e.to_string()));
+            release.send(()).unwrap();
+            let asked = serving.join_next().await.unwrap().unwrap();
+            fixture.runtime.shutdown().await;
+            (read, asked)
+        });
+        assert!(matches!(asked, Request::Screen { .. }), "{asked:?}");
+        assert_eq!(
+            read.map_err(|_| "the read waited past five seconds"),
+            Ok(Err(format!(
+                "terminal {}'s screen can't be read: its holder didn't answer in time",
+                id(1)
+            )))
+        );
+    }
+
+    #[test]
     fn lists_each_holder_with_its_build_memory_and_scope_and_one_it_cant_speak_to_by_its_socket() {
         let (mut fixture, _) = Fixture::new(FakeHost::default(), |o| {
             o.install_dir = Some(PathBuf::from("/opt/bz/holder"));
