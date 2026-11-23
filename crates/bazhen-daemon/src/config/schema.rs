@@ -10,7 +10,8 @@ use toml::de::{DeTable, DeValue};
 use toml::value::Datetime;
 
 use super::{
-    FileConfig, HOLDER_MAX_HISTORY_LINES, Listen, PairingMode, RuntimeKind, Shell, ranges, sizes,
+    FileConfig, HOLDER_MAX_HISTORY_LINES, LOOPBACK_ONLY, Listen, PairingMode, RuntimeKind, Shell,
+    sizes,
 };
 
 /// The largest integer JavaScript holds exactly, and so the furthest a TOML integer may go, in
@@ -272,6 +273,8 @@ const SHELLS: [(&str, Shell); 2] = [("direct", Shell::Direct), ("login", Shell::
 const PAIRINGS: [(&str, PairingMode); 2] =
     [("auto", PairingMode::Auto), ("always", PairingMode::Always)];
 const LISTENS: [(&str, Listen); 2] = [("loopback", Listen::Loopback), ("lan", Listen::Lan)];
+/// Keys the TypeScript daemon's LAN listener takes, refused here by name rather than as unknown.
+const LAN_LISTENER_KEYS: [&str; 2] = ["lan_port", "lan_allow"];
 const RUNTIMES: [(&str, RuntimeKind); 2] =
     [("tmux", RuntimeKind::Tmux), ("holder", RuntimeKind::Holder)];
 const FLAGS: [(&str, bool); 2] = [("true", true), ("false", false)];
@@ -333,16 +336,6 @@ fn memory_max(value: &DeValue<'_>, path: &str) -> Checked<String> {
 fn swap_max(value: &DeValue<'_>, path: &str) -> Checked<String> {
     string(value, path, |v| {
         sizes::swap_max_refusal(v).map(|why| format!("{v} {why}"))
-    })
-}
-
-fn lan_allow(value: &DeValue<'_>, path: &str) -> Checked<Vec<String>> {
-    list(value, path, |v, p| {
-        string(v, p, |text| {
-            ranges::parse_range(text)
-                .err()
-                .map(|problem| format!("{text} {problem}"))
-        })
     })
 }
 
@@ -508,15 +501,16 @@ fn read(top: &Table<'_, '_>) -> Checked<FileConfig> {
         out.allow_insecure_origins = web.field("allow_insecure_origins", boolean)?;
         out.pairing = web.field("pairing", |v, p| choice(v, p, &PAIRINGS))?;
         out.listen = web.field("listen", |v, p| choice(v, p, &LISTENS))?;
-        out.lan_port = web.field("lan_port", port)?;
-        out.lan_allow = web.field("lan_allow", lan_allow)?;
+        for key in LAN_LISTENER_KEYS {
+            if web.get(key).is_some() {
+                return issue(&child(&web.path, key), LOOPBACK_ONLY.to_owned());
+            }
+        }
         web.strict(&[
             "external_origins",
             "allow_insecure_origins",
             "pairing",
             "listen",
-            "lan_port",
-            "lan_allow",
         ])?;
     }
     top.strict(&[

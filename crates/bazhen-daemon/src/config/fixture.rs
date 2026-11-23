@@ -1,13 +1,15 @@
 //! The config against what `moon run :schema` records of the TypeScript daemon's
 //! (packages/protocol/fixtures/config/): every case's file and environment, read to the same
-//! settings or refused with the same words. A case that reaches the LAN listener is refused here
-//! instead, until this daemon has one.
+//! settings or refused with the same words. A case that sets a LAN listener's key, or reaches the
+//! LAN listener, is refused here instead: this daemon serves loopback only.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use super::{Config, LAN_REFUSAL, OriginsFrom, parse_config, resolve_config};
+use toml::de::{DeTable, DeValue};
+
+use super::{Config, LOOPBACK_ONLY, OriginsFrom, parse_config, resolve_config};
 
 fn fixture() -> Value {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -55,6 +57,23 @@ fn outcome(file: &str, case: &Value) -> Result<Value, String> {
         .map_err(|e| e.0)
 }
 
+/// `web.lan_port` if a case's file sets it, else `web.lan_allow` if it sets that, however the file
+/// writes `web`: the daemon refuses them in that order, whatever order the file has them in.
+fn lan_key(case: &Value) -> Option<&'static str> {
+    let toml = case["toml"].as_str().unwrap();
+    let (root, _) = DeTable::parse_recoverable(toml);
+    let Some(DeValue::Table(web)) = root.get_ref().get("web").map(toml::Spanned::get_ref) else {
+        return None;
+    };
+    ["lan_port", "lan_allow"]
+        .into_iter()
+        .find(|key| web.contains_key(*key))
+}
+
+/// The cases that set a LAN listener's key in `[web]`, counted so that a change to which cases
+/// this takes for one shows.
+const LAN_KEY_CASES: usize = 109;
+
 #[test]
 fn reads_every_case_as_the_typescript_daemon_does() {
     let fixture = fixture();
@@ -62,16 +81,20 @@ fn reads_every_case_as_the_typescript_daemon_does() {
     let cases = fixture["cases"].as_array().unwrap();
     assert!(cases.len() > 500, "{} cases", cases.len());
     let mut wrong = Vec::new();
+    let mut lan_key_cases = 0;
     for case in cases {
         let got = outcome(file, case);
         let ts = &case["outcome"];
-        let right = if case["lan"] == true {
-            got == Err(LAN_REFUSAL.to_owned())
-        } else if ts["syntax"] == true {
+        let right = if ts["syntax"] == true {
             // A TOML parser's own words differ past what it says the file is.
             got.as_ref().is_err_and(|message| {
                 message.starts_with(&format!("{file}: Invalid TOML document: "))
             })
+        } else if let Some(key) = lan_key(case) {
+            lan_key_cases += 1;
+            got == Err(format!("{file}: web.{key}: {LOOPBACK_ONLY}"))
+        } else if case["lan"] == true {
+            got == Err(format!("web.listen: {LOOPBACK_ONLY}"))
         } else if let Some(message) = ts["error"].as_str() {
             got == Err(message.to_owned())
         } else {
@@ -87,6 +110,7 @@ fn reads_every_case_as_the_typescript_daemon_does() {
         wrong.len(),
         wrong.join("\n")
     );
+    assert_eq!(lan_key_cases, LAN_KEY_CASES);
 }
 
 #[test]

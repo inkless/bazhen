@@ -6,7 +6,6 @@
 //! held to it.
 
 pub(crate) mod js;
-pub mod ranges;
 mod schema;
 mod sizes;
 
@@ -174,10 +173,6 @@ pub struct FileConfig {
     pub pairing: Option<PairingMode>,
     /// `web.listen`.
     pub listen: Option<Listen>,
-    /// `web.lan_port`.
-    pub lan_port: Option<u16>,
-    /// `web.lan_allow`, each a range [`ranges::parse_range`] takes.
-    pub lan_allow: Option<Vec<String>>,
 }
 
 /// A configuration the daemon can't start with; the message names the file or variable, and the
@@ -205,10 +200,11 @@ const HISTORY_LINES: u32 = 10_000;
 const HOLDER_MAX_HISTORY_LINES: u32 = 100_000;
 const CONFIG_FILE: &str = "config.toml";
 
-/// Why `web.listen = "lan"` is refused: this daemon serves loopback only, which another machine
-/// reaches through a port forwarded to it over SSH. The forward keeps the daemon's port, since
-/// the Host allowlist takes only its own loopback address and port.
-pub const LAN_REFUSAL: &str = "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>";
+/// Why `web.listen = "lan"`, `web.lan_port` and `web.lan_allow` are refused, after the key: this
+/// daemon serves loopback only, which another machine reaches through a port forwarded to it over
+/// SSH. The forward keeps the daemon's port, since the Host allowlist takes only its own loopback
+/// address and port.
+pub const LOOPBACK_ONLY: &str = "this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host> (docs/remote.md)";
 
 /// The settings a config file's bytes hold, read as the TypeScript daemon reads them: as UTF-8,
 /// with any byte that isn't replaced, then as TOML, then key by key.
@@ -272,10 +268,8 @@ pub fn resolve_config(
     let listen = from_env(env, "BAZHEN_WEB_LISTEN", schema::listen)?
         .or(file.listen)
         .unwrap_or(Listen::Loopback);
-    // Removed with the LAN listener, which takes over `web.lan_port`, `web.lan_allow` and
-    // BAZHEN_LAN_PORT as the TypeScript daemon reads them.
     if listen == Listen::Lan {
-        return Err(InvalidConfig(LAN_REFUSAL.to_owned()));
+        return Err(InvalidConfig(format!("web.listen: {LOOPBACK_ONLY}")));
     }
     let shell = from_env(env, "BAZHEN_AGENTS_SHELL", schema::shell)?
         .or(file.shell)
@@ -546,7 +540,7 @@ mod tests {
         let lan = parse_config("/c/config.toml", b"web.listen = \"lan\"\n").unwrap();
         let env = |name: &str| (name == "BAZHEN_WEB_LISTEN").then(|| "lan".to_owned());
         let why = Err(InvalidConfig(
-            "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host>".to_owned(),
+            "web.listen: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host> (docs/remote.md)".to_owned(),
         ));
         assert_eq!(
             [
@@ -554,6 +548,30 @@ mod tests {
                 resolve_config(&FileConfig::default(), &env)
             ],
             [why.clone(), why]
+        );
+    }
+
+    #[test]
+    fn refuses_a_lan_listener_s_port_or_ranges_by_name_saying_to_forward_a_port_over_ssh() {
+        let why = |key: &str| {
+            Err(InvalidConfig(format!(
+                "/c/config.toml: web.{key}: this daemon serves loopback only; to reach it from another machine, forward a port over SSH to its loopback address, on the same port: ssh -L <port>:127.0.0.1:<port> <host> (docs/remote.md)"
+            )))
+        };
+        let files: [&[u8]; 4] = [
+            b"[web]\nlan_port = 7942\n",
+            b"web.lan_allow = [\"10.0.0.0/8\"]\n",
+            b"web = { listen = \"loopback\", lan_allow = [] }\n",
+            b"[web]\nlan_allow = [\"10.0.0.0/8\"]\nlan_port = 7942\n",
+        ];
+        assert_eq!(
+            files.map(|file| parse_config("/c/config.toml", file)),
+            [
+                why("lan_port"),
+                why("lan_allow"),
+                why("lan_allow"),
+                why("lan_port")
+            ]
         );
     }
 
