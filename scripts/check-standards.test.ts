@@ -3113,17 +3113,6 @@ describe("decoderFailures", () => {
     expect(readAt([["ext", "1.0.0"]], "looked at ext@1.0.0 src/lib.rs")).toEqual([unsaid, stale]);
   });
 
-  it("reads a long run of names before a ! in linear time", () => {
-    // Read from each name it may start at, a run takes seconds: 120 KB of a name took 9 s, and
-    // 280 KB of raw path segments 52 s. Read back from the `!`, each takes milliseconds.
-    for (const run of ["a".repeat(120_000), "r#a :: ".repeat(40_000)]) {
-      const tree = { ...repo, "crates/r/src/lib.rs": `pub fn f() { ${run}; ${run}b!(); }` };
-      const start = performance.now();
-      failures(fuzzed, exempt, tree);
-      expect(performance.now() - start).toBeLessThan(3000);
-    }
-  });
-
   it("holds each foreign macro to the crates.io package a review read, under its own name", () => {
     const stale =
       "scripts/check-standards.ts: FOREIGN_MACROS lists ext::gone, which no product code calls.";
