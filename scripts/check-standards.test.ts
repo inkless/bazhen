@@ -4692,6 +4692,15 @@ const closing = (lets: string) => `#[test]\nfn a() { ${lets} client.close().awai
 const around = (form: string) =>
   `#[test]\nfn a() { let _ = stringify!(${form}); child.close(group, now); let _ = stringify!(${form}); }`;
 
+/** A hub whose `Shared::release` runs `release`, and a test that calls a release of its own. */
+const releasing = (release: string) =>
+  [
+    "impl<R> Shared<R> {",
+    `    fn release(&self) { ${release} }`,
+    "}",
+    "#[test]\nfn a() { h.rt.release(); }",
+  ].join("\n");
+
 const unmarked = (sources: Record<string, string>) =>
   unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
     (f) => f.split(": ")[0],
@@ -4814,6 +4823,98 @@ describe("tests that signal processes they didn't start", () => {
       "crates/h/src/serve.rs:20",
       "crates/h/src/x.rs:1",
     ]);
+  });
+
+  it("needn't be marked for a semaphore's own close(), and must be for any other call", () => {
+    // A semaphore's close(), with nothing in its parentheses, only refuses more permits. Any other
+    // call on it, or a close of one the file never types, still counts.
+    const source = [
+      "struct Slow { gate: Arc<Semaphore> }",
+      "impl Slow { fn disconnect(&self) { self.gate.close(); } }",
+      "fn shut(gate: &Arc<Semaphore>) { gate.close(); }",
+      "#[test]\nfn a() { shut(&gate); slow.disconnect(); }",
+      "#[test]\nfn b() { let g = Arc::new(Semaphore::new(0));\n g.close(); }",
+      "#[test]\nfn c() { let g = tokio::sync::Semaphore::new(1);\n g.close(); }",
+      "#[test]\nfn d() { gate.close(now); }",
+      "#[test]\nfn e() { gate.close_step(); }",
+      "#[test]\nfn f() { child.close(); }",
+    ].join("\n");
+    const untyped = "#[test]\nfn a() { gate.close(); }";
+    expect(unmarked({ "crates/h/src/hub.rs": source, "crates/h/src/x.rs": untyped })).toEqual([
+      "crates/h/src/hub.rs:12",
+      "crates/h/src/hub.rs:14",
+      "crates/h/src/hub.rs:16",
+      "crates/h/src/x.rs:1",
+    ]);
+  });
+
+  describe("closes listed as signalling nothing", () => {
+    const LISTED = {
+      "crates/h/src/hub.rs::Shared::release": "hangs up a stream's connections; signals nothing",
+    };
+    const listed = (sources: Record<string, string>, closes: Record<string, string> = LISTED) =>
+      unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "", closes);
+
+    it("needn't be marked for a stream's close() in the listed function", () => {
+      expect(listed({ "crates/h/src/hub.rs": releasing("found.watched.stream.close();") })).toEqual(
+        [],
+      );
+    });
+
+    it("must be marked for any other signalling call in the listed function", () => {
+      for (const release of [
+        "found.watched.stream.close(); child.signal(9);",
+        "found.watched.stream.close(); child.close();",
+      ]) {
+        expect(
+          listed({ "crates/h/src/hub.rs": releasing(release) }).map((f) => f.split(": ")[0]),
+        ).toEqual(["crates/h/src/hub.rs:4"]);
+      }
+      // A close given something isn't passed over, so the entry passes over nothing.
+      expect(
+        listed({ "crates/h/src/hub.rs": releasing("found.watched.stream.close(now);") }).map(
+          (f) => f.split(": ")[0],
+        ),
+      ).toEqual(["crates/h/src/hub.rs:4", "scripts/check-standards.ts"]);
+    });
+
+    it("must be marked for a stream's close() in a function that isn't listed", () => {
+      const source = [
+        "impl<R> Shared<R> {",
+        "    fn release(&self) { found.watched.stream.close(); }",
+        "    fn release_all(&self) { found.watched.stream.close(); }",
+        "}",
+        "#[test]\nfn a() { h.release_all(); }",
+      ].join("\n");
+      expect(listed({ "crates/h/src/hub.rs": source }).map((f) => f.split(": ")[0])).toEqual([
+        "crates/h/src/hub.rs:5",
+      ]);
+    });
+
+    it("refuses an entry whose function is gone, closes no stream, or gives no reason", () => {
+      expect(
+        listed(
+          { "crates/h/src/hub.rs": releasing("found.timer.abort();") },
+          {
+            ...LISTED,
+            "crates/h/src/hub.rs::Shared::gone": "signals nothing",
+            "crates/h/src/other.rs::Shared::release": "signals nothing",
+          },
+        ),
+      ).toEqual([
+        "scripts/check-standards.ts: crates/h/src/hub.rs::Shared::release is in NON_SIGNALLING_CLOSES, but closes no stream.",
+        "scripts/check-standards.ts: crates/h/src/hub.rs::Shared::gone is in NON_SIGNALLING_CLOSES, but no such function exists.",
+        "scripts/check-standards.ts: crates/h/src/other.rs::Shared::release is in NON_SIGNALLING_CLOSES, but no such function exists.",
+      ]);
+      expect(
+        listed(
+          { "crates/h/src/hub.rs": releasing("found.watched.stream.close();") },
+          { "crates/h/src/hub.rs::Shared::release": " " },
+        ),
+      ).toEqual([
+        "scripts/check-standards.ts: crates/h/src/hub.rs::Shared::release is in NON_SIGNALLING_CLOSES with no reason it signals nothing.",
+      ]);
+    });
   });
 
   it("must be marked when a lifetime or a literal's suffix named r comes before its close", () => {

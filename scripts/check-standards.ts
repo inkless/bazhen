@@ -5099,18 +5099,32 @@ const SIGNALLING_CALL =
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
 
+/** Types whose `close()` only stops them giving out more: a tokio TaskTracker, or a Semaphore. */
+const HARMLESS_CLOSERS = ["TaskTracker", "Semaphore"];
+
 /**
- * `code` with each `close()` of a tokio TaskTracker blanked out, to its length so positions hold:
- * it only stops the tracker taking tasks, and signals nothing. A tracker is a binding the file
- * types as `TaskTracker` or makes with `TaskTracker::new()`, named alone or as `self.<name>`, and
+ * `code` with each `close()` of a tokio TaskTracker or Semaphore blanked out, to its length so
+ * positions hold: a tracker's only stops it taking tasks, and a semaphore's only refuses more
+ * permits, waking those waiting with an error; neither signals anything. One is a binding the file
+ * types as one, alone or in an `Arc`, or makes with its `new`, named alone or as `self.<name>`, and
  * only a close with nothing in its parentheses is one; any other call on it still counts.
  */
-export function withoutTrackerCloses(code: string): string {
+export function withoutHarmlessCloses(code: string): string {
+  const type = `(?:(?:r#)?\\w+\\s*::\\s*)*(?:${HARMLESS_CLOSERS.join("|")})`;
   const names = new Set([
-    ...[...code.matchAll(/\b(\w+)\s*:\s*&?\s*(?:mut\s+)?TaskTracker\b/g)].map((m) => m[1] ?? ""),
-    ...[...code.matchAll(/\blet\s+(?:mut\s+)?(\w+)\s*=\s*TaskTracker\s*::\s*new\s*\(\s*\)/g)].map(
-      (m) => m[1] ?? "",
-    ),
+    ...[
+      ...code.matchAll(
+        new RegExp(`\\b(\\w+)\\s*:\\s*&?\\s*(?:mut\\s+)?(?:Arc\\s*<\\s*)?${type}\\b`, "g"),
+      ),
+    ].map((m) => m[1] ?? ""),
+    ...[
+      ...code.matchAll(
+        new RegExp(
+          `\\blet\\s+(?:mut\\s+)?(\\w+)\\s*=\\s*(?:Arc\\s*::\\s*new\\s*\\(\\s*)?${type}\\s*::\\s*new\\s*\\(`,
+          "g",
+        ),
+      ),
+    ].map((m) => m[1] ?? ""),
   ]);
   names.delete("");
   if (names.size === 0) return code;
@@ -5122,6 +5136,68 @@ export function withoutTrackerCloses(code: string): string {
 }
 
 /**
+ * Closes the signal scan passes over, by the function they are in (`file::Type::fn`), each with
+ * why it signals nothing. The scan matches methods by name, so without this a close that only
+ * hangs up a connection reads as a holder's. Only a `close()` with nothing in its parentheses on a
+ * path ending in `stream` is passed over, and only in the listed function: any other call there
+ * still counts.
+ */
+const NON_SIGNALLING_CLOSES: Record<string, string> = {
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release":
+    "closes a terminal stream, which hangs up its connections to the holder and never sends it " +
+    "`close` (HolderStream::close); a holder ends only on `close`",
+};
+
+/**
+ * `code` of `file` with the closes `listed` passes over blanked out, to their length. Each entry
+ * found in `file` goes in `seen`: 1 if its function closed a stream, 0 if it closed none.
+ */
+function withoutListedCloses(
+  file: string,
+  code: string,
+  listed: Record<string, string>,
+  seen: Map<string, number>,
+): string {
+  let out = code;
+  const { fns } = rustFunctions(code);
+  for (const key of Object.keys(listed).filter((k) => k.startsWith(`${file}::`))) {
+    const path = key.slice(file.length + 2).split("::");
+    const fn = path.at(-1);
+    const type = path.length > 1 ? path.at(-2) : undefined;
+    const found = fns.find((f) => f.fn === fn && f.block?.type === type);
+    if (found === undefined) continue;
+    const body = out.slice(found.open, found.close);
+    const closes = /(?<![\w.]\s*)(?:(?:r#)?\w+\s*\.\s*)*stream\s*\.\s*close\s*\(\s*\)/g;
+    const blanked = body.replace(closes, (call) => call.replace(/[^\n]/g, " "));
+    seen.set(key, blanked === body ? 0 : 1);
+    out = out.slice(0, found.open) + blanked + out.slice(found.close);
+  }
+  return out;
+}
+
+/** Why an entry of `listed` is stale or has no reason, given what the scan saw of each. */
+function listedCloseFailures(listed: Record<string, string>, seen: Map<string, number>): string[] {
+  return Object.entries(listed).flatMap(([key, reason]) => {
+    if (!seen.has(key)) {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES, but no such function exists.`,
+      ];
+    }
+    if (seen.get(key) === 0) {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES, but closes no stream.`,
+      ];
+    }
+    if (reason.trim() === "") {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES with no reason it signals nothing.`,
+      ];
+    }
+    return [];
+  });
+}
+
+/**
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
@@ -5129,15 +5205,22 @@ export function withoutTrackerCloses(code: string): string {
 export function unmarkedSignallingTests(
   files: readonly string[],
   read: (file: string) => string,
+  nonSignallingCloses: Record<string, string> = {},
 ): string[] {
   const rust = files.filter((f) => /^crates\/.+\.rs$/.test(f) && !f.includes("/fuzz/"));
   const holderBinaries = new Set(
     rust.flatMap((f) => (read(f).includes(HOLDER_BINARY) ? [testBinary(f) ?? ""] : [])),
   );
   holderBinaries.delete("");
-  return rust.flatMap((file) => {
+  const seen = new Map<string, number>();
+  const unmarked = rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = withoutTrackerCloses(rustCode(read(file), strings));
+    const code = withoutListedCloses(
+      file,
+      withoutHarmlessCloses(rustCode(read(file), strings)),
+      nonSignallingCloses,
+      seen,
+    );
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however
@@ -5209,6 +5292,7 @@ export function unmarkedSignallingTests(
     }
     return out;
   });
+  return [...unmarked, ...listedCloseFailures(nonSignallingCloses, seen)];
 }
 
 /** The lines of Rust source that are test code: under `#[cfg(test)]`. */
@@ -5372,7 +5456,7 @@ function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
   failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
-  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
+  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile, NON_SIGNALLING_CLOSES));
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
