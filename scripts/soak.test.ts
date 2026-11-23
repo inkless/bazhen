@@ -366,3 +366,27 @@ describe("outliving", () => {
     expect(outliving({}, () => true)).toEqual([]);
   });
 });
+
+// Rows end at their last cell that isn't blank, and the cursor is placed by CUP.
+const engine = (rows: string, row: number, column: number) =>
+  `\x1b[H\x1b[2J${rows}\x1b[${row};${column}H`;
+
+describe("splitAtCursor, on a snapshot as the holder engine writes it", () => {
+  it("keeps the blank the cursor stands after, and the text right of it, as the stream may end it", async () => {
+    const blank = await splitAtCursor(bytes(engine("one\r\n#soak f2", 2, 10)), SIZE);
+    expect(blank).toEqual({ above: "one\n", line: "#soak f2 " });
+    const right = await splitAtCursor(bytes(engine("one\r\n#soak f2 7", 2, 1)), SIZE);
+    expect(right).toEqual({ above: "one\n", line: "#soak f2 7" });
+    const full = "#soak f2 ".padEnd(SIZE.cols, "x");
+    expect(await splitAtCursor(bytes(full), SIZE)).toEqual({ above: "", line: full });
+  });
+
+  it("reads a marker cut after its blank once, as the stream's", async () => {
+    const snapshot = engine(`${marker("f2", 5355653360)}#soak f2`, 2, 10);
+    const stream = pty(`5355653361\r\n${marker("f2", 5355653362)}`);
+    expect(await attachMarkers("f2", bytes(snapshot), bytes(stream), SIZE)).toEqual({
+      snapshot: [[5355653360, 5355653360]],
+      stream: [[5355653361, 5355653362]],
+    });
+  });
+});
