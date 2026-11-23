@@ -1533,6 +1533,35 @@ describe("falsify judging new Rust tests by mutating the change", () => {
     }).toEqual({ status: 0, stale: true, noOp: true, killedBy: true, runs: 4, summary: true });
   });
 
+  it("says as it goes how long each mutant it ran took, against how many tests and killing how many", () => {
+    mutatedBranch(
+      ["tests::b_is_two", "tests::b_is_not_one"],
+      [
+        mutantOfB("stale context", "    3", "    0 /* MUTATED */"),
+        mutantOfB("replace b -> u8 with 0"),
+        mutantOfB("replace b -> u8 with 1", "    2", "    1 /* MUTATED ONE */"),
+      ],
+      [`MUTATED|tests::b_is_two|${ASSERTION}`, `MUTATED ONE|tests::b_is_not_one|${ASSERTION}`],
+    );
+    const result = againstBase();
+    expect({
+      status: result.status,
+      unmutated: /^falsify: 2 new Rust tests run unmutated in \d+ s, 2 passing$/m.test(
+        result.output,
+      ),
+      mutants: result.output
+        .match(/^falsify: mutant \d+ of .*$/gm)
+        ?.map((l) => l.replace(/ in \d+ s/, "")),
+    }).toEqual({
+      status: 0,
+      unmutated: true,
+      mutants: [
+        `falsify: mutant 1 of at most 100 (3 listed), against 2 tests, killed 1: ${LIB}:5:5: replace b -> u8 with 0`,
+        `falsify: mutant 2 of at most 100 (3 listed), against 1 test, killed 1: ${LIB}:5:5: replace b -> u8 with 1`,
+      ],
+    });
+  });
+
   it("stops once every new test is killed", () => {
     mutatedBranch(
       ["tests::b_is_two"],
@@ -2198,6 +2227,22 @@ describe("falsify on a branch with new tests in two vitest projects", () => {
       ],
       killed: [TEST, api],
     });
+  });
+
+  it("says as it goes which project's run it starts, and how long each took", () => {
+    const api = "tests/api/y.test.ts";
+    write(fx.linked, api, branchTest('import { v } from "../../packages/a/src/x.ts";\n'));
+    git(fx.linked, "add", api);
+    git(fx.linked, "commit", "--quiet", "-m", "test: api");
+    const result = againstBase({ STUB_EACH: "1" });
+    expect(
+      result.output.match(/^falsify: (running|the) .*$/gm)?.map((l) => l.replace(/\d+ s$/, "N s")),
+    ).toEqual([
+      "falsify: running the unit project (1 file)",
+      "falsify: the unit run took N s",
+      "falsify: running the api project (1 file)",
+      "falsify: the api run took N s",
+    ]);
   });
 });
 

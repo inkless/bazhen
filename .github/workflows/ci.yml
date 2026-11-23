@@ -263,9 +263,11 @@ jobs:
     name: falsify (${{ matrix.half }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # The slowest head run seen took 27 minutes, setup included; the base half does the same work
-    # after installing the base, in at most two tries of 2 minutes each, so about 31 at worst.
-    timeout-minutes: 40
+    # Falsify bounds itself: moon.toml runs each half, the base half's install of the base
+    # included, under `capped --time 120m`, which stops it with a message saying so. This is that
+    # 120 plus about a minute of setup before the step and a margin, so capped's stop always comes
+    # first and the log says why. The two must change together.
+    timeout-minutes: 130
     strategy:
       fail-fast: false
       matrix:

@@ -153,13 +153,15 @@ options = { cache = false, runDepsInParallel = false }
 command = "node scripts/capped.ts --memory 16G --time 120m -- node scripts/test-real.ts"
 options = { cache = false }
 
+# Streamed, so a run cut off at its time cap still shows how far it got. The 120m is the budget
+# CI's falsify-half job timeout is derived from (.github/workflows/ci.yml): change them together.
 [tasks.test-falsify]
 command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify.ts"
-options = { cache = false }
+options = { cache = false, outputStyle = "stream" }
 
 [tasks.test-falsify-base]
 command = "node scripts/capped.ts --memory 8G --time 120m -- node scripts/falsify-base.ts"
-options = { cache = false }
+options = { cache = false, outputStyle = "stream" }
 
 [tasks.test-mutants-holder]
 command = "node scripts/capped.ts --memory 12G --time 115m -- node scripts/holder-mutants.ts"
