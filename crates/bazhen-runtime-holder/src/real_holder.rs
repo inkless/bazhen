@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bazhen_holder_proto::body::{ExitStatus, Generation, HistoryLines, Signal};
+use bazhen_holder::ring::RING_BYTES;
+use bazhen_holder_proto::body::{Count, ExitStatus, Generation, HistoryLines, Signal, Size};
 use bazhen_host_guard::scope::{Containment, TerminalCaps, in_terminal_scope, probe_containment};
 use bazhen_protocol::ids::TerminalId;
 use tokio::sync::broadcast;
 
-use crate::client::{ClientOptions, connect};
+use crate::client::{ClientOptions, EVENTS_QUEUED, HolderClient, connect};
 use crate::fake_holder::fake_hello;
 use crate::host::{Host as _, System};
 use crate::locator::{HolderLocator, HolderRef, os_pid};
@@ -20,9 +21,14 @@ use crate::runtime::{
     RuntimeOptions, TerminalSpec,
 };
 use crate::sockets::HolderRoot;
+use crate::stream::{StreamEnd, StreamEvent, StreamEvents};
 use crate::tags::TerminalTags;
 use crate::test_support::{TempDir, block_on, me};
 use crate::watch::RuntimeEvent;
+
+/// How long a test's own connection waits for a holder's `hello`: a holder busy with its child's
+/// output, on a loaded host, can take past the product's `HELLO` to answer one.
+const CONNECT_FOR: Duration = Duration::from_secs(30);
 
 /// The holder built into the target directory this test binary is somewhere under, as
 /// `cargo nextest run --workspace` builds it: the real one, so its name and start are what
@@ -385,6 +391,277 @@ fn lists_each_holder_for_doctor_with_its_pid_memory_and_scope() {
         if cfg!(target_os = "linux") {
             assert_eq!(build.contained, Some(scoped));
         }
+        holders.close(&runtime, &made).await.unwrap();
+        runtime.shutdown().await;
+    });
+}
+
+/// A terminal running `program` through `sh -c`, as `spec` makes one.
+fn running(terminal_id: &TerminalId, program: &str) -> TerminalSpec {
+    let mut made = spec(terminal_id, "/");
+    made.process.argv = ["/bin/sh", "-c", program].map(str::to_owned).to_vec();
+    made
+}
+
+/// The bytes of every `Data` event `events` holds now, failing on any failure told.
+fn delivered(events: &mut StreamEvents) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    while let Some(event) = events.try_recv() {
+        match event {
+            StreamEvent::Data { bytes: more, .. } => bytes.extend(more),
+            StreamEvent::Failed(failure) => panic!("told {failure:?}"),
+            _ => {}
+        }
+    }
+    bytes
+}
+
+/// How long a held snapshot is watched not answering, before its stream's events are taken.
+const HELD_FOR: Duration = Duration::from_millis(500);
+
+/// Asks `probe` again every 20 ms until `done` holds of its answer or `bound` has passed, as
+/// `expect.poll` does, and gives back the last answer for the caller to assert on.
+async fn polled<T, F: Future<Output = T>>(
+    bound: Duration,
+    mut probe: impl FnMut() -> F,
+    done: impl Fn(&T) -> bool,
+) -> T {
+    let deadline = Instant::now() + bound;
+    loop {
+        let seen = probe().await;
+        if done(&seen) || Instant::now() >= deadline {
+            return seen;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The holder's offset, as a connection of the test's own reads it.
+async fn offset_of(client: &HolderClient) -> u64 {
+    client.snapshot().await.unwrap().offset.get()
+}
+
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let dir = TempDir::new();
+    let runtime = runtime(&dir, None);
+    let holders = Holders::default();
+    block_on(async {
+        let made = holders.keep(runtime.create(running(&id(1), "exec cat")).await.unwrap());
+        let mut attached = runtime.attach(&made, None).await.unwrap();
+        // Untaken, these fill the stream's events and those queued behind them, so the stream
+        // reads no further: the echo the holder sends next waits behind them all.
+        for at in 0..2 * EVENTS_QUEUED {
+            let cols = if at % 2 == 0 { 81 } else { 82 };
+            let size = Size {
+                cols: cols.try_into().unwrap(),
+                rows: 24.try_into().unwrap(),
+            };
+            attached.stream.resize(size).await.unwrap();
+        }
+        attached.stream.write(b"hello\n");
+        // Read on a connection of its own, the holder's offset says it has the echo.
+        let options = ClientOptions {
+            connect: CONNECT_FOR,
+            ..ClientOptions::default()
+        };
+        let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
+        let from = attached.offset.get();
+        let client = &client;
+        let echoed = polled(
+            Duration::from_secs(10),
+            || offset_of(client),
+            |&at| at > from,
+        )
+        .await;
+        assert_ne!(echoed, from);
+        client.end();
+        let (held, snapshot, mut taken) = {
+            let mut waiting = std::pin::pin!(attached.stream.snapshot());
+            let mut taken = Vec::new();
+            let (held, snapshot) = match tokio::time::timeout(HELD_FOR, &mut waiting).await {
+                Ok(snapshot) => (false, snapshot.unwrap()),
+                // Taken a batch at a time between looks at the snapshot, so the stream can queue
+                // more.
+                Err(_) => loop {
+                    if let Ok(snapshot) =
+                        tokio::time::timeout(Duration::from_millis(5), &mut waiting).await
+                    {
+                        break (true, snapshot.unwrap());
+                    }
+                    while let Some(event) = attached.events.try_recv() {
+                        taken.push(event);
+                    }
+                },
+            };
+            (held, snapshot, taken)
+        };
+        // What was queued as the snapshot came back, taken before the stream can queue more.
+        while let Some(event) = attached.events.try_recv() {
+            taken.push(event);
+        }
+        let mut output = Vec::new();
+        let mut next = from;
+        for event in taken {
+            match event {
+                StreamEvent::Data { at, bytes } => {
+                    assert_eq!(at.offset.get(), next);
+                    next += u64::try_from(bytes.len()).unwrap();
+                    output.extend(bytes);
+                }
+                StreamEvent::Failed(failure) => panic!("told {failure:?}"),
+                _ => {}
+            }
+        }
+        let behind = usize::try_from(snapshot.offset.get() - from).unwrap();
+        assert_eq!(
+            (held, behind > 0, output.get(..behind).map(<[u8]>::len)),
+            (true, true, Some(behind))
+        );
+        drop(attached);
+        holders.close(&runtime, &made).await.unwrap();
+        runtime.shutdown().await;
+    });
+}
+
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn confirms_a_resize_by_the_size_the_readers_holder_reports() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let dir = TempDir::new();
+    let runtime = runtime(&dir, None);
+    let holders = Holders::default();
+    block_on(async {
+        let made = holders.keep(runtime.create(running(&id(1), "exec cat")).await.unwrap());
+        let mut attached = runtime.attach(&made, None).await.unwrap();
+        let asked = Size {
+            cols: 100.try_into().unwrap(),
+            rows: 30.try_into().unwrap(),
+        };
+        attached.stream.resize(asked).await.unwrap();
+        assert_eq!(attached.stream.size(), asked);
+        let mut resized = Vec::new();
+        while let Some(event) = attached.events.try_recv() {
+            if let StreamEvent::Resized(size) = event {
+                resized.push(size);
+            }
+        }
+        assert_eq!(resized, [asked]);
+        drop(attached);
+        holders.close(&runtime, &made).await.unwrap();
+        runtime.shutdown().await;
+    });
+}
+
+/// What the ring test's program floods once told to: far past what its holder's ring holds, and
+/// short enough to end well inside `STUCK` on a loaded host.
+const FLOOD: u64 = 8 << 20;
+
+/// What the ring test's program prints once its flood has ended: text no `y` line holds, and
+/// nothing typed or echoed, so the screen shows it only once the holder has read the flood.
+const FLOODED: &str = "flood-over";
+
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let dir = TempDir::new();
+    let runtime = runtime(&dir, None);
+    let holders = Holders::default();
+    block_on(async {
+        // It floods only once told to, and then stops: a holder flooding can take past the
+        // product's bound to answer the attach or the close on a loaded host.
+        let made = holders.keep(
+            runtime
+                .create(running(
+                    &id(1),
+                    &format!("read line; yes | head -c {FLOOD}; echo {FLOODED}; exec cat"),
+                ))
+                .await
+                .unwrap(),
+        );
+        let mut attached = runtime.attach(&made, None).await.unwrap();
+        // This thread blocked from before the flood, the stream reads nothing past the attach
+        // while a connection of the test's own tells the program to flood and waits until the
+        // holder's screen shows what the program prints after it, so the holder has read it all.
+        let from = attached.offset.get();
+        let socket = made.locator.socket.clone();
+        let (flooded, reached) = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let options = ClientOptions {
+                        connect: CONNECT_FOR,
+                        writer: true,
+                        ..ClientOptions::default()
+                    };
+                    let (client, _events) = connect(&socket, &options).await.unwrap();
+                    assert!(client.hello().writer, "the writer slot was taken");
+                    client.input(b"\n").unwrap();
+                    // Bounded within `STUCK`: a flood that never ends is told by the assertion
+                    // below, not a hang.
+                    let looking = &client;
+                    let flooded = polled(
+                        Duration::from_secs(40),
+                        move || async move {
+                            let shown = looking.screen(Count::new(0).unwrap()).await.unwrap();
+                            shown.text().contains(FLOODED)
+                        },
+                        |&flooded| flooded,
+                    )
+                    .await;
+                    let reached = offset_of(&client).await;
+                    client.end();
+                    (flooded, reached)
+                })
+        })
+        .join()
+        .unwrap();
+        let ring = u64::try_from(RING_BYTES).unwrap();
+        assert_eq!((flooded, reached - from > 2 * ring), (true, true));
+        let closed = loop {
+            match attached.events.recv().await.unwrap() {
+                StreamEvent::Closed(why) => break why,
+                StreamEvent::Failed(failure) => panic!("told {failure:?}"),
+                _ => {}
+            }
+        };
+        assert_eq!(closed, StreamEnd::Behind);
+        assert!(attached.events.recv().await.is_none());
+        assert!(attached.stream.is_closed());
+        holders.close(&runtime, &made).await.unwrap();
+        runtime.shutdown().await;
+    });
+}
+
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn hands_the_writer_slot_to_the_next_stream_once_the_last_has_closed() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let dir = TempDir::new();
+    let runtime = runtime(&dir, None);
+    let holders = Holders::default();
+    block_on(async {
+        let made = holders.keep(runtime.create(running(&id(1), "exec cat")).await.unwrap());
+        let first = runtime.attach(&made, None).await.unwrap();
+        first.stream.write(b"first\n");
+        first.stream.snapshot().await.unwrap();
+        drop(first);
+        let mut second = runtime.attach(&made, None).await.unwrap();
+        second.stream.write(b"second\n");
+        let mut output = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !String::from_utf8_lossy(&output).contains("second") {
+            assert!(Instant::now() < deadline, "never echoed: {output:?}");
+            second.stream.snapshot().await.unwrap();
+            output.extend(delivered(&mut second.events));
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        drop(second);
         holders.close(&runtime, &made).await.unwrap();
         runtime.shutdown().await;
     });

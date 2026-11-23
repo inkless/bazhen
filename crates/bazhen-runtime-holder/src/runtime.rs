@@ -35,6 +35,9 @@ use crate::client::{
 use crate::host::{Host, System};
 use crate::locator::{HolderLocator, HolderRef, os_pid};
 use crate::sockets::HolderRoot;
+use crate::stream::{
+    Attached, ControlGuard, Controls, DRAIN, Notice, Opening, StreamError, WRITER_RETRY,
+};
 use crate::tags::{TerminalTags, decode_tags, encode_tags, unlinked};
 use crate::watch::{Running, RuntimeEvent, Watches};
 
@@ -61,6 +64,11 @@ pub struct RuntimeOptions {
     pub caps: Option<TerminalCaps>,
     pub hello: Duration,
     pub request: Duration,
+    /// How long a holder that has stopped reading gets to take a stream's input.
+    pub drain: Duration,
+    /// How long to wait before each time a stream's control connection asks again for a writer
+    /// slot another connection holds.
+    pub writer_retry: Vec<Duration>,
 }
 
 impl RuntimeOptions {
@@ -75,6 +83,8 @@ impl RuntimeOptions {
             caps: None,
             hello: HELLO,
             request: REQUEST,
+            drain: DRAIN,
+            writer_retry: WRITER_RETRY.to_vec(),
         }
     }
 }
@@ -301,6 +311,12 @@ pub enum RuntimeError {
     ScreenUnreadable {
         terminal_id: TerminalId,
         reason: String,
+    },
+    #[error("terminal {terminal_id}: its stream didn't attach")]
+    Stream {
+        terminal_id: TerminalId,
+        #[source]
+        source: Box<StreamError>,
     },
 }
 
@@ -606,6 +622,20 @@ pub struct HolderRuntime {
     /// The sockets reported unreadable, each reported again only once it has been readable.
     unreadable: Mutex<HashSet<PathBuf>>,
     watches: Arc<Watches>,
+    /// Each terminal's control connection, shared by its streams.
+    controls: Arc<Controls>,
+}
+
+/// Forgets a terminal's control connection once dropped, as a close ends.
+struct Forgetting<'a> {
+    controls: &'a Controls,
+    terminal_id: &'a TerminalId,
+}
+
+impl Drop for Forgetting<'_> {
+    fn drop(&mut self) {
+        self.controls.forget(self.terminal_id);
+    }
 }
 
 impl HolderRuntime {
@@ -627,6 +657,7 @@ impl HolderRuntime {
             containment: OnceCell::new(),
             unreadable: Mutex::new(HashSet::new()),
             watches,
+            controls: Arc::default(),
         }
     }
 
@@ -1056,6 +1087,66 @@ impl HolderRuntime {
         matches!(reached, Reached::Not(Unreached::None { .. })) && !self.recorded_runs(terminal)
     }
 
+    /// A stream of the terminal, on a connection of its own, attached on its holder's snapshot:
+    /// resized first to `size` when given, or at the size its holder says. What it sends goes
+    /// through the terminal's control connection, shared by its streams.
+    ///
+    /// # Errors
+    ///
+    /// As a verb's, or `Stream` when the resize or the attach fails, which closes the stream.
+    pub async fn attach(
+        &self,
+        terminal: &HolderRef,
+        size: Option<Size>,
+    ) -> Result<Attached, RuntimeError> {
+        let control = self.acquire(terminal)?;
+        let (reader, events) = self.holder_of(terminal).await?;
+        let watches = &self.watches;
+        crate::stream::attach(
+            reader,
+            events,
+            control,
+            size,
+            &watches.tasks,
+            &watches.token,
+        )
+        .await
+        .map_err(|source| RuntimeError::Stream {
+            terminal_id: terminal.terminal_id.clone(),
+            source: Box::new(source),
+        })
+    }
+
+    /// A use of the terminal's control connection, for input with no stream to read the
+    /// terminal: shared with its streams, and hung up once no stream or guard uses it.
+    ///
+    /// # Errors
+    ///
+    /// `Spec` for a terminal id no socket can be named for.
+    pub fn control(&self, terminal: &HolderRef) -> Result<ControlGuard, RuntimeError> {
+        self.acquire(terminal).map(|(guard, _)| guard)
+    }
+
+    fn acquire(
+        &self,
+        terminal: &HolderRef,
+    ) -> Result<(ControlGuard, tokio::sync::mpsc::UnboundedReceiver<Notice>), RuntimeError> {
+        let opening = Opening {
+            socket: self.socket_of(&terminal.terminal_id)?,
+            locator: terminal.locator.clone(),
+            options: self.client_options(),
+            drain: self.options.drain,
+            writer_retry: self.options.writer_retry.clone(),
+        };
+        let watches = &self.watches;
+        Ok(self.controls.acquire(
+            &terminal.terminal_id,
+            opening,
+            &watches.tasks,
+            &watches.token,
+        ))
+    }
+
     /// Closes the terminal: its holder ends its process and exits. One no holder answers for
     /// counts as closed once it is provably gone, its stale socket removed.
     ///
@@ -1074,6 +1165,7 @@ impl HolderRuntime {
                 ..
             }) => {
                 self.watches.closing(terminal).closed();
+                self.controls.forget(terminal_id);
                 let socket = self.socket_of(terminal_id)?;
                 let (_, reached) = reach(
                     socket.clone(),
@@ -1095,6 +1187,11 @@ impl HolderRuntime {
             Err(e) => return Err(e),
         };
         drop(events);
+        // Its control connection is hung up however this ends, a close dropped part-way too.
+        let _forget = Forgetting {
+            controls: &self.controls,
+            terminal_id,
+        };
         // Closed on purpose: no exit or loss of it is told, by its watch or by one an inventory
         // in flight would start.
         let closing = self.watches.closing(terminal);
@@ -1554,78 +1651,19 @@ impl HolderRuntime {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-    use std::sync::atomic::AtomicUsize;
 
     use bazhen_holder_proto::body::{
         ErrorBody, Foreground, OkBody, ProtocolVersion, StartTime, Tags, VersionText,
     };
     use bazhen_holder_proto::{Reply, Request};
-    use bazhen_host_guard::holder::HolderProcess;
     use bazhen_host_guard::scope::{Enforced, Scoped};
     use tokio::net::UnixListener;
 
     use super::*;
     use crate::fake_holder::{FakeHolder, fake_hello};
-    use crate::host::{Boxed, Leader, Started};
+    use crate::fake_host::{FakeHost, PID, START};
+    use crate::host::Leader;
     use crate::test_support::{TempDir, block_on, me};
-
-    const PID: i32 = 4242;
-    const START: u64 = 1_700_000_000;
-
-    #[derive(Debug, Default)]
-    struct FakeHost {
-        started: Mutex<Vec<StartHolderOptions>>,
-        probes: AtomicUsize,
-        containment: Option<Result<Containment, CapsRefused>>,
-        /// Whether the holder a pid names is taken for running.
-        running: bool,
-        rebinds: bool,
-        rebound: Mutex<Vec<HolderProcess>>,
-        leader: Option<Leader>,
-    }
-
-    impl Host for FakeHost {
-        fn start(&self, options: StartHolderOptions) -> Boxed<Result<Started, StartError>> {
-            self.started.lock().unwrap().push(options);
-            let holder = HolderProcess {
-                pid: rustix::process::Pid::from_raw(PID).unwrap(),
-                start: START,
-            };
-            Box::pin(std::future::ready(Ok(Started {
-                holder,
-                handle: None,
-            })))
-        }
-
-        fn probe(&self, _: TerminalCaps) -> Boxed<Result<Containment, CapsRefused>> {
-            self.probes.fetch_add(1, Ordering::Relaxed);
-            Box::pin(std::future::ready(self.containment.clone().unwrap()))
-        }
-
-        fn rebind(&self, holder: HolderProcess) -> Boxed<Result<bool, bazhen_host_guard::Error>> {
-            self.rebound.lock().unwrap().push(holder);
-            Box::pin(std::future::ready(Ok(self.rebinds)))
-        }
-
-        fn runs(&self, _: HolderProcess) -> bool {
-            self.running
-        }
-
-        fn leader(&self, _: rustix::process::Pid) -> Option<Leader> {
-            self.leader.clone()
-        }
-
-        fn in_scope(&self, _: rustix::process::Pid) -> Option<bool> {
-            Some(true)
-        }
-
-        fn process(&self, _: rustix::process::Pid) -> Option<(u64, Vec<OsString>)> {
-            Some((
-                START,
-                vec!["/opt/bz/holder/0123456789abcdef/bazhen-holder".into()],
-            ))
-        }
-    }
 
     /// How a fake at a socket answers `hello`.
     #[derive(Debug, Clone)]
