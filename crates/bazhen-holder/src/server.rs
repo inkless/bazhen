@@ -2,8 +2,9 @@
 //! connection, until a `close` has ended the child and its answers are written.
 //!
 //! A turn, in order: the master is read into the ring; each connection already open is read once
-//! and its requests answered; new connections are accepted; every connection is written to; the
-//! child is reaped and its exit published; and the socket is looked for. Answers go out in the
+//! and its requests answered; new connections are accepted, and if any were, the open connections
+//! with more to say are read again and the new ones after them; every connection is written to;
+//! the child is reaped and its exit published; and the socket is looked for. Answers go out in the
 //! order their requests were read.
 
 use std::collections::VecDeque;
@@ -209,6 +210,12 @@ impl Server {
     ///
     /// When `poll` fails for any reason but an interrupting signal.
     pub fn turn(&mut self, holder: &mut Holder<Screen>) -> io::Result<bool> {
+        let ready = self.wait(holder)?;
+        Ok(self.after_poll(&ready, holder))
+    }
+
+    /// Waits for the next thing to do, but no later than the loop or the holder must turn.
+    fn wait(&self, holder: &Holder<Screen>) -> io::Result<Ready> {
         let deadline = [holder.deadline(), self.deadline(Instant::now())]
             .into_iter()
             .flatten()
@@ -217,7 +224,11 @@ impl Server {
             .map(|at| Timespec::try_from(at.saturating_duration_since(Instant::now())))
             .transpose()
             .map_err(io::Error::other)?;
-        let ready = self.poll(holder, timeout.as_ref())?;
+        self.poll(holder, timeout.as_ref())
+    }
+
+    /// Does what a `poll` found to do; true once a `close` is done.
+    fn after_poll(&mut self, ready: &Ready, holder: &mut Holder<Screen>) -> bool {
         let now = Instant::now();
         holder.after_poll(ready.master, now);
         self.publish(holder);
@@ -234,36 +245,37 @@ impl Server {
         // Connections already open first, so one whose `hello` is waiting is read before a
         // newcomer can take its place.
         for i in 0..self.conns.len() {
-            if let Some(conn) = self.conns.get_mut(i) {
-                let revents = ready.conns.get(i).copied().unwrap_or_else(PollFlags::empty);
-                conn.polled(revents, &mut self.buffer, now);
-            }
-            // A respawn is answered here, with every connection at hand, and the connection's
-            // requests after it then go on being answered.
-            while let Some(conn) = self.conns.get_mut(i)
-                && let Some((id, spec)) = serve(conn, &mut self.shared, holder, now)
-            {
-                self.respawn(i, id, &spec, holder);
-            }
-            // Freed here as well as after the writes, so a writer's `hello` later in this turn can
-            // take the slot of one that can send no more. A writer that hangs up and then
-            // reconnects finds it free: its end of input is read no later than the turn that
-            // reads the new connection's `hello`, and before it, since older connections are
-            // served first.
-            if let Some(conn) = self.conns.get(i)
-                && self.shared.writer == Some(conn.id())
-                && !conn.may_send()
-            {
-                self.shared.writer = None;
+            let revents = ready.conns.get(i).copied().unwrap_or_else(PollFlags::empty);
+            self.read_and_serve(i, revents, holder, now);
+        }
+        // A client writes `hello` as soon as its connect returns, so a newcomer's is usually
+        // waiting already: answered in this turn, it doesn't wait out another turn's reading of
+        // the master, which in a flood is the whole of a turn. What a peer sent on an open
+        // connection before it connected anew may have come after this turn's `poll`, so the open
+        // connections are looked at again first: a newcomer is answered after it, as a turn later
+        // it would be, and a writer that hangs up and reconnects finds its slot free.
+        if ready.listener {
+            let open = self.conns.len();
+            self.accept(now);
+            if self.conns.len() > open {
+                // Without the second look the newcomers wait for the next turn's `poll`, as
+                // they would have before it: no reason to end the holder mid-turn.
+                let since = self.poll_conns(holder).unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not look at the connections again");
+                    Vec::new()
+                });
+                for (i, revents) in since.into_iter().enumerate() {
+                    if i < open && revents.is_empty() {
+                        continue;
+                    }
+                    self.read_and_serve(i, revents, holder, now);
+                }
             }
         }
         self.apply_resize(holder);
         // A respawn resets the title and the screen.
         self.publish(holder);
         holder.flush_input();
-        if ready.listener {
-            self.accept(now);
-        }
         if self.shared.close_requested && self.closing.is_none() {
             tracing::info!("closing");
             holder.close(now);
@@ -281,7 +293,7 @@ impl Server {
         self.release_writer();
         self.conns.retain(|conn| !conn.is_finished(now));
         if self.close_done(holder, now) {
-            return Ok(true);
+            return true;
         }
         if self.closing.is_none() && now >= self.recheck_at {
             if let Some(socket) = &mut self.socket {
@@ -289,7 +301,7 @@ impl Server {
             }
             self.recheck_at = now + RECHECK_EVERY;
         }
-        Ok(false)
+        false
     }
 
     /// Reports the title and the screen, where they changed since last reported, to every
@@ -589,6 +601,54 @@ impl Server {
             listener: listener.is_some_and(ready),
             conns: (first_conn..fds.len()).map(revents).collect(),
         })
+    }
+
+    /// Reads connection `i` once, as `poll` found it, and answers what it asked.
+    fn read_and_serve(
+        &mut self,
+        i: usize,
+        revents: PollFlags,
+        holder: &mut Holder<Screen>,
+        now: Instant,
+    ) {
+        if let Some(conn) = self.conns.get_mut(i) {
+            conn.polled(revents, &mut self.buffer, now);
+        }
+        // A respawn is answered here, with every connection at hand, and the connection's
+        // requests after it then go on being answered.
+        while let Some(conn) = self.conns.get_mut(i)
+            && let Some((id, spec)) = serve(conn, &mut self.shared, holder, now)
+        {
+            self.respawn(i, id, &spec, holder);
+        }
+        // Freed here as well as after the writes, so a writer's `hello` later in this turn can
+        // take the slot of one that can send no more. A writer that hangs up and then reconnects
+        // finds it free: its end of input is read no later than the turn that reads the new
+        // connection's `hello`, and before it, since older connections are served first.
+        if let Some(conn) = self.conns.get(i)
+            && self.shared.writer == Some(conn.id())
+            && !conn.may_send()
+        {
+            self.shared.writer = None;
+        }
+    }
+
+    /// What each connection has to be read for now, without waiting: one entry per connection,
+    /// or none when none has anything.
+    fn poll_conns(&self, holder: &Holder<Screen>) -> io::Result<Vec<PollFlags>> {
+        let end = holder.output().ring().end();
+        let mut fds: Vec<PollFd<'_>> = self
+            .conns
+            .iter()
+            .map(|conn| {
+                let interest = conn.interest(end) & PollFlags::IN;
+                PollFd::from_borrowed_fd(conn.fd(), interest)
+            })
+            .collect();
+        if fds.is_empty() || !readiness(poll(&mut fds, Some(&Timespec::default())))? {
+            return Ok(Vec::new());
+        }
+        Ok(fds.iter().map(PollFd::revents).collect())
     }
 
     fn accept(&mut self, now: Instant) {
@@ -1453,6 +1513,34 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    /// A client writes `hello` as soon as its connect returns, so the turn that accepts the
+    /// connection answers it, rather than the next, which in a flood would first read the master
+    /// again.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn a_hello_already_sent_is_answered_in_the_turn_that_accepts_its_connection() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut held = Failing::with("hello-turn", "exec sleep 30", crate::engine::engine, 100);
+        let mut peer = UnixStream::connect(held.dir.join("t.sock")).unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let hello = Request::Hello {
+            id: RequestId(1),
+            body: HelloRequest {
+                protocol: Versions::spoken(),
+                writer: None,
+            },
+        };
+        peer.write_all(&hello.encode().unwrap()).unwrap();
+        assert!(!held.server.turn(&mut held.holder).unwrap());
+        let mut decoder = bazhen_holder_proto::reply_decoder();
+        let mut replies = Vec::new();
+        read_into(&mut peer, &mut decoder, &mut replies);
+        assert!(
+            matches!(replies.as_slice(), [Reply::Hello { .. }]),
+            "after the turn that accepted it, answered {replies:?}"
+        );
     }
 
     #[test]
@@ -2404,6 +2492,30 @@ mod tests {
         assert!(
             writer.holds_a_snapshot(),
             "a writer still owing one went ahead again"
+        );
+    }
+
+    /// A writer that hangs up and connects anew finds its slot free, though its end of input and
+    /// its new connection both come after the turn's `poll`, as when the loop was busy: the turn
+    /// that accepts the newcomer reads the open connections again first.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn a_writer_that_reconnects_after_the_turn_s_poll_finds_its_slot_free() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut held = Failing::with("writer-back", "exec sleep 30", crate::engine::engine, 100);
+        let mut old = asks_to_write(&held);
+        assert!(hello_answer(&mut held, &mut old).writer, "the first writer");
+        let _waiting = UnixStream::connect(held.dir.join("t.sock")).unwrap();
+        let ready = held.server.wait(&held.holder).unwrap();
+        drop(old);
+        let mut new = asks_to_write(&held);
+        assert!(!held.server.after_poll(&ready, &mut held.holder));
+        let mut decoder = bazhen_holder_proto::reply_decoder();
+        let mut replies = Vec::new();
+        read_into(&mut new, &mut decoder, &mut replies);
+        assert!(
+            matches!(replies.as_slice(), [Reply::Hello { body, .. }] if body.writer),
+            "after the turn that accepted it, the new writer was answered {replies:?}"
         );
     }
 

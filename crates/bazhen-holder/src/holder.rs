@@ -25,6 +25,13 @@ pub const EXIT_DRAIN: Duration = Duration::from_millis(100);
 /// so a turn's reading can't lap a subscriber that the turn before left caught up.
 const READ_CHUNK: usize = 64 << 10;
 const MAX_READ_PER_TURN: usize = 256 << 10;
+/// How long into a turn the master is read before the turn moves on, a chunk at most past it.
+/// Every chunk goes through the terminal's engine, so a turn's byte budget costs as long as the
+/// engine takes over it: one turn of a flood, for a debug build on a busy host, can take seconds,
+/// and a client waits two or three turns for its `hello`. Bounded by time too, a turn of a flood
+/// costs about a chunk however slow the engine or short the CPU, and a flood moves as fast as
+/// before, since the rest of a turn costs next to nothing.
+const READ_FOR: Duration = Duration::from_millis(5);
 
 /// Where the child's output goes, in order.
 pub trait Output {
@@ -291,7 +298,7 @@ impl<O: Output> Holder<O> {
     pub fn after_poll(&mut self, master_ready: bool, now: Instant) {
         self.reaper.clear();
         if master_ready {
-            self.read_master();
+            self.read_master(now);
         }
         self.step(now);
     }
@@ -306,7 +313,10 @@ impl<O: Output> Holder<O> {
             .min()
     }
 
-    fn read_master(&mut self) {
+    /// Reads the master in the turn that began at `began`: a chunk at least, so a turn always
+    /// moves the output on.
+    fn read_master(&mut self, began: Instant) {
+        let until = began.checked_add(READ_FOR).unwrap_or(began);
         let mut read = 0;
         while read < MAX_READ_PER_TURN {
             match rustix::io::read(self.pty.master(), &mut *self.chunk) {
@@ -318,6 +328,9 @@ impl<O: Output> Holder<O> {
                     read += n;
                     self.output.write(self.chunk.get(..n).unwrap_or_default());
                     self.reply();
+                    if Instant::now() >= until {
+                        return;
+                    }
                 }
                 Err(rustix::io::Errno::INTR) => {}
                 Err(rustix::io::Errno::AGAIN) => return,
@@ -649,5 +662,64 @@ mod tests {
         assert!(!readiness(Ok(0)).unwrap());
         assert!(readiness(Ok(1)).unwrap());
         assert!(readiness(Err(rustix::io::Errno::BADF)).is_err());
+    }
+
+    /// An `Output` that counts its writes and, after each, waits for the child to have written
+    /// more, so a turn that reads on always finds more to read.
+    #[derive(Debug)]
+    struct Waiting {
+        master: rustix::fd::OwnedFd,
+        writes: usize,
+    }
+
+    impl Waiting {
+        fn until_more(&self) {
+            let mut fds = [PollFd::new(&self.master, PollFlags::IN)];
+            let wait = Timespec::try_from(DEADLINE).unwrap();
+            assert!(
+                readiness(poll(&mut fds, Some(&wait))).unwrap(),
+                "the flood stopped"
+            );
+        }
+    }
+
+    impl Output for Waiting {
+        fn write(&mut self, _bytes: &[u8]) {
+            self.writes += 1;
+            self.until_more();
+        }
+    }
+
+    /// The turn's time, and not only its bytes, bounds how much of a flood one turn reads, so a
+    /// slow engine or a starved CPU makes a turn longer by a chunk, not by the byte budget. Each
+    /// turn is given when it began: one long begun reads a chunk, one not yet begun the budget.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn a_turn_reads_a_flood_only_until_its_time_is_up() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let long_ago = Instant::now();
+        let process = spec(&["sh", "-c", "yes | head -c 16777216"]);
+        let reaper = Reaper::new().unwrap();
+        let (pty, slave) = Pty::open(WindowSize::clamped(80, 24)).unwrap();
+        let master = pty.master().try_clone_to_owned().unwrap();
+        let child = pty::spawn(slave, &process, &reaper).unwrap();
+        let mut holder = Holder::new(
+            pty,
+            reaper,
+            child,
+            process.generation,
+            Waiting { master, writes: 0 },
+        );
+        std::thread::sleep(Duration::from_secs(1).saturating_sub(long_ago.elapsed()));
+        holder.output().until_more();
+        holder.after_poll(true, long_ago);
+        let late = holder.output().writes;
+        holder.after_poll(true, Instant::now() + Duration::from_secs(3600));
+        let early = holder.output().writes - late;
+        assert_eq!(
+            (late, early > 1),
+            (1, true),
+            "chunks read by a turn long begun, and whether one not yet begun read more"
+        );
     }
 }
