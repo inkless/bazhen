@@ -11,7 +11,7 @@ use bazhen_host_guard::scope::{Containment, TerminalCaps, in_terminal_scope, pro
 use bazhen_protocol::ids::TerminalId;
 use tokio::sync::broadcast;
 
-use crate::client::{ClientOptions, connect};
+use crate::client::{ClientOptions, EVENTS_QUEUED, connect};
 use crate::fake_holder::fake_hello;
 use crate::host::{Host as _, System};
 use crate::locator::{HolderLocator, HolderRef, os_pid};
@@ -24,6 +24,10 @@ use crate::stream::{StreamEnd, StreamEvent, StreamEvents};
 use crate::tags::TerminalTags;
 use crate::test_support::{TempDir, block_on, me};
 use crate::watch::RuntimeEvent;
+
+/// How long a test's own connection waits for a holder's `hello`: a holder busy with its child's
+/// output, on a loaded host, can take past the product's `HELLO` to answer one.
+const CONNECT_FOR: Duration = Duration::from_secs(30);
 
 /// The holder built into the target directory this test binary is somewhere under, as
 /// `cargo nextest run --workspace` builds it: the real one, so its name and start are what
@@ -411,6 +415,9 @@ fn delivered(events: &mut StreamEvents) -> Vec<u8> {
     bytes
 }
 
+/// How long a held snapshot is watched not answering, before its stream's events are taken.
+const HELD_FOR: Duration = Duration::from_millis(500);
+
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
@@ -421,20 +428,73 @@ fn holds_a_streams_snapshot_until_it_has_delivered_the_output_before_it() {
     block_on(async {
         let made = holders.keep(runtime.create(running(&id(1), "exec cat")).await.unwrap());
         let mut attached = runtime.attach(&made, None).await.unwrap();
+        // Untaken, these fill the stream's events and those queued behind them, so the stream
+        // reads no further: the echo the holder sends next waits behind them all.
+        for at in 0..2 * EVENTS_QUEUED {
+            let cols = if at % 2 == 0 { 81 } else { 82 };
+            let size = Size {
+                cols: cols.try_into().unwrap(),
+                rows: 24.try_into().unwrap(),
+            };
+            attached.stream.resize(size).await.unwrap();
+        }
         attached.stream.write(b"hello\n");
-        let mut output = Vec::new();
+        // Read on a connection of its own, the holder's offset says it has the echo.
+        let options = ClientOptions {
+            connect: CONNECT_FOR,
+            ..ClientOptions::default()
+        };
+        let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
+        let from = attached.offset.get();
+        // Bounded: a holder that never reads it leaves the snapshot nothing behind, which the
+        // assertion below tells.
         let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let snapshot = attached.stream.snapshot().await.unwrap();
-            output.extend(delivered(&mut attached.events));
-            let behind = snapshot.offset.get() - attached.offset.get();
-            assert_eq!(usize::try_from(behind).unwrap(), output.len());
-            if String::from_utf8_lossy(&output).contains("hello") {
-                break;
-            }
-            assert!(Instant::now() < deadline, "never echoed: {output:?}");
+        while client.snapshot().await.unwrap().offset.get() == from && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        client.end();
+        let (held, snapshot, mut taken) = {
+            let mut waiting = std::pin::pin!(attached.stream.snapshot());
+            let mut taken = Vec::new();
+            let (held, snapshot) = match tokio::time::timeout(HELD_FOR, &mut waiting).await {
+                Ok(snapshot) => (false, snapshot.unwrap()),
+                // Taken a batch at a time between looks at the snapshot, so the stream can queue
+                // more.
+                Err(_) => loop {
+                    if let Ok(snapshot) =
+                        tokio::time::timeout(Duration::from_millis(5), &mut waiting).await
+                    {
+                        break (true, snapshot.unwrap());
+                    }
+                    while let Some(event) = attached.events.try_recv() {
+                        taken.push(event);
+                    }
+                },
+            };
+            (held, snapshot, taken)
+        };
+        // What was queued as the snapshot came back, taken before the stream can queue more.
+        while let Some(event) = attached.events.try_recv() {
+            taken.push(event);
+        }
+        let mut output = Vec::new();
+        let mut next = from;
+        for event in taken {
+            match event {
+                StreamEvent::Data { at, bytes } => {
+                    assert_eq!(at.offset.get(), next);
+                    next += u64::try_from(bytes.len()).unwrap();
+                    output.extend(bytes);
+                }
+                StreamEvent::Failed(failure) => panic!("told {failure:?}"),
+                _ => {}
+            }
+        }
+        let behind = usize::try_from(snapshot.offset.get() - from).unwrap();
+        assert_eq!(
+            (held, behind > 0, output.get(..behind).map(<[u8]>::len)),
+            (true, true, Some(behind))
+        );
         drop(attached);
         holders.close(&runtime, &made).await.unwrap();
         runtime.shutdown().await;
@@ -478,35 +538,62 @@ fn closes_a_stream_its_holders_ring_has_run_past_as_behind() {
     let runtime = runtime(&dir, None);
     let holders = Holders::default();
     block_on(async {
-        let made = holders.keep(runtime.create(running(&id(1), "exec yes")).await.unwrap());
+        // It floods only once told to, after the attach: a holder already flooding can take past
+        // the product's bound to answer one on a loaded host.
+        let made = holders.keep(
+            runtime
+                .create(running(&id(1), "read line; exec yes"))
+                .await
+                .unwrap(),
+        );
         let mut attached = runtime.attach(&made, None).await.unwrap();
+        attached.stream.write(b"\n");
+        // The write goes out on this thread, so it runs until a connection of its own sees the
+        // flood start; `from` is then past all the stream has read.
+        let options = ClientOptions {
+            connect: CONNECT_FOR,
+            ..ClientOptions::default()
+        };
+        let (client, _events) = connect(&made.locator.socket, &options).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let from = loop {
+            let offset = client.snapshot().await.unwrap().offset.get();
+            if offset > attached.offset.get() || Instant::now() >= deadline {
+                break offset;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        client.end();
         // This thread blocked, the stream reads nothing until the holder has written past all
         // its ring holds, as a second connection's snapshots show.
         let socket = made.locator.socket.clone();
-        let from = attached.offset.get();
-        std::thread::spawn(move || {
+        let past = from + 4 * (1 << 20);
+        let reached = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let options = ClientOptions {
-                        connect: HELLO,
-                        ..ClientOptions::default()
-                    };
-                    let (client, _events) = connect(&socket, &options).await.unwrap();
-                    loop {
-                        let snapshot = client.snapshot().await.unwrap();
-                        if snapshot.offset.get() > from + 4 * (1 << 20) {
-                            break;
+                    let connected = connect(&socket, &options).await;
+                    assert_eq!(connected.as_ref().err().map(ToString::to_string), None);
+                    let (client, _events) = connected.unwrap();
+                    // Bounded: a flood that never starts is told by the assertion below, not a
+                    // hang.
+                    let deadline = Instant::now() + Duration::from_secs(60);
+                    let reached = loop {
+                        let offset = client.snapshot().await.unwrap().offset.get();
+                        if offset > past || Instant::now() >= deadline {
+                            break offset;
                         }
                         tokio::time::sleep(Duration::from_millis(20)).await;
-                    }
+                    };
                     client.end();
-                });
+                    reached
+                })
         })
         .join()
         .unwrap();
+        assert_eq!((from > attached.offset.get(), reached > past), (true, true));
         let closed = loop {
             match attached.events.recv().await.unwrap() {
                 StreamEvent::Closed(why) => break why,
