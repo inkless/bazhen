@@ -2344,9 +2344,11 @@ function implBlocks(code: string): {
 
 /**
  * Each impl item in `code`: where it starts, and its body's `{`, or `undefined` where its head
- * can't be read, with where reading the head stopped. An `impl` after anything but a `;`, a brace
- * or an attribute's `]` is an `impl Trait` type that a long signature wrapped onto its own line.
- * Reading resumes where the last head stopped, so a file of heads that never end is read once.
+ * can't be read, with where reading the head stopped. An `impl` at a line's start after anything
+ * but a `;`, a brace or an attribute's `]` may be an `impl Trait` type that a long signature
+ * wrapped onto its own line, or an impl in a macro's body (`=> (`, `$(`): it is an item if its
+ * head can be read, and a type, passed over, if not. Reading resumes where the last head stopped,
+ * so a file of heads that never end is read once.
  */
 function implHeads(code: string): { start: number; open: number | undefined; end: number }[] {
   const out: { start: number; open: number | undefined; end: number }[] = [];
@@ -2354,10 +2356,10 @@ function implHeads(code: string): { start: number; open: number | undefined; end
   for (let m = starts.exec(code); m !== null; m = starts.exec(code)) {
     let before = m.index - 1;
     while (before >= 0 && /\s/.test(code[before] ?? "")) before--;
-    if (before >= 0 && !";{}]".includes(code[before] ?? "")) continue;
     const head = implHead(code, m.index + m[0].length);
-    out.push({ start: m.index, ...head });
     starts.lastIndex = head.end;
+    if (head.open === undefined && before >= 0 && !";{}]".includes(code[before] ?? "")) continue;
+    out.push({ start: m.index, ...head });
   }
   return out;
 }

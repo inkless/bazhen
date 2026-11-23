@@ -1721,12 +1721,33 @@ describe("byteTakers", () => {
     expect(byteTakers(source)).toEqual(["T::peek", "Gate::pull"]);
   });
 
+  it("reads an impl a macro's body writes on a line of its own, after a ( or a $(", () => {
+    const source = [
+      "macro_rules! readers {",
+      "    () => (",
+      "        impl<R: Read> Reader<R> {",
+      "            pub fn pull(&mut self) {}",
+      "        }",
+      "    );",
+      "    ($($t:ident),*) => {",
+      "        $(",
+      "        impl<S: BufRead> Feed<S> {",
+      "            pub fn feed(&mut self) {}",
+      "        }",
+      "        )*",
+      "    };",
+      "}",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["Reader::pull", "Feed::feed"]);
+  });
+
   it("reads a file of impl heads it can't finish in time linear in its length", () => {
     const lines = 20_000;
     expect({
       open: elapsed("impl X<(\n".repeat(lines)) < 500,
       braces: elapsed("impl X<{\n".repeat(lines)) < 500,
-    }).toEqual({ open: true, braces: true });
+      wrapped: elapsed("(\nimpl X<(\n".repeat(lines)) < 500,
+    }).toEqual({ open: true, braces: true, wrapped: true });
   });
 
   it("leaves a function that only holds a socket, a file or an fd, and names one reading it", () => {
