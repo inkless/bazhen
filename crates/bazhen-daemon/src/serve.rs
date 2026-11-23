@@ -487,7 +487,8 @@ async fn listen(
 }
 
 /// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's
-/// watches of them and its connections, each for no longer than `within`. Holders run on.
+/// watches of them and its connections, each for no longer than `within`. Holders run on. A hurry
+/// cuts short only the wait for the hub's work: every stream is closed all the same.
 async fn end_terminals(
     streams: Option<crate::stream::route::Streams>,
     shells: Option<Arc<Shells>>,
@@ -495,7 +496,8 @@ async fn end_terminals(
     hurry: &CancellationToken,
 ) {
     if let Some(streams) = streams {
-        hurry.run_until_cancelled(streams.close(within)).await;
+        streams.close();
+        hurry.run_until_cancelled(streams.wait(within)).await;
     }
     if let Some(shells) = shells {
         let _ = tokio::time::timeout(within, shells.terminals().shutdown()).await;
@@ -1434,6 +1436,80 @@ mod tests {
             matches!(&refused, Err(Refused::Said(said)) if said.contains("bazhen.db")),
             "{refused:?}"
         );
+    }
+
+    /// The hub, as far as the route drives it, saying only whether it was closed.
+    #[derive(Default)]
+    struct Closed(std::sync::atomic::AtomicBool);
+
+    impl crate::stream::route::Views for Closed {
+        fn join(
+            &self,
+            _: bazhen_protocol::ids::TerminalId,
+            _: crate::stream::hub::Viewer,
+            _: bazhen_holder_proto::body::Size,
+            _: Option<bazhen_protocol::stream::Resumes>,
+        ) -> crate::terminals::Answer<
+            'static,
+            Result<crate::stream::hub::Attachment, crate::stream::hub::JoinError>,
+        > {
+            Box::pin(std::future::ready(Err(
+                crate::stream::hub::JoinError::Ended,
+            )))
+        }
+
+        fn write(&self, _: &bazhen_protocol::ids::TerminalId, _: &AttachmentId, _: &[u8]) {}
+
+        fn engage(&self, _: &bazhen_protocol::ids::TerminalId, _: &AttachmentId) {}
+
+        fn declare_epoch(&self, _: &bazhen_protocol::ids::TerminalId, _: &AttachmentId, _: u64) {}
+
+        fn resize(
+            &self,
+            _: &bazhen_protocol::ids::TerminalId,
+            _: &AttachmentId,
+            _: bazhen_holder_proto::body::Size,
+        ) {
+        }
+
+        fn leave(
+            &self,
+            _: &bazhen_protocol::ids::TerminalId,
+            _: &AttachmentId,
+            _: crate::stream::hub::LeaveReason,
+        ) {
+        }
+
+        fn close(&self) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    type AttachmentId = bazhen_protocol::ids::AttachmentId;
+
+    // Sandbox-only by name alone: end_terminals also shuts the shells' terminals down, which the
+    // signal scan follows to a holder's close; with no shells and a stub hub it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_every_stream_even_when_it_is_told_to_hurry() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let views = Arc::new(Closed::default());
+            let streams = crate::stream::route::Streams {
+                views: Arc::clone(&views) as Arc<dyn crate::stream::route::Views>,
+                running: Arc::new(|_| Box::pin(std::future::ready(Ok(true)))),
+                protocol_id: Arc::from("build"),
+                closing: crate::stream::closing::ClosingBudget::new(
+                    crate::stream::closing::MAX_CLOSING_BYTES,
+                ),
+                tasks: TaskTracker::new(),
+                hub: TaskTracker::new(),
+            };
+            let hurry = CancellationToken::new();
+            hurry.cancel();
+            end_terminals(Some(streams), None, Duration::from_secs(60), &hurry).await;
+            assert!(views.0.load(std::sync::atomic::Ordering::Acquire));
+        });
     }
 
     #[test]

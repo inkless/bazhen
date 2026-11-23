@@ -8,6 +8,7 @@ pub(crate) mod hub;
 pub(crate) mod lease;
 pub(crate) mod log;
 pub(crate) mod route;
+pub mod said;
 pub(crate) mod screen;
 pub(crate) mod seam;
 pub(crate) mod view;

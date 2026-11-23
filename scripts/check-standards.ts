@@ -872,6 +872,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
   "crates/bazhen-hook/src/pane_title.rs::body": "pane_title",
   "crates/bazhen-store/src/events.rs::StoredEvent::frame": "frame",
+  "crates/bazhen-daemon/src/stream/said.rs::read": "stream_frame",
   "crates/bazhen-daemon/src/tasks.rs::asked": "tasks",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
@@ -1063,12 +1064,14 @@ const NOT_DECODERS: Record<string, string> = {
     "queues a frame the hub built for the view's writer; reads no bytes",
   "crates/bazhen-daemon/src/stream/view.rs::Inbox::recv":
     "hands back what the hub queued, whole; parses nothing",
+  "crates/bazhen-daemon/src/stream/view.rs::Inbox::try_recv":
+    "hands back what the hub has queued so far, whole; parses nothing",
   "crates/bazhen-daemon/src/stream/view.rs::Output::into_parts":
     "hands back output the hub queued, whole; parses nothing",
   "crates/bazhen-daemon/src/stream/view.rs::output":
     "the trait method a view's socket sends output with, which has no body here; it is handed output the hub queued whole, to send as it is",
-  "crates/bazhen-daemon/src/stream/view.rs::write_to":
-    "sends what the hub queued to a view's socket whole; parses none of it",
+  "crates/bazhen-daemon/src/stream/view.rs::write_one":
+    "sends one thing the hub queued to a view's socket whole; parses none of it",
   "crates/bazhen-daemon/src/serve.rs::listen":
     "builds and stops what the daemon serves, among it the holder runtime views stream from, and passes that runtime on; reads no bytes",
   "crates/bazhen-daemon/src/serve.rs::shells":
@@ -1099,6 +1102,8 @@ const NOT_DECODERS: Record<string, string> = {
     "the Views trait's join, which has no body here, and the route's join, which asks whether the terminal runs, then hands the view to Views::join; reads no bytes",
   "crates/bazhen-daemon/src/stream/route.rs::write":
     "the Views trait's write, which has no body here and is handed a view's input whole, and the socket's writer, which sends what the hub queued and what the route sends itself whole; parses none of it",
+  "crates/bazhen-daemon/src/stream/route.rs::write_queued":
+    "sends what the hub has queued so far to the socket whole, ahead of the route's close; parses none of it",
   "crates/bazhen-daemon/src/stream/route.rs::Hub::join":
     "hands the view to Hub::join; reads no bytes",
   "crates/bazhen-daemon/src/stream/route.rs::Hub::write":

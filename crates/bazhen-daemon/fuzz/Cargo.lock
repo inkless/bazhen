@@ -122,9 +122,12 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bazhen-client",
+ "bazhen-fs-trust",
+ "bazhen-holder-proto",
  "bazhen-host-guard",
  "bazhen-peer",
  "bazhen-protocol",
+ "bazhen-runtime-holder",
  "bazhen-store",
  "futures-util",
  "hyper",
@@ -151,6 +154,13 @@ dependencies = [
  "bazhen-daemon",
  "libfuzzer-sys",
  "serde_json",
+]
+
+[[package]]
+name = "bazhen-fs-trust"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]
@@ -229,9 +239,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bazhen-runtime-holder"
+version = "0.1.0"
+dependencies = [
+ "bazhen-client",
+ "bazhen-fs-trust",
+ "bazhen-holder",
+ "bazhen-holder-proto",
+ "bazhen-host-guard",
+ "bazhen-protocol",
+ "futures-util",
+ "rustix",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "bazhen-store"
 version = "0.1.0"
 dependencies = [
+ "bazhen-holder-proto",
  "bazhen-protocol",
  "jiff",
  "libc",
@@ -240,6 +270,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

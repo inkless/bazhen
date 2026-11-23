@@ -8,6 +8,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Extension;
 use axum::body::Bytes;
@@ -15,20 +16,19 @@ use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{CloseFrame, Message, WebSocketUpgrade, close_code};
 use axum::extract::{Path, State};
 use axum::response::Response;
-use bazhen_holder_proto::body::{Cols, Rows, Size};
+use bazhen_holder_proto::body::Size;
 use bazhen_protocol::ids::{AttachmentId, TerminalId};
-use bazhen_protocol::stream::{
-    AttachmentMode, Resumes, STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame,
-};
+use bazhen_protocol::stream::{AttachmentMode, Resumes, STREAM_FRAME_MAX_BYTES, StreamServerFrame};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use super::closing::{ClosingBudget, Place};
 use super::hub::{self, Attachment, AttachmentLog, Hub, JoinError, LeaveReason, Runtime, Viewer};
-use super::view::{self, Inbox, MOST_UNSENT, Outbox, Unsent, ViewSocket, write_to};
+use super::said::{Said, read};
+use super::view::{self, Inbox, MOST_UNSENT, Outbox, Unsent, ViewSocket, write_one};
 use crate::accept::Held;
 use crate::heartbeat::{Beat, Heartbeat, Pulse};
 use crate::paired;
@@ -124,11 +124,14 @@ pub(crate) struct Streams {
 }
 
 impl Streams {
-    /// Closes every stream, a parked one without waiting out its linger, and waits up to
-    /// `within` for the hub's work to finish.
-    pub(crate) async fn close(&self, within: std::time::Duration) {
+    /// Closes every stream, a parked one without waiting out its linger.
+    pub(crate) fn close(&self) {
         self.views.close();
         self.hub.close();
+    }
+
+    /// Waits up to `within` for the hub's work to finish, once the streams are closed.
+    pub(crate) async fn wait(&self, within: std::time::Duration) {
         let _ = tokio::time::timeout(within, self.hub.wait()).await;
     }
 }
@@ -217,55 +220,84 @@ struct Closing {
     by: Instant,
 }
 
-type Joining = Pin<Box<dyn Future<Output = Result<Attachment, String>> + Send>>;
+/// A view joining: the terminal it joined and its attachment, or what it is to be told.
+type Joining = Pin<Box<dyn Future<Output = Result<(TerminalId, Attachment), String>> + Send>>;
 
-/// A frame a view sent, as the route reads it.
-#[derive(Debug, PartialEq, Eq)]
-enum Said {
-    Hello {
-        protocol_id: Option<String>,
-        mode: AttachmentMode,
-        size: Size,
-        resumes: Option<Resumes>,
-    },
-    Resize(Size),
-    Engage,
-    Epoch(u64),
+/// What the route sends itself, ahead of nothing the hub has queued. A pong, and the heartbeat's
+/// ping, is queued at most once until the writer takes it, so a peer that pings without reading
+/// what it is sent grows nothing: the one pong queued answers every ping before it.
+enum Own {
+    Frame(Message),
+    Pong,
     Ping,
 }
 
-/// A view's size, as a frame may give one: 2 to 1000 columns and rows.
-fn size(cols: u16, rows: u16) -> Option<Size> {
-    let fits = |n: u16| (2..=1000).contains(&n);
-    if !fits(cols) || !fits(rows) {
-        return None;
-    }
-    Some(Size {
-        cols: Cols::new(u64::from(cols)).ok()?,
-        rows: Rows::new(u64::from(rows)).ok()?,
-    })
+/// Whether a pong, and a ping, is queued and not yet taken by the writer.
+#[derive(Debug, Default)]
+struct Queued {
+    pong: AtomicBool,
+    ping: AtomicBool,
 }
 
-/// A text frame, or `None` for one that isn't a frame a view sends.
-fn read(text: &str) -> Option<Said> {
-    Some(match serde_json::from_str(text).ok()? {
-        StreamClientFrame::Hello {
-            protocol_id,
-            mode,
-            cols,
-            rows,
-            resumes,
-        } => Said::Hello {
-            protocol_id,
-            mode,
-            size: size(cols, rows)?,
-            resumes,
+impl Queued {
+    fn of(&self, own: &Own) -> Option<&AtomicBool> {
+        match own {
+            Own::Frame(_) => None,
+            Own::Pong => Some(&self.pong),
+            Own::Ping => Some(&self.ping),
+        }
+    }
+}
+
+/// The queue of what the route sends itself: its end and the writer's.
+fn own_queue() -> (Ours, Mine) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let queued = Arc::new(Queued::default());
+    (
+        Ours {
+            tx,
+            queued: Arc::clone(&queued),
         },
-        StreamClientFrame::Resize { cols, rows } => Said::Resize(size(cols, rows)?),
-        StreamClientFrame::Engage => Said::Engage,
-        StreamClientFrame::Epoch { epoch } => Said::Epoch(epoch),
-        StreamClientFrame::Ping => Said::Ping,
-    })
+        Mine { rx, queued },
+    )
+}
+
+/// The route's end of what it sends itself.
+struct Ours {
+    tx: mpsc::UnboundedSender<Own>,
+    queued: Arc<Queued>,
+}
+
+impl Ours {
+    /// Queues `own` for the writer, unless it is a pong or a ping one is already queued for.
+    fn send(&self, own: Own) {
+        if self
+            .queued
+            .of(&own)
+            .is_some_and(|queued| queued.swap(true, Ordering::AcqRel))
+        {
+            return;
+        }
+        // The writer goes only once the socket is done with, so nothing sent here is lost.
+        let _ = self.tx.send(own);
+    }
+}
+
+/// The writer's end of what the route sends itself.
+struct Mine {
+    rx: mpsc::UnboundedReceiver<Own>,
+    queued: Arc<Queued>,
+}
+
+impl Mine {
+    /// What the route sends next; a pong or a ping taken may be queued again.
+    async fn recv(&mut self) -> Option<Own> {
+        let own = self.rx.recv().await?;
+        if let Some(queued) = self.queued.of(&own) {
+            queued.store(false, Ordering::Release);
+        }
+        Some(own)
+    }
 }
 
 fn text(frame: &StreamServerFrame) -> Option<Message> {
@@ -293,7 +325,7 @@ async fn until(by: Option<Instant>) {
     }
 }
 
-async fn joined(joining: &mut Option<Joining>) -> Result<Attachment, String> {
+async fn joined(joining: &mut Option<Joining>) -> Result<(TerminalId, Attachment), String> {
     match joining {
         Some(joining) => joining.as_mut().await,
         None => std::future::pending().await,
@@ -308,15 +340,16 @@ async fn join(
     viewer: Viewer,
     size: Size,
     resumes: Option<Resumes>,
-) -> Result<Attachment, String> {
+) -> Result<(TerminalId, Attachment), String> {
     match running(terminal.clone()).await {
         Ok(true) => {}
         Ok(false) => return Err(format!("no running terminal {terminal}")),
         Err(err) => return Err(format!("attach failed: {err}")),
     }
     views
-        .join(terminal, viewer, size, resumes)
+        .join(terminal.clone(), viewer, size, resumes)
         .await
+        .map(|attachment| (terminal, attachment))
         .map_err(|err| match err {
             JoinError::Refused(message) => message,
             err => format!("attach failed: {err}"),
@@ -329,7 +362,7 @@ struct View<'a> {
     how: &'a How,
     terminal: String,
     /// What the route itself sends, ahead of nothing the hub has queued.
-    own: mpsc::UnboundedSender<Message>,
+    own: Ours,
     /// The hub's end of the view's queue, until the view joins with it.
     outbox: Option<Outbox>,
     unsent: Unsent,
@@ -341,8 +374,7 @@ struct View<'a> {
 
 impl View<'_> {
     fn send(&self, message: Message) {
-        // The writer goes only once the socket is done with, so nothing sent here is lost.
-        let _ = self.own.send(message);
+        self.own.send(Own::Frame(message));
     }
 
     /// The socket begins to close, given until the heartbeat would end it to send what it holds.
@@ -382,13 +414,10 @@ impl View<'_> {
 
     /// The view joined, or was refused. One that joined while its socket closes leaves at once;
     /// one whose queue the hub has already let go of closes.
-    fn joined(&mut self, joined: Result<Attachment, String>, drained: bool) {
+    fn joined(&mut self, joined: Result<(TerminalId, Attachment), String>, drained: bool) {
         self.joining = None;
         match joined {
-            Ok(attachment) => {
-                let Some(terminal) = TerminalId::parse(&self.terminal) else {
-                    return;
-                };
+            Ok((terminal, attachment)) => {
                 let leaving = Leaving {
                     views: Arc::clone(&self.streams.views),
                     terminal,
@@ -432,11 +461,7 @@ impl View<'_> {
                 },
                 _,
             ) => self.hello(protocol_id.as_deref(), mode, size, resumes),
-            (Said::Ping, _) => {
-                if let Some(pong) = text(&StreamServerFrame::Pong) {
-                    self.send(pong);
-                }
-            }
+            (Said::Ping, _) => self.own.send(Own::Pong),
             (Said::Resize(size), Some(at)) => views.resize(&at.terminal, &at.id, size),
             (Said::Engage, Some(at)) => views.engage(&at.terminal, &at.id),
             (Said::Epoch(epoch), Some(at)) => views.declare_epoch(&at.terminal, &at.id, epoch),
@@ -480,7 +505,10 @@ impl View<'_> {
 }
 
 /// Serves one socket: sends on `sink` and hears from `heard` until it ends, leaving the view's
-/// attachment, if it joined, as it does.
+/// attachment, if it joined, as it does. A close the route sends goes after what the hub queued
+/// before it, and the socket then waits, reading what the peer still sends, for the peer's close,
+/// as long as the close may take: dropped at once, unread input would reset the connection under
+/// its last frames. A close that answers the peer's ends it once sent.
 pub(crate) async fn serve<E>(
     sink: impl Sink<Message> + Send,
     heard: impl Stream<Item = Result<Message, E>> + Send,
@@ -488,9 +516,9 @@ pub(crate) async fn serve<E>(
     streams: Streams,
     how: How,
 ) {
-    let (own, mine) = mpsc::unbounded_channel();
+    let (own, mine) = own_queue();
     let (outbox, inbox) = view::queue(MOST_UNSENT);
-    let (released, unsent) = (inbox.released(), inbox.unsent());
+    let (released, unsent, quiet) = (inbox.released(), inbox.unsent(), inbox.timed_out());
     let (drained_tx, mut drained) = oneshot::channel();
     let mut writing = pin!(write(sink, mine, inbox, drained_tx));
     let mut view = View {
@@ -511,11 +539,18 @@ pub(crate) async fn serve<E>(
     beat.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut heard = pin!(heard);
     let (mut was_released, mut was_drained) = (false, false);
+    // Whether the route's close has been sent, and whether the peer's has been heard: once both
+    // have, the socket is done with.
+    let (mut closed, mut peer_closed) = (false, false);
     loop {
         let open = view.closing.is_none();
         tokio::select! {
             biased;
-            () = &mut writing => return,
+            wrote = &mut writing, if !closed => match wrote {
+                Wrote::Closed if peer_closed => return,
+                Wrote::Closed => closed = true,
+                Wrote::Failed => return,
+            },
             () = cancelled(view.closing.as_ref().map(|c| c.place.ended())) => return,
             () = until(view.closing.as_ref().map(|c| c.by)) => return,
             () = how.stop.cancelled(), if open => view.close(Some(close_code::AWAY)),
@@ -535,20 +570,27 @@ pub(crate) async fn serve<E>(
                     view.close(None);
                 }
             }
-            message = heard.next(), if open => match message {
+            message = heard.next() => match message {
                 None | Some(Err(_)) => return,
+                // The peer's answer to the route's close, or a close of its own.
+                Some(Ok(Message::Close(_))) if closed => return,
                 Some(Ok(Message::Close(_))) => {
+                    peer_closed = true;
                     view.leaving = None;
                     view.close(None);
                 }
-                Some(Ok(message)) => {
+                Some(Ok(message)) if open => {
                     pulse.heard();
                     view.heard(message);
                 }
+                // Read while the socket closes, only so the peer's input isn't left unread.
+                Some(Ok(_)) => {}
             },
             _ = beat.tick(), if open => match pulse.beat(unsent.get()) {
-                Beat::Ping => view.send(Message::Ping(Bytes::new())),
+                Beat::Ping => view.own.send(Own::Ping),
                 Beat::Gone => {
+                    // A view still joining is ended as timed out by the hub, as it lets go.
+                    quiet.timed_out();
                     if let Some(leaving) = &mut view.leaving {
                         leaving.reason = LeaveReason::TimedOut;
                     }
@@ -559,54 +601,101 @@ pub(crate) async fn serve<E>(
     }
 }
 
-/// The socket's sink, shared by what the hub queues and what the route sends itself.
-struct Socket<'a, S>(&'a Mutex<Pin<Box<S>>>);
+/// The socket's sink, which sends what the hub queues and what the route sends itself.
+struct Socket<S>(Pin<Box<S>>);
 
-impl<S: Sink<Message> + Send> ViewSocket for Socket<'_, S> {
+impl<S: Sink<Message> + Send> ViewSocket for Socket<S> {
     type Error = ();
 
     async fn output(&mut self, output: Vec<u8>) -> Result<(), ()> {
-        let message = Message::Binary(output.into());
-        self.0.lock().await.send(message).await.map_err(drop)
+        self.send(Message::Binary(output.into())).await
     }
 
     async fn frame(&mut self, frame: &StreamServerFrame) -> Result<(), ()> {
         let Some(message) = text(frame) else {
             return Ok(());
         };
-        self.0.lock().await.send(message).await.map_err(drop)
+        self.send(message).await
     }
+}
+
+impl<S: Sink<Message> + Send> Socket<S> {
+    async fn send(&mut self, message: Message) -> Result<(), ()> {
+        self.0.send(message).await.map_err(drop)
+    }
+}
+
+/// How the writer ended: the route's close sent, or a send failed.
+#[derive(Debug, PartialEq, Eq)]
+enum Wrote {
+    Closed,
+    Failed,
 }
 
 /// Sends what the hub queues for the view, saying once it has all been sent, and what the route
 /// sends itself, until the route's close is sent or a send fails; then flushes, which sends the
-/// answer the socket queued to a client's close.
+/// answer the socket queued to a client's close. What the hub queued before the route's close goes
+/// ahead of it.
 async fn write(
     sink: impl Sink<Message> + Send,
-    mut mine: mpsc::UnboundedReceiver<Message>,
-    inbox: Inbox,
+    mut mine: Mine,
+    mut inbox: Inbox,
     drained: oneshot::Sender<()>,
-) {
-    let sink = Mutex::new(Box::pin(sink));
-    let queued = async {
-        if write_to(inbox, &mut Socket(&sink)).await.is_ok() {
-            let _ = drained.send(());
-            std::future::pending::<()>().await;
-        }
-    };
-    let own = async {
-        while let Some(message) = mine.recv().await {
-            let close = matches!(message, Message::Close(_));
-            if sink.lock().await.send(message).await.is_err() || close {
-                break;
+) -> Wrote {
+    let mut socket = Socket(Box::pin(sink));
+    let mut drained = Some(drained);
+    let wrote = loop {
+        tokio::select! {
+            biased;
+            own = mine.recv() => {
+                let Some(own) = own else {
+                    break Wrote::Failed;
+                };
+                let message = match own {
+                    Own::Frame(message) => message,
+                    Own::Pong => match text(&StreamServerFrame::Pong) {
+                        Some(pong) => pong,
+                        None => continue,
+                    },
+                    Own::Ping => Message::Ping(Bytes::new()),
+                };
+                let close = matches!(message, Message::Close(_));
+                if close && !write_queued(&mut inbox, &mut socket).await {
+                    break Wrote::Failed;
+                }
+                if socket.send(message).await.is_err() {
+                    break Wrote::Failed;
+                }
+                if close {
+                    break Wrote::Closed;
+                }
             }
+            out = inbox.recv(), if drained.is_some() => match out {
+                Some(out) => {
+                    if write_one(out, &mut socket).await.is_err() {
+                        break Wrote::Failed;
+                    }
+                }
+                None => {
+                    if let Some(drained) = drained.take() {
+                        let _ = drained.send(());
+                    }
+                }
+            },
         }
     };
-    tokio::select! {
-        () = queued => {}
-        () = own => {}
+    let _ = socket.0.flush().await;
+    wrote
+}
+
+/// Writes what the hub has queued so far; false if a send fails.
+async fn write_queued<S: Sink<Message> + Send>(inbox: &mut Inbox, socket: &mut Socket<S>) -> bool {
+    while let Some(out) = inbox.try_recv() {
+        if write_one(out, socket).await.is_err() {
+            return false;
+        }
     }
-    let _ = sink.lock().await.flush().await;
+    true
 }
 
 #[cfg(test)]
@@ -687,12 +776,24 @@ mod tests {
             Self::new(|id| Ok(*id == terminal()))
         }
 
+        /// A client that answers the route's close with its own, as a WebSocket peer does.
         fn open(&self, terminal: &str, how: How) -> Client {
+            self.open_answering(terminal, how, true)
+        }
+
+        fn open_answering(&self, terminal: &str, how: How, answers_close: bool) -> Client {
             let (says, from_client) = mpsc::unbounded_channel::<Result<Message, Infallible>>();
             let (to_client, hears) = mpsc::unbounded_channel();
-            let sink = futures_util::sink::unfold(to_client, |to, message: Message| async move {
-                to.send(message).map(|()| to).map_err(drop)
-            });
+            let answer = says.clone();
+            let sink = futures_util::sink::unfold(
+                (to_client, answer),
+                move |(to, answer), message: Message| async move {
+                    if answers_close && matches!(message, Message::Close(_)) {
+                        let _ = answer.send(Ok(Message::Close(None)));
+                    }
+                    to.send(message).map(|()| (to, answer)).map_err(drop)
+                },
+            );
             let said = futures_util::stream::unfold(from_client, |mut from| async move {
                 from.recv().await.map(|message| (message, from))
             });
@@ -946,12 +1047,24 @@ mod tests {
     // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
-    fn types_binary_frames_only_into_the_terminal_and_resizes_it_as_its_driver_asks() {
+    fn types_binary_frames_only_from_its_driver_into_the_terminal_and_resizes_it_as_it_asks() {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
             let served = Served::running();
             let mut client = served.open(terminal().as_str(), quiet());
             client.attached("interactive").await;
+            let mut observer = served.open(terminal().as_str(), quiet());
+            observer.attached("observe").await;
+            let mut other = served.open(terminal().as_str(), quiet());
+            other.attached("interactive").await;
+            for view in [&mut observer, &mut other] {
+                view.send(Message::Binary(Bytes::from_static(b"no\r")));
+                // Its pong comes once what it said before has been read.
+                view.say(r#"{"type":"ping"}"#);
+                view.until(|frame| (frame == StreamServerFrame::Pong).then_some(()))
+                    .await
+                    .unwrap_or_else(|heard| panic!("never answered its ping: {heard:?}"));
+            }
             client.say(r#"{"type":"engage"}"#);
             let epoch = client
                 .until(|frame| match frame {
@@ -1001,7 +1114,7 @@ mod tests {
         bazhen_test_signal::require_sandbox().unwrap();
         runtime().block_on(async {
             let served = Served::running();
-            let mut client = served.open(terminal().as_str(), how(Duration::from_millis(30)));
+            let mut client = served.open(terminal().as_str(), how(Duration::from_millis(300)));
             let attachment = client.attached("observe").await;
             assert_eq!(
                 (served.ended().await, served.ends()),
@@ -1107,5 +1220,129 @@ mod tests {
             (all_ended, served.ends()),
             (true, ended(&attachment_id, "client_closed"))
         );
+    }
+
+    /// What `write` sends a socket from what the route queued itself and what the hub queued,
+    /// and how it ended.
+    async fn written(mine: Mine, inbox: Inbox) -> (Wrote, Vec<Message>) {
+        let (to_client, mut hears) = mpsc::unbounded_channel();
+        let sink = futures_util::sink::unfold(to_client, |to, message: Message| async move {
+            to.send(message).map(|()| to).map_err(drop)
+        });
+        let (drained, _) = oneshot::channel();
+        let wrote = write(sink, mine, inbox, drained).await;
+        let mut sent = vec![];
+        while let Ok(message) = hears.try_recv() {
+            sent.push(message);
+        }
+        (wrote, sent)
+    }
+
+    #[test]
+    fn queues_one_pong_and_one_ping_however_many_go_unsent() {
+        runtime().block_on(async {
+            let (ours, mine) = own_queue();
+            let (_outbox, inbox) = view::queue(MOST_UNSENT);
+            for _ in 0..1000 {
+                ours.send(Own::Pong);
+                ours.send(Own::Ping);
+            }
+            ours.send(Own::Frame(Message::Close(None)));
+            let pong = text(&StreamServerFrame::Pong).unwrap();
+            assert_eq!(
+                written(mine, inbox).await,
+                (
+                    Wrote::Closed,
+                    vec![pong, Message::Ping(Bytes::new()), Message::Close(None)]
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn queues_a_pong_again_once_the_writer_has_taken_the_one_before() {
+        runtime().block_on(async {
+            let (ours, mut mine) = own_queue();
+            ours.send(Own::Pong);
+            let first = mine.recv().await;
+            ours.send(Own::Pong);
+            let again = mine.rx.try_recv().ok();
+            assert_eq!(
+                (
+                    matches!(first, Some(Own::Pong)),
+                    matches!(again, Some(Own::Pong))
+                ),
+                (true, true)
+            );
+        });
+    }
+
+    #[test]
+    fn sends_what_the_hub_queued_before_the_route_s_close_ahead_of_it() {
+        runtime().block_on(async {
+            let (ours, mine) = own_queue();
+            let (outbox, inbox) = view::queue(MOST_UNSENT);
+            outbox.send(b"one".to_vec()).unwrap();
+            outbox.send(b"two".to_vec()).unwrap();
+            ours.send(Own::Frame(Message::Close(None)));
+            assert_eq!(
+                written(mine, inbox).await,
+                (
+                    Wrote::Closed,
+                    vec![
+                        Message::Binary(Bytes::from_static(b"one")),
+                        Message::Binary(Bytes::from_static(b"two")),
+                        Message::Close(None),
+                    ]
+                )
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn reads_the_socket_after_its_close_until_the_client_closes_too() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let how = quiet();
+            let stop = how.stop.clone();
+            let mut client = served.open_answering(terminal().as_str(), how, false);
+            client.attached("observe").await;
+            stop.cancel();
+            let (_, heard) = client.until_closed().await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let read_on = !client.says.is_closed();
+            client.send(Message::Close(None));
+            assert_eq!(
+                (heard.code(), read_on, served.ended().await),
+                (Some(close_code::AWAY), true, true)
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn ends_a_view_still_joining_as_timed_out_once_its_client_stops_answering() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            // The first view takes the snapshot made as the stream opened; the next asks for one.
+            let mut first = served.open(terminal().as_str(), quiet());
+            first.attached("observe").await;
+            served.fake.hold_snapshots();
+            let client = served.open(terminal().as_str(), how(Duration::from_millis(300)));
+            client.say(&hello(BUILD, "observe"));
+            let ends = once(|| served.ends(), |ends| !ends.is_empty()).await;
+            let reasons: Vec<String> = ends
+                .iter()
+                .filter_map(|end| end.rsplit(' ').next().map(str::to_owned))
+                .collect();
+            assert_eq!(reasons, vec!["timed_out".to_owned()]);
+        });
     }
 }

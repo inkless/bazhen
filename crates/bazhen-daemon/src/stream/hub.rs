@@ -384,7 +384,8 @@ struct Seamed {
 
 /// A view whose join hasn't finished. A join dropped part way, as when its socket goes, ends the
 /// view as its leaving would: nothing else knows of it, its held output would grow for good, and
-/// its stream would never close.
+/// its stream would never close. It ends as timed out if its socket stopped answering, and as
+/// closed otherwise.
 struct Joining<R: Runtime, L: AttachmentLog> {
     hub: Arc<Shared<R, L>>,
     watched: Arc<Watched<R::Stream>>,
@@ -396,12 +397,15 @@ impl<R: Runtime, L: AttachmentLog> Drop for Joining<R, L> {
     fn drop(&mut self) {
         if !self.done {
             let mut state = self.watched.lock();
-            self.hub.end(
-                &self.watched,
-                &mut state,
-                &self.id,
-                AttachmentEndReason::ClientClosed,
-            );
+            let reason = if state
+                .view(&self.id)
+                .is_some_and(|view| view.outbox.timed_out())
+            {
+                AttachmentEndReason::TimedOut
+            } else {
+                AttachmentEndReason::ClientClosed
+            };
+            self.hub.end(&self.watched, &mut state, &self.id, reason);
         }
     }
 }
@@ -1745,7 +1749,7 @@ pub(crate) mod tests {
         }
 
         /// Snapshots asked for from now on wait until [`Fake::release`].
-        fn hold_snapshots(&self) {
+        pub(crate) fn hold_snapshots(&self) {
             self.terminal().holding = true;
         }
 
