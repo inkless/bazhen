@@ -1,5 +1,8 @@
 # Reaching Bazhen through Caddy
 
+> The Rust daemon serves loopback only and doesn't serve the LAN, which [docs/lan.md](lan.md)
+> describes. To reach it from another machine without a proxy, see [docs/remote.md](remote.md).
+
 To open Bazhen from a phone on your home network without Caddy, see [docs/lan.md](lan.md): the
 daemon serves HTTPS itself with a certificate you trust once. Caddy is for your own domain, or
 for a certificate authority the phone trusts for good.

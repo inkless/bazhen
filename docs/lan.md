@@ -1,5 +1,8 @@
 # Opening Bazhen on the LAN
 
+> This page applies to the TypeScript daemon only. The Rust daemon serves loopback only; to reach
+> it from another machine, see [docs/remote.md](remote.md).
+
 Bazhen can serve HTTPS on your home network itself, so a phone or tablet on the same Wi-Fi opens it
 in the browser with no Caddy. It uses a self-signed certificate that the browser trusts once, after
 you check the certificate's fingerprint. [docs/caddy.md](caddy.md) is the alternative, with your

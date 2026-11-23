@@ -168,9 +168,15 @@ the page can't use is shown above the terminal, which goes on without it.
 
 ### Reaching Bazhen from another device
 
-On your home network, Bazhen can serve HTTPS itself: set `web.listen = "lan"` and the address
-ranges that may connect, and trust its certificate on the phone after checking its fingerprint
-([docs/lan.md](docs/lan.md)).
+The Rust daemon listens on `127.0.0.1` only and refuses `web.listen = "lan"`. To open it from
+another machine, forward a port to it over SSH, through Tailscale or another VPN when the machines
+aren't on one network: [docs/remote.md](docs/remote.md) is the supported route, and needs no proxy
+or external origin. Only the LAN listener below, with [docs/lan.md](docs/lan.md), is the TypeScript
+daemon's alone; a proxy route with external origins and pairing applies to both.
+
+On your home network, the TypeScript daemon can serve HTTPS itself: set `web.listen = "lan"` and the
+address ranges that may connect, and trust its certificate on the phone after checking its
+fingerprint ([docs/lan.md](docs/lan.md)).
 
 Otherwise Bazhen listens on `127.0.0.1` only and never terminates TLS. To open it from a phone, bring your
 own route to that port that runs on this machine, such as a local reverse proxy: a proxy on
