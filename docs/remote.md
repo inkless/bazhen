@@ -3,9 +3,9 @@
 The daemon listens on IPv4 loopback (`127.0.0.1`) and nowhere else, and it never terminates TLS.
 To open it from a laptop or another machine, forward a port to that loopback address over SSH.
 When the two machines aren't on one network, reach the daemon host's SSH port through a VPN such as
-Tailscale. The forward carries the page and everything it connects to, and the daemon needs no extra
-configuration for it. Build the web app first (`moon run :build`): the daemon serves whatever was
-built last, and answers that it isn't built until then.
+Tailscale. The forward carries the page and its API, and the daemon needs no extra configuration
+for it. Build the web app first (`moon run :build`): the daemon serves whatever was built last, and
+answers that it isn't built until then.
 
 `web.listen = "lan"` is not supported by this daemon: it refuses to start with it.
 [docs/lan.md](lan.md) describes the TypeScript daemon's LAN listener, which this daemon doesn't
@@ -51,8 +51,8 @@ Each part matters:
 An SSH forward carries raw TCP, so the daemon sees no forwarding header, and the connection arrives
 at its loopback from `sshd` on the daemon host. Under the default `web.pairing = "auto"` and with no
 external origin (setting one makes every browser pair), a browser on the forward counts as this
-machine's own and isn't asked to pair. The
-SSH login is then what stands between the network and your agents.
+machine's own and isn't asked to pair. The SSH login is then what stands between the network and
+your agents.
 
 Set `web.pairing = "always"` (or `BAZHEN_PAIRING=always`) on the daemon host when:
 
