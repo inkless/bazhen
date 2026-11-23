@@ -464,9 +464,11 @@ fn a_closing_holder_binds_no_socket_again_though_told_to() {
 }
 
 /// A child that leaves a job behind in a group of its own, which ignores `SIGHUP` and writes its
-/// pid to the file named by `$0`, then exits.
-const LEAVES_A_STRAGGLER: &str =
-    r#"set -m; (trap '' HUP; exec sh -c 'echo $$ > "$1"; exec sleep 30' sh "$0") & exit 0"#;
+/// pid to the file named by `$0`, then exits. The job runs until that file is gone, or for 30 s,
+/// so a test ends what it left by letting its `Home` go rather than by signalling a pid that may
+/// be another process's by then.
+const LEAVES_A_STRAGGLER: &str = r#"set -m; (trap '' HUP; exec sh -c 'echo $$ > "$1"; i=0
+    while [ -e "$1" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done' sh "$0") & exit 0"#;
 
 /// The straggler's pid, once it has written it.
 fn straggler(path: &Path) -> Result<Pid> {
@@ -527,14 +529,6 @@ pub(super) fn exited_in(socket: &Path, generation: Option<u64>) -> Result<HelloR
     Client::connect(socket)?.hello(false)
 }
 
-/// Kills a straggler a test left, if it is still in the session the test's child led: a pid that
-/// has left it may already be another process's.
-fn kill_straggler(straggler: Pid, child: Pid) {
-    if rustix::process::getsid(Some(straggler)).is_ok_and(|sid| sid == child) {
-        let _ = bazhen_test_signal::signal(straggler.as_raw_pid(), Signal::KILL);
-    }
-}
-
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
 fn a_close_ends_what_the_child_left_running_before_the_holder_exits() {
@@ -546,14 +540,12 @@ fn a_close_ends_what_the_child_left_running_before_the_holder_exits() {
     let (mut holder, socket) = serving(&home, &argv).unwrap();
     let left = straggler(&file).unwrap();
     let mut client = Client::connect(&socket).unwrap();
-    let hello = client.hello(false).unwrap();
-    let child = pid(hello.child_pid.get()).unwrap();
+    client.hello(false).unwrap();
     exited_hello(&socket).unwrap();
     assert!(!gone(left));
     client.send(&Request::Close { id: RequestId(1) }).unwrap();
     let (code, _) = holder.exit().unwrap();
     let ended = gone(left);
-    kill_straggler(left, child);
     assert_eq!(code, Some(0));
     assert!(
         ended,

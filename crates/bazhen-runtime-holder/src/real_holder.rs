@@ -198,9 +198,16 @@ async fn reaped(runtime: &HolderRuntime, terminal: &HolderRef) {
     panic!("terminal {} never went", terminal.terminal_id);
 }
 
+/// Kills `terminal`'s holder once it is pinned and checked to be still that holder, by its name
+/// and start time: the runtime's reaper, not this test, reaps it, so its pid may be reused.
 fn kill_holder(terminal: &HolderRef) {
-    let pid = i64::try_from(terminal.locator.holder_pid.get()).unwrap();
-    bazhen_test_signal::signal(pid, bazhen_test_signal::Signal::KILL).unwrap();
+    let holder = terminal.holder().unwrap();
+    let sent = bazhen_test_signal::signal_if(
+        holder.pid.as_raw_pid(),
+        bazhen_test_signal::Signal::KILL,
+        || System.runs(holder),
+    );
+    assert_eq!(sent, Ok(true));
 }
 
 #[test]
