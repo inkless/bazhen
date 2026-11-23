@@ -707,6 +707,61 @@ export function attributeFailures(
 // here is one a review has read.
 const MACRO_MODULES: Record<string, string> = {};
 
+/** A macro of another crate whose expansion a review read: the crates read, at their versions. */
+export interface ForeignMacro {
+  read: Record<string, string>;
+  reason: string;
+}
+
+// The macros of other crates the decoder rule trusts to write no impl, by path, each held to the
+// versions of the crates whose source was read. Any other macro may write an impl of a trait for a
+// type of ours that wins a call the rule would clear, so it takes every type to answer any name. A
+// version Cargo.lock moves off fails until the expansion is read again at the new one.
+const FOREIGN_MACROS: Record<string, ForeignMacro> = {
+  "tracing::debug": {
+    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    reason:
+      "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
+      "identify_callsite!): expansion writes no impl",
+  },
+  "tracing::error": {
+    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    reason:
+      "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
+      "identify_callsite!): expansion writes no impl",
+  },
+  "tracing::info": {
+    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    reason:
+      "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
+      "identify_callsite!): expansion writes no impl",
+  },
+  "tracing::warn": {
+    read: { tracing: "0.1.44", "tracing-core": "0.1.36" },
+    reason:
+      "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
+      "identify_callsite!): expansion writes no impl",
+  },
+  "tokio::select": {
+    read: { tokio: "1.54.1", "tokio-macros": "2.7.2" },
+    reason:
+      "read tokio@1.54.1 src/macros/select.rs and tokio-macros@2.7.2 src/select.rs (an enum " +
+      "and a type alias): expansion writes no impl",
+  },
+  "serde_json::json": {
+    read: { serde_json: "1.0.154" },
+    reason:
+      "read serde_json@1.0.154 src/macros.rs (json!, json_internal!): expansion writes no impl",
+  },
+  "clap::value_parser": {
+    read: { clap: "4.6.7", clap_builder: "4.6.7" },
+    reason:
+      "read clap@4.6.7 src/lib.rs (pub use clap_builder::*) and clap_builder@4.6.7 " +
+      "src/builder/value_parser.rs (value_parser!, a block of a use and a call): expansion " +
+      "writes no impl",
+  },
+};
+
 /** Why a file outside MACRO_MODULES may not define a macro. */
 export function macroFailures(
   file: string,
@@ -1711,6 +1766,8 @@ interface Through {
   traits: Map<Item, Set<string> | undefined>;
   /** The names an impl of a trait for every type may answer; `undefined`: any. */
   blanket: Set<string> | undefined;
+  /** The types an attribute the scan can't read is on, which may answer any name or rewrite a field. */
+  opaque: Set<Item>;
 }
 
 const unionNames = (a: Set<string> | undefined, b: Set<string> | undefined) =>
@@ -1819,6 +1876,7 @@ function fileScope(table: ModuleTable, carriers: Carriers, file: string, through
   let opaque: boolean | undefined;
   const reaches = (items: Item[], body: string, from: number, to: number) => {
     if (through?.active !== true || /\buse\b/.test(body) || inMacro(body, from)) return true;
+    if (items.some((i) => through.opaque.has(i))) return true;
     opaque ??= foreignTraits(table, file);
     if (opaque) return true;
     const next = new RegExp(String.raw`^\s*\.\s*(?:r#)?(\w+)(${TURBOFISH}\s*\()?`).exec(
@@ -2358,6 +2416,8 @@ function definedFunctions(source: string): string[] {
 
 interface ImplParts {
   params: Set<string>;
+  /** Whether a type parameter carries a bound or the impl has a `where` clause. */
+  bounded: boolean;
   trait: string | undefined;
   type: string;
 }
@@ -2369,6 +2429,7 @@ interface ImplParts {
 function implParts(head: string): ImplParts {
   let rest = head.replace(/^[\s\S]*?\bimpl\b\s*/, "");
   const params = new Set<string>();
+  let bounded = false;
   if (rest.startsWith("<")) {
     let end = 0;
     for (let depth = 0; end < rest.length; end++) {
@@ -2378,6 +2439,7 @@ function implParts(head: string): ImplParts {
     for (const part of topLevelParts(rest.slice(1, end))) {
       const name = /^(?:r#)?(\w+)/.exec(part)?.[1];
       if (name !== undefined && name !== "const") params.add(name);
+      bounded ||= /^(?:r#)?\w+\s*:/.test(part);
     }
     rest = rest.slice(end + 1);
   }
@@ -2399,6 +2461,7 @@ function implParts(head: string): ImplParts {
   const trait = forAt === -1 ? undefined : rest.slice(0, forAt).trim();
   return {
     params,
+    bounded: bounded || whereAt < rest.length,
     trait:
       trait === undefined
         ? undefined
@@ -2464,11 +2527,14 @@ function cfgModule(module: Module | undefined): boolean {
 
 /**
  * Whether an inherent impl's methods are a type's under every build and for every one of its
- * instances: no `cfg` may leave the impl or its module out, and each type argument of its type is
- * one of the impl's own parameters (`impl Runtime<Fast>` is not every `Runtime`'s).
+ * instances: no `cfg` may leave the impl or its module out, each type argument of its type is one
+ * of the impl's own parameters (`impl Runtime<Fast>` is not every `Runtime`'s), and none of those
+ * carries a bound (`impl<O: Output> Holder<O>` is only the `Holder`s whose `O` meets it), which
+ * the scan can't tell of a field's type.
  */
 function everyInstance(code: string, at: number, modules: Module[], parts: ImplParts): boolean {
   if (CFG_ATTRIBUTE.test(attributesBefore(code, at)) || modules.some(cfgModule)) return false;
+  if (parts.bounded) return false;
   const args = /<([\s\S]*)>\s*$/.exec(parts.type)?.[1];
   return args === undefined || topLevelParts(args).every((a) => parts.params.has(a.trim()));
 }
@@ -2480,27 +2546,213 @@ function cfgFunction(code: string, at: number): boolean {
   return CFG_ATTRIBUTE.test(attributesBefore(code, at - qualifiers));
 }
 
-// A macro called where an item may be, outside a function body, may write an impl the scan
-// can't read; this one writes none.
-const ITEM_MACROS = new Set(["thread_local"]);
+// The macros of std, none of which writes an impl. `include!` isn't one: it brings in code the scan
+// doesn't read.
+const STD_MACROS = new Set(
+  (
+    "addr_of addr_of_mut assert assert_eq assert_ne cfg column compile_error concat dbg " +
+    "debug_assert debug_assert_eq debug_assert_ne env eprint eprintln file format format_args " +
+    "include_bytes include_str line matches module_path option_env panic pin print println " +
+    "stringify thread_local todo unimplemented unreachable vec write writeln"
+  ).split(" "),
+);
+
+// The macros of STD_MACROS a file names only by a path or a `use`: the rest are in its prelude.
+const UNPRELUDED_MACROS = new Set(["addr_of", "addr_of_mut", "pin"]);
+
+// The attributes the compiler reads itself, which write no item.
+const BUILTIN_ATTRIBUTES = new Set(
+  (
+    "allow cfg cold deny deprecated doc expect forbid ignore inline must_use non_exhaustive repr " +
+    "should_panic test track_caller warn"
+  ).split(" "),
+);
+
+// The derives of std. Each writes an impl, for the type derived only, of a trait whose methods are
+// all in TRAIT_METHODS.
+const STD_DERIVES = new Set("Clone Copy Debug Default Eq Hash Ord PartialEq PartialOrd".split(" "));
+
+// The helper attributes of the derives the workspace uses (serde's, thiserror's, Default's), which
+// the derive reads and the compiler drops.
+const DERIVE_HELPERS = new Set("backtrace default error from serde source".split(" "));
+
+const MACRO_CALL = /((?:(?:r#)?\w+\s*::\s*)*(?:r#)?\w+)\s*!\s*[({[]/g;
+
+// Words that may come right before a `!` that negates, as `if !(x)` does.
+const KEYWORDS = new Set(
+  "as break else if in let loop match move mut return unsafe where while yield".split(" "),
+);
+
+/** Every list's names, or `undefined` when any one is. */
+const allOf = (lists: (string[] | undefined)[]) =>
+  lists.some((l) => l === undefined) ? undefined : lists.flatMap((l) => l ?? []);
 
 /**
- * Whether `code` may hold an impl the scan can't read, for a type it can't tell: an impl written
- * with a macro's `$` fragments, a `macro_rules!` whose body writes one, or a macro called where an
- * item may be, outside a function body.
+ * Where a macro or attribute written as `path` in `module` comes from, as each path outside the
+ * workspace it may name (`std::format`, `tracing::warn`) or `prelude::<name>` for a bare name no
+ * `use` binds where `prelude` allows one. `undefined` when it may be the workspace's own, or the
+ * scan can't tell: a glob in a module on the way may bring the name in, a `use` binds a crate's
+ * name to another path, or a re-export goes round.
  */
-function macroImpls(code: string, bodies: { start: number; end: number }[]): boolean {
-  if ([...code.matchAll(IMPL_BLOCK)].some((m) => m[0].includes("$"))) return true;
-  for (const m of code.matchAll(/\bmacro_rules\s*!/g)) {
-    if (/\bimpl\b/.test(code.slice(m.index, itemEnd(code, m.index)))) return true;
+function macroOrigins(
+  table: ModuleTable,
+  module: Module,
+  path: string[],
+  prelude: boolean,
+  depth = 0,
+): string[] | undefined {
+  const segments = path.map(rawless);
+  const [first = "", ...rest] = segments;
+  const last = rest.at(-1) ?? first;
+  const follow = (m: Module, p: string[], bare: boolean) =>
+    depth > 16 ? undefined : macroOrigins(table, m, p, bare, depth + 1);
+  if (rest.length === 0) {
+    if (module.globs.length > 0) return undefined;
+    const uses = module.uses.get(first) ?? [];
+    if (uses.length === 0) return prelude ? [`prelude::${first}`] : undefined;
+    return allOf(uses.map((u) => follow(module, u.value.path, false)));
   }
-  return [...code.matchAll(/\b(?:r#)?(\w+)\s*!\s*[({[]/g)].some(
-    (m) =>
-      !ITEM_MACROS.has(m[1] ?? "") &&
-      !inside(m.index, bodies) &&
-      /(?:^|[;{}\]])\s*(?:(?:\$?(?:r#)?\w+)?\s*::\s*(?:(?:r#)?\w+\s*::\s*)*)?$/.test(
-        code.slice(Math.max(0, m.index - 200), m.index),
-      ),
+  if (!["crate", "self", "super"].includes(first)) {
+    if (module.globs.length > 0) return undefined;
+    const uses = module.uses.get(first) ?? [];
+    if (uses.some((u) => u.value.path.filter((p) => p !== "").join("::") !== first)) {
+      return undefined;
+    }
+  }
+  const holder = table.resolve(module, segments.slice(0, -1));
+  if (holder.items.length > 0 || holder.unresolved.size > 0) return undefined;
+  if (holder.modules.length === 0) return [segments.filter((p) => p !== "").join("::")];
+  return allOf(holder.modules.map((m) => follow(m, [last], false)));
+}
+
+/** Whether every module at `at` in `file` takes `path` to a name `known` accepts. */
+function knownIn(
+  table: ModuleTable,
+  file: string,
+  at: number,
+  path: string[],
+  known: (origin: string) => boolean,
+): boolean {
+  return table
+    .modulesAt(file, at)
+    .every((m) => macroOrigins(table, m, path, true)?.every(known) === true);
+}
+
+/** Each attribute written in `text`, outer or inner, as the path it names and its arguments. */
+function attributesIn(text: string): { path: string[]; args: string; at: number }[] {
+  const out: { path: string[]; args: string; at: number }[] = [];
+  for (const m of text.matchAll(/#\s*!?\s*\[/g)) {
+    const open = m.index + m[0].length - 1;
+    out.push({ ...attributeParts(text.slice(open + 1, matchingBracket(text, open))), at: m.index });
+  }
+  return out;
+}
+
+/** An attribute's body, `path(args)` or `path = value`, split; a path it can't read is `[]`. */
+function attributeParts(body: string): { path: string[]; args: string } {
+  const head = /^\s*((?:r#)?\w+(?:\s*::\s*(?:r#)?\w+)*)\s*/.exec(body);
+  if (head === null) return { path: [], args: "" };
+  const path = (head[1] ?? "").split("::").map((p) => rawless(p.trim()));
+  const rest = body.slice(head[0].length);
+  return { path, args: rest.startsWith("(") ? rest.slice(1, rest.lastIndexOf(")")) : "" };
+}
+
+/**
+ * Whether an attribute `path(args)`, in a module at `at` in `file`, is one `name` accepts: it is
+ * the compiler's own, or a `cfg_attr` adding only such, read by a name no `use` rebinds.
+ */
+function knownAttribute(
+  table: ModuleTable,
+  file: string,
+  at: number,
+  attribute: { path: string[]; args: string },
+  name: (n: string, args: string) => boolean,
+): boolean {
+  const { path, args } = attribute;
+  if (path.length === 0) return false;
+  if (path.length === 1 && path[0] === "cfg_attr") {
+    return topLevelParts(args)
+      .slice(1)
+      .every((a) => knownAttribute(table, file, at, attributeParts(a), name));
+  }
+  return knownIn(
+    table,
+    file,
+    at,
+    path,
+    (o) => o.startsWith("prelude::") && name(o.slice("prelude::".length), args),
+  );
+}
+
+/** Whether a derive by `path` is one of std's, in a module at `at` in `file`. */
+function stdDerive(table: ModuleTable, file: string, at: number, path: string[]): boolean {
+  return knownIn(table, file, at, path, (o) => {
+    const [from = "", ...rest] = o.split("::");
+    return STD_DERIVES.has(rest.at(-1) ?? "") && /^(?:prelude|std|core)$/.test(from);
+  });
+}
+
+/**
+ * Whether `code`, the code of `file`, may write an impl the scan can't read, for a type it can't
+ * tell: by a macro, anywhere, that is neither std's nor one of `trusted`, or by an attribute,
+ * anywhere, that is neither the compiler's own nor a helper of a derive. A macro's expansion may
+ * hold a block, and an impl in a block holds for the whole crate. A call of one of the
+ * workspace's own macros, `rules`, is never known, since its body may assemble an impl from the
+ * tokens it is handed. Each path a macro of another crate is called by goes into `called`.
+ */
+function unreadImpls(
+  table: ModuleTable,
+  file: string,
+  code: string,
+  trusted: Set<string>,
+  rules: Set<string>,
+  called: Set<string>,
+): boolean {
+  let unread = false;
+  const known = (origin: string) => {
+    const [from = "", ...rest] = origin.split("::");
+    const name = rest.at(-1) ?? "";
+    if (from === "prelude") {
+      return STD_MACROS.has(name) && !UNPRELUDED_MACROS.has(name) && !rules.has(name);
+    }
+    if (/^(?:std|core|alloc)$/.test(from)) return STD_MACROS.has(name);
+    called.add(origin);
+    return trusted.has(origin);
+  };
+  for (const m of code.matchAll(MACRO_CALL)) {
+    const path = (m[1] ?? "").split("::").map((p) => p.trim());
+    if (path.length === 1 && KEYWORDS.has(path[0] ?? "")) continue;
+    if (!knownIn(table, file, m.index, path, known)) unread = true;
+  }
+  for (const attribute of attributesIn(code)) {
+    const ok = knownAttribute(
+      table,
+      file,
+      attribute.at,
+      attribute,
+      (n) => BUILTIN_ATTRIBUTES.has(n) || DERIVE_HELPERS.has(n) || n === "derive",
+    );
+    if (!ok) unread = true;
+  }
+  return unread;
+}
+
+/**
+ * Whether a type, `item`, carries an attribute the scan can't read: one other than the compiler's
+ * own, or a derive other than std's, which writes impls of traits the scan doesn't read, Deref
+ * among them; or an attribute macro, which may rewrite the type whole.
+ */
+function opaqueItem(table: ModuleTable, code: string, item: Item): boolean {
+  const qualifiers = FN_QUALIFIERS.exec(code.slice(Math.max(0, item.at - 200), item.at));
+  const attributes = attributesIn(attributesBefore(code, item.at - (qualifiers?.[0].length ?? 0)));
+  return !attributes.every((a) =>
+    knownAttribute(table, item.file, item.at, a, (n, args) =>
+      n === "derive"
+        ? topLevelParts(args).every((d) =>
+            stdDerive(table, item.file, item.at, attributeParts(d).path),
+          )
+        : BUILTIN_ATTRIBUTES.has(n),
+    ),
   );
 }
 
@@ -2512,12 +2764,24 @@ function throughOf(
   table: ModuleTable,
   codes: Map<string, string>,
   scopes: Map<string, Scope>,
-): Pick<Through, "methods" | "traits" | "blanket"> {
-  const through: Pick<Through, "methods" | "traits" | "blanket"> = {
+  trusted: Set<string>,
+  called: Set<string>,
+): Pick<Through, "methods" | "traits" | "blanket" | "opaque"> {
+  const through: Pick<Through, "methods" | "traits" | "blanket" | "opaque"> = {
     methods: new Map(),
     traits: new Map(),
     blanket: new Set(),
+    opaque: new Set(
+      table.items.filter(
+        (i) => i.kind === "struct" && opaqueItem(table, codes.get(i.file) ?? "", i),
+      ),
+    ),
   };
+  const rules = new Set(
+    [...codes.values()].flatMap((code) =>
+      [...code.matchAll(/\b(?:macro_rules\s*!|macro)\s+(?:r#)?(\w+)/g)].map((m) => m[1] ?? ""),
+    ),
+  );
   const declared = new Map<string, Set<string> | undefined>();
   for (const t of table.items.filter((i) => i.kind === "trait")) {
     const name = rawless(t.name);
@@ -2555,7 +2819,7 @@ function throughOf(
     const resolved = (named: Named, at: number) => resolvedIn(file, named, at);
     const alias = (at: number) => aliasIn(file, at, new Set());
     const { blocks, fns, bodies } = rustFunctions(code);
-    if (macroImpls(code, bodies)) through.blanket = undefined;
+    if (unreadImpls(table, file, code, trusted, rules, called)) through.blanket = undefined;
     for (const block of blocks) {
       const parts = implParts(block.head);
       const own = fns.filter((f) => f.block === block && !inside(f.m.index, bodies));
@@ -2602,6 +2866,59 @@ function throughOf(
   return through;
 }
 
+/** Each package's locked versions, by name, as Cargo.lock records them. */
+function lockedVersions(lock: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const block of lock.split(/^\[\[package\]\]$/m).slice(1)) {
+    const name = /^name = "([^"]+)"$/m.exec(block)?.[1];
+    const version = /^version = "([^"]+)"$/m.exec(block)?.[1];
+    if (name !== undefined && version !== undefined)
+      out.set(name, [...(out.get(name) ?? []), version]);
+  }
+  return out;
+}
+
+/**
+ * The paths of `foreign` whose every crate read is the one version Cargo.lock locks, and whose
+ * reason says it read each; why each other isn't goes into `out`.
+ */
+function pinnedMacros(
+  paths: string[],
+  read: (path: string) => string,
+  foreign: Record<string, ForeignMacro>,
+  out: string[],
+): Set<string> {
+  const lock = paths.includes("Cargo.lock") ? lockedVersions(read("Cargo.lock")) : new Map();
+  const pinned = new Set<string>();
+  for (const [path, { read: crates, reason }] of Object.entries(foreign)) {
+    let held = Object.keys(crates).length > 0;
+    for (const [name, version] of Object.entries(crates)) {
+      const locked: string[] = lock.get(name) ?? [];
+      if (locked.length !== 1 || locked[0] !== version) {
+        held = false;
+        out.push(
+          `scripts/check-standards.ts: FOREIGN_MACROS read ${path} in ${name} ${version}, but ` +
+            `Cargo.lock locks ${locked.length === 0 ? "no " : ""}${name}` +
+            `${locked.length === 0 ? "" : ` ${locked.join(", ")}`}: read its expansion at the ` +
+            "locked version again, and pin that version if it still writes no impl.",
+        );
+      }
+      if (
+        !reason.includes(`${name}@${version} `) ||
+        !/^read .+: expansion writes no impl$/.test(reason)
+      ) {
+        held = false;
+        out.push(
+          `scripts/check-standards.ts: FOREIGN_MACROS's reason for ${path} doesn't say it read ` +
+            `${name}@${version}: write it as \`read <crate>@<version> <file>: expansion writes no impl\`.`,
+        );
+      }
+    }
+    if (held) pinned.add(path);
+  }
+  return pinned;
+}
+
 /** Each decoder of `takers`, by file, as its key: `file::Type::fn`. */
 const keysOf = (takers: Map<string, string[]>) =>
   new Set([...takers].flatMap(([file, fns]) => fns.map((fn) => `${file}::${fn}`)));
@@ -2617,8 +2934,11 @@ export function decoderFailures(
   fuzzed: Record<string, string>,
   notDecoders: Record<string, string>,
   publicByteFields: Record<string, string> = {},
+  foreignMacros: Record<string, ForeignMacro> = {},
 ): string[] {
   const out: string[] = [];
+  const trusted = pinnedMacros(paths, read, foreignMacros, out);
+  const called = new Set<string>();
   const found = new Set<string>();
   const publicFound = new Set<string>();
   const defined = new Set<string>();
@@ -2644,9 +2964,10 @@ export function decoderFailures(
     methods: new Map(),
     traits: new Map(),
     blanket: new Set(),
+    opaque: new Set(),
   };
   for (const file of product) scopes.set(file, fileScope(table, carriers, file, through));
-  Object.assign(through, throughOf(table, codes, scopes));
+  Object.assign(through, throughOf(table, codes, scopes, trusted, called));
   // A use of a field may reach its bytes by calling a decoder, which the scan is finding: start
   // from the decoders with no view read, the most there can be, and read views against the last
   // pass's until a pass finds no fewer. A cycle of calls between types so stays a decoder.
@@ -2746,6 +3067,11 @@ export function decoderFailures(
         );
       }
     }
+  }
+  for (const key of Object.keys(foreignMacros).filter((k) => !called.has(k))) {
+    out.push(
+      `scripts/check-standards.ts: FOREIGN_MACROS lists ${key}, which no product code calls.`,
+    );
   }
   for (const [key, reason] of Object.entries(publicByteFields)) {
     if (!publicFound.has(key)) {
@@ -4049,6 +4375,7 @@ export function rustFailures(
     fuzzed?: Record<string, string>;
     notDecoders?: Record<string, string>;
     publicByteFields?: Record<string, string>;
+    foreignMacros?: Record<string, ForeignMacro>;
     heavyAllowed?: Record<string, string>;
   } = {},
 ): string[] {
@@ -4147,6 +4474,7 @@ export function rustFailures(
       options.fuzzed ?? {},
       options.notDecoders ?? {},
       options.publicByteFields ?? {},
+      options.foreignMacros ?? {},
     ),
   );
   return out;
@@ -4221,6 +4549,7 @@ function checkRust(): void {
       macroModules: MACRO_MODULES,
       fuzzed: FUZZED_DECODERS,
       notDecoders: NOT_DECODERS,
+      foreignMacros: FOREIGN_MACROS,
       publicByteFields: PUBLIC_BYTE_FIELDS,
       heavyAllowed: HEAVY_ALLOWED,
     }),

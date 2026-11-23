@@ -603,6 +603,25 @@ What differs:
     so the reviewer checks the value is of the listed type; and a method that only measures or
     clears a byte field (`self.buf.len()`, `self.buf.clear()`) uses it, so it counts as a decoder
     and needs a `NOT_DECODERS` entry with its reason. That is expected, not noise.
+  - **A call on a field of a carrier reaches its bytes unless the rule can name the method rustc
+    calls.** It clears `self.runtime.size()` only when every struct the field may be (behind at
+    most `&`, std's `Arc`, `Rc` or `Box`) has an inherent `size` whose signature carries no bytes,
+    under every cfg and for every instance. An impl with a bound or a `where` clause
+    (`impl<O: Output> Holder<O>`), or one for a single instance (`impl Runtime<Fast>`), doesn't
+    count. Nothing else may answer the call either: no `Deref`, no trait impl for the type or for
+    every type that may answer that name, no trait a `use` in the file may bring in from another
+    crate, and no attribute on the type but
+    the compiler's own and std's derives, so a serde or thiserror derive counts against it. Any
+    macro, anywhere in the workspace, that is neither std's nor listed in `FOREIGN_MACROS` may
+    write an impl the rule can't read, and so may an attribute that is neither the compiler's own
+    nor a derive's helper. A call of one of the workspace's own macros counts too, since its body
+    may assemble an impl from the tokens it is handed. Any of these makes every such call reach.
+    `FOREIGN_MACROS` holds each macro to the versions of the crates whose source a review read,
+    and fails when Cargo.lock locks another, until someone reads the expansion again. What the
+    rule still takes on trust: a listed macro by its path, a derive's helper (`serde`, `error`,
+    `from`, `source`, `backtrace`, `default`) by its name, and a derive to write impls only for
+    the type it is on. And it reads a struct as written when it decides whether the struct carries
+    bytes at all, so it can't see an attribute macro adding a byte field.
   - The targets live in `crates/<name>/fuzz/fuzz_targets/<target>.rs` (cargo-fuzz's layout),
     with seed inputs in `fuzz/seeds/<target>/`. The fuzz crate is a workspace of its own, its
     dependencies pinned exactly. A target asserts what must hold of every input, not only
