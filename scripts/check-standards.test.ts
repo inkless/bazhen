@@ -4713,6 +4713,14 @@ const flagged = (source: string) =>
     (f) => f.split(": ")[0]?.split(":")[1] ?? f,
   );
 
+/** The lines to mark of a test that makes `client` as `type`, which `use` brings in, then runs
+ * `body`; `bind!` is a macro that binds its argument as a holder's client. */
+const rebinding = (type: string, use: string, body: string) =>
+  flagged(
+    `${use}\nmacro_rules! bind { ($n:ident) => { let $n = connect_holder(); }; }\n` +
+      `#[test]\nfn a() { let client = ${type}::new(0); ${body} }`,
+  );
+
 const unmarked = (sources: Record<string, string>) =>
   unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
     (f) => f.split(": ")[0],
@@ -4910,6 +4918,50 @@ describe("tests that signal processes they didn't start", () => {
               `impl ${impl} { fn end(&self) { self.holder.close(); } }\n#[test]\nfn a() { b.end(); }`,
           );
         expect([source("B"), source("C"), source("A")]).toEqual([["5"], ["5"], []]);
+      }
+    });
+
+    it("must be marked when a struct pattern binds its name again", () => {
+      for (const { type, use } of CLOSERS) {
+        expect(
+          [
+            "let Conn { client, .. } = conn(); client.close();",
+            "for Conn { client } in conns { client.close(); }",
+            "let Conn { other, .. } = conn(); client.close();",
+          ].map((body) => rebinding(type, use, body)),
+        ).toEqual([["3"], ["3"], []]);
+      }
+    });
+
+    it("must be marked when a struct pattern's field binds its name again", () => {
+      for (const { type, use } of CLOSERS) {
+        expect(
+          [
+            "let Conn { holder: client } = conn(); client.close();",
+            "let Conn { holder: other } = conn(); client.close();",
+          ].map((body) => rebinding(type, use, body)),
+        ).toEqual([["3"], []]);
+      }
+    });
+
+    it("must be marked when an if let's struct pattern binds its name again", () => {
+      for (const { type, use } of CLOSERS) {
+        expect(
+          [
+            "if let Conn { client } = conn() { client.close(); }",
+            "if let Conn { other } = conn() { client.close(); }",
+          ].map((body) => rebinding(type, use, body)),
+        ).toEqual([["3"], []]);
+      }
+    });
+
+    it("must be marked when a macro's argument may bind its name again", () => {
+      for (const { type, use } of CLOSERS) {
+        expect(
+          ["bind!(client); client.close();", "bind!(other); client.close();"].map((body) =>
+            rebinding(type, use, body),
+          ),
+        ).toEqual([["3"], []]);
       }
     });
 

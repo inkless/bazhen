@@ -5186,15 +5186,88 @@ function returnsHarmless(value: string, index: number | undefined, code: string)
   return part !== undefined && harmlessType(part, code);
 }
 
+/** Where a `let`'s pattern ends, tried from the character before: at a lone `=`, or a `;`. */
+const LET_PATTERN_END = /^[\s\S](?:=(?![=>])|;)/;
+
+/**
+ * Where in `text` the pattern that starts it ends: at the first `stop` outside any brackets, or
+ * at a bracket closing one opened before it. `stop` is tried on each character with the one before
+ * it, a space at the start, so it can tell where a word starts.
+ */
+function patternEnd(text: string, stop: RegExp): number {
+  for (let i = 0, depth = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if (depth === 0 && stop.test((text[i - 1] ?? " ") + text.slice(i, i + 4))) return i;
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c) && --depth < 0) return i;
+  }
+  return text.length;
+}
+
+/**
+ * The spans of `text`, a function from its `fn` with its body from `body` on, where a pattern may
+ * bind a name, or a macro may, besides a `let`'s, which `bindingsOf` reads: its signature; each
+ * `for`'s pattern, to its `in`; a closure's parameters; each match arm's pattern and guard, to its
+ * `=>`; and a macro call's arguments.
+ */
+function patternRegions(text: string, body: number): [number, number][] {
+  const regions: [number, number][] = [[0, body]];
+  for (const m of text.matchAll(/\bfor\s+/g)) {
+    const at = m.index + m[0].length;
+    regions.push([at, at + patternEnd(text.slice(at), /^(?:\Win\b|[\s\S];)/)]);
+  }
+  for (const m of text.matchAll(/\|([^|]+)\|/g)) {
+    regions.push([m.index, m.index + m[0].length]);
+  }
+  for (const m of text.matchAll(/\b(?:r#)?\w+\s*!\s*[([{]/g)) {
+    const open = m.index + m[0].length - 1;
+    regions.push([open, matchingBracket(text, open)]);
+  }
+  for (const m of text.matchAll(/\bmatch\b/g)) {
+    const scrutinee = m.index + m[0].length;
+    const open = scrutinee + patternEnd(text.slice(scrutinee), /^[\s\S]\{/);
+    if (text[open] !== "{") continue;
+    regions.push(...armPatterns(text, open + 1, matchingBracket(text, open)));
+  }
+  return regions;
+}
+
+/**
+ * The spans of a match block's arms, from `start` to `end`, that hold each arm's pattern and guard:
+ * from the block's start, or the end of the arm before, to the arm's `=>`.
+ */
+function armPatterns(text: string, start: number, end: number): [number, number][] {
+  const arms: [number, number][] = [];
+  let from: number | undefined = start;
+  let blockBody = false;
+  for (let i = start, depth = 0; i < end; i++) {
+    const c = text[i] ?? "";
+    if (depth === 0 && from !== undefined && text.startsWith("=>", i)) {
+      arms.push([from, i]);
+      from = undefined;
+      i++;
+      blockBody = /^\s*\{/.test(text.slice(i + 1));
+    } else if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) {
+      depth--;
+      if (depth === 0 && from === undefined && blockBody && c === "}") from = i + 1;
+    } else if (depth === 0 && from === undefined && c === ",") {
+      from = i + 1;
+    }
+  }
+  return arms;
+}
+
 /**
  * Where `text`, a function from its `fn`, binds `name`, each with whether that binding is surely
  * one of HARMLESS_CLOSERS: `name: T`, as a parameter, a `let` or a closure's; `let name = T::new(`
  * or that in an `Arc`; a tuple `let` whose part for `name` is that; either from a call whose
- * function is declared to return one there (`returnsHarmless`). Every other place it may be
- * bound counts, unsure: another `let` or `for` pattern, a closure's or a match arm's, or a struct
- * literal's or a pattern's field named for it.
+ * function is declared to return one there (`returnsHarmless`). Any other `name:`, and every
+ * mention of the name not followed by a `.` or a `(` where a pattern may bind it
+ * (`patternRegions`), counts as a binding, unsure. `text` is the function from its `fn`, its body
+ * from `body` on.
  */
-function bindingsOf(name: string, text: string, code: string): Map<number, boolean> {
+function bindingsOf(name: string, text: string, body: number, code: string): Map<number, boolean> {
   const sites = new Map<number, boolean>();
   const word = `(?<![\\w.]\\s*)(?:r#)?${name}\\b`;
   for (const m of text.matchAll(new RegExp(`${word}\\s*:(?!:)`, "g"))) {
@@ -5203,7 +5276,7 @@ function bindingsOf(name: string, text: string, code: string): Map<number, boole
   }
   for (const m of text.matchAll(/\blet\s+/g)) {
     const rest = text.slice(m.index + m[0].length);
-    const pattern = toTopLevelEnd(rest);
+    const pattern = rest.slice(0, patternEnd(rest, LET_PATTERN_END));
     const at = m.index + m[0].length;
     const single = new RegExp(`^(?:mut\\s+)?(?:r#)?${name}\\s*$`).exec(pattern);
     if (single !== null) {
@@ -5239,14 +5312,12 @@ function bindingsOf(name: string, text: string, code: string): Map<number, boole
       sites.set(offset, sure);
     }
   }
-  const unsure = [/\bfor\s+([^{;]*?)\s+in\b/g, /\|([^|]+)\|/g, /(?:^|[{},])([^{},;]*?)=>/g];
-  for (const pattern of unsure) {
-    for (const m of text.matchAll(pattern)) {
-      const group = m[1] ?? "";
-      const base = m.index + m[0].indexOf(group);
-      for (const found of group.matchAll(new RegExp(`${word}(?!\\s*[.(])`, "g"))) {
-        if (!sites.has(base + found.index)) sites.set(base + found.index, false);
-      }
+  // Every other mention of it where a pattern may bind it, not followed by a `.` or a `(`, is a
+  // binding the scan can't be sure of. Out of those places it is a use.
+  const mention = new RegExp(`${word}(?!\\s*[.(])`, "g");
+  for (const [start, end] of patternRegions(text, body)) {
+    for (const found of text.slice(start, end).matchAll(mention)) {
+      if (!sites.has(start + found.index)) sites.set(start + found.index, false);
     }
   }
   return sites;
@@ -5271,7 +5342,8 @@ export function withoutHarmlessCloses(code: string): string {
     if (f === undefined) return call;
     let harmless: boolean;
     if (self === undefined) {
-      const sites = [...bindingsOf(name, code.slice(f.m.index, f.close), code).values()];
+      const text = code.slice(f.m.index, f.close);
+      const sites = [...bindingsOf(name, text, f.open - f.m.index, code).values()];
       harmless = sites.length === 1 && sites[0] === true;
     } else {
       const type = f.block?.type;
