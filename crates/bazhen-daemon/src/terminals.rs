@@ -10,6 +10,7 @@ use bazhen_protocol::daemon::{Containment, RunningHolder, RuntimeHealthReport};
 use bazhen_protocol::ids::{AgentId, TerminalId};
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
+use bazhen_protocol::terminals::TerminalScreen;
 
 /// A future a runtime answers with, boxed so the trait is one a `dyn` can be.
 pub(crate) type Answer<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -69,6 +70,16 @@ pub(crate) enum TerminalError {
     /// Nothing answers for it, but what ran it may still run it.
     #[error("{0}")]
     Unconfirmed(String),
+    /// What runs it is there, but can't be reached just now: asking again may work.
+    #[error("{0}")]
+    Unreachable(String),
+    /// Its holder predates `what`, which was asked of it; restarting the terminal starts it on one
+    /// that has it.
+    #[error("its holder predates {what}")]
+    Predates { what: String },
+    /// Its screen can't be read just now, as when its holder has lost it.
+    #[error("its screen can't be read: {reason}")]
+    Unreadable { reason: String },
     /// Anything else: the runtime could not act just now.
     #[error("{0}")]
     Other(String),
@@ -170,6 +181,14 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
         text: &'a str,
         brackets: bool,
     ) -> Answer<'a, Result<(), TerminalError>>;
+
+    /// The screen shown as plain text, after the newest `history` rows of history, from reading
+    /// alone: it takes no writer's slot, and nothing reaches the terminal.
+    fn screen<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        history: u32,
+    ) -> Answer<'a, Result<TerminalScreen, TerminalError>>;
 
     /// The runtime's health, as `/v1/health` reports it.
     fn health(&self) -> Answer<'_, RuntimeHealthReport>;
@@ -284,6 +303,12 @@ pub(crate) mod fake {
         /// What each paste fails with, where it types nothing, as one into a shell whose input
         /// was typed ahead.
         pub(crate) pastes_refused: Option<TerminalError>,
+        /// The screen each terminal shows, as its reads answer it; an empty one where unset.
+        pub(crate) shown: BTreeMap<String, String>,
+        /// Each screen read asked for, in order: the terminal and the rows of history.
+        pub(crate) screens_read: Vec<(String, u32)>,
+        /// What each screen read fails with, where its terminal runs but the read can't be made.
+        pub(crate) screens_refused: Option<TerminalError>,
         /// Each read of the runtime's shells is held here as it reaches the runtime.
         pub(crate) hold_inventory: Option<Held>,
         /// Each read of what the terminals speak is held here as it reaches the runtime.
@@ -607,6 +632,33 @@ pub(crate) mod fake {
                 let id = terminal.terminal_id.as_str().to_owned();
                 state.pasted.push((id, text.to_owned(), brackets));
                 state.pastes_refused.clone().map_or(Ok(()), Err)
+            })
+        }
+
+        /// Read after its process has exited too, as a holder's screen is.
+        fn screen<'a>(
+            &'a self,
+            terminal: &'a Recorded,
+            history: u32,
+        ) -> Answer<'a, Result<TerminalScreen, TerminalError>> {
+            Box::pin(async move {
+                let mut state = self.state.lock().unwrap();
+                let id = terminal.terminal_id.as_str().to_owned();
+                state.screens_read.push((id.clone(), history));
+                match state.running.get(&id) {
+                    Some(running) if running.gone => {
+                        return Err(TerminalError::Gone("its holder is gone".to_owned()));
+                    }
+                    Some(_) => {}
+                    None => return Err(TerminalError::Stale("no such terminal".to_owned())),
+                }
+                if let Some(refused) = &state.screens_refused {
+                    return Err(refused.clone());
+                }
+                Ok(TerminalScreen {
+                    text: state.shown.get(&id).cloned().unwrap_or_default(),
+                    history: u64::from(history),
+                })
             })
         }
 

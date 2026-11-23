@@ -142,8 +142,12 @@ fn from_runtime(id: &str, cause: TerminalError) -> ShellError {
         TerminalError::Unconfirmed(_) => ShellError::ServerUnconfirmed(format!(
             "shell {id}'s terminal is no longer where it ran, but what ran it may still be running it; close it with force to record it closed anyway"
         )),
-        TerminalError::Other(detail) => ShellError::Unavailable(format!(
-            "could not reach the environment running shell {id}: {detail}"
+        // A screen read's own failures among them, which no command on a shell meets.
+        other @ (TerminalError::Other(_)
+        | TerminalError::Unreachable(_)
+        | TerminalError::Predates { .. }
+        | TerminalError::Unreadable { .. }) => ShellError::Unavailable(format!(
+            "could not reach the environment running shell {id}: {other}"
         )),
     }
 }

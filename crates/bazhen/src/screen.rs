@@ -1,7 +1,7 @@
 //! `terminals screen`: a terminal's screen as text, read through the daemon without its input.
 
 use bazhen_protocol::agents::StateSnapshot;
-use bazhen_protocol::terminals::TerminalScreen;
+use bazhen_protocol::terminals::{SCREEN_HISTORY_MAX, TerminalScreen};
 
 use crate::args::Parsed;
 use crate::call::{CALL, Daemon, Failed};
@@ -11,9 +11,6 @@ use crate::out::Out;
 use crate::target::{named, unknown};
 use crate::tasks::{Step, Stop, usage};
 use crate::{Exit, TERMINALS_USAGE};
-
-/// The most rows of history a read may ask for, as the daemon takes them.
-const HISTORY_MAX: u32 = 10_000;
 
 /// Prints the screen of the terminal the command line names, its history first if asked for.
 pub(crate) fn run(p: &Parsed, daemon: &Daemon, out: &mut Out) -> Result<Exit, Failed> {
@@ -54,9 +51,11 @@ fn verb(p: &Parsed, daemon: &Daemon) -> Step<String> {
 /// `--history`'s rows, a whole number up to the most.
 fn history(given: &str) -> Step<u32> {
     match given.parse::<u32>() {
-        Ok(rows) if rows <= HISTORY_MAX && given.bytes().all(|b| b.is_ascii_digit()) => Ok(rows),
+        Ok(rows) if rows <= SCREEN_HISTORY_MAX && given.bytes().all(|b| b.is_ascii_digit()) => {
+            Ok(rows)
+        }
         _ => usage(format!(
-            "--history is a whole number of rows from 0 to {HISTORY_MAX}, not {given}"
+            "--history is a whole number of rows from 0 to {SCREEN_HISTORY_MAX}, not {given}"
         )),
     }
 }

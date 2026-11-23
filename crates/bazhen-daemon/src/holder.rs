@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use bazhen_holder_proto::body::{Cols, Generation, HistoryLines, Rows, Size, Theme};
+use bazhen_holder_proto::body::{Cols, Count, Generation, HistoryLines, Rows, Size, Theme};
 use bazhen_host_guard::holder::{HolderProcess, is_vouchable};
 use bazhen_host_guard::scope::{self, CapsRefused, MIN_SYSTEMD, TERMINALS_SLICE};
 use bazhen_protocol::daemon::{
@@ -19,6 +19,7 @@ use bazhen_protocol::ids::TerminalId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
+use bazhen_protocol::terminals::TerminalScreen;
 use bazhen_runtime_holder::{
     HealthState, HolderBuild, HolderLocator, HolderRef, HolderRuntime, InstallOptions,
     InstalledHolder, ProcessLaunch, RuntimeError, RuntimeEvent, StaleReason, TerminalSpec,
@@ -254,6 +255,13 @@ fn terminal_error(err: &RuntimeError) -> TerminalError {
             holder_pid: Some(*holder_pid),
         },
         RuntimeError::Unconfirmed { .. } => TerminalError::Unconfirmed(detail(err)),
+        RuntimeError::Unreachable { .. } => TerminalError::Unreachable(detail(err)),
+        RuntimeError::Predates { what, .. } => TerminalError::Predates {
+            what: (*what).to_owned(),
+        },
+        RuntimeError::ScreenUnreadable { reason, .. } => TerminalError::Unreadable {
+            reason: reason.clone(),
+        },
         _ => TerminalError::Other(detail(err)),
     }
 }
@@ -531,6 +539,27 @@ impl Terminals for Holder {
                 .paste(&terminal, text, brackets)
                 .await
                 .map_err(|e| terminal_error(&e))
+        })
+    }
+
+    fn screen<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        history: u32,
+    ) -> Answer<'a, Result<TerminalScreen, TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            let history =
+                Count::new(u64::from(history)).map_err(|e| TerminalError::Other(e.to_string()))?;
+            let read = self
+                .runtime
+                .screen(&terminal, history)
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            Ok(TerminalScreen {
+                text: read.text().to_owned(),
+                history: read.history().get(),
+            })
         })
     }
 
@@ -914,6 +943,43 @@ mod tests {
                 protocol: vec!["0.9".to_owned()],
                 holder_pid: Some(77)
             }
+        );
+    }
+
+    #[test]
+    fn answers_a_holder_out_of_reach_before_screen_reads_or_unable_to_read_one_by_what_it_met() {
+        let terminal_id =
+            bazhen_protocol::ids::TerminalId::parse("term_01900000000070008000000000000001")
+                .unwrap();
+        let unreachable = RuntimeError::Unreachable {
+            terminal_id: terminal_id.clone(),
+            source: bazhen_runtime_holder::ConnectError::Timeout {
+                path: PathBuf::from("/run/h.sock"),
+                after: std::time::Duration::from_secs(2),
+            },
+        };
+        let predates = RuntimeError::Predates {
+            terminal_id: terminal_id.clone(),
+            what: "screen reads",
+        };
+        let unreadable = RuntimeError::ScreenUnreadable {
+            terminal_id,
+            reason: "the holder has no engine".to_owned(),
+        };
+        assert_eq!(
+            [unreachable, predates, unreadable].map(|err| terminal_error(&err)),
+            [
+                TerminalError::Unreachable(
+                    "terminal term_01900000000070008000000000000001: its holder runs but can't be reached"
+                        .to_owned()
+                ),
+                TerminalError::Predates {
+                    what: "screen reads".to_owned()
+                },
+                TerminalError::Unreadable {
+                    reason: "the holder has no engine".to_owned()
+                },
+            ]
         );
     }
 

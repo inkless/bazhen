@@ -33,6 +33,7 @@ use crate::peer::Peers;
 use crate::shell_routes;
 use crate::shells::Shells;
 use crate::tasks::{self, Refused};
+use crate::terminal_routes;
 use crate::writer::Writer;
 
 /// Why the daemon stopped, as its last line says.
@@ -354,6 +355,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
             post(shell_routes::decline)
                 .layer(DefaultBodyLimit::max(shell_routes::PROMPT_MAX_BYTES)),
         )
+        .route("/v1/terminals/{id}/screen", get(terminal_routes::screen))
         .route("/v1/daemon/doctor", get(crate::doctor::doctor))
         .route("/v1/daemon/stop", post(stop))
         .fallback(not_found)
@@ -385,6 +387,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
         .route("/shells/{id}/rename", post(shell_routes::rename))
+        .route("/terminals/{id}/screen", get(terminal_routes::screen))
         .fallback(not_found)
         .method_not_allowed_fallback(not_found)
         .with_state(shared)

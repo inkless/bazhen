@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The most rows of history a screen read may ask for (`SCREEN_HISTORY_MAX`).
+pub const SCREEN_HISTORY_MAX: u32 = 10_000;
+
 /// `GET /v1/terminals/:id/screen`: the newest rows of history asked for, then the screen shown,
 /// a line a row, each ended by `\n`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
