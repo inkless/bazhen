@@ -15,10 +15,12 @@ import {
   ownedArgv,
   oomKills,
   parsePs,
+  psGroupCount,
   smapsShmem,
   scopeArgv,
   sliceMemory,
   statAnon,
+  statInGroup,
   statParent,
   statusAnon,
   treeRows,
@@ -360,6 +362,20 @@ describe("reading memory", () => {
 
   it("reads a parent pid past a command name that has spaces and parens in it", () => {
     expect(statParent("4242 (a (b) c) S 77 4242 4242 0 -1")).toBe(77);
+  });
+
+  it("counts a live process in a group past a command with parens, and no zombie or other group", () => {
+    expect([
+      statInGroup("10 (a (b) 42) S 1 42 42 0 -1", 42),
+      statInGroup("11 (sh) Z 1 42 42 0 -1", 42),
+      statInGroup("12 (sh) S 42 43 43 0 -1", 42),
+    ]).toEqual([true, false, false]);
+  });
+
+  it("counts ps's live rows in a group, and no zombie or other group", () => {
+    expect(
+      psGroupCount(["   42 S", "   42 Z+", "   43 S", "   42 R+", "garbage"].join("\n"), 42),
+    ).toBe(2);
   });
 
   it("reads a process's own anonymous memory, swapped out included, but no shared memory", () => {

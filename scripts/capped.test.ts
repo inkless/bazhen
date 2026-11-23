@@ -10,7 +10,14 @@ import {
 
 const GIB = 1024 ** 3;
 const cap = { memory: 8 * GIB, timeMs: 20 * 60_000 };
-const ended = { code: 0, signal: null, peak: 3 * GIB, memoryKills: 0, timedOut: false };
+const ended = {
+  code: 0,
+  signal: null,
+  peak: 3 * GIB,
+  memoryKills: 0,
+  timedOut: false,
+  leftover: 0,
+};
 
 describe("capped's arguments", () => {
   it("takes a command's caps and its whole argv", () => {
@@ -104,6 +111,14 @@ describe("what a run says when it ends", () => {
     expect(report({ ...ended, memoryKills: 1 }, cap, "through", true)).toEqual([
       "capped: killed by the enclosing run's 8.0 GiB memory cap",
     ]);
+  });
+
+  it("says how many processes a run's command left running, and a test binary doesn't", () => {
+    expect(report({ ...ended, leftover: 2 }, cap, "scope", false)).toEqual([
+      "capped: peak 3.0 GiB of 8.0 GiB",
+      "capped: stopped 2 process(es) its command left running",
+    ]);
+    expect(report({ ...ended, leftover: 2 }, cap, "through", true)).toEqual([]);
   });
 
   it("names the CPU-time limit when a test dies of it", () => {

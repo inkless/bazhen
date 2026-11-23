@@ -34,6 +34,9 @@ const scopesLeft = () =>
     { encoding: "utf8" },
   ).stdout ?? "";
 
+/** A command that leaves one process running once it has gone. */
+const LEAVES_ONE = "(exec sleep 30) &";
+
 let mode: Mode;
 let dir: string;
 
@@ -49,6 +52,12 @@ describe("a run through the capped scope around it", () => {
   it("still keeps its own time cap", async () => {
     const ended = await runThrough("sleep", ["30"], { ...cap, timeMs: 1_000 }, process.env);
     expect(ended).toMatchObject({ timedOut: true, signal: "SIGTERM" });
+  });
+
+  it("counts what a command it runs through left in its group, and nothing when it left nothing", async () => {
+    const left = await runThrough("sh", ["-c", LEAVES_ONE], cap, process.env);
+    const clean = await runThrough("sh", ["-c", "sleep 0"], cap, process.env);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
   });
 });
 
@@ -79,6 +88,12 @@ describe("a capped run", () => {
     const pid = Number(readFileSync(pidFile, "utf8"));
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
   }, 30_000);
+
+  it("counts what its command left running, and nothing when it left nothing", async () => {
+    const left = await runIn(mode, "sh", ["-c", LEAVES_ONE], cap, process.env);
+    const clean = await runIn(mode, "sh", ["-c", "sleep 0"], cap, process.env);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
+  });
 
   it("leaves no scope behind, whether it exited, ran out of time or was killed", () => {
     expect(scopesLeft()).toBe("");
@@ -114,6 +129,12 @@ describe("a test binary its runner caps", () => {
     await vi.waitFor(() => expect(pidIn(pidFile)).toBeGreaterThan(1));
     const pid = pidIn(pidFile);
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
+  });
+
+  it("counts what it left in its group once it has gone, and nothing when it left nothing", async () => {
+    const left = await runOwned("sh", ["-c", LEAVES_ONE], cap, process.env);
+    const clean = await runOwned("sh", ["-c", "sleep 0"], cap, process.env);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
   });
 
   it("runs under the limits that hold it when no runner watches it", () => {
@@ -157,6 +178,12 @@ describe("the fallback watchdog", () => {
     // Killed, it lingers only until whatever inherited it reaps it.
     const pid = Number(readFileSync(pidFile, "utf8"));
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 2_000 });
+  });
+
+  it("counts what a watched command left in its group, and nothing when it left nothing", async () => {
+    const left = await runWatched("sh", ["-c", LEAVES_ONE], cap, process.env);
+    const clean = await runWatched("sh", ["-c", "sleep 0"], cap, process.env);
+    expect([left.leftover, clean.leftover]).toEqual([1, 0]);
   });
 
   it("leaves a run under its cap alone", async () => {

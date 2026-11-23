@@ -39,6 +39,8 @@ export interface Ended {
   readonly peak: number;
   readonly memoryKills: number;
   readonly timedOut: boolean;
+  /** The processes still in the run once its command had gone, which the run then stopped. */
+  readonly leftover: number;
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
 }
@@ -99,9 +101,35 @@ export function cappedScope(read = readText): number | undefined {
   return Number.isSafeInteger(max) && max > 0 ? max : undefined;
 }
 
+/** A `/proc/<pid>/stat`'s fields after the command, whose parens may hold spaces and parens. */
+const statFields = (text: string) => text.slice(text.lastIndexOf(")") + 2).split(" ");
+
 /** A `/proc/<pid>/stat`'s parent pid: the second field after the command's closing paren. */
-export const statParent = (text: string) =>
-  Number(text.slice(text.lastIndexOf(")") + 2).split(" ")[1]);
+export const statParent = (text: string) => Number(statFields(text)[1]);
+
+/** Whether a `/proc/<pid>/stat` is a live process in group `pgid`; a zombie holds nothing. */
+export function statInGroup(text: string, pgid: number): boolean {
+  const [state = "", , pgrp] = statFields(text);
+  return Number(pgrp) === pgid && state !== "Z" && state !== "X";
+}
+
+/** How many live processes `ps -o pgid=,stat=`'s rows put in group `pgid`. */
+export const psGroupCount = (text: string, pgid: number) =>
+  [...text.matchAll(/^\s*(\d+)\s+(\S+)\s*$/gm)].filter(
+    ([, group, stat = ""]) => Number(group) === pgid && !/^[ZX]/.test(stat),
+  ).length;
+
+/** How many live processes are in group `pgid`: a read of `/proc` or `ps`, no signal. */
+async function groupCount(pgid: number): Promise<number> {
+  if (process.platform === "darwin") {
+    return psGroupCount((await output("ps", ["-A", "-o", "pgid=,stat="])) ?? "", pgid);
+  }
+  let count = 0;
+  for (const entry of readdirSync("/proc")) {
+    if (/^\d+$/.test(entry) && statInGroup(readText(`/proc/${entry}/stat`) ?? "", pgid)) count++;
+  }
+  return count;
+}
 
 function parentOf(pid: number): number | undefined {
   if (process.platform === "linux") {
@@ -252,7 +280,7 @@ function onSignals(handler: (signal: NodeJS.Signals) => void, ownGroup: boolean)
  * Runs a command in a capped scope. Signals reach the whole scope through systemd, which also
  * reaches processes in other groups (nextest gives each test its own), and a scope that outlives
  * a stop request by 10 s is killed. Once the command has gone, so does its scope: whatever it
- * left behind would otherwise run on to the time cap, holding cargo's lock. The child stays in
+ * left behind, counted first, would otherwise run on to the time cap, holding cargo's lock. The child stays in
  * this process's group, so a signal to the group, from nextest or a terminal, reaches it too.
  */
 export function runInScope(
@@ -299,6 +327,9 @@ export function runInScope(
       sample();
       clearInterval(poll);
       watcher?.close();
+      // A zombie isn't listed, and the scope may already have gone with its last process.
+      const procs = readText(`${dir}/cgroup.procs`) ?? "";
+      const leftover = procs.split("\n").filter(Boolean).length;
       // `stop` sends what is left SIGTERM, and SIGKILL after the scope's TimeoutStopSec of 10 s,
       // and returns once it has gone.
       await output("systemctl", ["--user", "stop", unit], STOP_GRACE_MS + STEP_TIMEOUT_MS);
@@ -310,7 +341,7 @@ export function runInScope(
         kills === 0 && signal === "SIGKILL"
           ? await journaledKills(unit, started)
           : { memoryKills: kills };
-      done({ code, signal, peak, timedOut, ...journaled });
+      done({ code, signal, peak, timedOut, leftover, ...journaled });
     };
     child.once("error", () => void finish(127, null));
     child.once("exit", (code, signal) => void finish(code, signal));
@@ -478,7 +509,7 @@ type Watch = "tree" | "root" | "none";
  * Runs `bin` in a process group of its own and, but for `none`, watches its memory. Past the
  * memory cap the group gets SIGKILL at once (at gigabytes a second, a grace period is gigabytes
  * more); past the time cap, or on a SIGTERM or SIGHUP passed on to it, SIGTERM, then SIGKILL if
- * it hasn't gone. Once the command has gone, whatever it left in its group is killed with it.
+ * it hasn't gone. Once the command has gone, whatever it left in its group is counted and killed.
  */
 async function runGroup(
   bin: string,
@@ -534,12 +565,13 @@ async function runGroup(
   clearInterval(watchdog);
   clearTimeout(timer);
   clearTimeout(escalation);
+  const leftover = pid === undefined ? 0 : await groupCount(pid);
   stop("SIGKILL");
   offSignals();
   // A run through dies of the enclosing scope's cap: one that died by SIGKILL while the scope
   // counted an OOM kill is taken as that kill.
   if (watching === "none" && signal === "SIGKILL" && scopeKills() > scopeKillsBefore) kills = 1;
-  return { code, signal, peak, memoryKills: kills, timedOut };
+  return { code, signal, peak, memoryKills: kills, timedOut, leftover };
 }
 
 /** Runs a command in a process group of its own, watching its tree and stopping the group. */
