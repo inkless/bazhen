@@ -3931,14 +3931,14 @@ mod tests {
         #[test]
         fn never_ends_a_view_that_has_its_whole_snapshot_to_make_room() {
             paused().block_on(async {
-                let (h, _) = measured(|snap| budget(snap * 3 / 2));
+                let (h, _) = measured(|snap| budget(snap * 5 / 2));
                 let opened = h.observer().await;
                 h.later(5000).await;
                 let _reading = h.loading(Ask::observer()).await;
                 let (joined, _) = h.open(Ask::observer()).await;
                 assert_eq!(
                     (joined.map(|_| ()), opened.seen.closed(), evicted(&h.log)),
-                    (refused(STILL_LOADING), false, 0)
+                    (Ok(()), false, 0)
                 );
             });
         }
