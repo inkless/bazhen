@@ -52,7 +52,9 @@ pub trait TerminalStream: Send + Sync + 'static {
     /// Resolves once every event up to where the snapshot was taken is queued.
     fn snapshot(&self) -> impl Future<Output = Result<Snapshot, Self::Error>> + Send;
 
-    /// Ends the stream; its events end with a [`StreamEvent::Closed`].
+    /// Ends the stream; its events end with a [`StreamEvent::Closed`]. It hangs up only, and
+    /// never ends the terminal or its process: the signal scan passes over the hub's closes of a
+    /// stream (`NON_SIGNALLING_CLOSES` in `scripts/check-standards.ts`) on that promise.
     fn close(&self);
 }
 
@@ -210,7 +212,9 @@ pub struct HubOptions {
     pub max_views: usize,
     /// The most snapshot bytes not yet written to their views, across every terminal. Over it,
     /// views whose snapshots have stalled are ended to make room, and failing that the view that
-    /// opens is turned away.
+    /// opens is turned away. It can be passed for a while: a snapshot that opens while none is
+    /// being sent is taken whatever its size, and one let in on the room stalled views would free
+    /// stays in if one of them is spared, its snapshot having moved on since it was chosen.
     pub max_snapshot_bytes: usize,
     /// A snapshot goes to its view a piece of this many bytes at a time, each once the last is
     /// written.
