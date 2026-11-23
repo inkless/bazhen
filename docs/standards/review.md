@@ -12,8 +12,11 @@ already checked (listed at the end).
 3. **Complexity.** Could a reader new to the code follow it? Is anything built for a future need
    that isn't real yet?
 4. **Tests.** For each new test, ask _what change to the source would make this fail?_ Then check
-   the falsify result, or the `Control:` trailer naming the test, says the same, and that the
-   break the trailer records would fail that test on its assertion. For a test KILLED
+   the falsify result says the same. For a CONTROLLED or GUARDED test, does its commit's break
+   undo the behaviour the test names, in the code under test and not in what only feeds the test,
+   and does the assertion line falsify prints under it fail on that behaviour? For a test a
+   `Control:` names by name alone (one that runs a Rust binary, a Rust test), would the break the
+   line records fail that test on its assertion? For a test KILLED
    `(on the Rust daemon)`, does the line under it fail on what the test asserts, not on a surface
    the base's daemon didn't serve at all? For a GUARDED test, does its `Guard:` commit's break
    undo the behaviour the test names, in the code under test and not in support code that only
@@ -47,7 +50,7 @@ already checked (listed at the end).
    standards updated in the same commit?
 
 The commit body says why the change was made, and records any `Control:` and `Renamed:` trailers.
-A guard's break and its `Guard:` line go in a commit of their own.
+A guard's or a control's break and its `Guard:` or `Control:` lines go in a commit of their own.
 
 ## Already checked by tooling
 

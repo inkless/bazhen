@@ -7,8 +7,8 @@ import {
   crateBinaries,
   failedInTest,
   failedOnOwnAssertion,
+  breaksOf,
   guardErrors,
-  guardsOf,
   isFailsTest,
   numstatPaths,
   onBothDaemons,
@@ -45,8 +45,10 @@ import {
   rustTestIds,
   signalExitCode,
   staleWorktrees,
+  namesRustTest,
   uncontrolledRustTests,
   uncontrolledTests,
+  unusedControls,
   type VitestReport,
 } from "./falsify.ts";
 import { report as cappedReport } from "./capped.ts";
@@ -1591,7 +1593,7 @@ const FENCE = "```";
 /** A `git log --format=%H%x00%B%x00` record. */
 const commit = (hash: string, ...body: string[]) => `${hash}\0${body.join("\n")}\n\0\n`;
 
-describe("guardsOf", () => {
+describe("breaksOf", () => {
   it("gives a commit's Guard: subjects the break its fenced diff blocks make together", () => {
     const log = commit(
       "c1",
@@ -1615,12 +1617,37 @@ describe("guardsOf", () => {
       "Guard: x.test.ts › one: swaps a",
       "Guard: x.test.ts › two: swaps a",
     );
-    expect(guardsOf(log)).toEqual([
+    expect(breaksOf(log)).toEqual([
       {
         commit: "c1",
-        subjects: ["x.test.ts › one: swaps a", "x.test.ts › two: swaps a"],
+        guards: ["x.test.ts › one: swaps a", "x.test.ts › two: swaps a"],
+        controls: [],
         patch:
           "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/y.ts\n+++ b/y.ts\n@@ -1 +1 @@\n-c\n+d\n",
+      },
+    ]);
+  });
+
+  it("gives a commit's Control: subjects, each up to its last arrow, the break they share", () => {
+    const log = commit(
+      "c1",
+      `${FENCE}diff`,
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      FENCE,
+      "Control: x.test.ts › maps a -> b: swaps a -> expected a, got b",
+      "Control: tests::one: swaps a -> left 1, right 2",
+      "Control: x.test.ts › no arrow",
+    );
+    expect(breaksOf(log)).toEqual([
+      {
+        commit: "c1",
+        guards: [],
+        controls: ["x.test.ts › maps a -> b: swaps a", "tests::one: swaps a"],
+        patch: "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n",
       },
     ]);
   });
@@ -1641,24 +1668,29 @@ describe("guardsOf", () => {
       FENCE,
       "Guard: x.test.ts › one",
     );
-    expect(guardsOf(log)[0]?.patch).toBe("--- a/x.ts\n+++ b/x.ts\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n");
+    expect(breaksOf(log)[0]?.patch).toBe("--- a/x.ts\n+++ b/x.ts\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n");
   });
 
-  it("gives a guard whose commit has no block, or only one left open, no break", () => {
+  it("gives a line whose commit has no block, or only one left open, no break", () => {
     const log =
       commit("c1", "Guard: x.test.ts › one") +
-      commit("c2", `${FENCE}diff`, "--- a/x.ts", "Guard: x.test.ts › two");
-    expect(guardsOf(log).map((g) => [g.commit, g.patch])).toEqual([
-      ["c1", ""],
-      ["c2", ""],
+      commit("c2", `${FENCE}diff`, "--- a/x.ts", "Control: x.test.ts › two: x -> y");
+    expect(breaksOf(log).map((b) => [b.commit, b.patch, b.controls])).toEqual([
+      ["c1", "", []],
+      ["c2", "", ["x.test.ts › two: x"]],
     ]);
   });
 
-  it("reads no guard in a commit without a Guard: line, nor one a block holds", () => {
+  it("reads nothing in a commit without a Guard: or Control: line, nor one a block holds", () => {
     const log =
-      commit("c1", `${FENCE}diff`, "Guard: x.test.ts › one", FENCE) +
-      commit("c2", "Control: x.test.ts › one: broke it -> failed", " Guard: x.test.ts › one");
-    expect(guardsOf(log)).toEqual([]);
+      commit(
+        "c1",
+        `${FENCE}diff`,
+        "Guard: x.test.ts › one",
+        "Control: x.test.ts › one: x -> y",
+        FENCE,
+      ) + commit("c2", " Control: x.test.ts › one: broke it -> failed", " Guard: x.test.ts › one");
+    expect(breaksOf(log)).toEqual([]);
   });
 });
 
@@ -1687,10 +1719,26 @@ describe("brokenPathRefusal", () => {
     ]);
   });
 
-  it("refuses a file the test isn't related to", () => {
-    expect(brokenPathRefusal("packages/a/src/y.ts", related)).toBe(
+  it("refuses a test file, even one it is given as related", () => {
+    expect(
+      (["control", "guard"] as const).map((kind) =>
+        brokenPathRefusal("packages/a/src/y.test.ts", ["packages/a/src/y.test.ts"], kind),
+      ),
+    ).toEqual([
+      "packages/a/src/y.test.ts is a test file",
+      "packages/a/src/y.test.ts is a test file",
+    ]);
+  });
+
+  it("refuses a file the test isn't related to, saying what a guard's or a control's may be", () => {
+    expect(
+      (["guard", "control"] as const).map((kind) =>
+        brokenPathRefusal("packages/a/src/y.ts", related, kind),
+      ),
+    ).toEqual([
       "packages/a/src/y.ts isn't source the branch changed that the test imports",
-    );
+      "packages/a/src/y.ts isn't source the test imports",
+    ]);
   });
 });
 
@@ -1752,22 +1800,47 @@ describe("failedOnOwnAssertion", () => {
 describe("guardErrors", () => {
   const t = { file: FILE, title: "t" };
 
-  it("names a Guard: that names no new test, and a test it names that didn't survive", () => {
+  it("names each test a guard names that didn't survive, once, with its verdict", () => {
+    const u = { file: FILE, title: "u" };
     expect(
       guardErrors(
-        { plans: [{ tests: [t, { file: FILE, title: "u" }] }], strays: ["Guard: nothing"] },
+        [{ tests: [t, u] }, { tests: [t] }],
         [
           { ...t, outcome: "KILLED" },
-          { file: FILE, title: "u", outcome: "GUARDED" },
+          { ...u, outcome: "GUARDED" },
         ],
       ),
-    ).toEqual(["Guard: nothing (it names no new TypeScript test)", `${FILE} › t (KILLED)`]);
+    ).toEqual([`${FILE} › t (KILLED)`]);
   });
 
   it("names nothing for a guard of a surviving test", () => {
+    expect(guardErrors([{ tests: [t] }], [{ ...t, outcome: "SURVIVED" }])).toEqual([]);
+  });
+});
+
+describe("unusedControls", () => {
+  const t = { file: FILE, title: "t" };
+
+  it("names each test a control names that was judged without one, once, with its verdict", () => {
+    const judged = (["KILLED", "SURVIVED", "GUARDED", "INVALID", "CONTROLLED"] as const).map(
+      (outcome, i) => ({ file: FILE, title: `t${i}`, outcome }),
+    );
+    const again = { file: FILE, title: "t0" };
+    expect(unusedControls([{ tests: judged }, { tests: [again, t] }], judged)).toEqual([
+      `${FILE} › t0 (KILLED)`,
+      `${FILE} › t1 (SURVIVED)`,
+      `${FILE} › t2 (GUARDED)`,
+    ]);
+  });
+});
+
+describe("namesRustTest", () => {
+  it("finds a test's full path in a subject as a whole word only", () => {
     expect(
-      guardErrors({ plans: [{ tests: [t] }], strays: [] }, [{ ...t, outcome: "SURVIVED" }]),
-    ).toEqual([]);
+      ["tests::one: x", "a::tests::one: x", "tests::one_more: x", "one: x"].map((subject) =>
+        namesRustTest(subject, "tests::one"),
+      ),
+    ).toEqual([true, false, false, false]);
   });
 });
 

@@ -6,7 +6,7 @@ page serves that rule, or keeps tests from hurting the machine and each other.
 | Rule                                                                               | Enforced by                                      |
 | ---------------------------------------------------------------------------------- | ------------------------------------------------ |
 | A test that passes without the change it accompanies is rejected                   | CI on pull requests (`moon run :test-falsify`)   |
-| Each test falsify can't judge needs a `Control:` trailer naming it                 | CI on pull requests (`moon run :test-falsify`)   |
+| Each test falsify can't judge needs a `Control:` whose break falsify runs          | CI on pull requests (`moon run :test-falsify`)   |
 | Small tests (`*.test.ts`) touch no files, sockets, processes or databases          | `moon run :lint`                                 |
 | No `.only`, `.skip`, assertion-free tests, or conditionals inside tests            | `moon run :lint` (vitest rules)                  |
 | Every source file with runtime code has a sibling test, or a named covering test   | `moon run :check` (`scripts/check-standards.ts`) |
@@ -167,6 +167,8 @@ Every new test must be shown to fail without the code it covers.
     the worktree) recorded as each ended, just as the run's report would have judged them.
     Every test of a brand-new function is INVALID, because the function doesn't exist before
     the change.
+  - **CONTROLLED** — it was INVALID, and fails under every break a `Control:` commit gives it
+    (below). Good.
 
   A test is new when its title is: the branch's copy of the file has more tests with that title
   than the base's, counted over the whole file whatever `describe` each is in. So a test removed
@@ -184,20 +186,38 @@ Every new test must be shown to fail without the code it covers.
   (`const t = test.extend(…)`), a computed member (`it["skip"]`), a ternary (`c ? it(…) : …`) or
   an empty last call (`it.each(rows)()`), so a test written that way gets its control by hand.
 
-- **Controls for INVALID tests.** Break the code by hand: swap a comparison, delete a branch, or
-  return a constant. Confirm the test fails on its assertion, not on a crash or a timeout, then
-  restore the code. Record it as a trailer in a commit message on the branch, one per INVALID
-  test, naming the test by its file and title as falsify prints them:
-  `Control: <file> › <title>: <what you broke> -> <how the test failed>`. Falsify fails until
-  every INVALID test is named, and prints the line each one still needs. Only the part before a
+- **Controls for INVALID tests.** Break the code the test exercises: swap a comparison, delete a
+  branch, or return a constant. Write the break as a guard's is written (below), a commit on the
+  branch whose message holds ` ```diff ` blocks against HEAD, with a line naming each test it
+  breaks, by its file and title as falsify prints them:
+  `Control: <file> › <title>: <what you broke> -> <how the test failed>`. Falsify checks the break
+  before any test runs as it checks a guard's, except that it may change any source file the test
+  imports directly at HEAD, changed by the branch or not, so a test of a new function breaks that
+  function and a characterization test breaks the code it pins. It may not change a test file,
+  test support, or a file that isn't source (`package.json`, a vitest config). Then the test runs
+  at HEAD, where it must pass, and under each break that names it, where it must fail on an
+  assertion of its own, as a GUARDED test must; it is then CONTROLLED, printed with the assertion
+  that failed. Anything else leaves it INVALID with the reason, and falsify fails, printing the
+  line each test still needs. A branch with no source change to revert is checked the same way.
+  At most 30 commits may carry a control's break, and a commit carries `Control:` or `Guard:` lines,
+  not both. A `Control:` naming no new test fails the check; one naming a test falsify judged
+  without it (KILLED, SURVIVED or GUARDED) is printed as unused, since the base's falsify may still
+  need it on a branch that changes falsify. The `-> <how the test failed>` part is yours; falsify
+  prints what it saw. A test whose title falsify couldn't read has no result to check: give it a
+  literal title.
+
+  A test that runs a Rust binary or sits in a file `tests/rust-daemon.txt` names, and a Rust test,
+  is still matched by name alone: falsify checks that a `Control:` names it, and the reviewer checks
+  that the break recorded really is one. For those, break the code by hand, confirm the test fails
+  on its assertion, restore it, and record the line; the commit may hold the break as a block.
+  Only the part before a
   trailer's last `->` names a test, and it names at most one: it starts with the test's path and
   `›`, then any `describe` names each followed by `›` and holding no `: `, then the exact title,
   followed by `: ` or by that last `->`. Of the titles that fit, the longest is the one named.
   So `caps` is not named by `caps twice` or `big caps`, `parse: keys` names that test and not
   `parse`, and a title may hold `->` or `:`. A test whose title falsify couldn't read
   (`<unparsed test in FILE>`) is named by a trailer that starts with its file and names none of
-  the file's other new tests; falsify counts a file's unreadable tests as one. Falsify checks
-  that each test is named; the reviewer checks that the break recorded really is one. A Rust
+  the file's other new tests; falsify counts a file's unreadable tests as one. A Rust
   test falsify didn't kill with a mutant of the change needs a trailer of its own, whose
   subject starts with the test's full path as nextest lists it:
   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
@@ -245,8 +265,9 @@ Every new test must be shown to fail without the code it covers.
   `--cleanup=verbatim` if that is why.
 
   The names are the limit of the support-code rule: test support that the branch also changed, in no
-  folder named testing and in no file named `*fixture*`, can be broken by a guard, and the reviewer
-  catches it by reading the break.
+  folder named testing and in no file named `*fixture*`, can be broken by a guard or a control, and
+  the reviewer catches it by reading the break. So put test support in a folder named testing, as
+  `packages/core/src/testing/` is, or in a file whose name holds `fixture`.
 
 - **Listed tests run on both daemons.** A new test in a file `tests/rust-daemon.txt` names at HEAD
   holds both daemons, and the change it comes with may land in either, so it is judged on each. It

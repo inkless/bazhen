@@ -15,11 +15,8 @@
 //             says why; the tests that had are judged from what falsify-reporter.ts recorded as
 //             each ended), or it passed but is unrelated to the source change; a branch that
 //             adds tests without a source change also lands here, as does every test of a
-//             brand-new symbol. Each INVALID
-//             test needs a hand-run control, recorded as a trailer in a commit on the branch
-//             that names it by its file and exact title:
-//             `Control: <file> › <title>: <what you broke> -> <how the test failed>`
-//             (one whose title couldn't be read, by its file and no other new test's title).
+//             brand-new symbol. Each INVALID test needs a control (below).
+//   CONTROLLED  it was INVALID, and fails under every break a `Control:` commit gives it. Good.
 //
 // A test that runs a Rust binary finds it in the repository's target/, which the worktree has
 // none of. When a judged test, or anything it reaches through its imports (relative, or a
@@ -64,6 +61,15 @@
 // pass, then under each break alone on HEAD. A test is GUARDED only when it fails under each of
 // its breaks on an AssertionError at its own frame; a pass, a timeout or a thrown error leaves it
 // SURVIVED. A `Guard:` naming nothing judged, or a test that didn't survive, fails falsify.
+//
+// An INVALID test needs a control: a commit holding a break the same way, with a line
+// `Control: <file> › <title>: <what you broke> -> <how the test failed>`. Its break is checked and
+// run as a guard's, but may change any source the test imports directly at HEAD, and the test is
+// CONTROLLED when it passes at HEAD and fails under each of its breaks; a branch with no reverts
+// gets a worktree at HEAD for this. A commit holds Guard: or Control: lines, not both. A Control:
+// naming no new test fails falsify; one naming a test judged without it is printed as unused. A
+// test that runs a Rust binary or holds both daemons, and a Rust test, is controlled by a line
+// naming it alone (one whose title couldn't be read, by its file and no other new test's title).
 //
 // A test is new when its title is: HEAD's copy of the file has more tests with that title than
 // the base's, read from both copies' test calls (scripts/test-calls.ts), however git's diff aligns
@@ -145,7 +151,7 @@ import {
   type RustTest,
 } from "./rust-mutants.ts";
 
-export type Outcome = "KILLED" | "SURVIVED" | "INVALID" | "GUARDED";
+export type Outcome = "KILLED" | "SURVIVED" | "INVALID" | "GUARDED" | "CONTROLLED";
 export type Change = { status: string; path: string; oldPath?: string };
 
 const TEST_FILE = /(^|\/)[^/]+\.test\.tsx?$/;
@@ -690,7 +696,8 @@ export function addedRustTests(base: string[], head: string[]): { file: string; 
     });
 }
 
-const CONTROL_SUBJECT = /^Control: (.+) -> .+$/gm;
+const CONTROL_LINE = /^Control: (.+) -> .+$/;
+const CONTROL_SUBJECT = new RegExp(CONTROL_LINE.source, "gm");
 const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const controlSubjects = (messages: string) =>
   [...messages.matchAll(CONTROL_SUBJECT)].map(([, subject = ""]) => subject);
@@ -702,11 +709,15 @@ const controlSubjects = (messages: string) =>
  */
 export function uncontrolledRustTests(names: string[], messages: string): string[] {
   const subjects = controlSubjects(messages);
-  return names.filter((name) => {
-    const named = new RegExp(`(?<!\\w|::)${escapeRegExp(name)}(?!\\w|::)`);
-    return !subjects.some((subject) => named.test(subject));
-  });
+  return names.filter((name) => !subjects.some((subject) => namesRustTest(subject, name)));
 }
+
+/** Whether a `Control:` subject holds a Rust test's full path as a whole word. */
+export const namesRustTest = (subject: string, name: string): boolean =>
+  new RegExp(`(?<!\\w|::)${escapeRegExp(name)}(?!\\w|::)`).test(subject);
+
+const STRAYS =
+  "These lines name no new test, so nothing checks them. Name each test as falsify prints it:";
 
 const DESCRIBE = "(?:(?:(?!: | › ).)+ › )*";
 
@@ -785,63 +796,84 @@ export function closedBlock(lines: readonly string[]): string[] {
   return [...kept, ...Array.from({ length: Math.max(lacking, 0) }, () => " ")];
 }
 
-/** A commit's guards: the subjects of its `Guard:` lines, and the break they share. */
-export type Guard = { commit: string; subjects: string[]; patch: string };
+/**
+ * A commit's breaks: the subjects of its `Guard:` lines and of its `Control:` lines, each up to
+ * the line's last ` -> `, and the break they all share.
+ */
+export type Break = { commit: string; guards: string[]; controls: string[]; patch: string };
 
 export const GUARD_FORM = "Guard: <file> › <title>: <what the break does>";
 const GUARD_LINE = /^Guard: (.+)$/;
 const FENCE_OPEN = "```diff";
 const FENCE_CLOSE = "```";
 const MAX_GUARD_BREAKS = 10;
+const MAX_CONTROL_BREAKS = 30;
 
 /**
- * Each commit's guards, from `git log --format=%H%x00%B%x00`. A commit's break is every fenced
+ * Each commit's breaks, from `git log --format=%H%x00%B%x00`. A commit's break is every fenced
  * ```` ```diff ```` block of its message, in order (`closedBlock`); one left open is no block.
  */
-export function guardsOf(log: string): Guard[] {
+export function breaksOf(log: string): Break[] {
   const fields = log.split("\0");
-  const guards: Guard[] = [];
+  const breaks: Break[] = [];
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const commit = (fields[i] ?? "").trim();
     if (commit === "") continue;
-    const subjects: string[] = [];
+    const guards: string[] = [];
+    const controls: string[] = [];
+    const read = (line: string) => {
+      const guard = GUARD_LINE.exec(line)?.[1];
+      if (guard !== undefined) guards.push(guard);
+      const control = CONTROL_LINE.exec(line)?.[1];
+      if (control !== undefined) controls.push(control);
+    };
     const blocks: string[][] = [];
     let block: string[] | undefined;
     for (const line of (fields[i + 1] ?? "").split("\n")) {
       if (block === undefined) {
         if (line === FENCE_OPEN) block = [];
-        else {
-          const subject = GUARD_LINE.exec(line)?.[1];
-          if (subject !== undefined) subjects.push(subject);
-        }
+        else read(line);
       } else if (line === FENCE_CLOSE) {
         blocks.push(closedBlock(block));
         block = undefined;
       } else block.push(line);
     }
     // A block left open is no break, and its lines are the message's again.
-    for (const line of block ?? []) {
-      const subject = GUARD_LINE.exec(line)?.[1];
-      if (subject !== undefined) subjects.push(subject);
-    }
-    if (subjects.length === 0) continue;
+    for (const line of block ?? []) read(line);
+    if (guards.length === 0 && controls.length === 0) continue;
     const patch = blocks.flat();
-    guards.push({ commit, subjects, patch: patch.length === 0 ? "" : `${patch.join("\n")}\n` });
+    breaks.push({
+      commit,
+      guards,
+      controls,
+      patch: patch.length === 0 ? "" : `${patch.join("\n")}\n`,
+    });
   }
-  return guards;
+  return breaks;
 }
 
+/** Which line names a test a break is for: a guard of a SURVIVED test, or a control of an INVALID one. */
+export type BreakKind = "guard" | "control";
+
 /**
- * Why a break may not change `path`, for a test whose related reverts are `related`; undefined
- * when it may. A break of anything but the change the test was judged against, or of what the
- * test feeds itself through, could fail it without the guarded code being touched.
+ * Why a break may not change `path`, for a test whose breakable files are `related`; undefined
+ * when it may. A guard's are the reverted source the test imports directly, a control's any source
+ * it imports directly. A break of anything else, or of what the test feeds itself through, could
+ * fail it without the code it names being touched.
  */
-export function brokenPathRefusal(path: string, related: readonly string[]): string | undefined {
+export function brokenPathRefusal(
+  path: string,
+  related: readonly string[],
+  kind: BreakKind = "guard",
+): string | undefined {
   if (/(?:^|\/)testing\//.test(path) || /fixture/i.test(posix.basename(path))) {
     return `${path} is test support`;
   }
+  if (TEST_FILE.test(path)) return `${path} is a test file`;
   if (!related.includes(path)) {
-    return `${path} isn't source the branch changed that the test imports`;
+    return kind === "guard"
+      ? `${path} isn't source the branch changed that the test imports`
+      : `${path} isn't source the test imports`;
   }
   return undefined;
 }
@@ -1016,10 +1048,12 @@ export type Judged = TestRef & {
   note?: string;
   noReport?: string | undefined;
   failure?: string | undefined;
-  /** Why a guard naming a surviving test didn't make it GUARDED. */
-  guard?: string;
-  /** The breaks a GUARDED test failed under, each by its commit, with what failed it. */
-  guardedBy?: { commit: string; failure: string | undefined }[];
+  /** The kind of line that named it for a break: a guard of it SURVIVED, a control if INVALID. */
+  breakKind?: BreakKind;
+  /** Why its breaks didn't make it GUARDED or CONTROLLED. */
+  unheld?: string;
+  /** The breaks a GUARDED or CONTROLLED test failed under, each by its commit, with what failed it. */
+  brokenBy?: { commit: string; failure: string | undefined }[];
 };
 
 /** The Rust daemon's binary, as `<profile>/<name>` under target/. */
@@ -2417,41 +2451,61 @@ export function changesCode(before: string, after: string): boolean {
   return was.length !== now.length || was.some((token, i) => token !== now[i]);
 }
 
-/** A guard's break, the tests it names, and why it can't run for each test it can't. */
-export type GuardPlan = {
+/** A commit's break, the tests its lines name, and why it can't run for each test it can't. */
+export type BreakPlan = {
   commit: string;
+  kind: BreakKind;
   patch: string;
   tests: TestRef[];
   paths: string[];
   refusals: Map<string, string>;
 };
 
+/** What `checkedBreaks` found before anything runs. */
+export type CheckedBreaks = {
+  plans: BreakPlan[];
+  /** The `Guard:` lines that name no new TypeScript test. */
+  strays: string[];
+  /** The `Control:` subjects that name no new TypeScript test, which may name a Rust one. */
+  unmatched: string[];
+  /** The commits that carry both `Guard:` and `Control:` lines. */
+  mixed: string[];
+  /** The files a break leaves signalling. */
+  signalling: string[];
+};
+
 /**
- * The guards that name new tests, each checked before anything runs: its break must modify text
- * only, of files each test is related to and not its support, apply to HEAD, and not be of a
- * `.fails` test. `strays` are the subjects that name no new test; `signalling` the files a break
- * leaves signalling.
+ * The breaks whose lines name new tests, each checked before anything runs: it must modify text
+ * only, of files each test may have broken for its kind (`related`) and not its support or a test
+ * file, apply to HEAD, change some code, and not be of a `.fails` test.
  */
-function checkedGuards(
-  guards: Guard[],
+function checkedBreaks(
+  breaks: Break[],
   targets: TestRef[],
   head: string,
-  related: (t: TestRef) => string[],
+  related: (t: TestRef, kind: BreakKind) => string[],
   atHead: (path: string) => string | undefined,
-): { plans: GuardPlan[]; strays: string[]; signalling: string[] } {
+): CheckedBreaks {
   const strays: string[] = [];
+  const unmatched: string[] = [];
+  const mixed: string[] = [];
   const signalling: string[] = [];
-  const plans: GuardPlan[] = [];
-  for (const guard of guards) {
+  const plans: BreakPlan[] = [];
+  for (const commitBreak of breaks) {
+    if (commitBreak.guards.length > 0 && commitBreak.controls.length > 0)
+      mixed.push(commitBreak.commit);
+    const kind: BreakKind = commitBreak.guards.length > 0 ? "guard" : "control";
     const tests: TestRef[] = [];
-    for (const subject of guard.subjects) {
+    for (const subject of kind === "guard" ? commitBreak.guards : commitBreak.controls) {
       const test = namedBy(subject, targets);
-      if (test === undefined) strays.push(`Guard: ${subject}`);
-      else if (!tests.includes(test)) tests.push(test);
+      if (test !== undefined) {
+        if (!tests.includes(test)) tests.push(test);
+      } else if (kind === "guard") strays.push(`Guard: ${subject}`);
+      else unmatched.push(subject);
     }
     if (tests.length === 0) continue;
-    const short = guard.commit.slice(0, 12);
-    // The first reason a test's guard can't run is the one it is told.
+    const short = commitBreak.commit.slice(0, 12);
+    // The first reason a test's break can't run is the one it is told.
     const refusals = new Map<string, string>();
     const refuse = (t: TestRef, why: string) => {
       if (!refusals.has(keyOf(t))) refusals.set(keyOf(t), why);
@@ -2460,17 +2514,17 @@ function checkedGuards(
       for (const t of tests) refuse(t, why);
     };
     let paths: string[] = [];
-    if (guard.patch === "") {
+    if (commitBreak.patch === "") {
       refuseAll(`commit ${short} holds no \`\`\`diff block`);
     } else {
-      const read = breakPaths(guard.patch);
+      const read = breakPaths(commitBreak.patch);
       if (typeof read === "string") {
         refuseAll(`the break in ${short} ${read}`);
       } else {
         paths = read;
         for (const t of tests) {
           const why = paths
-            .map((path) => brokenPathRefusal(path, related(t)))
+            .map((path) => brokenPathRefusal(path, related(t, kind), kind))
             .find((w) => w !== undefined);
           if (why !== undefined) refuse(t, `the break in ${short}: ${why}`);
           else if (isFailsTest(atHead(t.file) ?? "", t.title)) {
@@ -2483,7 +2537,7 @@ function checkedGuards(
           scratchIndexGit(index, ["read-tree", head]);
           let applied = true;
           try {
-            scratchIndexGit(index, ["apply", "--cached", "--recount", "-"], guard.patch);
+            scratchIndexGit(index, ["apply", "--cached", "--recount", "-"], commitBreak.patch);
           } catch (error) {
             if (signalExitCode(error) !== undefined) throw error;
             applied = false;
@@ -2507,9 +2561,16 @@ function checkedGuards(
         }
       }
     }
-    plans.push({ commit: guard.commit, patch: guard.patch, tests, paths, refusals });
+    plans.push({
+      commit: commitBreak.commit,
+      kind,
+      patch: commitBreak.patch,
+      tests,
+      paths,
+      refusals,
+    });
   }
-  return { plans, strays, signalling };
+  return { plans, strays, unmatched, mixed, signalling };
 }
 
 async function main(args: string[]): Promise<number> {
@@ -2647,35 +2708,58 @@ async function main(args: string[]): Promise<number> {
   const runsBinaries = wanted.length > 0;
   // Before any test runs, Rust's included: the TS side would refuse after the mutants had run.
   const reverts = revertsOf(changes, { rust: runsBinaries });
-  const guards = checkedGuards(
-    guardsOf(git(["log", "--format=%H%x00%B%x00", `${base}..${head}`])),
+  const headPackages = workspacePackages(top);
+  const sourceAtHead = [...headFiles].filter(isRevertible);
+  const checked = checkedBreaks(
+    breaksOf(git(["log", "--format=%H%x00%B%x00", `${base}..${head}`])),
     targets,
     head,
-    (t) =>
+    (t, kind) =>
       relatedReverts(
         t.file,
         atHead(t.file) ?? "",
-        reverts.flatMap(pathsOf),
-        workspacePackages(top),
+        kind === "guard" ? reverts.flatMap(pathsOf) : sourceAtHead,
+        headPackages,
       ),
     atHead,
   );
-  const breaks = guards.plans.filter((g) => g.patch !== "").length;
-  if (breaks > MAX_GUARD_BREAKS) {
+  if (checked.mixed.length > 0) {
     console.error(
-      `falsify: ${breaks} commits carry a guard's break, and falsify runs at most ` +
-        `${MAX_GUARD_BREAKS}. Give guards that break the same code one commit.`,
+      "falsify: a commit's break is a guard's or a control's, which may break different files, " +
+        "and these commits carry both Guard: and Control: lines. Give each kind a commit of its " +
+        `own:\n${checked.mixed.map((c) => `  ${c.slice(0, 12)}`).join("\n")}`,
     );
     return 1;
   }
-  if (targets.length > 0 && reverts.length > 0) {
+  for (const [kind, cap] of [
+    ["guard", MAX_GUARD_BREAKS],
+    ["control", MAX_CONTROL_BREAKS],
+  ] as const) {
+    const count = checked.plans.filter((p) => p.kind === kind && p.patch !== "").length;
+    if (count > cap) {
+      console.error(
+        `falsify: ${count} commits carry a ${kind}'s break, and falsify runs at most ${cap}. ` +
+          `Give the ${kind}s of tests that break the same code one commit.`,
+      );
+      return 1;
+    }
+  }
+  // A control of a test that runs a binary, or holds both daemons, is matched by name only: its
+  // run here would see the base's binaries.
+  const fallsBack = (t: TestRef) =>
+    (binaries.get(t.file)?.reached.length ?? 0) > 0 || onList.has(t.file);
+  const controlled = checked.plans.flatMap((p) =>
+    p.kind === "control" ? p.tests.filter((t) => !fallsBack(t)) : [],
+  );
+  const runsTypeScript = targets.length > 0 && (reverts.length > 0 || controlled.length > 0);
+  if (runsTypeScript) {
     const work = signallingWork(
-      [...reverts.flatMap(pathsOf), ...guards.plans.flatMap((g) => g.paths)],
+      [...reverts.flatMap(pathsOf), ...checked.plans.flatMap((p) => p.paths)],
       targets.map((t) => t.file),
       [base, head],
       fileAt,
     );
-    const sources = [...new Set([...work.sources, ...guards.signalling])];
+    const sources = [...new Set([...work.sources, ...checked.signalling])];
     if (!judgeableHere({ ...work, sources })) return 1;
   }
   let rust: RustJudgement = {
@@ -2703,12 +2787,16 @@ async function main(args: string[]): Promise<number> {
     }
   }
   const rustTests = rust.verdicts;
+  const strays = [
+    ...checked.strays,
+    ...checked.unmatched
+      .filter((subject) => !rustTests.some((t) => namesRustTest(subject, t.title)))
+      .map((subject) => `Control: ${subject}`),
+  ];
   if (targets.length === 0 && rustTests.length === 0) {
     console.log(`falsify: no new tests between ${base.slice(0, 12)} and HEAD`);
-    if (guards.strays.length === 0) return 0;
-    console.error(
-      `\nThese Guard: lines name no new TypeScript test:\n${guards.strays.map((l) => `  ${l}`).join("\n")}`,
-    );
+    if (strays.length === 0) return 0;
+    console.error(`\n${STRAYS}\n${strays.map((l) => `  ${l}`).join("\n")}`);
     return 1;
   }
 
@@ -2717,9 +2805,10 @@ async function main(args: string[]): Promise<number> {
   results.push(...rustTests);
   if (targets.length === 0) {
     // Only Rust tests, judged already.
-  } else if (reverts.length === 0) {
+  } else if (!runsTypeScript) {
     for (const t of targets) results.push({ ...t, outcome: "INVALID" });
   } else {
+    // With nothing to revert, the worktree stays at HEAD and only the controls' breaks run there.
     const dir = mkdtempSync(join(tmpdir(), WORKTREE_PREFIX));
     cleanup = () => {
       cleanup = undefined;
@@ -2747,12 +2836,12 @@ async function main(args: string[]): Promise<number> {
         return 1;
       }
       let built: Built = new Map();
-      if (runsBinaries) {
+      if (runsBinaries && reverts.length > 0) {
         const made = await buildBinaries(dir, top, wanted);
         if (made === undefined) return 1;
         built = made;
       }
-      if (listedTargets.length > 0 && !built.has(RUST_DAEMON)) {
+      if (reverts.length > 0 && listedTargets.length > 0 && !built.has(RUST_DAEMON)) {
         console.error(
           `falsify: the base builds no ${DAEMON}, so the new tests in files ${LIST} names can't ` +
             `be judged on the Rust daemon, and none is judged:\n` +
@@ -2868,10 +2957,11 @@ async function main(args: string[]): Promise<number> {
         report.testResults.push(...stopped);
         return { report, unreported };
       };
-      const { report, unreported } = await runProjects([...projects], vitestEnv ?? isolatedEnv(), {
-        tag: "",
-        on: "",
-      });
+      // With nothing reverted no test is run against the base, and each is INVALID.
+      const { report, unreported } =
+        reverts.length > 0
+          ? await runProjects([...projects], vitestEnv ?? isolatedEnv(), { tag: "", on: "" })
+          : { report: { testResults: [] }, unreported: new Map<string, string>() };
       // A listed test runs on the base's Rust daemon too, when the branch reverted something it or
       // the binaries it runs were built from: otherwise that daemon is HEAD's, and the run would
       // only repeat HEAD.
@@ -2954,20 +3044,31 @@ async function main(args: string[]): Promise<number> {
               ),
         );
       }
-      // A surviving test a guard names: HEAD must pass it, and each break that names it must fail
-      // it on an assertion of its own. Each break runs alone, on HEAD reset in between.
-      const guardsOn = (t: TestRef) =>
-        guards.plans.filter((g) => g.tests.some((n) => keyOf(n) === keyOf(t)));
+      // A surviving test a guard names, or an INVALID one a control names: HEAD must pass it, and
+      // each break of that kind that names it must fail it on an assertion of its own. Each break
+      // runs alone, on HEAD reset in between.
+      const kindOf = new Map<Judged, BreakKind>();
+      const plansOn = (t: TestRef, kind: BreakKind) =>
+        checked.plans.filter((p) => p.kind === kind && p.tests.some((n) => keyOf(n) === keyOf(t)));
       const candidates: Judged[] = [];
       for (const r of results) {
-        if (r.outcome !== "SURVIVED" || guardsOn(r).length === 0) continue;
-        const refused = guardsOn(r)
-          .map((g) => g.refusals.get(keyOf(r)))
+        const kind =
+          r.outcome === "SURVIVED" ? "guard" : r.outcome === "INVALID" ? "control" : undefined;
+        if (kind === undefined || plansOn(r, kind).length === 0) continue;
+        if (kind === "control" && fallsBack(r)) continue;
+        r.breakKind = kind;
+        const refused = plansOn(r, kind)
+          .map((p) => p.refusals.get(keyOf(r)))
           .find((reason) => reason !== undefined);
-        if (refused !== undefined) r.guard = refused;
-        else if ((binaries.get(r.file)?.reached.length ?? 0) > 0 || onList.has(r.file)) {
-          r.guard = "it runs a Rust binary or both daemons, which a guard's run can't build";
-        } else candidates.push(r);
+        if (refused !== undefined) r.unheld = refused;
+        else if (kind === "control" && r.title === unparsedIn(r.file)) {
+          r.unheld = "falsify couldn't read its title, so it can't find its result";
+        } else if (kind === "guard" && fallsBack(r)) {
+          r.unheld = "it runs a Rust binary or both daemons, which a guard's run can't build";
+        } else {
+          kindOf.set(r, kind);
+          candidates.push(r);
+        }
       }
       if (candidates.length > 0) {
         const inProjects = (files: Set<string>) =>
@@ -2975,38 +3076,40 @@ async function main(args: string[]): Promise<number> {
             const these = inProject.filter((file) => files.has(file));
             return these.length > 0 ? [[project, these]] : [];
           });
-        const guardEnv = vitestEnv ?? isolatedEnv();
+        const breakEnv = vitestEnv ?? isolatedEnv();
         worktreeGit(dir, ["reset", "--quiet", "--hard", head]);
-        const control = await runProjects(
+        const atHeadRun = await runProjects(
           inProjects(new Set(candidates.map((t) => t.file))),
-          guardEnv,
-          { tag: "guard-head-", on: " at HEAD, for its guards" },
+          breakEnv,
+          { tag: "break-head-", on: " at HEAD, for its breaks" },
         );
         const passingAtHead = candidates.filter((t) => {
-          if (resultOf(control.report, t.file, t.title)?.status === "passed") return true;
-          t.guard = "it doesn't pass at HEAD without a break, so a break failing it shows nothing";
+          if (resultOf(atHeadRun.report, t.file, t.title)?.status === "passed") return true;
+          t.unheld = "it doesn't pass at HEAD without a break, so a break failing it shows nothing";
           return false;
         });
         const under = new Map<string, { commit: string; failure: string | undefined }[]>();
-        for (const [index, g] of guards.plans.entries()) {
-          const guarded = passingAtHead.filter((t) => g.tests.some((n) => keyOf(n) === keyOf(t)));
-          if (guarded.length === 0) continue;
-          const short = g.commit.slice(0, 12);
+        for (const [index, plan] of checked.plans.entries()) {
+          const named = passingAtHead.filter(
+            (t) => kindOf.get(t) === plan.kind && plan.tests.some((n) => keyOf(n) === keyOf(t)),
+          );
+          if (named.length === 0) continue;
+          const short = plan.commit.slice(0, 12);
           try {
-            worktreeGit(dir, ["apply", "--recount", "-"], g.patch);
+            worktreeGit(dir, ["apply", "--recount", "-"], plan.patch);
           } catch (error) {
             if (signalExitCode(error) !== undefined) throw error;
-            for (const t of guarded)
-              t.guard ??= `the break in ${short} doesn't apply in the worktree`;
+            for (const t of named)
+              t.unheld ??= `the break in ${short} doesn't apply in the worktree`;
             continue;
           }
           try {
             const { report: broken } = await runProjects(
-              inProjects(new Set(guarded.map((t) => t.file))),
-              guardEnv,
-              { tag: `guard-${index}-`, on: ` under the break in ${short}` },
+              inProjects(new Set(named.map((t) => t.file))),
+              breakEnv,
+              { tag: `break-${index}-`, on: ` under the break in ${short}` },
             );
-            for (const t of guarded) {
+            for (const t of named) {
               const outcome = classify(broken, t.file, t.title);
               const failures = resultOf(broken, t.file, t.title)?.failureMessages ?? [];
               if (outcome === "KILLED" && failedOnOwnAssertion(failures, t.file)) {
@@ -3015,7 +3118,7 @@ async function main(args: string[]): Promise<number> {
                   { commit: short, failure: failureLine(broken, t.file, t.title) },
                 ]);
               } else {
-                t.guard ??=
+                t.unheld ??=
                   outcome === "SURVIVED"
                     ? `it passes under the break in ${short}`
                     : outcome === "KILLED"
@@ -3029,9 +3132,9 @@ async function main(args: string[]): Promise<number> {
         }
         for (const t of passingAtHead) {
           const failedUnder = under.get(keyOf(t));
-          if (t.guard === undefined && failedUnder !== undefined) {
-            t.outcome = "GUARDED";
-            t.guardedBy = failedUnder;
+          if (t.unheld === undefined && failedUnder !== undefined) {
+            t.outcome = kindOf.get(t) === "guard" ? "GUARDED" : "CONTROLLED";
+            t.brokenBy = failedUnder;
           }
         }
       }
@@ -3054,18 +3157,33 @@ async function main(args: string[]): Promise<number> {
           : r.unbuilt
             ? ` (failed; the base builds no ${r.unbuilt.map((b) => `target/${b}`).join(", ")})`
             : "");
-    const guard = r.guard === undefined ? "" : ` (its guard doesn't hold: ${r.guard})`;
-    console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}${guard}`);
+    const unheld =
+      r.unheld === undefined ? "" : ` (its ${r.breakKind ?? "guard"} doesn't hold: ${r.unheld})`;
+    console.log(`  ${r.outcome.padEnd(8)} ${r.file} › ${r.title}${note}${unheld}`);
     if (r.failure !== undefined) console.log(`           failed: ${r.failure}`);
-    for (const { commit, failure } of r.guardedBy ?? []) {
+    for (const { commit, failure } of r.brokenBy ?? []) {
       console.log(`           under the break in ${commit}: ${failure ?? "(no message)"}`);
     }
   }
-  const unguarded = guardErrors(guards, results);
+  const guardPlans = checked.plans.filter((p) => p.kind === "guard");
+  const unguarded = guardErrors(guardPlans, results);
   if (unguarded.length > 0) {
     console.error(
       "\nA guard is for a new test that passes without the change. These Guard: lines name " +
         `none:\n${unguarded.map((line) => `  ${line}`).join("\n")}`,
+    );
+  }
+  if (strays.length > 0) {
+    console.error(`\n${STRAYS}\n${strays.map((l) => `  ${l}`).join("\n")}`);
+  }
+  const unused = unusedControls(
+    checked.plans.filter((p) => p.kind === "control"),
+    results,
+  );
+  if (unused.length > 0) {
+    console.log(
+      "falsify: these Control: lines name tests it judged without one, so their breaks didn't " +
+        `run:\n${unused.map((line) => `  ${line}`).join("\n")}`,
     );
   }
   if (rust.total > 0) {
@@ -3122,12 +3240,13 @@ async function main(args: string[]): Promise<number> {
           .join("\n"),
     );
   }
-  // Rust verdicts are checked above, by their full path.
+  // Rust verdicts are checked above, by their full path, as are the controls of tests that run a
+  // binary or hold both daemons. Every other INVALID test needs a control whose break held.
   const rustVerdicts = new Set<object>(rustTests);
-  const uncontrolled = uncontrolledTests(
-    results.filter((r) => !rustVerdicts.has(r)),
-    messages,
-  );
+  const typeScript = results.filter((r) => !rustVerdicts.has(r));
+  const byName = uncontrolledTests(typeScript.filter(fallsBack), messages);
+  const unchecked = typeScript.filter((r) => !fallsBack(r) && r.outcome === "INVALID");
+  const uncontrolled = [...byName, ...unchecked];
   if (uncontrolled.length > 0) {
     console.error(
       reverts.length === 0
@@ -3136,34 +3255,68 @@ async function main(args: string[]): Promise<number> {
             "source change, binaries the base doesn't build, unparsed titles, load errors, " +
             "timeouts, or runs that left no report).",
     );
-    const hints = uncontrolled.map((test) => ({ test, renamed: renameOf(test) }));
-    const controls = hints.flatMap(({ test, renamed }) => (renamed === undefined ? [test] : []));
-    const moved = hints.flatMap(({ renamed }) => renamed ?? []);
-    if (controls.length > 0) {
+    const unmoved = (some: Judged[]) => some.filter((t) => renameOf(t) === undefined);
+    const unreadable = unmoved(unchecked).filter((t) => t.title === unparsedIn(t.file));
+    const breakable = unmoved(unchecked).filter((t) => t.title !== unparsedIn(t.file));
+    if (breakable.length > 0) {
       console.error(
-        "Each needs a control of its own. Break the code by hand, confirm the test fails on its " +
-          "assertion, and record it in a commit message on the branch, naming the test by its " +
-          "file and title:\n" +
-          controls.map((t) => `  ${controlLine(t)}`).join("\n"),
+        "Each needs a control of its own: a commit on the branch whose message holds a ```diff " +
+          "block breaking the source the test imports, and a line naming the test by its file " +
+          "and title. Falsify applies the break, and the test must pass at HEAD and fail under " +
+          "it on an assertion of its own:\n" +
+          breakable.map((t) => `  ${controlLine(t)}`).join("\n"),
       );
     }
+    if (unreadable.length > 0) {
+      console.error(
+        "Falsify couldn't read the titles of new tests in these files, so it can't check a " +
+          "control of them. Give each test a literal title:\n" +
+          unreadable.map((t) => `  ${t.file}`).join("\n"),
+      );
+    }
+    if (unmoved(byName).length > 0) {
+      console.error(
+        "These run a Rust binary or hold both daemons, so each needs a control of its own. Break " +
+          "the code by hand, confirm the test fails on its assertion, and record it in a commit " +
+          "message on the branch, naming the test by its file and title:\n" +
+          unmoved(byName)
+            .map((t) => `  ${controlLine(t)}`)
+            .join("\n"),
+      );
+    }
+    const moved = uncontrolled.flatMap((t) => renameOf(t) ?? []);
     if (moved.length > 0) {
       console.error(`${MOVED_OR_RENAMED}\n${moved.map((line) => `  ${line}`).join("\n")}`);
     }
   }
-  return uncontrolledRust.length > 0 || uncontrolled.length > 0 || unguarded.length > 0 ? 1 : 0;
+  return uncontrolledRust.length > 0 ||
+    uncontrolled.length > 0 ||
+    unguarded.length > 0 ||
+    strays.length > 0
+    ? 1
+    : 0;
 }
 
 /**
- * The `Guard:` lines that name no new TypeScript test, or a test that didn't survive, so its
- * guard shows nothing: each as written, or with the test it names and its verdict.
+ * The tests control lines name that were judged without one (KILLED, SURVIVED or GUARDED), each
+ * with its verdict. A branch that changes falsify may need such a line for the base's falsify.
  */
-export function guardErrors(
-  guards: { plans: { tests: TestRef[] }[]; strays: string[] },
-  results: Judged[],
-): string[] {
-  const named = guards.plans.flatMap((g) => g.tests);
-  const errors = guards.strays.map((line) => `${line} (it names no new TypeScript test)`);
+export function unusedControls(plans: { tests: TestRef[] }[], results: Judged[]): string[] {
+  const named = plans.flatMap((p) => p.tests);
+  return named
+    .filter((n, i) => named.findIndex((m) => keyOf(m) === keyOf(n)) === i)
+    .flatMap((t) => {
+      const outcome = results.find((r) => keyOf(r) === keyOf(t))?.outcome;
+      return outcome === undefined || outcome === "INVALID" || outcome === "CONTROLLED"
+        ? []
+        : [`${t.file} › ${t.title} (${outcome})`];
+    });
+}
+
+/** The tests `Guard:` lines name that didn't survive, so their guards show nothing. */
+export function guardErrors(plans: { tests: TestRef[] }[], results: Judged[]): string[] {
+  const named = plans.flatMap((g) => g.tests);
+  const errors: string[] = [];
   for (const t of named.filter((n, i) => named.findIndex((m) => keyOf(m) === keyOf(n)) === i)) {
     const outcome = results.find((r) => keyOf(r) === keyOf(t))?.outcome;
     if (outcome === "SURVIVED" || outcome === "GUARDED") continue;

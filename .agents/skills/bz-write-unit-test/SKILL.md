@@ -32,10 +32,12 @@ check rejects a pull request whose new test passes without your change.
      and the line `Guard: <file> › <title>: <what the break does>`. Falsify applies the break
      and prints the test GUARDED only if it fails on its own assertion inside the 30 s
      `testTimeout`, not on a timeout or a thrown error.
-   - **INVALID** (a brand-new function) — break your code by hand, confirm the test fails on its
-     assertion, restore the code, and record a trailer in a commit on the branch naming the
-     test, one per INVALID test, as falsify prints the line it needs:
-     `Control: <file> › <title>: <what you broke> -> <how the test failed>`.
+   - **INVALID** (a brand-new function) — commit, the same way, a break of the code the test
+     imports and the line falsify prints for it,
+     `Control: <file> › <title>: <what you broke> -> <how the test failed>`. Falsify applies the
+     break and prints the test CONTROLLED only if it passes at HEAD and fails under the break on
+     its own assertion. A test that runs a Rust binary still takes the line alone: break the
+     code by hand, confirm the test fails on its assertion, restore it, and record the line.
 
 ## Checklist
 

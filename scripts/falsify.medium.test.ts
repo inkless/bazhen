@@ -177,6 +177,13 @@ case "$1" in
     for file in $files; do
       st="$status"
       msg="$messages"
+      # A test of a symbol the source lacks: while a file under packages/ holds STUB_LOAD_IF, each
+      # file run throws as it loads.
+      if [ -n "\${STUB_LOAD_IF:-}" ] && grep -rqsF -- "$STUB_LOAD_IF" packages; then
+        printf '%s{"name":"%s/%s","status":"failed","message":"SyntaxError: no export named w","assertionResults":[]}' "$sep" "$(pwd)" "$file" >> "$out"
+        sep=","
+        continue
+      fi
       # A break: while a file under packages/ holds STUB_FAIL_IF, each of STUB_FAIL_FILES (else
       # each file run) fails, on an assertion at its own frame or with STUB_FAIL_AS, or, with
       # STUB_FAIL_LOAD, by a throw as it loads.
@@ -813,36 +820,43 @@ describe("falsify on a branch in a linked worktree", () => {
     });
   });
 
-  it("fails on an INVALID test until a commit on the branch records a control naming it", () => {
-    const before = againstBase({ STUB_STATUS: "skipped" });
-    const another = `Control: ${TEST} › caps twice: return v = 1 -> expected 2, got 1`;
-    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: another", "-m", another);
-    const namingAnother = againstBase({ STUB_STATUS: "skipped" }).status;
-    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
+  it("fails on an INVALID test until a commit on the branch holds a control whose break fails it", () => {
+    const before = againstBase(CONTROLLABLE);
+    const bare = guardCommit([], [CONTROL]);
+    const unbroken = againstBase(CONTROLLABLE);
+    git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
+    const commit = guardCommit([breakOf()], [CONTROL]);
     git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "chore: later");
+    const after = againstBase(CONTROLLABLE);
     expect({
-      before,
-      namingAnother,
-      after: againstBase({ STUB_STATUS: "skipped" }).status,
-    }).toEqual({
-      before: {
-        status: 1,
-        output: expect.stringContaining(
-          `\n  Control: ${TEST} › caps: <what you broke> -> <how it failed>\n`,
+      before: { status: before.status, asks: before.output.includes(`\n${ASKS_CONTROL}\n`) },
+      unbroken: {
+        status: unbroken.status,
+        why: unbroken.output.includes(
+          `(its control doesn't hold: commit ${bare} holds no \`\`\`diff block)`,
         ),
       },
-      namingAnother: 1,
-      after: 0,
+      after: {
+        status: after.status,
+        controlled: after.output.includes(`  CONTROLLED ${TEST} › caps\n`),
+        under: after.output.includes(
+          `under the break in ${commit}: AssertionError: expected 2 to be 3`,
+        ),
+      },
+      leftovers: leftovers(),
+    }).toEqual({
+      before: { status: 1, asks: true },
+      unbroken: { status: 1, why: true },
+      after: { status: 0, controlled: true, under: true },
+      leftovers: [],
     });
   });
 
-  it("takes a control for another new test in the file as none for one whose title it couldn't read", () => {
+  it("asks a literal title of a test whose title it couldn't read, whatever controls name", () => {
     renameTest(branchTest(`${UNREADABLE}\n`), CONTROL);
     expect(againstBase()).toEqual({
       status: 1,
-      output: expect.stringContaining(
-        `\n  Control: ${TEST} › <the test's title>: <what you broke> -> <how it failed>\n`,
-      ),
+      output: expect.stringContaining(`Give each test a literal title:\n  ${TEST}\n`),
     });
   });
 
@@ -1019,15 +1033,17 @@ describe("falsify on a branch in a linked worktree", () => {
     }).toEqual({ status: 0, block: true, line: true });
   });
 
-  it("passes a test of a run that left no report only once a control names it", () => {
+  it("keeps a test of a run that left no report INVALID under a control, as HEAD's run leaves none", () => {
     const before = againstBase({ STUB_VITEST_REPORT: "none" });
-    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
+    guardCommit([breakOf()], [CONTROL]);
+    const after = againstBase({ STUB_VITEST_REPORT: "none" });
     expect({
       before: before.status,
       named: before.output.includes(`${ASKS_CONTROL}\n`),
       why: before.output.includes("(no report from the unit run: it wrote no report)"),
-      after: againstBase({ STUB_VITEST_REPORT: "none" }).status,
-    }).toEqual({ before: 1, named: true, why: true, after: 0 });
+      after: after.status,
+      unheld: after.output.includes("(its control doesn't hold: it doesn't pass at HEAD"),
+    }).toEqual({ before: 1, named: true, why: true, after: 1, unheld: true });
   });
 
   it("sweeps a stale worktree whose pid is dead and keeps one whose pid is alive", () => {
@@ -1114,27 +1130,30 @@ describe("falsify on a branch that changes a script", () => {
     });
   });
 
-  it("asks a control for a passing test that imports no script the branch changed", () => {
+  it("asks a control for a passing test that imports no script the branch changed, and refuses one breaking a script it doesn't import", () => {
     const unrelated = { path: "scripts/y.test.ts", text: branchTest("") };
     const before = changeScript(SCRIPT, unrelated, { STUB_STATUS: "passed" });
     const base = git(fx.linked, "rev-parse", "HEAD~1").trim();
-    const again = () =>
-      falsify(["--base", base], {
-        STUB_SOURCE: SCRIPT,
-        STUB_TEST: unrelated.path,
-        STUB_STATUS: "passed",
-      }).status;
-    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", CONTROL);
-    const namingAnotherFile = again();
     const naming = `Control: ${unrelated.path} › caps: return s = 1 -> expected 2, got 1`;
-    git(fx.linked, "commit", "--quiet", "--allow-empty", "-m", "test: control", "-m", naming);
-    expect({ before, namingAnotherFile, after: again() }).toEqual({
+    const commit = guardCommit([breakOf({ file: SCRIPT, from: "export const s = 2;" })], [naming]);
+    const after = falsify(["--base", base], {
+      STUB_SOURCE: SCRIPT,
+      STUB_TEST: unrelated.path,
+      STUB_STATUS: "passed",
+    });
+    expect({
+      before,
+      after: after.status,
+      refused: after.output.includes(
+        `(its control doesn't hold: the break in ${commit}: ${SCRIPT} isn't source the test imports)`,
+      ),
+    }).toEqual({
       before: {
         status: 1,
         output: expect.stringContaining("(passed; unrelated to the source change)"),
       },
-      namingAnotherFile: 1,
-      after: 0,
+      after: 1,
+      refused: true,
     });
   });
 
@@ -1213,6 +1232,7 @@ describe("falsify on a branch that adds Rust tests", () => {
       fx.linked,
       "commit",
       "--quiet",
+      "--amend",
       "--allow-empty",
       "-m",
       "test: y",
@@ -2813,6 +2833,9 @@ const V2 = "export const v = 2;";
 const GUARD = `Guard: ${TEST} › caps: marks v broken`;
 // The new test passes at the base and at HEAD, and fails while the source holds MARK.
 const SURVIVES = { STUB_STATUS: "passed", STUB_FAIL_IF: MARK };
+// The new test fails as it loads at the base, whose source lacks what it imports, passes at HEAD,
+// and fails while the source holds MARK.
+const CONTROLLABLE = { ...SURVIVES, STUB_LOAD_IF: "v = 1" };
 
 /** `line` with MARK in a string of its own, which changes its tokens. */
 const marked = (line: string) => `${line} "${MARK}";`;
@@ -2872,7 +2895,7 @@ const notItsOwn = (commit: string) =>
 const sourcesUnderBreaks = () =>
   stubLog()
     .split(/^ARGS: /m)
-    .filter((run) => /falsify-report-guard-\d+-/.test(run.split("\n")[0] ?? ""))
+    .filter((run) => /falsify-report-break-\d+-/.test(run.split("\n")[0] ?? ""))
     .map((run) => /^SOURCE: (.*)$/m.exec(run)?.[1]);
 
 describe("falsify on a branch that guards a test of behaviour the base already has", () => {
@@ -2987,11 +3010,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
       [fixture, "export const f = 2;", "is test support"],
       [support, "export const g = 2;", "is test support"],
       [unloaded, "export const h = 2;", "isn't source the branch changed that the test imports"],
-      [
-        TEST,
-        'import { v } from "./x.ts";',
-        "isn't source the branch changed that the test imports",
-      ],
+      [TEST, 'import { v } from "./x.ts";', "is a test file"],
     ] as const;
     const refused = breaks.map(([file, from, why]) => {
       const commit = guardCommit([breakOf({ file, from })]);
@@ -3126,9 +3145,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
     expect({
       status: result.status,
       killed: result.output.includes(`  ${TEST} › caps (KILLED)`),
-      stray: result.output.includes(
-        "Guard: tests::b_is_two: a Rust test's path (it names no new TypeScript test)",
-      ),
+      stray: result.output.includes("Guard: tests::b_is_two: a Rust test's path"),
     }).toEqual({ status: 1, killed: true, stray: true });
   });
 
@@ -3241,5 +3258,223 @@ describe("falsify on a branch that guards a test of behaviour the base already h
     expect(result.output).toMatch(
       new RegExp(`SURVIVED ${escape(LISTED_TEST)} › caps .*it runs a Rust binary or both daemons`),
     );
+  });
+});
+
+const MAX_CONTROLS = 30;
+const V1 = "export const v = 1;";
+
+/** Falsify's verdict on `caps`, INVALID by reverting, under one control's marker break. */
+function underOneControl(extra: Record<string, string> = {}) {
+  const commit = guardCommit([breakOf()], [CONTROL]);
+  return { commit, ...guardVerdict({ ...CONTROLLABLE, ...extra }) };
+}
+
+/** The verdict line on `caps` when its control doesn't hold, for the reason `why`. */
+const uncontrolledLine = (why: string) =>
+  expect.stringMatching(
+    new RegExp(
+      `^INVALID  ${escape(TEST)} › caps .*\\(its control doesn't hold: ${escape(why)}\\)$`,
+    ),
+  );
+
+/** The verdict on `caps` when its control doesn't hold, for the reason `why`. */
+const uncontrolled = (why: string) => ({ status: 1, line: uncontrolledLine(why), leftovers: [] });
+
+/** Makes the branch change only its test, so falsify has nothing to revert. */
+const testOnlyBranch = () => amendBranch({ [SOURCE]: `${V1}\n` });
+
+describe("falsify on a branch that controls a test reverting can't judge", () => {
+  it("leaves a controlled test INVALID when it passes under the break", () => {
+    const { commit, ...verdict } = underOneControl({ STUB_FAIL_IF: "NOT THERE" });
+    expect(verdict).toEqual(uncontrolled(`it passes under the break in ${commit}`));
+  });
+
+  it("leaves a controlled test INVALID when it times out under the break", () => {
+    const { commit, ...verdict } = underOneControl({
+      STUB_FAIL_AS: `Error: Test timed out in 30000ms.\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(uncontrolled(noVerdict(commit)));
+  });
+
+  it("leaves a controlled test INVALID when it fails on a TypeError at its own frame", () => {
+    const { commit, ...verdict } = underOneControl({
+      STUB_FAIL_AS: `TypeError: v is undefined\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(uncontrolled(notItsOwn(commit)));
+  });
+
+  it("leaves a controlled test INVALID when it fails on an assertion in a helper", () => {
+    const { commit, ...verdict } = underOneControl({
+      STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at packages/a/src/helper.ts:1:1\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(uncontrolled(notItsOwn(commit)));
+  });
+
+  it("leaves a controlled test INVALID when it fails at HEAD without the break", () => {
+    const { commit: _, ...verdict } = underOneControl({ STUB_FAIL_IF: V2 });
+    expect(verdict).toEqual(
+      uncontrolled("it doesn't pass at HEAD without a break, so a break failing it shows nothing"),
+    );
+  });
+
+  it("refuses a break of a test file, test support, a manifest or a file the test doesn't import", () => {
+    const fixture = "packages/a/src/store/fixture.ts";
+    const manifest = "packages/a/package.json";
+    const unloaded = "packages/a/src/other.ts";
+    amendBranch({
+      [fixture]: "export const f = 2;\n",
+      [manifest]: '{ "name": "a" }\n',
+      [unloaded]: "export const h = 2;\n",
+      [TEST]: branchTest(`${IMPORTS}import { f } from "./store/fixture.ts";\nit("v", () => {});\n`),
+    });
+    const breaks = [
+      [TEST, IMPORTS.trimEnd(), "is a test file"],
+      [fixture, "export const f = 2;", "is test support"],
+      [manifest, '{ "name": "a" }', "isn't source the test imports"],
+      [unloaded, "export const h = 2;", "isn't source the test imports"],
+    ] as const;
+    const refused = breaks.map(([file, from, why]) => {
+      const commit = guardCommit(
+        [breakOf({ file, from, to: from.replace(/\d|a/, "9") })],
+        [CONTROL],
+      );
+      const verdict = guardVerdict(CONTROLLABLE);
+      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
+      return uncontrolledLine(`the break in ${commit}: ${file} ${why}`).asymmetricMatch(
+        verdict.line,
+      );
+    });
+    expect(refused).toEqual([true, true, true, true]);
+  });
+
+  it("controls a test on a branch with no source change, by a break of code the test pins", () => {
+    testOnlyBranch();
+    const before = againstBase(SURVIVES);
+    const commit = guardCommit([breakOf({ from: V1 })], [CONTROL]);
+    const after = againstBase(SURVIVES);
+    expect({
+      before: before.output.includes("This branch adds tests but no source change to revert."),
+      status: after.status,
+      controlled: after.output.includes(`  CONTROLLED ${TEST} › caps\n`),
+      under: after.output.includes(`under the break in ${commit}: AssertionError`),
+      sources: sourcesUnderBreaks(),
+      leftovers: leftovers(),
+    }).toEqual({
+      before: true,
+      status: 0,
+      controlled: true,
+      under: true,
+      sources: [`${V1} "${MARK}";`],
+      leftovers: [],
+    });
+  });
+
+  it("refuses, before it installs anything, a break that leaves a quiet file signalling on a branch with no source change", () => {
+    testOnlyBranch();
+    guardCommit(
+      [
+        lines(
+          "```diff",
+          `--- a/${SOURCE}`,
+          `+++ b/${SOURCE}`,
+          "@@ -1 +1 @@",
+          `-${V1}`,
+          '+import { signalGroup } from "@bazhen/host-guard";',
+          `+${V1}`,
+          '+export const stop = (c) => signalGroup(c, "SIGTERM");',
+          "```",
+        ),
+      ],
+      [CONTROL],
+    );
+    const result = againstBase({ ...SURVIVES, BZ_FALSIFY_AS_HOST: "1" });
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, installed: false, leftovers: [] });
+  });
+
+  it("refuses a commit carrying both Guard: and Control: lines, before it installs anything", () => {
+    const commit = guardCommit([breakOf()], [GUARD, CONTROL]);
+    const result = againstBase(CONTROLLABLE);
+    expect({
+      status: result.status,
+      said: result.output.includes(`Give each kind a commit of its own:\n  ${commit}\n`),
+      installed: stubLog().includes("ARGS: install"),
+    }).toEqual({ status: 1, said: true, installed: false });
+  });
+
+  it("runs as many controls' breaks as falsify allows", () => {
+    for (let i = 0; i < MAX_CONTROLS; i++) {
+      guardCommit([breakOf({ to: `${V2} "${MARK} ${i}";` })], [CONTROL]);
+    }
+    const verdict = guardVerdict(CONTROLLABLE);
+    expect({ ...verdict, runs: sourcesUnderBreaks().length }).toEqual({
+      status: 0,
+      line: `CONTROLLED ${TEST} › caps`,
+      leftovers: [],
+      runs: MAX_CONTROLS,
+    });
+  });
+
+  it("refuses more controls' breaks than falsify runs, before it installs anything", () => {
+    for (let i = 0; i <= MAX_CONTROLS; i++) guardCommit([breakOf()], [CONTROL]);
+    const result = againstBase(CONTROLLABLE);
+    expect({
+      status: result.status,
+      said: result.output.includes(
+        `${MAX_CONTROLS + 1} commits carry a control's break, and falsify runs at most ${MAX_CONTROLS}`,
+      ),
+      installed: stubLog().includes("ARGS: install"),
+    }).toEqual({ status: 1, said: true, installed: false });
+  });
+
+  it("prints, and doesn't run, a control of a test reverting killed", () => {
+    guardCommit([breakOf()], [CONTROL]);
+    const result = againstBase();
+    expect({
+      status: result.status,
+      unused: result.output.includes(`so their breaks didn't run:\n  ${TEST} › caps (KILLED)\n`),
+      runs: sourcesUnderBreaks().length,
+    }).toEqual({ status: 0, unused: true, runs: 0 });
+  });
+
+  it("fails on a Control: naming no new test", () => {
+    guardCommit([breakOf()], [`Control: ${TEST} › nothing: marks v broken -> expected 2, got 3`]);
+    const result = againstBase();
+    expect({
+      status: result.status,
+      stray: result.output.includes(`  Control: ${TEST} › nothing: marks v broken\n`),
+    }).toEqual({ status: 1, stray: true });
+  });
+
+  it("asks a test that runs a Rust binary for a Control: line alone, and takes one", () => {
+    const before = changeCli(OTHER_CRATE, { STUB_STATUS: "passed" });
+    git(
+      fx.linked,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "test: control",
+      "-m",
+      `Control: ${CLI_TEST} › caps: x -> y`,
+    );
+    const base = git(fx.linked, "rev-parse", "HEAD~2").trim();
+    const after = falsify(["--base", base], {
+      STUB_SOURCE: CLI_MAIN,
+      STUB_TEST: CLI_TEST,
+      STUB_STATUS: "passed",
+    });
+    expect({
+      before: before.status,
+      asks: before.output.includes(
+        `These run a Rust binary or hold both daemons, so each needs a control of its own.`,
+      ),
+      after: after.status,
+    }).toEqual({ before: 1, asks: true, after: 0 });
   });
 });
