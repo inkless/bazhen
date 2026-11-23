@@ -167,7 +167,8 @@ pub struct HolderBuild {
     pub stats: Option<Stats>,
 }
 
-/// Why a ref names no process a verb can act on.
+/// Why a ref names no process a verb can act on. Shown in TypeScript's words, as
+/// `StaleIncarnation` gives its reason, since a client may match on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaleReason {
     /// No holder answers, and the one recorded no longer runs.
@@ -180,6 +181,17 @@ pub enum StaleReason {
     Unnumbered,
 }
 
+impl std::fmt::Display for StaleReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Gone => "gone",
+            Self::ServerReplaced => "server-replaced",
+            Self::ProcessReplaced => "process-replaced",
+            Self::Unnumbered => "unnumbered",
+        })
+    }
+}
+
 /// What a verb needs the terminal's process to be, and it isn't.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Needs {
@@ -189,7 +201,7 @@ pub enum Needs {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
-    #[error("terminal {terminal_id}: {reason:?}")]
+    #[error("terminal {terminal_id}: {reason}")]
     Stale {
         terminal_id: TerminalId,
         reason: StaleReason,
@@ -1846,6 +1858,28 @@ mod tests {
             systemd_run: PathBuf::from("/usr/bin/systemd-run"),
             runtime_dir: "/run/user/1000".into(),
         })
+    }
+
+    #[test]
+    fn says_why_a_terminal_is_stale_in_typescript_s_words() {
+        let said = [
+            StaleReason::Gone,
+            StaleReason::ServerReplaced,
+            StaleReason::ProcessReplaced,
+            StaleReason::Unnumbered,
+        ]
+        .map(|reason| {
+            RuntimeError::Stale {
+                terminal_id: id(1),
+                reason,
+            }
+            .to_string()
+        });
+        assert_eq!(
+            said,
+            ["gone", "server-replaced", "process-replaced", "unnumbered"]
+                .map(|reason| format!("terminal {}: {reason}", id(1)))
+        );
     }
 
     #[test]
