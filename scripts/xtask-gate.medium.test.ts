@@ -44,7 +44,7 @@ echo '{"packages":[{"name":"two"},{"name":"one"}]}'
 `;
 
 let xtask: string;
-let xtaskDir: string;
+let xtaskDir: string | undefined;
 let dir: string;
 let bin: string;
 let log: string;
@@ -77,7 +77,9 @@ beforeAll(() => {
   chmodSync(xtask, 0o755);
 }, 300_000);
 
-afterAll(() => rmSync(xtaskDir, { recursive: true, force: true }));
+afterAll(() => {
+  if (xtaskDir !== undefined) rmSync(xtaskDir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "bz-xtask-gate-"));
