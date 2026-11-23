@@ -260,7 +260,33 @@ export function pathBefore(text: string, at: number, name: string): string[] | u
 
 // The name in generic arguments that an `=` binds: an associated type's (`Future<Output = T>`,
 // `Item<'a> = T`) or a parameter's with a default (`<T = U>`). It names no type; what follows does.
-const BOUND_NAME = /^\s*(?:<[^<>=]*>\s*)?=(?![=>])/;
+const BOUND_NAME = /^\s*(?:<[^<>]*>\s*)?=(?![=>])/;
+
+const CLOSES: Record<string, string> = { "(": ")", "[": "]", "{": "}", "<": ">" };
+
+/**
+ * Whether the bracket open around `at` in `text` is a `<`, with no bracket around it opening a
+ * macro's arguments, whose `<` and `,` may be any token. `false` when brackets before `at` don't
+ * pair (`{ 1 > 0 }`), since which one is open can't then be told.
+ */
+function inGenericArgs(text: string, at: number): boolean {
+  const closed: string[] = [];
+  let open: string | undefined;
+  for (let i = at - 1; i >= 0; i--) {
+    const c = text[i] ?? "";
+    if (c === ">" && text[i - 1] === "-") i--;
+    else if (")]}>".includes(c)) closed.push(c);
+    else if (c in CLOSES) {
+      if (closed.length > 0) {
+        if (closed.pop() !== CLOSES[c]) return false;
+        continue;
+      }
+      open ??= c;
+      if (c !== "<" && /!\s*$/.test(text.slice(0, i))) return false;
+    }
+  }
+  return open === "<";
+}
 
 /**
  * Each path in `text` that ends at a name and isn't a keyword, a lifetime or a name `=` binds in
@@ -273,7 +299,13 @@ export function typePaths(text: string): { name: string; path: string[] | undefi
     const name = m[0];
     const after = text.slice(m.index + name.length);
     if (KEYWORDS.has(name) || /^\s*::/.test(after)) continue;
-    if (BOUND_NAME.test(after) && /[<,]\s*$/.test(text.slice(0, m.index))) continue;
+    if (
+      BOUND_NAME.test(after) &&
+      /[<,]\s*$/.test(text.slice(0, m.index)) &&
+      inGenericArgs(text, m.index)
+    ) {
+      continue;
+    }
     out.push({ name, path: pathBefore(text, m.index, name) });
   }
   return out;

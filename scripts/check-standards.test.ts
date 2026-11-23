@@ -1953,11 +1953,16 @@ describe("decoderFailures", () => {
         "pub fn spawn(f: Pin<Box<dyn Future<Output = ()> + Send>>) {}",
         "pub fn run<F>(f: F) where F: Future<Output = ()> {}",
         "type Boxed = Pin<Box<dyn Future<Output = ()> + Send>>;",
+        "type Made = ty!(x, Output = 1);",
+        "pub struct Holds { f: ty!(x, Output = 1) }",
+        "pub fn hold(h: Holds) {}",
       ].join("\n"),
     };
     expect(failures(fuzzed, exempt, output).map((f) => f.split(": ")[0])).toEqual([
       "crates/p/src/out.rs::Outputs",
       "crates/p/src/out.rs::feed",
+      "crates/p/src/other.rs::Made",
+      "crates/p/src/other.rs::hold",
     ]);
   });
 

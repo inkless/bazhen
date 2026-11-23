@@ -55,6 +55,8 @@ describe("useTree", () => {
   });
 });
 
+const typeNames = (text: string) => typePaths(text).map((p) => p.name);
+
 describe("typePaths", () => {
   it("finds each path ending at a name, skipping keywords and lifetimes", () => {
     expect(typePaths("&'a mut Vec<direct::Step<T>>, ::q::Frame")).toEqual([
@@ -87,6 +89,9 @@ describe("typePaths", () => {
       { name: "Frame", path: ["Frame"] },
     ]);
     expect(typePaths("<T = Vec<u8>>").map((p) => p.name)).toEqual(["Vec", "u8"]);
+    expect(
+      typePaths("<F: Fn() -> u8, O = u32>, Vec<(u8, Box<dyn Tr<A = [u8; 2]>>)>").map((p) => p.name),
+    ).toEqual(["F", "Fn", "u8", "u32", "Vec", "u8", "Box", "Tr", "u8"]);
   });
 
   it("keeps a name followed by `==` or `=>`, or by `=` outside generic arguments", () => {
@@ -98,6 +103,48 @@ describe("typePaths", () => {
       "x",
       "Output",
       "y",
+    ]);
+    expect(typePaths("ty!(a, Output = 1), Vec<(a, Output = 1)>").map((p) => p.name)).toEqual([
+      "ty",
+      "a",
+      "Output",
+      "Vec",
+      "a",
+      "Output",
+    ]);
+  });
+
+  it("keeps a parameter's bound before its default", () => {
+    expect(typePaths("<T: Read = File, U: io::Read = File>").map((p) => p.name)).toEqual([
+      "T",
+      "Read",
+      "File",
+      "U",
+      "Read",
+      "File",
+    ]);
+  });
+
+  it("keeps a name inside a macro's arguments, where `<` and `,` may be any token", () => {
+    expect([
+      typeNames("Vec<ty!(a, Output = 1)>"),
+      typeNames("ty!(a < Output = 1)"),
+      typeNames("ty!(a, Output<u8> = 1)"),
+      typeNames("ty![<a, Output = 1>]"),
+    ]).toEqual([
+      ["Vec", "ty", "a", "Output"],
+      ["ty", "a", "Output"],
+      ["ty", "a", "Output", "u8"],
+      ["ty", "a", "Output"],
+    ]);
+  });
+
+  it("keeps a name whose brackets don't pair, since what opens it can't be told", () => {
+    expect(typePaths("Tr<X<{ 1 > 0 }, Output = u8>>").map((p) => p.name)).toEqual([
+      "Tr",
+      "X",
+      "Output",
+      "u8",
     ]);
   });
 });
