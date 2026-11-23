@@ -11,9 +11,11 @@ use std::time::Duration;
 
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, waitid};
 
-/// Whether `child` ended within `bound`. One still unreaped is left so, and until it is reaped
-/// through `child` its pid is still its own, so a signal sent to it reaches it alone. One already
-/// reaped, as `Child::try_wait` does, has ended: its pid may be another process's by now.
+/// Whether `child` ended within `bound`. It is left unreaped, so until it is reaped through
+/// `child` its pid is still its own, and a signal sent to it reaches it alone. Pass a child not
+/// yet waited for: once reaped, as `Child::try_wait` or `Child::wait` reap it, its pid may be
+/// another child's of this process, which this would watch in its place. A pid with no child left
+/// to wait for counts as ended.
 ///
 /// # Errors
 ///
@@ -48,12 +50,18 @@ fn watch(pid: Pid) -> io::Result<()> {
 }
 
 /// How `child` ended, if it did within `bound`; `None` if it was still running then, when it is
-/// killed. Reaped either way.
+/// killed. Reaped either way. A child already reaped through `child` gives the status std kept,
+/// and its pid, perhaps another process's by now, is neither watched nor signalled. Unlike
+/// `Child::wait`, this leaves the child's stdin open, so one that would end at the end of its
+/// input is still running at the bound, and is killed.
 ///
 /// # Errors
 ///
 /// When the child can't be waited for, or the kill is refused (`crate::Tester::check`).
 pub fn end_within(child: &mut Child, bound: Duration) -> io::Result<Option<ExitStatus>> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(Some(status));
+    }
     if ended_within(child, bound)? {
         return child.wait().map(Some);
     }
