@@ -1048,6 +1048,7 @@ describe("rootManifestFailures", () => {
     "",
     ...table("[profile.release]"),
     ...table("[profile.release-holder]"),
+    ...table("[profile.dev.package.bazhen-client]"),
   ].join("\n");
 
   const deps = (lines: string) =>
@@ -1085,6 +1086,8 @@ describe("rootManifestFailures", () => {
       rootManifestFailures(root.replace(/\[profile\.release\][^[]*/, "")),
       rootManifestFailures(root.replace('panic = "unwind"', 'panic = "abort"')),
       rootManifestFailures(root.replace(/\[profile\.release-holder\][^[]*/, "")),
+      rootManifestFailures(root.replace("opt-level = 3", "opt-level = 1")),
+      rootManifestFailures(root.replace(/\[profile\.dev\.package\.bazhen-client\][^[]*/, "")),
     ]).toEqual([
       [expect.stringContaining("[workspace] differs from ROOT_TABLES")],
       [expect.stringContaining("[patch.crates-io] isn't one of the root manifest's tables")],
@@ -1093,6 +1096,8 @@ describe("rootManifestFailures", () => {
       [expect.stringContaining("[profile.release] is missing")],
       [expect.stringContaining("[profile.release-holder] differs")],
       [expect.stringContaining("[profile.release-holder] is missing")],
+      [expect.stringContaining("[profile.dev.package.bazhen-client] differs")],
+      [expect.stringContaining("[profile.dev.package.bazhen-client] is missing")],
     ]);
   });
 

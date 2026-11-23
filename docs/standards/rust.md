@@ -210,7 +210,9 @@ gate tasks in `moon.toml` as `RUST_GATE_TASKS`, and the root `.cargo/config.toml
 capping test runner, which caps what `cargo run` and `cargo bench` start too) and `.cargo/mutants.toml` as `CARGO_CONFIG` and `MUTANTS_CONFIG`, and fails
 when the files differ, so a lint level, the toolchain or a gate changes only in a commit that
 changes the task and this page with it. The root manifest holds no other table (a patch, an
-excluded crate, another profile), and a workspace dependency is an exact version or a path to
+excluded crate, another profile; the one dev override, `bazhen-client` at opt-level 3, is pinned
+because every daemon start hashes the holder build with it), and a workspace dependency is an
+exact version or a path to
 `crates/<name>`. It also fails on anything that would loosen them from beside: cargo config in any
 other `.cargo` directory, whose `rustflags` can turn lints off; a second `clippy.toml` or
 `deny.toml`; a nextest config, whose profiles can filter tests out; a `rustfmt.toml`; a second

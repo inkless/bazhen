@@ -3118,12 +3118,16 @@ export const WORKSPACE_LINTS = [
 // The root manifest's other tables, exactly: one workspace over crates/, nothing excluded, the
 // profile the hook's release build uses, and the holder's, which must unwind: the holder catches
 // a panic in its terminal engine and replaces the engine, and under `abort` the panic would end
-// the holder and hang its terminal up. Any other table (a patch, a test profile) is refused.
+// the holder and hang its terminal up. bazhen-client is optimized in `dev`, which `test` inherits.
+// Every daemon start hashes the whole holder build with bazhen-client's SHA-256, and a debug
+// holder is tens of megabytes: unoptimized, that hash is most of a test daemon's start.
+// Any other table (a patch, a test profile) is refused.
 export const ROOT_TABLES: Record<string, string[]> = {
   "[workspace]": ['members = ["crates/*"]', 'resolver = "3"'],
   "[workspace.package]": ['edition = "2024"', 'rust-version = "1.100"', "publish = false"],
   "[profile.release]": ["lto = true", "codegen-units = 1", 'panic = "abort"', "strip = true"],
   "[profile.release-holder]": ['inherits = "release"', 'panic = "unwind"'],
+  "[profile.dev.package.bazhen-client]": ["opt-level = 3"],
 };
 export const TOOLCHAIN_CONFIG = [
   "[toolchain]",
