@@ -27,7 +27,7 @@ const wordAt = (text: string, i: number) =>
   (text.startsWith("r#", i) && matchAt(RAW_IDENT, text, i)) || runAt(text, i);
 
 /** Rust's whitespace, Pattern_White_Space, which `\s` is not: it has U+00A0 but not U+0085. */
-const RUST_WHITESPACE = new Set("\t\n\v\f\r \u0085\u200e\u200f\u2028\u2029");
+export const RUST_WHITESPACE = new Set("\t\n\v\f\r \u0085\u200e\u200f\u2028\u2029");
 // `///` and `/**` open doc comments, but `////`, `/***` and `/**/` don't; `//!` and `/*!` do.
 const isDocComment = (text: string, i: number) =>
   text[i + 2] === "!" ||

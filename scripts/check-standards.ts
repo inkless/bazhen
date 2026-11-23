@@ -22,7 +22,7 @@ import {
   typePaths,
   type UseBinding,
 } from "./rust-modules.ts";
-import { isIdent, itemEnd, newlinesIn, rustCode } from "./rust-source.ts";
+import { isIdent, itemEnd, newlinesIn, RUST_WHITESPACE, rustCode } from "./rust-source.ts";
 import {
   SIGNALS_IGNORE,
   SIGNAL_CHOKEPOINTS,
@@ -1532,9 +1532,16 @@ const PUBLIC_BYTE_FIELDS: Record<string, string> = {
     "a built-in theme's RGB, which Theme::colours makes in-process",
 };
 
-// An impl block, whose associated types its trait requires, so they aren't aliases. (A trait's
-// own associated types take no `= …` on stable, so the alias pattern never matches them.)
-const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{;]*(?=\{)/gm;
+// Rust's whitespace as a regex class: `\s` has U+00A0 but not the marks U+200E and U+200F.
+const SPACE = `[${[...RUST_WHITESPACE].join("")}]`;
+
+// Where an impl item starts, its head read on by implHead. An impl block's associated types are
+// its trait's, so they aren't aliases. (A trait's own associated types take no `= …` on stable, so
+// the alias pattern never matches them.)
+const IMPL_START = new RegExp(
+  `(?<=^|[;{}])${SPACE}*(?:(?:pub(?:\\([^)]*\\))?|unsafe)${SPACE}+)*impl\\b`,
+  "gm",
+);
 
 // Types a function takes that carry bytes from outside the process: anything holding u8s, a
 // reader of any kind, a handle that can only be read (stdin, a child's output), or a WebSocket,
@@ -2319,38 +2326,129 @@ function implBlocks(code: string): {
   named: Named;
   byteBound: boolean;
 }[] {
-  return [...code.matchAll(IMPL_BLOCK)].map((m) => {
-    const head = m[0].replace(/^[\s\S]*?\bimpl\b\s*/, "").replace(/^<(?:[^<>]|<[^<>]*>)*>\s*/, "");
-    const type = /(?:\bfor\s+)?((?:::\s*)?(?:(?:r#)?\w+\s*::\s*)*)(\w+)\s*(?:<|where\b|$)/.exec(
-      head.split(/\bfor\b/).pop() ?? "",
-    );
+  return implHeads(code).flatMap(({ start, open }) => {
+    if (open === undefined) return [];
+    const head = code.slice(start, open);
+    const type = /((?:::\s*)?(?:(?:r#)?\w+\s*::\s*)*)(\w+)\s*(?:<|$)/.exec(implParts(head).type);
     const name = type?.[2] ?? "";
     const prefix = (type?.[1] ?? "")
       .split("::")
       .slice(0, -1)
       .map((p) => rawless(p.trim()));
-    return {
-      start: m.index,
-      end: itemEnd(code, m.index + m[0].length),
-      head: m[0],
-      type: name,
-      named: { name, path: [...prefix, name] },
-      byteBound: BYTES_IN.test(m[0]),
-    };
+    return [
+      {
+        start,
+        end: itemEnd(code, open),
+        head,
+        type: name,
+        named: { name, path: [...prefix, name] },
+        byteBound: BYTES_IN.test(head),
+      },
+    ];
   });
+}
+
+/**
+ * Each impl item in `code`: where it starts, and its body's `{`, or `undefined` where its head
+ * can't be read, with where reading the head stopped. An `impl` at a line's start after anything
+ * but a `;`, a brace or an attribute's `]` may be an `impl Trait` type that a long signature
+ * wrapped onto its own line, or an impl in a macro's body (`=> (`, `$(`): it is an item if its
+ * head can be read, and a type, passed over, if not. Reading resumes where the last head stopped,
+ * so a file of heads that never end is read once.
+ */
+function implHeads(code: string): { start: number; open: number | undefined; end: number }[] {
+  const out: { start: number; open: number | undefined; end: number }[] = [];
+  const starts = new RegExp(IMPL_START.source, IMPL_START.flags);
+  for (let m = starts.exec(code); m !== null; m = starts.exec(code)) {
+    let before = m.index - 1;
+    while (before >= 0 && RUST_WHITESPACE.has(code[before] ?? "")) before--;
+    const head = implHead(code, m.index + m[0].length);
+    starts.lastIndex = head.end;
+    if (head.open === undefined && before >= 0 && !";{}]".includes(code[before] ?? "")) continue;
+    out.push({ start: m.index, ...head });
+  }
+  return out;
+}
+
+/**
+ * Where an impl's head that goes on from `from` ends: `open` is its body's `{`, or `undefined`
+ * where it can't be read, at `end`. Brackets are matched (a `>` after `-` is an arrow's), and a
+ * brace block inside them is skipped whole, so neither an array's `;` nor a const expression's
+ * `>` ends the head. After an array's `;` comes its length, an expression, where `<` and `>` are
+ * operators (`[u8; 8 >> 1]`). A `;` or `}` outside them, a closer that doesn't match, or the end
+ * of the code can't be read.
+ */
+function implHead(code: string, from: number): { open: number | undefined; end: number } {
+  const open: Bracket[] = [];
+  for (let i = from; i < code.length; i++) {
+    const c = code[i] ?? "";
+    const top = open.at(-1);
+    if (c === "{" && top === undefined) return { open: i, end: i };
+    if (c === "{") i = closingBrace(code, i + 1) - 1;
+    else if (!takeBracket(open, c, code[i - 1])) return { open: undefined, end: i };
+  }
+  return { open: undefined, end: code.length };
+}
+
+interface Bracket {
+  closer: string;
+  /** Whether it is in an array's length, where `<` and `>` are operators. */
+  expression: boolean;
+}
+
+/**
+ * Takes `c`, after `previous`, into the brackets `open` in a type: false where it can't be read
+ * there, a closer that doesn't match or a `;` or `}` outside an array.
+ */
+function takeBracket(open: Bracket[], c: string, previous: string | undefined): boolean {
+  const top = open.at(-1);
+  const expression = top?.expression ?? false;
+  const closer = { "(": ")", "[": "]", "<": expression ? undefined : ">" }[c];
+  if (closer !== undefined) open.push({ closer, expression });
+  else if (c === ")" || c === "]" || (c === ">" && !expression && previous !== "-")) {
+    return open.pop()?.closer === c;
+  } else if (c === ";" && top?.closer === "]") top.expression = true;
+  else if (c === ";" || c === "}") return false;
+  return true;
+}
+
+/** The line of each impl in `code` whose head can't be read. */
+function unreadImplLines(code: string): number[] {
+  const lines: number[] = [];
+  let line = 1;
+  let counted = 0;
+  for (const { start, open } of implHeads(code)) {
+    if (open !== undefined) continue;
+    let at = start;
+    while (RUST_WHITESPACE.has(code[at] ?? "")) at++;
+    for (; counted < at; counted++) if (code[counted] === "\n") line++;
+    lines.push(line);
+  }
+  return lines;
 }
 
 /** `code` with each item matched by `head` blanked to its end, newlines kept. */
 function blankItems(code: string, head: RegExp): string {
-  let out = code;
-  for (const m of code.matchAll(head)) {
-    const end = itemEnd(code, m.index + m[0].length);
-    out =
-      out.slice(0, m.index) +
-      newlinesIn(code.slice(m.index, end)).padStart(end - m.index) +
-      out.slice(end);
+  return blankSpans(
+    code,
+    [...code.matchAll(head)].map((m) => ({
+      start: m.index,
+      end: itemEnd(code, m.index + m[0].length),
+    })),
+  );
+}
+
+/** `code` with each of `spans`, in the order they start, blanked, newlines kept. */
+function blankSpans(code: string, spans: { start: number; end: number }[]): string {
+  let out = "";
+  let at = 0;
+  for (const { start, end } of spans) {
+    if (end <= at) continue;
+    const from = Math.max(start, at);
+    out += code.slice(at, from) + newlinesIn(code.slice(from, end)).padStart(end - from);
+    at = end;
   }
-  return out;
+  return out + code.slice(at);
 }
 
 /** The code of a Rust file with every `#[cfg(test)]` item blanked out, newlines kept. */
@@ -2498,7 +2596,7 @@ interface ImplParts {
  * of the trait it implements, if any, and the type it is for, less any `where` clause.
  */
 function implParts(head: string): ImplParts {
-  let rest = head.replace(/^[\s\S]*?\bimpl\b\s*/, "");
+  let rest = expressionsBlanked(head.replace(/^[\s\S]*?\bimpl\b\s*/, ""));
   const params = new Set<string>();
   let bounded = false;
   if (rest.startsWith("<")) {
@@ -2539,6 +2637,23 @@ function implParts(head: string): ImplParts {
         : rawless(/((?:r#)?\w+)\s*(?:<[\s\S]*)?$/.exec(trait)?.[1] ?? ""),
     type: rest.slice(forAt === -1 ? 0 : forAt + 3, whereAt).trim(),
   };
+}
+
+/**
+ * `text`, an impl's head, with each const expression in it blanked: what a brace block holds, and
+ * an array's length. So a `<` or `>` in one (`{ 1 > 0 }`, `[u8; 1 << 2]`) isn't a bracket.
+ */
+function expressionsBlanked(text: string): string {
+  let out = "";
+  const open: Bracket[] = [];
+  for (let i = 0, braces = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if (braces === 0 && c !== "{") takeBracket(open, c, text[i - 1]);
+    if (c === "}" && braces > 0) braces--;
+    out += braces > 0 || (open.at(-1)?.expression ?? false) ? " " : c;
+    if (c === "{") braces++;
+  }
+  return out;
 }
 
 // A trait impl's type that is one of its own parameters, behind at most a reference or a std
@@ -3120,7 +3235,14 @@ export function decoderFailures(
   }
   for (const file of product) {
     const scope = scopes.get(file) ?? NO_CARRIERS;
-    const code = blankItems(codes.get(file) ?? "", IMPL_BLOCK);
+    const whole = codes.get(file) ?? "";
+    for (const line of unreadImplLines(whole)) {
+      out.push(
+        `${file}:${line}: an impl whose head the decoder rule can't read, so it can't tell ` +
+          "what the impl is for or whether it takes bytes: balance its brackets.",
+      );
+    }
+    const code = blankSpans(whole, implBlocks(whole));
     for (const fn of definedFunctions(read(file))) defined.add(`${file}::${fn}`);
     for (const { statement, bindings } of useStatements(table, file)) {
       for (const { path, renamed, at } of bindings) {

@@ -1649,6 +1649,13 @@ describe("moonFailures", () => {
   });
 });
 
+// How long byteTakers takes to read `source`, in ms.
+const elapsed = (source: string) => {
+  const from = performance.now();
+  byteTakers(source);
+  return performance.now() - from;
+};
+
 describe("byteTakers", () => {
   it("names each function that takes bytes from outside, by parameter or bound", () => {
     const source = [
@@ -1697,6 +1704,61 @@ describe("byteTakers", () => {
       "each",
       "raw",
     ]);
+  });
+
+  it("reads an impl's head past an array or a brace block, for its bound and its type", () => {
+    const source = [
+      "pub struct Gate<const B: bool> { n: u32 }",
+      "impl<T> Peek for T where T: AsRef<[u8; 4]> { fn peek(&self) -> u32 { 0 } }",
+      "impl<T> Look for T where T: AsRef<[u16; 4]> { fn look(&self) -> u32 { 0 } }",
+      "impl<R, const N: usize> Gate<{ N > 1 }> where R: Read { fn pull(&self) {} }",
+      "impl<R, const N: usize> Gate<{ N > 1 }> where R: Clone { fn hold(&self) {} }",
+      "fn wrapped() -> (",
+      "    impl Future<Output = u8>,",
+      "    u8,",
+      ") { todo() }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["T::peek", "Gate::pull"]);
+  });
+
+  it("reads an array's length in an impl's head as an expression, its << and >> operators", () => {
+    const source = [
+      "impl<T> Peek for T where T: AsRef<[u8; 8 >> 1]> { fn peek(&self) -> u32 { 0 } }",
+      "impl<T> Look for T where T: AsRef<[u16; 1 << 2]> { fn look(&self) -> u32 { 0 } }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["T::peek"]);
+  });
+
+  it("reads an impl a macro's body writes on a line of its own, after a ( or a $(", () => {
+    const source = [
+      "macro_rules! readers {",
+      "    () => (",
+      "        impl<R: Read> Reader<R> {",
+      "            pub fn pull(&mut self) {}",
+      "        }",
+      "        impl<T> Peek for T where T: AsRef<[u8; 4]> {",
+      "            fn peek(&self) -> u32 { 0 }",
+      "        }",
+      "    );",
+      "    ($($t:ident),*) => {",
+      "        $(",
+      "        impl<S: BufRead> Feed<S> {",
+      "            pub fn feed(&mut self) {}",
+      "        }",
+      "        )*",
+      "    };",
+      "}",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual(["Reader::pull", "T::peek", "Feed::feed"]);
+  });
+
+  it("reads a file of impl heads it can't finish in time linear in its length", () => {
+    const lines = 20_000;
+    expect({
+      open: elapsed("impl X<(\n".repeat(lines)) < 500,
+      braces: elapsed("impl X<{\n".repeat(lines)) < 500,
+      wrapped: elapsed("(\nimpl X<(\n".repeat(lines)) < 500,
+    }).toEqual({ open: true, braces: true, wrapped: true });
   });
 
   it("leaves a function that only holds a socket, a file or an fd, and names one reading it", () => {
@@ -1975,6 +2037,17 @@ describe("decoderFailures", () => {
     );
   const fuzzed = { "crates/p/src/lib.rs::decode": "decode" };
   const exempt = { "crates/p/src/lib.rs::send": "an encoder" };
+  // The repo with an impl of Peek for Runtime written with `impl` as its head, on line 3.
+  const head = (impl: string) => ({
+    ...repo,
+    "crates/p/src/odd.rs": [
+      "pub struct Runtime { n: u32 }",
+      "pub trait Peek { fn size(&self) -> usize; }",
+      `${impl} {`,
+      "    fn size(&self) -> usize { 0 }",
+      "}",
+    ].join("\n"),
+  });
 
   it("accepts each byte-taking function, fuzzed or exempt with a reason", () => {
     expect(failures(fuzzed, exempt)).toEqual([]);
@@ -2219,6 +2292,86 @@ describe("decoderFailures", () => {
       "crates/p/src/gen.rs::Feed::feed",
       "crates/p/src/gen.rs::Bounded::pull",
       "crates/p/src/gen.rs::Outer::go",
+    ]);
+  });
+
+  it("reads the type of an impl whose bound nests three generics deep", () => {
+    const deep = {
+      ...repo,
+      "crates/p/src/deep.rs": [
+        "pub struct Framer<T> { buf: Vec<u8>, t: T }",
+        "impl<T: Into<Vec<Vec<u16>>>> Framer<T> {",
+        "    pub fn pending(&self) -> usize { self.buf.len() }",
+        "}",
+        "pub struct Plain<T> { n: u32, t: T }",
+        "impl<T: Into<Vec<Vec<u16>>>> Plain<T> {",
+        "    pub fn count(&self) -> u32 { self.n }",
+        "}",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, deep).map((f) => f.split(": ")[0])).toEqual([
+      "crates/p/src/deep.rs::Framer::pending",
+    ]);
+  });
+
+  it("fails on an impl head it can't read, naming its file and line", () => {
+    expect([
+      failures(fuzzed, exempt, head("impl Peek for Arc<Runtime>")),
+      failures(fuzzed, exempt, head("impl Peek for Arc<Runtime>>")),
+      failures(fuzzed, exempt, {
+        ...repo,
+        "crates/p/src/wrapped.rs": [
+          "pub fn wrapped(\n    n: u32,\n) -> (",
+          "    impl Iterator<Item = u32>,",
+          "    u32,",
+          ") { todo() }",
+        ].join("\n"),
+      }),
+    ]).toEqual([
+      [],
+      [
+        "crates/p/src/odd.rs:3: an impl whose head the decoder rule can't read, so it can't " +
+          "tell what the impl is for or whether it takes bytes: balance its brackets.",
+      ],
+      [],
+    ]);
+  });
+
+  it("reads an impl after a direction mark, on a line of its own, after an attribute or before it", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/marks.rs": [
+        "pub trait Peek { fn peek(&self) -> u32; }",
+        "\u200e",
+        "impl<T> Peek for T where T: AsRef<[u8; 4]> { fn peek(&self) -> u32 { 0 } }",
+        "\u200f",
+        "impl Peek for Arc<Runtime>> { fn peek(&self) -> u32 { 0 } }",
+        "#[cfg(unix)]\u200e",
+        "impl Peek for Arc<Holder>> { fn peek(&self) -> u32 { 0 } }",
+        "pub struct Reader<R> { r: R }\u200e impl<R: Read> Reader<R> { pub fn pull(&mut self) {} }",
+      ].join("\n"),
+    };
+    expect(
+      failures(fuzzed, exempt, tree)
+        .map((f) => f.slice(0, f.indexOf(": ")))
+        .toSorted(),
+    ).toEqual([
+      "crates/p/src/marks.rs:5",
+      "crates/p/src/marks.rs:7",
+      "crates/p/src/marks.rs::Reader::pull",
+      "crates/p/src/marks.rs::T::peek",
+    ]);
+  });
+
+  it("takes no associated type of an impl whose head holds an array for an alias", () => {
+    const tree = {
+      ...repo,
+      "crates/p/src/assoc.rs":
+        "impl<T> Tr for W<T> where [u8; 4]: Sized {\n    type Item = Vec<u8>;\n}\n" +
+        "type Raw = Vec<u8>;\n",
+    };
+    expect(failures(fuzzed, exempt, tree)).toEqual([
+      expect.stringContaining("crates/p/src/assoc.rs::Raw: names a byte type"),
     ]);
   });
 
@@ -2912,6 +3065,55 @@ describe("decoderFailures", () => {
       "a field read of a type an attribute macro may rewrite": [
         { "crates/r/src/lib.rs": counted("#[repr(C)]") },
         { "crates/r/src/lib.rs": counted("#[wrap]") },
+      ],
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(cases).map(([name, [clean, tricked]]) => [
+          name,
+          [leaks(clean), leaks(tricked)],
+        ]),
+      ),
+    ).toEqual(Object.fromEntries(Object.keys(cases).map((name) => [name, [false, true]])));
+  });
+
+  it("reads an impl whose head holds an array or a brace block, for what may answer a call", () => {
+    const plain = "pub struct Runtime { controls: Controls }";
+    const shim = "impl Runtime { pub fn size(&self) -> usize { 0 } }";
+    const peek = "pub trait Peek<const B: bool> { fn size(&self) -> usize; }";
+    const generic = "pub trait Peek<T> { fn size(&self) -> usize; }";
+    const cases: Record<string, [Record<string, string>, Record<string, string>]> = {
+      "a Deref whose where clause names an array": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "impl std::ops::Deref for Runtime where [u8; 4]: Sized {",
+            "    type Target = Controls;",
+            "    fn deref(&self) -> &Controls { &self.controls }",
+            "}",
+          ]),
+        },
+      ],
+      "a trait impl whose trait takes an array with a shift in its length": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, generic]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            generic,
+            "impl Peek<[u8; 1 << 2]> for Runtime { fn size(&self) -> usize { 0 } }",
+          ]),
+        },
+      ],
+      "a trait impl whose trait takes a brace block": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, peek]) },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            peek,
+            "impl Peek<{ 1 > 0 }> for Runtime { fn size(&self) -> usize { 0 } }",
+          ]),
+        },
       ],
     };
     expect(
