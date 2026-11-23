@@ -486,16 +486,15 @@ describe("descendantsIn", () => {
       new Set(),
     );
     expect(
-      read.live.map((d) => [d.pid, d.pgid, d.name]).toSorted(([a], [b]) => Number(a) - Number(b)),
+      read.map((d) => [d.pid, d.pgid, d.name]).toSorted(([a], [b]) => Number(a) - Number(b)),
     ).toEqual([
       [101, 101, "vitest"],
       [102, 102, "tmux: server"],
       [103, 103, "sh"],
     ]);
-    expect(read.zombies).toBe(0);
   });
 
-  it("counts the root's zombie children, and counts them as nothing live", () => {
+  it("counts a zombie, its own or a descendant's, as nothing live", () => {
     const read = descendantsIn(
       procStats(
         procStat(300, "cat", "Z", 100),
@@ -506,8 +505,7 @@ describe("descendantsIn", () => {
       100,
       new Set(),
     );
-    expect(read.live.map((d) => d.pid)).toEqual([303]);
-    expect(read.zombies).toBe(2);
+    expect(read.map((d) => d.pid)).toEqual([303]);
   });
 
   it("leaves out a helper and what is below it", () => {
@@ -520,11 +518,11 @@ describe("descendantsIn", () => {
       100,
       new Set([400]),
     );
-    expect(read.live.map((d) => d.pid)).toEqual([402]);
+    expect(read.map((d) => d.pid)).toEqual([402]);
   });
 
   it("reads a name holding spaces and parens", () => {
     const read = descendantsIn(procStats(procStat(500, "a) b (c", "S", 100)), 100, new Set());
-    expect(read.live).toEqual([{ pid: 500, pgid: 500, name: "a) b (c" }]);
+    expect(read).toEqual([{ pid: 500, pgid: 500, name: "a) b (c" }]);
   });
 });

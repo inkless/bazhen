@@ -26,6 +26,8 @@ import {
   type ProbeReading,
 } from "./scope.ts";
 import { heard } from "./child.ts";
+import { inSignalSandbox } from "./sandbox.ts";
+import { candidateOf, mayBeShared, ownState, sharedAmong } from "./shared.ts";
 import { isAlive, rethrowUnsafe, signalGroup, spawnGroup } from "./signal.ts";
 
 export interface Cap {
@@ -51,12 +53,17 @@ export interface Ended {
   /** Why a memory kill may have gone uncounted, when one may have. */
   readonly uncounted?: string;
   /**
-   * The names of the run's live processes outside its scope or group once its command had gone,
-   * where this process is a subreaper and so can see them: reported, not yet counted.
+   * The run's live processes outside its scope or group once its command had gone, where this
+   * process is a subreaper and so can see them, but the daemons the user shares on the host
+   * (shared.ts). They fail the run as `leftover` does; on the host nothing stops them.
    */
-  readonly escaped?: readonly string[];
-  /** This process's children left as zombies at the run's end, where it is a subreaper. */
-  readonly zombies?: number;
+  readonly escaped?: readonly Escapee[];
+}
+
+/** A process of the run's that left its scope or group. */
+export interface Escapee {
+  readonly pid: number;
+  readonly name: string;
 }
 
 export type Verdict = { readonly ok: true } | { readonly ok: false; readonly why: string };
@@ -170,34 +177,28 @@ export interface Descendant {
 
 /**
  * From every process's `/proc/<pid>/stat`, `root`'s live descendants, leaving out `skipped` and
- * everything below them, and how many of `root`'s own children are zombies. A zombie holds nothing,
- * but a subreaper's stay until it exits.
+ * everything below them. A zombie holds nothing, and whatever it had below it is reparented.
  */
 export function descendantsIn(
   stats: ReadonlyMap<number, string>,
   root: number,
   skipped: ReadonlySet<number>,
-): { live: Descendant[]; zombies: number } {
+): Descendant[] {
   const children = new Map<number, number[]>();
   for (const [pid, stat] of stats) {
     const parent = statParent(stat);
     children.set(parent, [...(children.get(parent) ?? []), pid]);
   }
   const live: Descendant[] = [];
-  let zombies = 0;
   const stack = [...(children.get(root) ?? [])];
   for (let pid = stack.pop(); pid !== undefined; pid = stack.pop()) {
     const stat = stats.get(pid) ?? "";
     const [state = "", , pgrp] = statFields(stat);
-    if (state === "Z" || state === "X") {
-      if (statParent(stat) === root) zombies++;
-      continue;
-    }
-    if (skipped.has(pid)) continue;
+    if (state === "Z" || state === "X" || skipped.has(pid)) continue;
     live.push({ pid, pgid: Number(pgrp), name: statComm(stat) });
     stack.push(...(children.get(pid) ?? []));
   }
-  return { live, zombies };
+  return live;
 }
 
 /** Every process's `/proc/<pid>/stat`, by pid: one scan, no signal. */
@@ -217,22 +218,35 @@ const listedIn = (pids: readonly string[]) => {
   return (d: Descendant) => listed.has(d.pid);
 };
 
-/** This process's live descendants but its helpers, and its zombie children. */
-const descendants = () => descendantsIn(procStats(), process.pid, helpers);
+/**
+ * The daemons the user shares among `live`, by pid, read against this process's own state. Only
+ * gpg-agent's identity needs a helper (gpgconf), so only a candidate gpg-agent starts one.
+ */
+async function sharedDaemons(live: readonly Descendant[]): Promise<Set<number>> {
+  const candidates = live.filter((d) => mayBeShared(d.name)).map((d) => candidateOf(d.pid, d.name));
+  if (candidates.length === 0) return new Set();
+  const gpg = candidates.some((c) => c.name === "gpg-agent")
+    ? await output("gpgconf", ["--list-dirs", "agent-socket", "homedir"])
+    : undefined;
+  return sharedAmong(candidates, ownState(process.env.XDG_RUNTIME_DIR, gpg));
+}
 
 /**
- * The names of the run's processes that `counted` didn't already hold, once the end of the command
- * has settled, and this process's zombie children then.
+ * The run's processes that `counted` didn't already hold, once the end of the command has settled:
+ * this process's live descendants but its helpers, and on the host but the daemons the user shares
+ * and what is below them.
  */
 async function escapedFrom(countedNow: () => (d: Descendant) => boolean) {
-  let zombies = 0;
-  const escaped = await settled(() => {
+  const host = !inSignalSandbox();
+  const escaped = await settled(async () => {
     const counted = countedNow();
-    const read = descendants();
-    zombies = read.zombies;
-    return read.live.filter((d) => !counted(d)).map((d) => d.name);
+    const stats = procStats();
+    let live = descendantsIn(stats, process.pid, helpers);
+    const shared = host ? await sharedDaemons(live) : new Set<number>();
+    if (shared.size > 0) live = descendantsIn(stats, process.pid, new Set([...helpers, ...shared]));
+    return live.filter((d) => !counted(d)).map(({ pid, name }) => ({ pid, name }));
   });
-  return { escaped, zombies };
+  return { escaped };
 }
 
 const errorCode = (error: unknown) =>
@@ -266,7 +280,7 @@ export const namesOf = (
 export const LEFTOVER_SETTLE_MS = 500;
 
 /** What `list` finds once the end of the command has settled: a second read, after the settle. */
-async function settled<L extends readonly string[] | undefined>(
+async function settled<L extends readonly unknown[] | undefined>(
   list: () => L | Promise<L>,
 ): Promise<L> {
   const first = await list();

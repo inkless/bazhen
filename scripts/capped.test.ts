@@ -164,6 +164,19 @@ describe("what a run says when it ends", () => {
     );
   });
 
+  it("names each process that left the run's scope or group by its pid, escaped", () => {
+    const escaped = [
+      { pid: 4242, name: "bazhen-holder" },
+      { pid: 4243, name: "x\ncapped: forged" },
+    ];
+    expect(report({ ...ended, escaped }, cap, "scope", false)).toEqual([
+      "capped: peak 3.0 GiB of 8.0 GiB",
+      "capped: 2 process(es) its command started left its scope or group and still run, " +
+        "not stopped on this host: bazhen-holder (pid 4242), x\\x0acapped: forged (pid 4243)",
+    ]);
+    expect(report({ ...ended, escaped }, cap, "owned", true)).toEqual([]);
+  });
+
   it("names the CPU-time limit when a test dies of it", () => {
     expect(report({ ...ended, code: null, signal: "SIGXCPU" }, cap, "owned", true)).toEqual([
       "capped: stopped at its CPU-time limit, set for a test whose runner had died",
@@ -202,6 +215,31 @@ describe("how a run ends", () => {
       { status: 0 },
       { status: 1, why: "it reached its time cap" },
       { status: 1, why: "its command left processes running" },
+      { status: 0 },
+    ]);
+  });
+
+  it("fails a passed run on a process that left its scope or group", () => {
+    const escaped = [{ pid: 4242, name: "sleep" }];
+    expect([
+      exitStatus({ ...ended, escaped }, RUN),
+      exitStatus({ ...ended, escaped: [] }, RUN),
+      exitStatus({ ...ended, code: 2, escaped }, RUN),
+    ]).toEqual([
+      { status: 1, why: "its command left processes running" },
+      { status: 0 },
+      { status: 2 },
+    ]);
+  });
+
+  it("fails a passed run that can't see what leaves it, but not a test binary", () => {
+    expect([
+      exitStatus(ended, RUN, "there is no python3 to set the flag"),
+      exitStatus({ ...ended, code: 1 }, RUN, "there is no python3 to set the flag"),
+      exitStatus(ended, BINARY, "there is no python3 to set the flag"),
+    ]).toEqual([
+      { status: 1, why: "it can't see the processes that leave its run here" },
+      { status: 1 },
       { status: 0 },
     ]);
   });

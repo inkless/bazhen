@@ -33,6 +33,7 @@ import {
   chooseMode,
   clampMemory,
   dieBy,
+  inSignalSandbox,
   onPath,
   probeReaper,
   reaperStart,
@@ -191,13 +192,12 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
   }
   if (ended.uncounted !== undefined) lines.push(`capped: ${ended.uncounted}`);
   if (!testBinary && ended.escaped?.length) {
+    const each = ended.escaped.map(({ pid, name }) => `${printable(name)} (pid ${pid})`);
     lines.push(
-      `capped: ${ended.escaped.length} process(es) of the run left its scope or group, ` +
-        `not yet counted: ${nameCounts(ended.escaped)}`,
+      `capped: ${ended.escaped.length} process(es) its command started left its scope or group ` +
+        `and still run, not stopped on this host: ${each.join(", ")}`,
     );
   }
-  if (!testBinary && ended.zombies)
-    lines.push(`capped: ${ended.zombies} zombie(s) held at the end`);
   return lines;
 }
 
@@ -208,6 +208,7 @@ export function report(ended: Ended, cap: Cap, mode: Mode, testBinary: boolean):
 export function exitStatus(
   ended: Ended,
   invocation: Invocation,
+  blind?: string,
 ): { status: number | NodeJS.Signals; why?: string } {
   const status = ended.signal ?? ended.code ?? 1;
   if (status !== 0 || invocation.kind === "test-binary") return { status };
@@ -215,16 +216,24 @@ export function exitStatus(
     return { status: 1, why: "its memory cap killed a process in it" };
   }
   if (ended.timedOut) return { status: 1, why: "it reached its time cap" };
-  if (ended.leftover > 0) return { status: 1, why: "its command left processes running" };
+  if (ended.leftover > 0 || (ended.escaped?.length ?? 0) > 0) {
+    return { status: 1, why: "its command left processes running" };
+  }
+  if (blind !== undefined) {
+    return { status: 1, why: "it can't see the processes that leave its run here" };
+  }
   return { status };
 }
 
 /**
- * Makes a run on Linux a subreaper before it spawns anything: re-execs it through python3 once, or,
- * back from that, restores its env and checks the flag took. Whether it is one, and if not, why.
+ * Makes a run on a Linux host a subreaper before it spawns anything: re-execs it through python3
+ * once, or, back from that, restores its env and checks the flag took. Whether it is one, and if
+ * not, why. A run in a sandbox isn't one: a reaper keeps every orphan it adopts as a zombie until
+ * it exits, and a long run there adopts thousands, past the container's pid limit.
  */
 async function becomeReaper(invocation: Invocation): Promise<{ sees: boolean; why?: string }> {
   if (process.platform !== "linux" || invocation.kind !== "run") return { sees: false };
+  if (inSignalSandbox()) return { sees: false };
   const nodeArgv = [...process.execArgv, ...process.argv.slice(1)];
   const python = onPath("python3", process.env.PATH);
   const start = reaperStart(process.env, process.pid, process.execPath, nodeArgv, python);
@@ -262,7 +271,7 @@ async function run(invocation: Invocation): Promise<number | NodeJS.Signals> {
   if (kills !== undefined && ended.memoryKills > 0) {
     appendFileSync(kills, `${[command, ...args].join(" ")}\n`);
   }
-  const { status, why } = exitStatus(ended, invocation);
+  const { status, why } = exitStatus(ended, invocation, reaper.why);
   if (why !== undefined) console.error(`capped: the run fails, though its command passed: ${why}`);
   return status;
 }
