@@ -1415,8 +1415,11 @@ const IMPL_BLOCK = /(?<=^|[;{}])\s*(?:(?:pub(?:\([^)]*\))?|unsafe)\s+)*impl\b[^{
 // whose `read()` takes nothing to read into, so BODY_READS can't see it. A socket, a file or an fd
 // isn't one, since holding it isn't reading it: a function that reads one does so in its body,
 // which BODY_READS reads.
-const BYTES_IN =
-  /\[(?:(?:core|std)::primitive::)?u8\b|\b(?:Vec|VecDeque)<(?:(?:core|std)::primitive::)?u8>|\*\s*(?:const|mut)\s+u8\b|\bItem\s*=\s*u8\b|\b(?:(?:Async)?(?:Buf)?Read(?:er)?|Buf|Bytes|BytesMut|Stdin\w*|Child(?:Stdout|Stderr)|WebSocket)\b/;
+const U8 = String.raw`(?:(?:r#)?(?:core|std)::(?:r#)?primitive::)?(?:r#)?u8`;
+const BYTES_IN = new RegExp(
+  String.raw`\[${U8}\b|\b(?:Vec|VecDeque)<${U8}>|\*\s*(?:const|mut)\s+${U8}\b|\bItem\s*=\s*${U8}\b|` +
+    String.raw`\b(?:(?:Async)?(?:Buf)?Read(?:er)?|Buf|Bytes|BytesMut|Stdin\w*|Child(?:Stdout|Stderr)|WebSocket)\b`,
+);
 
 // The reads of std::io, the socket and fd calls, and the reads of a file, whether called as a
 // method, by path or by a bare name a `use` brought in.
@@ -2407,7 +2410,7 @@ function implParts(head: string): ImplParts {
 // A trait impl's type that is one of its own parameters, behind at most a reference or a std
 // pointer, so that it is implemented for every type, a carrier and its Arc among them.
 const BLANKET =
-  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:(?:[\w:]+::)?(?:Arc|Rc|Box|Pin)\s*<\s*(?:r#)?(\w+)\s*>|(?:r#)?(\w+))$/;
+  /^(?:&\s*(?:'\w+\s+)?(?:mut\s+)?)?(?:(?:(?:::\s*)?(?:(?:r#)?\w+\s*::\s*)+)?(?:r#)?(?:Arc|Rc|Box|Pin)\s*<\s*(?:r#)?(\w+)\s*>|(?:r#)?(\w+))$/;
 
 /**
  * Whether a method's signature `sig`, at `at` in its file, may hand bytes to its caller or take
@@ -2495,7 +2498,7 @@ function macroImpls(code: string, bodies: { start: number; end: number }[]): boo
     (m) =>
       !ITEM_MACROS.has(m[1] ?? "") &&
       !inside(m.index, bodies) &&
-      /(?:^|[;{}\]])\s*(?:(?:\$?\w+)?\s*::\s*(?:\w+\s*::\s*)*)?$/.test(
+      /(?:^|[;{}\]])\s*(?:(?:\$?(?:r#)?\w+)?\s*::\s*(?:(?:r#)?\w+\s*::\s*)*)?$/.test(
         code.slice(Math.max(0, m.index - 200), m.index),
       ),
   );

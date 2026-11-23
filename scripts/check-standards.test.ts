@@ -1990,11 +1990,16 @@ describe("decoderFailures", () => {
         "type r#Bytes = Vec<u8>;",
         "pub struct r#Packet { buf: Vec<u8> }",
         "pub struct r#Open { pub buf: Vec<u8> }",
+        "pub struct Wide { pub r#buf: Vec<r#u8> }",
         "pub enum r#Event { r#Data { b: Vec<u8> }, Tick }",
         "pub struct Holds { f: r#Frame }",
         "pub fn param(x: r#Frame) {}",
         "pub fn nested(x: Vec<crate::r#raw::Frame>) {}",
         "pub fn bound(x: impl Iterator<Item = r#Frame>) {}",
+        "pub fn byte_slice(x: &[r#u8]) {}",
+        "pub fn byte_vec(x: Vec<r#std::primitive::u8>) {}",
+        "pub fn byte_ptr(x: *const core::r#primitive::u8) {}",
+        "pub fn byte_items(x: impl Iterator<Item = r#u8>) {}",
         "pub fn packet(p: Packet) {}",
         "pub fn event(e: Event) {}",
         "pub fn holds(h: Holds) {}",
@@ -2010,17 +2015,33 @@ describe("decoderFailures", () => {
       "crates/p/src/other.rs::Packet::rooted",
       "crates/p/src/raw.rs::Odd::A",
       "crates/p/src/raw.rs::Open::buf",
+      "crates/p/src/raw.rs::Wide::r#buf",
       "crates/p/src/raw.rs::Bytes",
       "crates/p/src/raw.rs::Alias",
       "crates/p/src/raw.rs::param",
       "crates/p/src/raw.rs::nested",
       "crates/p/src/raw.rs::bound",
+      "crates/p/src/raw.rs::byte_slice",
+      "crates/p/src/raw.rs::byte_vec",
+      "crates/p/src/raw.rs::byte_ptr",
+      "crates/p/src/raw.rs::byte_items",
       "crates/p/src/raw.rs::packet",
       "crates/p/src/raw.rs::event",
       "crates/p/src/raw.rs::holds",
       "crates/p/src/raw.rs::arm",
       "crates/p/src/raw.rs::Packet::size",
     ]);
+  });
+
+  it("reads a raw associated type's name as its name, not as a type it holds", () => {
+    const one = {
+      ...repo,
+      "crates/p/src/one.rs": [
+        "pub struct One;",
+        "impl Tr for One { type r#Item = u8; fn one(&self, x: Self::Item) {} }",
+      ].join("\n"),
+    };
+    expect(failures(fuzzed, exempt, one)).toEqual([]);
   });
 
   it("takes an associated type holding bytes for a carrier, by its name wherever a path reaches it", () => {
@@ -2666,6 +2687,29 @@ describe("decoderFailures", () => {
           ]),
         },
         { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "ext::peek!(Arc<Runtime>);"]) },
+      ],
+      "a macro called by a raw path": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "r#ext::peek!(Arc<Runtime>);"]) },
+      ],
+      "a macro called by a path with a raw module": [
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim]) },
+        { "crates/r/src/lib.rs": heldRuntime(plain, [shim, "crate::r#m::peek!(Arc<Runtime>);"]) },
+      ],
+      "a blanket impl for a raw pointer by a raw path": [
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+          ]),
+        },
+        {
+          "crates/r/src/lib.rs": heldRuntime(plain, [
+            shim,
+            "pub trait Peek { fn size(&self) -> usize; }",
+            "impl<T> Peek for ::r#std::sync::r#Arc<r#T> { fn size(&self) -> usize { 0 } }",
+          ]),
+        },
       ],
     };
     expect(
