@@ -359,8 +359,15 @@ export async function splitAtCursor(
     { length: row },
     (_, y) => `${buffer.getLine(y)?.translateToString(true) ?? ""}\n`,
   ).join("");
-  // Trimmed of cells never written, never of spaces written, as a marker's own.
-  const line = buffer.getLine(row)?.translateToString(true) ?? "";
+  // To the later of the cursor and the last cell written. A snapshot omits a row's trailing
+  // blanks, so a marker it cut after its space has no cell for it, only a cursor past the text;
+  // and text right of the cursor, a line cut between CR and LF, is the stream's to end.
+  const current = buffer.getLine(row);
+  let written = 0;
+  for (let x = size.cols; x > 0 && written === 0; x--) {
+    if (current?.getCell(x - 1)?.getChars()) written = x;
+  }
+  const line = current?.translateToString(false, 0, Math.max(buffer.cursorX, written)) ?? "";
   term.dispose();
   return { above, line };
 }
