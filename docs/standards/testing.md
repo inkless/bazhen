@@ -154,6 +154,8 @@ Every new test must be shown to fail without the code it covers.
   - **SURVIVED** — it passed without the change, so it can't detect the change. The check
     fails. Only a test that directly imports a reverted file, runs one it names with
     `new URL("<file>", import.meta.url)`, or runs a binary built from one, can survive.
+  - **GUARDED** — it survived, but it guards behaviour the base already has, and a `Guard:` on
+    the branch broke that behaviour and watched it fail (below). Good.
   - **INVALID** — no verdict: it couldn't load, timed out, was skipped, its title couldn't be
     read or isn't unique, or it passed but imports no reverted file, so it is unrelated to the
     source change (a characterization or property test of existing code); a branch that adds
@@ -200,6 +202,51 @@ Every new test must be shown to fail without the code it covers.
   subject starts with the test's full path as nextest lists it:
   `Control: <module::path::test_name>: <what you broke> -> <how the test failed>` (`rust.md`
   § Tests). Never bypass a hook with `--no-verify`.
+
+- **Guards for SURVIVED tests.** A test that pins behaviour the base already has, such as a scan
+  that must stay linear in time, passes on the base, so it is SURVIVED and fails the check. It may
+  still land as a regression guard, but only with a break that falsify itself applies and sees the
+  test fail under. Nothing marks a test as a guard without one. Write the break as a commit on the
+  branch (`git commit --allow-empty --cleanup=verbatim`) whose message holds one or more fenced
+  blocks, each a line that is exactly ` ```diff `, a diff against HEAD as `git diff` prints
+  it, and a closing ` ``` `, and a line naming the test as a `Control:` does:
+  `Guard: <file> › <title>: <what the break does>`. A commit's blocks together are its break, and
+  every `Guard:` line in it shares that break; a different break goes in a commit of its own. A
+  test named by several `Guard:` lines must fail under each.
+
+  Before any test runs, falsify refuses a break that creates, deletes, renames or copies a file,
+  changes a mode or is binary, that changes a file other than the reverted source the test imports
+  directly (the files that made it SURVIVED), or that changes anything in a folder named testing (as
+  `packages/core/src/testing/`) or a file whose name holds `fixture`, so the break is of the code,
+  not of what the test feeds it. It refuses a break that leaves every file it changes with the
+  tokens it has at HEAD, so a comment or a reflow can't stand in for a break under a flaky test. It
+  refuses a break that doesn't apply to HEAD, a test written with `.fails`, whose result a break
+  would invert, and more than ten commits that carry a break. Each break is applied to a scratch
+  index, never the checkout's, and a break that leaves a file signalling is refused outside a
+  sandbox, as a signalling revert is. After the revert run, in the same worktree, the guarded tests
+  run once at HEAD, where each must pass; then each break is applied to HEAD alone and the tests it
+  guards run, the worktree going back to HEAD after each. A test is GUARDED only when it fails under
+  every break that names it on an `AssertionError` (chai's or `node:assert`'s) whose first frame
+  outside node_modules is in the test file. A pass, a timeout, a missing result, a throw as the file
+  loads, a `TypeError`, or an assertion a helper throws leaves it SURVIVED, printed with the reason.
+  So a break must fail the test well inside the project's `testTimeout` (30 s for unit): a guard on
+  a scan's time bound needs an input that breaks the bound in seconds, not one that makes the
+  backtracking scan run out the clock. A GUARDED test is printed with each break's commit and the
+  first line of the assertion that failed, which the reviewer reads with the break (`review.md` §
+  Tests). A test that runs a Rust binary, or sits in a file `tests/rust-daemon.txt` names, can't be
+  guarded, since the worktree's binaries are the base's, and a `Guard:` naming no new TypeScript
+  test, or one that didn't survive, fails the check. Rust tests take no `Guard:`: they are judged by
+  mutants, and are never SURVIVED.
+
+  Git's default message cleanup strips the space a blank context line starts with. Falsify reads an
+  empty line inside a hunk as blank context, and of the empty lines before a closing fence keeps as
+  context those the last hunk's header says it lacks. Cleanup also collapses consecutive blank
+  lines, which nothing can undo, so a break that doesn't apply to HEAD says to commit with
+  `--cleanup=verbatim` if that is why.
+
+  The names are the limit of the support-code rule: test support that the branch also changed, in no
+  folder named testing and in no file named `*fixture*`, can be broken by a guard, and the reviewer
+  catches it by reading the break.
 
 - **Listed tests run on both daemons.** A new test in a file `tests/rust-daemon.txt` names at HEAD
   holds both daemons, and the change it comes with may land in either, so it is judged on each. It

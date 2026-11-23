@@ -175,7 +175,25 @@ case "$1" in
     printf '{"testResults":[' > "$out"
     sep=""
     for file in $files; do
-      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"%s","status":"%s","failureMessages":[%s]}]}' "$sep" "$(pwd)" "$file" "\${STUB_TITLE:-caps}" "$status" "$messages" >> "$out"
+      st="$status"
+      msg="$messages"
+      # A break: while a file under packages/ holds STUB_FAIL_IF, each of STUB_FAIL_FILES (else
+      # each file run) fails, on an assertion at its own frame or with STUB_FAIL_AS, or, with
+      # STUB_FAIL_LOAD, by a throw as it loads.
+      if [ -n "\${STUB_FAIL_IF:-}" ] && grep -rqsF -- "$STUB_FAIL_IF" packages; then
+        case " \${STUB_FAIL_FILES:-$file} " in
+          *" $file "*)
+            if [ "\${STUB_FAIL_LOAD:-}" = 1 ]; then
+              printf '%s{"name":"%s/%s","status":"failed","message":"Error: boom as it loaded","assertionResults":[]}' "$sep" "$(pwd)" "$file" >> "$out"
+              sep=","
+              continue
+            fi
+            st=failed
+            msg="\\"\${STUB_FAIL_AS:-AssertionError: expected 2 to be 3\\n    at $file:3:5}\\""
+            ;;
+        esac
+      fi
+      printf '%s{"name":"%s/%s","status":"failed","assertionResults":[{"title":"%s","status":"%s","failureMessages":[%s]}]}' "$sep" "$(pwd)" "$file" "\${STUB_TITLE:-caps}" "$st" "$msg" >> "$out"
       sep=","
     done
     printf ']}' >> "$out"
@@ -2086,12 +2104,15 @@ function changeDaemon(
     added = {},
     atBase = {},
     imports = 'import { d } from "./daemon.ts";\n',
+    guard,
   }: {
     listed?: boolean;
     daemonAtBase?: boolean;
     added?: Record<string, string>;
     atBase?: Record<string, string>;
     imports?: string;
+    /** The message of a commit after the change, holding a guard. */
+    guard?: string;
   } = {},
 ) {
   const tree: Record<string, string> = {
@@ -2111,6 +2132,9 @@ function changeDaemon(
   write(fx.linked, LISTED_TEST, branchTest(imports));
   git(fx.linked, "add", changed, ...Object.keys(added), LISTED_TEST);
   git(fx.linked, "commit", "--quiet", "-m", "feat: daemon2");
+  if (guard !== undefined) {
+    git(fx.linked, "commit", "--quiet", "--allow-empty", "--cleanup=verbatim", "-m", guard);
+  }
   return falsify(["--base", base], { STUB_SOURCE: DAEMON_MAIN, STUB_TEST: LISTED_TEST, ...extra });
 }
 
@@ -2779,5 +2803,443 @@ describe("the repository's tests that run a binary", () => {
       .map(({ path }) => path)
       .filter((path) => !(path in RUNS_BINARIES));
     expect(mentions).toEqual(MENTIONS_TARGET);
+  });
+});
+
+const MARK = "BROKEN";
+/** The most commits with a break falsify runs. */
+const MAX_BREAKS = 10;
+const V2 = "export const v = 2;";
+const GUARD = `Guard: ${TEST} › caps: marks v broken`;
+// The new test passes at the base and at HEAD, and fails while the source holds MARK.
+const SURVIVES = { STUB_STATUS: "passed", STUB_FAIL_IF: MARK };
+
+/** `line` with MARK in a string of its own, which changes its tokens. */
+const marked = (line: string) => `${line} "${MARK}";`;
+
+/** A ```diff block changing `from`, the first line of `file` at HEAD, to `to`. */
+const breakOf = ({ file = SOURCE, from = V2, to = marked(from) } = {}) =>
+  lines("```diff", `--- a/${file}`, `+++ b/${file}`, "@@ -1 +1 @@", `-${from}`, `+${to}`, "```");
+
+/** An empty commit on the branch whose message holds `blocks`, then the lines `guards`. */
+function guardCommit(blocks: string[], guards: string[] = [GUARD], cleanup = "verbatim"): string {
+  const paragraphs = [...blocks, guards.join("\n")].flatMap((text) => ["-m", text]);
+  git(
+    fx.linked,
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    `--cleanup=${cleanup}`,
+    "-m",
+    "test: guard",
+    ...paragraphs,
+  );
+  return git(fx.linked, "rev-parse", "HEAD").trim().slice(0, 12);
+}
+
+/** Amends the branch's commit with `files` added or changed. */
+function amendBranch(files: Record<string, string>): void {
+  for (const [path, text] of Object.entries(files)) write(fx.linked, path, text);
+  git(fx.linked, "add", ...Object.keys(files));
+  git(fx.linked, "commit", "--quiet", "--amend", "--no-edit");
+}
+
+/** What falsify printed beside the new test `caps`, and its exit. */
+function guardVerdict(extra: Record<string, string> = {}, test = TEST) {
+  const result = againstBase({ ...SURVIVES, ...extra });
+  const line = result.output.split("\n").find((l) => l.includes(` ${test} › caps`)) ?? "";
+  return { status: result.status, line: line.trim(), leftovers: leftovers() };
+}
+
+/** Falsify's verdict on `caps` under one guard's marker break, and that guard's commit. */
+function underOneBreak(extra: Record<string, string>) {
+  const commit = guardCommit([breakOf()]);
+  return { commit, ...guardVerdict(extra) };
+}
+
+/** The verdict on `caps` when its guard doesn't hold, for the reason `why`. */
+const unheld = (why: string) => ({
+  status: 1,
+  line: `SURVIVED ${TEST} › caps (its guard doesn't hold: ${why})`,
+  leftovers: [],
+});
+const noVerdict = (commit: string) =>
+  `it has no pass or fail under the break in ${commit} (a timeout, or no result)`;
+const notItsOwn = (commit: string) =>
+  `it fails under the break in ${commit}, but not on an assertion of its own`;
+
+/** The source each vitest run under a guard's break saw, in order. */
+const sourcesUnderBreaks = () =>
+  stubLog()
+    .split(/^ARGS: /m)
+    .filter((run) => /falsify-report-guard-\d+-/.test(run.split("\n")[0] ?? ""))
+    .map((run) => /^SOURCE: (.*)$/m.exec(run)?.[1]);
+
+describe("falsify on a branch that guards a test of behaviour the base already has", () => {
+  it("keeps a surviving test its guard's break fails on an assertion of its own, printing that assertion", () => {
+    const commit = guardCommit([breakOf()]);
+    const result = againstBase(SURVIVES);
+    expect({
+      status: result.status,
+      guarded: result.output.includes(`GUARDED  ${TEST} › caps\n`),
+      under: result.output.includes(
+        `under the break in ${commit}: AssertionError: expected 2 to be 3`,
+      ),
+      leftovers: leftovers(),
+    }).toEqual({ status: 0, guarded: true, under: true, leftovers: [] });
+  });
+
+  it("applies a break whose last blank context line git's message cleanup emptied", () => {
+    amendBranch({ [SOURCE]: `${V2}\n\nexport const w = 1;\n` });
+    guardCommit(
+      [
+        lines(
+          "```diff",
+          `--- a/${SOURCE}`,
+          `+++ b/${SOURCE}`,
+          "@@ -1,2 +1,2 @@",
+          `-${V2}`,
+          `+${marked(V2)}`,
+          " ",
+          "```",
+        ),
+      ],
+      [GUARD],
+      "default",
+    );
+    const message = git(fx.linked, "log", "-1", "--format=%B");
+    expect({
+      emptied: message.includes(`+${marked(V2)}\n\n\`\`\``),
+      ...guardVerdict(),
+    }).toEqual({
+      emptied: true,
+      status: 0,
+      line: `GUARDED  ${TEST} › caps`,
+      leftovers: [],
+    });
+  });
+
+  it("leaves a guarded test SURVIVED when it passes under the break", () => {
+    const { commit, ...verdict } = underOneBreak({ STUB_FAIL_IF: "NOT THERE" });
+    expect(verdict).toEqual(unheld(`it passes under the break in ${commit}`));
+  });
+
+  it("leaves a guarded test SURVIVED when it times out under the break", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `Error: Test timed out in 30000ms.\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails on a TypeError at its own frame", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `TypeError: v is undefined\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(notItsOwn(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails on an assertion in a helper", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at packages/a/src/helper.ts:1:1\\n    at ${TEST}:3:5`,
+    });
+    expect(verdict).toEqual(unheld(notItsOwn(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when its file throws as it loads", () => {
+    const { commit, ...verdict } = underOneBreak({ STUB_FAIL_LOAD: "1" });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it times out after a soft assertion fails", () => {
+    const { commit, ...verdict } = underOneBreak({
+      STUB_FAIL_AS: `AssertionError: expected 2 to be 3\\n    at ${TEST}:3:5","Error: Test timed out in 30000ms.`,
+    });
+    expect(verdict).toEqual(unheld(noVerdict(commit)));
+  });
+
+  it("leaves a guarded test SURVIVED when it fails at HEAD without the break", () => {
+    const { commit: _, ...verdict } = underOneBreak({ STUB_FAIL_IF: V2 });
+    expect(verdict).toEqual(
+      unheld("it doesn't pass at HEAD without a break, so a break failing it shows nothing"),
+    );
+  });
+
+  it("leaves SURVIVED a test a Guard: names in a commit with no break", () => {
+    const commit = guardCommit([]);
+    expect(guardVerdict().line).toBe(
+      `SURVIVED ${TEST} › caps (its guard doesn't hold: commit ${commit} holds no \`\`\`diff block)`,
+    );
+  });
+
+  it("refuses, before it applies anything, a break the test feeds itself through or never loads", () => {
+    const fixture = "packages/a/src/store/fixture.ts";
+    const support = "packages/a/src/testing/fake.ts";
+    const unloaded = "packages/a/src/other.ts";
+    amendBranch({
+      [fixture]: "export const f = 2;\n",
+      [support]: "export const g = 2;\n",
+      [unloaded]: "export const h = 2;\n",
+      [TEST]: branchTest(
+        'import { v } from "./x.ts";\nimport { f } from "./store/fixture.ts";\nimport { g } from "./testing/fake.ts";\nit("v", () => {});\n',
+      ),
+    });
+    const breaks = [
+      [fixture, "export const f = 2;", "is test support"],
+      [support, "export const g = 2;", "is test support"],
+      [unloaded, "export const h = 2;", "isn't source the branch changed that the test imports"],
+      [
+        TEST,
+        'import { v } from "./x.ts";',
+        "isn't source the branch changed that the test imports",
+      ],
+    ] as const;
+    const refused = breaks.map(([file, from, why]) => {
+      const commit = guardCommit([breakOf({ file, from })]);
+      const verdict = guardVerdict();
+      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
+      writeFileSync(fx.log, "");
+      return verdict.line.endsWith(
+        `(its guard doesn't hold: the break in ${commit}: ${file} ${why})`,
+      );
+    });
+    expect(refused).toEqual([true, true, true, true]);
+  });
+
+  it("refuses a break of a file outside the source falsify reverts", () => {
+    amendBranch({ "package.json": "{}\n", "tests/support/x.ts": "export const s = 1;\n" });
+    const verdicts = [
+      ["package.json", "{}"],
+      ["tests/support/x.ts", "export const s = 1;"],
+    ].map(([file = "", from = ""]) => {
+      const commit = guardCommit([breakOf({ file, from })]);
+      const verdict = guardVerdict();
+      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
+      return verdict.line.endsWith(
+        `the break in ${commit}: ${file} isn't source the branch changed that the test imports)`,
+      );
+    });
+    expect(verdicts).toEqual([true, true]);
+  });
+
+  it("refuses a break that creates, renames or changes a mode, or is binary", () => {
+    const breaks = [
+      lines(
+        "```diff",
+        "diff --git a/packages/a/src/n.ts b/packages/a/src/n.ts",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/packages/a/src/n.ts",
+        "@@ -0,0 +1 @@",
+        "+x",
+        "```",
+      ),
+      lines(
+        "```diff",
+        `diff --git a/${SOURCE} b/packages/a/src/y.ts`,
+        "similarity index 100%",
+        `rename from ${SOURCE}`,
+        "rename to packages/a/src/y.ts",
+        "```",
+      ),
+      lines(
+        "```diff",
+        `diff --git a/${SOURCE} b/${SOURCE}`,
+        "old mode 100644",
+        "new mode 100755",
+        "```",
+      ),
+      lines(
+        "```diff",
+        `diff --git a/${SOURCE} b/${SOURCE}`,
+        "index 1111111..2222222 100644",
+        "Binary files a/x and b/x differ",
+        "```",
+      ),
+    ];
+    const verdicts = breaks.map((block) => {
+      const commit = guardCommit([block]);
+      const verdict = guardVerdict();
+      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
+      return [
+        verdict.status,
+        verdict.line.includes(`the break in ${commit} must only modify text`),
+      ];
+    });
+    expect(verdicts).toEqual([
+      [1, true],
+      [1, true],
+      [1, true],
+      [1, true],
+    ]);
+  });
+
+  it("refuses a break that doesn't apply to HEAD, saying how to commit one", () => {
+    const commit = guardCommit([breakOf({ from: "export const v = 7;" })]);
+    expect(guardVerdict().line).toContain(
+      `the break in ${commit} doesn't apply to HEAD. If git's message cleanup collapsed its blank lines, commit it with --cleanup=verbatim`,
+    );
+  });
+
+  it("refuses a guard of a test written with .fails", () => {
+    renameTest('it("v", () => {});\nit.fails("caps", () => {});');
+    guardCommit([breakOf()]);
+    expect(guardVerdict().line).toContain("it is written with .fails, which inverts its result");
+  });
+
+  it("runs each break alone, on HEAD reset after the one before", () => {
+    guardCommit([breakOf({ to: `${V2} "${MARK} one";` })]);
+    guardCommit([breakOf({ to: `${V2} "${MARK} two";` })]);
+    const verdict = guardVerdict();
+    expect({ verdict, sources: sourcesUnderBreaks() }).toEqual({
+      verdict: { status: 0, line: `GUARDED  ${TEST} › caps`, leftovers: [] },
+      sources: [`${V2} "${MARK} two";`, `${V2} "${MARK} one";`],
+    });
+  });
+
+  it("keeps a test only when every Guard: naming it holds", () => {
+    guardCommit([breakOf()]);
+    const harmless = guardCommit([breakOf({ to: `${V2} "harmless";` })]);
+    const { status, line } = guardVerdict();
+    expect({ status, line }).toEqual({
+      status: 1,
+      line: `SURVIVED ${TEST} › caps (its guard doesn't hold: it passes under the break in ${harmless})`,
+    });
+  });
+
+  it("judges on its own each test one break's Guard: lines name", () => {
+    amendBranch({ [MOVED]: `${IMPORTS}it("caps", () => {});\n` });
+    guardCommit([breakOf()], [GUARD, `Guard: ${MOVED} › caps: marks v broken`]);
+    const both = guardVerdict({ STUB_EACH: "1" });
+    const moved = againstBase({ ...SURVIVES, STUB_EACH: "1", STUB_FAIL_FILES: TEST }).output;
+    expect({
+      both: both.status,
+      held: moved.includes(`GUARDED  ${TEST} › caps`),
+      passed: moved.includes(
+        `SURVIVED ${MOVED} › caps (its guard doesn't hold: it passes under the break in`,
+      ),
+    }).toEqual({ both: 0, held: true, passed: true });
+  });
+
+  it("fails on a Guard: naming a test that didn't survive, or no new TypeScript test", () => {
+    guardCommit([breakOf()], [GUARD, "Guard: tests::b_is_two: a Rust test's path"]);
+    const result = againstBase({ STUB_FAIL_IF: MARK });
+    expect({
+      status: result.status,
+      killed: result.output.includes(`  ${TEST} › caps (KILLED)`),
+      stray: result.output.includes(
+        "Guard: tests::b_is_two: a Rust test's path (it names no new TypeScript test)",
+      ),
+    }).toEqual({ status: 1, killed: true, stray: true });
+  });
+
+  it("refuses a break that changes only comments or layout", () => {
+    const commit = guardCommit([breakOf({ to: `${V2} // ${MARK}` })]);
+    expect(guardVerdict()).toEqual(
+      unheld(`the break in ${commit} changes no code, only comments or layout`),
+    );
+  });
+
+  it("runs as many breaks as falsify allows", () => {
+    for (let i = 0; i < MAX_BREAKS; i++) guardCommit([breakOf({ to: `${V2} "${MARK} ${i}";` })]);
+    const verdict = guardVerdict();
+    expect({ ...verdict, runs: sourcesUnderBreaks().length }).toEqual({
+      status: 0,
+      line: `GUARDED  ${TEST} › caps`,
+      leftovers: [],
+      runs: MAX_BREAKS,
+    });
+  });
+
+  it("counts toward its cap only the commits that carry a break", () => {
+    for (let i = 0; i < MAX_BREAKS; i++) guardCommit([breakOf({ to: `${V2} "${MARK} ${i}";` })]);
+    const bare = guardCommit([]);
+    const { output } = againstBase(SURVIVES);
+    expect({
+      capped: output.includes("commits carry a guard's break"),
+      refused: output.includes(`commit ${bare} holds no \`\`\`diff block`),
+    }).toEqual({ capped: false, refused: true });
+  });
+
+  it("refuses more breaks than falsify runs, before it installs anything", () => {
+    for (let i = 0; i <= MAX_BREAKS; i++) guardCommit([breakOf()]);
+    const result = againstBase(SURVIVES);
+    expect({
+      status: result.status,
+      said: result.output.includes(
+        `${MAX_BREAKS + 1} commits carry a guard's break, and falsify runs at most ${MAX_BREAKS}`,
+      ),
+      installed: stubLog().includes("ARGS: install"),
+    }).toEqual({ status: 1, said: true, installed: false });
+  });
+
+  it("refuses, before it installs anything, a break that leaves a quiet file signalling", () => {
+    guardCommit([
+      lines(
+        "```diff",
+        `--- a/${SOURCE}`,
+        `+++ b/${SOURCE}`,
+        "@@ -1 +1 @@",
+        `-${V2}`,
+        '+import { signalGroup } from "@bazhen/host-guard";',
+        `+${V2}`,
+        '+export const stop = (c) => signalGroup(c, "SIGTERM");',
+        "```",
+      ),
+    ]);
+    const result = againstBase({ ...SURVIVES, BZ_FALSIFY_AS_HOST: "1" });
+    expect({
+      status: result.status,
+      named: result.output.includes(`  ${SOURCE}`),
+      installed: stubLog().includes("ARGS: install"),
+      leftovers: leftovers(),
+    }).toEqual({ status: 1, named: true, installed: false, leftovers: [] });
+  });
+
+  it("leaves the checkout's staged and unstaged changes as they were", () => {
+    guardCommit([breakOf()]);
+    write(fx.linked, "packages/a/src/staged.ts", "export const s = 1;\n");
+    git(fx.linked, "add", "packages/a/src/staged.ts");
+    write(fx.linked, SOURCE, "export const v = 9;\n");
+    const verdict = guardVerdict();
+    expect({
+      verdict: verdict.status,
+      staged: git(fx.linked, "diff", "--cached", "--name-only"),
+      unstaged: git(fx.linked, "diff", "--name-only"),
+      source: readFileSync(join(fx.linked, SOURCE), "utf8"),
+    }).toEqual({
+      verdict: 0,
+      staged: "packages/a/src/staged.ts\n",
+      unstaged: `${SOURCE}\n`,
+      source: "export const v = 9;\n",
+    });
+  });
+
+  it("leaves SURVIVED a guarded test that runs a Rust binary", () => {
+    amendBranch({
+      "crates/bazhen/src/main.rs": "fn main() {}\n",
+      "crates/bazhen/Cargo.toml": '[package]\nname = "bazhen"\n',
+      [TEST]: branchTest(`${IMPORTS}const cli = "target/release/bazhen";\nit("v", () => {});\n`),
+    });
+    guardCommit([breakOf()]);
+    expect(guardVerdict().line).toContain("it runs a Rust binary or both daemons");
+  });
+
+  it("leaves SURVIVED a guarded test in a file the Rust daemon's list names", () => {
+    const listed = 'import { v } from "../../packages/a/src/x.ts";\n';
+    const v3 = "export const v = 3;";
+    const guard = lines(
+      "test: guard",
+      "",
+      breakOf({ from: v3 }),
+      `Guard: ${LISTED_TEST} › caps: marks v broken`,
+    );
+    const result = changeDaemon(
+      DAEMON_MAIN,
+      { ...SURVIVES, STUB_RUST_STATUS: "passed" },
+      { imports: listed, added: { [SOURCE]: `${v3}\n` }, guard },
+    );
+    expect(result.output).toMatch(
+      new RegExp(`SURVIVED ${escape(LISTED_TEST)} › caps .*it runs a Rust binary or both daemons`),
+    );
   });
 });
