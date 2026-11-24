@@ -5528,8 +5528,11 @@ function closingBrace(code: string, from: number): number {
 // such as a key's variant, signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
-const SIGNALLING_OR_SESSION = new RegExp(`${SIGNALLING_CALL.source}|\\bSession\\b`);
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
+/** Also the holder's `Session`: named, or as a leader's `session()` gives one to call. */
+const SIGNALLING_OR_SESSION = new RegExp(
+  `${SIGNALLING_CALL.source}|\\bSession\\b|\\bsession\\s*\\(\\s*\\)\\s*\\.`,
+);
 
 const HOLDER_CRATE = "crates/bazhen-holder";
 
@@ -5899,8 +5902,8 @@ function listedCloseFailures(listed: Record<string, string>, seen: Map<string, n
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
- * A mention of `Session` counts only in the crates `holderCrates` names, by directory; with none
- * given, it counts in every crate.
+ * A mention of `Session`, or a call on what a `session()` gives, counts only in the crates
+ * `holderCrates` names, by directory; with none given, it counts in every crate.
  */
 export function unmarkedSignallingTests(
   files: readonly string[],

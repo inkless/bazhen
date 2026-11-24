@@ -4854,11 +4854,13 @@ describe("tests that signal processes they didn't start", () => {
   it("names the holder's Session only in a crate that can reach the holder", () => {
     const sources = {
       ...testIn("holder", "let s = Session::led_by(pid);"),
-      ...testIn("harness", "assert_eq!(k, Key::Session(s));"),
+      ...testIn("leader", "leader.session().count();"),
+      ...testIn("harness", 'assert_eq!(k, Key::Session(s)); codex.session().expect("one");'),
       ...testIn("core", "child.close();"),
     };
-    expect(unmarked(sources, new Set(["crates/holder"]))).toEqual([
+    expect(unmarked(sources, new Set(["crates/holder", "crates/leader"]))).toEqual([
       "crates/holder/src/t.rs:1",
+      "crates/leader/src/t.rs:1",
       "crates/core/src/t.rs:1",
     ]);
   });
