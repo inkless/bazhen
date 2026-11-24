@@ -9,6 +9,7 @@
 import type { z } from "zod";
 import { hasControl } from "./holder.ts";
 import { noteSafe, TASK_NOTE_MAX_BYTES, titleSafe } from "./tasks.ts";
+import { showable } from "./text.ts";
 
 const encoder = new TextEncoder();
 
@@ -63,6 +64,12 @@ export function refusingOwnProto(value: unknown, ctx: z.core.$RefinementCtx) {
 export const newTaskTitle = check(
   "a title can't hold control characters, bidirectional overrides or invisible ones",
   titleSafe,
+);
+
+/** A name a person gives a shell, once trimmed: `ShellName`'s rule. */
+export const shellName = check(
+  "a shell's name can't hold control characters or bidirectional overrides",
+  (name: string) => showable(name),
 );
 
 /** A task note within its UTF-8 budget. */

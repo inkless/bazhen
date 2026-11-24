@@ -26,7 +26,10 @@ use crate::notices::{
     PairingCodeResponse, RevokeDeviceResponse,
 };
 use crate::roles::RolesResponse;
-use crate::shells::{CloseShellRequest, OpenShellRequest, ShellCommandResponse};
+use crate::shells::{
+    CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
+};
 use crate::stream::{StreamClientFrame, StreamServerFrame};
 use crate::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, BroadcastMessageResponse,
@@ -114,12 +117,17 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<PairingCodeResponse>();
     generator.subschema_for::<RelaunchAgentRequest>();
     generator.subschema_for::<RenameAgentRequest>();
+    generator.subschema_for::<RenameShellRequest>();
+    generator.subschema_for::<RestartShellRequest>();
     generator.subschema_for::<RespawnAgentRequest>();
     generator.subschema_for::<RevokeDeviceResponse>();
     generator.subschema_for::<RolesResponse>();
     generator.subschema_for::<SendMessageRequest>();
     generator.subschema_for::<SendMessageResponse>();
     generator.subschema_for::<ShellCommandResponse>();
+    generator.subschema_for::<ShellDecline>();
+    generator.subschema_for::<ShellPrompt>();
+    generator.subschema_for::<ShellReport>();
     generator.subschema_for::<SignalAgentRequest>();
     generator.subschema_for::<TerminalScreen>();
     generator.subschema_for::<StateSnapshot>();
@@ -176,6 +184,66 @@ impl JsonSchema for NewTaskTitle {
             "maxLength": 200,
             "x-bazhen-check": "newTaskTitle",
         })
+    }
+}
+
+/// A name a person gives a shell: trimmed, 1 to 80 long, with no control character or
+/// bidirectional override.
+#[derive(Debug)]
+pub struct ShellName;
+
+impl JsonSchema for ShellName {
+    fn schema_name() -> Cow<'static, str> {
+        "ShellName".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "x-bazhen-transform": "trim",
+            "minLength": 1,
+            "maxLength": crate::shells::SHELL_NAME_MAX_UNITS,
+            "x-bazhen-check": "shellName",
+        })
+    }
+}
+
+/// A line a shell reports running, as the report bounds it.
+#[derive(Debug)]
+pub struct ReportedLine;
+
+impl JsonSchema for ReportedLine {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "ReportedLine".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "maxLength": crate::shells::REPORTED_LINE_MAX_UNITS,
+        })
+    }
+}
+
+/// `true`, the one value a flag that can only be set takes.
+#[derive(Debug)]
+pub struct OnlyTrue;
+
+impl JsonSchema for OnlyTrue {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "OnlyTrue".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "boolean", "const": true })
     }
 }
 

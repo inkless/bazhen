@@ -43,7 +43,16 @@ import { hasKeystrokes, withoutReplies } from "./input.ts";
 import { isOrigin, isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
 import { TerminalScreen } from "./terminals.ts";
-import { CloseShellRequest, OpenShellRequest, ShellCommandResponse } from "./shells.ts";
+import {
+  CloseShellRequest,
+  OpenShellRequest,
+  RenameShellRequest,
+  RestartShellRequest,
+  ShellCommandResponse,
+  ShellDecline,
+  ShellPrompt,
+  ShellReport,
+} from "./shells.ts";
 import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
 import {
   AddTaskNoteRequest,
@@ -802,6 +811,20 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     schema: RenameAgentRequest,
     wire: [{ idempotencyKey: KEY, name: "reviewer" }],
   },
+  RenameShellRequest: {
+    schema: RenameShellRequest,
+    wire: [
+      { idempotencyKey: KEY, name: " build " },
+      { idempotencyKey: KEY, name: null },
+    ],
+  },
+  RestartShellRequest: {
+    schema: RestartShellRequest,
+    wire: [
+      { idempotencyKey: KEY, generation: 0 },
+      { idempotencyKey: KEY, generation: 3, theme: "dark", retype: true },
+    ],
+  },
   RespawnAgentRequest: {
     schema: RespawnAgentRequest,
     wire: [
@@ -826,6 +849,18 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     wire: [
       { terminalId: TERM, eventIds: [4] },
       { terminalId: TERM, eventIds: [] },
+    ],
+  },
+  ShellDecline: { schema: ShellDecline, wire: [{ token: "shell-token" }] },
+  ShellPrompt: {
+    schema: ShellPrompt,
+    wire: [{ token: "shell-token" }, { token: "shell-token", brackets: true }],
+  },
+  ShellReport: {
+    schema: ShellReport,
+    wire: [
+      { token: "shell-token", at: 1_700_000_000_000_000, command: "make test" },
+      { token: "shell-token", at: 0, command: null },
     ],
   },
   TerminalScreen: {

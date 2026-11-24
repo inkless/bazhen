@@ -1,0 +1,52 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "token": "shell-token"
+    },
+    "parsed": {
+      "token": "shell-token"
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "token": "shell-token",
+      "brackets": true
+    },
+    "parsed": {
+      "token": "shell-token",
+      "brackets": true
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "token": "shell-token",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "token": "shell-token"
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "token": "shell-token",
+      "brackets": true,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "token": "shell-token",
+      "brackets": true
+    }
+  }
+]

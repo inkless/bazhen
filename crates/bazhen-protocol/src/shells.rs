@@ -246,6 +246,7 @@ pub struct ShellCommandResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RestartShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(
@@ -261,7 +262,7 @@ pub struct RestartShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::OnlyTrue"))]
     pub retype: Option<bool>,
 }
 
@@ -270,10 +271,15 @@ pub struct RestartShellRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RenameShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     /// Required, null or not, as zod's `.nullable()` holds it: a rename that leaves it out asks
     /// for nothing.
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<crate::schema::ShellName>")
+    )]
     pub name: Option<String>,
 }
 
@@ -316,6 +322,7 @@ pub const SHELL_TOKEN_MAX_UNITS: usize = 128;
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellReport {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
     pub token: String,
     /// When the shell started running the line, in microseconds since the epoch: a report earlier
     /// than the kept one, arriving late, changes nothing.
@@ -323,7 +330,10 @@ pub struct ShellReport {
     /// The line, or `None` for one its client couldn't send whole: too long, or not UTF-8. The
     /// field is required, null or not, as zod's `.nullable()` holds it.
     #[serde(deserialize_with = "Option::deserialize")]
-    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<crate::schema::ReportedLine>")
+    )]
     pub command: Option<String>,
 }
 
@@ -358,6 +368,7 @@ impl std::fmt::Debug for ShellReport {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellPrompt {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
     pub token: String,
     #[serde(
         default,
@@ -391,6 +402,7 @@ impl std::fmt::Debug for ShellPrompt {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellDecline {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
     pub token: String,
 }
 

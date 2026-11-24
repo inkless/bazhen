@@ -1,0 +1,64 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "token": "shell-token",
+      "at": 1700000000000000,
+      "command": "make test"
+    },
+    "parsed": {
+      "token": "shell-token",
+      "at": 1700000000000000,
+      "command": "make test"
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "token": "shell-token",
+      "at": 0,
+      "command": null
+    },
+    "parsed": {
+      "token": "shell-token",
+      "at": 0,
+      "command": null
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "token": "shell-token",
+      "at": 1700000000000000,
+      "command": "make test",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "token": "shell-token",
+      "at": 1700000000000000,
+      "command": "make test"
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "token": "shell-token",
+      "at": 0,
+      "command": null,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "token": "shell-token",
+      "at": 0,
+      "command": null
+    }
+  }
+]

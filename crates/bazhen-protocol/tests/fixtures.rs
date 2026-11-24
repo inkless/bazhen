@@ -16,6 +16,7 @@ use bazhen_protocol::daemon::{
     StopResponse,
 };
 use bazhen_protocol::detach_keys::DetachKeys;
+use bazhen_protocol::edge::{EdgeCheck, edge};
 use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
@@ -30,7 +31,10 @@ use bazhen_protocol::notices::{
     RevokeDeviceResponse,
 };
 use bazhen_protocol::roles::RolesResponse;
-use bazhen_protocol::shells::{CloseShellRequest, OpenShellRequest, ShellCommandResponse};
+use bazhen_protocol::shells::{
+    CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
+};
 use bazhen_protocol::stream::{STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame};
 use bazhen_protocol::tasks::{
     AddTaskNoteRequest, AssignTaskRequest, AssignTaskResponse, BroadcastMessageResponse,
@@ -91,6 +95,25 @@ struct Report {
 /// Every example of the message `name` decodes as `T` and encodes back to its parsed form, and
 /// each of its fields is left out and nulled in turn, for serde's answer and the schema's.
 fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Result<Report> {
+    examined::<T>(name, |wire| {
+        serde_json::from_value(wire.clone()).map_err(|e| e.to_string())
+    })
+}
+
+/// As [`round_trips`], for a request the daemon's edge reads: decoded as the edge takes it, which
+/// gives it back as zod parses it.
+fn round_trips_at_edge<T: DeserializeOwned + Serialize + JsonSchema + EdgeCheck>(
+    name: &str,
+) -> Result<Report> {
+    examined::<T>(name, |wire| {
+        edge::<T>(wire.to_string().as_bytes()).map_err(|refused| refused.to_string())
+    })
+}
+
+fn examined<T: DeserializeOwned + Serialize + JsonSchema>(
+    name: &str,
+    decode: impl Fn(&Value) -> Result<T>,
+) -> Result<Report> {
     let examples = read(&format!("{name}.json"))?;
     let examples = examples.as_array().ok_or(format!("{name}: not a list"))?;
     let schema = Schema::of::<T>();
@@ -99,8 +122,7 @@ fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Resu
         let what = example.get("name").cloned().unwrap_or_default();
         let wire = example.get("wire").cloned().unwrap_or_default();
         let parsed = example.get("parsed").cloned().unwrap_or_default();
-        let decoded: T =
-            serde_json::from_value(wire.clone()).map_err(|e| format!("{name}, {what}: {e}"))?;
+        let decoded = decode(&wire).map_err(|e| format!("{name}, {what}: {e}"))?;
         let encoded = serde_json::to_value(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
         if !same(&encoded, &parsed) {
             return Err(format!(
@@ -154,12 +176,21 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ),
     ("CallerResponse", round_trips::<CallerResponse>),
     ("CloseAgentRequest", round_trips::<CloseAgentRequest>),
-    ("CloseShellRequest", round_trips::<CloseShellRequest>),
-    ("CreateTaskRequest", round_trips::<CreateTaskRequest>),
+    (
+        "CloseShellRequest",
+        round_trips_at_edge::<CloseShellRequest>,
+    ),
+    (
+        "CreateTaskRequest",
+        round_trips_at_edge::<CreateTaskRequest>,
+    ),
     ("CreateTaskResponse", round_trips::<CreateTaskResponse>),
     ("DelegateTaskRequest", round_trips::<DelegateTaskRequest>),
     ("DevicesResponse", round_trips::<DevicesResponse>),
-    ("DismissNoticeRequest", round_trips::<DismissNoticeRequest>),
+    (
+        "DismissNoticeRequest",
+        round_trips_at_edge::<DismissNoticeRequest>,
+    ),
     (
         "DismissNoticeResponse",
         round_trips::<DismissNoticeResponse>,
@@ -176,18 +207,29 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("HealthResponse", round_trips::<HealthResponse>),
     ("LaunchAgentRequest", round_trips::<LaunchAgentRequest>),
     ("LaunchAgentResponse", round_trips::<LaunchAgentResponse>),
-    ("OpenShellRequest", round_trips::<OpenShellRequest>),
-    ("PairRequest", round_trips::<PairRequest>),
+    ("OpenShellRequest", round_trips_at_edge::<OpenShellRequest>),
+    ("PairRequest", round_trips_at_edge::<PairRequest>),
     ("PairResponse", round_trips::<PairResponse>),
     ("PairingCodeResponse", round_trips::<PairingCodeResponse>),
     ("RelaunchAgentRequest", round_trips::<RelaunchAgentRequest>),
     ("RenameAgentRequest", round_trips::<RenameAgentRequest>),
+    (
+        "RenameShellRequest",
+        round_trips_at_edge::<RenameShellRequest>,
+    ),
+    (
+        "RestartShellRequest",
+        round_trips_at_edge::<RestartShellRequest>,
+    ),
     ("RespawnAgentRequest", round_trips::<RespawnAgentRequest>),
     ("RevokeDeviceResponse", round_trips::<RevokeDeviceResponse>),
     ("RolesResponse", round_trips::<RolesResponse>),
     ("SendMessageRequest", round_trips::<SendMessageRequest>),
     ("SendMessageResponse", round_trips::<SendMessageResponse>),
     ("ShellCommandResponse", round_trips::<ShellCommandResponse>),
+    ("ShellDecline", round_trips_at_edge::<ShellDecline>),
+    ("ShellPrompt", round_trips_at_edge::<ShellPrompt>),
+    ("ShellReport", round_trips_at_edge::<ShellReport>),
     ("SignalAgentRequest", round_trips::<SignalAgentRequest>),
     ("TerminalScreen", round_trips::<TerminalScreen>),
     ("StateSnapshot", round_trips::<StateSnapshot>),
