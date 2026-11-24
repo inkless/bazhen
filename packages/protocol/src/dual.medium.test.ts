@@ -37,6 +37,115 @@ interface Known {
  */
 const DUAL_KNOWN: readonly Known[] = [];
 
+/** A schema the protocol exports that the Rust protocol doesn't emit yet, with what owns it. */
+interface NotYet {
+  readonly name: string;
+  readonly owner: string;
+  readonly why: string;
+}
+
+const ATTENTION = "the attention routes' port";
+const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
+const HOOKS = "the hook wire types' port";
+const HOOKS_WHY = "the hook wire types aren't in bazhen-protocol yet";
+const EVENTS = "this protocol's event typing";
+const EVENTS_WHY = "the Rust protocol emits the event envelope, not the typed events";
+const HOLDER = "this protocol's holder-proto schema";
+const NAMED = "this protocol's named definitions";
+const NAMED_WHY = "the Rust protocol writes it inline in each message that holds it";
+
+/**
+ * The schemas the protocol exports that the zod generated from the Rust protocol doesn't. A schema
+ * exported and not listed fails, and so does an entry the generated zod now exports: the change
+ * that emits a schema removes its entry.
+ */
+const NOT_YET_IN_RUST: readonly NotYet[] = [
+  { name: "AnswerAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "AnswerAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "ApprovalDecision", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "DismissAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "DismissAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "ReplyAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "ReplyAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "ResendAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
+  { name: "ResendAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
+  {
+    name: "BroadcastMessageRequest",
+    owner: "the mailbox routes' port",
+    why: "the Rust daemon serves no mailbox route yet",
+  },
+  { name: "HookAck", owner: HOOKS, why: HOOKS_WHY },
+  { name: "HookReply", owner: HOOKS, why: HOOKS_WHY },
+  { name: "HookRequest", owner: HOOKS, why: HOOKS_WHY },
+  { name: "OfferToken", owner: HOOKS, why: HOOKS_WHY },
+  {
+    name: "CompactWindowTokens",
+    owner: "the agent request checks' move into the protocol",
+    why: "a launch's compactWindowTokens is a bare number in the Rust protocol, its range checked by the daemon",
+  },
+  {
+    name: "UnlinkShellRequest",
+    owner: "the linked shells' port",
+    why: "the Rust daemon serves no linked shell's route yet",
+  },
+  {
+    name: "PaneTitleChanged",
+    owner: "the tmux runtime",
+    why: "/v1/codex/pane-title goes with tmux at the cutover, and is removed at the flip, not ported",
+  },
+  { name: "ClientEventFrame", owner: EVENTS, why: EVENTS_WHY },
+  { name: "Event", owner: EVENTS, why: EVENTS_WHY },
+  { name: "EventFrame", owner: EVENTS, why: EVENTS_WHY },
+  { name: "EventStreamQuery", owner: EVENTS, why: EVENTS_WHY },
+  {
+    name: "HolderHelloFrozen",
+    owner: HOLDER,
+    why: "the part of a hello every major reads first, to know which major the rest is in, which the holder's own hello holds inline",
+  },
+  {
+    name: "HolderHelloReplyFrozen",
+    owner: HOLDER,
+    why: "the part of a hello reply every major reads first, which the holder's own reply holds inline",
+  },
+  {
+    name: "HolderProcessSpec",
+    owner: HOLDER,
+    why: "the holder's requests write what a terminal runs inline",
+  },
+  {
+    name: "HolderRequestName",
+    owner: HOLDER,
+    why: "the holder's requests name themselves inline, by each one's tag",
+  },
+  {
+    name: "FleetAgents",
+    owner: NAMED,
+    why: "what the Rust CLI's `bazhen agents --json` prints, which only the CLI's tests read: the Rust protocol emits FleetAgent, not the list",
+  },
+  { name: "NoticeAction", owner: NAMED, why: NAMED_WHY },
+  { name: "NoticeCloseReason", owner: NAMED, why: NAMED_WHY },
+  { name: "NoticeCloser", owner: NAMED, why: NAMED_WHY },
+  { name: "ProtocolVersion", owner: NAMED, why: NAMED_WHY },
+  { name: "RuntimeHealthState", owner: NAMED, why: NAMED_WHY },
+  { name: "ShellCommandLine", owner: NAMED, why: NAMED_WHY },
+  { name: "TaskBrief", owner: NAMED, why: NAMED_WHY },
+  { name: "TaskTitle", owner: NAMED, why: NAMED_WHY },
+];
+
+/** Each schema the protocol exports and `generated` doesn't, unlisted, and each entry it does. */
+function notYetInRust(generated: unknown) {
+  const handOnly = Object.keys(protocol).filter(
+    (name) => schemaIn(protocol, name) && !schemaIn(generated, name),
+  );
+  const listed = new Set(NOT_YET_IN_RUST.map((entry) => entry.name));
+  return {
+    unlisted: handOnly.filter((name) => !listed.has(name)),
+    emitted: NOT_YET_IN_RUST.filter((entry) => !handOnly.includes(entry.name)).map(
+      (entry) => `${entry.name}, owned by ${entry.owner}`,
+    ),
+  };
+}
+
 /** The module at `file` under the shadow, or why it won't load. */
 async function shadowed(file: string, json = false): Promise<unknown> {
   const url = new URL(file, SHADOW);
@@ -106,7 +215,8 @@ function judge(cases: readonly Case[], generated: unknown): Judged {
 
 describe("the protocol and the zod generated from the Rust protocol", async () => {
   const corpus = Corpus.parse(await shadowed("corpus.json", true)).default;
-  const { found, parsed } = judge(corpus, await shadowed("gen/protocol.ts"));
+  const generated = await shadowed("gen/protocol.ts");
+  const { found, parsed } = judge(corpus, generated);
 
   it("judge each planted case as the corpus expects", () => {
     expect(found).toEqual([]);
@@ -115,5 +225,9 @@ describe("the protocol and the zod generated from the Rust protocol", async () =
   it("parse each case both take to the same value", () => {
     expect(Object.keys(parsed.protocol).length).toBeGreaterThan(0);
     expect(parsed.generated).toStrictEqual(parsed.protocol);
+  });
+
+  it("differ in the schemas they export only by those NOT_YET_IN_RUST lists", () => {
+    expect(notYetInRust(generated)).toEqual({ unlisted: [], emitted: [] });
   });
 });
