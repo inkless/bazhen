@@ -223,7 +223,7 @@ impl JsonSchema for TaskTitle {
             "type": "string",
             "x-bazhen-transform": "trim",
             "minLength": 1,
-            "maxLength": 200,
+            "maxLength": crate::text::TASK_TITLE_MAX_CHARS,
         })
     }
 }
@@ -241,7 +241,7 @@ impl JsonSchema for TaskBrief {
         schemars::json_schema!({
             "type": "string",
             "minLength": 1,
-            "maxLength": crate::tasks::TASK_BRIEF_MAX,
+            "maxLength": crate::text::TASK_BRIEF_MAX_CHARS,
         })
     }
 }

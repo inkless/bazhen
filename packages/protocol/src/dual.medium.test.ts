@@ -204,9 +204,12 @@ const COMMAND_LINES = [
   `${"\u00e9".repeat(1024)}a`,
 ];
 
-/** Whether `module`'s `ShellCommandLine` takes each of `COMMAND_LINES`. */
+/** Each of `COMMAND_LINES`, with whether `module`'s `ShellCommandLine` takes it. */
 const judgedLines = (module: unknown) =>
-  COMMAND_LINES.map((line) => schemaIn(module, "ShellCommandLine")?.safeParse(line).success);
+  COMMAND_LINES.map((line) => ({
+    line,
+    takes: schemaIn(module, "ShellCommandLine")?.safeParse(line).success,
+  }));
 
 describe("the protocol and the zod generated from the Rust protocol", async () => {
   const corpus = Corpus.parse(await shadowed("corpus.json", true)).default;
@@ -223,8 +226,9 @@ describe("the protocol and the zod generated from the Rust protocol", async () =
   });
 
   it("judge each command line ShellCommandLine is given alike", () => {
-    expect(judgedLines(protocol)).toContain(true);
-    expect(judgedLines(protocol)).toContain(false);
+    const takes = judgedLines(protocol).map((judged) => judged.takes);
+    expect(takes).toContain(true);
+    expect(takes).toContain(false);
     expect(judgedLines(generated)).toEqual(judgedLines(protocol));
   });
 
