@@ -43,6 +43,6 @@ mod tokens;
 mod web;
 mod writer;
 
-pub use channel::rpc;
+pub use channel::{reconnect, rpc};
 pub use run::run;
 pub use stream::said;

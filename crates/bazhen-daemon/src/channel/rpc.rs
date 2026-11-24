@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use bazhen_harness::{ChannelError, ChannelErrorKind};
+use bazhen_harness::{BoxFuture, ChannelError, ChannelErrorKind, ChannelPort};
 use futures_util::{SinkExt as _, StreamExt as _};
 use serde_json::{Map, Number, Value};
 use tokio::net::UnixStream;
@@ -210,6 +210,8 @@ impl From<RpcError> for ChannelError {
 #[error("{message}")]
 pub struct OpenError {
     pub message: String,
+    /// Whether nothing listens at the socket: there is none, or nobody accepts on it.
+    pub absent: bool,
 }
 
 impl From<OpenError> for ChannelError {
@@ -281,11 +283,16 @@ pub async fn connect(
 ) -> Result<(Rpc, Inbox), OpenError> {
     let refused = |why: String| OpenError {
         message: format!("can't connect to {}: {why}", socket.display()),
+        absent: false,
     };
     let opening = async {
-        let stream = UnixStream::connect(socket)
-            .await
-            .map_err(|e| refused(e.to_string()))?;
+        let stream = UnixStream::connect(socket).await.map_err(|e| OpenError {
+            absent: matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ),
+            ..refused(e.to_string())
+        })?;
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_MESSAGE))
             .max_frame_size(Some(MAX_MESSAGE));
@@ -450,50 +457,43 @@ impl Rpc {
         self.send(Value::Object(fields).to_string());
     }
 
+    /// Whether the connection is still open.
+    pub fn open(&self) -> bool {
+        lock(&self.waiting).open
+    }
+
     fn send(&self, text: String) {
         // The owner has ended, so the connection has: whatever waits on it fails as ended.
         let _ = self.outbox.send(text);
     }
 }
 
+/// One connection, for what is said on it alone, such as the handshake: it is never made again.
+impl ChannelPort for Rpc {
+    fn request<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+    ) -> BoxFuture<'a, Result<Value, ChannelError>> {
+        Box::pin(async move { Ok(Self::request(self, method, params).await?) })
+    }
+
+    fn notify<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+    ) -> BoxFuture<'a, Result<(), ChannelError>> {
+        Box::pin(async move { Ok(Self::notify(self, method, params)?) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{TempDir, paused, runtime};
+    use crate::testing::{Server, TempDir, accepted, bounded, heard, paused, runtime, say, within};
     use futures_util::FutureExt as _;
     use serde_json::json;
     use tokio::net::UnixListener;
-
-    /// `test` within `limit`, so a test that would wait forever on a reply fails instead.
-    async fn within<T>(limit: Duration, test: impl Future<Output = T>) -> T {
-        tokio::time::timeout(limit, test)
-            .await
-            .unwrap_or_else(|_| panic!("the test still waits after {limit:?}"))
-    }
-
-    async fn bounded<T>(test: impl Future<Output = T>) -> T {
-        within(Duration::from_secs(5), test).await
-    }
-
-    /// The server's side of one connection: a WebSocket it accepted.
-    type Server = WebSocketStream<UnixStream>;
-
-    async fn accepted(listener: &UnixListener) -> Server {
-        let (stream, _) = listener.accept().await.unwrap();
-        tokio_tungstenite::accept_async(stream).await.unwrap()
-    }
-
-    async fn heard(server: &mut Server) -> Value {
-        loop {
-            if let Message::Text(text) = server.next().await.unwrap().unwrap() {
-                return serde_json::from_str(text.as_str()).unwrap();
-            }
-        }
-    }
-
-    async fn say(server: &mut Server, value: Value) {
-        server.send(Message::text(value.to_string())).await.unwrap();
-    }
 
     /// A listener in a directory of the test's own, and a connection to it.
     async fn connected(
@@ -595,6 +595,7 @@ mod tests {
         }
         let open = OpenError {
             message: "no".to_owned(),
+            absent: true,
         };
         assert_eq!(ChannelError::from(open).kind, ChannelErrorKind::Failed);
     }
@@ -751,10 +752,12 @@ mod tests {
                 () = silent => panic!("the silent server never ends"),
             };
             assert_eq!(started.elapsed(), OPEN_TIMEOUT);
+            let refused = refused.unwrap_err();
             assert_eq!(
-                refused.unwrap_err().to_string(),
+                refused.to_string(),
                 format!("can't connect to {}: no WebSocket in 10 s", path.display())
             );
+            assert!(!refused.absent, "something listened");
         }));
     }
 
@@ -845,12 +848,17 @@ mod tests {
         let path = dir.path().join("server.sock");
         runtime().block_on(bounded(async {
             let refused = connect(&path, &TaskTracker::new(), CancellationToken::new()).await;
+            let refused = refused.unwrap_err();
             assert!(
                 refused
-                    .unwrap_err()
                     .message
                     .starts_with(&format!("can't connect to {}: ", path.display()))
             );
+            assert!(refused.absent, "no socket");
+            // A socket its server left behind, which nobody accepts on.
+            drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+            let refused = connect(&path, &TaskTracker::new(), CancellationToken::new()).await;
+            assert!(refused.unwrap_err().absent, "a socket nobody accepts on");
         }));
     }
 
