@@ -850,5 +850,103 @@
         }
       ]
     }
+  ],
+  "task": [
+    {
+      "from": "open",
+      "final": false,
+      "events": [
+        {
+          "event": "done",
+          "to": "done"
+        },
+        {
+          "event": "cancelled",
+          "to": "cancelled"
+        }
+      ]
+    },
+    {
+      "from": "done",
+      "final": true,
+      "events": [
+        {
+          "event": "done",
+          "refused": "task cannot handle done while done"
+        },
+        {
+          "event": "cancelled",
+          "refused": "task cannot handle cancelled while done"
+        }
+      ]
+    },
+    {
+      "from": "cancelled",
+      "final": true,
+      "events": [
+        {
+          "event": "done",
+          "refused": "task cannot handle done while cancelled"
+        },
+        {
+          "event": "cancelled",
+          "refused": "task cannot handle cancelled while cancelled"
+        }
+      ]
+    }
+  ],
+  "assignment": [
+    {
+      "from": "active",
+      "final": false,
+      "events": [
+        {
+          "event": "unassigned",
+          "to": "ended"
+        },
+        {
+          "event": "completed",
+          "to": "ended"
+        },
+        {
+          "event": "task_finished",
+          "to": "ended"
+        },
+        {
+          "event": "agent_closed",
+          "to": "ended"
+        },
+        {
+          "event": "parent_ended",
+          "to": "ended"
+        }
+      ]
+    },
+    {
+      "from": "ended",
+      "final": true,
+      "events": [
+        {
+          "event": "unassigned",
+          "refused": "assignment cannot handle unassigned while ended"
+        },
+        {
+          "event": "completed",
+          "refused": "assignment cannot handle completed while ended"
+        },
+        {
+          "event": "task_finished",
+          "refused": "assignment cannot handle task_finished while ended"
+        },
+        {
+          "event": "agent_closed",
+          "refused": "assignment cannot handle agent_closed while ended"
+        },
+        {
+          "event": "parent_ended",
+          "refused": "assignment cannot handle parent_ended while ended"
+        }
+      ]
+    }
   ]
 }

@@ -12,11 +12,12 @@ use bazhen_core::agent::{self, AgentEvent};
 use bazhen_core::mail::{self, MailboxEvent, leading_mail_id, mail_label, quote_labels};
 use bazhen_core::role_file::{SYNTAX, parse_role};
 use bazhen_core::roles::{UserRole, resolve_roles};
-use bazhen_core::{attention, machine::InvalidTransition};
+use bazhen_core::{attention, machine::InvalidTransition, task};
 use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::mail::{AttentionCloseReason, AttentionState, MailboxState};
 use bazhen_protocol::roles::{RoleDefinition, RoleProblem, RoleSource};
 use bazhen_protocol::shells::TerminalState;
+use bazhen_protocol::tasks::{AssignmentEndReason, AssignmentState, TaskOutcome, TaskState};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
@@ -155,6 +156,29 @@ fn moves_each_machine_as_packages_core_does_and_refuses_in_its_words() -> Result
             answer(attention::next(from, reason))
         },
         |from| !attention::accepts(from),
+    )?;
+    let outcomes: Vec<&str> = TaskOutcome::ALL.iter().map(|o| o.as_str()).collect();
+    check_machine::<TaskState>(
+        rows(&machines, "task")?,
+        &outcomes,
+        |from, name| {
+            let outcome = by_name(&TaskOutcome::ALL, TaskOutcome::as_str, name)?;
+            answer(task::next(from, outcome))
+        },
+        task::is_final,
+    )?;
+    let ends: Vec<&str> = AssignmentEndReason::ALL
+        .iter()
+        .map(|r| r.as_str())
+        .collect();
+    check_machine::<AssignmentState>(
+        rows(&machines, "assignment")?,
+        &ends,
+        |from, name| {
+            let reason = by_name(&AssignmentEndReason::ALL, AssignmentEndReason::as_str, name)?;
+            answer(task::next_assignment(from, reason))
+        },
+        task::assignment_is_final,
     )
 }
 

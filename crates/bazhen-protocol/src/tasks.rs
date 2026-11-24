@@ -51,6 +51,8 @@ pub enum TaskOutcome {
 }
 
 impl TaskOutcome {
+    pub const ALL: [Self; 2] = [Self::Done, Self::Cancelled];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Done => "done",
@@ -66,6 +68,15 @@ pub enum AssignmentState {
     Ended,
 }
 
+impl AssignmentState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Ended => "ended",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssignmentEndReason {
@@ -77,6 +88,14 @@ pub enum AssignmentEndReason {
 }
 
 impl AssignmentEndReason {
+    pub const ALL: [Self; 5] = [
+        Self::Unassigned,
+        Self::Completed,
+        Self::TaskFinished,
+        Self::AgentClosed,
+        Self::ParentEnded,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Unassigned => "unassigned",
