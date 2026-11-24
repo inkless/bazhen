@@ -4,6 +4,7 @@
 //! can't do per variant.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Serialize;
@@ -35,7 +36,7 @@ pub struct Payload {
 const fn of<T: JsonSchema + DeserializeOwned + Serialize>() -> Payload {
     Payload {
         schema: body::<T>,
-        read: reread::<T>,
+        read: through::<T>,
     }
 }
 
@@ -49,7 +50,7 @@ fn body<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
     schema
 }
 
-fn reread<T: DeserializeOwned + Serialize>(payload: Value) -> Result<Value, String> {
+fn through<T: DeserializeOwned + Serialize>(payload: Value) -> Result<Value, String> {
     let read: T = serde_json::from_value(payload).map_err(|e| e.to_string())?;
     serde_json::to_value(read).map_err(|e| e.to_string())
 }
@@ -143,36 +144,22 @@ pub fn payload(kind: &EventKind, generator: &mut SchemaGenerator) -> Option<Sche
     Some((payload.schema)(generator))
 }
 
-/// `event` as a client of this build reads it off the stream: a payload its type sends whole read
-/// through its Rust type, and one it cuts left with only the keys it sends. A type this build
-/// doesn't know keeps its payload as it came.
-///
-/// # Errors
-///
-/// The type and why, when its Rust type refuses a payload it sends whole.
-pub fn read(mut event: super::Event) -> Result<super::Event, String> {
-    let Some(kind) = super::event_kind(&event.kind) else {
-        return Ok(event);
-    };
-    let Some((_, entry)) = PAYLOADS.iter().find(|(name, _)| *name == kind.name) else {
-        return Ok(event);
-    };
-    let schema = (entry.schema)(&mut crate::schema::generator());
-    if streamed(kind, &schema).is_some() {
-        if let Some(payload) = event.payload.as_object_mut() {
-            payload.retain(|key, _| kind.streamed.contains(&key.as_str()));
-        }
-    } else {
-        event.payload = (entry.read)(event.payload).map_err(|e| format!("{}: {e}", kind.name))?;
-    }
-    Ok(event)
+/// `payload` read through the Rust type of the event type named `kind` and written back, as this
+/// build reads it whole off the store; none for a type with no payload listed.
+pub fn read(kind: &str, payload: Value) -> Option<Result<Value, String>> {
+    let (_, entry) = PAYLOADS.iter().find(|(name, _)| *name == kind)?;
+    Some((entry.read)(payload))
 }
 
 /// `payload` cut to the keys a client is sent; or none where it keeps them all.
 pub fn streamed(kind: &EventKind, payload: &Schema) -> Option<Schema> {
-    let properties = payload.get("properties").and_then(Value::as_object);
-    let all = properties.map_or(0, Map::len);
-    if all == kind.streamed.len() {
+    let keys: BTreeSet<&str> = payload
+        .get("properties")
+        .and_then(Value::as_object)
+        .map_or_else(BTreeSet::new, |properties| {
+            properties.keys().map(String::as_str).collect()
+        });
+    if keys == kind.streamed.iter().copied().collect() {
         return None;
     }
     let mut cut = payload.clone();
@@ -215,6 +202,32 @@ impl JsonSchema for TypedEvent {
 
 fn pinned(value: &str) -> Value {
     serde_json::json!({ "type": "string", "const": value })
+}
+
+/// An event's type and its payload as the store records it, whole, of which the stream sends the
+/// part [`streamed`] leaves: zod's `RecordedEvent`, which no client is sent.
+#[derive(Debug)]
+pub struct TypedRecordedEvent;
+
+impl JsonSchema for TypedRecordedEvent {
+    fn schema_name() -> Cow<'static, str> {
+        "RecordedEvent".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let branches: Vec<Value> = EVENT_KINDS
+            .iter()
+            .filter_map(|kind| {
+                let payload = payload(kind, generator)?;
+                Some(serde_json::json!({
+                    "type": "object",
+                    "properties": { "type": pinned(kind.name), "payload": payload },
+                    "required": ["type", "payload"],
+                }))
+            })
+            .collect();
+        json_schema!({ "anyOf": branches })
+    }
 }
 
 /// A text frame the daemon sends on `/v1/events`, each event's payload checked.

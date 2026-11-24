@@ -102,11 +102,11 @@ type Sided<T, S extends Side> = T extends z.ZodType
 type Flat<T> = T extends unknown ? { [P in keyof T]: T[P] } : never;
 
 /**
- * The schemas judged kind by kind below rather than whole: the protocol builds `Event`'s branches
- * from `EVENTS` in a loop, so its type is one branch of any type with its payload unknown, where
- * the generated one types each kind's.
+ * The schemas judged kind by kind below rather than whole: the protocol builds `Event`'s and
+ * `RecordedEvent`'s branches from `EVENTS` in a loop, so each type is one branch of any type with
+ * its payload unknown, where the generated one types each kind's.
  */
-type ByKind = "Event" | "EventFrame";
+type ByKind = "Event" | "EventFrame" | "RecordedEvent";
 
 /** Each shared schema, but those `ByKind` names, whose `S` side of the type differs. */
 type Differing<S extends Side> = {
@@ -121,9 +121,19 @@ type OurEvents = Ours["EVENTS"];
 type TheirEvents = Theirs["EVENTS"];
 type Kind = keyof OurEvents;
 type TheirKind = Sided<Theirs["Event"], "output">["type"];
+type TheirRecordedKind = Sided<Theirs["RecordedEvent"], "output">["type"];
 
 /** What one of `A` and `B` holds and the other doesn't. */
 type Apart<A, B> = Exclude<A, B> | Exclude<B, A>;
+
+/** `T` with only whether each part may be null or left out taken out, at every depth. */
+type Loose<T> = T extends object ? { [P in keyof T]?: Loose<Exclude<T[P], null | undefined>> } : T;
+
+/** The fields of kind `K`'s payload `KnownFields` excuses. */
+type Excused<K> = K extends keyof KnownFields ? KnownFields[K]["fields"] : never;
+
+/** Payload `T` of kind `K` with only what `KnownFields` excuses in it taken out. */
+type Excusing<T, K> = Flat<Omit<T, Excused<K>> & Loose<Pick<T, Excused<K> & keyof T>>>;
 
 /** The branch of `Event` the protocol builds for kind `K`, from `EVENTS`, as `Event` builds it. */
 type OurBranch<K, S extends Side> = K extends keyof OurEvents
@@ -131,44 +141,95 @@ type OurBranch<K, S extends Side> = K extends keyof OurEvents
       Omit<Sided<Ours["EventEnvelope"], S>, "type" | "entityType" | "payload"> & {
         type: K;
         entityType: OurEvents[K]["entity"];
-        payload: Sided<OurEvents[K] extends { streamed: infer P } ? P : OurEvents[K]["payload"], S>;
+        payload: Excusing<
+          Sided<OurEvents[K] extends { streamed: infer P } ? P : OurEvents[K]["payload"], S>,
+          K
+        >;
       }
     >
   : never;
 
+/** The generated branch for kind `K` of union `T`, with what `KnownFields` excuses taken out. */
+type TheirBranch<T, K> = T extends { type: K; payload: infer P }
+  ? Flat<Omit<T, "payload"> & { payload: Excusing<P, K> }>
+  : never;
+
 /** Whether kind `K`'s branch of `Event` is the same type on `S` on both. */
 type KindAgrees<K, S extends Side> = Equal<
-  Flat<Extract<Sided<Theirs["Event"], S>, { type: K }>>,
+  TheirBranch<Sided<Theirs["Event"], S>, K>,
   OurBranch<K, S>
 >;
 
-/** Each kind whose branch of `Event` differs between the two, as it parses or as it is written. */
+/** Whether kind `K`'s branch of `RecordedEvent` is the same type on `S` on both. */
+type RecordedAgrees<K, S extends Side> = K extends keyof OurEvents
+  ? Equal<
+      TheirBranch<Sided<Theirs["RecordedEvent"], S>, K>,
+      { type: K; payload: Excusing<Sided<OurEvents[K]["payload"], S>, K> }
+    >
+  : false;
+
+/** Each kind whose branch of `Event` or `RecordedEvent` differs, as it parses or as it is written. */
 type DifferingKinds = {
-  [K in Kind]: [KindAgrees<K, "output">, KindAgrees<K, "input">] extends [true, true] ? never : K;
+  [K in Kind]: [
+    KindAgrees<K, "output">,
+    KindAgrees<K, "input">,
+    RecordedAgrees<K, "output">,
+    RecordedAgrees<K, "input">,
+  ] extends [true, true, true, true]
+    ? never
+    : K;
 }[Kind];
 
-type Streamed<E> = E extends { streamed: infer P }
-  ? [Sided<P, "output">, Sided<P, "input">]
+type Streamed<E, K> = E extends { streamed: infer P }
+  ? [Excusing<Sided<P, "output">, K>, Excusing<Sided<P, "input">, K>]
   : "none";
 
-/**
- * Whether kind `K`'s entry in `EVENTS` is the same on both: its entity, payload and streamed one.
- * A field a kind doesn't stream has no other check: the corpus plants cases only in what `Event`
- * streams, so its bounds and patterns go unjudged until a corpus covers the whole payloads.
- */
+/** Payload `P` of kind `K` on both sides, with what `KnownFields` excuses taken out. */
+type Payloads<P, K> = [Excusing<Sided<P, "output">, K>, Excusing<Sided<P, "input">, K>];
+
+/** Whether kind `K`'s entry in `EVENTS` is the same on both: its entity, payload and streamed one. */
 type EntryAgrees<K extends Kind> = K extends keyof TheirEvents
   ? [
       Equal<TheirEvents[K]["entity"], OurEvents[K]["entity"]>,
-      Equal<Sided<TheirEvents[K]["payload"], "output">, Sided<OurEvents[K]["payload"], "output">>,
-      Equal<Sided<TheirEvents[K]["payload"], "input">, Sided<OurEvents[K]["payload"], "input">>,
-      Equal<Streamed<TheirEvents[K]>, Streamed<OurEvents[K]>>,
-    ] extends [true, true, true, true]
+      Equal<Payloads<TheirEvents[K]["payload"], K>, Payloads<OurEvents[K]["payload"], K>>,
+      Equal<Streamed<TheirEvents[K], K>, Streamed<OurEvents[K], K>>,
+    ] extends [true, true, true]
     ? true
     : false
   : false;
 
 /** Each kind whose entry in `EVENTS` differs between the two. */
 type DifferingEntries = { [K in Kind]: EntryAgrees<K> extends true ? never : K }[Kind];
+
+/** Field `F` of payload `P`, on side `S`. */
+type Field<P, F, S extends Side> = Pick<Sided<P, S>, F & keyof Sided<P, S>>;
+
+/** Whether field `F` of kind `K`'s payload is the same type on both, as it parses and as written. */
+type FieldAgrees<K, F> = K extends keyof TheirEvents
+  ? K extends Kind
+    ? [
+        Equal<
+          Field<TheirEvents[K]["payload"], F, "output">,
+          Field<OurEvents[K]["payload"], F, "output">
+        >,
+        Equal<
+          Field<TheirEvents[K]["payload"], F, "input">,
+          Field<OurEvents[K]["payload"], F, "input">
+        >,
+      ] extends [true, true]
+      ? true
+      : false
+    : false
+  : false;
+
+/** Each field `KnownFields` excuses that no longer differs, named `kind.field`. */
+type ExcusedButAgreeing = {
+  [K in keyof KnownFields]: {
+    [F in KnownFields[K]["fields"]]: FieldAgrees<K, F> extends true
+      ? `${K & string}.${F & string}`
+      : never;
+  }[KnownFields[K]["fields"]];
+}[keyof KnownFields];
 
 /** `EventFrame` but for the event it carries, which `DifferingKinds` judges. */
 type FrameRest<T> = T extends { type: "event" } ? Omit<T, "event"> : T;
@@ -185,38 +246,61 @@ const MAIL_EVENTS = "the port of mail_events.rs";
 const TASK_EVENTS = "the port of task_events.rs";
 
 /**
- * The kinds whose payload's type differs, each with what owns it: a field the Rust payload takes
- * as null or leaves out where the protocol doesn't. The runtime leg's DUAL_KNOWN lists the cases of
- * those it streams. The list only shrinks: a kind listed whose branch and entry no longer differ
- * fails.
+ * The fields of each kind's payload that the Rust payload takes as null or leaves out where the
+ * protocol doesn't, with what owns them. Each is judged with only that taken out, so any other
+ * difference in it still fails. The runtime leg's DUAL_KNOWN lists their cases. The list only
+ * shrinks: a field listed that no longer differs fails.
  */
-interface KnownKinds {
-  "agent.compacted": typeof AGENT_EVENTS;
-  "agent.failed": typeof AGENT_EVENTS;
-  "agent.launched": typeof AGENT_EVENTS;
-  "agent.relaunch_rejected": typeof AGENT_EVENTS;
-  "agent.relaunch_requested": typeof AGENT_EVENTS;
-  "agent.relaunched": typeof AGENT_EVENTS;
-  "agent.respawn_rejected": typeof AGENT_EVENTS;
-  "agent.respawned": typeof AGENT_EVENTS;
-  "agent.running": typeof AGENT_EVENTS;
-  "assignment.granted": typeof TASK_EVENTS;
-  "attention.opened": typeof MAIL_EVENTS;
-  "mailbox.offered": typeof MAIL_EVENTS;
-  "mailbox.queued": typeof MAIL_EVENTS;
-  "task.finished": typeof TASK_EVENTS;
-  "task.noted": typeof TASK_EVENTS;
-  "task.owner_changed": typeof TASK_EVENTS;
+interface KnownFields {
+  "agent.compacted": { fields: "before" | "hook"; owner: typeof AGENT_EVENTS };
+  "agent.failed": { fields: "detail"; owner: typeof AGENT_EVENTS };
+  "agent.launched": {
+    fields:
+      | "compactWindowTokens"
+      | "launchedBy"
+      | "name"
+      | "nameOrdinal"
+      | "promptHash"
+      | "role"
+      | "runtime"
+      | "terminalId";
+    owner: typeof AGENT_EVENTS;
+  };
+  "agent.relaunch_rejected": { fields: "detail"; owner: typeof AGENT_EVENTS };
+  "agent.relaunch_requested": { fields: "runtime"; owner: typeof AGENT_EVENTS };
+  "agent.relaunched": {
+    fields: "externalRef" | "harnessName" | "promptHash" | "theme";
+    owner: typeof AGENT_EVENTS;
+  };
+  "agent.respawn_rejected": { fields: "detail"; owner: typeof AGENT_EVENTS };
+  "agent.respawned": {
+    fields: "externalRef" | "harnessName" | "promptHash" | "theme";
+    owner: typeof AGENT_EVENTS;
+  };
+  "agent.running": {
+    fields: "externalRef" | "harnessName" | "runtimeRef" | "theme";
+    owner: typeof AGENT_EVENTS;
+  };
+  "assignment.granted": { fields: "parentAssignmentId"; owner: typeof TASK_EVENTS };
+  "attention.opened": {
+    fields: "kind" | "messageId" | "taskId" | "toolUseId";
+    owner: typeof MAIL_EVENTS;
+  };
+  "mailbox.offered": { fields: "promptId"; owner: typeof MAIL_EVENTS };
+  "mailbox.queued": { fields: "from"; owner: typeof MAIL_EVENTS };
+  "task.finished": { fields: "note"; owner: typeof TASK_EVENTS };
+  "task.noted": { fields: "role"; owner: typeof TASK_EVENTS };
+  "task.owner_changed": { fields: "delegatedFrom" | "ownerAgentId"; owner: typeof TASK_EVENTS };
 }
 
 export const parsedTypesDiffer: None<Differing<"output">> = "none";
 export const writtenTypesDiffer: None<Differing<"input">> = "none";
 export const eventKindsApart: None<Apart<TheirKind, Kind>> = "none";
+export const recordedKindsApart: None<Apart<TheirRecordedKind, Kind>> = "none";
 export const eventEntriesApart: None<Apart<keyof TheirEvents, Kind>> = "none";
-export const eventKindsDiffer: None<Exclude<DifferingKinds, keyof KnownKinds>> = "none";
-export const eventEntriesDiffer: None<Exclude<DifferingEntries, keyof KnownKinds>> = "none";
-export const knownKindsAgree: None<Exclude<keyof KnownKinds, DifferingKinds | DifferingEntries>> =
-  "none";
+export const eventKindsDiffer: None<DifferingKinds> = "none";
+export const eventEntriesDiffer: None<DifferingEntries> = "none";
+export const knownFieldsAgree: None<ExcusedButAgreeing> = "none";
 export const eventFramesDiffer: None<FrameDiffers> = "none";
 export const unexportedAndUnlisted: None<Exclude<Unexported, GeneratedOnly>> = "none";
 export const listedButExported: None<Exclude<GeneratedOnly, Unexported>> = "none";

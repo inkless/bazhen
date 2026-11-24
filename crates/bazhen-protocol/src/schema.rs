@@ -17,7 +17,7 @@ use crate::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, ErrorResponse, HealthResponse,
     StopResponse,
 };
-use crate::events::typed::TypedEventFrame;
+use crate::events::typed::{TypedEventFrame, TypedRecordedEvent};
 use crate::events::{ClientEventFrame, EventFrame, EventStreamQuery};
 use crate::mail::{
     SendMessageRequest, SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
@@ -110,6 +110,7 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<ClientEventFrame>();
     generator.subschema_for::<EventStreamQuery>();
     generator.subschema_for::<TypedEventFrame>();
+    generator.subschema_for::<TypedRecordedEvent>();
     generator.subschema_for::<FinishTaskRequest>();
     generator.subschema_for::<FleetAgent>();
     generator.subschema_for::<HealthResponse>();

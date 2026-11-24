@@ -1,0 +1,6648 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local"
+      }
+    },
+    "parsed": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local"
+      }
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.80.0",
+        "previous": "0.79.0"
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.80.0",
+        "previous": "0.79.0"
+      }
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null
+      }
+    }
+  },
+  {
+    "name": "example 4",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "BZ-127",
+        "nameOrdinal": 3,
+        "runtime": "holder",
+        "role": "worker",
+        "promptHash": "9f86d081",
+        "compactWindowTokens": 200000
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "BZ-127",
+        "nameOrdinal": 3,
+        "runtime": "holder",
+        "role": "worker",
+        "promptHash": "9f86d081",
+        "compactWindowTokens": 200000
+      }
+    }
+  },
+  {
+    "name": "example 5",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    }
+  },
+  {
+    "name": "example 6",
+    "wire": {
+      "type": "agent.renamed",
+      "payload": {
+        "name": "reviewer",
+        "previous": "bazhen-3"
+      }
+    },
+    "parsed": {
+      "type": "agent.renamed",
+      "payload": {
+        "name": "reviewer",
+        "previous": "bazhen-3"
+      }
+    }
+  },
+  {
+    "name": "example 7",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": "example 8",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": null
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": null
+      }
+    }
+  },
+  {
+    "name": "example 9",
+    "wire": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    },
+    "parsed": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    }
+  },
+  {
+    "name": "example 10",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected",
+        "detail": "no such cwd"
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected",
+        "detail": "no such cwd"
+      }
+    }
+  },
+  {
+    "name": "example 11",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": "example 12",
+    "wire": {
+      "type": "agent.lost",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "agent.lost",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 13",
+    "wire": {
+      "type": "agent.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 14",
+    "wire": {
+      "type": "agent.respawn_requested",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "agent.respawn_requested",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 15",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": "example 16",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 17",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable",
+        "detail": "no session"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable",
+        "detail": "no session"
+      }
+    }
+  },
+  {
+    "name": "example 18",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    }
+  },
+  {
+    "name": "example 19",
+    "wire": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 2,
+        "fresh": true,
+        "runtime": "holder"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 2,
+        "fresh": true,
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": "example 20",
+    "wire": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "fresh": false
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "fresh": false
+      }
+    }
+  },
+  {
+    "name": "example 21",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": "example 22",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 23",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists",
+        "detail": "still open"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists",
+        "detail": "still open"
+      }
+    }
+  },
+  {
+    "name": "example 24",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": "example 25",
+    "wire": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2"
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 26",
+    "wire": {
+      "type": "agent.transcript_recorded",
+      "payload": {
+        "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+        "path": "/home/u/.claude/projects/p/s.jsonl"
+      }
+    },
+    "parsed": {
+      "type": "agent.transcript_recorded",
+      "payload": {
+        "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+        "path": "/home/u/.claude/projects/p/s.jsonl"
+      }
+    }
+  },
+  {
+    "name": "example 27",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT"
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT"
+      }
+    }
+  },
+  {
+    "name": "example 28",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "native",
+        "confidence": 1,
+        "observedAt": "2026-11-16T12:00:00.000Z",
+        "detail": "Editing",
+        "resetsAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "native",
+        "confidence": 1,
+        "observedAt": "2026-11-16T12:00:00.000Z",
+        "detail": "Editing",
+        "resetsAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "example 29",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "example 30",
+    "wire": {
+      "type": "agent.usage",
+      "payload": {
+        "model": "claude-opus",
+        "contextUsedPercent": 42.5,
+        "contextWindowTokens": 200000,
+        "limits": [
+          {
+            "window": "5h",
+            "usedPercent": 12,
+            "resetsAt": "2026-11-16T12:00:00.000Z"
+          },
+          {
+            "window": "weekly",
+            "usedPercent": 3
+          }
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.usage",
+      "payload": {
+        "model": "claude-opus",
+        "contextUsedPercent": 42.5,
+        "contextWindowTokens": 200000,
+        "limits": [
+          {
+            "window": "5h",
+            "usedPercent": 12,
+            "resetsAt": "2026-11-16T12:00:00.000Z"
+          },
+          {
+            "window": "weekly",
+            "usedPercent": 3
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "example 31",
+    "wire": {
+      "type": "agent.usage",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "agent.usage",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 32",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook",
+        "before": {
+          "model": "claude-opus",
+          "contextUsedPercent": 42.5,
+          "contextWindowTokens": 200000,
+          "limits": [
+            {
+              "window": "5h",
+              "usedPercent": 12,
+              "resetsAt": "2026-11-16T12:00:00.000Z"
+            },
+            {
+              "window": "weekly",
+              "usedPercent": 3
+            }
+          ]
+        },
+        "hook": {
+          "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+          "pid": 4242
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook",
+        "before": {
+          "model": "claude-opus",
+          "contextUsedPercent": 42.5,
+          "contextWindowTokens": 200000,
+          "limits": [
+            {
+              "window": "5h",
+              "usedPercent": 12,
+              "resetsAt": "2026-11-16T12:00:00.000Z"
+            },
+            {
+              "window": "weekly",
+              "usedPercent": 3
+            }
+          ]
+        },
+        "hook": {
+          "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+          "pid": 4242
+        }
+      }
+    }
+  },
+  {
+    "name": "example 33",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item",
+        "before": {},
+        "hook": {
+          "sessionId": null,
+          "pid": 4242
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item",
+        "before": {},
+        "hook": {
+          "sessionId": null,
+          "pid": 4242
+        }
+      }
+    }
+  },
+  {
+    "name": "example 34",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item"
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item"
+      }
+    }
+  },
+  {
+    "name": "example 35",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "exited",
+          "code": 0
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "exited",
+          "code": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "example 36",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 37",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "unknown"
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "unknown"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 38",
+    "wire": {
+      "type": "agent.closing",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "agent.closing",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 39",
+    "wire": {
+      "type": "agent.closed",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "agent.closed",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 40",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": "example 41",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": null
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": null
+      }
+    }
+  },
+  {
+    "name": "example 42",
+    "wire": {
+      "type": "terminal.running",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    },
+    "parsed": {
+      "type": "terminal.running",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 43",
+    "wire": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected"
+      }
+    },
+    "parsed": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected"
+      }
+    }
+  },
+  {
+    "name": "example 44",
+    "wire": {
+      "type": "terminal.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    },
+    "parsed": {
+      "type": "terminal.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 45",
+    "wire": {
+      "type": "terminal.lost",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "terminal.lost",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 46",
+    "wire": {
+      "type": "terminal.closing",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "terminal.closing",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 47",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user"
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user"
+      }
+    }
+  },
+  {
+    "name": "example 48",
+    "wire": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": "vim"
+      }
+    },
+    "parsed": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": "vim"
+      }
+    }
+  },
+  {
+    "name": "example 49",
+    "wire": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": null
+      }
+    },
+    "parsed": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": null
+      }
+    }
+  },
+  {
+    "name": "example 50",
+    "wire": {
+      "type": "terminal.needs_restart",
+      "payload": {
+        "protocol": [
+          "2"
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.needs_restart",
+      "payload": {
+        "protocol": [
+          "2"
+        ]
+      }
+    }
+  },
+  {
+    "name": "example 51",
+    "wire": {
+      "type": "terminal.restart_cleared",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "terminal.restart_cleared",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 52",
+    "wire": {
+      "type": "terminal.unlinked",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "terminal.unlinked",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 53",
+    "wire": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": "build"
+      }
+    },
+    "parsed": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": "build"
+      }
+    }
+  },
+  {
+    "name": "example 54",
+    "wire": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": null
+      }
+    },
+    "parsed": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": null
+      }
+    }
+  },
+  {
+    "name": "example 55",
+    "wire": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive"
+      }
+    },
+    "parsed": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive"
+      }
+    }
+  },
+  {
+    "name": "example 56",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed"
+      }
+    }
+  },
+  {
+    "name": "example 57",
+    "wire": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "body": "Review the port."
+      }
+    },
+    "parsed": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Review the port.",
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+      }
+    }
+  },
+  {
+    "name": "example 58",
+    "wire": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Ship it."
+      }
+    },
+    "parsed": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Ship it."
+      }
+    }
+  },
+  {
+    "name": "example 59",
+    "wire": {
+      "type": "mailbox.offered",
+      "payload": {
+        "promptId": "p-1"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.offered",
+      "payload": {
+        "promptId": "p-1"
+      }
+    }
+  },
+  {
+    "name": "example 60",
+    "wire": {
+      "type": "mailbox.offered",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "mailbox.offered",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 61",
+    "wire": {
+      "type": "mailbox.emitted",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "mailbox.emitted",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 62",
+    "wire": {
+      "type": "mailbox.seen",
+      "payload": {
+        "promptId": "p-1"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.seen",
+      "payload": {
+        "promptId": "p-1"
+      }
+    }
+  },
+  {
+    "name": "example 63",
+    "wire": {
+      "type": "mailbox.delivered",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "mailbox.delivered",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 64",
+    "wire": {
+      "type": "mailbox.accepted",
+      "payload": {
+        "offline": false
+      }
+    },
+    "parsed": {
+      "type": "mailbox.accepted",
+      "payload": {
+        "offline": false
+      }
+    }
+  },
+  {
+    "name": "example 65",
+    "wire": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up"
+      }
+    }
+  },
+  {
+    "name": "example 66",
+    "wire": {
+      "type": "message.observed",
+      "payload": {
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "to": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "summary": "Review it?",
+        "accepted": true,
+        "toolUseId": "toolu_01",
+        "text": "Review the port, please."
+      }
+    },
+    "parsed": {
+      "type": "message.observed",
+      "payload": {
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "to": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "summary": "Review it?",
+        "text": "Review the port, please.",
+        "accepted": true,
+        "toolUseId": "toolu_01"
+      }
+    }
+  },
+  {
+    "name": "example 67",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen"
+      }
+    }
+  },
+  {
+    "name": "example 68",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": "example 69",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Stuck?",
+        "toolUseId": null,
+        "mainAgent": false
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Stuck?",
+        "toolUseId": null,
+        "mainAgent": false
+      }
+    }
+  },
+  {
+    "name": "example 70",
+    "wire": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow"
+      }
+    },
+    "parsed": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow"
+      }
+    }
+  },
+  {
+    "name": "example 71",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied"
+      }
+    }
+  },
+  {
+    "name": "example 72",
+    "wire": {
+      "type": "device.paired",
+      "payload": {
+        "name": "iPad"
+      }
+    },
+    "parsed": {
+      "type": "device.paired",
+      "payload": {
+        "name": "iPad"
+      }
+    }
+  },
+  {
+    "name": "example 73",
+    "wire": {
+      "type": "device.revoked",
+      "payload": {}
+    },
+    "parsed": {
+      "type": "device.revoked",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 74",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://192.168.1.20:7777",
+          "address": "192.168.1.20"
+        }
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://192.168.1.20:7777",
+          "address": "192.168.1.20"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 75",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://ipad.local:7777",
+          "address": null
+        }
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://ipad.local:7777",
+          "address": null
+        }
+      }
+    }
+  },
+  {
+    "name": "example 76",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "daemon_restarted",
+        "summary": "Restarted",
+        "device": null
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "daemon_restarted",
+        "summary": "Restarted",
+        "device": null
+      }
+    }
+  },
+  {
+    "name": "example 77",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "revoke",
+        "fromDevice": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "revoke",
+        "fromDevice": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 78",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    }
+  },
+  {
+    "name": "example 79",
+    "wire": {
+      "type": "lease.granted",
+      "payload": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "epoch": 1
+      }
+    },
+    "parsed": {
+      "type": "lease.granted",
+      "payload": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "epoch": 1
+      }
+    }
+  },
+  {
+    "name": "example 80",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 81",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null
+      }
+    }
+  },
+  {
+    "name": "example 82",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "example 83",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": "Shipped."
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": "Shipped."
+      }
+    }
+  },
+  {
+    "name": "example 84",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null
+      }
+    }
+  },
+  {
+    "name": "example 85",
+    "wire": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    },
+    "parsed": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 86",
+    "wire": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": null,
+        "delegatedFrom": null
+      }
+    },
+    "parsed": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": null,
+        "delegatedFrom": null
+      }
+    }
+  },
+  {
+    "name": "example 87",
+    "wire": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Over to you.",
+        "handoff": true,
+        "role": "reviewer"
+      }
+    },
+    "parsed": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Over to you.",
+        "handoff": true,
+        "role": "reviewer"
+      }
+    }
+  },
+  {
+    "name": "example 88",
+    "wire": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Noted.",
+        "handoff": false,
+        "role": null
+      }
+    },
+    "parsed": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Noted.",
+        "handoff": false,
+        "role": null
+      }
+    }
+  },
+  {
+    "name": "example 89",
+    "wire": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    },
+    "parsed": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 90",
+    "wire": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    },
+    "parsed": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    }
+  },
+  {
+    "name": "example 91",
+    "wire": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed"
+      }
+    },
+    "parsed": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed"
+      }
+    }
+  },
+  {
+    "name": ".(type=environment.registered).payload.kind = \"local\"",
+    "wire": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local"
+      }
+    },
+    "parsed": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local"
+      }
+    }
+  },
+  {
+    "name": ".(type=environment.registered).payload.kind = \"opencode-server\"",
+    "wire": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "opencode-server"
+      }
+    },
+    "parsed": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "opencode-server"
+      }
+    }
+  },
+  {
+    "name": ".(type=environment.harness_version).payload.harness = \"claude-code\"",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "claude-code",
+        "version": "0.79.0",
+        "previous": null
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "claude-code",
+        "version": "0.79.0",
+        "previous": null
+      }
+    }
+  },
+  {
+    "name": ".(type=environment.harness_version).payload.harness = \"codex\"",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.launched).payload.harness = \"claude-code\"",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.launched).payload.harness = \"codex\"",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.running).payload.externalRef.kind = \"claude-session\"",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.running).payload.externalRef.kind = \"codex-thread\"",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.running).payload.theme = \"light\"",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Claude Code"
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.running).payload.theme = \"dark\"",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.ready).payload.sign = \"claude_hook\"",
+    "wire": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    },
+    "parsed": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.ready).payload.sign = \"codex_title\"",
+    "wire": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "codex_title"
+      }
+    },
+    "parsed": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "codex_title"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.failed).payload.reason = \"launch_rejected\"",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected"
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.failed).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawned).payload.externalRef.kind = \"claude-session\"",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawned).payload.externalRef.kind = \"codex-thread\"",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawned).payload.theme = \"light\"",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawned).payload.theme = \"dark\"",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"not_resumable\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"no_terminal\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "no_terminal"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "no_terminal"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"terminal_changed\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "terminal_changed"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "terminal_changed"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"harness_refused\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "harness_refused"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "harness_refused"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"unavailable\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.respawn_rejected).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunched).payload.externalRef.kind = \"claude-session\"",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunched).payload.externalRef.kind = \"codex-thread\"",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunched).payload.theme = \"light\"",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunched).payload.theme = \"dark\"",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunch_rejected).payload.reason = \"not_resumable\"",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "not_resumable"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "not_resumable"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunch_rejected).payload.reason = \"terminal_exists\"",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunch_rejected).payload.reason = \"harness_refused\"",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "harness_refused"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "harness_refused"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunch_rejected).payload.reason = \"unavailable\"",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.relaunch_rejected).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.external_ref_updated).payload.externalRef.kind = \"claude-session\"",
+    "wire": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-2"
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "t-2"
+        }
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.external_ref_updated).payload.externalRef.kind = \"codex-thread\"",
+    "wire": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2"
+        }
+      }
+    },
+    "parsed": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2"
+        }
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.signalled).payload.signal = \"SIGINT\"",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT"
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.signalled).payload.signal = \"SIGTERM\"",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGTERM"
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGTERM"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.signalled).payload.signal = \"SIGHUP\"",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGHUP"
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGHUP"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.signalled).payload.signal = \"SIGKILL\"",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGKILL"
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGKILL"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"working\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"waiting_input\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "waiting_input",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "waiting_input",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"needs_approval\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "needs_approval",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "needs_approval",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"idle\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"done\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "done",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "done",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"failed\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "failed",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "failed",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"limited\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "limited",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "limited",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.value = \"unknown\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "unknown",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "unknown",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.source = \"native\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "native",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "native",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.activity).payload.source = \"heuristic\"",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.compacted).payload.sign = \"claude_hook\"",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    }
+  },
+  {
+    "name": ".(type=agent.compacted).payload.sign = \"codex_item\"",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item"
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.opened).payload.theme = \"light\"",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "light",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "light",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.opened).payload.theme = \"dark\"",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.failed).payload.reason = \"open_rejected\"",
+    "wire": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected"
+      }
+    },
+    "parsed": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.failed).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.closed).payload.reason = \"user\"",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user"
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.closed).payload.reason = \"exited\"",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "exited"
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "exited"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.closed).payload.reason = \"agent_closed\"",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    }
+  },
+  {
+    "name": ".(type=terminal.closed).payload.reason = \"restarted\"",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "restarted"
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "restarted"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.started).payload.mode = \"observe\"",
+    "wire": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "observe"
+      }
+    },
+    "parsed": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "observe"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.started).payload.mode = \"interactive\"",
+    "wire": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive"
+      }
+    },
+    "parsed": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"client_closed\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"terminal_closed\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "terminal_closed"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "terminal_closed"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"attach_failed\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "attach_failed"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "attach_failed"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"disconnected\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "disconnected"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "disconnected"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"evicted_slow\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "evicted_slow"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "evicted_slow"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"timed_out\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "timed_out"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "timed_out"
+      }
+    }
+  },
+  {
+    "name": ".(type=attachment.ended).payload.reason = \"replaced\"",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "replaced"
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "replaced"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.undeliverable).payload.reason = \"agent_closed\"",
+    "wire": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.undeliverable).payload.reason = \"gave_up\"",
+    "wire": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"not_written\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_written"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_written"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"daemon_restart\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"session_started\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "session_started"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "session_started"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"stop_failed\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "stop_failed"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "stop_failed"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"interrupted\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "interrupted"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "interrupted"
+      }
+    }
+  },
+  {
+    "name": ".(type=mailbox.requeued).payload.reason = \"not_seen\"",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen"
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"approval\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"question\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "question",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "question",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"failed\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "failed",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "failed",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"undeliverable\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "undeliverable",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "undeliverable",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"escalation\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "escalation",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "escalation",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"task_done\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "task_done",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "task_done",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.opened).payload.kind = \"stuck_starting\"",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "stuck_starting",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "stuck_starting",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.answered).payload.decision = \"allow\"",
+    "wire": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow"
+      }
+    },
+    "parsed": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.answered).payload.decision = \"deny\"",
+    "wire": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "deny"
+      }
+    },
+    "parsed": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "deny"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"answered_in_tui\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "answered_in_tui"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "answered_in_tui"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"timed_out\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "timed_out"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "timed_out"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"superseded\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "superseded"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "superseded"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"agent_closed\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"stale\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "stale"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "stale"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"replied\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"dismissed\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "dismissed"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "dismissed"
+      }
+    }
+  },
+  {
+    "name": ".(type=attention.closed).payload.reason = \"resent\"",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "resent"
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "resent"
+      }
+    }
+  },
+  {
+    "name": ".(type=notice.closed).payload.reason = \"dismissed\"",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    }
+  },
+  {
+    "name": ".(type=notice.closed).payload.reason = \"revoked\"",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "owner-socket"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "owner-socket"
+      }
+    }
+  },
+  {
+    "name": ".(type=notice.closed).payload.by = \"owner-socket\"",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    }
+  },
+  {
+    "name": ".(type=notice.closed).payload.by = \"owner-loopback\"",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-loopback"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-loopback"
+      }
+    }
+  },
+  {
+    "name": ".(type=notice.closed).payload.by = \"revoke\"",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "revoke"
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "revoke"
+      }
+    }
+  },
+  {
+    "name": ".(type=task.finished).payload.outcome = \"done\"",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null
+      }
+    }
+  },
+  {
+    "name": ".(type=task.finished).payload.outcome = \"cancelled\"",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "cancelled",
+        "note": null
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "cancelled",
+        "note": null
+      }
+    }
+  },
+  {
+    "name": ".(type=assignment.ended).payload.reason = \"unassigned\"",
+    "wire": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "unassigned"
+      }
+    },
+    "parsed": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "unassigned"
+      }
+    }
+  },
+  {
+    "name": ".(type=assignment.ended).payload.reason = \"completed\"",
+    "wire": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed"
+      }
+    },
+    "parsed": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed"
+      }
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "environment.registered",
+      "payload": {
+        "kind": "local"
+      }
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.80.0",
+        "previous": "0.79.0",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.80.0",
+        "previous": "0.79.0"
+      }
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "environment.harness_version",
+      "payload": {
+        "harness": "codex",
+        "version": "0.79.0",
+        "previous": null
+      }
+    }
+  },
+  {
+    "name": "example 4, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "BZ-127",
+        "nameOrdinal": 3,
+        "runtime": "holder",
+        "role": "worker",
+        "promptHash": "9f86d081",
+        "compactWindowTokens": 200000,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "claude-code",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "launchedBy": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "name": "BZ-127",
+        "nameOrdinal": 3,
+        "runtime": "holder",
+        "role": "worker",
+        "promptHash": "9f86d081",
+        "compactWindowTokens": 200000
+      }
+    }
+  },
+  {
+    "name": "example 5, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.launched",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "harness": "codex",
+        "project": "bazhen",
+        "cwd": "/work",
+        "terminalId": null
+      }
+    }
+  },
+  {
+    "name": "example 6, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.renamed",
+      "payload": {
+        "name": "reviewer",
+        "previous": "bazhen-3",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.renamed",
+      "payload": {
+        "name": "reviewer",
+        "previous": "bazhen-3"
+      }
+    }
+  },
+  {
+    "name": "example 7, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "claude-session",
+          "id": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code"
+      }
+    }
+  },
+  {
+    "name": "example 8, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.running",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": null
+      }
+    }
+  },
+  {
+    "name": "example 9, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.ready",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    }
+  },
+  {
+    "name": "example 10, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected",
+        "detail": "no such cwd",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "launch_rejected",
+        "detail": "no such cwd"
+      }
+    }
+  },
+  {
+    "name": "example 11, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.failed",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": "example 12, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.lost",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.lost",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 13, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 14, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.respawn_requested",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_requested",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 15, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "light",
+        "harnessName": "Codex",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": "example 16, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.respawned",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 17, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable",
+        "detail": "no session",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "not_resumable",
+        "detail": "no session"
+      }
+    }
+  },
+  {
+    "name": "example 18, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.respawn_rejected",
+      "payload": {
+        "reason": "unavailable"
+      }
+    }
+  },
+  {
+    "name": "example 19, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 2,
+        "fresh": true,
+        "runtime": "holder",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 2,
+        "fresh": true,
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": "example 20, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "fresh": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_requested",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "generation": 3,
+        "fresh": false
+      }
+    }
+  },
+  {
+    "name": "example 21, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-1"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        },
+        "theme": "dark",
+        "harnessName": "Claude Code",
+        "promptHash": "9f86d081"
+      }
+    }
+  },
+  {
+    "name": "example 22, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunched",
+      "payload": {
+        "externalRef": null,
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 23, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists",
+        "detail": "still open",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "terminal_exists",
+        "detail": "still open"
+      }
+    }
+  },
+  {
+    "name": "example 24, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.relaunch_rejected",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    }
+  },
+  {
+    "name": "example 25, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.external_ref_updated",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "kind": "codex-thread",
+          "id": "t-2"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 26, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.transcript_recorded",
+      "payload": {
+        "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+        "path": "/home/u/.claude/projects/p/s.jsonl",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.transcript_recorded",
+      "payload": {
+        "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+        "path": "/home/u/.claude/projects/p/s.jsonl"
+      }
+    }
+  },
+  {
+    "name": "example 27, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.signalled",
+      "payload": {
+        "signal": "SIGINT"
+      }
+    }
+  },
+  {
+    "name": "example 28, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "native",
+        "confidence": 1,
+        "observedAt": "2026-11-16T12:00:00.000Z",
+        "detail": "Editing",
+        "resetsAt": "2026-11-16T12:00:00.000Z",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "working",
+        "source": "native",
+        "confidence": 1,
+        "observedAt": "2026-11-16T12:00:00.000Z",
+        "detail": "Editing",
+        "resetsAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "example 29, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.activity",
+      "payload": {
+        "value": "idle",
+        "source": "heuristic",
+        "confidence": 0.5,
+        "observedAt": "2026-11-16T12:00:00.000Z"
+      }
+    }
+  },
+  {
+    "name": "example 30, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.usage",
+      "payload": {
+        "model": "claude-opus",
+        "contextUsedPercent": 42.5,
+        "contextWindowTokens": 200000,
+        "limits": [
+          {
+            "window": "5h",
+            "usedPercent": 12,
+            "resetsAt": "2026-11-16T12:00:00.000Z",
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          },
+          {
+            "window": "weekly",
+            "usedPercent": 3,
+            "fieldFromANewerDaemon": {
+              "any": [
+                1
+              ]
+            }
+          }
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.usage",
+      "payload": {
+        "model": "claude-opus",
+        "contextUsedPercent": 42.5,
+        "contextWindowTokens": 200000,
+        "limits": [
+          {
+            "window": "5h",
+            "usedPercent": 12,
+            "resetsAt": "2026-11-16T12:00:00.000Z"
+          },
+          {
+            "window": "weekly",
+            "usedPercent": 3
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "example 31, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.usage",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.usage",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 32, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook",
+        "before": {
+          "model": "claude-opus",
+          "contextUsedPercent": 42.5,
+          "contextWindowTokens": 200000,
+          "limits": [
+            {
+              "window": "5h",
+              "usedPercent": 12,
+              "resetsAt": "2026-11-16T12:00:00.000Z",
+              "fieldFromANewerDaemon": {
+                "any": [
+                  1
+                ]
+              }
+            },
+            {
+              "window": "weekly",
+              "usedPercent": 3,
+              "fieldFromANewerDaemon": {
+                "any": [
+                  1
+                ]
+              }
+            }
+          ],
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "hook": {
+          "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+          "pid": 4242,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "claude_hook",
+        "before": {
+          "model": "claude-opus",
+          "contextUsedPercent": 42.5,
+          "contextWindowTokens": 200000,
+          "limits": [
+            {
+              "window": "5h",
+              "usedPercent": 12,
+              "resetsAt": "2026-11-16T12:00:00.000Z"
+            },
+            {
+              "window": "weekly",
+              "usedPercent": 3
+            }
+          ]
+        },
+        "hook": {
+          "sessionId": "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59",
+          "pid": 4242
+        }
+      }
+    }
+  },
+  {
+    "name": "example 33, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item",
+        "before": {
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "hook": {
+          "sessionId": null,
+          "pid": 4242,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item",
+        "before": {},
+        "hook": {
+          "sessionId": null,
+          "pid": 4242
+        }
+      }
+    }
+  },
+  {
+    "name": "example 34, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.compacted",
+      "payload": {
+        "sign": "codex_item"
+      }
+    }
+  },
+  {
+    "name": "example 35, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "exited",
+          "code": 0,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "exited",
+          "code": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "example 36, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "signalled",
+          "signal": "SIGTERM"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 37, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "unknown",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.exited",
+      "payload": {
+        "exit": {
+          "type": "unknown"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 38, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.closing",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.closing",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 39, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "agent.closed",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "agent.closed",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 40, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "theme": "dark",
+        "restartOf": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "runtime": "holder"
+      }
+    }
+  },
+  {
+    "name": "example 41, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.opened",
+      "payload": {
+        "environmentId": "env_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "cwd": "/work",
+        "linkedAgentId": null
+      }
+    }
+  },
+  {
+    "name": "example 42, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.running",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.running",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 43, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.failed",
+      "payload": {
+        "reason": "open_rejected"
+      }
+    }
+  },
+  {
+    "name": "example 44, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          },
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.process_adopted",
+      "payload": {
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "pid": "4242"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "example 45, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.lost",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.lost",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 46, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.closing",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.closing",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 47, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.closed",
+      "payload": {
+        "reason": "user"
+      }
+    }
+  },
+  {
+    "name": "example 48, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": "vim",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": "vim"
+      }
+    }
+  },
+  {
+    "name": "example 49, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.foreground_changed",
+      "payload": {
+        "command": null
+      }
+    }
+  },
+  {
+    "name": "example 50, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.needs_restart",
+      "payload": {
+        "protocol": [
+          "2"
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.needs_restart",
+      "payload": {
+        "protocol": [
+          "2"
+        ]
+      }
+    }
+  },
+  {
+    "name": "example 51, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.restart_cleared",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.restart_cleared",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 52, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.unlinked",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.unlinked",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 53, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": "build",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": "build"
+      }
+    }
+  },
+  {
+    "name": "example 54, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "terminal.renamed",
+      "payload": {
+        "name": null
+      }
+    }
+  },
+  {
+    "name": "example 55, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attachment.started",
+      "payload": {
+        "terminalId": "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "mode": "interactive"
+      }
+    }
+  },
+  {
+    "name": "example 56, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attachment.ended",
+      "payload": {
+        "reason": "client_closed"
+      }
+    }
+  },
+  {
+    "name": "example 57, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "body": "Review the port.",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Review the port.",
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d"
+      }
+    }
+  },
+  {
+    "name": "example 58, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Ship it.",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.queued",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "body": "Ship it."
+      }
+    }
+  },
+  {
+    "name": "example 59, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.offered",
+      "payload": {
+        "promptId": "p-1",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.offered",
+      "payload": {
+        "promptId": "p-1"
+      }
+    }
+  },
+  {
+    "name": "example 60, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.offered",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.offered",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 61, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.emitted",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.emitted",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 62, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.seen",
+      "payload": {
+        "promptId": "p-1",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.seen",
+      "payload": {
+        "promptId": "p-1"
+      }
+    }
+  },
+  {
+    "name": "example 63, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.delivered",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.delivered",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 64, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.accepted",
+      "payload": {
+        "offline": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.accepted",
+      "payload": {
+        "offline": false
+      }
+    }
+  },
+  {
+    "name": "example 65, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.undeliverable",
+      "payload": {
+        "reason": "gave_up"
+      }
+    }
+  },
+  {
+    "name": "example 66, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "message.observed",
+      "payload": {
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "to": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "summary": "Review it?",
+        "accepted": true,
+        "toolUseId": "toolu_01",
+        "text": "Review the port, please.",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "message.observed",
+      "payload": {
+        "from": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "to": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "summary": "Review it?",
+        "text": "Review the port, please.",
+        "accepted": true,
+        "toolUseId": "toolu_01"
+      }
+    }
+  },
+  {
+    "name": "example 67, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "mailbox.requeued",
+      "payload": {
+        "reason": "not_seen"
+      }
+    }
+  },
+  {
+    "name": "example 68, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Run the migration?",
+        "kind": "approval",
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "toolUseId": "toolu_01",
+        "mainAgent": true
+      }
+    }
+  },
+  {
+    "name": "example 69, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Stuck?",
+        "toolUseId": null,
+        "mainAgent": false,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attention.opened",
+      "payload": {
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "summary": "Stuck?",
+        "toolUseId": null,
+        "mainAgent": false
+      }
+    }
+  },
+  {
+    "name": "example 70, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attention.answered",
+      "payload": {
+        "decision": "allow"
+      }
+    }
+  },
+  {
+    "name": "example 71, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "attention.closed",
+      "payload": {
+        "reason": "replied"
+      }
+    }
+  },
+  {
+    "name": "example 72, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "device.paired",
+      "payload": {
+        "name": "iPad",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "device.paired",
+      "payload": {
+        "name": "iPad"
+      }
+    }
+  },
+  {
+    "name": "example 73, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "device.revoked",
+      "payload": {
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "device.revoked",
+      "payload": {}
+    }
+  },
+  {
+    "name": "example 74, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://192.168.1.20:7777",
+          "address": "192.168.1.20",
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://192.168.1.20:7777",
+          "address": "192.168.1.20"
+        }
+      }
+    }
+  },
+  {
+    "name": "example 75, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://ipad.local:7777",
+          "address": null,
+          "fieldFromANewerDaemon": {
+            "any": [
+              1
+            ]
+          }
+        },
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "device_paired",
+        "summary": "iPad paired",
+        "device": {
+          "id": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+          "name": "iPad",
+          "origin": "https://ipad.local:7777",
+          "address": null
+        }
+      }
+    }
+  },
+  {
+    "name": "example 76, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "daemon_restarted",
+        "summary": "Restarted",
+        "device": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice.opened",
+      "payload": {
+        "kind": "daemon_restarted",
+        "summary": "Restarted",
+        "device": null
+      }
+    }
+  },
+  {
+    "name": "example 77, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "revoke",
+        "fromDevice": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "revoked",
+        "by": "revoke",
+        "fromDevice": "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 78, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "notice.closed",
+      "payload": {
+        "reason": "dismissed",
+        "by": "owner-socket"
+      }
+    }
+  },
+  {
+    "name": "example 79, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "lease.granted",
+      "payload": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "epoch": 1,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "lease.granted",
+      "payload": {
+        "attachmentId": "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "epoch": 1
+      }
+    }
+  },
+  {
+    "name": "example 80, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "parentTaskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c8d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 81, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null
+      }
+    }
+  },
+  {
+    "name": "example 82, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.created",
+      "payload": {
+        "title": "Port events",
+        "brief": "Port the event stream.",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    }
+  },
+  {
+    "name": "example 83, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": "Shipped.",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": "Shipped."
+      }
+    }
+  },
+  {
+    "name": "example 84, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.finished",
+      "payload": {
+        "outcome": "done",
+        "note": null
+      }
+    }
+  },
+  {
+    "name": "example 85, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "delegatedFrom": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 86, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": null,
+        "delegatedFrom": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.owner_changed",
+      "payload": {
+        "ownerAgentId": null,
+        "delegatedFrom": null
+      }
+    }
+  },
+  {
+    "name": "example 87, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Over to you.",
+        "handoff": true,
+        "role": "reviewer",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Over to you.",
+        "handoff": true,
+        "role": "reviewer"
+      }
+    }
+  },
+  {
+    "name": "example 88, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Noted.",
+        "handoff": false,
+        "role": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "task.noted",
+      "payload": {
+        "text": "Noted.",
+        "handoff": false,
+        "role": null
+      }
+    }
+  },
+  {
+    "name": "example 89, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
+      }
+    }
+  },
+  {
+    "name": "example 90, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": null,
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "assignment.granted",
+      "payload": {
+        "taskId": "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    }
+  },
+  {
+    "name": "example 91, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "assignment.ended",
+      "payload": {
+        "reason": "completed"
+      }
+    }
+  }
+]

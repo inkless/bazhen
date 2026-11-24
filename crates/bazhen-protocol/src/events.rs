@@ -312,6 +312,7 @@ pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
 pub struct TaskCreated {
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 200)))]
     pub title: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
     pub brief: String,
     #[cfg_attr(
         feature = "schema",

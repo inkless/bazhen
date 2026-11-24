@@ -17,7 +17,10 @@ use bazhen_protocol::daemon::{
 };
 use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::edge::{EdgeCheck, edge};
-use bazhen_protocol::events::{ClientEventFrame, Event, EventFrame, EventStreamQuery, typed};
+use bazhen_protocol::events::typed::{TypedEvent, TypedRecordedEvent};
+use bazhen_protocol::events::{
+    ClientEventFrame, EVENT_KINDS, Event, EventFrame, EventStreamQuery, event_kind, typed,
+};
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
@@ -83,9 +86,46 @@ fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
+/// Where `encoded` and `parsed` first differ, at the JSON pointer `at` into them, and what each
+/// holds there; none when they don't.
+fn difference(encoded: &Value, parsed: &Value, at: &str) -> Option<String> {
+    let shown = |held: Option<&Value>| held.map_or_else(|| "nothing".to_owned(), Value::to_string);
+    match (encoded, parsed) {
+        (Value::Object(x), Value::Object(y)) => {
+            let keys: BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+            keys.into_iter()
+                .find_map(|key| match (x.get(key), y.get(key)) {
+                    (Some(a), Some(b)) => difference(a, b, &format!("{at}/{key}")),
+                    (a, b) => Some(format!(
+                        "{at}/{key}: written {}, parsed {}",
+                        shown(a),
+                        shown(b)
+                    )),
+                })
+        }
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
+            .iter()
+            .zip(y)
+            .enumerate()
+            .find_map(|(i, (a, b))| difference(a, b, &format!("{at}/{i}"))),
+        _ if same(encoded, parsed) => None,
+        _ => Some(format!("{at}: written {encoded}, parsed {parsed}")),
+    }
+}
+
+/// The examples this build writes back other than the protocol parses them, each named by its
+/// message, its branch and where they first differ, with what owns the difference. The list only
+/// shrinks: an entry no example shows fails.
+const KNOWN_REWRITES: &[(&str, &str)] = &[(
+    "RecordedEvent (type=task.created), /payload/delegatedFrom: written null, parsed nothing",
+    "the port of the task store",
+)];
+
 /// What a message's examples showed.
 struct Report {
     examples: usize,
+    /// Each entry of [`KNOWN_REWRITES`] an example showed.
+    rewritten: Vec<String>,
     /// Each field, at its path in an example, that the schema takes left out or null where serde
     /// refuses it. The schema may refuse what serde takes: it holds the protocol's contract, which
     /// can be stricter than the reader.
@@ -110,10 +150,46 @@ fn round_trips_at_edge<T: DeserializeOwned + Serialize + JsonSchema + EdgeCheck>
     })
 }
 
-/// As [`round_trips`], for an event read with its payload typed, as the protocol's `Event` reads it.
+/// As [`round_trips`], for an event as a client of this build reads it off the stream, against
+/// the protocol's `Event`: a payload its type sends whole read through its Rust type, and one it
+/// cuts left with only the keys it sends.
 fn round_trips_typed(name: &str) -> Result<Report> {
-    examined::<Event>(name, |wire| {
-        typed::read(serde_json::from_value(wire.clone()).map_err(|e| e.to_string())?)
+    let mut generator = bazhen_protocol::schema::generator();
+    let cut: Vec<&str> = EVENT_KINDS
+        .iter()
+        .filter(|kind| {
+            typed::payload(kind, &mut generator)
+                .is_some_and(|payload| typed::streamed(kind, &payload).is_some())
+        })
+        .map(|kind| kind.name)
+        .collect();
+    let decode = |wire: &Value| -> Result<Event> {
+        let mut event: Event = serde_json::from_value(wire.clone()).map_err(|e| e.to_string())?;
+        if let Some(kind) = event_kind(&event.kind).filter(|kind| cut.contains(&kind.name)) {
+            if let Some(payload) = event.payload.as_object_mut() {
+                payload.retain(|key, _| kind.streamed.contains(&key.as_str()));
+            }
+        } else if let Some(read) = typed::read(&event.kind, event.payload.clone()) {
+            event.payload = read.map_err(|e| format!("{}: {e}", event.kind))?;
+        }
+        Ok(event)
+    };
+    examined_as(name, &Schema::of::<TypedEvent>(), decode, |wire| {
+        decode(&wire).is_ok()
+    })
+}
+
+/// As [`round_trips`], for an event's type and its payload as the store records it, against the
+/// protocol's `RecordedEvent`: the payload read whole through its type's Rust payload.
+fn round_trips_recorded(name: &str) -> Result<Report> {
+    let decode = |wire: &Value| -> Result<Value> {
+        let kind = wire.get("type").and_then(Value::as_str).ok_or("no type")?;
+        let payload = wire.get("payload").cloned().ok_or("no payload")?;
+        let read = typed::read(kind, payload).ok_or(format!("{kind}: no payload type"))?;
+        Ok(serde_json::json!({ "type": kind, "payload": read? }))
+    };
+    examined_as(name, &Schema::of::<TypedRecordedEvent>(), decode, |wire| {
+        decode(&wire).is_ok()
     })
 }
 
@@ -121,25 +197,46 @@ fn examined<T: DeserializeOwned + Serialize + JsonSchema>(
     name: &str,
     decode: impl Fn(&Value) -> Result<T>,
 ) -> Result<Report> {
+    examined_as(name, &Schema::of::<T>(), decode, |wire| {
+        serde_json::from_value::<T>(wire).is_ok()
+    })
+}
+
+/// As [`examined`], against `schema`, with `reads` saying whether the reader takes each example
+/// with a field left out or null.
+fn examined_as<T: Serialize>(
+    name: &str,
+    schema: &Schema,
+    decode: impl Fn(&Value) -> Result<T>,
+    reads: impl Fn(Value) -> bool,
+) -> Result<Report> {
     let examples = read(&format!("{name}.json"))?;
     let examples = examples.as_array().ok_or(format!("{name}: not a list"))?;
-    let schema = Schema::of::<T>();
     let mut unlike = Vec::new();
+    let mut rewritten = Vec::new();
     for example in examples {
         let what = example.get("name").cloned().unwrap_or_default();
         let wire = example.get("wire").cloned().unwrap_or_default();
         let parsed = example.get("parsed").cloned().unwrap_or_default();
         let decoded = decode(&wire).map_err(|e| format!("{name}, {what}: {e}"))?;
         let encoded = serde_json::to_value(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
-        if !same(&encoded, &parsed) {
-            return Err(format!(
-                "{name}, {what}:\n  encoded {encoded}\n  parsed  {parsed}"
-            ));
+        if let Some(at) = difference(&encoded, &parsed, "") {
+            let branch = wire
+                .get("type")
+                .and_then(Value::as_str)
+                .map_or_else(String::new, |kind| format!(" (type={kind})"));
+            let named = format!("{name}{branch}, {at}");
+            if !KNOWN_REWRITES.iter().any(|(known, _)| *known == named) {
+                return Err(format!(
+                    "{name}, {what}:\n  encoded {encoded}\n  parsed  {parsed}"
+                ));
+            }
+            rewritten.push(named);
+            continue;
         }
         for (at, field) in schema.fields(&wire) {
-            let serde = |edited: Value| serde_json::from_value::<T>(edited).is_ok();
-            let left_out = serde(edited(&wire, &at, None));
-            let null = serde(edited(&wire, &at, Some(Value::Null)));
+            let left_out = reads(edited(&wire, &at, None));
+            let null = reads(edited(&wire, &at, Some(Value::Null)));
             if field.optional && !left_out {
                 unlike.push(format!(
                     "{name}, {at}: the schema takes it left out, serde doesn't"
@@ -165,6 +262,7 @@ fn examined<T: DeserializeOwned + Serialize + JsonSchema>(
     unlike.dedup();
     Ok(Report {
         examples: examples.len(),
+        rewritten,
         unlike,
     })
 }
@@ -210,6 +308,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("EscalateRequest", round_trips::<EscalateRequest>),
     ("EscalateResponse", round_trips::<EscalateResponse>),
     ("Event", round_trips_typed),
+    ("RecordedEvent", round_trips_recorded),
     ("EventEnvelopeFrame", round_trips::<EventFrame>),
     ("EventStreamQuery", round_trips::<EventStreamQuery>),
     ("FinishTaskRequest", round_trips::<FinishTaskRequest>),
@@ -263,6 +362,19 @@ fn every_message_decodes_its_examples_and_encodes_what_the_protocol_makes_of_the
             "{name} has no examples"
         );
     }
+}
+
+#[test]
+fn each_known_rewrite_is_one_an_example_shows() {
+    let shown: BTreeSet<String> = MESSAGES
+        .iter()
+        .flat_map(|(name, round_trip)| round_trip(name).unwrap().rewritten)
+        .collect();
+    let known: BTreeSet<String> = KNOWN_REWRITES
+        .iter()
+        .map(|(at, _)| (*at).to_owned())
+        .collect();
+    assert_eq!(shown, known);
 }
 
 #[test]

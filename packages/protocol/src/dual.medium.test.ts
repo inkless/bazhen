@@ -41,65 +41,82 @@ const WHY: Record<string, string> = {
 };
 const BOUND_WHY = "the Rust payload holds the field to no bound where the protocol does";
 
-/** A case of kind `type`'s payload at `field` the generated side alone takes. */
-const payload = (owner: string, type: string, field: string, kind: string): Known => ({
-  side: "generated",
-  schema: "Event",
-  path: `/(type=${type})/payload/${field}`,
-  kind,
-  owner,
-  why: WHY[kind] ?? BOUND_WHY,
-});
+/**
+ * A case of kind `type`'s payload at `field` the generated side alone takes: in the payload as the
+ * store records it, and in the event as well where the type streams the field.
+ */
+const payload = (
+  owner: string,
+  type: protocol.EventType,
+  field: string,
+  kind: string,
+): readonly Known[] => {
+  const known = (schema: string): Known => ({
+    side: "generated",
+    schema,
+    path: `/(type=${type})/payload/${field}`,
+    kind,
+    owner,
+    why: WHY[kind] ?? BOUND_WHY,
+  });
+  const entry: { readonly payload: z.ZodType; readonly streamed?: z.ZodObject } =
+    protocol.EVENTS[type];
+  const top = field.split("/")[0] ?? field;
+  const streams = entry.streamed === undefined || top in entry.streamed.shape;
+  return streams ? [known("Event"), known("RecordedEvent")] : [known("RecordedEvent")];
+};
 
 /**
  * Where a side judges a case otherwise than the corpus expects. Each case of an entry's key must
  * be judged so, by that side alone. The list only shrinks: an entry no case meets fails.
  */
 const DUAL_KNOWN: readonly Known[] = [
-  payload(AGENT_EVENTS, "agent.compacted", "before", "null"),
-  payload(AGENT_EVENTS, "agent.compacted", "hook", "null"),
-  payload(AGENT_EVENTS, "agent.compacted", "hook/sessionId", "leftOut"),
-  payload(AGENT_EVENTS, "agent.failed", "detail", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "pastMaximum"),
-  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "underMinimum"),
-  payload(AGENT_EVENTS, "agent.launched", "launchedBy", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "name", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "atExclusiveMinimum"),
-  payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "promptHash", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "role", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "runtime", "null"),
-  payload(AGENT_EVENTS, "agent.launched", "runtime", "underMinLength"),
-  payload(AGENT_EVENTS, "agent.launched", "terminalId", "leftOut"),
-  payload(AGENT_EVENTS, "agent.relaunch_rejected", "detail", "null"),
-  payload(AGENT_EVENTS, "agent.relaunch_requested", "generation", "atExclusiveMinimum"),
-  payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "null"),
-  payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "underMinLength"),
-  payload(AGENT_EVENTS, "agent.relaunched", "externalRef", "leftOut"),
-  payload(AGENT_EVENTS, "agent.relaunched", "harnessName", "null"),
-  payload(AGENT_EVENTS, "agent.relaunched", "promptHash", "null"),
-  payload(AGENT_EVENTS, "agent.relaunched", "theme", "null"),
-  payload(AGENT_EVENTS, "agent.respawn_rejected", "detail", "null"),
-  payload(AGENT_EVENTS, "agent.respawned", "externalRef", "leftOut"),
-  payload(AGENT_EVENTS, "agent.respawned", "harnessName", "null"),
-  payload(AGENT_EVENTS, "agent.respawned", "promptHash", "null"),
-  payload(AGENT_EVENTS, "agent.respawned", "theme", "null"),
-  payload(AGENT_EVENTS, "agent.running", "externalRef", "leftOut"),
-  payload(AGENT_EVENTS, "agent.running", "harnessName", "null"),
-  payload(AGENT_EVENTS, "agent.running", "runtimeRef", "leftOut"),
-  payload(AGENT_EVENTS, "agent.running", "theme", "null"),
-  payload(AGENT_EVENTS, "agent.transcript_recorded", "sessionId", "underMinLength"),
-  payload(TASK_EVENTS, "assignment.granted", "parentAssignmentId", "leftOut"),
-  payload(MAIL_EVENTS, "attention.opened", "kind", "null"),
-  payload(MAIL_EVENTS, "attention.opened", "messageId", "null"),
-  payload(MAIL_EVENTS, "attention.opened", "taskId", "null"),
-  payload(MAIL_EVENTS, "attention.opened", "toolUseId", "leftOut"),
-  payload(MAIL_EVENTS, "mailbox.offered", "promptId", "null"),
-  payload(MAIL_EVENTS, "mailbox.queued", "from", "null"),
-  payload(TASK_EVENTS, "task.noted", "role", "leftOut"),
-  payload(TASK_EVENTS, "task.owner_changed", "delegatedFrom", "leftOut"),
-  payload(TASK_EVENTS, "task.owner_changed", "ownerAgentId", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.compacted", "before", "null"),
+  ...payload(AGENT_EVENTS, "agent.compacted", "hook", "null"),
+  ...payload(AGENT_EVENTS, "agent.compacted", "hook/sessionId", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.failed", "detail", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "pastMaximum"),
+  ...payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "underMinimum"),
+  ...payload(AGENT_EVENTS, "agent.launched", "launchedBy", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "name", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "atExclusiveMinimum"),
+  ...payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "promptHash", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "role", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "runtime", "null"),
+  ...payload(AGENT_EVENTS, "agent.launched", "runtime", "underMinLength"),
+  ...payload(AGENT_EVENTS, "agent.launched", "terminalId", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.relaunch_rejected", "detail", "null"),
+  ...payload(AGENT_EVENTS, "agent.relaunch_requested", "generation", "atExclusiveMinimum"),
+  ...payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "null"),
+  ...payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "underMinLength"),
+  ...payload(AGENT_EVENTS, "agent.relaunched", "externalRef", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.relaunched", "harnessName", "null"),
+  ...payload(AGENT_EVENTS, "agent.relaunched", "promptHash", "null"),
+  ...payload(AGENT_EVENTS, "agent.relaunched", "theme", "null"),
+  ...payload(AGENT_EVENTS, "agent.respawn_rejected", "detail", "null"),
+  ...payload(AGENT_EVENTS, "agent.respawned", "externalRef", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.respawned", "harnessName", "null"),
+  ...payload(AGENT_EVENTS, "agent.respawned", "promptHash", "null"),
+  ...payload(AGENT_EVENTS, "agent.respawned", "theme", "null"),
+  ...payload(AGENT_EVENTS, "agent.running", "externalRef", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.running", "harnessName", "null"),
+  ...payload(AGENT_EVENTS, "agent.running", "runtimeRef", "leftOut"),
+  ...payload(AGENT_EVENTS, "agent.running", "theme", "null"),
+  ...payload(AGENT_EVENTS, "agent.transcript_recorded", "path", "patternLeading"),
+  ...payload(AGENT_EVENTS, "agent.transcript_recorded", "sessionId", "underMinLength"),
+  ...payload(TASK_EVENTS, "assignment.granted", "parentAssignmentId", "leftOut"),
+  ...payload(MAIL_EVENTS, "attention.opened", "kind", "null"),
+  ...payload(MAIL_EVENTS, "attention.opened", "messageId", "null"),
+  ...payload(MAIL_EVENTS, "attention.opened", "taskId", "null"),
+  ...payload(MAIL_EVENTS, "attention.opened", "toolUseId", "leftOut"),
+  ...payload(MAIL_EVENTS, "mailbox.offered", "promptId", "null"),
+  ...payload(MAIL_EVENTS, "mailbox.queued", "from", "null"),
+  ...payload(TASK_EVENTS, "task.finished", "note", "leftOut"),
+  ...payload(TASK_EVENTS, "task.noted", "role", "leftOut"),
+  ...payload(TASK_EVENTS, "task.owner_changed", "delegatedFrom", "leftOut"),
+  ...payload(TASK_EVENTS, "task.owner_changed", "ownerAgentId", "leftOut"),
 ];
 
 /** A schema the protocol exports that the Rust protocol doesn't emit yet, with what owns it. */

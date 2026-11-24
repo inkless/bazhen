@@ -581,6 +581,20 @@ export const Event = z.union(Object.keys(EVENTS).filter(isEventType).map(eventBr
 export type Event = z.infer<typeof Event>;
 
 /**
+ * An event's type and its payload as the store records it, whole, of which `Event` carries what
+ * the type streams. No client is sent it: the protocol's tests hold each payload to it.
+ */
+export const RecordedEvent = z.union(
+  Object.keys(EVENTS)
+    .filter(isEventType)
+    .map((type) => {
+      const entry: { readonly payload: z.ZodType } = EVENTS[type];
+      return z.object({ type: z.literal(type), payload: entry.payload });
+    }),
+);
+export type RecordedEvent = z.infer<typeof RecordedEvent>;
+
+/**
  * The query that opens `/v1/events`: the client's protocol version, and the cursor `/v1/state`
  * or the last event it saw gave it. The stream resumes after `after`.
  */

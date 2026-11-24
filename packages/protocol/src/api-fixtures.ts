@@ -31,6 +31,7 @@ import {
   ClientEventFrame,
   EVENTS,
   Event,
+  RecordedEvent,
   EventEnvelopeFrame,
   EventStreamQuery,
   type EventType,
@@ -337,6 +338,60 @@ function atLeastOne<T>(items: readonly T[]): readonly [T, ...T[]] {
   if (first === undefined) throw new Error("expected at least one item");
   return [first, ...rest];
 }
+
+/** Each type's payloads as the store records them, where that is more than the stream sends. */
+const RECORDED: Readonly<Record<string, readonly unknown[]>> = {
+  "agent.transcript_recorded": [{ sessionId: SESSION, path: "/home/u/.claude/projects/p/s.jsonl" }],
+  "mailbox.queued": [
+    { agentId: AGENT, from: AGENT2, body: "Review the port." },
+    { agentId: AGENT, body: "Ship it." },
+  ],
+  "message.observed": [
+    {
+      from: AGENT,
+      to: AGENT2,
+      summary: "Review it?",
+      accepted: true,
+      toolUseId: "toolu_01",
+      text: "Review the port, please.",
+    },
+  ],
+  "task.created": [
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: AGENT,
+      parentTaskId: TASK2,
+      delegatedFrom: ASGN,
+    },
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: null,
+      parentTaskId: null,
+      delegatedFrom: null,
+    },
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: null,
+      parentTaskId: null,
+    },
+  ],
+  "task.finished": [
+    { outcome: "done", note: "Shipped." },
+    { outcome: "done", note: null },
+  ],
+  "task.noted": [
+    { text: "Over to you.", handoff: true, role: "reviewer" },
+    { text: "Noted.", handoff: false, role: null },
+  ],
+};
+
+/** Every type's payloads as the store records them, each with its type. */
+const PAYLOAD_WIRE = Object.entries(EVENT_PAYLOADS).flatMap(([type, payloads]) =>
+  (RECORDED[type] ?? payloads).map((payload) => ({ type, payload })),
+);
 
 /** Every example of `EVENT_PAYLOADS` as an event, the first of each type caused by none. */
 const EVENT_WIRE = Object.entries(EVENT_PAYLOADS).flatMap(([type, payloads], t) => {
@@ -928,6 +983,10 @@ const MESSAGES: Readonly<Record<string, Example>> = {
    * each type's apart, and parse every event alike.
    */
   Event: { schema: z.discriminatedUnion("type", atLeastOne(Event.options)), wire: EVENT_WIRE },
+  RecordedEvent: {
+    schema: z.discriminatedUnion("type", atLeastOne(RecordedEvent.options)),
+    wire: PAYLOAD_WIRE,
+  },
   EventStreamQuery: {
     schema: EventStreamQuery,
     wire: [{ epoch: "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", after: "41" }],
