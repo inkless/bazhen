@@ -320,6 +320,7 @@ dependencies = [
 name = "bazhen-store"
 version = "0.1.0"
 dependencies = [
+ "bazhen-core",
  "bazhen-holder-proto",
  "bazhen-protocol",
  "jiff",

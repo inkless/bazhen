@@ -17,11 +17,13 @@ use crate::projections::At;
 use crate::snapshot::{SnapshotError, SnapshotView};
 
 /// A step of a terminal's lifecycle, as packages/core's `TerminalEvent` names it; only the steps
-/// a shell's events take are here.
+/// a shell's or an agent's events take are here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Step {
     RuntimeConfirmed,
     RuntimeRejected,
+    ProcessExited,
+    Respawned,
     Adopted,
     TargetAbsent,
     CloseRequested,
@@ -33,6 +35,8 @@ impl Step {
         match self {
             Self::RuntimeConfirmed => "runtime.confirmed",
             Self::RuntimeRejected => "runtime.rejected",
+            Self::ProcessExited => "process.exited",
+            Self::Respawned => "respawned",
             Self::Adopted => "adopted",
             Self::TargetAbsent => "target.absent",
             Self::CloseRequested => "close.requested",
@@ -43,10 +47,16 @@ impl Step {
 
 /// Where `step` takes a terminal in `from`, as packages/core's table has it, or why it can't.
 pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, String> {
-    use Step::{Adopted, CloseCompleted, CloseRequested, RuntimeConfirmed, RuntimeRejected};
+    use Step::{
+        Adopted, CloseCompleted, CloseRequested, ProcessExited, Respawned, RuntimeConfirmed,
+        RuntimeRejected,
+    };
     use TerminalState::{Closed, Closing, Creating, Exited, Failed, Lost, Running, Unknown};
     match (from, step) {
-        (Creating, RuntimeConfirmed) | (Running | Exited, Adopted) => Ok(Running),
+        (Creating, RuntimeConfirmed) | (Running | Exited, Adopted) | (Exited, Respawned) => {
+            Ok(Running)
+        }
+        (Running | Unknown, ProcessExited) => Ok(Exited),
         (Creating, RuntimeRejected) => Ok(Failed),
         (Running | Unknown | Exited, Step::TargetAbsent) => Ok(Lost),
         (Running | Unknown | Exited | Lost, CloseRequested) => Ok(Closing),
@@ -205,7 +215,7 @@ fn describe(
 
 /// The generation an adopted process's ref names, which must be later than the terminal's:
 /// generations only rise, and commands aimed at an older one must stay stale.
-fn adopted_generation(
+pub(crate) fn adopted_generation(
     tx: &Transaction<'_>,
     id: &str,
     runtime_ref: &RuntimeRefPayload,

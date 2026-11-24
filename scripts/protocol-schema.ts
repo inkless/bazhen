@@ -18,6 +18,7 @@ import { storeFixture } from "../apps/daemon/src/store/fixture.ts";
 import { configFixture } from "../apps/daemon/src/config/fixture.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
+import { agentEventFixture } from "./agent-event-fixtures.ts";
 import { coreFixture } from "./core-fixtures.ts";
 import { roleFixture } from "./role-fixtures.ts";
 import { filesHash, protocolFiles, protocolId } from "../packages/protocol/src/id.ts";
@@ -86,6 +87,7 @@ const outputs = (): Record<string, Record<string, string>> => ({
   "fixtures/config/": configFixture(),
   "fixtures/core/": coreFixture(),
   "fixtures/roles/": roleFixture(),
+  "fixtures/agents/": agentEventFixture(),
 });
 
 /** Where the Rust crates' protocol id is written, relative to the repository. */

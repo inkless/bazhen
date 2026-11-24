@@ -2,6 +2,9 @@
 //! schema the TypeScript daemon gives it (`apps/daemon/src/store/store.ts`), so either daemon opens
 //! the other's database. Blocking, as `SQLite` is: an async caller runs it on a thread of its own.
 
+mod agent_events;
+#[cfg(test)]
+mod agent_events_fixture;
 mod agents;
 mod attachments;
 mod devices;
@@ -29,6 +32,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub use agent_events::AgentChange;
 pub use agents::LiveTerminal;
 /// Every event type, with the payload keys a frame of it keeps.
 pub use bazhen_protocol::events::EVENT_KINDS;

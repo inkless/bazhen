@@ -10,19 +10,22 @@ use bazhen_protocol::events::{
     TerminalFailed, TerminalForegroundChanged, TerminalIncarnation, TerminalNeedsRestart,
     TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
 };
-use bazhen_protocol::ids::{AttachmentId, DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId};
+use bazhen_protocol::ids::{
+    AgentId, AttachmentId, DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId,
+};
 use bazhen_protocol::record::Record;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
+use crate::agent_events::AgentChange;
 use crate::projections;
 
 /// An event this build records, with the entity it is about and who it came from: an agent's id,
 /// or a word naming the human or the system. A device's events and a notice's closing come from
 /// the human, `user`, and a notice opens from the `system`, as the TypeScript daemon records them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum NewEvent {
     TaskCreated {
         task: TaskId,
@@ -69,6 +72,12 @@ pub enum NewEvent {
     LeaseGranted {
         terminal: TerminalId,
         payload: LeaseGranted,
+    },
+    /// A change to an agent, from the human, an agent, or the `system`.
+    Agent {
+        agent: AgentId,
+        actor: String,
+        change: AgentChange,
     },
 }
 
@@ -152,6 +161,7 @@ impl NewEvent {
             Self::AttachmentStarted { .. } => "attachment.started",
             Self::AttachmentEnded { .. } => "attachment.ended",
             Self::LeaseGranted { .. } => "lease.granted",
+            Self::Agent { change, .. } => change.name(),
         }
     }
 
@@ -168,12 +178,13 @@ impl NewEvent {
             }
             Self::AttachmentStarted { attachment, .. }
             | Self::AttachmentEnded { attachment, .. } => attachment.as_str(),
+            Self::Agent { agent, .. } => agent.as_str(),
         }
     }
 
     fn actor(&self) -> &str {
         match self {
-            Self::TaskCreated { actor, .. } => actor,
+            Self::TaskCreated { actor, .. } | Self::Agent { actor, .. } => actor,
             Self::DevicePaired { .. } | Self::DeviceRevoked { .. } | Self::NoticeClosed { .. } => {
                 "user"
             }
@@ -198,6 +209,7 @@ impl NewEvent {
             Self::AttachmentStarted { payload, .. } => serde_json::to_string(payload),
             Self::AttachmentEnded { payload, .. } => serde_json::to_string(payload),
             Self::LeaseGranted { payload, .. } => serde_json::to_string(payload),
+            Self::Agent { change, .. } => change.payload(),
         }
     }
 }
