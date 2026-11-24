@@ -1,7 +1,7 @@
-//! A launch's body, as `POST /v1/agents` reads it: its schema's shape, then the rules it has beyond
-//! its shape. Any bytes at all can arrive, so its fuzz target reads them.
+//! The agents' request bodies, as their routes read them: each schema's shape, then the rules it
+//! has beyond its shape. Any bytes at all can arrive, so its fuzz target reads them with each.
 
-use bazhen_protocol::agents::LaunchAgentRequest;
+use bazhen_protocol::agents::{LaunchAgentRequest, RenameAgentRequest};
 
 /// The most UTF-16 units an idempotency key has.
 const KEY_MAX_UNITS: usize = 200;
@@ -16,9 +16,7 @@ const COMPACT_WINDOW: std::ops::RangeInclusive<u32> = 100_000..=10_000_000;
 pub fn launch_request(body: &[u8]) -> Result<LaunchAgentRequest, String> {
     let req: LaunchAgentRequest = serde_json::from_slice(body)
         .map_err(|err| format!("the body is not an agent to launch: {err}"))?;
-    if !(1..=KEY_MAX_UNITS).contains(&req.idempotency_key.encode_utf16().count()) {
-        return Err("idempotencyKey is 1 to 200 characters".to_owned());
-    }
+    keyed(&req.idempotency_key)?;
     if req.cwd.is_empty() {
         return Err("cwd is a path".to_owned());
     }
@@ -32,6 +30,27 @@ pub fn launch_request(body: &[u8]) -> Result<LaunchAgentRequest, String> {
         return Err("compactWindowTokens is from 100000 to 10000000".to_owned());
     }
     Ok(req)
+}
+
+/// `body` as a rename of an agent, held to the rules its schema has beyond its shape.
+///
+/// # Errors
+///
+/// Why the body is not a rename, or which rule it breaks, as the 400's message.
+pub fn rename_request(body: &[u8]) -> Result<RenameAgentRequest, String> {
+    let req: RenameAgentRequest = serde_json::from_slice(body)
+        .map_err(|err| format!("the body is not a rename of an agent: {err}"))?;
+    keyed(&req.idempotency_key)?;
+    Ok(req)
+}
+
+/// Refuses an idempotency key past its schema's bounds.
+fn keyed(key: &str) -> Result<(), String> {
+    if (1..=KEY_MAX_UNITS).contains(&key.encode_utf16().count()) {
+        Ok(())
+    } else {
+        Err("idempotencyKey is 1 to 200 characters".to_owned())
+    }
 }
 
 #[cfg(test)]
@@ -96,17 +115,39 @@ mod tests {
     /// every field, and one a rule refuses.
     #[test]
     fn takes_the_fuzz_seeds_as_they_are_named() {
-        let least = launch_request(include_bytes!("../fuzz/seeds/agent_launch/least")).unwrap();
+        let least = launch_request(include_bytes!("../fuzz/seeds/agent_requests/least")).unwrap();
         let every =
-            launch_request(include_bytes!("../fuzz/seeds/agent_launch/every-field")).unwrap();
+            launch_request(include_bytes!("../fuzz/seeds/agent_requests/every-field")).unwrap();
         assert_eq!(
             (least.project, every.project, every.compact_window_tokens),
             (None, Some("bazhen".to_owned()), Some(200_000))
         );
         assert!(every.theme.is_some() && every.name.is_some() && every.role.is_some());
         assert_eq!(
-            launch_request(include_bytes!("../fuzz/seeds/agent_launch/window-below")).err(),
+            launch_request(include_bytes!("../fuzz/seeds/agent_requests/window-below")).err(),
             Some("compactWindowTokens is from 100000 to 10000000".to_owned())
+        );
+    }
+
+    #[test]
+    fn holds_a_rename_to_its_name_and_its_keys_bounds() {
+        let refused = |text: &str| rename_request(text.as_bytes()).err();
+        assert_eq!(refused(r#"{"idempotencyKey":"k","name":"reviewer"}"#), None);
+        assert_eq!(
+            refused(r#"{"idempotencyKey":"","name":"reviewer"}"#),
+            Some("idempotencyKey is 1 to 200 characters".to_owned())
+        );
+        assert!(
+            [
+                r#"{"idempotencyKey":"k","name":"-x"}"#,
+                r#"{"idempotencyKey":"k"}"#,
+                "[]"
+            ]
+            .map(refused)
+            .iter()
+            .all(|e| e
+                .as_deref()
+                .is_some_and(|e| e.starts_with("the body is not a rename of an agent: ")))
         );
     }
 }

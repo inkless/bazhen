@@ -1,16 +1,20 @@
-//! The agents' routes (`POST /v1/agents` in `http/app.ts`), and the agents' failures as the
-//! protocol's errors.
+//! The agents' routes (`POST /v1/agents` and `POST /v1/agents/:id/rename` in `http/app.ts`), and
+//! the agents' failures as the protocol's errors.
 
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use bazhen_protocol::agents::AgentCommandResponse;
 use bazhen_protocol::daemon::ErrorCode;
+use bazhen_protocol::ids::AgentId;
+use bazhen_store::{OnceError, Rename, RenameError};
 
-use crate::agent_launch::launch_request;
+use crate::agent_requests::{launch_request, rename_request};
 use crate::agents::{AgentError, Agents};
+use crate::callers::{Caller, caller_of};
 use crate::routes::{Shared, fail, internal};
 
 /// The protocol's error for an agent's failure.
@@ -47,6 +51,89 @@ pub(crate) async fn launch(State(shared): State<Shared>, body: Bytes) -> Respons
     match launched.await {
         Ok(response) => axum::Json(response).into_response(),
         Err(err) => refusal(&err),
+    }
+}
+
+/// Why an agent wasn't renamed, or that the path named no agent.
+#[derive(Debug)]
+enum Renaming {
+    Invalid(String),
+    /// The path names no agent: by its id, none the store knows; by its name, none live.
+    Unnamed(String),
+    Refused(RenameError),
+    /// The store's writer has stopped.
+    Closed(String),
+}
+
+/// `POST /v1/agents/:id/rename`: the human renames any agent over either listener, an agent only
+/// itself over the socket. The path names the agent by its id or its live name, resolved before
+/// the key is replayed.
+pub(crate) async fn rename(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
+    body: Bytes,
+) -> Response {
+    let renamed = async {
+        let req = rename_request(&body).map_err(Renaming::Invalid)?;
+        let caller = caller_of(caller).map(|agent| agent.as_str().to_owned());
+        shared
+            .store
+            .run(move |store| {
+                let agent = store
+                    .reads()
+                    .resolve_agent(&reference)
+                    .map_err(|err| Renaming::Refused(err.into()))?
+                    .and_then(|agent| AgentId::parse(&agent))
+                    .ok_or_else(|| Renaming::Unnamed(reference.clone()))?;
+                store
+                    .rename_agent(&Rename {
+                        key: req.idempotency_key,
+                        caller,
+                        agent,
+                        name: req.name.as_str().to_owned(),
+                    })
+                    .map_err(Renaming::Refused)
+            })
+            .await
+            .map_err(|err| Renaming::Closed(err.to_string()))?
+    };
+    renaming(renamed.await)
+}
+
+/// The answer to a rename, or its failure as the protocol's error.
+fn renaming(renamed: Result<AgentCommandResponse, Renaming>) -> Response {
+    match renamed {
+        Ok(answer) => axum::Json(answer).into_response(),
+        Err(Renaming::Invalid(message)) => {
+            fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message)
+        }
+        Err(Renaming::Unnamed(reference)) => {
+            let message = if AgentId::parse(&reference).is_some() {
+                format!("no agent {reference}")
+            } else {
+                format!("no agent {reference} by that name")
+            };
+            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &message)
+        }
+        Err(Renaming::Refused(err @ RenameError::Forbidden)) => fail(
+            StatusCode::FORBIDDEN,
+            ErrorCode::Forbidden,
+            &err.to_string(),
+        ),
+        Err(Renaming::Refused(err @ RenameError::Unknown(_))) => {
+            fail(StatusCode::NOT_FOUND, ErrorCode::NotFound, &err.to_string())
+        }
+        Err(Renaming::Refused(err @ (RenameError::Ended { .. } | RenameError::NameTaken(_)))) => {
+            fail(StatusCode::CONFLICT, ErrorCode::Conflict, &err.to_string())
+        }
+        Err(Renaming::Refused(RenameError::Once(OnceError::Conflict(key)))) => fail(
+            StatusCode::CONFLICT,
+            ErrorCode::Conflict,
+            &format!("idempotency key {key} was first used for a different request"),
+        ),
+        Err(Renaming::Refused(err)) => internal(&err),
+        Err(Renaming::Closed(err)) => internal(&err),
     }
 }
 
