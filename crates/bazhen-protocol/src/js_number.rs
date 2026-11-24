@@ -6,7 +6,7 @@
 //! short and as near, the even one: Rust's float formatting rounds those ties up instead. It writes
 //! them plainly from 1e-6 up to 1e21 and past those bounds in exponent form, with a sign after the
 //! `e`. Negative zero is `0`, and a number that isn't finite is `null`. ryu-js writes all of it as
-//! ECMAScript's Number::toString does.
+//! ECMAScript's `Number::toString` does.
 
 use serde::ser::Error;
 use serde::{Serialize as _, Serializer};
@@ -111,8 +111,11 @@ mod tests {
             let x = f64::from_bits(bits);
             prop_assume!(x.is_finite());
             let text = written(x);
-            prop_assert_eq!(text.parse::<f64>().unwrap(), x);
-            let plain = x == 0.0 || (1e-6..1e21).contains(&x.abs());
+            // Negative zero is written `0`, which reads back as positive zero.
+            let zero = x.abs().to_bits() == 0;
+            let expected = if zero { 0 } else { bits };
+            prop_assert_eq!(text.parse::<f64>().unwrap().to_bits(), expected);
+            let plain = zero || (1e-6..1e21).contains(&x.abs());
             prop_assert_eq!(!text.contains('e'), plain, "{}", text);
             prop_assert!(plain || text.contains("e+") || text.contains("e-"), "{}", text);
         }
