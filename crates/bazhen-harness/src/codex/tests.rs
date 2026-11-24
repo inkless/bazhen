@@ -1,9 +1,10 @@
 //! The Codex adapter, read against what the TypeScript daemon makes of the same messages.
 
 use super::*;
-use crate::{Reply, SessionRef};
+use crate::SessionRef;
 use bazhen_protocol::agents::{ExternalRefKind, UsageLimit};
 use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::mail_events::ApprovalDecision;
 use proptest::prelude::*;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -32,7 +33,25 @@ fn limit(limit: Option<LimitStop>) -> Value {
 
 /// What each of the TypeScript adapter's readers made of a message, by its key in the fixture.
 fn reads(method: &str, params: &Js) -> Vec<(&'static str, Value)> {
+    let resolved = approvals::read_resolved(method, params).map(|id| match id {
+        approvals::RequestId::Number(n) => json!(n),
+        approvals::RequestId::Text(s) => json!(s),
+    });
     vec![
+        (
+            "approval",
+            json!(approvals::read_approval(method, params).map(|a| json!({
+                "threadId": a.thread_id, "itemId": a.item_id, "summary": a.summary,
+            }))),
+        ),
+        (
+            "question",
+            json!(approvals::read_question(method, params).map(|q| json!({
+                "threadId": q.thread_id, "itemId": q.item_id, "key": q.key,
+                "summary": q.summary, "answers": q.answers,
+            }))),
+        ),
+        ("resolved", json!(resolved)),
         (
             "userMessage",
             json!(mail::read_user_message(method, params).map(|m| json!({
@@ -103,7 +122,7 @@ fn reads_every_recorded_message_as_the_typescript_adapter_did() {
             checked += 1;
         }
     }
-    assert_eq!(checked, cases.len() * 7);
+    assert_eq!(checked, cases.len() * 10);
 }
 
 #[test]
@@ -403,6 +422,301 @@ fn compaction_rate_limits_and_new_threads_are_the_threads_and_the_accounts() {
         vec![account(Observed::SessionAnnounced {
             session: SessionKey(THREAD.to_owned())
         })]
+    );
+}
+
+fn ask(codex: &Codex, bound: Option<&AgentId>, method: &str, params: &Value, id: &str) -> Ingested {
+    let params = params.to_string();
+    let report = Report::ServerRequest {
+        method,
+        params: params.as_bytes(),
+        id,
+    };
+    codex.ingest(
+        report,
+        &IngestContext {
+            agent: bound,
+            ..IngestContext::default()
+        },
+    )
+}
+
+fn tool(call: &str) -> ToolKey {
+    ToolKey {
+        key: format!("[\"{THREAD}\",\"{call}\"]"),
+        caller: None,
+        prompt_id: None,
+    }
+}
+
+fn command() -> Value {
+    json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-1",
+            "command": "rm -rf build", "reason": "outside the sandbox" })
+}
+
+#[test]
+fn an_approval_is_held_for_the_inbox_with_no_deadline() {
+    let codex = harness();
+    let a = agent();
+    let got = ask(
+        &codex,
+        Some(&a),
+        "item/commandExecution/requestApproval",
+        &command(),
+        "7",
+    );
+    assert_eq!(
+        got,
+        Ingested {
+            observed: vec![on(
+                THREAD,
+                Observed::ApprovalAsked {
+                    key: tool("call-1"),
+                    summary: "Run rm -rf build (outside the sandbox)".to_owned(),
+                    question: false,
+                }
+            )],
+            origin: None,
+            reply: Reply::Hold(Held::Approval {
+                key: tool("call-1"),
+                wait_ms: None
+            }),
+            reply_gate: Gate::None,
+        }
+    );
+    let pending = Pending::ServerRequest {
+        method: "item/commandExecution/requestApproval",
+        key: &tool("call-1"),
+    };
+    let allow = codex.answer(&pending, Resolution::Decision(ApprovalDecision::Allow));
+    assert_eq!(allow, Answer::Rpc(r#"{"decision":"accept"}"#.to_owned()));
+    let deny = codex.answer(&pending, Resolution::Decision(ApprovalDecision::Deny));
+    assert_eq!(deny, Answer::Rpc(r#"{"decision":"decline"}"#.to_owned()));
+    assert_eq!(
+        codex.answer(&pending, Resolution::Nothing),
+        Answer::Unavailable
+    );
+}
+
+#[test]
+fn a_request_answered_in_the_tui_is_settled_by_its_id() {
+    let codex = harness();
+    let a = agent();
+    ask(
+        &codex,
+        Some(&a),
+        "item/commandExecution/requestApproval",
+        &command(),
+        "7",
+    );
+    ask(
+        &codex,
+        Some(&a),
+        "item/fileChange/requestApproval",
+        &json!({
+            "threadId": THREAD, "turnId": "t1", "itemId": "call-2",
+        }),
+        "\"x\"",
+    );
+    let other = notify(
+        &codex,
+        None,
+        "serverRequest/resolved",
+        &json!({ "threadId": THREAD, "requestId": 8 }),
+    );
+    assert_eq!(other, vec![]);
+    let settled = |call: &str| {
+        vec![on(
+            THREAD,
+            Observed::ApprovalSettled {
+                key: tool(call),
+                how: Settled::AnsweredInTui,
+            },
+        )]
+    };
+    let resolved = json!({ "threadId": THREAD, "requestId": 7 });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved),
+        settled("call-1")
+    );
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved),
+        vec![]
+    );
+    let text = json!({ "threadId": THREAD, "requestId": "x" });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &text),
+        settled("call-2")
+    );
+}
+
+#[test]
+fn a_single_free_text_question_is_answered_with_the_humans_text() {
+    let codex = harness();
+    let a = agent();
+    let params = json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-3",
+        "questions": [{ "id": "q1", "header": "Name", "question": "What should it be called?" }] });
+    let got = ask(&codex, Some(&a), "item/tool/requestUserInput", &params, "9");
+    assert_eq!(
+        got.observed,
+        vec![on(
+            THREAD,
+            Observed::ApprovalAsked {
+                key: tool("call-3"),
+                summary: "What should it be called?".to_owned(),
+                question: true,
+            }
+        )]
+    );
+    assert_eq!(
+        got.reply,
+        Reply::Hold(Held::Approval {
+            key: tool("call-3"),
+            wait_ms: None
+        })
+    );
+    let pending = Pending::ServerRequest {
+        method: "item/tool/requestUserInput",
+        key: &tool("call-3"),
+    };
+    assert_eq!(
+        codex.answer(&pending, Resolution::Text("Ada")),
+        Answer::Rpc(r#"{"answers":{"q1":{"answers":["Ada"]}}}"#.to_owned())
+    );
+    // Answered once.
+    assert_eq!(
+        codex.answer(&pending, Resolution::Text("Ada")),
+        Answer::Unavailable
+    );
+}
+
+#[test]
+fn a_request_the_inbox_answered_is_settled_by_nothing_the_server_says_of_it() {
+    let codex = harness();
+    let a = agent();
+    let method = "item/commandExecution/requestApproval";
+    ask(&codex, Some(&a), method, &command(), "7");
+    let pending = Pending::ServerRequest {
+        method,
+        key: &tool("call-1"),
+    };
+    let allow = codex.answer(&pending, Resolution::Decision(ApprovalDecision::Allow));
+    assert_eq!(allow, Answer::Rpc(r#"{"decision":"accept"}"#.to_owned()));
+    let resolved = json!({ "threadId": THREAD, "requestId": 7 });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved),
+        vec![]
+    );
+}
+
+#[test]
+fn a_request_is_settled_by_its_ids_value_however_it_was_written() {
+    let codex = harness();
+    let a = agent();
+    let method = "item/commandExecution/requestApproval";
+    ask(&codex, Some(&a), method, &command(), "7.0");
+    let params = json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-2" });
+    ask(
+        &codex,
+        Some(&a),
+        "item/fileChange/requestApproval",
+        &params,
+        r#""\u0078""#,
+    );
+    let settled = |call: &str| {
+        vec![on(
+            THREAD,
+            Observed::ApprovalSettled {
+                key: tool(call),
+                how: Settled::AnsweredInTui,
+            },
+        )]
+    };
+    let resolved = |id: Value| json!({ "threadId": THREAD, "requestId": id });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved(json!(7))),
+        settled("call-1")
+    );
+    assert_eq!(
+        notify(
+            &codex,
+            None,
+            "serverRequest/resolved",
+            &resolved(json!("x"))
+        ),
+        settled("call-2")
+    );
+    // An id that isn't JSON can't be matched, so the TUI keeps it.
+    assert_eq!(
+        ask(&codex, Some(&a), method, &command(), "7,"),
+        Ingested::nothing()
+    );
+}
+
+#[test]
+fn a_question_takes_no_decision() {
+    let codex = harness();
+    let pending = Pending::ServerRequest {
+        method: "item/tool/requestUserInput",
+        key: &tool("call-3"),
+    };
+    assert_eq!(
+        codex.answer(&pending, Resolution::Decision(ApprovalDecision::Allow)),
+        Answer::Unavailable
+    );
+}
+
+#[test]
+fn a_question_only_the_tui_can_answer_is_shown_and_not_held() {
+    let codex = harness();
+    let a = agent();
+    let params = json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-4", "reason": "" });
+    let got = ask(
+        &codex,
+        Some(&a),
+        "item/permissions/requestApproval",
+        &params,
+        "10",
+    );
+    assert_eq!(
+        got,
+        Ingested {
+            observed: vec![on(
+                THREAD,
+                Observed::QuestionAsked {
+                    key: tool("call-4"),
+                    summary: "Grant more permissions".to_owned(),
+                }
+            )],
+            ..Ingested::nothing()
+        }
+    );
+}
+
+#[test]
+fn a_request_for_no_agent_bazhen_runs_or_none_for_the_human_is_left_to_the_tui() {
+    let codex = harness();
+    let a = agent();
+    let unbound = ask(
+        &codex,
+        None,
+        "item/commandExecution/requestApproval",
+        &command(),
+        "7",
+    );
+    assert_eq!(unbound, Ingested::nothing());
+    let other = ask(
+        &codex,
+        Some(&a),
+        "item/tool/call",
+        &json!({ "threadId": THREAD }),
+        "8",
+    );
+    assert_eq!(other, Ingested::nothing());
+    let resolved = json!({ "threadId": THREAD, "requestId": 7 });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved),
+        vec![]
     );
 }
 

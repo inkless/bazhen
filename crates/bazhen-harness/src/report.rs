@@ -18,6 +18,8 @@ pub enum Report<'a> {
     ServerRequest {
         method: &'a str,
         params: &'a [u8],
+        /// The request's id as JSON text, such as `7` or `"a"`, as a notification that it was
+        /// resolved names it.
         id: &'a str,
     },
     /// The title the agent's terminal shows, as the terminal's runtime reports it.
@@ -81,8 +83,9 @@ pub enum Held {
     /// A tool call's end in the turn `prompt_id`, answered at once with any queued mail folded
     /// into the turn.
     Fold { prompt_id: String },
-    /// A permission request, answered from the inbox within `wait_ms`, or left to the TUI.
-    Approval { key: ToolKey, wait_ms: u64 },
+    /// A permission request, answered from the inbox within `wait_ms`, or left to the TUI. None
+    /// for one with no deadline: the TUI asks the same request, and whichever answers first wins.
+    Approval { key: ToolKey, wait_ms: Option<u64> },
 }
 
 /// A fact, who it is about, and what the daemon must find of the report's session to apply it.

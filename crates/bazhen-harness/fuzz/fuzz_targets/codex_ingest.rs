@@ -1,14 +1,15 @@
 #![no_main]
 
 use bazhen_harness::{
-    AgentId, Gate, HarnessDeps, HarnessId, IngestContext, Ingested, Key, Observed, Reply, Report,
-    compiled,
+    AgentId, Gate, HarnessDeps, HarnessId, Held, IngestContext, Ingested, Key, Observed, Reply,
+    Report, compiled,
 };
 use libfuzzer_sys::fuzz_target;
 
 // One notification, request or terminal title from Codex's app-server, as a server could send
 // it: no report may panic the adapter, text that isn't JSON says nothing, every fact is about a
-// thread, the account or the agent a title is for, nothing is gated, and nothing is held.
+// thread, the account or the agent a title is for, nothing is gated, and only a request is held,
+// with no deadline, since the TUI asks the same request.
 fuzz_target!(|input: (u8, &str, &[u8], &str)| {
     let (kind, method, params, text) = input;
     let harnesses = compiled(HarnessDeps {
@@ -65,5 +66,15 @@ fuzz_target!(|input: (u8, &str, &[u8], &str)| {
             other => panic!("{other:?}"),
         }
     }
-    assert_eq!(read.reply, Reply::Quiet);
+    match &read.reply {
+        Reply::Quiet => {}
+        Reply::Hold(Held::Approval { key, wait_ms: None }) => {
+            assert_eq!(kind % 4, 1);
+            assert!(read.observed.iter().any(|k| matches!(
+                &k.fact,
+                Observed::ApprovalAsked { key: asked, .. } if asked == key
+            )));
+        }
+        other => panic!("{other:?}"),
+    }
 });

@@ -2,6 +2,7 @@
 //! to the server; every Codex agent's TUI is a client of the same server, on its own thread, and
 //! the thread's notifications say what the agent is doing.
 
+mod approvals;
 mod mail;
 mod signals;
 #[cfg(test)]
@@ -12,9 +13,10 @@ mod wire;
 use crate::js::Js;
 use crate::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
-    Gate, Harness, HarnessActivity, HarnessDoctor, IngestContext, Ingested, Key, Keyed,
+    Gate, Harness, HarnessActivity, HarnessDoctor, Held, IngestContext, Ingested, Key, Keyed,
     LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal, Observed, Outgoing,
-    Pending, PushPort, Pushed, Report, Resolution, RunPort, Session, SessionKey,
+    Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session, SessionKey, Settled,
+    ToolKey,
 };
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
@@ -42,6 +44,11 @@ struct Threads {
     /// before its items, so whether it is the new server's own waits for the first one.
     first_item: HashSet<String>,
     labels: HashMap<String, &'static str>,
+    /// The server's requests no one has answered, by id as JSON text, to the thread and tool call
+    /// each is for.
+    requests: HashMap<String, (String, ToolKey)>,
+    /// The question a text answer to a request goes to, by the request's key, and its thread.
+    questions: HashMap<String, (String, String)>,
 }
 
 impl Threads {
@@ -50,6 +57,8 @@ impl Threads {
         self.failed.remove(thread);
         self.first_item.remove(thread);
         self.labels.remove(thread);
+        self.requests.retain(|_, (on, _)| on != thread);
+        self.questions.retain(|_, (on, _)| on != thread);
     }
 
     /// The thread's activity as a fact, with the error a failed turn names or the thread's label.
@@ -134,6 +143,19 @@ impl Codex {
             })];
         }
         let mut t = self.threads();
+        if let Some(id) = approvals::read_resolved(method, params) {
+            let Some((thread, key)) = t.requests.remove(&request_key(&id)) else {
+                return Vec::new();
+            };
+            t.questions.remove(&key.key);
+            return vec![on(
+                &thread,
+                Observed::ApprovalSettled {
+                    key,
+                    how: Settled::AnsweredInTui,
+                },
+            )];
+        }
         let Some(thread) = thread_of(params) else {
             return Vec::new();
         };
@@ -208,6 +230,80 @@ impl Codex {
             }
         }
         out
+    }
+
+    fn request(&self, method: &str, params: &Js, id: &str, bound: bool) -> Ingested {
+        let approval = approvals::read_approval(method, params);
+        let question = match approval {
+            None => approvals::read_question(method, params),
+            Some(_) => None,
+        };
+        // Not an approval or a question, or not for an agent Bazhen runs: the TUI answers it.
+        let (thread, tool, summary) = match (&approval, &question) {
+            (Some(a), _) => (&a.thread_id, &a.item_id, &a.summary),
+            (None, Some(q)) => (&q.thread_id, &q.key, &q.summary),
+            (None, None) => return Ingested::nothing(),
+        };
+        let mut t = self.threads();
+        if !bound {
+            t.forget(thread);
+            return Ingested::nothing();
+        }
+        // As serverRequest/resolved names it, so the same id matches however it was written. One
+        // that isn't JSON could never be matched, and is left to the TUI.
+        let Some(id) = Js::parse(id.as_bytes()).map(|id| id.stringify()) else {
+            return Ingested::nothing();
+        };
+        let key = ToolKey {
+            key: Js::Array(vec![Js::String(thread.clone()), Js::String(tool.clone())]).stringify(),
+            caller: None,
+            prompt_id: None,
+        };
+        t.requests.insert(id, (thread.clone(), key.clone()));
+        let answers = question.as_ref().and_then(|q| q.answers.clone());
+        let (fact, reply) = match (&approval, answers) {
+            (None, None) => (
+                Observed::QuestionAsked {
+                    key,
+                    summary: summary.clone(),
+                },
+                Reply::Quiet,
+            ),
+            (_, answers) => {
+                let question = answers.is_some();
+                if let Some(answers) = answers {
+                    t.questions
+                        .insert(key.key.clone(), (thread.clone(), answers));
+                }
+                // No deadline: the TUI asks the same request, and the first answer wins.
+                let held = Held::Approval {
+                    key: key.clone(),
+                    wait_ms: None,
+                };
+                (
+                    Observed::ApprovalAsked {
+                        key,
+                        summary: summary.clone(),
+                        question,
+                    },
+                    Reply::Hold(held),
+                )
+            }
+        };
+        Ingested {
+            observed: vec![on(thread, fact)],
+            origin: None,
+            reply,
+            reply_gate: Gate::None,
+        }
+    }
+}
+
+/// The request id a `serverRequest/resolved` names, as JSON text, as the daemon reports a request's.
+fn request_key(id: &approvals::RequestId) -> String {
+    match id {
+        approvals::RequestId::Number(n) => Js::Number(*n).stringify(),
+        approvals::RequestId::Text(s) => Js::String(s.clone()).stringify(),
     }
 }
 
@@ -292,9 +388,12 @@ impl Harness for Codex {
                 .map_or_else(Ingested::nothing, |params| {
                     facts(self.notification(method, &params, bound))
                 }),
+            Report::ServerRequest { method, params, id } => Js::parse(params)
+                .map_or_else(Ingested::nothing, |params| {
+                    self.request(method, &params, id, bound)
+                }),
             Report::TerminalTitle { title: text } => title(text, context),
-            // A request for the human is the next change's: until then the TUI answers it.
-            Report::ServerRequest { .. } | Report::Hook { .. } => Ingested::nothing(),
+            Report::Hook { .. } => Ingested::nothing(),
         }
     }
 
@@ -320,8 +419,29 @@ impl Harness for Codex {
         not_yet(Pushed::NotNow)
     }
 
-    fn answer(&self, _to: &Pending<'_>, _with: Resolution<'_>) -> Answer {
-        Answer::Unavailable
+    fn answer(&self, to: &Pending<'_>, with: Resolution<'_>) -> Answer {
+        let Pending::ServerRequest { method, key } = to else {
+            return Answer::Unavailable;
+        };
+        let result = match with {
+            Resolution::Decision(decision) if approvals::takes_decision(method) => {
+                approvals::approval_result(decision)
+            }
+            Resolution::Text(text) => {
+                let Some((_, question)) = self.threads().questions.remove(&key.key) else {
+                    return Answer::Unavailable;
+                };
+                approvals::question_result(&question, text)
+            }
+            Resolution::Decision(_) | Resolution::Mail(_) | Resolution::Nothing => {
+                return Answer::Unavailable;
+            }
+        };
+        // The inbox answered it, so the server saying it was resolved settles nothing more.
+        self.threads()
+            .requests
+            .retain(|_, (_, asked)| asked.key != key.key);
+        Answer::Rpc(result.to_string())
     }
 
     fn session(&self) -> Option<Box<dyn Session>> {
