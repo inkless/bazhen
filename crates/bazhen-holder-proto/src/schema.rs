@@ -205,3 +205,120 @@ impl JsonSchema for Env {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use schemars::generate::SchemaSettings;
+    use serde_json::{Map, Value, json};
+
+    use super::*;
+    use crate::body::{Cols, Count, Offset, Rows};
+
+    fn definitions() -> Map<String, Value> {
+        let mut generator = SchemaSettings::draft2020_12().into_generator();
+        add_bodies(&mut generator);
+        generator.take_definitions(true)
+    }
+
+    fn described(definitions: &Map<String, Value>, name: &str) -> Value {
+        let mut schema = definitions.get(name).cloned().unwrap_or_default();
+        if let Some(schema) = schema.as_object_mut() {
+            schema.remove("description");
+        }
+        schema
+    }
+
+    #[test]
+    fn describes_each_type_read_through_another_with_the_limits_its_conversion_holds() {
+        let definitions = definitions();
+        let names = json!({
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!(?:__proto__|constructor|prototype)$)",
+            "x-bazhen-check": "utf8AtMost64Bytes",
+        });
+        let cases = [
+            (
+                "HolderSize",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "cols": { "type": "integer", "minimum": 0, "maximum": 1000 },
+                        "rows": { "type": "integer", "minimum": 0, "maximum": 1000 },
+                    },
+                    "required": ["cols", "rows"],
+                }),
+            ),
+            (
+                "HolderExitCode",
+                json!({ "type": "integer", "minimum": -9_007_199_254_740_991_i64, "maximum": 9_007_199_254_740_991_i64 }),
+            ),
+            (
+                "HolderVersions",
+                json!({
+                    "type": "array",
+                    "items": { "type": "string", "x-bazhen-check": "utf8AtMost32Bytes" },
+                    "minItems": 1,
+                    "maxItems": 16,
+                }),
+            ),
+            (
+                "HolderProtocolVersion",
+                json!({ "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }),
+            ),
+            (
+                "HolderTerminalId",
+                json!({ "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }),
+            ),
+            (
+                "HolderArgv",
+                json!({ "type": "array", "items": { "type": "string" }, "minItems": 1 }),
+            ),
+            (
+                "HolderSignal",
+                json!({ "type": "string", "enum": ["SIGINT", "SIGTERM", "SIGHUP", "SIGKILL"] }),
+            ),
+            (
+                "HolderTheme",
+                json!({ "type": "string", "enum": ["light", "dark"] }),
+            ),
+            (
+                "HolderTags",
+                json!({
+                    "type": "object",
+                    "propertyNames": names,
+                    "additionalProperties": { "type": "string", "x-bazhen-check": "utf8AtMost1024Bytes" },
+                    "x-bazhen-transform": "refusingOwnProto",
+                }),
+            ),
+            (
+                "HolderEnv",
+                json!({
+                    "type": "object",
+                    "propertyNames": { "type": "string", "pattern": "^(?!(?:__proto__)$)" },
+                    "additionalProperties": { "type": "string" },
+                    "x-bazhen-transform": "refusingOwnProto",
+                }),
+            ),
+        ];
+        for (name, schema) in cases {
+            assert_eq!(described(&definitions, name), schema, "{name}");
+        }
+        let generic: Vec<&String> = definitions
+            .keys()
+            .filter(|n| n.starts_with("Bounded") || n.starts_with("Utf8"))
+            .collect();
+        assert_eq!(generic, Vec::<&String>::new());
+    }
+
+    #[test]
+    fn tells_apart_bounded_integers_and_strings_by_their_limits_alone() {
+        assert_ne!(Cols::schema_id(), Count::schema_id());
+        assert_eq!(Cols::schema_id(), Rows::schema_id());
+        assert_eq!(Count::schema_id(), Offset::schema_id());
+        assert_ne!(TagName::schema_id(), TagValue::schema_id());
+        assert_ne!(TagValue::schema_id(), VersionText::schema_id());
+        assert_ne!(Cols::schema_name(), Count::schema_name());
+        assert_ne!(TagName::schema_name(), TagValue::schema_name());
+    }
+}
