@@ -17,13 +17,22 @@ pub(super) struct Approval {
     pub(super) summary: String,
 }
 
+/// Whether a request is answered with a decision, allow or deny: an approval to run a command or
+/// change files. Any other is answered otherwise, or not by Bazhen.
+pub(super) fn takes_decision(method: &str) -> bool {
+    matches!(
+        method,
+        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval"
+    )
+}
+
 /// An approval to run a command or change files, as one for the inbox (foundation-design §5.8);
 /// none for any other request, which is not Bazhen's to answer.
 pub(super) fn read_approval(method: &str, params: &Js) -> Option<Approval> {
-    let command = method == "item/commandExecution/requestApproval";
-    if !command && method != "item/fileChange/requestApproval" {
+    if !takes_decision(method) {
         return None;
     }
+    let command = method == "item/commandExecution/requestApproval";
     let thread_id = string(params, "threadId")?;
     let item_id = string(params, "itemId")?;
     let asked = nullish_string(params, "command").ok()?;

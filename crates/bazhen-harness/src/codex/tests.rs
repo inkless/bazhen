@@ -591,6 +591,82 @@ fn a_single_free_text_question_is_answered_with_the_humans_text() {
 }
 
 #[test]
+fn a_request_the_inbox_answered_is_settled_by_nothing_the_server_says_of_it() {
+    let codex = harness();
+    let a = agent();
+    let method = "item/commandExecution/requestApproval";
+    ask(&codex, Some(&a), method, &command(), "7");
+    let pending = Pending::ServerRequest {
+        method,
+        key: &tool("call-1"),
+    };
+    let allow = codex.answer(&pending, Resolution::Decision(ApprovalDecision::Allow));
+    assert_eq!(allow, Answer::Rpc(r#"{"decision":"accept"}"#.to_owned()));
+    let resolved = json!({ "threadId": THREAD, "requestId": 7 });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved),
+        vec![]
+    );
+}
+
+#[test]
+fn a_request_is_settled_by_its_ids_value_however_it_was_written() {
+    let codex = harness();
+    let a = agent();
+    let method = "item/commandExecution/requestApproval";
+    ask(&codex, Some(&a), method, &command(), "7.0");
+    let params = json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-2" });
+    ask(
+        &codex,
+        Some(&a),
+        "item/fileChange/requestApproval",
+        &params,
+        r#""\u0078""#,
+    );
+    let settled = |call: &str| {
+        vec![on(
+            THREAD,
+            Observed::ApprovalSettled {
+                key: tool(call),
+                how: Settled::AnsweredInTui,
+            },
+        )]
+    };
+    let resolved = |id: Value| json!({ "threadId": THREAD, "requestId": id });
+    assert_eq!(
+        notify(&codex, None, "serverRequest/resolved", &resolved(json!(7))),
+        settled("call-1")
+    );
+    assert_eq!(
+        notify(
+            &codex,
+            None,
+            "serverRequest/resolved",
+            &resolved(json!("x"))
+        ),
+        settled("call-2")
+    );
+    // An id that isn't JSON can't be matched, so the TUI keeps it.
+    assert_eq!(
+        ask(&codex, Some(&a), method, &command(), "7,"),
+        Ingested::nothing()
+    );
+}
+
+#[test]
+fn a_question_takes_no_decision() {
+    let codex = harness();
+    let pending = Pending::ServerRequest {
+        method: "item/tool/requestUserInput",
+        key: &tool("call-3"),
+    };
+    assert_eq!(
+        codex.answer(&pending, Resolution::Decision(ApprovalDecision::Allow)),
+        Answer::Unavailable
+    );
+}
+
+#[test]
 fn a_question_only_the_tui_can_answer_is_shown_and_not_held() {
     let codex = harness();
     let a = agent();
