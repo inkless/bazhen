@@ -8,10 +8,11 @@ use crate::ids::{DeviceId, NoticeId};
 pub const PAIRING_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 pub const PAIRING_CODE_LENGTH: usize = 8;
 
-/// The most UTF-16 units a code has as typed, with the spaces and dashes a person adds.
+/// The most code points a code has as typed, with the spaces and dashes a person adds, as zod's
+/// `.max(32)` counts them.
 pub const PAIRING_CODE_TYPED_MAX: usize = 32;
 
-/// The most characters a device's name holds, as JavaScript counts them: UTF-16 code units.
+/// The most characters a device's name holds, as zod's `.max` counts them: code points.
 pub const DEVICE_NAME_MAX: usize = 64;
 
 /// The one kind of notice a daemon opens today: a device paired.
