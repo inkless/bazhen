@@ -22,6 +22,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "rpc_frame"
+path = "fuzz_targets/rpc_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "stream_frame"
 path = "fuzz_targets/stream_frame.rs"
 test = false

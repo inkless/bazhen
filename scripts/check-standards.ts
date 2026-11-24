@@ -876,6 +876,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
+  "crates/bazhen-daemon/src/channel/rpc.rs::decode": "rpc_frame",
   "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
@@ -4978,7 +4979,8 @@ export function harnessFailures(manifest: string, text: string): string[] {
         "Write every key and value out plainly.",
     ];
   }
-  return /["']?\bharness["']?\s*=/.test(text)
+  // A bare key may hold `-`, so `bazhen-harness = …`, a dependency, is a key of its own.
+  return /(?<![\w-])["']?harness["']?\s*=/.test(text)
     ? [`${manifest}: sets a test harness. Tests run under libtest, which nextest drives.`]
     : [];
 }

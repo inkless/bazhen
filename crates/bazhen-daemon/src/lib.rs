@@ -5,6 +5,7 @@ mod accept;
 mod agent_cli;
 mod budget;
 mod callers;
+mod channel;
 pub mod config;
 mod detach;
 mod devices;
@@ -42,5 +43,6 @@ mod tokens;
 mod web;
 mod writer;
 
+pub use channel::rpc;
 pub use run::run;
 pub use stream::said;
