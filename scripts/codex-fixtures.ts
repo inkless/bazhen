@@ -5,7 +5,7 @@
 // requests and argv over a channel that records them. Each message and answer follows the JSON
 // Schema that `codex app-server generate-json-schema` printed for the CLI tests/api pins, committed
 // in packages/protocol/fixtures/codex-schema/, unless it is marked `bad`: off that schema on purpose,
-// with a field the readers take absent, null or of the wrong type. codex-fixtures.test.ts holds
+// with a field the readers take absent, null or of the wrong type. codex-fixtures.medium.test.ts holds
 // each case to the schema.
 // `moon run :schema` writes it to packages/protocol/fixtures/codex/. This script is a parity
 // capture: it goes with the TypeScript daemon, and the fixtures it wrote stay.
@@ -13,6 +13,7 @@
 import type { AgentLaunchRequest, HarnessChannelPort, LaunchOptions } from "@bazhen/core";
 import {
   CodexHarness,
+  DAEMON_START_ARGS,
   approvalResult,
   compactConfig,
   matching,
@@ -817,6 +818,22 @@ const TOML = [
   "",
 ];
 
+/** The schema, in Codex's, of the params of each request the daemon sends. */
+export const SENT: Readonly<Record<string, string>> = {
+  "thread/start": "ThreadStartParams.json",
+  "thread/resume": "ThreadResumeParams.json",
+  "thread/inject_items": "ThreadInjectItemsParams.json",
+};
+
+/** The schemas, in Codex's, of the answers to the requests an approval or question result answers. */
+export const ANSWERS = {
+  approvalResult: [
+    "CommandExecutionRequestApprovalResponse.json",
+    "FileChangeRequestApprovalResponse.json",
+  ],
+  questionResult: ["ToolRequestUserInputResponse.json"],
+} as const;
+
 /** What the daemon sends back and runs, given what it holds. */
 function builders(): unknown {
   return {
@@ -852,6 +869,7 @@ function builders(): unknown {
 /** What the daemon reads of the CLI and the server, and how long it waits to reconnect. */
 function daemonSide(): unknown {
   return {
+    startArgs: DAEMON_START_ARGS,
     cliVersion: [
       "codex-cli 0.167.1\n",
       "codex-cli 0.167.1-alpha.2",

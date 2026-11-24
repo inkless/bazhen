@@ -64,6 +64,17 @@ describe("problems", () => {
   it("refuses a keyword it doesn't read, so none goes unchecked", () => {
     expect(() => problems({ pattern: "^a" }, "b")).toThrow(/pattern/);
   });
+
+  it("refuses a keyword in a form it doesn't read, so none is read as absent", () => {
+    expect(() => problems({ items: [{ type: "string" }] }, ["a"])).toThrow(/items/);
+    expect(() => problems({ enum: "a" }, "a")).toThrow(/enum/);
+    expect(() => problems({ required: "id" }, {})).toThrow(/required/);
+    expect(() => problems({ minimum: "0" }, 1)).toThrow(/minimum/);
+  });
+
+  it("takes a required field only as the object's own", () => {
+    expect(problems({ required: ["toString"] }, {})).toEqual(["$.toString: missing"]);
+  });
 });
 
 describe("Codex's own schema files", () => {

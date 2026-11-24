@@ -2,7 +2,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { LISTS, MESSAGES, RESULTS, STARTED, STARTS, codexFixture } from "./codex-fixtures.ts";
+import {
+  ANSWERS,
+  LISTS,
+  MESSAGES,
+  RESULTS,
+  SENT,
+  STARTED,
+  STARTS,
+  codexFixture,
+} from "./codex-fixtures.ts";
 import { SCHEMA_DIR, messageProblems, problems, schemaFile } from "./codex-schema.ts";
 
 const files = await codexFixture();
@@ -18,6 +27,31 @@ const FOUND = new Set(
       .map(([k]) => k),
   ),
 );
+type Sent = { method: string; params: unknown };
+const started: readonly { launch: { requests: Sent[] }; resume: { requests: Sent[] } }[] =
+  JSON.parse(files["starts.json"] ?? "[]");
+const sent = started.flatMap((s) => [...s.launch.requests, ...s.resume.requests]);
+/** Each request the daemon sends that its method's params schema refuses, with why. */
+const sentProblems = sent.flatMap((r) => {
+  const file = SENT[r.method];
+  if (file === undefined) return [{ method: r.method, problems: ["no schema for its params"] }];
+  const found = problems(schemaFile(file), r.params);
+  return found.length === 0 ? [] : [{ method: r.method, problems: found }];
+});
+const built: Readonly<Record<string, readonly { result: unknown }[]>> = JSON.parse(
+  files["builders.json"] ?? "{}",
+);
+/** Each approval or question result that the schema of what it answers refuses, with why. */
+const answerProblems = Object.entries(ANSWERS).flatMap(([builder, schemaFiles]) =>
+  (built[builder] ?? []).flatMap(({ result }) =>
+    schemaFiles.flatMap((file) => {
+      const found = problems(schemaFile(file), result);
+      return found.length === 0 ? [] : [{ builder, file, problems: found }];
+    }),
+  ),
+);
+const answersBuilt = Object.keys(ANSWERS).map((builder) => built[builder]?.length ?? 0);
+
 const CLI = readFileSync(join(SCHEMA_DIR, "cli-version.txt"), "utf8").trim();
 const PINS = readFileSync(
   fileURLToPath(new URL("../tests/api/package.json", import.meta.url)),
@@ -52,6 +86,16 @@ describe("the codex fixture", () => {
     expect(misjudged(lists)).toEqual([]);
     expect(misjudged(resumes)).toEqual([]);
     expect(problems(STARTED_SCHEMA, STARTED)).toEqual([]);
+  });
+
+  it("holds each request the daemon sends to the schema of its method's params", () => {
+    expect(new Set(sent.map((r) => r.method))).toEqual(new Set(Object.keys(SENT)));
+    expect(sentProblems).toEqual([]);
+  });
+
+  it("holds each approval and question result to the schema of the request it answers", () => {
+    expect(answersBuilt.every((n) => n > 0)).toBe(true);
+    expect(answerProblems).toEqual([]);
   });
 
   // The control: a check that passed everything would pass the cases marked bad.

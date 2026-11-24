@@ -1,4 +1,9 @@
 {
+  "startArgs": [
+    "app-server",
+    "daemon",
+    "start"
+  ],
   "cliVersion": [
     {
       "output": "codex-cli 0.167.1\n",

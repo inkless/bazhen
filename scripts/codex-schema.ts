@@ -41,6 +41,27 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 const isSchema = (v: unknown): v is Schema => typeof v === "boolean" || isObject(v);
 const isString = (v: unknown): v is string => typeof v === "string";
 
+/**
+ * The form each keyword must take to be read; a schema that gives one another form is refused,
+ * so a schema printed by a later CLI can't pass by a keyword read as absent. Tuple-form `items`
+ * is one such form.
+ */
+const FORMS: Readonly<Record<string, (v: unknown) => boolean>> = {
+  $ref: isString,
+  type: (v) => isString(v) || (Array.isArray(v) && v.every(isString)),
+  enum: Array.isArray,
+  minLength: (v) => typeof v === "number",
+  minimum: (v) => typeof v === "number",
+  properties: (v) => isObject(v) && Object.values(v).every(isSchema),
+  definitions: (v) => isObject(v) && Object.values(v).every(isSchema),
+  required: (v) => Array.isArray(v) && v.every(isString),
+  additionalProperties: isSchema,
+  items: isSchema,
+  allOf: (v) => Array.isArray(v) && v.every(isSchema),
+  anyOf: (v) => Array.isArray(v) && v.every(isSchema),
+  oneOf: (v) => Array.isArray(v) && v.every(isSchema),
+};
+
 /** A keyword's schemas, its strings or its named schemas; none when it is absent. */
 const schemas = (v: unknown): Schema[] => (Array.isArray(v) ? v.filter(isSchema) : []);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isString) : []);
@@ -85,8 +106,11 @@ function resolve(root: Schema, ref: string): Schema {
 export function problems(root: Schema, value: unknown, schema: Schema = root, at = "$"): string[] {
   if (schema === true) return [];
   if (schema === false) return [`${at}: allowed by no schema`];
-  for (const keyword of Object.keys(schema)) {
+  for (const [keyword, form] of Object.entries(schema)) {
     if (!KNOWN.has(keyword)) throw new Error(`${at}: the schema keyword ${keyword} isn't read`);
+    if (FORMS[keyword]?.(form) === false) {
+      throw new Error(`${at}: the schema's ${keyword} is in a form that isn't read`);
+    }
   }
   const out: string[] = [];
   const sub = (s: Schema, v: unknown, path: string) => out.push(...problems(root, v, s, path));
@@ -115,7 +139,7 @@ export function problems(root: Schema, value: unknown, schema: Schema = root, at
   if (isObject(value)) {
     const properties = named(schema["properties"]);
     for (const name of strings(schema["required"])) {
-      if (!(name in value)) out.push(`${at}.${name}: missing`);
+      if (!Object.hasOwn(value, name)) out.push(`${at}.${name}: missing`);
     }
     const extra = schema["additionalProperties"];
     for (const [name, field] of Object.entries(value)) {
