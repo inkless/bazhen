@@ -7,6 +7,7 @@ import {
   MUTANTS_CONFIG,
   cappedScriptFailures,
   harnessNameFailures,
+  compiledFailures,
   tmuxPinFailures,
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
@@ -5444,6 +5445,44 @@ const PROTOCOL = {
     "",
   ].join("\n"),
 };
+
+const compiledIn = (sources: Record<string, string>) =>
+  compiledFailures(Object.keys(sources), (p) => sources[p] ?? "");
+const compiledRefused = (where: string) =>
+  `${where}: the daemon serves the harnesses bazhen_harness::production gives it; compiled ` +
+  "holds adapters it doesn't serve yet, so only its tests may call it.";
+
+describe("compiledFailures", () => {
+  it("refuses the daemon's product code reaching compiled by a path or a use", () => {
+    expect(
+      compiledIn({
+        "crates/bazhen-daemon/src/a.rs":
+          "fn a(d: HarnessDeps) {\n  bazhen_harness::compiled(d);\n}\n",
+        "crates/bazhen-daemon/src/b.rs": "use bazhen_harness::compiled;\n",
+        "crates/bazhen-daemon/src/c.rs":
+          "use bazhen_harness::{\n  production,\n  compiled as all,\n};\n",
+      }),
+    ).toEqual([
+      compiledRefused("crates/bazhen-daemon/src/a.rs:2"),
+      compiledRefused("crates/bazhen-daemon/src/b.rs:1"),
+      compiledRefused("crates/bazhen-daemon/src/c.rs:1"),
+    ]);
+  });
+
+  it("lets the daemon's tests, other crates and other names called compiled be", () => {
+    expect(
+      compiledIn({
+        "crates/bazhen-daemon/src/lib.rs":
+          "#[cfg(test)]\nmod tests;\n#[cfg(test)]\nmod t {\n  use bazhen_harness::compiled;\n}\n",
+        "crates/bazhen-daemon/src/tests.rs": "use bazhen_harness::compiled;\n",
+        "crates/bazhen-daemon/tests/api.rs": "use bazhen_harness::compiled;\n",
+        "crates/bazhen-cli/src/x.rs": "use bazhen_harness::compiled;\n",
+        "crates/bazhen-daemon/src/d.rs":
+          '// bazhen_harness::compiled\nconst S: &str = "bazhen_harness::compiled";\nuse bazhen_harness::production;\nfn compiled() {}\nuse regex::compiled;\n',
+      }),
+    ).toEqual([]);
+  });
+});
 
 describe("harnessNameFailures", () => {
   const daemon = "crates/bazhen-daemon/src/route.rs";

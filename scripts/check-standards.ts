@@ -878,6 +878,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
   "crates/bazhen-daemon/src/channel/rpc.rs::decode": "rpc_frame",
   "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
+  "crates/bazhen-harness/src/codex/mod.rs::Codex::ingest": "codex_ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
@@ -5149,6 +5150,32 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
 };
 
 /**
+ * Where bazhen-daemon's product code reaches `bazhen_harness::compiled`, by its path or a `use`
+ * that names it. `compiled` holds every adapter the build has, served or not, so its tests and
+ * fuzz targets can drive one; the daemon serves what `production` gives it, so an adapter isn't
+ * reached by a user before it is served. The daemon's tests may call it. An accepted gap: a crate
+ * imported by another name (`use bazhen_harness as h;` then `h::compiled`) isn't seen.
+ */
+export function compiledFailures(paths: string[], read: (path: string) => string): string[] {
+  const sources = paths.filter((p) => /^crates\/bazhen-daemon\/src\/.+\.rs$/.test(p));
+  const testOnly = testModuleFiles(sources, read);
+  const out: string[] = [];
+  for (const file of sources.filter((p) => !testOnly.has(p))) {
+    const product = withoutTests(rustCode(read(file)));
+    for (const m of product.matchAll(
+      /\bbazhen_harness\s*::\s*(?:compiled\b|\{[^;]*\bcompiled\b)/g,
+    )) {
+      out.push(
+        `${file}:${product.slice(0, m.index).split("\n").length}: the daemon serves the ` +
+          "harnesses bazhen_harness::production gives it; compiled holds adapters it doesn't " +
+          "serve yet, so only its tests may call it.",
+      );
+    }
+  }
+  return out;
+}
+
+/**
  * The names in a Rust file's product code that name a harness, once as an identifier and once in
  * a string literal, each with its first line.
  */
@@ -5390,6 +5417,7 @@ export function rustFailures(
       options.harnessNamed ?? {},
     ),
   );
+  out.push(...compiledFailures(paths, read));
   return out;
 }
 
