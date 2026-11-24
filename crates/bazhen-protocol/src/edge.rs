@@ -115,11 +115,17 @@ pub fn is_key(key: &str) -> bool {
     (1..=IDEMPOTENCY_KEY_MAX_CHARS).contains(&chars(key))
 }
 
+/// Whether `title`, as given, is the length a task's title is: 1 to 200 code points.
+#[must_use]
+pub fn is_task_title_length(title: &str) -> bool {
+    (1..=TASK_TITLE_MAX_CHARS).contains(&chars(title))
+}
+
 /// A task's title, trimmed, if it holds to `NewTaskTitle`.
 #[must_use]
 pub fn task_title(text: &str) -> Option<&str> {
     let text = trim(text);
-    ((1..=TASK_TITLE_MAX_CHARS).contains(&chars(text)) && title_safe(text)).then_some(text)
+    (is_task_title_length(text) && title_safe(text)).then_some(text)
 }
 
 /// Whether `brief` is a task's brief: 1 to 20000 code points.

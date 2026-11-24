@@ -1,9 +1,10 @@
 //! The read models each event changes, applied inside the transaction that records it. A type
 //! gets its projection here in the change that first appends it.
 
+use bazhen_protocol::edge::is_task_brief;
 use bazhen_protocol::events::NoticeClosed;
 use bazhen_protocol::ids::{Id, NoticeId};
-use bazhen_protocol::tasks::{is_task_brief, is_task_title};
+use bazhen_protocol::tasks::is_task_title;
 use rusqlite::{OptionalExtension, Transaction};
 
 use crate::events::{AppendError, NewEvent, int};
