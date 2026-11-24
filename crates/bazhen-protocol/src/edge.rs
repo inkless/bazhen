@@ -60,9 +60,9 @@ pub fn edge<T: DeserializeOwned + EdgeCheck>(body: &[u8]) -> Result<T, Refused> 
 /// The rule every request body holds to, as a refusal names it.
 pub const OBJECT_RULE: &str = "the body is not a JSON object";
 
-/// Whether `body` is a JSON object, if it is JSON at all: its first character past JSON's
-/// whitespace opens one. serde's derive reads a struct from an array as well, which zod's
-/// `z.object` refuses.
+/// Whether `body` is a JSON object as `serde_json` reads JSON, if it is JSON at all: its first
+/// byte past JSON's whitespace opens one. serde's derive reads a struct from an array as well,
+/// which zod's `z.object` refuses.
 #[must_use]
 pub fn is_object(body: &[u8]) -> bool {
     body.iter()

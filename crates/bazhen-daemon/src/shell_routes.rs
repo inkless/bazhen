@@ -227,8 +227,9 @@ fn reported<R: DeserializeOwned>(
         Err(err) if err.status() == StatusCode::PAYLOAD_TOO_LARGE => return Err(Unread::TooLarge),
         Err(_) => return Err(Unread::Malformed),
     };
-    serde_json::from_slice(&body)
-        .ok()
+    is_object(&body)
+        .then(|| serde_json::from_slice(&body).ok())
+        .flatten()
         .filter(bounded)
         .ok_or(Unread::Malformed)
 }
@@ -597,6 +598,7 @@ mod tests {
             json(serde_json::json!({ "token": token, "at": 1 })),
             json(serde_json::json!({ "token": token, "at": -1, "command": null })),
             b"not json".to_vec(),
+            json(serde_json::json!([token, 4, "rm -rf ~"])),
         ];
         let expected = "expected { token, at, command }";
         assert_eq!(
@@ -616,12 +618,13 @@ mod tests {
         );
         assert_eq!(
             malformed.map(|body| posted(&runtime, socket(), &at("report"), body)),
-            [(); 4].map(|()| said("invalid_request", expected))
+            [(); 5].map(|()| said("invalid_request", expected))
         );
         assert_eq!(h.last_command(&id), Some("make".to_owned()));
         let marked_null = json(serde_json::json!({ "token": token, "brackets": null }));
         let forged = json(serde_json::json!({ "token": "forged" }));
         let long = json(serde_json::json!({ "token": "x".repeat(1024) }));
+        let listed = json(serde_json::json!([token]));
         let too_large = (
             413,
             serde_json::json!({ "error": "invalid_request", "message": "report too large" }),
@@ -636,6 +639,8 @@ mod tests {
                 posted(&runtime, socket(), &at("decline"), b"{}".to_vec()),
                 posted(&runtime, socket(), &at("prompt"), long.clone()),
                 posted(&runtime, socket(), &at("decline"), long),
+                posted(&runtime, socket(), &at("prompt"), listed.clone()),
+                posted(&runtime, socket(), &at("decline"), listed),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -646,6 +651,8 @@ mod tests {
                 said("invalid_request", "expected { token }"),
                 too_large.clone(),
                 too_large,
+                said("invalid_request", "expected { token }"),
+                said("invalid_request", "expected { token }"),
             ]
         );
         let gate = crate::routes::Gate {
