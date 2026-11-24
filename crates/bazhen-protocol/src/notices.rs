@@ -8,7 +8,11 @@ use crate::ids::{DeviceId, NoticeId};
 pub const PAIRING_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 pub const PAIRING_CODE_LENGTH: usize = 8;
 
-/// The most characters a device's name holds, as JavaScript counts them: UTF-16 code units.
+/// The most code points a code has as typed, with the spaces and dashes a person adds, as zod's
+/// `.max(32)` counts them.
+pub const PAIRING_CODE_TYPED_MAX: usize = 32;
+
+/// The most characters a device's name holds, as zod's `.max` counts them: code points.
 pub const DEVICE_NAME_MAX: usize = 64;
 
 /// The one kind of notice a daemon opens today: a device paired.
@@ -130,10 +134,14 @@ pub struct DismissNoticeResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairRequest {
-    #[cfg_attr(feature = "schema", schemars(length(max = 32)))]
+    #[cfg_attr(feature = "schema", schemars(length(max = PAIRING_CODE_TYPED_MAX)))]
     pub code: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 64)))]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = DEVICE_NAME_MAX)))]
     pub name: Option<String>,
 }
 

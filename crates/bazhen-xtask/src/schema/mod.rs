@@ -1,10 +1,15 @@
 //! `cargo xtask schema`: the protocol's JSON Schema, as the Rust crates emit it, and the zod
 //! written from it, into `target/protocol-shadow/`. Nothing there is committed yet: the
 //! TypeScript protocol in packages/protocol is still the one the daemon and clients run. With
-//! `--check` it also holds schemars to the crates' own tests (`leaks`).
+//! `--check` it also holds schemars to the crates' own tests (`leaks`). Beside them it writes the
+//! planted corpus (`corpus`), with the daemon edge's verdict on each case, and fails where the
+//! edge's verdict isn't the protocol's.
 
+mod corpus;
 mod leaks;
 mod zod;
+
+pub(crate) use corpus::KNOWN_MISMATCHES;
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -25,6 +30,15 @@ const EMIT: &[&str] = &[
     "emit_schema",
 ];
 
+/// The cases' file, which the example reads for `verdicts`, under `SHADOW`.
+const CASES: &str = "corpus/cases.json";
+
+/// The protocol's own schemas, one file a message.
+const PROTOCOL_SCHEMAS: &str = "packages/protocol/schema";
+
+/// The protocol's fixtures, one file a message.
+const FIXTURES: &str = "packages/protocol/fixtures/api";
+
 /// Where the output goes, under the repository's root.
 const SHADOW: &str = "target/protocol-shadow";
 
@@ -34,10 +48,11 @@ const CHECKS: &str = "packages/protocol/src/checks.ts";
 /// `CHECKS` as the generated module, in `SHADOW/gen/`, imports it.
 const CHECKS_FROM_SHADOW: &str = "../../../packages/protocol/src/checks.ts";
 
-/// Writes the schema and its zod into `SHADOW`, and with `check` holds schemars to the crates'
-/// tests.
+/// Writes the schema and its zod into `SHADOW`, with the corpus judged against `known`, and with
+/// `check` holds schemars to the crates' tests.
 pub(crate) fn run(
     check: bool,
+    known: corpus::Known<'_>,
     env: Env,
     places: &Places,
     host: &mut impl Host,
@@ -53,7 +68,12 @@ pub(crate) fn run(
         return Exit::Failed;
     }
     match host.output(EMIT, &env) {
-        Ok(Some(printed)) => problems.extend(write_shadow(&printed, places, host)),
+        Ok(Some(printed)) => {
+            problems.extend(write_shadow(&printed, places, host));
+            if problems.is_empty() {
+                problems.extend(write_corpus(&printed, known, &env, places, host));
+            }
+        }
         Ok(None) => problems
             .push("the schema's example failed: `cargo run --example emit_schema`".to_owned()),
         Err(error) => problems.push(format!("cargo: {error}")),
@@ -90,6 +110,79 @@ fn write_shadow(printed: &str, places: &Places, host: &mut impl Host) -> Vec<Str
         if let Err(error) = host.write(&path, text) {
             problems.push(format!("{}: {error}", path.display()));
         }
+    }
+    problems
+}
+
+/// Plants the corpus from the schema `printed` holds, has the example judge each case as the
+/// daemon's edge does, and writes both: each disagreement outside `known` is a
+/// problem.
+fn write_corpus(
+    printed: &str,
+    known: corpus::Known<'_>,
+    env: &Env,
+    places: &Places,
+    host: &mut impl Host,
+) -> Vec<String> {
+    let Some(defs) = serde_json::from_str::<serde_json::Value>(printed)
+        .ok()
+        .and_then(|document| document.get("$defs").and_then(|d| d.as_object()).cloned())
+    else {
+        return vec!["the schema's example printed no `$defs`".to_owned()];
+    };
+    let read = |dir: &str, name: &str| {
+        let path = places.root.join(dir).join(format!("{name}.json"));
+        host.read(&path)
+            .ok()
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+    };
+    let cases = match corpus::plant(&defs, &|name| read(PROTOCOL_SCHEMAS, name), &|name| {
+        read(FIXTURES, name)
+    }) {
+        Ok(cases) => cases,
+        Err(problems) => return problems,
+    };
+    let listed: Vec<serde_json::Value> = cases.iter().map(corpus::Case::to_json).collect();
+    let shadow = places.root.join(SHADOW);
+    let cases_at = shadow.join(CASES);
+    if let Err(error) = host.write(
+        &cases_at,
+        &serde_json::Value::from(listed.clone()).to_string(),
+    ) {
+        return vec![format!("{}: {error}", cases_at.display())];
+    }
+    let Some(cases_path) = cases_at.to_str() else {
+        return vec![format!("{} isn't UTF-8", cases_at.display())];
+    };
+    let judge: Vec<&str> = EMIT
+        .iter()
+        .copied()
+        .chain(["--", "verdicts", cases_path])
+        .collect();
+    let verdicts = match host.output(&judge, env) {
+        Ok(Some(printed)) => match serde_json::from_str::<Vec<serde_json::Value>>(&printed) {
+            Ok(verdicts) => verdicts,
+            Err(error) => return vec![format!("the example's verdicts aren't JSON: {error}")],
+        },
+        Ok(None) => return vec!["the example failed to judge the corpus".to_owned()],
+        Err(error) => return vec![format!("cargo: {error}")],
+    };
+    let judged: Vec<serde_json::Value> = listed
+        .into_iter()
+        .zip(&verdicts)
+        .map(|(mut case, verdict)| {
+            if let Some(case) = case.as_object_mut() {
+                case.insert("edge".to_owned(), verdict.clone());
+            }
+            case
+        })
+        .collect();
+    let mut problems = corpus::mismatched(&cases, &verdicts, known);
+    let written = shadow.join("corpus.json");
+    let text = serde_json::to_string_pretty(&judged).unwrap_or_default() + "\n";
+    if let Err(error) = host.write(&written, &text) {
+        problems.push(format!("{}: {error}", written.display()));
     }
     problems
 }
@@ -153,11 +246,14 @@ mod tests {
     use super::*;
     use crate::gate::Status;
 
-    /// A host whose commands print what it was given, and which keeps what is written.
+    /// A host whose commands print what it was given, which reads `files`, and which keeps
+    /// what is written. With `judge`, the example's verdicts are `judge`'s on each case written.
     #[derive(Default)]
     struct Fake {
         printed: BTreeMap<String, Option<String>>,
         checks: Option<String>,
+        files: BTreeMap<PathBuf, String>,
+        judge: Option<fn(&serde_json::Value) -> serde_json::Value>,
         written: BTreeMap<PathBuf, String>,
         ran: Vec<String>,
     }
@@ -170,7 +266,7 @@ mod tests {
             if path == Path::new("/a/repo").join(CHECKS) {
                 return Ok(self.checks.clone());
             }
-            Ok(None)
+            Ok(self.files.get(path).cloned())
         }
         fn run(&mut self, _: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
             Ok(Some(1))
@@ -178,6 +274,13 @@ mod tests {
         fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
             let line = argv.join(" ");
             self.ran.push(line.clone());
+            if let (Some(judge), true) = (self.judge, line == judged()) {
+                let cases = &self.written[&Path::new("/a/repo").join(SHADOW).join(CASES)];
+                let cases: Vec<serde_json::Value> = serde_json::from_str(cases).unwrap();
+                return Ok(Some(
+                    json!(cases.iter().map(judge).collect::<Vec<_>>()).to_string(),
+                ));
+            }
             Ok(self.printed.get(&line).cloned().flatten())
         }
         fn write(&mut self, path: &Path, text: &str) -> std::io::Result<()> {
@@ -203,7 +306,12 @@ mod tests {
         );
         host.printed
             .insert(leaks::METADATA.join(" "), Some(metadata(&json!([]))));
+        host.printed.insert(judged(), Some("[]".to_owned()));
         host
+    }
+
+    fn judged() -> String {
+        format!("{} -- verdicts /a/repo/{SHADOW}/{CASES}", EMIT.join(" "))
     }
 
     fn ran(host: &mut Fake, check: bool) -> (Exit, String) {
@@ -212,7 +320,7 @@ mod tests {
             cargo_home: "/home/u/.cargo".into(),
         };
         let mut err = Vec::new();
-        let exit = run(check, Env::new(), &places, host, &mut err);
+        let exit = run(check, &[], Env::new(), &places, host, &mut err);
         (exit, String::from_utf8(err).unwrap())
     }
 
@@ -228,7 +336,49 @@ mod tests {
             Some(&schema(&json!({ "Role": { "type": "string" } })))
         );
         assert!(host.written.keys().all(|p| p.starts_with(&shadow)));
-        assert_eq!(host.ran, vec![EMIT.join(" ")]);
+        assert_eq!(host.ran, vec![EMIT.join(" "), judged()]);
+        assert_eq!(
+            host.written
+                .get(&shadow.join("corpus.json"))
+                .map(String::as_str),
+            Some("[]\n")
+        );
+    }
+
+    #[test]
+    fn fails_on_each_case_the_edge_judges_otherwise_and_writes_its_verdict_beside_it() {
+        let message = json!({
+            "type": "object",
+            "properties": { "n": { "type": "integer", "minimum": 0, "maximum": 9 } },
+            "required": ["n"],
+        });
+        let judged_by = |judge| {
+            let mut host = fake(&json!({ "M": message }));
+            let fixture = Path::new("/a/repo").join(FIXTURES).join("M.json");
+            let example = json!([{ "name": "one", "wire": { "n": 1 } }]);
+            host.files.insert(fixture, example.to_string());
+            host.judge = Some(judge);
+            let (exit, err) = ran(&mut host, true);
+            let corpus = &host.written[&Path::new("/a/repo").join(SHADOW).join("corpus.json")];
+            let corpus: Vec<serde_json::Value> = serde_json::from_str(corpus).unwrap();
+            (exit, err, corpus)
+        };
+        let (exit, err, corpus) = judged_by(|_| json!({ "taken": {} }));
+        assert_eq!(exit, Exit::Failed);
+        assert!(
+            err.contains(
+                r#"M/n (pastMaximum): the protocol refuses {"n":10}, and the edge takes it"#
+            ),
+            "{err}"
+        );
+        assert!(!err.contains("(atMaximum)"), "{err}");
+        let past = corpus.iter().find(|c| c["kind"] == "pastMaximum").unwrap();
+        assert_eq!(past["edge"], json!({ "taken": {} }));
+        let (exit, err, _) = judged_by(|case| match case["expect"].as_str() {
+            Some("accept") => json!({ "taken": {} }),
+            _ => json!({ "refused": "no" }),
+        });
+        assert_eq!((exit, err.as_str()), (Exit::Done, ""));
     }
 
     #[test]
@@ -287,6 +437,7 @@ mod tests {
             host.ran,
             vec![
                 EMIT.join(" "),
+                judged(),
                 leaks::TREE.join(" "),
                 leaks::METADATA.join(" ")
             ]

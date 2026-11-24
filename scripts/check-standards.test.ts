@@ -2050,6 +2050,11 @@ describe("decoderFailures", () => {
     "crates/p/fuzz/fuzz_targets/decode.rs": "fuzz_target!(|b: &[u8]| { p::decode(b); });",
     "crates/p/tests/api.rs": "fn helper(b: &[u8]) {}",
   };
+  /** The repo with decode's fuzz target making `call`. */
+  const decodeTargetCalling = (call: string) => ({
+    ...repo,
+    "crates/p/fuzz/fuzz_targets/decode.rs": `fuzz_target!(|b: &[u8]| { ${call}; });`,
+  });
   const failures = (
     fuzzed: Record<string, string>,
     notDecoders: Record<string, string>,
@@ -4250,6 +4255,37 @@ describe("decoderFailures", () => {
     ]).toEqual([
       [expect.stringContaining("lib.rs::other is listed, but no such function takes bytes")],
       [expect.stringContaining("its fuzz target crates/p/fuzz/fuzz_targets/gone.rs doesn't exist")],
+      [expect.stringContaining("doesn't call decode")],
+    ]);
+  });
+
+  it("counts a call that names its type parameters, by path or as a method", () => {
+    expect([
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<Frame>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode :: <Vec<Frame>> (b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decoded::<Frame>(b)")),
+    ]).toEqual([[], [], [expect.stringContaining("doesn't call decode")]]);
+  });
+
+  it("counts a method's call that names its type parameters, and no turbofish past its statement", () => {
+    const methods = {
+      ...repo,
+      "crates/p/src/lib.rs": `${lib}pub struct Reader;\nimpl Reader { pub fn decode<T>(&self, b: &[u8]) {} }\n`,
+    };
+    const reading = (call: string) => ({
+      ...methods,
+      "crates/p/fuzz/fuzz_targets/decode.rs": `fuzz_target!(|b: &[u8]| { p::decode(b); let r = p::Reader; ${call}; });`,
+    });
+    const both = { ...fuzzed, "crates/p/src/lib.rs::Reader::decode": "decode" };
+    expect([
+      failures(both, exempt, reading("r.decode::<Frame>(b)")),
+      failures(both, exempt, reading("r.decode::<Frame>; Box::<u8>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<T>; Box::<u8>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<T> { Box::<u8>(b) }")),
+    ]).toEqual([
+      [],
+      [expect.stringContaining("doesn't call Reader::decode")],
+      [expect.stringContaining("doesn't call decode")],
       [expect.stringContaining("doesn't call decode")],
     ]);
   });

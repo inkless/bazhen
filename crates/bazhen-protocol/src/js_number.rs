@@ -44,6 +44,47 @@ pub fn optional<S: Serializer>(x: &Option<f64>, serializer: S) -> Result<S::Ok, 
     }
 }
 
+/// Deserializes a whole number as JavaScript reads one: `2`, `2.0` and `2e0` are the same number,
+/// which zod's `.int()` takes however JSON writes it. A number written with a fraction or exponent
+/// is taken up to the largest safe integer, past which an `f64` isn't exact; one written as digits
+/// is taken as it is, and held to that bound by the edge, as serde's `u64` was.
+///
+/// # Errors
+///
+/// When the value isn't a whole, non-negative number.
+pub fn whole<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    struct Whole;
+
+    impl serde::de::Visitor<'_> for Whole {
+        type Value = u64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a whole, non-negative number")
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<u64, E> {
+            Ok(n)
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<u64, E> {
+            u64::try_from(n).map_err(|_| E::invalid_value(serde::de::Unexpected::Signed(n), &self))
+        }
+
+        fn visit_f64<E: serde::de::Error>(self, x: f64) -> Result<u64, E> {
+            // Rust writes a whole f64 as its digits, with no exponent, and negative zero as `-0`.
+            let text = x.to_string();
+            let digits = if text == "-0" { "0" } else { &text };
+            digits
+                .parse()
+                .ok()
+                .filter(|n| *n <= crate::edge::MAX_SAFE_INTEGER)
+                .ok_or_else(|| E::invalid_value(serde::de::Unexpected::Float(x), &self))
+        }
+    }
+
+    deserializer.deserialize_any(Whole)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,6 +92,34 @@ mod tests {
 
     #[derive(serde::Serialize)]
     struct One(#[serde(serialize_with = "number")] f64);
+
+    #[derive(serde::Deserialize)]
+    struct Whole(#[serde(deserialize_with = "whole")] u64);
+
+    fn read_whole(text: &str) -> Option<u64> {
+        serde_json::from_str::<Whole>(text).ok().map(|w| w.0)
+    }
+
+    #[test]
+    fn reads_a_whole_number_however_json_writes_it_and_an_inexact_one_not_at_all() {
+        for (text, read) in [
+            ("0", Some(0)),
+            ("2", Some(2)),
+            ("2.0", Some(2)),
+            ("2e0", Some(2)),
+            ("-0.0", Some(0)),
+            ("9007199254740991", Some(9_007_199_254_740_991)),
+            ("9007199254740991.0", Some(9_007_199_254_740_991)),
+            ("2.5", None),
+            ("9007199254740992", Some(9_007_199_254_740_992)),
+            ("9007199254740992.0", None),
+            ("-1", None),
+            ("\"2\"", None),
+            ("null", None),
+        ] {
+            assert_eq!(read_whole(text), read, "{text}");
+        }
+    }
 
     fn written(x: f64) -> String {
         serde_json::to_string(&One(x)).unwrap()
@@ -119,6 +188,32 @@ mod tests {
     }
 
     proptest! {
+        /// A whole number written as digits is read as itself, and one up to the largest safe
+        /// integer as itself however JSON writes it; past that bound, only as digits, where the
+        /// edge holds it to the bound.
+        #[test]
+        fn reads_a_whole_number_as_digits_and_a_safe_one_however_json_writes_it(
+            n in prop_oneof![
+                any::<u64>(),
+                0..=crate::edge::MAX_SAFE_INTEGER,
+                (crate::edge::MAX_SAFE_INTEGER - 2)..=(crate::edge::MAX_SAFE_INTEGER + 2),
+            ]
+        ) {
+            prop_assert_eq!(read_whole(&n.to_string()), Some(n));
+            let safe = (n <= crate::edge::MAX_SAFE_INTEGER).then_some(n);
+            for written in [format!("{n}.0"), format!("{n}e0"), format!("{n}.000")] {
+                prop_assert_eq!(read_whole(&written), safe, "{}", written);
+            }
+            prop_assert_eq!(read_whole(&format!("-{n}")), (n == 0).then_some(0));
+        }
+
+        /// A fraction a double holds is refused, as zod's `.int()` refuses it: below 2^48 a
+        /// double's step is at most 1/16, so no tenth rounds to a whole.
+        #[test]
+        fn refuses_a_number_with_a_fraction(n in 0..(1_u64 << 48), tenths in 1..10_u8) {
+            prop_assert_eq!(read_whole(&format!("{n}.{tenths}")), None);
+        }
+
         /// Every finite number reads back as itself, written plainly from 1e-6 up to 1e21 and
         /// with a signed exponent past those bounds, as JavaScript writes it.
         #[test]
