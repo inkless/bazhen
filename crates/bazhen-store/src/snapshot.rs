@@ -74,7 +74,7 @@ impl Reads<'_> {
     ///
     /// [`SnapshotError::NeedsAgentView`] when the database holds agents or items for the human.
     pub fn snapshot(self, view: &SnapshotView) -> Result<StateSnapshot, SnapshotError> {
-        self.compose(view, None)
+        self.read(view, None)
     }
 
     /// The snapshot, and the cursor after its newest event, its agents and items for the human
@@ -88,10 +88,10 @@ impl Reads<'_> {
         view: &SnapshotView,
         agents: &dyn AgentView,
     ) -> Result<StateSnapshot, SnapshotError> {
-        self.compose(view, Some(agents))
+        self.read(view, Some(agents))
     }
 
-    fn compose(
+    fn read(
         self,
         view: &SnapshotView,
         agents: Option<&dyn AgentView>,
