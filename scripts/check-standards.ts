@@ -3745,12 +3745,22 @@ export function decoderFailures(
     const code = paths.includes(file) ? rustCode(read(file)) : "";
     // A call may name its type parameters, as `edge::<T>(body)` does, within one expression.
     const turbofish = String.raw`(?:\s*::\s*<[^(){};]*>)?`;
+    // A private type is reached through a trait it implements, as a `dyn Trait` or `impl Trait`:
+    // the trait named so, not merely named, as `Key::Session` names a variant.
+    const source = key.slice(0, key.indexOf(".rs::") + 3);
+    const implemented = new RegExp(`\\bimpl\\s+(\\w+)\\s+for\\s+${owner ?? ""}\\b`, "g");
+    const traits =
+      owner === undefined || !paths.includes(source)
+        ? []
+        : [...rustCode(read(source)).matchAll(implemented)].map((m) => m[1] ?? "");
+    const named =
+      new RegExp(`\\b${owner ?? ""}\\b`).test(code) ||
+      traits.some((name) => new RegExp(`\\b(?:dyn|impl)\\s+${name}\\b`).test(code));
     const calls =
       owner === undefined
         ? new RegExp(`\\b${fn}${turbofish}\\s*\\(`).test(code)
         : new RegExp(`\\b${owner}::${fn}${turbofish}\\s*\\(`).test(code) ||
-          (new RegExp(`\\b${owner}\\b`).test(code) &&
-            new RegExp(`\\.${fn}${turbofish}\\s*\\(`).test(code));
+          (named && new RegExp(`\\.${fn}${turbofish}\\s*\\(`).test(code));
     if (!paths.includes(file)) {
       out.push(`${key}: its fuzz target ${file} doesn't exist.`);
     } else if (!calls) {
