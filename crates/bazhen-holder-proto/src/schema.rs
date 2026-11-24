@@ -8,11 +8,11 @@ use std::marker::PhantomData;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
 use crate::body::{
-    Alternate, Argv, Bounded, Env, ErrorBody, ExitCode, Exited, Foreground, Gap, HelloReply,
-    HelloRequest, MAX_SAFE_INTEGER, OkBody, PasteRequest, ProtocolVersion, RESERVED_ENV_NAMES,
-    RESERVED_TAG_NAMES, Resized, Respawned, Screen, ScreenRequest, SetTagsRequest, SetThemeRequest,
-    Signal, SignalRequest, SpawnSpec, Stats, SubscribeRequest, TagName, TagValue, Tags, TerminalId,
-    Theme, Title, Utf8, VersionText, Versions,
+    Alternate, Argv, Bounded, Count, Env, ErrorBody, ExitCode, Exited, Foreground, Gap, Generation,
+    HelloReply, HelloRequest, MAX_SAFE_INTEGER, OkBody, PasteRequest, ProtocolVersion,
+    RESERVED_ENV_NAMES, RESERVED_TAG_NAMES, Resized, Respawned, Screen, ScreenRequest,
+    SetTagsRequest, SetThemeRequest, Signal, SignalRequest, SpawnSpec, Stats, SubscribeRequest,
+    TagName, TagValue, Tags, TerminalId, Theme, Title, Utf8, VersionText, Versions,
 };
 
 /// Adds every body a holder request, reply or event carries to `generator`'s definitions, with
@@ -40,8 +40,33 @@ pub fn add_bodies(generator: &mut SchemaGenerator) {
     generator.subschema_for::<Respawned>();
 }
 
-/// The extension that names a rule no keyword states, which `checks.ts` holds a string to.
+/// The extension that names the rules no keyword states, which `checks.ts` holds a value to.
 const CHECK: &str = "x-bazhen-check";
+
+/// The check that refuses a lone surrogate, which a Rust peer can't read into a `String`.
+const WELL_FORMED: &str = "wellFormed";
+
+/// A string with no lone surrogate: any a Rust `String` holds.
+#[derive(Debug)]
+pub struct WellFormed;
+
+impl JsonSchema for WellFormed {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "WellFormed".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        well_formed()
+    }
+}
+
+fn well_formed() -> Schema {
+    json_schema!({ "type": "string", CHECK: WELL_FORMED })
+}
 
 /// The extension that names, on a record, the `checks.ts` preprocess that refuses an own
 /// `__proto__` key: zod's record skips one, so `propertyNames` alone never sees it.
@@ -103,9 +128,11 @@ impl<const MAX: usize, const MIN: usize> JsonSchema for Utf8<MAX, MIN> {
         if MIN > 0 {
             schema.insert("minLength".to_owned(), MIN.into());
         }
+        let mut checks = vec![serde_json::Value::from(WELL_FORMED)];
         if MAX != usize::MAX {
-            schema.insert(CHECK.to_owned(), format!("utf8AtMost{MAX}Bytes").into());
+            checks.push(format!("utf8AtMost{MAX}Bytes").into());
         }
+        schema.insert(CHECK.to_owned(), checks.into());
         schema
     }
 }
@@ -151,7 +178,7 @@ impl JsonSchema for Argv {
     }
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({ "type": "array", "items": { "type": "string" }, "minItems": 1 })
+        json_schema!({ "type": "array", "items": well_formed(), "minItems": 1 })
     }
 }
 
@@ -198,11 +225,52 @@ impl JsonSchema for Env {
     }
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let mut names = well_formed();
+        names.insert("pattern".to_owned(), refusing(&RESERVED_ENV_NAMES).into());
         json_schema!({
             "type": "object",
-            "propertyNames": { "type": "string", "pattern": refusing(&RESERVED_ENV_NAMES) },
-            "additionalProperties": { "type": "string" },
+            "propertyNames": names,
+            "additionalProperties": well_formed(),
             TRANSFORM: REFUSING_OWN_PROTO,
+        })
+    }
+}
+
+/// Text to paste: no C0 or C1 control or DEL, and printable ASCII only when unmarked, as
+/// `PasteRequest::new` holds it.
+impl JsonSchema for PasteRequest {
+    fn schema_name() -> Cow<'static, str> {
+        "HolderPasteRequest".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "object",
+            "properties": {
+                "generation": generator.subschema_for::<Generation>(),
+                "text": { "type": "string", CHECK: [WELL_FORMED, "noControl"] },
+                "brackets": { "type": "boolean" },
+            },
+            "required": ["generation", "text", "brackets"],
+            CHECK: "unmarkedPasteIsAscii",
+        })
+    }
+}
+
+/// A screen's text: no control but the newline ending each row, as `Screen::new` holds it.
+impl JsonSchema for Screen {
+    fn schema_name() -> Cow<'static, str> {
+        "HolderScreen".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "object",
+            "properties": {
+                "text": { "type": "string", CHECK: [WELL_FORMED, "screenText"] },
+                "history": generator.subschema_for::<Count>(),
+            },
+            "required": ["text", "history"],
         })
     }
 }
@@ -260,8 +328,9 @@ mod tests {
             "type": "string",
             "minLength": 1,
             "pattern": "^(?!(?:__proto__|constructor|prototype)$)",
-            "x-bazhen-check": "utf8AtMost64Bytes",
+            "x-bazhen-check": ["wellFormed", "utf8AtMost64Bytes"],
         });
+        let well_formed = json!({ "type": "string", "x-bazhen-check": "wellFormed" });
         let cases = [
             (
                 "HolderSize",
@@ -282,7 +351,7 @@ mod tests {
                 "HolderVersions",
                 json!({
                     "type": "array",
-                    "items": { "type": "string", "x-bazhen-check": "utf8AtMost32Bytes" },
+                    "items": { "type": "string", "x-bazhen-check": ["wellFormed", "utf8AtMost32Bytes"] },
                     "minItems": 1,
                     "maxItems": 16,
                 }),
@@ -297,7 +366,7 @@ mod tests {
             ),
             (
                 "HolderArgv",
-                json!({ "type": "array", "items": { "type": "string" }, "minItems": 1 }),
+                json!({ "type": "array", "items": well_formed, "minItems": 1 }),
             ),
             (
                 "HolderSignal",
@@ -312,7 +381,7 @@ mod tests {
                 json!({
                     "type": "object",
                     "propertyNames": names,
-                    "additionalProperties": { "type": "string", "x-bazhen-check": "utf8AtMost1024Bytes" },
+                    "additionalProperties": { "type": "string", "x-bazhen-check": ["wellFormed", "utf8AtMost1024Bytes"] },
                     "x-bazhen-transform": "refusingOwnProto",
                 }),
             ),
@@ -320,8 +389,8 @@ mod tests {
                 "HolderEnv",
                 json!({
                     "type": "object",
-                    "propertyNames": { "type": "string", "pattern": "^(?!(?:__proto__)$)" },
-                    "additionalProperties": { "type": "string" },
+                    "propertyNames": { "type": "string", "pattern": "^(?!(?:__proto__)$)", "x-bazhen-check": "wellFormed" },
+                    "additionalProperties": well_formed,
                     "x-bazhen-transform": "refusingOwnProto",
                 }),
             ),
@@ -334,6 +403,40 @@ mod tests {
             .filter(|n| n.starts_with("Bounded") || n.starts_with("Utf8"))
             .collect();
         assert_eq!(generic, Vec::<&String>::new());
+    }
+
+    #[test]
+    fn describes_a_paste_and_a_screen_with_the_checks_their_text_is_held_to() {
+        let definitions = definitions();
+        let cases = [
+            (
+                "HolderPasteRequest",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "generation": { "type": "integer", "minimum": 0, "maximum": 9_007_199_254_740_991_u64 },
+                        "text": { "type": "string", "x-bazhen-check": ["wellFormed", "noControl"] },
+                        "brackets": { "type": "boolean" },
+                    },
+                    "required": ["generation", "text", "brackets"],
+                    "x-bazhen-check": "unmarkedPasteIsAscii",
+                }),
+            ),
+            (
+                "HolderScreen",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string", "x-bazhen-check": ["wellFormed", "screenText"] },
+                        "history": { "type": "integer", "minimum": 0, "maximum": 9_007_199_254_740_991_u64 },
+                    },
+                    "required": ["text", "history"],
+                }),
+            ),
+        ];
+        for (name, schema) in cases {
+            assert_eq!(described(&definitions, name), schema, "{name}");
+        }
     }
 
     #[test]

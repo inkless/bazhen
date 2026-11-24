@@ -2,39 +2,16 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   agentOrLaunch,
-  finishNoteText,
   linkedShellTakesNoCwd,
-  newTaskTitle,
+  noControl,
   refusingOwnProto,
-  taskNoteText,
+  screenText,
+  unmarkedPasteIsAscii,
   utf8AtMost1024Bytes,
   utf8AtMost32Bytes,
   utf8AtMost64Bytes,
+  wellFormed,
 } from "./checks.ts";
-import { FinishNoteText, NewTaskTitle, TASK_NOTE_MAX_BYTES, TaskNoteText } from "./tasks.ts";
-
-/** Text each rule should judge: plain, each kind of control and invisible, and at the budgets. */
-const TEXTS = [
-  "plain",
-  "two\nlines",
-  "a\ttab",
-  "a\rreturn",
-  "bell\u0007",
-  "escape\u001b[1m",
-  "del\u007f",
-  "c1\u0085",
-  "over\u202eride",
-  "isolate\u2066",
-  "zero\u200bwidth",
-  "word\u2060joiner",
-  "bom\ufeff",
-  "tag\u{e0041}",
-  "lone\ud83d",
-  "pair\ud83d\ude00",
-  "a".repeat(TASK_NOTE_MAX_BYTES),
-  "a".repeat(TASK_NOTE_MAX_BYTES + 1),
-  `${"é".repeat(TASK_NOTE_MAX_BYTES / 2)}a`,
-];
 
 describe("the checks the Rust schema names", () => {
   it.each([
@@ -46,11 +23,32 @@ describe("the checks the Rust schema names", () => {
     expect(check("a".repeat(max + 1))).toBe(false);
     expect(check("é".repeat(max / 2))).toBe(true);
     expect(check(`${"é".repeat(max / 2)}a`)).toBe(false);
+    expect(check.message).toBe(`at most ${max} UTF-8 bytes`);
   });
 
   it("refuses a lone surrogate, which has no UTF-8, and takes a pair", () => {
-    expect(utf8AtMost32Bytes("\ud83d")).toBe(false);
-    expect(utf8AtMost32Bytes("\ud83d\ude00")).toBe(true);
+    expect(wellFormed("\ud83d")).toBe(false);
+    expect(wellFormed("a\ude00")).toBe(false);
+    expect(wellFormed("\ud83d\ude00")).toBe(true);
+  });
+
+  it.each(["\n", "\t", "\u0000", "\u001b", "\u007f", "\u0080", "\u009f"])(
+    "refuses the control %j, and a screen takes it only as a newline",
+    (control) => {
+      expect(noControl(`a${control}`)).toBe(false);
+      expect(screenText(`a${control}`)).toBe(control === "\n");
+    },
+  );
+
+  it("takes text past ASCII that holds no control", () => {
+    expect(noControl("a\u00a0é")).toBe(true);
+    expect(screenText("a\u00a0é\n")).toBe(true);
+  });
+
+  it("takes text beyond printable ASCII in a paste only marked with brackets", () => {
+    expect(unmarkedPasteIsAscii({ text: " ~", brackets: false })).toBe(true);
+    expect(unmarkedPasteIsAscii({ text: "é", brackets: false })).toBe(false);
+    expect(unmarkedPasteIsAscii({ text: "é", brackets: true })).toBe(true);
   });
 
   it("refuses an own __proto__ key a record would skip, and nothing else", () => {
@@ -61,22 +59,6 @@ describe("the checks the Rust schema names", () => {
     expect(record.safeParse(JSON.parse('{"__proto__":"x"}')).success).toBe(false);
     expect(record.safeParse({ a: "x", constructor: "y" }).success).toBe(true);
   });
-
-  it.each([
-    ["NewTaskTitle", z.string().trim().min(1).max(200).refine(newTaskTitle), NewTaskTitle],
-    ["TaskNoteText", z.string().trim().min(1).refine(taskNoteText), TaskNoteText],
-    ["FinishNoteText", z.string().max(20000).refine(finishNoteText), FinishNoteText],
-  ] as const)(
-    "%s as the Rust schema writes it judges text as the protocol does",
-    (_, written, protocol) => {
-      for (const text of TEXTS) {
-        expect({ text, ok: written.safeParse(text).success }).toEqual({
-          text,
-          ok: protocol.safeParse(text).success,
-        });
-      }
-    },
-  );
 
   it("takes a delegation naming an agent or a launch, never both or neither", () => {
     expect(agentOrLaunch({ agentId: "agent_x" })).toBe(true);

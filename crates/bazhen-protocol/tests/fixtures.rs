@@ -267,11 +267,11 @@ fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
     assert_eq!(tagged::<DelegateTaskRequest>(Some("title"), &keys), title);
     assert_eq!(
         tagged::<AddTaskNoteRequest>(Some("text"), &keys),
-        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "x-bazhen-check": "taskNoteText" })
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "x-bazhen-check": ["taskNoteBytes", "noteText"] })
     );
     assert_eq!(
         tagged::<FinishTaskRequest>(Some("note"), &keys),
-        serde_json::json!({ "maxLength": 20_000, "x-bazhen-check": "finishNoteText" })
+        serde_json::json!({ "maxLength": 20_000, "x-bazhen-check": "noteText" })
     );
     assert_eq!(
         tagged::<EscalateRequest>(Some("summary"), &keys),
@@ -284,6 +284,57 @@ fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
     assert_eq!(
         tagged::<OpenShellRequest>(None, &keys),
         serde_json::json!({ "x-bazhen-check": "linkedShellTakesNoCwd" })
+    );
+}
+
+#[test]
+fn each_refinement_the_holder_protocol_makes_is_named_where_it_makes_it() {
+    use bazhen_holder_proto::body::{
+        Argv, Env, ErrorBody, ExitStatus, HelloReply, OkBody, PasteRequest, Screen, SpawnSpec,
+        Title,
+    };
+    let keys = ["minLength", "x-bazhen-check"];
+    let well_formed = serde_json::json!({ "x-bazhen-check": "wellFormed" });
+    let checks = |names: &[&str]| serde_json::json!({ "x-bazhen-check": names });
+    assert_eq!(
+        tagged::<PasteRequest>(Some("text"), &keys),
+        checks(&["wellFormed", "noControl"])
+    );
+    assert_eq!(
+        tagged::<PasteRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "unmarkedPasteIsAscii" })
+    );
+    assert_eq!(
+        tagged::<Screen>(Some("text"), &keys),
+        checks(&["wellFormed", "screenText"])
+    );
+    let non_empty = serde_json::json!({ "minLength": 1, "x-bazhen-check": ["wellFormed"] });
+    assert_eq!(tagged::<SpawnSpec>(Some("cwd"), &keys), non_empty);
+    assert_eq!(tagged::<SpawnSpec>(Some("socket"), &keys), non_empty);
+    assert_eq!(tagged::<HelloReply>(Some("title"), &keys), well_formed);
+    assert_eq!(tagged::<Title>(Some("text"), &keys), well_formed);
+    assert_eq!(tagged::<OkBody>(Some("request"), &keys), well_formed);
+    for key in ["request", "code", "message"] {
+        assert_eq!(tagged::<ErrorBody>(Some(key), &keys), well_formed, "{key}");
+    }
+    let argv = Schema::of::<Argv>();
+    assert_eq!(
+        argv.resolved(&argv.root)["items"]["x-bazhen-check"],
+        "wellFormed"
+    );
+    let env = Schema::of::<Env>();
+    let env = env.resolved(&env.root);
+    assert_eq!(env["propertyNames"]["x-bazhen-check"], "wellFormed");
+    assert_eq!(env["additionalProperties"]["x-bazhen-check"], "wellFormed");
+    let exit = Schema::of::<ExitStatus>();
+    let signalled = exit.resolved(&exit.root)["oneOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|b| b["properties"]["type"]["const"] == "signalled");
+    assert_eq!(
+        signalled.map(|b| &b["properties"]["signal"]["x-bazhen-check"]),
+        Some(&Value::from("wellFormed"))
     );
 }
 

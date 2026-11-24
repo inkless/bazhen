@@ -113,7 +113,7 @@ options = { cache = false }
 
 [tasks.test-medium]
 command = "node scripts/capped.ts --memory 8G --time 20m -- node_modules/.bin/vitest run --project medium --project cli"
-deps = ["build-hook", "build-cli", "build-engine"]
+deps = ["build-hook", "build-cli", "build-engine", "rust-schema-check"]
 options = { cache = false, runDepsInParallel = false }
 
 [tasks.test-bench]

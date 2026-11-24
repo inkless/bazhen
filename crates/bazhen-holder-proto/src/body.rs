@@ -568,8 +568,13 @@ impl From<Theme> for &'static str {
 )]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ExitStatus {
-    Exited { code: ExitCode },
-    Signalled { signal: String },
+    Exited {
+        code: ExitCode,
+    },
+    Signalled {
+        #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
+        signal: String,
+    },
     Unknown,
 }
 
@@ -740,11 +745,6 @@ pub struct SetThemeRequest {
 /// C1 control or DEL, and, unless marked with `brackets`, nothing beyond printable ASCII. Why a
 /// text is refused never quotes it. Since 1.3.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "schema",
-    derive(schemars::JsonSchema),
-    schemars(rename = "HolderPasteRequest")
-)]
 #[serde(try_from = "PasteFields", into = "PasteFields")]
 pub struct PasteRequest(PasteFields);
 
@@ -759,11 +759,6 @@ impl std::fmt::Debug for PasteRequest {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "schema",
-    derive(schemars::JsonSchema),
-    schemars(rename = "HolderPasteFields")
-)]
 struct PasteFields {
     generation: Generation,
     text: String,
@@ -855,6 +850,7 @@ pub struct HelloReply {
     #[serde(deserialize_with = "json::object")]
     pub size: Size,
     pub offset: Offset,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub title: String,
     pub alternate: bool,
     pub history_lines: Count,
@@ -939,20 +935,10 @@ pub struct ScreenRequest {
 /// The screen as text: a line a row, each ended by `\n`, with no other control, so it can be
 /// printed to a terminal as it is. `history` is how many rows of the text are history. Since 1.4.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "schema",
-    derive(schemars::JsonSchema),
-    schemars(rename = "HolderScreen")
-)]
 #[serde(try_from = "ScreenFields", into = "ScreenFields")]
 pub struct Screen(ScreenFields);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "schema",
-    derive(schemars::JsonSchema),
-    schemars(rename = "HolderScreenFields")
-)]
 struct ScreenFields {
     text: String,
     history: Count,
@@ -1026,6 +1012,7 @@ pub struct Resized {
 )]
 pub struct Title {
     pub offset: Offset,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub text: String,
 }
 
@@ -1080,6 +1067,7 @@ pub struct Respawned {
     schemars(rename = "HolderOk")
 )]
 pub struct OkBody {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub request: String,
 }
 
@@ -1160,8 +1148,11 @@ impl ErrorCode {
     schemars(rename = "HolderError")
 )]
 pub struct ErrorBody {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub request: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub code: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::WellFormed"))]
     pub message: String,
     /// The holder's versions, with `no-shared-version`.
     #[serde(

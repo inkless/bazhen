@@ -194,7 +194,7 @@ impl JsonSchema for TaskNoteText {
             "type": "string",
             "x-bazhen-transform": "trim",
             "minLength": 1,
-            "x-bazhen-check": "taskNoteText",
+            "x-bazhen-check": ["taskNoteBytes", "noteText"],
         })
     }
 }
@@ -212,7 +212,7 @@ impl JsonSchema for FinishNoteText {
         schemars::json_schema!({
             "type": "string",
             "maxLength": 20_000,
-            "x-bazhen-check": "finishNoteText",
+            "x-bazhen-check": "noteText",
         })
     }
 }
