@@ -10,6 +10,7 @@ axum = { workspace = true }
 bazhen-client = { workspace = true }
 bazhen-core = { workspace = true }
 bazhen-fs-trust = { workspace = true }
+bazhen-harness = { workspace = true }
 bazhen-holder-proto = { workspace = true }
 bazhen-host-guard = { workspace = true }
 bazhen-peer = { workspace = true }
@@ -27,6 +28,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tokio-util = { workspace = true }
 toml = { workspace = true }
 tower = { workspace = true }
