@@ -28,6 +28,8 @@ enum Edit {
     Raw(String),
     /// Sets or takes out an object's fields.
     Fields(Fields),
+    /// Adds a key, written as JSON text, holding a value.
+    Key(String, Value),
 }
 
 /// One planted case.
@@ -60,9 +62,9 @@ struct Plant {
     accept: bool,
 }
 
-/// The cases the edge's verdict disagrees with today, each with its message, path and kind,
-/// what owns the fix, and why they differ. The list only shrinks: an entry that no longer
-/// disagrees fails, as does a disagreement not listed.
+/// The cases the edge's verdict disagrees with today, each named by its message, path and kind,
+/// which together name one case of each example, with what owns the fix and why they differ. The
+/// list only shrinks: an entry that no longer disagrees fails, as does a disagreement not listed.
 /// Each disagreement the edge may keep, as (message, path, kind, owner, reason).
 pub(crate) type Known<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 
@@ -128,9 +130,9 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     (
         "RenameShellRequest",
         "/name",
-        "shellName",
+        "shellName/loneSurrogate",
         OWNER_STRINGS,
-        LONE,
+        LONE_SHOWABLE,
     ),
     (
         "RestartShellRequest",
@@ -176,52 +178,67 @@ const OWNER_STRINGS: &str = "the protocol's request strings";
 const LONE: &str = "zod takes a lone surrogate in a plain string, which serde_json refuses \
                     and no Rust string or UTF-8 store can hold";
 
-/// The test the protocol's schema names `check` makes, as cases: JSON text put at the field, and
-/// whether the check takes it. `None` for a check this has no cases for.
-fn check_cases(check: &str) -> Option<Vec<(String, bool)>> {
-    let text = |cases: &[(&str, bool)]| {
+/// Why the edge refuses a lone surrogate in a shell's name, which the protocol takes.
+const LONE_SHOWABLE: &str = "zod's shellName check refuses controls and bidi overrides, not a \
+                             lone surrogate, which serde_json refuses and no Rust string or \
+                             UTF-8 store can hold";
+
+/// The test the protocol's schema names `check` makes, as cases: each case's name, the JSON text
+/// put at the field, and whether the check takes it. `None` for a check this has no cases for.
+fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
+    let text = |cases: &[(&'static str, &str, bool)]| {
         cases
             .iter()
-            .map(|(json, accept)| ((*json).to_owned(), *accept))
+            .map(|(name, json, accept)| (*name, (*json).to_owned(), *accept))
             .collect::<Vec<_>>()
     };
     Some(match check {
         "newTaskTitle" => text(&[
-            (r#""fix the build""#, true),
-            (r#""a\u0007b""#, false),
-            (r#""a\u202eb""#, false),
-            (r#""a\u200bb""#, false),
-            (r#""a\udb40\udc01b""#, false),
-            (r#""a\ud800b""#, false),
+            ("plain", r#""fix the build""#, true),
+            ("control", r#""a\u0007b""#, false),
+            ("bidi", r#""a\u202eb""#, false),
+            ("zeroWidth", r#""a\u200bb""#, false),
+            ("tag", r#""a\udb40\udc01b""#, false),
+            ("loneSurrogate", r#""a\ud800b""#, false),
         ]),
         "shellName" => text(&[
-            (r#""build""#, true),
-            (r#""a\u0007b""#, false),
-            (r#""a\u202eb""#, false),
-            (r#""a\u200bb""#, true),
-            (r#""a\ud800b""#, true),
+            ("plain", r#""build""#, true),
+            ("control", r#""a\u0007b""#, false),
+            ("bidi", r#""a\u202eb""#, false),
+            ("zeroWidth", r#""a\u200bb""#, true),
+            ("loneSurrogate", r#""a\ud800b""#, true),
         ]),
         "noteText" => text(&[
-            (r#""line\nnext\ttab""#, true),
-            (r#""a\u0007b""#, false),
-            (r#""a\u200bb""#, false),
-            (r#""a\ud800b""#, false),
+            ("plain", r#""line\nnext\ttab""#, true),
+            ("control", r#""a\u0007b""#, false),
+            ("zeroWidth", r#""a\u200bb""#, false),
+            ("loneSurrogate", r#""a\ud800b""#, false),
         ]),
         "taskNoteBytes" => vec![
-            (Value::from("é".repeat(2000)).to_string(), true),
-            (Value::from("é".repeat(2001)).to_string(), false),
+            (
+                "atMaxBytes",
+                Value::from("é".repeat(2000)).to_string(),
+                true,
+            ),
+            (
+                "pastMaxBytes",
+                Value::from("é".repeat(2001)).to_string(),
+                false,
+            ),
         ],
         _ => return None,
     })
 }
 
-/// The fields an object-level check is broken by, and whether it takes them.
-fn object_cases(check: &str) -> Option<Vec<(Fields, bool)>> {
+/// The fields an object-level check is broken by, each case with its name, and whether the check
+/// takes them.
+fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
     const AGENT: &str = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
     Some(match check {
-        "agentOrLaunch" => vec![(vec![("agentId", None), ("launch", None)], false)],
+        "agentOrLaunch" => vec![("neither", vec![("agentId", None), ("launch", None)], false)],
         "linkedShellTakesNoCwd" => vec![
             (
+                "linkedWithCwd",
                 vec![
                     ("linkedAgentId", Some(json!(AGENT))),
                     ("cwd", Some(json!("/w"))),
@@ -229,6 +246,7 @@ fn object_cases(check: &str) -> Option<Vec<(Fields, bool)>> {
                 false,
             ),
             (
+                "unlinkedWithCwd",
                 vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
                 true,
             ),
@@ -377,13 +395,32 @@ impl<'a> Walk<'a> {
             })
     }
 
+    /// The keyword's value on the protocol's side, which is zod's, or else on the Rust side.
     fn keyword(node: Node<'a>, key: &str) -> Option<&'a Value> {
-        node.rust
+        node.protocol
             .and_then(|s| s.get(key))
-            .or_else(|| node.protocol.and_then(|s| s.get(key)))
+            .or_else(|| node.rust.and_then(|s| s.get(key)))
     }
 
+    fn problem(&mut self, path: &Path, what: &str) {
+        self.problems
+            .insert(format!("{}{}: {what}", self.schema, pointer(path)));
+    }
+
+    /// Plants one case. Two at one path with one kind would be one key in `KNOWN_MISMATCHES`,
+    /// where an entry must name one case, so that is a problem.
     fn plant(&mut self, path: &Path, kind: &str, edit: Edit, accept: bool) {
+        if self
+            .plants
+            .iter()
+            .any(|plant| plant.path == *path && plant.kind == kind)
+        {
+            self.problems.insert(format!(
+                "{}{}: two cases are planted as `{kind}`",
+                self.schema,
+                pointer(path)
+            ));
+        }
         self.plants.push(Plant {
             path: path.clone(),
             kind: kind.to_owned(),
@@ -395,6 +432,13 @@ impl<'a> Walk<'a> {
     /// Plants the cases of the field at `path`, holding `value`, which `node` describes.
     fn walk(&mut self, node: Node<'a>, value: &Value, path: &Path) {
         let node = self.resolve(node);
+        for schema in [node.rust, node.protocol].into_iter().flatten() {
+            for key in schema.as_object().into_iter().flat_map(Map::keys) {
+                if !handled(key, schema) {
+                    self.problem(path, &format!("the corpus plants no case for `{key}`"));
+                }
+            }
+        }
         let pick = |schema: Option<&'a Value>, walk: &Self| -> Option<Option<&'a Value>> {
             let schema = schema?;
             let branches = branches(schema)?;
@@ -436,10 +480,10 @@ impl<'a> Walk<'a> {
         match ty {
             Some("object") => self.object(node, value, path, &checks),
             Some("array") => self.array(node, value, path),
-            Some("string") => self.string(node, path, &checks),
+            Some("string") => self.string(node, value, path, &checks),
             Some("integer") => self.integer(node, value, path),
             Some("boolean") => self.plant(path, "wrongType", Edit::Put(json!("true")), false),
-            Some("number") => self.plant(path, "wrongType", Edit::Put(json!("1")), false),
+            Some("number") => self.number(node, path),
             _ => {}
         }
     }
@@ -463,7 +507,12 @@ impl<'a> Walk<'a> {
             _ => return,
         };
         for value in values.iter().filter(|v| !v.is_null()) {
-            self.plant(path, "eachValue", Edit::Put(value.clone()), true);
+            self.plant(
+                path,
+                &format!("eachValue/{value}"),
+                Edit::Put(value.clone()),
+                true,
+            );
         }
         let other = match values.iter().find(|v| !v.is_null()) {
             Some(Value::Bool(b)) => json!(!b),
@@ -519,12 +568,14 @@ impl<'a> Walk<'a> {
         }
         let mut unknown = path.clone();
         unknown.push("zzUnplanted".to_owned());
-        self.plant(&unknown, "unknownField", Edit::Put(json!(1)), true);
+        let closed = Self::keyword(node, "additionalProperties") == Some(&Value::Bool(false));
+        self.plant(&unknown, "unknownField", Edit::Put(json!(1)), !closed);
         for check in checks {
             match object_cases(check) {
                 Some(cases) => {
-                    for (fields, accept) in cases {
-                        self.plant(path, check, Edit::Fields(fields), accept);
+                    for (name, fields, accept) in cases {
+                        let kind = format!("{check}/{name}");
+                        self.plant(path, &kind, Edit::Fields(fields), accept);
                     }
                 }
                 None => {
@@ -539,6 +590,9 @@ impl<'a> Walk<'a> {
     }
 
     fn record(&mut self, node: Node<'a>, object: &Map<String, Value>, path: &Path) {
+        if let Some((_, held)) = object.iter().next() {
+            self.keys(node, held, path);
+        }
         let values = Node {
             rust: node.rust.and_then(|s| s.get("additionalProperties")),
             protocol: node.protocol.and_then(|s| s.get("additionalProperties")),
@@ -550,6 +604,60 @@ impl<'a> Walk<'a> {
             let mut at = path.clone();
             at.push(key.clone());
             self.walk(values, held, &at);
+        }
+    }
+
+    /// Plants the keys a record refuses, and the longest it takes, each holding `held`.
+    fn keys(&mut self, node: Node<'a>, held: &Value, path: &Path) {
+        let key = |text: &str| Edit::Key(Value::from(text).to_string(), held.clone());
+        if Self::keyword(node, "x-bazhen-transform") == Some(&json!("refusingOwnProto")) {
+            self.plant(path, "ownProto", key("__proto__"), false);
+        }
+        let names = Node {
+            rust: node.rust.and_then(|s| s.get("propertyNames")),
+            protocol: node.protocol.and_then(|s| s.get("propertyNames")),
+        };
+        for schema in [names.rust, names.protocol].into_iter().flatten() {
+            for keyword in schema.as_object().into_iter().flat_map(Map::keys) {
+                if !matches!(
+                    keyword.as_str(),
+                    "type" | "minLength" | "pattern" | "x-bazhen-check"
+                ) {
+                    self.problem(path, &format!("the corpus plants no key for `{keyword}`"));
+                }
+            }
+        }
+        match Self::keyword(names, "minLength").and_then(Value::as_u64) {
+            None | Some(0) => {}
+            Some(1) => self.plant(path, "emptyKey", key(""), false),
+            Some(min) => self.problem(path, &format!("the corpus plants no key under {min}")),
+        }
+        if let Some(pattern) = Self::keyword(names, "pattern").and_then(Value::as_str) {
+            match reserved(pattern) {
+                Some(reserved) => {
+                    for name in reserved {
+                        self.plant(path, &format!("reservedKey/{name}"), key(name), false);
+                    }
+                }
+                None => self.problem(path, &format!("the corpus plants no key for `{pattern}`")),
+            }
+        }
+        for check in Self::checks(names) {
+            match check.as_str() {
+                "wellFormed" => {
+                    let lone = Edit::Key(r#""\ud800""#.to_owned(), held.clone());
+                    self.plant(path, "loneSurrogateKey", lone, false);
+                }
+                "utf8AtMost64Bytes" => {
+                    self.plant(path, "keyAtMaxBytes", key(&"é".repeat(32)), true);
+                    let past = "é".repeat(32) + "a";
+                    self.plant(path, "keyPastMaxBytes", key(&past), false);
+                }
+                _ => self.problem(
+                    path,
+                    &format!("the corpus has no keys for the check `{check}`"),
+                ),
+            }
         }
     }
 
@@ -582,9 +690,22 @@ impl<'a> Walk<'a> {
         self.walk(item, first, &at);
     }
 
-    fn string(&mut self, node: Node<'a>, path: &Path, checks: &[String]) {
+    fn string(&mut self, node: Node<'a>, value: &Value, path: &Path, checks: &[String]) {
         self.plant(path, "wrongType", Edit::Put(json!(1)), false);
-        let patterned = Self::keyword(node, "pattern").is_some();
+        let pattern = Self::keyword(node, "pattern").and_then(Value::as_str);
+        let patterned = pattern.is_some();
+        match (pattern, value.as_str()) {
+            (None, _) => {}
+            (Some(pattern), Some(held)) if refuses_bang(pattern) => {
+                let leading = json!(format!("!{held}"));
+                self.plant(path, "patternLeading", Edit::Put(leading), false);
+                let trailing = json!(format!("{held}!"));
+                self.plant(path, "patternTrailing", Edit::Put(trailing), false);
+            }
+            (Some(pattern), _) => {
+                self.problem(path, &format!("the corpus plants no case for `{pattern}`"));
+            }
+        }
         let min = Self::keyword(node, "minLength")
             .and_then(Value::as_u64)
             .unwrap_or(0);
@@ -618,8 +739,22 @@ impl<'a> Walk<'a> {
             }
             if trims && min > 0 {
                 self.plant(path, "blank", Edit::Put(json!("   ")), false);
-                let padded = format!("  {}  ", units(min.max(1)));
-                self.plant(path, "padded", Edit::Put(json!(padded)), true);
+                let padded = |pad: &str| json!(format!("{pad}{}{pad}", units(min)));
+                self.plant(path, "padded", Edit::Put(padded("  ")), true);
+                // zod trims as JavaScript does: U+FEFF but not U+0085, which every check refuses.
+                self.plant(
+                    path,
+                    "paddedByteOrderMark",
+                    Edit::Put(padded("\u{feff}")),
+                    true,
+                );
+                let next_line = checks.is_empty();
+                self.plant(
+                    path,
+                    "paddedNextLine",
+                    Edit::Put(padded("\u{85}")),
+                    next_line,
+                );
             }
             if checks.is_empty() && min <= 1 && max.is_none_or(|max| max >= 1) {
                 self.plant(
@@ -633,8 +768,9 @@ impl<'a> Walk<'a> {
         for check in checks {
             match check_cases(check) {
                 Some(cases) => {
-                    for (json, accept) in cases {
-                        self.plant(path, check, Edit::Raw(json), accept);
+                    for (name, json, accept) in cases {
+                        let kind = format!("{check}/{name}");
+                        self.plant(path, &kind, Edit::Raw(json), accept);
                     }
                 }
                 None => {
@@ -658,6 +794,9 @@ impl<'a> Walk<'a> {
         self.plant(path, "exponent", Edit::Raw(format!("{held}e0")), true);
         let min = Self::keyword(node, "minimum").and_then(Value::as_i64);
         let max = Self::keyword(node, "maximum").and_then(Value::as_i64);
+        if let Some(floor) = Self::keyword(node, "exclusiveMinimum").and_then(Value::as_i64) {
+            self.plant(path, "atExclusiveMinimum", Edit::Put(json!(floor)), false);
+        }
         if let Some(min) = min {
             self.plant(path, "atMinimum", Edit::Put(json!(min)), true);
             self.plant(
@@ -680,6 +819,68 @@ impl<'a> Walk<'a> {
             }
         }
     }
+
+    fn number(&mut self, node: Node<'a>, path: &Path) {
+        self.plant(path, "wrongType", Edit::Put(json!("1")), false);
+        if let Some(floor) = Self::keyword(node, "exclusiveMinimum").and_then(Value::as_f64) {
+            self.plant(path, "atExclusiveMinimum", Edit::Put(json!(floor)), false);
+        }
+        if let Some(min) = Self::keyword(node, "minimum").and_then(Value::as_f64) {
+            self.plant(path, "atMinimum", Edit::Put(json!(min)), true);
+            self.plant(path, "underMinimum", Edit::Put(json!(min - 1.0)), false);
+        }
+        if let Some(max) = Self::keyword(node, "maximum").and_then(Value::as_f64) {
+            self.plant(path, "atMaximum", Edit::Put(json!(max)), true);
+            self.plant(path, "pastMaximum", Edit::Put(json!(max + 1.0)), false);
+        }
+    }
+}
+
+/// Whether the corpus plants the cases `key` makes in `schema`, or `key` makes none.
+fn handled(key: &str, schema: &Value) -> bool {
+    match key {
+        "$ref" | "$schema" | "$id" | "$defs" | "description" | "default" | "type"
+        | "properties" | "required" | "items" | "enum" | "const" | "oneOf" | "anyOf"
+        | "minLength" | "maxLength" | "pattern" | "minimum" | "maximum" | "exclusiveMinimum"
+        | "minItems" | "maxItems" | "x-bazhen-check" | "propertyNames" => true,
+        "additionalProperties" => schema
+            .get(key)
+            .is_some_and(|v| v.is_object() || v.is_boolean()),
+        "x-bazhen-transform" => matches!(
+            schema.get(key).and_then(Value::as_str),
+            Some("trim" | "refusingOwnProto")
+        ),
+        // A number's format names its width, which its bounds state; a date-time's, the pattern
+        // beside it.
+        "format" => match type_of(schema) {
+            Some("integer" | "number") => true,
+            Some("string") => schema.get("pattern").is_some(),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Whether `pattern` refuses a `!` at either end of what it takes: it is anchored at both, and
+/// holds no `.`, negated class or `!` that could match one but in a lookahead's opening.
+fn refuses_bang(pattern: &str) -> bool {
+    let body = pattern.replace("(?!", "").replace("\\.", "");
+    pattern.starts_with('^')
+        && pattern.ends_with('$')
+        && !body.contains(['!', '.'])
+        && !body.contains("[^")
+}
+
+/// The names a key pattern written `^(?!(?:a|b)$)` reserves, or `None` for any other pattern.
+fn reserved(pattern: &str) -> Option<Vec<&str>> {
+    let names = pattern.strip_prefix("^(?!(?:")?.strip_suffix(")$)")?;
+    let word = |name: &str| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    names
+        .split('|')
+        .all(word)
+        .then(|| names.split('|').collect())
 }
 
 /// `example` with `plant` made in it, as JSON text.
@@ -723,14 +924,21 @@ fn planted(example: &Value, plant: &Plant) -> Option<String> {
             put(at, Value::from(MARK));
             raw = Some(text);
         }
-        Edit::Fields(fields) => {
+        Edit::Fields(_) | Edit::Key(..) => {
             let target = match (at, last) {
                 (at, None) => at,
                 (Value::Object(object), Some(key)) => object.get_mut(key)?,
                 _ => return None,
             };
             let object = target.as_object_mut()?;
-            for (key, value) in fields {
+            if let Edit::Key(key, value) = &plant.edit {
+                object.insert(MARK.to_owned(), value.clone());
+                raw = Some(key);
+            }
+            for (key, value) in match &plant.edit {
+                Edit::Fields(fields) => fields.as_slice(),
+                _ => &[],
+            } {
                 match value {
                     Some(value) => object.insert((*key).to_owned(), value.clone()),
                     None => object.remove(*key),
@@ -918,6 +1126,211 @@ mod tests {
         assert_eq!(at(&["x", "b"], Edit::Drop), None);
     }
 
+    /// The cases planted in one example of `M`, whose Rust schema is `rust` and whose protocol
+    /// schema is `protocol`, as (path, kind, accept, body), or the problems.
+    fn planted_in(
+        rust: Value,
+        protocol: Option<Value>,
+        example: Value,
+    ) -> Result<Vec<(String, String, bool, String)>, Vec<String>> {
+        let mut defs = Map::new();
+        defs.insert("M".to_owned(), rust);
+        let fixture = json!([{ "name": "one", "wire": example }]);
+        let cases = plant(&defs, &|_| protocol.clone(), &|_| Some(fixture.clone()))?;
+        Ok(cases
+            .into_iter()
+            .map(|c| (c.path, c.kind, c.accept, c.body))
+            .collect())
+    }
+
+    fn has(cases: &[(String, String, bool, String)], path: &str, kind: &str, accept: bool) -> bool {
+        cases
+            .iter()
+            .any(|(p, k, a, _)| p == path && k == kind && *a == accept)
+    }
+
+    #[test]
+    fn plants_a_pattern_broken_at_each_end_and_refuses_one_it_cant_break() {
+        let field = |pattern: &str| {
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "pattern": pattern } },
+                "required": ["id"],
+            })
+        };
+        let example = json!({ "id": "task_1" });
+        let cases = planted_in(field("^task_[0-9]$"), None, example.clone()).unwrap();
+        for kind in ["patternLeading", "patternTrailing"] {
+            assert!(has(&cases, "/id", kind, false), "{kind} in {cases:?}");
+        }
+        assert!(
+            cases.iter().any(|c| c.3 == r#"{"id":"task_1!"}"#),
+            "{cases:?}"
+        );
+        for unbreakable in ["^task_.*$", "task_[0-9]", "^task_[^x]$", "^task_!?$"] {
+            let problems = planted_in(field(unbreakable), None, example.clone()).unwrap_err();
+            assert_eq!(
+                problems,
+                [format!(
+                    "M/id: the corpus plants no case for `{unbreakable}`"
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn takes_each_bound_from_the_protocols_side_where_both_give_it() {
+        let field = |max: u64| {
+            json!({
+                "type": "object",
+                "properties": { "n": { "type": "integer", "minimum": 0, "maximum": max } },
+                "required": ["n"],
+            })
+        };
+        let cases = planted_in(field(9), Some(field(5)), json!({ "n": 1 })).unwrap();
+        assert!(has(&cases, "/n", "atMaximum", true), "{cases:?}");
+        assert!(
+            cases
+                .iter()
+                .any(|c| c.1 == "atMaximum" && c.3 == r#"{"n":5}"#),
+            "{cases:?}"
+        );
+        assert!(
+            cases
+                .iter()
+                .any(|c| c.1 == "pastMaximum" && c.3 == r#"{"n":6}"#),
+            "{cases:?}"
+        );
+    }
+
+    #[test]
+    fn plants_an_exclusive_minimum_and_a_numbers_bounds() {
+        let message = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9 },
+                "x": { "type": "number", "format": "double", "minimum": 0.0, "maximum": 1.0 },
+            },
+            "required": ["n", "x"],
+        });
+        let cases = planted_in(message, None, json!({ "n": 1, "x": 0.5 })).unwrap();
+        let body = |kind: &str, path: &str| {
+            cases
+                .iter()
+                .find(|c| c.0 == path && c.1 == kind)
+                .map(|c| (c.2, c.3.as_str()))
+        };
+        assert_eq!(
+            body("atExclusiveMinimum", "/n"),
+            Some((false, r#"{"n":0,"x":0.5}"#))
+        );
+        assert_eq!(
+            body("underMinimum", "/x"),
+            Some((false, r#"{"n":1,"x":-1.0}"#))
+        );
+        assert_eq!(body("atMaximum", "/x"), Some((true, r#"{"n":1,"x":1.0}"#)));
+        assert_eq!(
+            body("pastMaximum", "/x"),
+            Some((false, r#"{"n":1,"x":2.0}"#))
+        );
+    }
+
+    #[test]
+    fn plants_the_keys_a_record_refuses_and_the_longest_it_takes() {
+        let record = json!({
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!(?:__proto__|constructor)$)",
+                "x-bazhen-check": ["wellFormed", "utf8AtMost64Bytes"],
+            },
+            "x-bazhen-transform": "refusingOwnProto",
+        });
+        let cases = planted_in(record, None, json!({ "k": "v" })).unwrap();
+        for (kind, accept, body) in [
+            ("emptyKey", false, r#"{"":"v","k":"v"}"#.to_owned()),
+            (
+                "reservedKey/constructor",
+                false,
+                r#"{"constructor":"v","k":"v"}"#.to_owned(),
+            ),
+            (
+                "loneSurrogateKey",
+                false,
+                r#"{"\ud800":"v","k":"v"}"#.to_owned(),
+            ),
+            (
+                "keyAtMaxBytes",
+                true,
+                format!(r#"{{"{}":"v","k":"v"}}"#, "é".repeat(32)),
+            ),
+            (
+                "keyPastMaxBytes",
+                false,
+                format!(r#"{{"{}a":"v","k":"v"}}"#, "é".repeat(32)),
+            ),
+        ] {
+            let found = cases
+                .iter()
+                .find(|c| c.1 == kind)
+                .map(|c| (c.2, c.3.clone()));
+            assert_eq!(found, Some((accept, body)), "{kind} in {cases:?}");
+        }
+        let own = r#"{"__proto__":"v","k":"v"}"#;
+        assert!(cases.iter().any(|c| c.3 == own && !c.2), "{cases:?}");
+    }
+
+    #[test]
+    fn fails_on_a_keyword_it_plants_no_case_for() {
+        let field = |extra: Value| {
+            let mut n = json!({ "type": "integer", "minimum": 0, "maximum": 9 });
+            n.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            json!({ "type": "object", "properties": { "n": n }, "required": ["n"] })
+        };
+        let problems = planted_in(field(json!({ "multipleOf": 2 })), None, json!({ "n": 2 }));
+        assert_eq!(
+            problems.unwrap_err(),
+            ["M/n: the corpus plants no case for `multipleOf`"]
+        );
+        let protocol = field(json!({ "exclusiveMaximum": 9 }));
+        let problems = planted_in(field(json!({})), Some(protocol), json!({ "n": 2 }));
+        assert_eq!(
+            problems.unwrap_err(),
+            ["M/n: the corpus plants no case for `exclusiveMaximum`"]
+        );
+        let text = json!({
+            "type": "object",
+            "properties": { "at": { "type": "string", "format": "date-time" } },
+            "required": ["at"],
+        });
+        assert_eq!(
+            planted_in(text, None, json!({ "at": "x" })).unwrap_err(),
+            ["M/at: the corpus plants no case for `format`"]
+        );
+    }
+
+    #[test]
+    fn fails_on_two_cases_planted_as_one_kind_at_one_path() {
+        let mut walk = Walk {
+            defs: &Map::new(),
+            plants: Vec::new(),
+            problems: BTreeSet::new(),
+            schema: "M",
+        };
+        let at = vec!["a".to_owned()];
+        walk.plant(&at, "k", Edit::Put(json!(1)), true);
+        walk.plant(&at, "k", Edit::Put(json!(2)), true);
+        walk.plant(&Vec::new(), "k", Edit::Put(json!(3)), true);
+        assert_eq!(
+            walk.problems.into_iter().collect::<Vec<_>>(),
+            ["M/a: two cases are planted as `k`"]
+        );
+    }
+
     #[test]
     fn plants_each_keyword_of_either_schema_once_from_each_example() {
         let message = json!({
@@ -949,7 +1362,7 @@ mod tests {
             ("/title", "atMaxLength", true),
             ("/title", "pastMaxLength", false),
             ("/title", "wrongType", false),
-            ("/zzUnplanted", "unknownField", true),
+            ("/zzUnplanted", "unknownField", false),
         ] {
             assert!(found.contains(&expected), "{expected:?} in {found:?}");
         }
