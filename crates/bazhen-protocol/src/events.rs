@@ -249,8 +249,10 @@ pub struct Event {
     pub entity_id: String,
     pub actor: String,
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<u64>"))]
     pub causation_id: Option<u64>,
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub correlation_id: Option<String>,
     pub payload: serde_json::Value,
 }

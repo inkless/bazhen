@@ -118,7 +118,12 @@ pub struct Task {
     pub id: TaskId,
     pub title: String,
     pub state: TaskState,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub owner_agent_id: Option<AgentId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<TaskId>"))]
     pub parent_task_id: Option<TaskId>,
 }
 
@@ -130,8 +135,16 @@ pub struct Assignment {
     pub task_id: TaskId,
     pub agent_id: AgentId,
     pub role: Role,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AssignmentId>")
+    )]
     pub parent_assignment_id: Option<AssignmentId>,
     pub state: AssignmentState,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AssignmentEndReason>")
+    )]
     pub end_reason: Option<AssignmentEndReason>,
 }
 
@@ -142,7 +155,12 @@ pub struct Assignment {
 pub struct TaskNote {
     pub event_id: u64,
     pub task_id: TaskId,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub agent_id: Option<AgentId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<Role>"))]
     pub role: Option<Role>,
     pub text: String,
     pub handoff: bool,
@@ -157,9 +175,15 @@ pub struct TaskDetail {
     pub id: TaskId,
     pub title: String,
     pub state: TaskState,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub owner_agent_id: Option<AgentId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<TaskId>"))]
     pub parent_task_id: Option<TaskId>,
     pub brief: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub note: Option<String>,
     pub assignments: Vec<Assignment>,
     pub subtasks: Vec<Task>,
@@ -185,8 +209,10 @@ pub struct CreateTaskRequest {
     pub title: String,
     pub brief: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub parent_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Grant"))]
     pub assign: Option<Grant>,
 }
 
@@ -196,6 +222,10 @@ pub struct CreateTaskRequest {
 pub struct CreateTaskResponse {
     pub task_id: TaskId,
     /// Null when the request assigned no one.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AssignmentId>")
+    )]
     pub assignment_id: Option<AssignmentId>,
     pub event_ids: Vec<u64>,
 }
@@ -235,8 +265,10 @@ pub struct FinishTaskRequest {
     pub idempotency_key: String,
     pub outcome: TaskOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub cascade: Option<bool>,
 }
 
@@ -248,6 +280,7 @@ pub struct AddTaskNoteRequest {
     pub idempotency_key: String,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub handoff: Option<bool>,
 }
 
@@ -264,8 +297,10 @@ pub struct TaskCommandResponse {
 pub struct Launch {
     pub harness: HarnessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentName"))]
     pub name: Option<AgentName>,
 }
 
@@ -276,10 +311,13 @@ pub struct Launch {
 pub struct DelegateTaskRequest {
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub from_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentRef"))]
     pub agent_id: Option<AgentRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Launch"))]
     pub launch: Option<Launch>,
     #[serde(default)]
     pub role: Role,
@@ -295,6 +333,7 @@ pub struct EscalateRequest {
     pub idempotency_key: String,
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub task_id: Option<String>,
 }
 

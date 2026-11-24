@@ -590,6 +590,7 @@ pub struct ProcessSpec {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Theme"))]
     pub theme: Option<Theme>,
 }
 
@@ -615,6 +616,7 @@ pub struct SpawnSpec {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Theme"))]
     pub theme: Option<Theme>,
     /// The daemon's versions.
     pub protocol: Versions,
@@ -666,6 +668,7 @@ pub struct HelloRequest {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub writer: Option<bool>,
 }
 
@@ -695,6 +698,7 @@ pub struct SubscribeRequest {
         deserialize_with = "json::optional_object",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "SubscribeFrom"))]
     pub from: Option<SubscribeFrom>,
 }
 
@@ -727,6 +731,7 @@ pub struct SetTagsRequest {
 )]
 pub struct SetThemeRequest {
     #[serde(deserialize_with = "json::nullable")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<Theme>"))]
     pub theme: Option<Theme>,
 }
 
@@ -842,6 +847,10 @@ pub struct HelloReply {
     pub child_start: StartTime,
     /// How the child ended; `None` while it runs.
     #[serde(deserialize_with = "json::nullable_object")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<ExitStatus>")
+    )]
     pub exit: Option<ExitStatus>,
     #[serde(deserialize_with = "json::object")]
     pub size: Size,
@@ -858,6 +867,7 @@ pub struct HelloReply {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub engine: Option<bool>,
 }
 
@@ -883,6 +893,7 @@ pub(crate) struct FrozenHelloReply {
 pub struct Stats {
     pub engine_bytes: Count,
     #[serde(deserialize_with = "json::nullable")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<Count>"))]
     pub rss: Option<Count>,
     pub ring_bytes: Count,
     pub history_lines: Count,
@@ -894,6 +905,7 @@ pub struct Stats {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Count"))]
     pub engine_resets: Option<Count>,
 }
 
@@ -1157,6 +1169,7 @@ pub struct ErrorBody {
         deserialize_with = "json::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "Versions"))]
     pub protocol: Option<Versions>,
 }
 

@@ -1,8 +1,11 @@
 //! The API's messages as JSON Schema, which `cargo xtask schema` writes the TypeScript protocol
 //! from.
 
-use schemars::SchemaGenerator;
+use std::borrow::Cow;
+use std::marker::PhantomData;
+
 use schemars::generate::SchemaSettings;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 
 use crate::agents::{
     AgentCommandResponse, CallerResponse, CloseAgentRequest, FleetAgent, LaunchAgentRequest,
@@ -90,4 +93,28 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<WaitMessagesResponse>();
     generator.subschema_for::<WaitRequest>();
     generator.subschema_for::<WaitResponse>();
+}
+
+/// The schema of a field that must be there and may be null, as `Option::deserialize` reads an
+/// `Option`: schemars leaves out of `required` only a field whose type is an `Option`, which this
+/// isn't, so it stays in.
+#[derive(Debug)]
+pub struct Required<T>(PhantomData<T>);
+
+impl<T: JsonSchema> JsonSchema for Required<T> {
+    fn inline_schema() -> bool {
+        Option::<T>::inline_schema()
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        Option::<T>::schema_name()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        Option::<T>::schema_id()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        Option::<T>::json_schema(generator)
+    }
 }

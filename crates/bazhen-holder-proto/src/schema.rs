@@ -3,6 +3,7 @@
 //! conversion holds it to, which a derive, describing the type it converts from, would leave out.
 
 use std::borrow::Cow;
+use std::marker::PhantomData;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
@@ -203,6 +204,30 @@ impl JsonSchema for Env {
             "additionalProperties": { "type": "string" },
             TRANSFORM: REFUSING_OWN_PROTO,
         })
+    }
+}
+
+/// The schema of a field that must be there and may be null, as `Option::deserialize` reads an
+/// `Option`: schemars leaves out of `required` only a field whose type is an `Option`, which this
+/// isn't, so it stays in.
+#[derive(Debug)]
+pub struct Required<T>(PhantomData<T>);
+
+impl<T: JsonSchema> JsonSchema for Required<T> {
+    fn inline_schema() -> bool {
+        Option::<T>::inline_schema()
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        Option::<T>::schema_name()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        Option::<T>::schema_id()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        Option::<T>::json_schema(generator)
     }
 }
 

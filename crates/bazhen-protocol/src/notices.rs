@@ -68,6 +68,7 @@ pub struct NoticeDevice {
     pub id: DeviceId,
     pub name: String,
     pub origin: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub address: Option<String>,
 }
 
@@ -87,12 +88,22 @@ pub struct Notice {
     pub id: NoticeId,
     pub kind: String,
     pub state: NoticeState,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub close_reason: Option<String>,
     pub summary: String,
     pub opened_at: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<NoticeDevice>")
+    )]
     pub device: Option<NoticeDevice>,
     pub actions: Vec<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub closed_by: Option<String>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<ClosedFrom>")
+    )]
     pub closed_from: Option<ClosedFrom>,
 }
 
@@ -118,6 +129,7 @@ pub struct DismissNoticeResponse {
 pub struct PairRequest {
     pub code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub name: Option<String>,
 }
 
@@ -149,6 +161,7 @@ pub struct PairingCodeResponse {
     pub expires_at: String,
     pub origins: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "PairingLan"))]
     pub lan: Option<PairingLan>,
 }
 
