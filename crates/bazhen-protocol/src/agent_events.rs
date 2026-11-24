@@ -18,27 +18,41 @@ pub struct AgentLaunched {
     pub harness: HarnessId,
     pub project: String,
     pub cwd: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<TerminalId>")
+    )]
     pub terminal_id: Option<TerminalId>,
     /// The agent that launched it to delegate to it; absent when the human did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentId"))]
     pub launched_by: Option<AgentId>,
     /// Absent from an older daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub name: Option<String>,
     /// The `<n>` its default name took, which no later default takes again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "u64", range(min = 1)))]
     pub name_ordinal: Option<u64>,
     /// The runtime its terminal is created on; tmux, from an older daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub runtime: Option<String>,
     /// The role whose prompt it was launched with; absent for none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Role"))]
     pub role: Option<Role>,
     /// The SHA-256 of the system prompt its launch gives it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub prompt_hash: Option<String>,
     /// The compaction window every start of it is given; absent, the harness's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "u32", range(min = 100_000, max = 10_000_000))
+    )]
     pub compact_window_tokens: Option<u32>,
 }
 
@@ -55,14 +69,24 @@ pub struct AgentRenamed {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunning {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<ExternalRef>")
+    )]
     pub external_ref: Option<ExternalRef>,
     /// Null with no local terminal.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<RuntimeRefPayload>")
+    )]
     pub runtime_ref: Option<RuntimeRefPayload>,
     /// The theme the TUI was started for, when one was named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
     pub theme: Option<TuiTheme>,
     /// The name the harness's session was started with, for one that is addressed by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub harness_name: Option<String>,
 }
 
@@ -98,6 +122,7 @@ pub struct AgentFailed {
     pub reason: AgentFailedReason,
     /// What went wrong, with secrets taken out, at most 500 grapheme clusters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub detail: Option<String>,
 }
 
@@ -114,16 +139,23 @@ pub struct AgentProcessAdopted {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRestarted {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<ExternalRef>")
+    )]
     pub external_ref: Option<ExternalRef>,
     pub runtime_ref: RuntimeRefPayload,
     /// The theme the TUI was started for, when one was named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
     pub theme: Option<TuiTheme>,
     /// The name the harness's session was started with, for one that is addressed by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub harness_name: Option<String>,
     /// The SHA-256 of the system prompt the start gave it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub prompt_hash: Option<String>,
 }
 
@@ -131,11 +163,15 @@ pub struct AgentRestarted {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RespawnRejectedReason {
+    /// The agent has no harness session it can be started again on.
     NotResumable,
+    /// The agent has no terminal recorded, though its state says it should.
     NoTerminal,
+    /// Its terminal is no longer the incarnation, or in the process state, the respawn needs.
     TerminalChanged,
     /// The harness's server answered that it won't resume the session.
     HarnessRefused,
+    /// Anything else stopped it.
     Unavailable,
     /// The daemon died mid-respawn, before the new process started.
     DaemonRestart,
@@ -147,6 +183,7 @@ pub enum RespawnRejectedReason {
 pub struct AgentRespawnRejected {
     pub reason: RespawnRejectedReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub detail: Option<String>,
 }
 
@@ -156,11 +193,13 @@ pub struct AgentRespawnRejected {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRelaunchRequested {
     pub terminal_id: TerminalId,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub generation: u64,
     /// On a new harness session, which the old one's conversation doesn't carry into.
     pub fresh: bool,
     /// The runtime its terminal is created on; tmux, from an older daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub runtime: Option<String>,
 }
 
@@ -168,10 +207,13 @@ pub struct AgentRelaunchRequested {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RelaunchRejectedReason {
+    /// The agent has no harness session it can be started again on.
     NotResumable,
+    /// A terminal already carries the agent, which has one terminal at a time.
     TerminalExists,
     /// The harness's server answered that it won't start the session.
     HarnessRefused,
+    /// Anything else stopped it.
     Unavailable,
     /// The daemon died mid-relaunch, and the new terminal never appeared.
     DaemonRestart,
@@ -183,6 +225,7 @@ pub enum RelaunchRejectedReason {
 pub struct AgentRelaunchRejected {
     pub reason: RelaunchRejectedReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub detail: Option<String>,
 }
 
@@ -199,7 +242,13 @@ pub struct AgentExternalRefUpdated {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTranscriptRecorded {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
     pub session_id: String,
+    /// Absolute.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = 4096), regex(pattern = r"^\/.*"))
+    )]
     pub path: String,
 }
 
@@ -223,6 +272,7 @@ pub enum CompactedSign {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CompactedHook {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub session_id: Option<String>,
     pub pid: i64,
 }
@@ -234,8 +284,10 @@ pub struct AgentCompacted {
     pub sign: CompactedSign,
     /// The model and context use last recorded before it; absent when none was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Usage"))]
     pub before: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "CompactedHook"))]
     pub hook: Option<CompactedHook>,
 }
 

@@ -242,57 +242,13 @@ type FrameDiffers = [FrameAgrees<"output">, FrameAgrees<"input">] extends [true,
   ? never
   : "EventFrame";
 
-const AGENT_EVENTS = "the port of agent_events.rs";
-const MAIL_EVENTS = "the port of mail_events.rs";
-const TASK_EVENTS = "the port of task_events.rs";
-
 /**
  * The fields of each kind's payload that the Rust payload takes as null or leaves out where the
  * protocol doesn't, with what owns them. Each is judged with only that taken out, so any other
  * difference in it still fails. The runtime leg's DUAL_KNOWN lists their cases. The list only
  * shrinks: a field listed that no longer differs fails.
  */
-interface KnownFields {
-  "agent.compacted": { fields: "before" | "hook"; owner: typeof AGENT_EVENTS };
-  "agent.failed": { fields: "detail"; owner: typeof AGENT_EVENTS };
-  "agent.launched": {
-    fields:
-      | "compactWindowTokens"
-      | "launchedBy"
-      | "name"
-      | "nameOrdinal"
-      | "promptHash"
-      | "role"
-      | "runtime"
-      | "terminalId";
-    owner: typeof AGENT_EVENTS;
-  };
-  "agent.relaunch_rejected": { fields: "detail"; owner: typeof AGENT_EVENTS };
-  "agent.relaunch_requested": { fields: "runtime"; owner: typeof AGENT_EVENTS };
-  "agent.relaunched": {
-    fields: "externalRef" | "harnessName" | "promptHash" | "theme";
-    owner: typeof AGENT_EVENTS;
-  };
-  "agent.respawn_rejected": { fields: "detail"; owner: typeof AGENT_EVENTS };
-  "agent.respawned": {
-    fields: "externalRef" | "harnessName" | "promptHash" | "theme";
-    owner: typeof AGENT_EVENTS;
-  };
-  "agent.running": {
-    fields: "externalRef" | "harnessName" | "runtimeRef" | "theme";
-    owner: typeof AGENT_EVENTS;
-  };
-  "assignment.granted": { fields: "parentAssignmentId"; owner: typeof TASK_EVENTS };
-  "attention.opened": {
-    fields: "kind" | "messageId" | "taskId" | "toolUseId";
-    owner: typeof MAIL_EVENTS;
-  };
-  "mailbox.offered": { fields: "promptId"; owner: typeof MAIL_EVENTS };
-  "mailbox.queued": { fields: "from"; owner: typeof MAIL_EVENTS };
-  "task.finished": { fields: "note"; owner: typeof TASK_EVENTS };
-  "task.noted": { fields: "role"; owner: typeof TASK_EVENTS };
-  "task.owner_changed": { fields: "delegatedFrom" | "ownerAgentId"; owner: typeof TASK_EVENTS };
-}
+interface KnownFields {}
 
 export const parsedTypesDiffer: None<Differing<"output">> = "none";
 export const writtenTypesDiffer: None<Differing<"input">> = "none";

@@ -18,6 +18,7 @@ pub struct MailQueued {
     /// The agent whose own words the body is, after a line naming it that the body starts with;
     /// absent for the human's mail and for mail Bazhen composes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentId"))]
     pub from: Option<AgentId>,
 }
 
@@ -28,6 +29,7 @@ pub struct MailQueued {
 pub struct MailOffered {
     /// The prompt of the turn a fold's offer is folded into, whose Stop delivers it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub prompt_id: Option<String>,
 }
 
@@ -121,12 +123,16 @@ pub struct AttentionOpened {
     pub summary: String,
     /// Absent on items recorded before kinds, which were all approvals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AttentionKind"))]
     pub kind: Option<AttentionKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "MessageId"))]
     pub message_id: Option<MessageId>,
     /// The tool call it is for, whose result closes it; null if no call was seen to start.
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub tool_use_id: Option<String>,
     /// Asked by the agent itself, whose turn ending closes it, rather than by a subagent.
     pub main_agent: bool,
