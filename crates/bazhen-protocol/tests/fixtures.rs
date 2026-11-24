@@ -86,9 +86,9 @@ fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// Where `encoded` and `parsed` first differ, at the JSON pointer `at` into them, and what each
-/// holds there; none when they don't.
-fn difference(encoded: &Value, parsed: &Value, at: &str) -> Option<String> {
+/// Where `encoded` and `parsed` first differ, as a JSON pointer below `at`, and what each holds
+/// there; none when they don't.
+fn difference(encoded: &Value, parsed: &Value, at: &str) -> Option<(String, String)> {
     let shown = |held: Option<&Value>| held.map_or_else(|| "nothing".to_owned(), Value::to_string);
     match (encoded, parsed) {
         (Value::Object(x), Value::Object(y)) => {
@@ -96,10 +96,9 @@ fn difference(encoded: &Value, parsed: &Value, at: &str) -> Option<String> {
             keys.into_iter()
                 .find_map(|key| match (x.get(key), y.get(key)) {
                     (Some(a), Some(b)) => difference(a, b, &format!("{at}/{key}")),
-                    (a, b) => Some(format!(
-                        "{at}/{key}: written {}, parsed {}",
-                        shown(a),
-                        shown(b)
+                    (a, b) => Some((
+                        format!("{at}/{key}"),
+                        format!("written {}, parsed {}", shown(a), shown(b)),
                     )),
                 })
         }
@@ -109,7 +108,22 @@ fn difference(encoded: &Value, parsed: &Value, at: &str) -> Option<String> {
             .enumerate()
             .find_map(|(i, (a, b))| difference(a, b, &format!("{at}/{i}"))),
         _ if same(encoded, parsed) => None,
-        _ => Some(format!("{at}: written {encoded}, parsed {parsed}")),
+        _ => Some((at.to_owned(), format!("written {encoded}, parsed {parsed}"))),
+    }
+}
+
+/// `written` made to hold what `parsed` does at `pointer`, so it no longer differs there; whether
+/// it changed.
+fn excuse(written: &mut Value, parsed: &Value, pointer: &str) -> bool {
+    let Some((parent, key)) = pointer.rsplit_once('/') else {
+        return false;
+    };
+    let Some(Value::Object(parent)) = written.pointer_mut(parent) else {
+        return false;
+    };
+    match parsed.pointer(pointer) {
+        Some(held) => parent.insert(key.to_owned(), held.clone()).as_ref() != Some(held),
+        None => parent.remove(key).is_some(),
     }
 }
 
@@ -220,19 +234,23 @@ fn examined_as<T: Serialize>(
         let parsed = example.get("parsed").cloned().unwrap_or_default();
         let decoded = decode(&wire).map_err(|e| format!("{name}, {what}: {e}"))?;
         let encoded = serde_json::to_value(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
-        if let Some(at) = difference(&encoded, &parsed, "") {
-            let branch = wire
-                .get("type")
-                .and_then(Value::as_str)
-                .map_or_else(String::new, |kind| format!(" (type={kind})"));
-            let named = format!("{name}{branch}, {at}");
-            if !KNOWN_REWRITES.iter().any(|(known, _)| *known == named) {
+        let branch = wire
+            .get("type")
+            .and_then(Value::as_str)
+            .map_or_else(String::new, |kind| format!(" (type={kind})"));
+        let mut written = encoded.clone();
+        let mut excused = false;
+        while let Some((at, how)) = difference(&written, &parsed, "") {
+            let named = format!("{name}{branch}, {at}: {how}");
+            if !KNOWN_REWRITES.iter().any(|(known, _)| *known == named)
+                || !excuse(&mut written, &parsed, &at)
+            {
                 return Err(format!(
-                    "{name}, {what}:\n  encoded {encoded}\n  parsed  {parsed}"
+                    "{name}, {what}: {named}\n  encoded {encoded}\n  parsed  {parsed}"
                 ));
             }
             rewritten.push(named);
-            continue;
+            excused = true;
         }
         for (at, field) in schema.fields(&wire) {
             let left_out = reads(edited(&wire, &at, None));
@@ -248,7 +266,11 @@ fn examined_as<T: Serialize>(
                 ));
             }
         }
-        if let Some(text) = example.get("text").and_then(Value::as_str) {
+        if let Some(text) = example
+            .get("text")
+            .and_then(Value::as_str)
+            .filter(|_| !excused)
+        {
             let printed =
                 serde_json::to_string(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
             if printed != text {
