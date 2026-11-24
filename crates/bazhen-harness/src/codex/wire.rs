@@ -41,6 +41,15 @@ pub(super) fn nullish_string<'a>(value: &'a Js, name: &str) -> Result<Option<&'a
     }
 }
 
+/// A field `z.boolean().optional()` takes.
+pub(super) fn optional_bool(value: &Js, name: &str) -> Result<Option<bool>, Invalid> {
+    match value.field(name) {
+        None => Ok(None),
+        Some(Js::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(Invalid),
+    }
+}
+
 /// A field `z.boolean().nullish()` takes.
 pub(super) fn nullish_bool(value: &Js, name: &str) -> Result<Option<bool>, Invalid> {
     match value.field(name) {
@@ -48,4 +57,9 @@ pub(super) fn nullish_bool(value: &Js, name: &str) -> Result<Option<bool>, Inval
         Some(Js::Bool(b)) => Ok(Some(*b)),
         Some(_) => Err(Invalid),
     }
+}
+
+/// Whether a string is one JavaScript takes as true: any but the empty one.
+pub(super) fn truthy(text: Option<&str>) -> Option<&str> {
+    text.filter(|s| !s.is_empty())
 }

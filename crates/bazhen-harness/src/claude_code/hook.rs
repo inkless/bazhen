@@ -174,7 +174,7 @@ fn facts_of(hook: Hook, offered: &[String]) -> Said {
             ));
             reply = Reply::Hold(Held::Approval {
                 key: tool,
-                wait_ms: APPROVAL_WAIT_MS,
+                wait_ms: Some(APPROVAL_WAIT_MS),
             });
         }
         Hook::Question { summary, tool } => {

@@ -63,7 +63,7 @@ fuzz_target!(|input: (&str, &[u8])| {
         Reply::Hold(Held::Waiter) => assert_eq!(event, "wait"),
         Reply::Hold(Held::Fold { .. }) => assert_eq!(event, "PostToolUse"),
         Reply::Hold(Held::Approval { wait_ms, .. }) => {
-            assert_eq!((event, *wait_ms), ("PermissionRequest", 50_000));
+            assert_eq!((event, *wait_ms), ("PermissionRequest", Some(50_000)));
         }
         Reply::Quiet => {}
         Reply::Now(_) => panic!("Claude Code answers no hook before the daemon resolves it"),

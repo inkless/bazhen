@@ -582,7 +582,7 @@ fn keys_a_permission_request_as_json_stringify_does_its_call_and_holds_it_for_th
         read.reply,
         Reply::Hold(Held::Approval {
             key,
-            wait_ms: 50_000
+            wait_ms: Some(50_000)
         })
     );
 }
