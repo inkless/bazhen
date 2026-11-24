@@ -43,6 +43,10 @@ pub(crate) const CHECK: &str = "x-bazhen-check";
 /// record, a preprocess `checks.ts` exports, which sees the keys zod's record would skip.
 pub(crate) const TRANSFORM: &str = "x-bazhen-transform";
 
+/// The document's table of event types: each one's `entity`, its `payload`, and the narrower
+/// `streamed` payload a client is sent where it has one. It is written as `EVENTS`.
+pub(crate) const EVENTS: &str = "x-bazhen-events";
+
 /// The transforms a schema may name, and how zod spells each.
 const TRANSFORMS: [(&str, &str); 1] = [("trim", ".trim()")];
 
@@ -94,6 +98,18 @@ pub(crate) fn generate(document: &Value, checks: &str) -> Result<Source, Vec<Str
         }
         bodies.insert(name.clone(), (body, uses));
     }
+    let mut event_uses = BTreeSet::new();
+    let events = document
+        .get(EVENTS)
+        .map(|table| writer.events(table, &mut event_uses));
+    for used in &event_uses {
+        if !defs.contains_key(used) {
+            writer.refuse(
+                EVENTS,
+                &format!("names `{used}`, which `$defs` doesn't hold"),
+            );
+        }
+    }
     let order = match ordered(&bodies) {
         Ok(order) => order,
         Err(cycle) => {
@@ -121,6 +137,9 @@ pub(crate) fn generate(document: &Value, checks: &str) -> Result<Source, Vec<Str
                 "\nexport const {name} = {body};\nexport type {name} = z.infer<typeof {name}>;\n"
             );
         }
+    }
+    if let Some(events) = events {
+        let _ = write!(text, "\nexport const EVENTS = {events} as const;\n");
     }
     Ok(Source {
         text,
@@ -163,6 +182,53 @@ struct Writer {
 impl Writer {
     fn refuse(&mut self, at: &str, why: &str) {
         self.problems.push(format!("{at}: {why}"));
+    }
+
+    /// The object literal for the event table `table`, adding each definition it names to
+    /// `uses`.
+    fn events(&mut self, table: &Value, uses: &mut BTreeSet<String>) -> String {
+        let Some(table) = table.as_object() else {
+            self.refuse(EVENTS, "is no object");
+            return String::new();
+        };
+        let mut text = String::from("{\n");
+        for (kind, entry) in table {
+            let at = format!("{EVENTS}/{kind}");
+            let Some(entry) = entry.as_object() else {
+                self.refuse(&at, "is no object");
+                continue;
+            };
+            for key in entry.keys() {
+                if !["entity", "payload", "streamed"].contains(&key.as_str()) {
+                    self.refuse(
+                        &format!("{at}/{key}"),
+                        "is a key an event type doesn't have",
+                    );
+                }
+            }
+            let Some(entity) = entry.get("entity").and_then(Value::as_str) else {
+                self.refuse(&format!("{at}/entity"), "is no string");
+                continue;
+            };
+            let Some(payload) = entry.get("payload") else {
+                self.refuse(&format!("{at}/payload"), "is missing");
+                continue;
+            };
+            let payload = self.schema(payload, &format!("{at}/payload"), uses);
+            let _ = write!(
+                text,
+                "  {}: {{ entity: {}, payload: {payload}",
+                quoted(kind),
+                quoted(entity)
+            );
+            if let Some(streamed) = entry.get("streamed") {
+                let streamed = self.schema(streamed, &format!("{at}/streamed"), uses);
+                let _ = write!(text, ", streamed: {streamed}");
+            }
+            text.push_str(" },\n");
+        }
+        text.push('}');
+        text
     }
 
     /// The zod expression for `schema`, at `at`, adding each definition it names to `uses`.
@@ -915,6 +981,54 @@ mod tests {
         assert!(at("C") < at("B") && at("B") < at("A"), "{text}");
         assert!(text.contains("export type A = z.infer<typeof A>;"));
         assert!(!text.contains("import * as checks"));
+    }
+
+    #[test]
+    fn writes_the_event_table_last_and_refuses_an_entry_it_cannot_read() {
+        let entry = json!({ "entity": "task", "payload": { "$ref": "#/$defs/P" } });
+        let document = |table: Value| {
+            json!({
+                "$defs": { "P": { "type": "object", "properties": {}, "required": [] } },
+                "x-bazhen-events": table,
+            })
+        };
+        let mut streamed = entry.clone();
+        streamed["streamed"] = json!({ "type": "object", "properties": {}, "required": [] });
+        let text = generate(&document(json!({ "a.b": entry, "c": streamed })), "./c.js")
+            .unwrap_or_default()
+            .text;
+        assert!(
+            text.ends_with(
+                "\nexport const EVENTS = {\n  \"a.b\": { entity: \"task\", payload: P },\n  \
+                 \"c\": { entity: \"task\", payload: P, streamed: z.object({}) },\n} as const;\n"
+            ),
+            "{text}"
+        );
+        let refused = |table: Value| generate(&document(table), "./c.js").err();
+        assert_eq!(
+            refused(json!({ "a": { "entity": "task", "payload": { "$ref": "#/$defs/Q" } } })),
+            Some(vec![
+                "x-bazhen-events: names `Q`, which `$defs` doesn't hold".to_owned()
+            ])
+        );
+        assert_eq!(
+            refused(json!({ "a": { "entity": "task", "payload": true, "zz": 1 } })),
+            Some(vec![
+                "x-bazhen-events/a/zz: is a key an event type doesn't have".to_owned()
+            ])
+        );
+        assert_eq!(
+            refused(json!({ "a": { "payload": true } })),
+            Some(vec!["x-bazhen-events/a/entity: is no string".to_owned()])
+        );
+        assert_eq!(
+            refused(json!({ "a": { "entity": "task" } })),
+            Some(vec!["x-bazhen-events/a/payload: is missing".to_owned()])
+        );
+        assert_eq!(
+            refused(json!([])),
+            Some(vec!["x-bazhen-events: is no object".to_owned()])
+        );
     }
 
     #[test]
