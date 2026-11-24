@@ -29,8 +29,8 @@ use tokio::sync::broadcast;
 
 use crate::config::RuntimeKind;
 use crate::terminals::{
-    Answer, Compatibility, Event, Events, Exit, FoundShell, Recorded, ShellForeground, ShellSpec,
-    TerminalError, Terminals,
+    Answer, Compatibility, Event, Events, Exit, FoundShell, Kind, NewTerminal, Recorded,
+    ShellForeground, TerminalError, Terminals,
 };
 
 /// The size a terminal starts at, until a view attaches and sets its own (`DEFAULT_SIZE`).
@@ -359,12 +359,19 @@ impl Holder {
         }
     }
 
-    fn spec(&self, spec: ShellSpec) -> Result<TerminalSpec, TerminalError> {
+    fn spec(&self, spec: NewTerminal) -> Result<TerminalSpec, TerminalError> {
         let invalid = |e: bazhen_holder_proto::body::Invalid| TerminalError::Other(e.to_string());
         Ok(TerminalSpec {
             terminal_id: spec.terminal_id,
-            tags: TerminalTags::Shell {
-                linked_agent_id: spec.linked_agent_id,
+            tags: match spec.kind {
+                Kind::Shell { linked_agent_id } => TerminalTags::Shell { linked_agent_id },
+                Kind::Agent {
+                    agent_id,
+                    harness_session,
+                } => TerminalTags::Agent {
+                    agent_id,
+                    harness_session,
+                },
             },
             size: Size {
                 cols: Cols::new(COLS).map_err(invalid)?,
@@ -491,7 +498,7 @@ impl Events for HolderTold {
 }
 
 impl Terminals for Holder {
-    fn create(&self, spec: ShellSpec) -> Answer<'_, Result<Record<String>, TerminalError>> {
+    fn create(&self, spec: NewTerminal) -> Answer<'_, Result<Record<String>, TerminalError>> {
         Box::pin(async move {
             let spec = self.spec(spec)?;
             let created = self.runtime.create(spec).await;

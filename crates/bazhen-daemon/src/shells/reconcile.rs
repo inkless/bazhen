@@ -365,9 +365,11 @@ mod tests {
 
         /// The runtime starts a terminal for `id`, as one the daemon died before recording.
         fn start_unrecorded(&self, id: &str, linked: Option<&str>) {
-            let spec = crate::terminals::ShellSpec {
+            let spec = crate::terminals::NewTerminal {
                 terminal_id: TerminalId::parse(id).unwrap(),
-                linked_agent_id: linked.and_then(AgentId::parse),
+                kind: crate::terminals::Kind::Shell {
+                    linked_agent_id: linked.and_then(AgentId::parse),
+                },
                 argv: vec!["/bin/zsh".to_owned()],
                 cwd: "/".to_owned(),
                 env: std::collections::BTreeMap::new(),
@@ -618,8 +620,13 @@ mod tests {
             h.record_running(&id).await;
             h.shells.reconcile().await.unwrap();
             assert_eq!(
-                (h.state_of(&id), h.fake.spec_of(&id).linked_agent_id),
-                (Some(TerminalState::Running), None)
+                (h.state_of(&id), h.fake.spec_of(&id).kind),
+                (
+                    Some(TerminalState::Running),
+                    crate::terminals::Kind::Shell {
+                        linked_agent_id: None
+                    }
+                )
             );
         });
     }

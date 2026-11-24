@@ -15,24 +15,37 @@ use bazhen_protocol::terminals::TerminalScreen;
 /// A future a runtime answers with, boxed so the trait is one a `dyn` can be.
 pub(crate) type Answer<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// A new shell, as the lifecycle asks for it; the runtime adds its size and history.
+/// What a new terminal holds, as its runtime tags it, so an inventory tells them apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// A shell, beside an agent or on its own.
+    Shell { linked_agent_id: Option<AgentId> },
+    /// An agent's TUI, with the harness session it starts when that is known before it does:
+    /// carried on the terminal, so a daemon that dies before recording it can still resume it.
+    Agent {
+        agent_id: AgentId,
+        harness_session: Option<String>,
+    },
+}
+
+/// A new terminal, as a lifecycle asks for it; the runtime adds its size and history.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ShellSpec {
+pub(crate) struct NewTerminal {
     pub(crate) terminal_id: TerminalId,
-    pub(crate) linked_agent_id: Option<AgentId>,
+    pub(crate) kind: Kind,
     pub(crate) argv: Vec<String>,
     pub(crate) cwd: String,
-    /// The shell's own variables, over the runtime's.
+    /// Its own variables, over the runtime's.
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) theme: Option<TuiTheme>,
 }
 
 /// Its variables by name alone: `BAZHEN_SHELL_TOKEN`'s value proves the shell.
-impl std::fmt::Debug for ShellSpec {
+impl std::fmt::Debug for NewTerminal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShellSpec")
+        f.debug_struct("NewTerminal")
             .field("terminal_id", &self.terminal_id)
-            .field("linked_agent_id", &self.linked_agent_id)
+            .field("kind", &self.kind)
             .field("argv", &self.argv)
             .field("cwd", &self.cwd)
             .field("env", &self.env.keys().collect::<Vec<_>>())
@@ -154,7 +167,7 @@ pub(crate) struct Compatibility {
 pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
     /// Starts `spec`, answering where the runtime keeps it, every value a string, in the order
     /// the runtime wrote them.
-    fn create(&self, spec: ShellSpec) -> Answer<'_, Result<Record<String>, TerminalError>>;
+    fn create(&self, spec: NewTerminal) -> Answer<'_, Result<Record<String>, TerminalError>>;
 
     /// Ends the terminal, and everything in it.
     fn close<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, Result<(), TerminalError>>;
@@ -253,7 +266,7 @@ pub(crate) mod fake {
     /// One terminal the fake runs.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub(crate) struct Running {
-        pub(crate) spec: ShellSpec,
+        pub(crate) spec: NewTerminal,
         /// What holds its foreground; `None` for its own process.
         pub(crate) foreground: Option<String>,
         /// The directory its foreground is in, where one is seen.
@@ -410,7 +423,7 @@ pub(crate) mod fake {
     }
 
     impl Fake {
-        pub(crate) fn spec_of(&self, terminal_id: &str) -> ShellSpec {
+        pub(crate) fn spec_of(&self, terminal_id: &str) -> NewTerminal {
             self.state.lock().unwrap().running[terminal_id].spec.clone()
         }
 
@@ -511,7 +524,7 @@ pub(crate) mod fake {
     }
 
     impl Terminals for Fake {
-        fn create(&self, spec: ShellSpec) -> Answer<'_, Result<Record<String>, TerminalError>> {
+        fn create(&self, spec: NewTerminal) -> Answer<'_, Result<Record<String>, TerminalError>> {
             Box::pin(async move {
                 let held = self.state.lock().unwrap().hold_creates.clone();
                 if let Some(gate) = held {
@@ -689,10 +702,13 @@ pub(crate) mod fake {
                     .running
                     .iter()
                     .filter(|(_, running)| !running.gone)
-                    .map(|(id, running)| FoundShell {
-                        terminal: recorded_at(id, running.generation),
-                        dead: running.exited,
-                        linked_agent_id: running.spec.linked_agent_id.clone(),
+                    .filter_map(|(id, running)| match &running.spec.kind {
+                        Kind::Shell { linked_agent_id } => Some(FoundShell {
+                            terminal: recorded_at(id, running.generation),
+                            dead: running.exited,
+                            linked_agent_id: linked_agent_id.clone(),
+                        }),
+                        Kind::Agent { .. } => None,
                     })
                     .collect())
             })
@@ -711,7 +727,9 @@ pub(crate) mod fake {
                 let mut state = self.state.lock().unwrap();
                 let id = terminal.terminal_id.as_str().to_owned();
                 if let Some(running) = state.running.get_mut(&id) {
-                    running.spec.linked_agent_id = None;
+                    running.spec.kind = Kind::Shell {
+                        linked_agent_id: None,
+                    };
                 }
                 state.unlinked.push(id);
                 Ok(())

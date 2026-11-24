@@ -42,7 +42,9 @@ use self::integration::Integration;
 use self::reports::new_shell_token;
 use self::retype::{PendingRetypes, Typing};
 use crate::budget::{Budget, Counts, TerminalLimit};
-use crate::terminals::{Event, Events, Exit, Recorded, ShellSpec, TerminalError, Terminals};
+use crate::terminals::{
+    Event, Events, Exit, Kind, NewTerminal, Recorded, TerminalError, Terminals,
+};
 use crate::writer::Writer;
 
 /// The runtime every shell this daemon opens is created on.
@@ -755,7 +757,7 @@ impl Shells {
 
     /// The user's shell as a login shell, told its terminal and the daemon's socket, the paired
     /// device that opened it, and, with `token`, what its integration reports with and where.
-    fn spec(&self, terminal: &TerminalId, opening: Opening, token: Option<String>) -> ShellSpec {
+    fn spec(&self, terminal: &TerminalId, opening: Opening, token: Option<String>) -> NewTerminal {
         let mut env = BTreeMap::from([
             (
                 "BAZHEN_TERMINAL_ID".to_owned(),
@@ -774,9 +776,11 @@ impl Shells {
                 integration.dir.clone(),
             );
         }
-        ShellSpec {
+        NewTerminal {
             terminal_id: terminal.clone(),
-            linked_agent_id: None,
+            kind: Kind::Shell {
+                linked_agent_id: None,
+            },
             argv: vec![self.deps.shell.clone(), "-l".to_owned(), "-i".to_owned()],
             cwd: opening.cwd,
             env,
@@ -1563,11 +1567,13 @@ pub(crate) mod tests {
             let id = h.shells.open(&req, None).await.unwrap().terminal_id;
             let spec = h.fake.spec_of(id.as_str());
             assert_eq!(
-                (spec.argv, spec.cwd, spec.linked_agent_id, spec.theme),
+                (spec.argv, spec.cwd, spec.kind, spec.theme),
                 (
                     vec!["/bin/zsh".to_owned(), "-l".to_owned(), "-i".to_owned()],
                     h.home.clone(),
-                    None,
+                    Kind::Shell {
+                        linked_agent_id: None
+                    },
                     Some(TuiTheme::Light)
                 )
             );
@@ -2214,8 +2220,14 @@ pub(crate) mod tests {
                 (Some(TerminalState::Closed), Some(TerminalState::Running))
             );
             assert_eq!(
-                (spec.cwd, spec.linked_agent_id, spec.theme),
-                (h.home.clone(), None, Some(TuiTheme::Light))
+                (spec.cwd, spec.kind, spec.theme),
+                (
+                    h.home.clone(),
+                    Kind::Shell {
+                        linked_agent_id: None
+                    },
+                    Some(TuiTheme::Light)
+                )
             );
             assert_eq!(h.listed().len(), 1);
         });
