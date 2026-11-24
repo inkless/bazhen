@@ -292,6 +292,8 @@ dependencies = [
 name = "bazhen-protocol"
 version = "0.1.0"
 dependencies = [
+ "proptest",
+ "ryu-js",
  "serde",
  "serde_json",
 ]
@@ -1136,6 +1138,12 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "ryu-js"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f232fd0249f55adbe7f15bee58bbbd3d40708000b84e6482066d2ba599e08a9"
 
 [[package]]
 name = "saphyr-parser"
