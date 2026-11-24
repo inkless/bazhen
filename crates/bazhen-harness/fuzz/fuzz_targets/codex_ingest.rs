@@ -2,14 +2,15 @@
 
 use bazhen_harness::{
     AgentId, Gate, HarnessDeps, HarnessId, Held, IngestContext, Ingested, Key, Observed, Reply,
-    Report, compiled,
+    Report, Session, compiled,
 };
 use libfuzzer_sys::fuzz_target;
 
 // One notification, request or terminal title from Codex's app-server, as a server could send
 // it: no report may panic the adapter, text that isn't JSON says nothing, every fact is about a
 // thread, the account or the agent a title is for, nothing is gated, and only a request is held,
-// with no deadline, since the TUI asks the same request.
+// with no deadline, since the TUI asks the same request. The session routes a notification or a
+// request to the thread each of its facts is about, and nothing else anywhere.
 fuzz_target!(|input: (u8, &str, &[u8], &str)| {
     let (kind, method, params, text) = input;
     let harnesses = compiled(HarnessDeps {
@@ -22,7 +23,7 @@ fuzz_target!(|input: (u8, &str, &[u8], &str)| {
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
         daemon_socket: String::new(),
-        real_path: Box::new(|_| None),
+        real_path: std::sync::Arc::new(|_| None),
     });
     let codex = harnesses
         .get(HarnessId::Codex)
@@ -46,6 +47,11 @@ fuzz_target!(|input: (u8, &str, &[u8], &str)| {
             payload: params,
         },
     };
+    let session: Box<dyn Session> = codex.session().expect("Codex keeps a connection");
+    let routed = session.route(&report);
+    if kind % 4 >= 2 {
+        assert_eq!(routed, None);
+    }
     let read = codex.ingest(report, &context);
     // serde_json refuses text JavaScript reads: a lone surrogate's escape, a byte that isn't
     // UTF-8, nesting past its limit. Text with none of them that it refuses isn't JSON.
@@ -62,7 +68,7 @@ fuzz_target!(|input: (u8, &str, &[u8], &str)| {
         match (&keyed.key, &keyed.fact) {
             (Key::Agent(id), _) => assert!(kind % 4 == 2 && *id == agent),
             (Key::Account, Observed::AccountLimits(_) | Observed::SessionAnnounced { .. }) => {}
-            (Key::Session(_), _) => assert!(kind % 4 < 2),
+            (Key::Session(thread), _) => assert!(kind % 4 < 2 && routed.as_ref() == Some(thread)),
             other => panic!("{other:?}"),
         }
     }

@@ -9,9 +9,9 @@ use proptest::prelude::*;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 
-const THREAD: &str = "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51";
+pub(super) const THREAD: &str = "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51";
 
-fn fixture(file: &str) -> Value {
+pub(super) fn fixture(file: &str) -> Value {
     let path = format!(
         "{}/../../packages/protocol/fixtures/codex/{file}",
         env!("CARGO_MANIFEST_DIR")
@@ -140,19 +140,27 @@ fn reads_a_terminal_title_as_the_typescript_adapter_did() {
 /// The app-server in the fixtures' Codex home.
 const REMOTE: &str = "unix:///home/u/.codex/app-server-control/app-server-control.sock";
 
-fn harness() -> Codex {
-    Codex::on(launch::Starts {
+pub(super) const HOME: &str = "/home/u/.codex";
+
+pub(super) fn harness() -> Codex {
+    let starts = launch::Starts {
         remote: REMOTE.to_owned(),
         socket: None,
-    })
+    };
+    Codex::on(starts, Home::new(HOME.to_owned(), Arc::new(|_| None)))
 }
 
-fn agent() -> AgentId {
+pub(super) fn agent() -> AgentId {
     AgentId::parse("agent_0190a1b2c3d47abc8def0123456789a1").unwrap()
 }
 
 /// One notification, as the daemon hands it over for the agent bound to its thread, or none.
-fn notify(codex: &Codex, bound: Option<&AgentId>, method: &str, params: &Value) -> Vec<Keyed> {
+pub(super) fn notify(
+    codex: &Codex,
+    bound: Option<&AgentId>,
+    method: &str,
+    params: &Value,
+) -> Vec<Keyed> {
     let params = params.to_string();
     let report = Report::Notification {
         method,
@@ -169,11 +177,11 @@ fn notify(codex: &Codex, bound: Option<&AgentId>, method: &str, params: &Value) 
     ingested.observed
 }
 
-fn status(kind: &str) -> Value {
+pub(super) fn status(kind: &str) -> Value {
     json!({ "threadId": THREAD, "status": { "type": kind } })
 }
 
-fn turn(status: Option<&str>) -> Value {
+pub(super) fn turn(status: Option<&str>) -> Value {
     let mut turn = json!({ "id": "t1", "items": [] });
     if let Some(status) = status {
         turn["status"] = json!(status);
@@ -181,7 +189,7 @@ fn turn(status: Option<&str>) -> Value {
     json!({ "threadId": THREAD, "turn": turn })
 }
 
-fn activity(value: ActivityValue, detail: Option<&str>) -> Keyed {
+pub(super) fn activity(value: ActivityValue, detail: Option<&str>) -> Keyed {
     on(
         THREAD,
         Observed::Activity(HarnessActivity {
@@ -431,7 +439,13 @@ fn compaction_rate_limits_and_new_threads_are_the_threads_and_the_accounts() {
     );
 }
 
-fn ask(codex: &Codex, bound: Option<&AgentId>, method: &str, params: &Value, id: &str) -> Ingested {
+pub(super) fn ask(
+    codex: &Codex,
+    bound: Option<&AgentId>,
+    method: &str,
+    params: &Value,
+    id: &str,
+) -> Ingested {
     let params = params.to_string();
     let report = Report::ServerRequest {
         method,
@@ -447,7 +461,7 @@ fn ask(codex: &Codex, bound: Option<&AgentId>, method: &str, params: &Value, id:
     )
 }
 
-fn tool(call: &str) -> ToolKey {
+pub(super) fn tool(call: &str) -> ToolKey {
     ToolKey {
         key: format!("[\"{THREAD}\",\"{call}\"]"),
         caller: None,
@@ -455,7 +469,7 @@ fn tool(call: &str) -> ToolKey {
     }
 }
 
-fn command() -> Value {
+pub(super) fn command() -> Value {
     json!({ "threadId": THREAD, "turnId": "t1", "itemId": "call-1",
             "command": "rm -rf build", "reason": "outside the sandbox" })
 }
@@ -1012,7 +1026,7 @@ impl ChannelPort for Server {
     }
 }
 
-fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
+pub(super) fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     match future.as_mut().poll(&mut cx) {
         std::task::Poll::Ready(value) => value,
@@ -1021,7 +1035,7 @@ fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
 }
 
 /// A fixture case's launch options as the daemon asks for them.
-fn launch_request(options: &Value) -> LaunchRequest {
+pub(super) fn launch_request(options: &Value) -> LaunchRequest {
     LaunchRequest {
         cwd: "/work".to_owned(),
         theme: options["theme"].as_str().map(|theme| match theme {
@@ -1078,10 +1092,11 @@ fn launches_and_resumes_as_the_typescript_adapter_did() {
     assert_eq!(cases.len(), 11);
     for case in cases {
         let name = &case["name"];
-        let codex = Codex::on(launch::Starts {
+        let starts = launch::Starts {
             remote: REMOTE.to_owned(),
             socket: case["socket"].as_str().map(str::to_owned),
-        });
+        };
+        let codex = Codex::on(starts, Home::new(HOME.to_owned(), Arc::new(|_| None)));
         let request = launch_request(&case["options"]);
         let server = Server::new(case["answers"].clone());
         let launched = started(ready(codex.launch(&request, Some(&server))));
@@ -1316,7 +1331,7 @@ fn codex_is_on_the_server_in_the_users_codex_home_and_its_threads_reach_the_daem
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
         daemon_socket: "/run/bazhen.sock".to_owned(),
-        real_path: Box::new(|_| None),
+        real_path: std::sync::Arc::new(|_| None),
     };
     let starts = |codex_home| Codex::new(&deps(codex_home)).starts;
     assert_eq!(
