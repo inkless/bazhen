@@ -876,6 +876,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
+  "crates/bazhen-daemon/src/channel/rpc.rs::decode": "rpc_frame",
   "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",

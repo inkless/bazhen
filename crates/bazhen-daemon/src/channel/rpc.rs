@@ -2,12 +2,12 @@
 //! owns the socket. It writes what the daemon sends, settles each request with its reply, and hands
 //! the server's own requests and notifications to the connection's [`Inbox`]. The server may exit
 //! without a close frame, so the socket ending is the disconnect, and every request still waiting
-//! fails then.
+//! fails then. A server that stops reading, or floods the inbox, is disconnected too: the
+//! connection never waits on the server without end, nor holds without bound what it sent.
 //!
 //! Messages carry no `jsonrpc` member: the servers this talks to send none and need none.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -19,6 +19,7 @@ use tokio::net::UnixStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -26,6 +27,15 @@ use tokio_util::task::TaskTracker;
 pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one request may wait for its reply.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long one message may take to write: a server that reads nothing for this long is gone.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// The server's own messages the inbox holds unread; one more disconnects the server. The daemon
+/// reads them as they come, as the TypeScript daemon handled each before reading the next.
+pub const INBOX_CAPACITY: usize = 4096;
+/// The largest message, and frame, the server may send: what the TypeScript daemon's `ws` client
+/// took (its 100 MiB `maxPayload`), so a thread's whole history that it read is never refused.
+/// tungstenite's own defaults, 64 MiB and 16 MiB, are less.
+const MAX_MESSAGE: usize = 100 * 1024 * 1024;
 
 /// The `data.reason` a server gives its errors while it drains before it exits.
 const DRAINING: &str = "serverShuttingDown";
@@ -143,15 +153,19 @@ fn server_error(error: Value) -> Option<ServerError> {
 }
 
 /// A request that got no result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RpcError {
     /// The server answered it with an error.
+    #[error("{method}: {} ({})", error.message, error.code)]
     Server { method: String, error: ServerError },
     /// No reply came within [`REQUEST_TIMEOUT`].
+    #[error("{method}: no reply in {ms} ms", ms = REQUEST_TIMEOUT.as_millis())]
     TimedOut { method: String },
     /// The connection ended while it waited.
+    #[error("{method}: the connection ended")]
     Ended { method: String },
     /// The connection had already ended.
+    #[error("{method}: the server is not connected")]
     NotOpen { method: String },
 }
 
@@ -178,27 +192,6 @@ impl RpcError {
     }
 }
 
-impl fmt::Display for RpcError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Server { method, error } => {
-                write!(f, "{method}: {} ({})", error.message, error.code)
-            }
-            Self::TimedOut { method } => {
-                write!(
-                    f,
-                    "{method}: no reply in {} ms",
-                    REQUEST_TIMEOUT.as_millis()
-                )
-            }
-            Self::Ended { method } => write!(f, "{method}: the connection ended"),
-            Self::NotOpen { method } => write!(f, "{method}: the server is not connected"),
-        }
-    }
-}
-
-impl std::error::Error for RpcError {}
-
 impl From<RpcError> for ChannelError {
     fn from(error: RpcError) -> Self {
         Self {
@@ -213,18 +206,11 @@ impl From<RpcError> for ChannelError {
 }
 
 /// A connection that couldn't be opened.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct OpenError {
     pub message: String,
 }
-
-impl fmt::Display for OpenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for OpenError {}
 
 impl From<OpenError> for ChannelError {
     fn from(error: OpenError) -> Self {
@@ -249,6 +235,19 @@ fn lock(waiting: &Mutex<Waiting>) -> MutexGuard<'_, Waiting> {
     waiting.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// One request's place among those waiting, given up however its wait ends: answered, timed out,
+/// or dropped by a caller that stopped waiting.
+struct Place<'a> {
+    waiting: &'a Mutex<Waiting>,
+    id: u64,
+}
+
+impl Drop for Place<'_> {
+    fn drop(&mut self) {
+        lock(self.waiting).replies.remove(&self.id);
+    }
+}
+
 /// A handle to one connection, to send on it. The connection ends when the socket does, when its
 /// stop token is cancelled, or once every handle is dropped.
 #[derive(Debug, Clone)]
@@ -257,10 +256,10 @@ pub struct Rpc {
     outbox: mpsc::UnboundedSender<String>,
 }
 
-/// The server's own requests and notifications, in the order it sent them. Unbounded, so a reply
-/// is never held up behind messages nobody has read yet.
+/// The server's own requests and notifications, in the order it sent them, at most
+/// [`INBOX_CAPACITY`] unread. A reply never waits behind them: it settles its request directly.
 #[derive(Debug)]
-pub struct Inbox(mpsc::UnboundedReceiver<Inbound>);
+pub struct Inbox(mpsc::Receiver<Inbound>);
 
 impl Inbox {
     /// The next message, or `None` once the connection has ended and every message is read.
@@ -287,9 +286,13 @@ pub async fn connect(
         let stream = UnixStream::connect(socket)
             .await
             .map_err(|e| refused(e.to_string()))?;
-        let (ws, _) = tokio_tungstenite::client_async("ws://localhost/", stream)
-            .await
-            .map_err(|e| refused(e.to_string()))?;
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_MESSAGE))
+            .max_frame_size(Some(MAX_MESSAGE));
+        let (ws, _) =
+            tokio_tungstenite::client_async_with_config("ws://localhost/", stream, Some(config))
+                .await
+                .map_err(|e| refused(e.to_string()))?;
         Ok(ws)
     };
     let ws = tokio::time::timeout(OPEN_TIMEOUT, opening)
@@ -300,37 +303,50 @@ pub async fn connect(
         ..Waiting::default()
     }));
     let (outbox, sending) = mpsc::unbounded_channel();
-    let (heard, inbox) = mpsc::unbounded_channel();
+    let (heard, inbox) = mpsc::channel(INBOX_CAPACITY);
     tasks.spawn(own(ws, Arc::clone(&waiting), sending, heard, stop));
     Ok((Rpc { waiting, outbox }, Inbox(inbox)))
 }
 
 /// The task that owns the socket, until it ends, `stop` is cancelled or every [`Rpc`] is dropped.
-/// Then each request still waiting fails as ended, and any after fails as not open.
+/// It reads and writes at once, so a write the server doesn't take holds up neither its replies
+/// nor the stop; one that takes longer than [`WRITE_TIMEOUT`] ends the connection. Then each
+/// request still waiting fails as ended, and any after fails as not open.
 async fn own(
-    mut ws: WebSocketStream<UnixStream>,
+    ws: WebSocketStream<UnixStream>,
     waiting: Arc<Mutex<Waiting>>,
     mut sending: mpsc::UnboundedReceiver<String>,
-    heard: mpsc::UnboundedSender<Inbound>,
+    heard: mpsc::Sender<Inbound>,
     stop: CancellationToken,
 ) {
-    loop {
-        tokio::select! {
-            () = stop.cancelled() => break,
-            text = sending.recv() => {
-                let Some(text) = text else { break };
-                // A write that fails is the socket ending, which this loop ends on.
-                if ws.send(Message::text(text)).await.is_err() {
-                    break;
-                }
+    let (mut sink, mut stream) = ws.split();
+    let outgoing = async {
+        while let Some(text) = sending.recv().await {
+            // A write that fails is the socket ending.
+            match tokio::time::timeout(WRITE_TIMEOUT, sink.send(Message::text(text))).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) | Err(_) => break,
             }
-            frame = ws.next() => match frame {
-                Some(Ok(Message::Text(text))) => receive(&waiting, &heard, text.as_str()),
-                Some(Ok(Message::Close(_)) | Err(_)) | None => break,
-                // Pings are answered by the WebSocket itself; nothing else is the server's.
-                Some(Ok(_)) => {}
-            },
         }
+    };
+    let incoming = async {
+        while let Some(frame) = stream.next().await {
+            match frame {
+                Ok(Message::Text(text)) => {
+                    if !receive(&waiting, &heard, text.as_str()) {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => break,
+                // Pings are answered by the WebSocket itself; nothing else is the server's.
+                Ok(_) => {}
+            }
+        }
+    };
+    tokio::select! {
+        () = stop.cancelled() => {}
+        () = outgoing => {}
+        () = incoming => {}
     }
     let mut waiting = lock(&waiting);
     waiting.open = false;
@@ -338,20 +354,23 @@ async fn own(
     waiting.replies.clear();
 }
 
-fn receive(waiting: &Mutex<Waiting>, heard: &mpsc::UnboundedSender<Inbound>, text: &str) {
+/// Takes one text frame; false when the server has filled the inbox, which disconnects it.
+fn receive(waiting: &Mutex<Waiting>, heard: &mpsc::Sender<Inbound>, text: &str) -> bool {
     match decode(text) {
         Some(Frame::Reply { id, outcome }) => {
             if let Some(reply) = lock(waiting).replies.remove(&id) {
-                // A request that stopped waiting, as its timeout came, wants no reply.
+                // A request that stopped waiting wants no reply.
                 let _ = reply.send(outcome);
             }
+            true
         }
-        Some(Frame::Inbound(message)) => {
-            // An inbox nobody holds hears nothing: the server's message goes unread, as it
-            // would with no one listening.
-            let _ = heard.send(message);
-        }
-        None => {}
+        // An inbox nobody holds hears nothing: the server's message goes unread, as it would
+        // with no one listening.
+        Some(Frame::Inbound(message)) => !matches!(
+            heard.try_send(message),
+            Err(mpsc::error::TrySendError::Full(_))
+        ),
+        None => true,
     }
 }
 
@@ -388,6 +407,10 @@ impl Rpc {
             waiting.replies.insert(id, sender);
             (id, reply)
         };
+        let _place = Place {
+            waiting: &self.waiting,
+            id,
+        };
         self.send(call(Some(id), method, params));
         match tokio::time::timeout(REQUEST_TIMEOUT, reply).await {
             Ok(Ok(outcome)) => outcome.map_err(|error| RpcError::Server {
@@ -397,12 +420,9 @@ impl Rpc {
             Ok(Err(_)) => Err(RpcError::Ended {
                 method: method.to_owned(),
             }),
-            Err(_) => {
-                lock(&self.waiting).replies.remove(&id);
-                Err(RpcError::TimedOut {
-                    method: method.to_owned(),
-                })
-            }
+            Err(_) => Err(RpcError::TimedOut {
+                method: method.to_owned(),
+            }),
         }
     }
 
@@ -440,6 +460,7 @@ impl Rpc {
 mod tests {
     use super::*;
     use crate::testing::{TempDir, paused, runtime};
+    use futures_util::FutureExt as _;
     use serde_json::json;
     use tokio::net::UnixListener;
 
@@ -617,16 +638,18 @@ mod tests {
             let tasks = TaskTracker::new();
             let stop = CancellationToken::new();
             let (rpc, mut inbox, mut server) = connected(&dir, &tasks, stop.clone()).await;
-            let stopping = async {
-                heard(&mut server).await;
-                stop.cancel();
-                server
-            };
-            let (failed, mut server) = tokio::join!(rpc.request("a/slow", Value::Null), stopping);
-            assert!(matches!(failed, Err(RpcError::Ended { .. })));
-            assert_eq!(inbox.next().await, None);
+            let request = rpc.request("a/slow", Value::Null);
+            tokio::pin!(request);
+            tokio::select! {
+                _ = &mut request => panic!("answered with no reply"),
+                _ = heard(&mut server) => {}
+            }
+            stop.cancel();
             tasks.close();
-            tasks.wait().await;
+            let ended = tokio::time::timeout(Duration::from_secs(1), tasks.wait()).await;
+            assert!(ended.is_ok(), "the owner still runs after its stop");
+            assert!(matches!(request.await, Err(RpcError::Ended { .. })));
+            assert_eq!(inbox.next().await, None);
             // The owner is gone, and the socket with it.
             assert!(!matches!(server.next().await, Some(Ok(Message::Text(_)))));
         }));
@@ -697,6 +720,7 @@ mod tests {
             );
             assert_eq!(started.elapsed(), REQUEST_TIMEOUT);
             assert_eq!(first["id"], 0);
+            assert_eq!(lock(&rpc.waiting).replies.len(), 0);
             let answering = async {
                 heard(&mut server).await;
                 say(&mut server, json!({ "id": 0, "result": "late" })).await;
@@ -712,7 +736,7 @@ mod tests {
     fn is_refused_when_the_socket_doesn_t_upgrade_in_10_s() {
         let dir = TempDir::new("rpc-open");
         let path = dir.path().join("server.sock");
-        paused().block_on(async {
+        paused().block_on(within(2 * OPEN_TIMEOUT, async {
             let listener = UnixListener::bind(&path).unwrap();
             let started = tokio::time::Instant::now();
             let silent = async {
@@ -731,7 +755,88 @@ mod tests {
                 refused.unwrap_err().to_string(),
                 format!("can't connect to {}: no WebSocket in 10 s", path.display())
             );
-        });
+        }));
+    }
+
+    #[test]
+    fn gives_up_its_place_when_the_caller_stops_waiting() {
+        let dir = TempDir::new("rpc-dropped");
+        runtime().block_on(bounded(async {
+            let tasks = TaskTracker::new();
+            let (rpc, _inbox, mut server) = connected(&dir, &tasks, CancellationToken::new()).await;
+            // Polled once, so sent, then dropped.
+            assert!(rpc.request("a/slow", Value::Null).now_or_never().is_none());
+            assert_eq!(lock(&rpc.waiting).replies.len(), 0);
+            assert_eq!(heard(&mut server).await["id"], 0);
+        }));
+    }
+
+    /// A request too big for the socket's buffers, which a server that reads nothing never takes.
+    fn too_big() -> Value {
+        Value::String("x".repeat(8 * 1024 * 1024))
+    }
+
+    #[test]
+    fn stops_while_a_write_the_server_doesn_t_read_waits() {
+        let dir = TempDir::new("rpc-stuck");
+        runtime().block_on(bounded(async {
+            let tasks = TaskTracker::new();
+            let stop = CancellationToken::new();
+            let (rpc, _inbox, _server) = connected(&dir, &tasks, stop.clone()).await;
+            let request = rpc.request("a/big", too_big());
+            tokio::pin!(request);
+            assert!((&mut request).now_or_never().is_none());
+            // Long enough for the owner to start the write, and the socket's buffers to fill.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            stop.cancel();
+            tasks.close();
+            let ended = tokio::time::timeout(Duration::from_secs(1), tasks.wait()).await;
+            assert!(ended.is_ok(), "the owner still writes after its stop");
+            assert!(matches!(request.await, Err(RpcError::Ended { .. })));
+        }));
+    }
+
+    #[test]
+    fn ends_the_connection_when_the_server_reads_nothing_for_10_s() {
+        let dir = TempDir::new("rpc-unread");
+        paused().block_on(within(2 * REQUEST_TIMEOUT, async {
+            let tasks = TaskTracker::new();
+            let (rpc, _inbox, _server) = connected(&dir, &tasks, CancellationToken::new()).await;
+            let started = tokio::time::Instant::now();
+            assert_eq!(
+                rpc.request("a/big", too_big()).await,
+                Err(RpcError::Ended {
+                    method: "a/big".to_owned()
+                })
+            );
+            assert_eq!(started.elapsed(), WRITE_TIMEOUT);
+        }));
+    }
+
+    #[test]
+    fn disconnects_a_server_that_fills_the_inbox() {
+        let dir = TempDir::new("rpc-flood");
+        runtime().block_on(bounded(async {
+            let tasks = TaskTracker::new();
+            let (rpc, mut inbox, mut server) =
+                connected(&dir, &tasks, CancellationToken::new()).await;
+            for n in 0..=INBOX_CAPACITY {
+                say(&mut server, json!({ "method": "a/tick", "params": n })).await;
+            }
+            // Nobody reads the inbox until the owner has ended, as it ends on the one too many.
+            tasks.close();
+            let ended = tokio::time::timeout(Duration::from_secs(1), tasks.wait()).await;
+            assert!(
+                ended.is_ok(),
+                "a server that filled the inbox is still connected"
+            );
+            let mut read = 0;
+            while inbox.next().await.is_some() {
+                read += 1;
+            }
+            assert_eq!(read, INBOX_CAPACITY);
+            assert!(rpc.notify("a/after", Value::Null).is_err());
+        }));
     }
 
     #[test]
