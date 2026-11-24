@@ -195,7 +195,8 @@ command = "cargo build --release --quiet --locked -p bazhen"
 options = { cache = false }
 
 [tasks.build-daemon]
-command = "cargo build --release --quiet --locked -p bazhen-daemon"
+# The hook client beside it, which the daemon installs for agents and shells to run.
+command = "cargo build --release --quiet --locked -p bazhen-daemon -p bazhen-hook"
 options = { cache = false }
 
 [tasks.build-engine]

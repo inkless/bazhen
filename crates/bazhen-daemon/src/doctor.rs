@@ -15,6 +15,7 @@ use bazhen_protocol::record::Record;
 use crate::budget::Counts;
 use crate::env::Capture;
 use crate::holder::{Install, holder_doctor};
+use crate::hook_link::InstalledHook;
 use crate::routes::{Shared, internal};
 
 /// What doctor says that is settled once the daemon starts.
@@ -28,6 +29,8 @@ pub(crate) struct Settled {
     pub(crate) bundle: crate::web::Bundle,
     pub(crate) install: Install,
     pub(crate) env: CapturedEnv,
+    /// Where doctor finds the `bazhen` the agents run, read as it is asked.
+    pub(crate) agent_cli: crate::agent_cli::Lookup,
 }
 
 /// What the start-up settings say, for [`Settled`].
@@ -37,19 +40,20 @@ pub(crate) struct Settings<'a> {
     pub(crate) config: &'a crate::config::Settings,
     pub(crate) install: Install,
     pub(crate) capture: &'a Capture,
+    /// The hook client this start installed, or none when none is built.
+    pub(crate) hook: Option<&'a InstalledHook>,
 }
 
-/// The hook client agents run beside this daemon: `bazhen-hook`, built beside it, or, before it
-/// is, the curl script in the crate's source.
-fn hook_client(exe: &Path) -> HookClient {
-    let dir = exe.parent().unwrap_or_else(|| Path::new("/"));
-    let built = dir.join("bazhen-hook");
-    if built.exists() {
+/// The hook client agents run beside this daemon: the copy of `bazhen-hook` this start
+/// installed, or, before one is built, the curl script in the crate's source.
+fn hook_client(exe: &Path, hook: Option<&InstalledHook>) -> HookClient {
+    if let Some(hook) = hook {
         return HookClient {
-            path: built.to_string_lossy().into_owned(),
+            path: hook.client.to_string_lossy().into_owned(),
             fallback: false,
         };
     }
+    let dir = exe.parent().unwrap_or_else(|| Path::new("/"));
     HookClient {
         path: dir
             .join("../../crates/bazhen-hook/bazhen-hook.sh")
@@ -64,7 +68,7 @@ impl Settled {
         let config = &settings.config.config;
         let capture = settings.capture;
         Self {
-            hook_client: hook_client(settings.exe),
+            hook_client: hook_client(settings.exe, settings.hook),
             config: ConfigFile {
                 path: settings.config.config_file.path.clone(),
                 found: settings.config.config_file.found,
@@ -106,6 +110,7 @@ impl Settled {
                 kept: u64::try_from(capture.env.len()).unwrap_or(u64::MAX),
                 removed: Record::new(capture.removed.clone()),
             },
+            agent_cli: crate::agent_cli::Lookup::of(&capture.env, settings.exe),
         }
     }
 }
@@ -146,14 +151,16 @@ pub(crate) async fn doctor(State(shared): State<Shared>) -> Response {
         .collect();
     let mut settled = settled.as_ref().clone();
     let bundle = settled.bundle.clone();
-    (settled.web.app, settled.web.app_refused) = match tokio::task::spawn_blocking(move || {
-        crate::web::app(&bundle, &bundle.state())
+    let lookup = settled.agent_cli.clone();
+    let (app, agent_cli) = match tokio::task::spawn_blocking(move || {
+        (crate::web::app(&bundle, &bundle.state()), lookup.read())
     })
     .await
     {
-        Ok(app) => app,
+        Ok(read) => read,
         Err(err) => return internal(&err),
     };
+    (settled.web.app, settled.web.app_refused) = app;
     let answer = DoctorResponse {
         app_version: shared.health.app_version.clone(),
         protocol_id: shared.health.protocol_id.clone(),
@@ -162,7 +169,7 @@ pub(crate) async fn doctor(State(shared): State<Shared>) -> Response {
         // This daemon reads its callers without the peer reader's program, so says nothing of
         // one, as a daemon older than it.
         peer_reader: Nullable::Absent,
-        agent_cli: None,
+        agent_cli: Some(agent_cli),
         config: settled.config,
         agents: settled.agents,
         codex: None,
