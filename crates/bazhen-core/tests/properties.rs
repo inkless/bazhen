@@ -34,6 +34,18 @@ fn walk(events: &[AgentEvent]) -> Vec<(AgentEvent, AgentState, AgentState)> {
     steps
 }
 
+/// A role file's text, which bytes at random almost never are: a title near the cap of 80, and a
+/// prompt that is empty, blank, short, or near the cap of `PROMPT_MAX`.
+fn role_text() -> impl Strategy<Value = Vec<u8>> {
+    let prompt = prop_oneof![
+        "[ \t\n]{0,3}".prop_map(String::from),
+        "[ \n]{0,2}[a-z]{1,8}".prop_map(String::from),
+        (PROMPT_MAX - 3..PROMPT_MAX + 3).prop_map(|n| "x".repeat(n)),
+    ];
+    ("[A-Za-z0-9]([A-Za-z0-9 ]{0,90}[A-Za-z0-9])?", prompt)
+        .prop_map(|(title, prompt)| format!("---\ntitle: {title}\n---\n{prompt}").into_bytes())
+}
+
 proptest! {
     #[test]
     fn an_agent_takes_no_event_once_closed_or_failed(events in agent_events()) {
@@ -108,7 +120,7 @@ proptest! {
 
     #[test]
     fn reads_any_bytes_without_panicking_and_keeps_only_what_a_role_may_be(
-        bytes in prop::collection::vec(any::<u8>(), 0..2048),
+        bytes in prop_oneof![prop::collection::vec(any::<u8>(), 0..2048), role_text()],
     ) {
         if let Ok(role) = parse_role("tester", &bytes, RoleSource::User) {
             prop_assert!(role.title.chars().count() <= 80);
