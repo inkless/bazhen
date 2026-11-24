@@ -203,6 +203,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bazhen-harness"
+version = "0.1.0"
+dependencies = [
+ "bazhen-core",
+ "bazhen-protocol",
+ "jiff",
+ "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bazhen-holder"
 version = "0.1.0"
 dependencies = [

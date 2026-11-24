@@ -6,6 +6,7 @@ import {
   MAX_CAP,
   MUTANTS_CONFIG,
   cappedScriptFailures,
+  harnessNameFailures,
   tmuxPinFailures,
   ROOT_TABLES,
   TOOLCHAIN_CONFIG,
@@ -5354,5 +5355,156 @@ describe("suppressionFailures", () => {
     expect(suppressionFailures("a.html", "<!-- Why -->\n<p>a --> b</p>\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "while (n --> 0) f(n);\n")).toEqual([]);
     expect(suppressionFailures("a.ts", "// Why\r\n// the rule is on.\r\n")).toEqual([]);
+  });
+});
+
+const harnessNames = (
+  sources: Record<string, string>,
+  named: Record<string, { names: string[]; why: string }> = {},
+) =>
+  harnessNameFailures(Object.keys(sources), (p) => sources[p] ?? "", FREE, VOCABULARY, named).map(
+    (f) => (f.includes(": names a harness") ? f.slice(0, f.indexOf(". Code outside")) : f),
+  );
+
+const FREE = { "bazhen-protocol": "the wire" };
+const VOCABULARY = {
+  ClaudeCode: { free: false, why: "w" },
+  Codex: { free: false, why: "w" },
+  CodexThread: { free: false, why: "w" },
+  QueuedInCodex: { free: true, why: "w" },
+  codex: { free: false, why: "w" },
+};
+const PROTOCOL = {
+  "crates/bazhen-protocol/src/lib.rs": [
+    "pub enum HarnessId { ClaudeCode, Codex }",
+    'impl HarnessId { fn as_str(self) -> &str { match self { Self::Codex => "codex" } } }',
+    "pub enum MailboxState { QueuedInCodex }",
+    'pub enum ExternalRefKind { #[serde(rename = "codex-thread")] CodexThread }',
+    "pub struct DaemonDoctor { pub codex: Option<u8> }",
+    "",
+  ].join("\n"),
+};
+
+describe("harnessNameFailures", () => {
+  const daemon = "crates/bazhen-daemon/src/route.rs";
+
+  it("refuses a harness named by a path, an identifier or a string, in any crate not freed", () => {
+    expect(
+      harnessNames({
+        ...PROTOCOL,
+        [daemon]: "fn a(h: HarnessId) -> bool {\n  h == HarnessId::Codex\n}\n",
+        "crates/bazhen-store/src/q.rs": "const Q: &str = \"WHERE harness = 'claude-code'\";\n",
+        "crates/bazhen-core/src/m.rs": "fn as_codex() {}\n",
+        "crates/bazhen-new/src/lib.rs": "use bazhen_protocol::HarnessId::ClaudeCode;\n",
+        "crates/bazhen/src/attach.rs": "fn label() { HarnessId::ClaudeCode; }\n",
+        "crates/bazhen-holder/src/b.rs":
+          'const B: &[u8] = b"codex";\nconst R: &str = r#"a "claude" b"#;\nconst C: &[u8] = br"Codex-x";\n',
+      }),
+    ).toEqual([
+      "crates/bazhen-daemon/src/route.rs:2: names a harness (`Codex`)",
+      'crates/bazhen-store/src/q.rs:1: names a harness (`"claude-code"`)',
+      "crates/bazhen-core/src/m.rs:1: names a harness (`as_codex`)",
+      "crates/bazhen-new/src/lib.rs:1: names a harness (`ClaudeCode`)",
+      "crates/bazhen/src/attach.rs:1: names a harness (`ClaudeCode`)",
+      'crates/bazhen-holder/src/b.rs:1: names a harness (`"codex"`)',
+      'crates/bazhen-holder/src/b.rs:2: names a harness (`"claude"`)',
+      'crates/bazhen-holder/src/b.rs:3: names a harness (`"Codex-x"`)',
+    ]);
+  });
+
+  it("frees only a free vocabulary identifier, never a bound one, a string or a field name", () => {
+    expect(
+      harnessNames({
+        ...PROTOCOL,
+        [daemon]: [
+          "fn a() -> bool { s == MailboxState::QueuedInCodex }",
+          'fn b() -> bool { h == "codex" }',
+          "mod codex;",
+          "fn c() -> bool { k == ExternalRefKind::CodexThread }",
+          'fn d() -> &str { "QueuedInCodex" }',
+          "",
+        ].join("\n"),
+        "crates/bazhen-store/src/sql.rs":
+          "const Q: &str = \"SELECT id WHERE harness = 'codex'\";\n",
+      }),
+    ).toEqual([
+      'crates/bazhen-daemon/src/route.rs:2: names a harness (`"codex"`)',
+      "crates/bazhen-daemon/src/route.rs:3: names a harness (`codex`)",
+      "crates/bazhen-daemon/src/route.rs:4: names a harness (`CodexThread`)",
+      'crates/bazhen-daemon/src/route.rs:5: names a harness (`"QueuedInCodex"`)',
+      'crates/bazhen-store/src/sql.rs:1: names a harness (`"codex"`)',
+    ]);
+  });
+
+  it("holds HARNESS_VOCABULARY to the protocol's identifiers both ways, its strings aside", () => {
+    expect(
+      harnessNameFailures(
+        ["crates/bazhen-protocol/src/lib.rs"],
+        () => 'pub enum A { CodexNew, Codex }\nconst S: &str = "claude-only";\n',
+        FREE,
+        { Codex: { free: false, why: "w" }, ClaudeGone: { free: true, why: "w" } },
+        {},
+      ),
+    ).toEqual([
+      "scripts/check-standards.ts: bazhen-protocol names CodexNew, which HARNESS_VOCABULARY " +
+        "doesn't list. List it, free only if harness-blind code may name it, with why.",
+      "scripts/check-standards.ts: HARNESS_VOCABULARY lists ClaudeGone, which bazhen-protocol's " +
+        "product code doesn't name. Drop it.",
+    ]);
+  });
+
+  it("reads neither comments, test code nor a test-only module", () => {
+    expect(
+      harnessNames({
+        ...PROTOCOL,
+        [daemon]:
+          '// Codex\n/** claude */\nfn a() {}\n#[cfg(test)]\nmod tests { const C: &str = "codex"; }\n',
+        "crates/bazhen-daemon/src/lib.rs": "#[cfg(test)]\nmod fixture;\n",
+        "crates/bazhen-daemon/src/fixture.rs": "fn codex() {}\n",
+        "crates/bazhen-daemon/tests/codex.rs": "fn codex() {}\n",
+      }),
+    ).toEqual([]);
+  });
+
+  it("takes the names an entry lists, and holds each entry both ways", () => {
+    expect(
+      harnessNames(
+        {
+          ...PROTOCOL,
+          [daemon]: 'fn as_codex() { "bazhen-codex-thread"; Codex }\n',
+        },
+        {
+          [daemon]: { names: ["as_codex", '"bazhen-codex-thread', "codex_gone"], why: "w" },
+          "crates/bazhen-core/src/g.rs": { names: [], why: "w" },
+          "crates/bazhen-protocol/src/lib.rs": { names: ["Codex"], why: "w" },
+        },
+      ),
+    ).toEqual([
+      "crates/bazhen-daemon/src/route.rs:1: names a harness (`Codex`)",
+      "scripts/check-standards.ts: HARNESS_NAMED lists codex_gone for " +
+        "crates/bazhen-daemon/src/route.rs, which no longer holds it. Drop the name.",
+      "scripts/check-standards.ts: HARNESS_NAMED lists crates/bazhen-core/src/g.rs, which isn't " +
+        "product code.",
+      "scripts/check-standards.ts: HARNESS_NAMED lists crates/bazhen-protocol/src/lib.rs, whose " +
+        "crate HARNESS_CRATES frees already.",
+    ]);
+  });
+
+  it("holds an entry's identifier and string apart, so listing one lets the other through never", () => {
+    expect(
+      harnessNames(
+        { ...PROTOCOL, [daemon]: 'fn codex() { "codex"; }\nfn as_codex() { "as_codex"; }\n' },
+        { [daemon]: { names: ['"codex', "as_codex"], why: "w" } },
+      ),
+    ).toEqual([
+      "crates/bazhen-daemon/src/route.rs:1: names a harness (`codex`)",
+      'crates/bazhen-daemon/src/route.rs:2: names a harness (`"as_codex"`)',
+    ]);
+  });
+
+  it("refuses a freed crate that doesn't exist", () => {
+    expect(harnessNameFailures(["crates/bazhen-peer/src/lib.rs"], () => "", FREE, {}, {})).toEqual([
+      "scripts/check-standards.ts: HARNESS_CRATES lists missing bazhen-protocol.",
+    ]);
   });
 });

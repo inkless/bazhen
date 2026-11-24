@@ -876,6 +876,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-client/src/framing.rs::body": "framing",
   "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
+  "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
@@ -927,6 +928,12 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
 };
 const NOT_DECODERS: Record<string, string> = {
+  "crates/bazhen-harness/src/js.rs::Js::parse":
+    "hands its bytes whole to serde_json's parser, whose values its visitor only collects; reached from a hook only through ClaudeCode::ingest, which the ingest target fuzzes",
+  "crates/bazhen-harness/src/lib.rs::ingest":
+    "Harness::ingest's declaration, with no body: each adapter's implementation is listed with its own fuzz target",
+  "crates/bazhen-harness/src/lib.rs::route":
+    "Session::route's declaration, with no body: each adapter's implementation is listed with its own fuzz target",
   "crates/bazhen-daemon/src/devices.rs::token_of":
     "encodes random bytes the daemon read itself as base64url; parses nothing",
   "crates/bazhen-daemon/src/paired.rs::dismiss":
@@ -5004,6 +5011,230 @@ export function rootManifestFailures(text: string): string[] {
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 /**
+ * The crates whose product code may name a harness, each with why. Every other crate's code is
+ * harness-blind: it asks the harness's adapter in bazhen-harness, or reads its capabilities, so a
+ * harness is added there alone. A new crate is blind until it is listed here.
+ */
+const HARNESS_CRATES: Record<string, string> = {
+  "bazhen-harness": "the adapters: where each harness is named and read",
+  "bazhen-peer":
+    "caller identity's process-tree marks, a Codex app-server among them: a security edge",
+  "bazhen-protocol": "the wire, which names each harness and its vocabulary",
+};
+
+/**
+ * Each identifier in bazhen-protocol's product code that holds `codex` or `claude`, and whether
+ * harness-blind code may name it freely: a state or sign the daemon records as an adapter gives
+ * it, and never branches on. A name that stands in for a harness is bound: each use needs its
+ * file's HARNESS_NAMED entry. The list is held to the protocol both ways, so a new name there
+ * fails until it is listed.
+ */
+const HARNESS_VOCABULARY: Record<string, { free: boolean; why: string }> = {
+  ClaudeCode: { free: false, why: "a HarnessId variant" },
+  ClaudeHook: {
+    free: true,
+    why: "a readiness and compaction sign, recorded as the adapter gives it",
+  },
+  ClaudeSession: { free: false, why: "an ExternalRefKind, which stands in for its harness" },
+  Codex: { free: false, why: "a HarnessId variant" },
+  CodexItem: { free: true, why: "a compaction source, recorded as the adapter gives it" },
+  CodexThread: { free: false, why: "an ExternalRefKind, which stands in for its harness" },
+  CodexTitle: { free: true, why: "a readiness sign, recorded as the adapter gives it" },
+  QueuedInCodex: { free: true, why: "a mailbox state the store passes through" },
+  codex: { free: false, why: "the doctor reply's field for one harness's block" },
+};
+
+/**
+ * The harness names each file of a harness-blind crate may hold, exactly, and why. A name is an
+ * identifier, or the word in a string literal that holds `codex` or `claude`, listed with a
+ * leading `"` (`"codex`): each kind is held apart, so listing one never lets the other through. A
+ * free HARNESS_VOCABULARY identifier needs no entry.
+ */
+const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
+  "crates/bazhen/src/attach.rs": {
+    names: ['"Codex', "ClaudeCode", '"Claude', "Codex"],
+    why: "names each harness to the person attaching, and a Codex thread apart from a session",
+  },
+  "crates/bazhen/src/doctor.rs": {
+    names: ['"codex', "codex", '"Codex'],
+    why: "renders the doctor reply's Codex block",
+  },
+  "crates/bazhen/src/lib.rs": {
+    names: ['"claude-code', '"codex'],
+    why: "the usage text, which lists the harnesses",
+  },
+  "crates/bazhen-client/src/lib.rs": {
+    names: ['"codex_thread', "codex_thread", '"CODEX_THREAD_ID', '"Bazhen-Codex-Thread'],
+    why: "the Codex thread header a call presents, read from the agent's environment",
+  },
+  "crates/bazhen-hook/src/pane_title.rs": {
+    names: ['"codex'],
+    why: "the pane-title hook, which posts a Codex TUI's title to its route",
+  },
+  "crates/bazhen-daemon/src/callers.rs": {
+    names: [
+      '"Codex',
+      "codex_agent",
+      "as_codex",
+      "is_codex_thread",
+      '"bazhen-codex-thread',
+      "Codex",
+      '"codex',
+    ],
+    why:
+      "caller identity, a security edge, read from the kernel-vouched process tree and a " +
+      "header; it must not depend on adapter code that parses untrusted reports. Permanent",
+  },
+  "crates/bazhen-daemon/src/doctor.rs": {
+    names: ["codex"],
+    why: "the doctor reply's `codex` field, which the protocol names",
+  },
+  "crates/bazhen-daemon/src/env.rs": {
+    names: [
+      '"CLAUDECODE',
+      '"CLAUDE_CODE_SESSION_ID',
+      '"CLAUDE_CODE_ENTRYPOINT',
+      '"CLAUDE_CODE_CHILD_SESSION',
+      '"CLAUDE_CODE_MESSAGING_SOCKET',
+      '"CLAUDE_CODE_MESSAGING_TOKEN',
+      '"CLAUDE_PID',
+      '"CLAUDE_CODE_SESSION_ATTENDED',
+      '"CLAUDE_CODE_EXECPATH',
+      '"CLAUDE_ENV_FILE',
+      '"CLAUDE_PROJECT_DIR',
+      '"CODEX_THREAD_ID',
+      '"CODEX_SANDBOX',
+      '"CODEX_SANDBOX_NETWORK_DISABLED',
+    ],
+    why: "each harness's session variables, which no terminal inherits, whatever runs in it",
+  },
+  "crates/bazhen-daemon/src/peer.rs": {
+    names: ["Codex", "codex_server"],
+    why: "caller identity, as callers.rs: a Codex app-server among the caller's ancestors. Permanent",
+  },
+  "crates/bazhen-store/src/agent_events.rs": {
+    names: ['"codex-thread', '"Codex', "CodexThread"],
+    why: "the stored `codex-thread` ref, which one live agent at a time may hold",
+  },
+  "crates/bazhen-store/src/agents.rs": {
+    names: ["codex_agent", '"codex', '"codex-thread'],
+    why: "caller identity's query, for callers.rs: the live agent bound to a Codex thread",
+  },
+};
+
+/**
+ * The names in a Rust file's product code that name a harness, once as an identifier and once in
+ * a string literal, each with its first line.
+ */
+function harnessNames(source: string): { name: string; line: number; literal: boolean }[] {
+  const strings: string[] = [];
+  const code = rustCode(source, strings);
+  const product = withoutTests(code);
+  const out = new Map<string, { name: string; line: number; literal: boolean }>();
+  let n = 0;
+  for (const m of code.matchAll(/""|[A-Za-z_]\w*/g)) {
+    const literal = m[0] === '""';
+    const text = literal ? (strings[n++] ?? "") : m[0];
+    if (product.slice(m.index, m.index + m[0].length) !== m[0]) continue;
+    const names = literal ? text.match(/[\w-]*(?:codex|claude)[\w-]*/gi) : [text];
+    for (const name of names ?? []) {
+      const key = `${literal ? '"' : ""}${name}`;
+      if (!/codex|claude/i.test(name) || out.has(key)) continue;
+      out.set(key, { name, line: code.slice(0, m.index).split("\n").length, literal });
+    }
+  }
+  return [...out.values()];
+}
+
+/** A found name as a HARNESS_NAMED entry lists it: a string's word with a leading `"`. */
+const entryName = (n: { name: string; literal: boolean }) => `${n.literal ? '"' : ""}${n.name}`;
+
+/**
+ * Why a harness-blind crate's product code names a harness: by a name its file's HARNESS_NAMED
+ * entry doesn't list, as `HarnessId::Codex`, `"claude-code"` or `as_codex` do, where the name
+ * isn't the protocol's own vocabulary. Each entry is held both ways: a name it lists that the
+ * file no longer holds, a file missing, or one in a crate free to name harnesses, fails too.
+ * Comments, test code and test-only modules are not read. `concat!`, `format!` and indexing
+ * `HarnessId::ALL` can still spell a harness, and so can branching on a free name, as
+ * `if sign == ReadySign::CodexTitle` does: accepted gaps.
+ */
+export function harnessNameFailures(
+  paths: string[],
+  read: (path: string) => string,
+  crates: Record<string, string>,
+  vocabulary: Record<string, { free: boolean; why: string }>,
+  named: Record<string, { names: string[]; why: string }>,
+): string[] {
+  const out: string[] = [];
+  const sources = paths.filter((p) => /^crates\/[^/]+\/src\/.+\.rs$/.test(p));
+  const testOnly = testModuleFiles(sources, read);
+  const product = sources.filter((p) => !testOnly.has(p));
+  const free = (file: string) => (file.split("/")[1] ?? "") in crates;
+  const protocol = new Set(
+    product
+      .filter((p) => p.startsWith("crates/bazhen-protocol/"))
+      .flatMap((p) =>
+        harnessNames(read(p))
+          .filter((n) => !n.literal)
+          .map((n) => n.name),
+      ),
+  );
+  for (const name of protocol) {
+    if (!(name in vocabulary)) {
+      out.push(
+        `scripts/check-standards.ts: bazhen-protocol names ${name}, which HARNESS_VOCABULARY ` +
+          "doesn't list. List it, free only if harness-blind code may name it, with why.",
+      );
+    }
+  }
+  for (const name of Object.keys(vocabulary).filter((n) => !protocol.has(n))) {
+    out.push(
+      `scripts/check-standards.ts: HARNESS_VOCABULARY lists ${name}, which bazhen-protocol's ` +
+        "product code doesn't name. Drop it.",
+    );
+  }
+  for (const file of product.filter((p) => !free(p))) {
+    const listed = new Set(named[file]?.names ?? []);
+    const found = harnessNames(read(file));
+    for (const { name, line, literal } of found) {
+      if (listed.has(entryName({ name, literal }))) continue;
+      if (!literal && vocabulary[name]?.free === true) continue;
+      out.push(
+        `${file}:${line}: names a harness (\`${literal ? `"${name}"` : name}\`). Code outside the crates in ` +
+          "HARNESS_CRATES asks the harness's adapter, or reads its capabilities; a name it " +
+          "must hold goes in its file's HARNESS_NAMED entry in scripts/check-standards.ts, with why.",
+      );
+    }
+    for (const name of listed) {
+      if (!found.some((n) => entryName(n) === name)) {
+        out.push(
+          `scripts/check-standards.ts: HARNESS_NAMED lists ${name} for ${file}, which no longer ` +
+            "holds it. Drop the name.",
+        );
+      }
+    }
+  }
+  for (const crate of Object.keys(crates)) {
+    if (!paths.some((p) => p.startsWith(`crates/${crate}/`))) {
+      out.push(`scripts/check-standards.ts: HARNESS_CRATES lists missing ${crate}.`);
+    }
+  }
+  for (const file of Object.keys(named)) {
+    if (!product.includes(file)) {
+      out.push(
+        `scripts/check-standards.ts: HARNESS_NAMED lists ${file}, which isn't product code.`,
+      );
+    } else if (free(file)) {
+      out.push(
+        `scripts/check-standards.ts: HARNESS_NAMED lists ${file}, whose crate HARNESS_CRATES ` +
+          "frees already.",
+      );
+    }
+  }
+  return out;
+}
+
+/**
  * The Rust rules' failures for a repository holding `paths`, read with `read`: crates only in
  * crates/, each taking the workspace lints and its dependencies from the workspace; the lint
  * configuration as the standard says, with nothing beside it to loosen it; and no source that
@@ -5021,6 +5252,9 @@ export function rustFailures(
     publicByteFields?: Record<string, string>;
     foreignMacros?: Record<string, ForeignMacro>;
     heavyAllowed?: Record<string, string>;
+    harnessCrates?: Record<string, string>;
+    harnessVocabulary?: Record<string, { free: boolean; why: string }>;
+    harnessNamed?: Record<string, { names: string[]; why: string }>;
   } = {},
 ): string[] {
   const out: string[] = [];
@@ -5121,6 +5355,15 @@ export function rustFailures(
       options.foreignMacros ?? {},
     ),
   );
+  out.push(
+    ...harnessNameFailures(
+      paths,
+      read,
+      options.harnessCrates ?? {},
+      options.harnessVocabulary ?? {},
+      options.harnessNamed ?? {},
+    ),
+  );
   return out;
 }
 
@@ -5196,6 +5439,9 @@ function checkRust(): void {
       foreignMacros: FOREIGN_MACROS,
       publicByteFields: PUBLIC_BYTE_FIELDS,
       heavyAllowed: HEAVY_ALLOWED,
+      harnessCrates: HARNESS_CRATES,
+      harnessVocabulary: HARNESS_VOCABULARY,
+      harnessNamed: HARNESS_NAMED,
     }),
   );
 }
