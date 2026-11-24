@@ -873,6 +873,10 @@ impl<'a> Walk<'a> {
                 let trailing = json!(format!("{held}!"));
                 self.plant(path, "patternTrailing", Edit::Put(trailing), false);
             }
+            (Some(pattern), Some(held)) if starts_with_literal(pattern) => {
+                let leading = json!(format!("!{held}"));
+                self.plant(path, "patternLeading", Edit::Put(leading), false);
+            }
             (Some(pattern), _) => {
                 self.problem(path, &format!("the corpus plants no case for `{pattern}`"));
             }
@@ -1035,6 +1039,31 @@ fn refuses_bang(pattern: &str) -> bool {
         && pattern.ends_with('$')
         && !body.contains(['!', '.'])
         && !body.contains("[^")
+}
+
+/// Whether `pattern` is zod's `startsWith`, `^` and a literal text and `.*`, which a `!` before
+/// what it takes breaks, and nothing after it does.
+fn starts_with_literal(pattern: &str) -> bool {
+    let Some(literal) = pattern
+        .strip_prefix('^')
+        .and_then(|rest| rest.strip_suffix(".*"))
+    else {
+        return false;
+    };
+    let mut text = String::new();
+    let mut chars = literal.chars();
+    while let Some(c) = chars.next() {
+        let c = match c {
+            '\\' => match chars.next() {
+                Some(escaped) if !escaped.is_ascii_alphanumeric() => escaped,
+                _ => return false,
+            },
+            c if r"\.^$*+?()[]{}|".contains(c) => return false,
+            c => c,
+        };
+        text.push(c);
+    }
+    !text.is_empty() && !text.starts_with('!')
 }
 
 /// The names a key pattern written `^(?!(?:a|b)$)` reserves, or `None` for any other pattern.
@@ -1332,6 +1361,37 @@ mod tests {
                 .any(|c| c.body == r#"{"entity":"e","n":"","type":"a.b"}"#),
             "{cases:?}"
         );
+    }
+
+    #[test]
+    fn plants_only_a_leading_break_for_a_pattern_a_literal_starts() {
+        let field = |pattern: &str| {
+            json!({
+                "type": "object",
+                "properties": { "path": { "type": "string", "pattern": pattern } },
+                "required": ["path"],
+            })
+        };
+        let example = json!({ "path": "/a" });
+        let cases = planted_in(&field("^\\/.*"), None, &example).unwrap();
+        assert!(has(&cases, "/path", "patternLeading", false), "{cases:?}");
+        assert!(
+            cases.iter().any(|c| c.body == r#"{"path":"!/a"}"#),
+            "{cases:?}"
+        );
+        assert!(
+            !cases.iter().any(|c| c.kind == "patternTrailing"),
+            "{cases:?}"
+        );
+        for unbreakable in ["^.*", "^\\d.*", "^a+.*", "^!a.*", "^a.*$"] {
+            let problems = planted_in(&field(unbreakable), None, &example).unwrap_err();
+            assert_eq!(
+                problems,
+                [format!(
+                    "M/path: the corpus plants no case for `{unbreakable}`"
+                )]
+            );
+        }
     }
 
     #[test]
