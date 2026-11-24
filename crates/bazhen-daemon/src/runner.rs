@@ -14,6 +14,7 @@ use crate::budget::Budget;
 use crate::doctor::{self, Settled};
 use crate::env::{self, Env};
 use crate::holder::{self, Holder, default_runtime_refusal, holder_source, runtime_env};
+use crate::hook_link;
 use crate::serve::{Refused, Startup};
 use crate::terminals::Terminals;
 
@@ -37,6 +38,8 @@ pub(crate) struct Runner {
     pub(crate) shell: String,
     /// The holder runtime its terminals' views stream from; none for a fake's.
     pub(crate) streams: Option<Arc<HolderRuntime>>,
+    /// What hooks are given to run, or none when no hook client is built.
+    pub(crate) hook: Option<String>,
 }
 
 /// The holder runtime, with the build installed for its new terminals, or why the daemon can't
@@ -77,11 +80,15 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
         Arc::new(ptys),
         Box::new(|message| tracing::warn!("bazhen: {message}")),
     );
+    // With none built, a link an earlier start made is left as it is.
+    let hook = hook_link::built_beside(&exe)
+        .map(|built| hook_link::install_hook_client(&built, &state.join("hook"), startup.uid));
     let doctor = Settled::of(doctor::Settings {
         exe: &exe,
         config: settings,
         install,
         capture: &captured,
+        hook: hook.as_ref(),
     });
     let holder = Holder::new(runtime, config.history_lines);
     Ok(Runner {
@@ -90,6 +97,7 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
         budget: Arc::new(budget),
         doctor,
         shell: login_shell(&captured.env),
+        hook: hook.map(|hook| hook.path.to_string_lossy().into_owned()),
     })
 }
 

@@ -2,6 +2,7 @@
 //! loopback HTTP, as `apps/daemon` does, which it is to replace.
 
 mod accept;
+mod agent_cli;
 mod budget;
 mod callers;
 pub mod config;
@@ -13,6 +14,7 @@ mod events;
 mod guard;
 mod heartbeat;
 mod holder;
+mod hook_link;
 mod lock;
 mod log;
 mod paired;

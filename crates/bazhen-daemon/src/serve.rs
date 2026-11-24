@@ -208,7 +208,7 @@ fn run(startup: &Startup, (store, writer): (Writer, writer::Thread)) -> Result<R
 async fn shell_integration(
     startup: &Startup,
     store: &Writer,
-    hook: &bazhen_protocol::daemon::HookClient,
+    hook: Option<&str>,
 ) -> Result<Option<Integration>, Refused> {
     if !startup.settings.config.retype_last_command {
         store
@@ -218,16 +218,16 @@ async fn shell_integration(
             .map_err(|err| Refused::Said(format!("bazhen can't forget shells' lines: {err}")))?;
         return Ok(None);
     }
-    if hook.fallback {
+    let Some(hook) = hook else {
         tracing::warn!(
             "shells.retype_last_command is on, but bazhen-hook is not built: shells report nothing"
         );
         return Ok(None);
-    }
+    };
     let dir = Path::new(&startup.paths.state).join("shell-integration");
     match install_shell_integration(&dir, startup.uid) {
         Ok(()) => Ok(Some(Integration {
-            hook: hook.path.clone(),
+            hook: hook.to_owned(),
             dir: dir.to_string_lossy().into_owned(),
         })),
         Err(err) => {
@@ -255,7 +255,7 @@ async fn shells(
         .await
         .map_err(|err| Refused::Said(format!("bazhen can't start its store: {err}")))?
         .map_err(|err| Refused::Said(format!("bazhen can't register this machine: {err}")))?;
-    let integration = shell_integration(startup, store, &runner.doctor.hook_client).await?;
+    let integration = shell_integration(startup, store, runner.hook.as_deref()).await?;
     let budget = Arc::clone(&runner.budget);
     let shells = Shells::new(ShellsDeps {
         store: store.clone(),
@@ -686,6 +686,7 @@ mod tests {
             config: &startup.settings,
             install: crate::holder::Install::None("no build".to_owned()),
             capture: &captured,
+            hook: None,
         });
         let budget = crate::budget::Budget::new(
             3,
@@ -698,6 +699,7 @@ mod tests {
             doctor,
             shell: "/bin/sh".to_owned(),
             streams: None,
+            hook: None,
         }
     }
 
@@ -767,20 +769,13 @@ mod tests {
 
     #[test]
     fn tells_shells_to_report_only_with_retyping_on_the_hook_built_and_the_snippets_written() {
-        use bazhen_protocol::daemon::HookClient;
         use bazhen_protocol::shells::ShellReport;
         let h = crate::shells::tests::setup_with(100, Some(crate::shells::tests::integration()));
         let mut startup = startup(h.dir.path());
         let said = crate::shells::tests::Said::default();
         let _logging = said.logging();
-        let built = HookClient {
-            path: "/opt/bazhen/bazhen-hook".to_owned(),
-            fallback: false,
-        };
-        let unbuilt = HookClient {
-            path: "/usr/bin/env".to_owned(),
-            fallback: true,
-        };
+        let built = Some("/opt/bazhen/bazhen-hook");
+        let unbuilt = None;
         runtime().block_on(async {
             let id = h.open("o").await.unwrap();
             let report = ShellReport {
@@ -789,7 +784,7 @@ mod tests {
                 command: Some("make".to_owned()),
             };
             h.shells.report(&id, report).await.unwrap();
-            let off = shell_integration(&startup, &h.store, &built).await;
+            let off = shell_integration(&startup, &h.store, built).await;
             let forgotten = {
                 let reader = h.store.reader().unwrap();
                 let reads = reader.reads();
@@ -802,10 +797,10 @@ mod tests {
             let state = std::path::Path::new(&startup.paths.state);
             std::fs::create_dir_all(state).unwrap();
             std::fs::write(state.join("shell-integration"), "a file").unwrap();
-            let unwritten = shell_integration(&startup, &h.store, &built).await;
+            let unwritten = shell_integration(&startup, &h.store, built).await;
             std::fs::remove_file(state.join("shell-integration")).unwrap();
-            let on = shell_integration(&startup, &h.store, &built).await;
-            let no_hook = shell_integration(&startup, &h.store, &unbuilt).await;
+            let on = shell_integration(&startup, &h.store, built).await;
+            let no_hook = shell_integration(&startup, &h.store, unbuilt).await;
             assert_eq!((off.unwrap(), forgotten), (None, (None, None)));
             assert_eq!((no_hook.unwrap(), unwritten.unwrap()), (None, None));
             assert_eq!(
