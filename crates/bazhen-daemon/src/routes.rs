@@ -30,6 +30,7 @@ use crate::guard::{self, Allowlists, Arrival, Refusal};
 use crate::heartbeat::{HEARTBEAT, Heartbeat};
 use crate::paired::{self, Gated, Pairing, Viewer};
 use crate::peer::Peers;
+use crate::roles::Roles;
 use crate::shell_routes;
 use crate::shells::Shells;
 use crate::tasks::{self, Refused};
@@ -98,6 +99,8 @@ pub(crate) struct Shared {
     pub(crate) web: Option<Arc<crate::web::Bundle>>,
     /// The terminals' live views, where this daemon runs terminals.
     pub(crate) streams: Option<crate::stream::route::Streams>,
+    /// The roles in force: the built-ins, and the user's files once a config directory is given.
+    pub(crate) roles: Arc<Roles>,
 }
 
 impl Shared {
@@ -120,7 +123,14 @@ impl Shared {
             host: Arc::from(hostname()),
             web: None,
             streams: None,
+            roles: Arc::new(Roles::new(None)),
         }
+    }
+
+    /// The same, reading the user's role files from `dir`.
+    pub(crate) fn with_roles(mut self, dir: std::path::PathBuf) -> Self {
+        self.roles = Arc::new(Roles::new(Some(dir)));
+        self
     }
 
     /// The same, running terminals as `shells` does, with what doctor says of them.
@@ -179,6 +189,15 @@ async fn health(State(shared): State<Shared>) -> axum::Json<HealthResponse> {
         health.runtimes = crate::holder::routed(shells.terminals().health().await);
     }
     axum::Json(health)
+}
+
+/// The roles in force, each user file read again if it changed since the last answer.
+async fn roles(State(shared): State<Shared>) -> Response {
+    let roles = Arc::clone(&shared.roles);
+    match tokio::task::spawn_blocking(move || roles.current()).await {
+        Ok(now) => axum::Json(now.response()).into_response(),
+        Err(err) => internal(&err),
+    }
 }
 
 /// Stops the daemon once this answer is written: the listeners stop taking connections and finish
@@ -351,6 +370,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/caller", get(callers::caller))
         .route("/v1/state", get(state))
+        .route("/v1/roles", get(roles))
         .route("/v1/events", get(stream))
         .route(
             "/v1/terminals/{id}/stream",
@@ -403,6 +423,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/health", get(health))
         .route("/caller", get(callers::caller))
         .route("/state", get(state))
+        .route("/roles", get(roles))
         .route("/events", get(stream))
         .route("/terminals/{id}/stream", get(crate::stream::route::stream))
         .route("/tasks", post(create_task))
@@ -485,6 +506,7 @@ mod tests {
     use super::*;
 
     use axum::body::Body;
+    use bazhen_protocol::roles::RolesResponse;
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
@@ -618,6 +640,33 @@ mod tests {
                 })
             )
         );
+    }
+
+    #[test]
+    fn answers_the_roles_in_force_on_the_socket_and_on_loopback() {
+        let keys = |(status, body): (u16, Value)| {
+            let roles = body["roles"].as_array().cloned().unwrap_or_default();
+            let keys: Vec<Value> = roles.iter().map(|r| r["key"].clone()).collect();
+            (status, keys, body["problems"].clone())
+        };
+        let want = (
+            200,
+            vec![
+                json!("coordinator"),
+                json!("lead"),
+                json!("worker"),
+                json!("reviewer"),
+            ],
+            json!([]),
+        );
+        let socket = send(socket_router(shared()), request("GET", "/v1/roles", &[]));
+        assert!(
+            serde_json::from_value::<RolesResponse>(socket.1.clone()).is_ok(),
+            "{socket:?}"
+        );
+        assert_eq!(keys(socket), want);
+        let loopback = send(http(false), request("GET", "/v1/roles", &[("host", HOST)]));
+        assert_eq!(keys(loopback), want);
     }
 
     /// Health says the version both daemons are: the TypeScript one's `APP_VERSION` and this crate's

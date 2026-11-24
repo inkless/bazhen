@@ -42,6 +42,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -142,11 +148,24 @@ name = "bazhen-client"
 version = "0.1.0"
 
 [[package]]
+name = "bazhen-core"
+version = "0.1.0"
+dependencies = [
+ "bazhen-protocol",
+ "proptest",
+ "saphyr-parser",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bazhen-daemon"
 version = "0.1.0"
 dependencies = [
  "axum",
  "bazhen-client",
+ "bazhen-core",
  "bazhen-fs-trust",
  "bazhen-holder-engine",
  "bazhen-holder-proto",
@@ -1116,6 +1135,16 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "saphyr-parser"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a425f8285f1321dd220c4d781a7f757eccd6639359f72bdeceec3cdaac8b3a7"
+dependencies = [
+ "arraydeque",
+ "thiserror",
+]
 
 [[package]]
 name = "scopeguard"

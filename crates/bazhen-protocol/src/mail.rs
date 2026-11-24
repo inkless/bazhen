@@ -65,6 +65,15 @@ pub enum AttentionState {
     Closed,
 }
 
+impl AttentionState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionCloseReason {
@@ -77,6 +86,34 @@ pub enum AttentionCloseReason {
     Replied,
     Dismissed,
     Resent,
+}
+
+impl AttentionCloseReason {
+    pub const ALL: [Self; 9] = [
+        Self::Answered,
+        Self::AnsweredInTui,
+        Self::TimedOut,
+        Self::Superseded,
+        Self::AgentClosed,
+        Self::Stale,
+        Self::Replied,
+        Self::Dismissed,
+        Self::Resent,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::AnsweredInTui => "answered_in_tui",
+            Self::TimedOut => "timed_out",
+            Self::Superseded => "superseded",
+            Self::AgentClosed => "agent_closed",
+            Self::Stale => "stale",
+            Self::Replied => "replied",
+            Self::Dismissed => "dismissed",
+            Self::Resent => "resent",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

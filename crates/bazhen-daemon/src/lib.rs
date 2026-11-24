@@ -22,6 +22,7 @@ mod private_dir;
 mod probe;
 mod restarts;
 mod retention;
+mod roles;
 mod routes;
 mod run;
 mod runner;

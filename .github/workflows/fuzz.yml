@@ -111,12 +111,17 @@ jobs:
           for target in $targets; do
             echo "::group::$target"
             mkdir -p "fuzz/corpus/$target" "fuzz/seeds/$target"
+            # A target whose input can be longer than libFuzzer's guess names its own longest.
+            max_len=()
+            if [ -f "fuzz/max_len/$target" ]; then
+              max_len=("-max_len=$(cat "fuzz/max_len/$target")")
+            fi
             # libFuzzer's own limits are given, not left to its defaults, inside a cap of the run's.
             node ../../scripts/capped.ts --memory 4G \
               --time "$((SECONDS_PER_TARGET / 60 + BUILD_MINUTES + 5))m" -- \
               cargo "+$NIGHTLY" fuzz run "$target" \
               "fuzz/corpus/$target" "fuzz/seeds/$target" \
-              -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048
+              -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 "${max_len[@]}"
             echo "::endgroup::"
           done
       # Saved once the targets ran, even when one crashed, since the build itself is still good.

@@ -181,7 +181,7 @@ pub fn read_regular(path: &Path, max: u64) -> Result<Vec<u8>, Unread> {
     }
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(o_nonblock())
+        .custom_flags(o_nonblock() | o_noctty())
         .open(path)
         .map_err(Unread::Io)?;
     if !file.metadata().map_err(Unread::Io)?.is_file() {
@@ -206,6 +206,17 @@ fn o_nonblock() -> i32 {
         0x0004
     } else {
         0o4000
+    }
+}
+
+/// `O_NOCTTY` on the same systems, so a terminal swapped in for the file after the check above
+/// doesn't become the daemon's controlling terminal, as Node's `readText` opens it. Linux uses
+/// 0o400 on x86 and arm only, as with `O_NONBLOCK`.
+fn o_noctty() -> i32 {
+    if env::consts::OS == "macos" {
+        0x0002_0000
+    } else {
+        0o400
     }
 }
 

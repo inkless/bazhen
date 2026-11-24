@@ -396,7 +396,8 @@ async fn listen(
         stop.clone(),
         store.clone(),
     )
-    .with_external_origins(startup.external_origins.clone());
+    .with_external_origins(startup.external_origins.clone())
+    .with_roles(Path::new(&startup.paths.config).join("roles"));
     // Made before the shells, whose commands run on it, so the drain waits for them as well.
     let tracker = TaskTracker::new();
     let mut watching = None;
