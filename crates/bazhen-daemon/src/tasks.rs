@@ -1,14 +1,14 @@
 //! `POST /v1/tasks`'s body held to `CreateTaskRequest`'s rules (`http/app.ts`), so the store makes
-//! only a task the TypeScript daemon would.
+//! only a task the TypeScript daemon would. Each field is held to the edge's rule for it, and every
+//! rule broken is named, as zod names every issue.
 
+use bazhen_protocol::edge::{
+    BRIEF_RULE, KEY_RULE, OBJECT_RULE, PARENT_RULE, TITLE_RULE, is_key, is_task_brief, task_title,
+};
 use bazhen_protocol::ids::TaskId;
 use bazhen_protocol::tasks::Grant;
-use bazhen_protocol::text::{TASK_BRIEF_MAX_UNITS, new_task_title};
 use bazhen_store::NewTask;
 use serde_json::Value;
-
-/// The most UTF-16 units an idempotency key has.
-const KEY_MAX_UNITS: usize = 200;
 
 /// Why a body makes no task.
 #[derive(Debug, PartialEq, Eq)]
@@ -17,10 +17,6 @@ pub enum Refused {
     Invalid(String),
     /// It is valid, but assigns the task, which needs agents this daemon doesn't run.
     Assigns,
-}
-
-fn units(text: &str) -> usize {
-    text.encode_utf16().count()
 }
 
 /// The task `body` asks for. Every rule is checked, and each one broken named, before an
@@ -32,15 +28,15 @@ fn units(text: &str) -> usize {
 /// [`Refused`], saying why.
 pub fn asked(body: &[u8]) -> Result<NewTask, Refused> {
     let Ok(Value::Object(body)) = serde_json::from_slice::<Value>(body) else {
-        return Err(Refused::Invalid("the body is not a JSON object".to_owned()));
+        return Err(Refused::Invalid(OBJECT_RULE.to_owned()));
     };
     let text = |key: &str| match body.get(key) {
         Some(Value::String(text)) => Some(text.as_str()),
         _ => None,
     };
-    let key = text("idempotencyKey").filter(|key| (1..=KEY_MAX_UNITS).contains(&units(key)));
-    let title = text("title").and_then(new_task_title);
-    let brief = text("brief").filter(|brief| (1..=TASK_BRIEF_MAX_UNITS).contains(&units(brief)));
+    let key = text("idempotencyKey").filter(|key| is_key(key));
+    let title = text("title").and_then(task_title);
+    let brief = text("brief").filter(|brief| is_task_brief(brief));
     let parent = match body.get("parentTaskId") {
         None => Some(None),
         Some(Value::String(id)) => TaskId::parse(id).map(Some),
@@ -53,14 +49,10 @@ pub fn asked(body: &[u8]) -> Result<NewTask, Refused> {
             .map(|_| true),
     };
     let broken: Vec<&str> = [
-        (key.is_none(), "idempotencyKey is 1 to 200 characters"),
-        (
-            title.is_none(),
-            "title is 1 to 200 characters once trimmed, with no control characters, bidirectional \
-             overrides or invisible ones",
-        ),
-        (brief.is_none(), "brief is 1 to 20000 characters"),
-        (parent.is_none(), "parentTaskId is a task id"),
+        (key.is_none(), KEY_RULE),
+        (title.is_none(), TITLE_RULE),
+        (brief.is_none(), BRIEF_RULE),
+        (parent.is_none(), PARENT_RULE),
         (assigns.is_none(), "assign is an agent and a role"),
     ]
     .into_iter()
@@ -175,6 +167,19 @@ mod tests {
         assert!(
             matches!(asked(&both), Err(Refused::Invalid(m)) if m.contains("idempotencyKey") && m.contains("title"))
         );
+    }
+
+    #[test]
+    fn counts_each_bound_in_code_points_so_astral_text_at_it_is_taken_and_one_past_refused() {
+        let emoji = |n: usize| json!("\u{1f600}".repeat(n));
+        for (key, max) in [("idempotencyKey", 200), ("title", 200), ("brief", 20_000)] {
+            assert!(asked(&with(key, emoji(max))).is_ok(), "{key} at {max}");
+            let past = asked(&with(key, emoji(max + 1)));
+            assert!(
+                matches!(&past, Err(Refused::Invalid(m)) if m.starts_with(key)),
+                "{key} past {max}: {past:?}"
+            );
+        }
     }
 
     #[test]

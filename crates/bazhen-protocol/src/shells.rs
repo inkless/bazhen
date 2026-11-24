@@ -288,20 +288,8 @@ pub struct RenameShellRequest {
     pub name: Option<String>,
 }
 
-/// The most UTF-16 units a shell's name has, once trimmed.
-pub const SHELL_NAME_MAX_UNITS: usize = 80;
-
-/// The most code points a shell's name has once trimmed, as zod's `.max(80)` counts them: the
-/// edge's bound. The daemon's handler counts UTF-16 units, through [`shell_name`].
+/// The most code points a shell's name has once trimmed, as zod's `.max(80)` counts them.
 pub const SHELL_NAME_MAX_CHARS: usize = 80;
-
-/// A name a person gives a shell, trimmed, if it is 1 to 80 UTF-16 units with no control
-/// character or bidirectional override, as `ShellName` in packages/protocol holds it.
-pub fn shell_name(text: &str) -> Option<&str> {
-    let text = crate::text::trim(text);
-    let units = text.encode_utf16().count();
-    ((1..=SHELL_NAME_MAX_UNITS).contains(&units) && crate::text::showable(text)).then_some(text)
-}
 
 /// The most UTF-8 bytes a command line kept to type back has.
 pub const COMMAND_LINE_MAX_BYTES: usize = 2048;

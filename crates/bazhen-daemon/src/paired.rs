@@ -12,9 +12,11 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use bazhen_protocol::daemon::ErrorCode;
+use bazhen_protocol::edge::{EdgeCheck, Refused, edge, object};
 use bazhen_protocol::ids::DeviceId;
 use bazhen_protocol::notices::{
-    DevicesResponse, DismissNoticeRequest, PairResponse, PairingCodeResponse, RevokeDeviceResponse,
+    DevicesResponse, DismissNoticeRequest, PairRequest, PairResponse, PairingCodeResponse,
+    RevokeDeviceResponse,
 };
 use bazhen_store::{DismissError, Dismissal, NewDevice, RevokeError, Revoked};
 use tokio_util::sync::CancellationToken;
@@ -24,9 +26,6 @@ use crate::guard;
 use crate::pairing::{Attempt, Bucket, PairingCodes, random_bytes};
 use crate::routes::{Gate, Shared, fail, header, internal, refuse_upgrade};
 
-/// The longest code a request may carry, and name, as `PairRequest` bounds them.
-const CODE_MAX_UNITS: usize = 32;
-const NAME_MAX_UNITS: usize = 64;
 /// How often the streams of devices revoked or lapsed since they opened them are closed.
 const CLOSE_EVERY: Duration = Duration::from_secs(60);
 
@@ -233,22 +232,6 @@ pub(crate) async fn issue(State(shared): State<Shared>) -> Response {
     }
 }
 
-/// The text of `body`'s `key`, if it is text no longer than `max` UTF-16 units; `Err` if it is
-/// there but isn't that.
-fn bounded<'a>(
-    body: &'a serde_json::Map<String, serde_json::Value>,
-    key: &str,
-    max: usize,
-) -> Result<Option<&'a str>, String> {
-    match body.get(key) {
-        None => Ok(None),
-        Some(serde_json::Value::String(text)) if text.encode_utf16().count() <= max => {
-            Ok(Some(text))
-        }
-        Some(_) => Err(format!("{key} must be text of at most {max} characters")),
-    }
-}
-
 /// A pairing code traded for a device and the cookie that carries its token.
 pub(crate) async fn pair(State(shared): State<Shared>, request: Request) -> Response {
     let Some(origin) = header(request.headers(), "origin") else {
@@ -261,22 +244,11 @@ pub(crate) async fn pair(State(shared): State<Shared>, request: Request) -> Resp
             "the body can't be read",
         );
     };
-    let asked = match serde_json::from_slice::<serde_json::Value>(&body) {
-        Ok(serde_json::Value::Object(body)) => {
-            match (
-                bounded(&body, "code", CODE_MAX_UNITS),
-                bounded(&body, "name", NAME_MAX_UNITS),
-            ) {
-                (Ok(Some(code)), Ok(name)) => Ok((code.to_owned(), name.map(str::to_owned))),
-                (Ok(None), _) => Err("code is required".to_owned()),
-                (Err(message), _) | (_, Err(message)) => Err(message),
-            }
-        }
-        _ => Err("the body is not a JSON object".to_owned()),
-    };
-    let (code, name) = match asked {
+    let PairRequest { code, name } = match edge::<PairRequest>(&body) {
         Ok(asked) => asked,
-        Err(message) => return fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message),
+        Err(Refused(rule)) => {
+            return fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &rule);
+        }
     };
     let attempt = shared
         .pairing
@@ -388,12 +360,18 @@ pub(crate) async fn dismiss(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
-    let Ok(asked) = serde_json::from_slice::<DismissNoticeRequest>(&body) else {
+    let Ok(asked) = object::<DismissNoticeRequest>(&body) else {
         return fail(
             StatusCode::BAD_REQUEST,
             ErrorCode::InvalidRequest,
             "the body must carry an idempotencyKey",
         );
+    };
+    let asked = match asked.checked() {
+        Ok(asked) => asked,
+        Err(Refused(rule)) => {
+            return fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &rule);
+        }
     };
     let (by, named) = match viewer.map(|Extension(v)| v) {
         Some(Viewer::Device { id, .. }) => (bazhen_store::Viewer::Device(id), None),
@@ -653,6 +631,84 @@ mod tests {
                 200,
                 unpaired(),
             )
+        );
+    }
+
+    #[test]
+    fn refuses_a_pairing_naming_the_rule_it_breaks_and_counts_each_bound_in_code_points() {
+        let daemon = over_a_store(true);
+        let ask = |body: Value| {
+            let answer = send(
+                &daemon.http,
+                "POST",
+                "/v1/pairing",
+                &[("host", HOST), ("origin", OWN)],
+                Some(body),
+            );
+            (answer.status, answer.body)
+        };
+        let invalid =
+            |message: &str| (400, json!({"error": "invalid_request", "message": message}));
+        let emoji = |n: usize| "\u{1f600}".repeat(n);
+        assert_eq!(
+            [
+                ask(json!({"code": emoji(32), "name": emoji(64)})),
+                ask(json!({"code": emoji(33)})),
+                ask(json!({"code": "c", "name": emoji(65)})),
+                ask(json!({"code": "c", "name": null})),
+                ask(json!({"name": "n"})),
+                ask(json!({"code": 5})),
+                ask(json!(["c"])),
+            ],
+            [
+                (
+                    401,
+                    json!({"error": "pairing_failed", "message": "that code is wrong or has expired"})
+                ),
+                invalid("code is at most 32 characters"),
+                invalid("name is at most 64 characters"),
+                invalid("invalid type: null, expected a string at line 1 column 23"),
+                invalid("missing field `code` at line 1 column 12"),
+                invalid("invalid type: integer `5`, expected a string at line 1 column 9"),
+                invalid("the body is not a JSON object"),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_a_dismissal_whose_key_is_past_its_bound_or_that_is_no_object() {
+        let daemon = over_a_store(true);
+        let dismiss = |body: Value| {
+            let answer = send(
+                &daemon.socket,
+                "POST",
+                "/v1/notices/notice_1/dismiss",
+                &[],
+                Some(body),
+            );
+            (answer.status, answer.body)
+        };
+        let invalid =
+            |message: &str| (400, json!({"error": "invalid_request", "message": message}));
+        // No notice is open, so a key the edge takes reaches the store, which answers a conflict.
+        assert_eq!(
+            [
+                dismiss(json!({"idempotencyKey": "\u{1f600}".repeat(200)})).1["error"].clone(),
+                dismiss(json!({"idempotencyKey": "\u{1f600}".repeat(201)})).1["error"].clone(),
+            ],
+            [json!("conflict"), json!("invalid_request")]
+        );
+        assert_eq!(
+            [
+                dismiss(json!({"idempotencyKey": "k".repeat(201)})),
+                dismiss(json!({"idempotencyKey": ""})),
+                dismiss(json!(["k"])),
+            ],
+            [
+                invalid("idempotencyKey is 1 to 200 characters"),
+                invalid("idempotencyKey is 1 to 200 characters"),
+                invalid("the body must carry an idempotencyKey"),
+            ]
         );
     }
 

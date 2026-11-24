@@ -2,12 +2,10 @@
 //! past its shape, and given back as zod parses it. A message's edge verdict is [`edge`]: its
 //! decode, then its [`EdgeCheck`].
 //!
-//! Where zod holds a request to more than the Rust daemon's handlers check, the edge holds it to
-//! zod's rule: a dismissal's key to 1 to 200 characters, and a close's or a restart's generation to
-//! the largest safe integer. The daemon's router test lists both.
-//!
-//! zod counts a string's length in code points, so the edge does too. Where a handler shares a
-//! rule with the edge, the handler's helper still counts UTF-16 units, and the edge has its own.
+//! zod counts a string's length in code points, so the edge does too. The daemon's handlers take
+//! their verdict from here: each reads its request as it words a refusal, then holds it to the
+//! [`EdgeCheck`] here. A task's creation, which names every rule it breaks as zod does, holds each
+//! field to the rule this module names for it.
 
 use serde::de::DeserializeOwned;
 
@@ -53,11 +51,36 @@ pub trait EdgeCheck: Sized {
 ///
 /// # Errors
 ///
-/// [`Refused`], when serde can't read it as a `T` or it breaks one of `T`'s rules.
+/// [`Refused`], when `body` isn't a JSON object, serde can't read it as a `T`, or it breaks one of
+/// `T`'s rules.
 pub fn edge<T: DeserializeOwned + EdgeCheck>(body: &[u8]) -> Result<T, Refused> {
-    serde_json::from_slice::<T>(body)
-        .map_err(|err| Refused(err.to_string()))?
-        .checked()
+    object::<T>(body)?.checked()
+}
+
+/// The rule every request body holds to, as a refusal names it.
+pub const OBJECT_RULE: &str = "the body is not a JSON object";
+
+/// Whether `body` is a JSON object, if it is JSON at all: its first character past JSON's
+/// whitespace opens one. serde's derive reads a struct from an array as well, which zod's
+/// `z.object` refuses.
+#[must_use]
+pub fn is_object(body: &[u8]) -> bool {
+    body.iter()
+        .find(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
+        == Some(&b'{')
+}
+
+/// `body` read as `T`, if it is a JSON object.
+///
+/// # Errors
+///
+/// [`Refused`], naming [`OBJECT_RULE`] when `body` isn't an object, or serde's error when it
+/// can't read it as a `T`.
+pub fn object<T: DeserializeOwned>(body: &[u8]) -> Result<T, Refused> {
+    if !is_object(body) {
+        return Err(Refused(OBJECT_RULE.to_owned()));
+    }
+    serde_json::from_slice(body).map_err(|err| Refused(err.to_string()))
 }
 
 /// A string's length as zod counts it: in code points.
@@ -73,17 +96,40 @@ fn holds(holds: bool, rule: &str) -> Result<(), Refused> {
     }
 }
 
-fn keyed(key: &str) -> Result<(), Refused> {
-    holds(
-        (1..=IDEMPOTENCY_KEY_MAX_CHARS).contains(&chars(key)),
-        "idempotencyKey is 1 to 200 characters",
-    )
+/// The rule an idempotency key holds to, as a refusal names it.
+pub const KEY_RULE: &str = "idempotencyKey is 1 to 200 characters";
+
+/// The rule a task's title holds to, as a refusal names it.
+pub const TITLE_RULE: &str = "title is 1 to 200 characters once trimmed, with no control \
+                              characters, bidirectional overrides or invisible ones";
+
+/// The rule a task's brief holds to, as a refusal names it.
+pub const BRIEF_RULE: &str = "brief is 1 to 20000 characters";
+
+/// The rule a task's parent holds to, as a refusal names it.
+pub const PARENT_RULE: &str = "parentTaskId is a task id";
+
+/// Whether `key` is an idempotency key: 1 to 200 code points.
+#[must_use]
+pub fn is_key(key: &str) -> bool {
+    (1..=IDEMPOTENCY_KEY_MAX_CHARS).contains(&chars(key))
 }
 
 /// A task's title, trimmed, if it holds to `NewTaskTitle`.
-fn titled(text: &str) -> Option<&str> {
+#[must_use]
+pub fn task_title(text: &str) -> Option<&str> {
     let text = trim(text);
     ((1..=TASK_TITLE_MAX_CHARS).contains(&chars(text)) && title_safe(text)).then_some(text)
+}
+
+/// Whether `brief` is a task's brief: 1 to 20000 code points.
+#[must_use]
+pub fn is_task_brief(brief: &str) -> bool {
+    (1..=TASK_BRIEF_MAX_CHARS).contains(&chars(brief))
+}
+
+fn keyed(key: &str) -> Result<(), Refused> {
+    holds(is_key(key), KEY_RULE)
 }
 
 /// A shell's name, trimmed, if it holds to `ShellName`.
@@ -102,24 +148,15 @@ fn generation(generation: u64) -> Result<(), Refused> {
 impl EdgeCheck for CreateTaskRequest {
     fn checked(mut self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
-        self.title = titled(&self.title)
-            .ok_or_else(|| {
-                Refused(
-                    "title is 1 to 200 characters once trimmed, with no control characters, \
-                     bidirectional overrides or invisible ones"
-                        .to_owned(),
-                )
-            })?
+        self.title = task_title(&self.title)
+            .ok_or_else(|| Refused(TITLE_RULE.to_owned()))?
             .to_owned();
-        holds(
-            (1..=TASK_BRIEF_MAX_CHARS).contains(&chars(&self.brief)),
-            "brief is 1 to 20000 characters",
-        )?;
+        holds(is_task_brief(&self.brief), BRIEF_RULE)?;
         holds(
             self.parent_task_id
                 .as_deref()
                 .is_none_or(|id| TaskId::parse(id).is_some()),
-            "parentTaskId is a task id",
+            PARENT_RULE,
         )?;
         Ok(self)
     }
@@ -231,8 +268,6 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::shells::shell_name;
-    use crate::text::new_task_title;
 
     fn verdict<T: DeserializeOwned + EdgeCheck + serde::Serialize>(
         body: &Value,
@@ -360,6 +395,56 @@ mod tests {
         }
     }
 
+    /// Whether serde alone reads `body` as a `T`, and the edge's verdict on it.
+    fn read_and_judged<T: DeserializeOwned + EdgeCheck>(body: &str) -> (bool, Result<(), String>) {
+        (
+            serde_json::from_str::<T>(body).is_ok(),
+            edge::<T>(body.as_bytes())
+                .map(drop)
+                .map_err(|refused| refused.0),
+        )
+    }
+
+    #[test]
+    fn a_request_written_as_an_array_is_refused_though_serde_reads_it() {
+        let refused = (true, Err(OBJECT_RULE.to_owned()));
+        assert_eq!(
+            read_and_judged::<CreateTaskRequest>(r#"["k","t","b"]"#),
+            refused
+        );
+        assert_eq!(read_and_judged::<OpenShellRequest>(r#"["o"]"#), refused);
+        assert_eq!(read_and_judged::<CloseShellRequest>(r#"["c",0]"#), refused);
+        assert_eq!(
+            read_and_judged::<RestartShellRequest>(r#"["r",0]"#),
+            refused
+        );
+        assert_eq!(
+            read_and_judged::<RenameShellRequest>(r#"["n","dev"]"#),
+            refused
+        );
+        assert_eq!(read_and_judged::<DismissNoticeRequest>(r#"["k"]"#), refused);
+        assert_eq!(read_and_judged::<PairRequest>(r#" ["c"]"#), refused);
+    }
+
+    #[test]
+    fn a_request_is_an_object_past_json_s_whitespace_and_no_other() {
+        assert_eq!(
+            read_and_judged::<DismissNoticeRequest>(" \t\n\r{\"idempotencyKey\":\"k\"}"),
+            (true, Ok(()))
+        );
+        for other in [
+            "\u{c}{}",
+            "\u{a0}{}",
+            "\u{3000}{}",
+            "\u{feff}{}",
+            "",
+            "null",
+            "\"{\"",
+        ] {
+            assert!(!is_object(other.as_bytes()), "{other:?}");
+        }
+    }
+
     #[test]
     fn a_dismissal_and_a_pairing_are_held_to_their_lengths() {
         assert!(!refused::<DismissNoticeRequest>(
@@ -368,6 +453,20 @@ mod tests {
         assert!(refused::<DismissNoticeRequest>(
             &json!({ "idempotencyKey": "" })
         ));
+        for (key, taken) in [
+            ("k".repeat(200), true),
+            ("\u{1f600}".repeat(200), true),
+            ("k".repeat(201), false),
+            ("\u{1f600}".repeat(201), false),
+        ] {
+            let body = json!({ "idempotencyKey": key });
+            assert_eq!(
+                verdict::<DismissNoticeRequest>(&body).map_err(|rule| rule == KEY_RULE),
+                if taken { Ok(body) } else { Err(true) },
+                "{} code points",
+                key.chars().count()
+            );
+        }
         let pair = |code: &str, name: &str| json!({ "code": code, "name": name });
         assert!(!refused::<PairRequest>(&pair(
             &"c".repeat(32),
@@ -435,12 +534,6 @@ mod tests {
         r#"{"token":"t","command":"ls"}"#,
     ];
 
-    /// Whether every character of `text` is one UTF-16 unit, where a code point count and a UTF-16
-    /// count agree.
-    fn within_one_unit(text: &str) -> bool {
-        text.chars().all(|c| c.len_utf16() == 1)
-    }
-
     /// Text a name or a title might hold: anything, or what sits at their rules' edges.
     const EDGES: &str = "[ \\t\\x{feff}\\x{85}\\x{7}\\x{202e}\\x{200b}a-z\\x{1f600}]{0,210}";
 
@@ -470,9 +563,6 @@ mod tests {
             let trimmed = trim(&name);
             let held = (1..=80).contains(&trimmed.chars().count()) && showable(trimmed);
             prop_assert_eq!(read, held.then_some(trimmed));
-            if within_one_unit(&name) {
-                prop_assert_eq!(read, shell_name(&name), "the handler's rule, without astral text");
-            }
             prop_assert!(taken.as_ref().ok().is_none_or(settled));
         }
 
@@ -486,9 +576,6 @@ mod tests {
             let trimmed = trim(&title);
             let held = (1..=200).contains(&trimmed.chars().count()) && title_safe(trimmed);
             prop_assert_eq!(read, held.then_some(trimmed));
-            if within_one_unit(&title) {
-                prop_assert_eq!(read, new_task_title(&title), "the handler's rule, without astral text");
-            }
             prop_assert!(taken.as_ref().ok().is_none_or(settled));
         }
 

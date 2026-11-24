@@ -892,6 +892,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-protocol/src/wire.rs::well_formed": "wire",
   "crates/bazhen-protocol/src/wire.rs::from_slice": "wire",
   "crates/bazhen-protocol/src/edge.rs::edge": "edge",
+  "crates/bazhen-protocol/src/edge.rs::is_object": "edge",
+  "crates/bazhen-protocol/src/edge.rs::object": "edge",
   "crates/bazhen-protocol/src/input.rs::has_keystrokes": "input",
   "crates/bazhen-protocol/src/input.rs::without_replies": "input",
   "crates/bazhen-protocol/src/detach_keys.rs::DetachKeys::bytes": "detach_keys",
