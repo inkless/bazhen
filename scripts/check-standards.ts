@@ -4217,7 +4217,14 @@ export const RUST_GATE_TASKS: Record<string, string> = {
   "test-rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
 };
 export const GATE_STEPS: Record<string, readonly string[]> = {
-  check: ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"],
+  check: [
+    "format-check",
+    "lint-rust",
+    "deny",
+    "test-rust",
+    "rust-schema-check",
+    "protocol-dual-types",
+  ],
   "format-check": ["gate-fmt"],
 };
 

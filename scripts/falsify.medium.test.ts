@@ -2601,8 +2601,10 @@ const RUNS_BINARIES: Record<string, string[]> = {
 const MENTIONS_TARGET = [
   "apps/daemon/src/env/agent-cli.medium.test.ts",
   "apps/daemon/src/store/store.medium.test.ts",
+  "packages/protocol/dual/types.ts",
   "packages/protocol/src/api-fixtures.ts",
   "packages/protocol/src/checks.medium.test.ts",
+  "packages/protocol/src/dual.medium.test.ts",
   "scripts/check-standards.ts",
   "scripts/falsify.medium.test.ts",
   "scripts/falsify.test.ts",
