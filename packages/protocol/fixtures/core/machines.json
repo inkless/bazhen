@@ -17,16 +17,16 @@
           "to": "failed"
         },
         {
-          "event": "process.exited",
+          "event": "respawn.rejected",
           "to": "exited"
         },
         {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while starting"
+          "event": "relaunch.rejected",
+          "to": "lost"
         },
         {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while starting"
+          "event": "process.exited",
+          "to": "exited"
         },
         {
           "event": "target.absent",
@@ -37,24 +37,24 @@
           "to": "starting"
         },
         {
+          "event": "close.requested",
+          "to": "closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while starting"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while starting"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while starting"
         },
         {
-          "event": "respawn.rejected",
-          "to": "exited"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while starting"
-        },
-        {
-          "event": "relaunch.rejected",
-          "to": "lost"
-        },
-        {
-          "event": "close.requested",
-          "to": "closing"
         },
         {
           "event": "close.completed",
@@ -79,16 +79,16 @@
           "refused": "agent session cannot handle launch.rejected while running"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while running"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while running"
+        },
+        {
           "event": "process.exited",
           "to": "exited"
-        },
-        {
-          "event": "environment.unreachable",
-          "to": "unknown"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while running"
         },
         {
           "event": "target.absent",
@@ -99,24 +99,24 @@
           "to": "starting"
         },
         {
+          "event": "close.requested",
+          "to": "closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "to": "unknown"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while running"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while running"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while running"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while running"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while running"
-        },
-        {
-          "event": "close.requested",
-          "to": "closing"
         },
         {
           "event": "close.completed",
@@ -141,16 +141,16 @@
           "refused": "agent session cannot handle launch.rejected while exited"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while exited"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while exited"
+        },
+        {
           "event": "process.exited",
           "refused": "agent session cannot handle process.exited while exited"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while exited"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while exited"
         },
         {
           "event": "target.absent",
@@ -161,24 +161,24 @@
           "to": "starting"
         },
         {
+          "event": "close.requested",
+          "to": "closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while exited"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while exited"
+        },
+        {
           "event": "respawn.requested",
           "to": "starting"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while exited"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while exited"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while exited"
-        },
-        {
-          "event": "close.requested",
-          "to": "closing"
         },
         {
           "event": "close.completed",
@@ -203,16 +203,16 @@
           "refused": "agent session cannot handle launch.rejected while unknown"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while unknown"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while unknown"
+        },
+        {
           "event": "process.exited",
           "to": "exited"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while unknown"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "to": "running"
         },
         {
           "event": "target.absent",
@@ -223,24 +223,24 @@
           "refused": "agent session cannot handle process.adopted while unknown"
         },
         {
+          "event": "close.requested",
+          "to": "closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while unknown"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "to": "running"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while unknown"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while unknown"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while unknown"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while unknown"
-        },
-        {
-          "event": "close.requested",
-          "to": "closing"
         },
         {
           "event": "close.completed",
@@ -265,16 +265,16 @@
           "refused": "agent session cannot handle launch.rejected while lost"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while lost"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while lost"
+        },
+        {
           "event": "process.exited",
           "refused": "agent session cannot handle process.exited while lost"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while lost"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while lost"
         },
         {
           "event": "target.absent",
@@ -285,24 +285,24 @@
           "refused": "agent session cannot handle process.adopted while lost"
         },
         {
+          "event": "close.requested",
+          "to": "closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while lost"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while lost"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while lost"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while lost"
-        },
-        {
           "event": "relaunch.requested",
           "to": "starting"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while lost"
-        },
-        {
-          "event": "close.requested",
-          "to": "closing"
         },
         {
           "event": "close.completed",
@@ -327,16 +327,16 @@
           "refused": "agent session cannot handle launch.rejected while closing"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while closing"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while closing"
+        },
+        {
           "event": "process.exited",
           "refused": "agent session cannot handle process.exited while closing"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while closing"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while closing"
         },
         {
           "event": "target.absent",
@@ -347,24 +347,24 @@
           "refused": "agent session cannot handle process.adopted while closing"
         },
         {
+          "event": "close.requested",
+          "refused": "agent session cannot handle close.requested while closing"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while closing"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while closing"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while closing"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while closing"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while closing"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while closing"
-        },
-        {
-          "event": "close.requested",
-          "refused": "agent session cannot handle close.requested while closing"
         },
         {
           "event": "close.completed",
@@ -389,16 +389,16 @@
           "refused": "agent session cannot handle launch.rejected while closed"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while closed"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while closed"
+        },
+        {
           "event": "process.exited",
           "refused": "agent session cannot handle process.exited while closed"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while closed"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while closed"
         },
         {
           "event": "target.absent",
@@ -409,24 +409,24 @@
           "refused": "agent session cannot handle process.adopted while closed"
         },
         {
+          "event": "close.requested",
+          "refused": "agent session cannot handle close.requested while closed"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while closed"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while closed"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while closed"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while closed"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while closed"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while closed"
-        },
-        {
-          "event": "close.requested",
-          "refused": "agent session cannot handle close.requested while closed"
         },
         {
           "event": "close.completed",
@@ -451,16 +451,16 @@
           "refused": "agent session cannot handle launch.rejected while failed"
         },
         {
+          "event": "respawn.rejected",
+          "refused": "agent session cannot handle respawn.rejected while failed"
+        },
+        {
+          "event": "relaunch.rejected",
+          "refused": "agent session cannot handle relaunch.rejected while failed"
+        },
+        {
           "event": "process.exited",
           "refused": "agent session cannot handle process.exited while failed"
-        },
-        {
-          "event": "environment.unreachable",
-          "refused": "agent session cannot handle environment.unreachable while failed"
-        },
-        {
-          "event": "environment.reconfirmed",
-          "refused": "agent session cannot handle environment.reconfirmed while failed"
         },
         {
           "event": "target.absent",
@@ -471,24 +471,24 @@
           "refused": "agent session cannot handle process.adopted while failed"
         },
         {
+          "event": "close.requested",
+          "refused": "agent session cannot handle close.requested while failed"
+        },
+        {
+          "event": "environment.unreachable",
+          "refused": "agent session cannot handle environment.unreachable while failed"
+        },
+        {
+          "event": "environment.reconfirmed",
+          "refused": "agent session cannot handle environment.reconfirmed while failed"
+        },
+        {
           "event": "respawn.requested",
           "refused": "agent session cannot handle respawn.requested while failed"
         },
         {
-          "event": "respawn.rejected",
-          "refused": "agent session cannot handle respawn.rejected while failed"
-        },
-        {
           "event": "relaunch.requested",
           "refused": "agent session cannot handle relaunch.requested while failed"
-        },
-        {
-          "event": "relaunch.rejected",
-          "refused": "agent session cannot handle relaunch.rejected while failed"
-        },
-        {
-          "event": "close.requested",
-          "refused": "agent session cannot handle close.requested while failed"
         },
         {
           "event": "close.completed",
@@ -507,24 +507,16 @@
           "to": "offered"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while queued"
-        },
-        {
-          "event": "seen",
-          "to": "seen"
+          "event": "accept",
+          "to": "queued_in_codex"
         },
         {
           "event": "confirm",
           "to": "delivered"
         },
         {
-          "event": "accept",
-          "to": "queued_in_codex"
-        },
-        {
-          "event": "requeue",
-          "refused": "mailbox message cannot handle requeue while queued"
+          "event": "seen",
+          "to": "seen"
         },
         {
           "event": "give_up",
@@ -533,6 +525,14 @@
         {
           "event": "agent_closed",
           "to": "undeliverable"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while queued"
+        },
+        {
+          "event": "requeue",
+          "refused": "mailbox message cannot handle requeue while queued"
         }
       ]
     },
@@ -545,24 +545,16 @@
           "refused": "mailbox message cannot handle offer while offered"
         },
         {
-          "event": "ack",
-          "to": "emitted"
-        },
-        {
-          "event": "seen",
-          "to": "seen"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while offered"
         },
         {
           "event": "confirm",
           "refused": "mailbox message cannot handle confirm while offered"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while offered"
-        },
-        {
-          "event": "requeue",
-          "to": "queued"
+          "event": "seen",
+          "to": "seen"
         },
         {
           "event": "give_up",
@@ -571,6 +563,14 @@
         {
           "event": "agent_closed",
           "to": "undeliverable"
+        },
+        {
+          "event": "ack",
+          "to": "emitted"
+        },
+        {
+          "event": "requeue",
+          "to": "queued"
         }
       ]
     },
@@ -583,24 +583,16 @@
           "refused": "mailbox message cannot handle offer while emitted"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while emitted"
-        },
-        {
-          "event": "seen",
-          "to": "seen"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while emitted"
         },
         {
           "event": "confirm",
           "to": "delivered"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while emitted"
-        },
-        {
-          "event": "requeue",
-          "to": "queued"
+          "event": "seen",
+          "to": "seen"
         },
         {
           "event": "give_up",
@@ -609,6 +601,14 @@
         {
           "event": "agent_closed",
           "to": "undeliverable"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while emitted"
+        },
+        {
+          "event": "requeue",
+          "to": "queued"
         }
       ]
     },
@@ -621,24 +621,16 @@
           "refused": "mailbox message cannot handle offer while seen"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while seen"
-        },
-        {
-          "event": "seen",
-          "refused": "mailbox message cannot handle seen while seen"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while seen"
         },
         {
           "event": "confirm",
           "to": "delivered"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while seen"
-        },
-        {
-          "event": "requeue",
-          "to": "queued"
+          "event": "seen",
+          "refused": "mailbox message cannot handle seen while seen"
         },
         {
           "event": "give_up",
@@ -647,6 +639,14 @@
         {
           "event": "agent_closed",
           "to": "undeliverable"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while seen"
+        },
+        {
+          "event": "requeue",
+          "to": "queued"
         }
       ]
     },
@@ -659,24 +659,16 @@
           "refused": "mailbox message cannot handle offer while queued_in_codex"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while queued_in_codex"
-        },
-        {
-          "event": "seen",
-          "refused": "mailbox message cannot handle seen while queued_in_codex"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while queued_in_codex"
         },
         {
           "event": "confirm",
           "to": "delivered"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while queued_in_codex"
-        },
-        {
-          "event": "requeue",
-          "refused": "mailbox message cannot handle requeue while queued_in_codex"
+          "event": "seen",
+          "refused": "mailbox message cannot handle seen while queued_in_codex"
         },
         {
           "event": "give_up",
@@ -685,6 +677,14 @@
         {
           "event": "agent_closed",
           "to": "undeliverable"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while queued_in_codex"
+        },
+        {
+          "event": "requeue",
+          "refused": "mailbox message cannot handle requeue while queued_in_codex"
         }
       ]
     },
@@ -697,24 +697,16 @@
           "refused": "mailbox message cannot handle offer while delivered"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while delivered"
-        },
-        {
-          "event": "seen",
-          "refused": "mailbox message cannot handle seen while delivered"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while delivered"
         },
         {
           "event": "confirm",
           "refused": "mailbox message cannot handle confirm while delivered"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while delivered"
-        },
-        {
-          "event": "requeue",
-          "refused": "mailbox message cannot handle requeue while delivered"
+          "event": "seen",
+          "refused": "mailbox message cannot handle seen while delivered"
         },
         {
           "event": "give_up",
@@ -723,6 +715,14 @@
         {
           "event": "agent_closed",
           "refused": "mailbox message cannot handle agent_closed while delivered"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while delivered"
+        },
+        {
+          "event": "requeue",
+          "refused": "mailbox message cannot handle requeue while delivered"
         }
       ]
     },
@@ -735,24 +735,16 @@
           "refused": "mailbox message cannot handle offer while undeliverable"
         },
         {
-          "event": "ack",
-          "refused": "mailbox message cannot handle ack while undeliverable"
-        },
-        {
-          "event": "seen",
-          "refused": "mailbox message cannot handle seen while undeliverable"
+          "event": "accept",
+          "refused": "mailbox message cannot handle accept while undeliverable"
         },
         {
           "event": "confirm",
           "refused": "mailbox message cannot handle confirm while undeliverable"
         },
         {
-          "event": "accept",
-          "refused": "mailbox message cannot handle accept while undeliverable"
-        },
-        {
-          "event": "requeue",
-          "refused": "mailbox message cannot handle requeue while undeliverable"
+          "event": "seen",
+          "refused": "mailbox message cannot handle seen while undeliverable"
         },
         {
           "event": "give_up",
@@ -761,6 +753,14 @@
         {
           "event": "agent_closed",
           "refused": "mailbox message cannot handle agent_closed while undeliverable"
+        },
+        {
+          "event": "ack",
+          "refused": "mailbox message cannot handle ack while undeliverable"
+        },
+        {
+          "event": "requeue",
+          "refused": "mailbox message cannot handle requeue while undeliverable"
         }
       ]
     }

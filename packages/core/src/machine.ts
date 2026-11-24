@@ -23,6 +23,8 @@ export interface Machine<S extends string, E extends string> {
   accepts(from: S, event: E): boolean;
   /** A state that accepts no event is final. */
   isFinal(state: S): boolean;
+  /** Every event some state accepts, in the order the table first names each. */
+  readonly events: readonly E[];
 }
 
 export function machine<S extends string, E extends string>(
@@ -37,5 +39,12 @@ export function machine<S extends string, E extends string>(
     },
     accepts: (from, event) => table[from][event] !== undefined,
     isFinal: (state) => Object.keys(table[state]).length === 0,
+    events: [
+      ...new Set(
+        Object.values<Readonly<Partial<Record<E, S>>>>(table).flatMap((leads) =>
+          Object.keys(leads).filter((event): event is E => event in leads),
+        ),
+      ),
+    ],
   };
 }

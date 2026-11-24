@@ -26,4 +26,8 @@ describe("machine", () => {
   it("treats a state that accepts nothing as final", () => {
     expect([door.isFinal("gone"), door.isFinal("shut")]).toEqual([true, false]);
   });
+
+  it("lists each event its table takes once, in the order the table first names it", () => {
+    expect(door.events).toEqual(["close", "open", "remove"]);
+  });
 });

@@ -67,20 +67,31 @@ fn answer<S: serde::Serialize>(
     })
 }
 
-/// Checks a machine's rows: the events each lists are `events`, in order, and each state leads
-/// where packages/core's does, and is final where it is.
+/// The one of `all` named `name`.
+fn by_name<T: Copy>(all: &[T], as_str: fn(T) -> &'static str, name: &str) -> Result<T> {
+    all.iter()
+        .copied()
+        .find(|t| as_str(*t) == name)
+        .ok_or_else(|| format!("no event {name}"))
+}
+
+/// Checks a machine's rows: the events each lists are `events`, and each state leads where
+/// packages/core's does, and is final where it is.
 fn check_machine<S: DeserializeOwned + Copy>(
     rows: &[Value],
     events: &[&str],
-    next: impl Fn(S, usize) -> Result<std::result::Result<String, String>>,
+    next: impl Fn(S, &str) -> Result<std::result::Result<String, String>>,
     is_final: impl Fn(S) -> bool,
 ) -> Result<()> {
+    let mut events = events.to_vec();
+    events.sort_unstable();
     for row in rows {
         let from: S = decode(&row["from"])?;
-        let listed: Vec<&str> = rows_of(row)?
+        let mut listed: Vec<&str> = rows_of(row)?
             .iter()
             .map(|e| str_of(e, "event"))
             .collect::<Result<_>>()?;
+        listed.sort_unstable();
         assert_eq!(listed, events, "the events of {}", row["from"]);
         assert_eq!(
             Some(is_final(from)),
@@ -88,9 +99,9 @@ fn check_machine<S: DeserializeOwned + Copy>(
             "{} final",
             row["from"]
         );
-        for (i, event) in rows_of(row)?.iter().enumerate() {
+        for event in rows_of(row)? {
             assert_eq!(
-                next(from, i)?,
+                next(from, str_of(event, "event")?)?,
                 expected(event)?,
                 "{} on {}",
                 row["from"],
@@ -112,14 +123,20 @@ fn moves_each_machine_as_packages_core_does_and_refuses_in_its_words() -> Result
     check_machine::<AgentState>(
         rows(&machines, "agent")?,
         &agent_events,
-        |from, i| answer(agent::next(from, AgentEvent::ALL[i])),
+        |from, name| {
+            let event = by_name(&AgentEvent::ALL, AgentEvent::as_str, name)?;
+            answer(agent::next(from, event))
+        },
         agent::is_final,
     )?;
     let mail_events: Vec<&str> = MailboxEvent::ALL.iter().map(|e| e.as_str()).collect();
     check_machine::<MailboxState>(
         rows(&machines, "mailbox")?,
         &mail_events,
-        |from, i| answer(mail::next(from, MailboxEvent::ALL[i])),
+        |from, name| {
+            let event = by_name(&MailboxEvent::ALL, MailboxEvent::as_str, name)?;
+            answer(mail::next(from, event))
+        },
         mail::is_final,
     )?;
     let reasons: Vec<&str> = AttentionCloseReason::ALL
@@ -129,7 +146,14 @@ fn moves_each_machine_as_packages_core_does_and_refuses_in_its_words() -> Result
     check_machine::<AttentionState>(
         rows(&machines, "attention")?,
         &reasons,
-        |from, i| answer(attention::next(from, AttentionCloseReason::ALL[i])),
+        |from, name| {
+            let reason = by_name(
+                &AttentionCloseReason::ALL,
+                AttentionCloseReason::as_str,
+                name,
+            )?;
+            answer(attention::next(from, reason))
+        },
         |from| !attention::accepts(from),
     )
 }

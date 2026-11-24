@@ -12,50 +12,11 @@ import {
   TerminalState,
   type RoleDefinition,
 } from "@bazhen/protocol";
-import {
-  agent,
-  agentCommands,
-  offeredCommands,
-  type AgentEvent,
-} from "../packages/core/src/agent.ts";
+import { agent, agentCommands, offeredCommands } from "../packages/core/src/agent.ts";
 import { attention } from "../packages/core/src/attention.ts";
 import { InvalidTransition, type Machine } from "../packages/core/src/machine.ts";
-import {
-  leadingMailId,
-  mailLabel,
-  mailbox,
-  quoteLabels,
-  type MailboxEvent,
-} from "../packages/core/src/mailbox.ts";
+import { leadingMailId, mailLabel, mailbox, quoteLabels } from "../packages/core/src/mailbox.ts";
 import { resolveRoles, type UserRole } from "../packages/core/src/roles.ts";
-
-const AGENT_EVENTS: readonly AgentEvent[] = [
-  "launch.confirmed",
-  "harness.ready",
-  "launch.rejected",
-  "process.exited",
-  "environment.unreachable",
-  "environment.reconfirmed",
-  "target.absent",
-  "process.adopted",
-  "respawn.requested",
-  "respawn.rejected",
-  "relaunch.requested",
-  "relaunch.rejected",
-  "close.requested",
-  "close.completed",
-];
-
-const MAILBOX_EVENTS: readonly MailboxEvent[] = [
-  "offer",
-  "ack",
-  "seen",
-  "confirm",
-  "accept",
-  "requeue",
-  "give_up",
-  "agent_closed",
-];
 
 /** Every state and event of a machine, with where each event leads or what refusing it says. */
 function table<S extends string, E extends string>(
@@ -197,8 +158,8 @@ const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 export function coreFixture(): Record<string, string> {
   return {
     "machines.json": json({
-      agent: table(agent, AgentState.options, AGENT_EVENTS),
-      mailbox: table(mailbox, MailboxState.options, MAILBOX_EVENTS),
+      agent: table(agent, AgentState.options, agent.events),
+      mailbox: table(mailbox, MailboxState.options, mailbox.events),
       attention: table(attention, AttentionState.options, AttentionCloseReason.options),
     }),
     "commands.json": json(commands()),
