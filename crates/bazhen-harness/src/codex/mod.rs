@@ -3,6 +3,7 @@
 //! the thread's notifications say what the agent is doing.
 
 mod approvals;
+mod launch;
 mod mail;
 mod signals;
 #[cfg(test)]
@@ -13,10 +14,10 @@ mod wire;
 use crate::js::Js;
 use crate::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
-    Gate, Harness, HarnessActivity, HarnessDoctor, Held, IngestContext, Ingested, Key, Keyed,
-    LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal, Observed, Outgoing,
-    Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session, SessionKey, Settled,
-    ToolKey,
+    Gate, Harness, HarnessActivity, HarnessDeps, HarnessDoctor, Held, IngestContext, Ingested, Key,
+    Keyed, LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal, Observed,
+    Outgoing, Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session, SessionKey,
+    Settled, ToolKey,
 };
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
@@ -111,6 +112,7 @@ fn facts(observed: Vec<Keyed>) -> Ingested {
 
 /// Codex's adapter.
 pub(crate) struct Codex {
+    starts: launch::Starts,
     threads: Mutex<Threads>,
 }
 
@@ -121,8 +123,21 @@ impl fmt::Debug for Codex {
 }
 
 impl Codex {
-    pub(crate) fn new() -> Self {
+    /// Codex in the user's own Codex home, `CODEX_HOME` or `~/.codex`, on the app-server it manages
+    /// there. Its threads reach the daemon on its socket.
+    pub(crate) fn new(deps: &HarnessDeps) -> Self {
+        // An empty `CODEX_HOME` is taken as it is, as the CLI the agents run takes it.
+        let codex_home =
+            (deps.user_env)("CODEX_HOME").unwrap_or_else(|| format!("{}/.codex", deps.home));
+        Self::on(launch::Starts {
+            remote: launch::app_server_address(&codex_home),
+            socket: Some(deps.daemon_socket.clone()),
+        })
+    }
+
+    fn on(starts: launch::Starts) -> Self {
         Self {
+            starts,
             threads: Mutex::default(),
         }
     }
@@ -340,7 +355,15 @@ fn title(title: &str, context: &IngestContext<'_>) -> Ingested {
     facts(vec![Keyed::agent(agent, Gate::None, fact)])
 }
 
-/// Not yet: the next change starts and resumes Codex's TUI, and pushes its mail.
+/// What to tell the user when a Codex agent's TUI never titles its terminal with its thread.
+pub(crate) const NOT_READY_HINT: &str = "If Codex is up with no dialog, Bazhen didn't see it title its terminal with its thread: check that this Codex honours tui.terminal_title.";
+
+/// The app-server's channel, or why there is none.
+fn connected(channel: Option<&dyn ChannelPort>) -> Result<&dyn ChannelPort, LaunchError> {
+    channel.ok_or_else(|| LaunchError::Unavailable("Codex's app-server isn't connected".to_owned()))
+}
+
+/// Not yet: the next change reports Codex in `bazhen doctor`.
 fn not_yet<T: Send + 'static>(value: T) -> BoxFuture<'static, T> {
     Box::pin(std::future::ready(value))
 }
@@ -360,25 +383,28 @@ impl Harness for Codex {
 
     fn launch<'a>(
         &'a self,
-        _request: &'a LaunchRequest,
-        _channel: Option<&'a dyn ChannelPort>,
+        request: &'a LaunchRequest,
+        channel: Option<&'a dyn ChannelPort>,
     ) -> BoxFuture<'a, Result<LaunchSpec, LaunchError>> {
-        not_yet(Err(LaunchError::Unavailable(
-            "Codex agents can't be started yet".to_owned(),
-        )))
+        Box::pin(async move { self.starts.launch(request, connected(channel)?).await })
     }
 
     fn resume<'a>(
         &'a self,
-        _request: &'a LaunchRequest,
-        _session: &'a ExternalRef,
-        _channel: Option<&'a dyn ChannelPort>,
+        request: &'a LaunchRequest,
+        session: &'a ExternalRef,
+        channel: Option<&'a dyn ChannelPort>,
     ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>> {
-        None
+        Some(Box::pin(async move {
+            self.starts
+                .resume(request, &session.id, connected(channel)?)
+                .await
+        }))
     }
 
+    /// The server keeps every thread, so any the agent was bound to can be resumed.
     fn can_resume(&self, _evidence: &Evidence<'_>) -> bool {
-        false
+        true
     }
 
     fn ingest(&self, report: Report<'_>, context: &IngestContext<'_>) -> Ingested {
@@ -397,26 +423,30 @@ impl Harness for Codex {
         }
     }
 
-    fn listening(&self, _agent: &Listen) -> bool {
-        false
+    /// The server wakes an idle thread for mail and holds it for a busy one's next turn, so it
+    /// reaches an agent bound to a thread, unless the agent's mail is held.
+    fn listening(&self, agent: &Listen) -> bool {
+        agent.bound && !agent.held
     }
 
+    /// Codex's one sign it is up is the title, and a build that ignores the setting never gives it.
     fn not_ready_hint(&self) -> Option<&'static str> {
-        None
+        Some(NOT_READY_HINT)
     }
 
-    fn accepts_mail(&self, _agent: &AgentRef<'_>) -> Result<(), MailRefusal> {
-        Err(MailRefusal {
-            reason: "Codex agents can't take mail yet".to_owned(),
-        })
+    /// A Codex agent with no thread has nowhere to take mail, and the sender hears so now. The
+    /// reason qualifies "no agent <id>", as the TypeScript daemon's refusal did.
+    fn accepts_mail(&self, agent: &AgentRef<'_>) -> Result<(), MailRefusal> {
+        match agent.session {
+            Some(_) => Ok(()),
+            None => Err(MailRefusal {
+                reason: "bound to a Codex thread".to_owned(),
+            }),
+        }
     }
 
-    fn push<'a>(
-        &'a self,
-        _mail: &'a Outgoing<'a>,
-        _port: &'a dyn PushPort,
-    ) -> BoxFuture<'a, Pushed> {
-        not_yet(Pushed::NotNow)
+    fn push<'a>(&'a self, mail: &'a Outgoing<'a>, port: &'a dyn PushPort) -> BoxFuture<'a, Pushed> {
+        Box::pin(self.starts.push(mail, port))
     }
 
     fn answer(&self, to: &Pending<'_>, with: Resolution<'_>) -> Answer {

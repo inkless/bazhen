@@ -400,11 +400,12 @@ pub fn production(deps: HarnessDeps) -> Harnesses {
 /// Every adapter this build has, served or not, as a test or a fuzz target drives one the daemon
 /// doesn't serve yet. The daemon's own code builds from [`production`].
 pub fn compiled(deps: HarnessDeps) -> Harnesses {
+    let codex = codex::Codex::new(&deps);
     Harnesses::new(vec![
         (
             HarnessId::ClaudeCode,
             Box::new(claude_code::ClaudeCode::new(deps)),
         ),
-        (HarnessId::Codex, Box::new(codex::Codex::new())),
+        (HarnessId::Codex, Box::new(codex)),
     ])
 }

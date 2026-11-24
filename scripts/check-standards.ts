@@ -5531,12 +5531,16 @@ const SIGNALLING_CALL =
   /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
 const SIGNALLING_OR_SESSION = new RegExp(`${SIGNALLING_CALL.source}|\\bSession\\b`);
 
+const HOLDER_CRATE = "crates/bazhen-holder";
+
 /**
  * The workspace crates, by directory, that can name bazhen-holder's `Session`: the holder, and
  * each member that depends on it through a dependency of any kind, dev-dependencies too, however
  * many members deep. Read from Cargo, so a crate that comes to depend on the holder is in it.
+ * When the holder itself isn't among them, as when Cargo's workspace root isn't where its
+ * manifests are, it says why instead, so a mismatch can't empty the set without a word.
  */
-export function holderReachingCrates(meta: CargoMetadata): Set<string> {
+export function holderReachingCrates(meta: CargoMetadata): Set<string> | string {
   const reaches = new Set(["bazhen-holder"]);
   for (let grew = true; grew;) {
     grew = false;
@@ -5548,11 +5552,16 @@ export function holderReachingCrates(meta: CargoMetadata): Set<string> {
     }
   }
   const workspace = meta.workspace_root.replace(/\/?$/, "/");
-  return new Set(
+  const crates = new Set(
     meta.packages
       .filter((p) => reaches.has(p.name) && p.manifest_path.startsWith(workspace))
       .map((p) => p.manifest_path.slice(workspace.length).replace(/\/Cargo\.toml$/, "")),
   );
+  return crates.has(HOLDER_CRATE)
+    ? crates
+    : `Cargo.toml: cargo metadata names no bazhen-holder at ${HOLDER_CRATE} under its workspace ` +
+        `root ${meta.workspace_root}, so the crates that can reach the holder's Session can't be ` +
+        "told and every crate is scanned for it.";
 }
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
@@ -6153,9 +6162,12 @@ function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
   failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
-  // With no report from Cargo, every crate is taken to reach the holder.
+  // With no report from Cargo, or one that can't say which crates reach the holder, every crate
+  // is taken to reach it.
   const metadata = cargoMetadata();
-  const holderCrates = typeof metadata === "string" ? undefined : holderReachingCrates(metadata);
+  const reaching = typeof metadata === "string" ? undefined : holderReachingCrates(metadata);
+  if (typeof reaching === "string") failures.push(reaching);
+  const holderCrates = typeof reaching === "string" ? undefined : reaching;
   failures.push(
     ...unmarkedSignallingTests(repoFiles(), readRepoFile, NON_SIGNALLING_CLOSES, holderCrates),
   );

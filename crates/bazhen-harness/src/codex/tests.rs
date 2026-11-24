@@ -1,13 +1,13 @@
 //! The Codex adapter, read against what the TypeScript daemon makes of the same messages.
 
 use super::*;
-use crate::SessionRef;
+use crate::{ChannelError, ChannelErrorKind, Output, RunError, SessionRef, Waiting};
 use bazhen_protocol::agents::{ExternalRefKind, UsageLimit};
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, EnvironmentId};
 use bazhen_protocol::mail_events::ApprovalDecision;
 use proptest::prelude::*;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 const THREAD: &str = "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51";
 
@@ -137,8 +137,14 @@ fn reads_a_terminal_title_as_the_typescript_adapter_did() {
     }
 }
 
+/// The app-server in the fixtures' Codex home.
+const REMOTE: &str = "unix:///home/u/.codex/app-server-control/app-server-control.sock";
+
 fn harness() -> Codex {
-    Codex::new()
+    Codex::on(launch::Starts {
+        remote: REMOTE.to_owned(),
+        socket: None,
+    })
 }
 
 fn agent() -> AgentId {
@@ -898,4 +904,435 @@ proptest! {
         let held = t.activity.len() + t.failed.len() + t.first_item.len() + t.labels.len();
         prop_assert_eq!(held, 0);
     }
+}
+
+/// A setting as the TypeScript adapter wrote it, in JSON.
+fn settings(config: &[(&str, threads::Setting)]) -> Value {
+    let config = config.iter().map(|(key, value)| {
+        let value = match value {
+            threads::Setting::Text(text) => json!(text),
+            threads::Setting::Number(n) => json!(n),
+        };
+        ((*key).to_owned(), value)
+    });
+    Value::Object(config.collect())
+}
+
+#[test]
+fn builds_what_carries_mail_and_a_threads_config_as_the_typescript_adapter_did() {
+    let builders = fixture("builders.json");
+    for case in builders["messageText"].as_array().unwrap() {
+        let text = mail::message_text(case["id"].as_str().unwrap(), case["body"].as_str().unwrap());
+        assert_eq!(json!(text), case["text"], "{case}");
+    }
+    for case in builders["queueArgs"].as_array().unwrap() {
+        let args = mail::queue_args(
+            case["thread"].as_str().unwrap(),
+            case["text"].as_str().unwrap(),
+            case["remote"].as_str(),
+        );
+        assert_eq!(json!(args), case["args"], "{case}");
+    }
+    for case in builders["threadConfig"].as_array().unwrap() {
+        let config = threads::thread_config(case["socket"].as_str().unwrap());
+        assert_eq!(settings(&config), case["config"], "{case}");
+    }
+    let mut windows = 0;
+    for case in builders["compactConfig"].as_array().unwrap() {
+        // A launch gives a window in whole tokens: one that isn't can't reach the adapter.
+        if !case["tokens"].is_null() && !case["tokens"].is_u64() {
+            continue;
+        }
+        windows += 1;
+        let config = threads::compact_config(case["tokens"].as_u64());
+        assert_eq!(settings(&config), case["config"], "{case}");
+    }
+    assert_eq!(windows, 3);
+    for case in builders["tomlString"].as_array().unwrap() {
+        let toml = threads::toml_string(case["value"].as_str().unwrap());
+        assert_eq!(json!(toml), case["toml"], "{case}");
+    }
+}
+
+proptest! {
+    /// Codex reads a `-c` value as TOML, so any text written as one reads back as itself, control
+    /// characters too, which `any::<String>()` never makes.
+    #[test]
+    fn any_text_written_as_a_toml_string_reads_back_as_itself(
+        value in prop::collection::vec(any::<char>(), 0..32).prop_map(String::from_iter),
+    ) {
+        let line = format!("v = {}", threads::toml_string(&value));
+        let table: toml::Table = toml::from_str(&line).unwrap();
+        prop_assert_eq!(table["v"].as_str(), Some(value.as_str()));
+    }
+}
+
+/// An app-server that answers each request as `answers` names, and records what it was sent.
+struct Server {
+    answers: Value,
+    sent: Mutex<Vec<Value>>,
+}
+
+impl Server {
+    fn new(answers: Value) -> Self {
+        Self {
+            answers,
+            sent: Mutex::default(),
+        }
+    }
+
+    fn sent(&self) -> Value {
+        json!(*self.sent.lock().unwrap())
+    }
+}
+
+impl ChannelPort for Server {
+    fn request<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+    ) -> BoxFuture<'a, Result<Value, ChannelError>> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push(json!({ "method": method, "params": params }));
+        let answer = self.answers.get(method).cloned().ok_or(ChannelError {
+            kind: ChannelErrorKind::Refused,
+            message: format!("no {method}"),
+        });
+        Box::pin(std::future::ready(answer))
+    }
+
+    fn notify<'a>(
+        &'a self,
+        method: &'a str,
+        _params: Value,
+    ) -> BoxFuture<'a, Result<(), ChannelError>> {
+        panic!("a launch sends no {method} notification")
+    }
+}
+
+fn ready<T>(mut future: BoxFuture<'_, T>) -> T {
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    match future.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(value) => value,
+        std::task::Poll::Pending => panic!("the fakes never wait"),
+    }
+}
+
+/// A fixture case's launch options as the daemon asks for them.
+fn launch_request(options: &Value) -> LaunchRequest {
+    LaunchRequest {
+        cwd: "/work".to_owned(),
+        theme: options["theme"].as_str().map(|theme| match theme {
+            "light" => TuiTheme::Light,
+            _ => TuiTheme::Dark,
+        }),
+        instructions: options["instructions"].as_str().map(str::to_owned),
+        instructions_file: None,
+        instructions_changed: options["instructionsChanged"] == json!(true),
+        name: None,
+        compact_window_tokens: options["compactWindowTokens"].as_u64(),
+    }
+}
+
+/// What a launch gave, as the fixture writes it: the spec, or the kind of the TypeScript
+/// adapter's refusal, each of which it read as the harness unavailable, not refusing.
+fn started(spec: Result<LaunchSpec, LaunchError>) -> Value {
+    match spec {
+        Ok(spec) => {
+            let mut out = json!({
+                "argv": spec.argv,
+                "env": {},
+                "externalRef": spec.session.map(|s| {
+                    assert_eq!(s.kind, ExternalRefKind::CodexThread);
+                    json!({ "kind": "codex-thread", "id": s.id })
+                }),
+            });
+            assert_eq!(spec.env, []);
+            if let Some(theme) = spec.theme {
+                out["theme"] = json!(if theme == TuiTheme::Light {
+                    "light"
+                } else {
+                    "dark"
+                });
+            }
+            json!({ "spec": out })
+        }
+        Err(LaunchError::Unavailable(detail)) => {
+            let kind = if detail.contains("resumed") {
+                "ThreadMismatch"
+            } else {
+                "ZodError"
+            };
+            json!({ "refused": kind })
+        }
+        Err(LaunchError::Refused(detail)) => json!({ "refused": detail }),
+    }
+}
+
+#[test]
+fn launches_and_resumes_as_the_typescript_adapter_did() {
+    let cases = fixture("starts.json");
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 11);
+    for case in cases {
+        let name = &case["name"];
+        let codex = Codex::on(launch::Starts {
+            remote: REMOTE.to_owned(),
+            socket: case["socket"].as_str().map(str::to_owned),
+        });
+        let request = launch_request(&case["options"]);
+        let server = Server::new(case["answers"].clone());
+        let launched = started(ready(codex.launch(&request, Some(&server))));
+        let mut want = case["launch"].clone();
+        let requests = want.as_object_mut().unwrap().remove("requests").unwrap();
+        assert_eq!(server.sent(), requests, "{name} launch");
+        assert_eq!(launched, want, "{name} launch");
+
+        let session = ExternalRef {
+            environment_id: EnvironmentId::parse("env_0190a1b2c3d47abc8def0123456789ab").unwrap(),
+            kind: ExternalRefKind::CodexThread,
+            id: THREAD.to_owned(),
+        };
+        let server = Server::new(case["answers"].clone());
+        let resumed = codex.resume(&request, &session, Some(&server)).unwrap();
+        let resumed = started(ready(resumed));
+        let mut want = case["resume"].clone();
+        let requests = want.as_object_mut().unwrap().remove("requests").unwrap();
+        assert_eq!(server.sent(), requests, "{name} resume");
+        assert_eq!(resumed, want, "{name} resume");
+    }
+}
+
+#[test]
+fn a_launch_or_resume_with_no_server_connected_asks_nothing_and_is_unavailable() {
+    let codex = harness();
+    let request = launch_request(&json!({}));
+    assert!(matches!(
+        ready(codex.launch(&request, None)),
+        Err(LaunchError::Unavailable(_))
+    ));
+    let session = ExternalRef {
+        environment_id: EnvironmentId::parse("env_0190a1b2c3d47abc8def0123456789ab").unwrap(),
+        kind: ExternalRefKind::CodexThread,
+        id: THREAD.to_owned(),
+    };
+    let resumed = codex.resume(&request, &session, None).unwrap();
+    assert!(matches!(ready(resumed), Err(LaunchError::Unavailable(_))));
+    assert!(codex.can_resume(&Evidence { transcript: None }));
+}
+
+#[test]
+fn a_server_that_refuses_a_launchs_request_refuses_the_launch() {
+    let codex = harness();
+    let request = launch_request(&json!({}));
+    let server = Server::new(json!({ "thread/start": { "thread": { "id": THREAD } } }));
+    assert_eq!(
+        ready(codex.launch(&request, Some(&server))),
+        Err(LaunchError::Refused("no thread/inject_items".to_owned()))
+    );
+}
+
+/// `codex`, answering each run as `exits` says in turn, and recording what it was run with.
+struct Cli {
+    exits: Mutex<VecDeque<Result<Output, RunError>>>,
+    ran: Mutex<Vec<Vec<String>>>,
+}
+
+impl Cli {
+    fn new(exits: impl IntoIterator<Item = Result<Output, RunError>>) -> Self {
+        Self {
+            exits: Mutex::new(exits.into_iter().collect()),
+            ran: Mutex::default(),
+        }
+    }
+
+    fn ran(&self) -> Vec<Vec<String>> {
+        self.ran.lock().unwrap().clone()
+    }
+}
+
+impl RunPort for Cli {
+    fn run<'a>(
+        &'a self,
+        argv: &'a [String],
+        _timeout: std::time::Duration,
+    ) -> BoxFuture<'a, Result<Output, RunError>> {
+        self.ran.lock().unwrap().push(argv.to_vec());
+        let exit = self
+            .exits
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("no more runs");
+        Box::pin(std::future::ready(exit))
+    }
+}
+
+impl PushPort for Cli {
+    fn channel(&self) -> Option<&dyn ChannelPort> {
+        None
+    }
+}
+
+fn exited(code: Option<i32>, stderr: &str) -> Output {
+    Output {
+        code,
+        stdout: String::new(),
+        stderr: stderr.to_owned(),
+    }
+}
+
+/// `codex queue` for the message in the fixtures' thread, to `remote` or to the home.
+fn queued(remote: Option<&str>) -> Vec<String> {
+    let text = mail::message_text("msg_0190000000007000800000000000001", "Hello");
+    let mut argv = vec!["codex".to_owned()];
+    argv.extend(mail::queue_args(THREAD, &text, remote));
+    argv
+}
+
+fn push(cli: &Cli, session: Option<&SessionRef>) -> Pushed {
+    let mail = Outgoing {
+        message_id: "msg_0190000000007000800000000000001",
+        body: "Hello",
+        session,
+    };
+    ready(harness().push(&mail, cli))
+}
+
+fn thread_ref() -> SessionRef {
+    SessionRef {
+        kind: ExternalRefKind::CodexThread,
+        id: THREAD.to_owned(),
+    }
+}
+
+#[test]
+fn mail_goes_to_the_server_and_waits_there_as_queued() {
+    let cli = Cli::new([Ok(exited(Some(0), ""))]);
+    assert_eq!(
+        push(&cli, Some(&thread_ref())),
+        Pushed::Accepted { offline: false }
+    );
+    assert_eq!(cli.ran(), [queued(Some(REMOTE))]);
+}
+
+#[test]
+fn mail_the_server_doesnt_take_waits_in_the_codex_home_for_one_to_come_up() {
+    let cli = Cli::new([Ok(exited(Some(1), "no server\n")), Ok(exited(Some(0), ""))]);
+    assert_eq!(
+        push(&cli, Some(&thread_ref())),
+        Pushed::Accepted { offline: true }
+    );
+    assert_eq!(cli.ran(), [queued(Some(REMOTE)), queued(None)]);
+}
+
+#[test]
+fn mail_neither_takes_fails_with_why_each_didnt() {
+    let cli = Cli::new([
+        Ok(exited(None, "")),
+        Err(RunError {
+            message: "timed out".to_owned(),
+        }),
+    ]);
+    let Pushed::Failed { detail } = push(&cli, Some(&thread_ref())) else {
+        panic!("it was taken");
+    };
+    assert_eq!(
+        detail,
+        format!(
+            "codex queue to {REMOTE} exited on a signal; codex queue to the Codex home failed: timed out"
+        )
+    );
+}
+
+#[test]
+fn mail_codex_wont_queue_fails_with_what_codex_said_if_it_said_anything() {
+    let cli = Cli::new([
+        Ok(exited(Some(1), "no server\n")),
+        Ok(exited(Some(2), " \n")),
+    ]);
+    let Pushed::Failed { detail } = push(&cli, Some(&thread_ref())) else {
+        panic!("it was taken");
+    };
+    assert_eq!(
+        detail,
+        format!(
+            "codex queue to {REMOTE} exited 1: no server; codex queue to the Codex home exited 2"
+        )
+    );
+}
+
+#[test]
+fn mail_for_an_agent_on_no_thread_waits_and_runs_nothing() {
+    let cli = Cli::new([]);
+    assert_eq!(push(&cli, None), Pushed::NotNow);
+    assert_eq!(cli.ran(), Vec::<Vec<String>>::new());
+}
+
+#[test]
+fn an_agent_takes_mail_only_on_a_thread_and_hears_it_unless_its_mail_is_held() {
+    let codex = harness();
+    let thread = thread_ref();
+    assert_eq!(
+        codex.accepts_mail(&AgentRef {
+            session: Some(&thread)
+        }),
+        Ok(())
+    );
+    assert_eq!(
+        codex.accepts_mail(&AgentRef { session: None }),
+        Err(MailRefusal {
+            reason: "bound to a Codex thread".to_owned(),
+        })
+    );
+    let listen = |bound, held| Listen {
+        activity: Some(ActivityValue::Idle),
+        hooks: Waiting::Nothing,
+        bound,
+        held,
+    };
+    assert!(codex.listening(&listen(true, false)));
+    assert!(!codex.listening(&listen(true, true)));
+    assert!(!codex.listening(&listen(false, false)));
+    assert_eq!(codex.not_ready_hint(), Some(NOT_READY_HINT));
+}
+
+#[test]
+fn codex_is_on_the_server_in_the_users_codex_home_and_its_threads_reach_the_daemon() {
+    let deps = |codex_home: Option<&'static str>| HarnessDeps {
+        new_session_id: Box::new(String::new),
+        hook_command: String::new(),
+        daemon_env: Box::new(|_| None),
+        user_env: Box::new(move |name| {
+            (name == "CODEX_HOME")
+                .then_some(codex_home)
+                .flatten()
+                .map(str::to_owned)
+        }),
+        home: "/home/u".to_owned(),
+        read_file: Box::new(|_| None),
+        scan_transcript: Box::new(|_, _| false),
+        now_ms: Box::new(|| 0),
+        daemon_socket: "/run/bazhen.sock".to_owned(),
+        real_path: Box::new(|_| None),
+    };
+    let starts = |codex_home| Codex::new(&deps(codex_home)).starts;
+    assert_eq!(
+        starts(None),
+        launch::Starts {
+            remote: REMOTE.to_owned(),
+            socket: Some("/run/bazhen.sock".to_owned()),
+        }
+    );
+    assert_eq!(
+        starts(Some("/srv/codex")).remote,
+        "unix:///srv/codex/app-server-control/app-server-control.sock"
+    );
+    // As the CLI the agents run takes it, an empty one is no fallback.
+    assert_eq!(
+        starts(Some("")).remote,
+        "unix:///app-server-control/app-server-control.sock"
+    );
 }

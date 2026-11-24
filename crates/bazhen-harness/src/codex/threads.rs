@@ -1,7 +1,9 @@
-//! Codex's threads: those a TUI starts, and the one a terminal title names.
+//! Codex's threads: those a TUI starts, the one a terminal title names, and the config a thread
+//! is given.
 
 use super::wire::{field, nullish_bool, nullish_string, string};
 use crate::js::Js;
+use std::fmt::Write as _;
 
 /// A started or listed thread's id, when it is one a human could be shown: not one Codex makes to
 /// write a title, which is ephemeral.
@@ -44,4 +46,65 @@ pub(super) fn title_prefix(title: &str) -> Option<&str> {
     ((20..=27).contains(&tail.len()) && matches!(cut, "" | "..." | "…"))
         .then(|| title.get(..9 + run))
         .flatten()
+}
+
+/// One `-c` setting's value: a number is written bare, as Codex refuses a string where its config
+/// takes an integer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Setting {
+    Text(String),
+    Number(u64),
+}
+
+/// What a thread loaded with Bazhen's daemon at `socket` is given. Codex keeps a thread's config
+/// from the client that loaded it, so the daemon sends it on the threads it loads and the TUI on
+/// those it loads itself. The server's own environment is whatever started it, which an agent's
+/// tool call can be, so the thread sets the agent's id and token file empty, which the CLI and the
+/// daemon read as none. Not `exclude`: a list in a thread's config replaces the user's.
+pub(super) fn thread_config(socket: &str) -> Vec<(&'static str, Setting)> {
+    vec![
+        (
+            "shell_environment_policy.set.BAZHEN_SOCKET",
+            Setting::Text(socket.to_owned()),
+        ),
+        (
+            "shell_environment_policy.set.BAZHEN_AGENT_ID",
+            Setting::Text(String::new()),
+        ),
+        (
+            "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE",
+            Setting::Text(String::new()),
+        ),
+    ]
+}
+
+/// What a thread is given so it compacts at `tokens`; nothing, to leave Codex's own setting.
+pub(super) fn compact_config(tokens: Option<u64>) -> Vec<(&'static str, Setting)> {
+    tokens
+        .map(|tokens| ("model_auto_compact_token_limit", Setting::Number(tokens)))
+        .into_iter()
+        .collect()
+}
+
+/// `value` as a TOML basic string. Codex reads a `-c` value as TOML and, when that fails, takes the
+/// raw text with spaces and quotes trimmed from its ends, so a path left unescaped reaches the
+/// thread as some other path, with no error.
+pub(super) fn toml_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.chars() {
+        match c {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '\0'..='\u{1f}' | '\u{7f}' => {
+                // Writing to a String can't fail.
+                let _ = write!(out, "\\u{:04x}", u32::from(c));
+            }
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
