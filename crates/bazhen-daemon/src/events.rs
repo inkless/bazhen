@@ -1,6 +1,6 @@
 //! `/v1/events`: the log from a client's cursor, the backlog then each new event, every one once.
 
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -190,13 +190,13 @@ async fn over<E>(
     let (out, queued) = mpsc::unbounded_channel();
     let unsent = Arc::new(AtomicUsize::new(0));
     let written = Arc::new(Notify::new());
-    let mut writing = std::pin::pin!(write(
+    let mut writing = pin!(write(
         sink,
         queued,
         Arc::clone(&unsent),
         Arc::clone(&written)
     ));
-    let mut heard = std::pin::pin!(heard);
+    let mut heard = pin!(heard);
     let ending = tokio::select! {
         ending = follow(heard.as_mut(), &out, cursor, &how, &unsent, &written) => ending,
         () = &mut writing => return,
@@ -250,7 +250,7 @@ async fn write(
     unsent: Arc<AtomicUsize>,
     written: Arc<Notify>,
 ) {
-    let mut sink = std::pin::pin!(sink);
+    let mut sink = pin!(sink);
     while let Some(Out { message, ends_page }) = queued.recv().await {
         let counted = matches!(message, Message::Text(_));
         let closing = matches!(message, Message::Close(_));
@@ -278,7 +278,7 @@ fn closing(code: u16, reason: &'static str) -> Message {
 
 /// Feeds the log to the writer and listens to the client, until the stream ends.
 async fn follow<E>(
-    heard: impl Stream<Item = Result<Message, E>>,
+    mut heard: Pin<&mut impl Stream<Item = Result<Message, E>>>,
     out: &mpsc::UnboundedSender<Out>,
     cursor: Cursor,
     how: &Streaming,
@@ -311,7 +311,6 @@ async fn follow<E>(
     // A stall doesn't fire the beats it missed back to back, a ping then at once its verdict, which
     // would find a peer gone that had no turn to answer; the next beat is a whole beat on.
     beat.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut heard = std::pin::pin!(heard);
     let mut pump = true;
     loop {
         if pump {
@@ -760,7 +759,8 @@ mod tests {
     #[test]
     fn sends_its_close_whole_to_a_client_that_sent_on_after_the_close_began() {
         let daemon = Daemon::start("stream-close-unread");
-        // A page far larger than loopback's buffers, so the close waits behind it on the socket.
+        // A page far larger than the client's receive buffer, so the close waits behind it in the
+        // daemon's send queue.
         let db = rusqlite::Connection::open(daemon.dir.path().join("bazhen.db")).unwrap();
         db.execute(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200)
@@ -836,25 +836,28 @@ mod tests {
     /// A stream to a client in this process, on a paused clock: what the client gets, what it
     /// says, and the stream's task, which ends when the stream does.
     struct Peer {
-        gets: mpsc::UnboundedReceiver<Message>,
+        gets: mpsc::Receiver<Message>,
         says: mpsc::UnboundedSender<Message>,
         ended: tokio::task::JoinHandle<()>,
         tasks: TaskTracker,
         stop: CancellationToken,
     }
 
+    /// Room for more frames than any test here sends a peer that doesn't read them.
+    const ROOMY: usize = 1024;
+
     fn peer(store: &Writer) -> Peer {
-        peer_of(store, None)
+        peer_of(store, None, ROOMY)
     }
 
-    /// The same, for a device's stream that ends with `device`.
-    fn peer_of(store: &Writer, device: Option<CancellationToken>) -> Peer {
+    /// The same, for a device's stream that ends with `device`, whose writer waits once `room`
+    /// frames are queued for the peer and unread.
+    fn peer_of(store: &Writer, device: Option<CancellationToken>, room: usize) -> Peer {
         let epoch = store.reader().unwrap().reads().epoch().unwrap();
-        let (to_peer, gets) = mpsc::unbounded_channel();
+        let (to_peer, gets) = mpsc::channel(room);
         let (says, from_peer) = mpsc::unbounded_channel::<Message>();
-        let sink = futures_util::sink::unfold(to_peer, |to: mpsc::UnboundedSender<Message>, m| {
-            let sent = to.send(m).map(|()| to);
-            async move { sent }
+        let sink = futures_util::sink::unfold(to_peer, |to: mpsc::Sender<Message>, m| async move {
+            to.send(m).await.map(|()| to)
         });
         let heard = futures_util::stream::unfold(from_peer, |mut from| async move {
             let message = from.recv().await?;
@@ -928,7 +931,7 @@ mod tests {
             appended(&store, 1).await;
             let device = CancellationToken::new();
             device.cancel();
-            let mut peer = peer_of(&store, Some(device));
+            let mut peer = peer_of(&store, Some(device), ROOMY);
             peer.ended.await.unwrap();
             let mut got = Vec::new();
             while let Ok(message) = peer.gets.try_recv() {
@@ -986,6 +989,40 @@ mod tests {
             peer.says.send(Message::Close(None)).unwrap();
             peer.ended.await.unwrap();
             assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+        });
+        thread.finish();
+    }
+
+    #[test]
+    fn answers_a_client_that_closes_while_the_daemon_s_close_waits_and_ends_at_once() {
+        let dir = TempDir::new("stream-close-crossed");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            for n in 1..=3 {
+                appended(&store, n).await;
+            }
+            let mut peer = peer_of(&store, None, 1);
+            let start = Instant::now();
+            // On a paused clock, a sleep ends only once every other task has nothing left to do.
+            let idle = || tokio::time::sleep(std::time::Duration::from_millis(1));
+            peer.stop.cancel();
+            idle().await;
+            // The page waits on the peer, the daemon's close behind it, as the peer closes.
+            peer.says.send(Message::Close(None)).unwrap();
+            idle().await;
+            let mut got = Vec::new();
+            while let Some(message) = peer.gets.recv().await {
+                got.push(message);
+            }
+            peer.ended.await.unwrap();
+            assert_eq!(
+                (got.len(), got.last(), start.elapsed()),
+                (
+                    4,
+                    Some(&closing(close_code::AWAY, "")),
+                    std::time::Duration::from_millis(2)
+                )
+            );
         });
         thread.finish();
     }
