@@ -11,6 +11,7 @@ use crate::shells::TuiTheme;
 
 /// The payload of `agent.launched`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentLaunched {
     pub environment_id: EnvironmentId,
@@ -43,6 +44,7 @@ pub struct AgentLaunched {
 
 /// The payload of `agent.renamed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentRenamed {
     pub name: String,
     pub previous: String,
@@ -50,6 +52,7 @@ pub struct AgentRenamed {
 
 /// The payload of `agent.running`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunning {
     pub external_ref: Option<ExternalRef>,
@@ -65,6 +68,7 @@ pub struct AgentRunning {
 
 /// What showed the harness alive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ReadySign {
     ClaudeHook,
@@ -73,11 +77,13 @@ pub enum ReadySign {
 
 /// The payload of `agent.ready`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentReady {
     pub sign: ReadySign,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AgentFailedReason {
     LaunchRejected,
@@ -87,6 +93,7 @@ pub enum AgentFailedReason {
 
 /// The payload of `agent.failed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentFailed {
     pub reason: AgentFailedReason,
     /// What went wrong, with secrets taken out, at most 500 grapheme clusters.
@@ -96,6 +103,7 @@ pub struct AgentFailed {
 
 /// The payload of `agent.process_adopted`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProcessAdopted {
     pub runtime_ref: RuntimeRefPayload,
@@ -103,6 +111,7 @@ pub struct AgentProcessAdopted {
 
 /// The payload of `agent.respawned` and `agent.relaunched`: the start's new incarnation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRestarted {
     pub external_ref: Option<ExternalRef>,
@@ -119,6 +128,7 @@ pub struct AgentRestarted {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RespawnRejectedReason {
     NotResumable,
@@ -133,6 +143,7 @@ pub enum RespawnRejectedReason {
 
 /// The payload of `agent.respawn_rejected`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentRespawnRejected {
     pub reason: RespawnRejectedReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -141,6 +152,7 @@ pub struct AgentRespawnRejected {
 
 /// The payload of `agent.relaunch_requested`: the new terminal it starts on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRelaunchRequested {
     pub terminal_id: TerminalId,
@@ -153,6 +165,7 @@ pub struct AgentRelaunchRequested {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RelaunchRejectedReason {
     NotResumable,
@@ -166,6 +179,7 @@ pub enum RelaunchRejectedReason {
 
 /// The payload of `agent.relaunch_rejected`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentRelaunchRejected {
     pub reason: RelaunchRejectedReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,6 +188,7 @@ pub struct AgentRelaunchRejected {
 
 /// The payload of `agent.external_ref_updated`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentExternalRefUpdated {
     pub external_ref: ExternalRef,
@@ -181,6 +196,7 @@ pub struct AgentExternalRefUpdated {
 
 /// The payload of `agent.transcript_recorded`; the stream leaves the path out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTranscriptRecorded {
     pub session_id: String,
@@ -189,11 +205,13 @@ pub struct AgentTranscriptRecorded {
 
 /// The payload of `agent.signalled`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentSignalled {
     pub signal: Signal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CompactedSign {
     ClaudeHook,
@@ -202,6 +220,7 @@ pub enum CompactedSign {
 
 /// The Claude Code hook that reported a compaction: its session and process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CompactedHook {
     pub session_id: Option<String>,
@@ -210,6 +229,7 @@ pub struct CompactedHook {
 
 /// The payload of `agent.compacted`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentCompacted {
     pub sign: CompactedSign,
     /// The model and context use last recorded before it; absent when none was.
@@ -221,6 +241,7 @@ pub struct AgentCompacted {
 
 /// The payload of `agent.exited`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentExited {
     pub exit: ExitStatus,
 }
