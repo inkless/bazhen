@@ -46,7 +46,6 @@ interface NotYet {
 
 const ATTENTION = "the attention routes' port";
 const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
-const HOLDER = "this protocol's holder-proto schema";
 
 /**
  * The schemas the protocol exports that the zod generated from the Rust protocol doesn't. A schema
@@ -76,26 +75,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     name: "PaneTitleChanged",
     owner: "the tmux runtime",
     why: "/v1/codex/pane-title goes with tmux at the cutover, and is removed at the flip, not ported",
-  },
-  {
-    name: "HolderHelloFrozen",
-    owner: HOLDER,
-    why: "the part of a hello every major reads first, to know which major the rest is in, which the holder's own hello holds inline",
-  },
-  {
-    name: "HolderHelloReplyFrozen",
-    owner: HOLDER,
-    why: "the part of a hello reply every major reads first, which the holder's own reply holds inline",
-  },
-  {
-    name: "HolderProcessSpec",
-    owner: HOLDER,
-    why: "the holder's requests write what a terminal runs inline",
-  },
-  {
-    name: "HolderRequestName",
-    owner: HOLDER,
-    why: "the holder's requests name themselves inline, by each one's tag",
   },
 ];
 

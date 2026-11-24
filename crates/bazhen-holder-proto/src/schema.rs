@@ -8,12 +8,14 @@ use std::marker::PhantomData;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 
 use crate::body::{
-    Alternate, Argv, Bounded, Count, Env, ErrorBody, ExitCode, Exited, Foreground, Gap, Generation,
-    HelloReply, HelloRequest, MAX_SAFE_INTEGER, OkBody, PasteRequest, ProtocolVersion,
-    RESERVED_ENV_NAMES, RESERVED_TAG_NAMES, Resized, Respawned, Screen, ScreenRequest,
-    SetTagsRequest, SetThemeRequest, Signal, SignalRequest, SpawnSpec, Stats, SubscribeRequest,
-    TagName, TagValue, Tags, TerminalId, Theme, Title, Utf8, VersionText, Versions,
+    Alternate, Argv, Bounded, Count, Env, ErrorBody, ExitCode, Exited, Foreground,
+    FrozenHelloReply, FrozenProtocol, Gap, Generation, HelloReply, HelloRequest, MAX_SAFE_INTEGER,
+    OkBody, PasteRequest, ProcessSpec, ProtocolVersion, RESERVED_ENV_NAMES, RESERVED_TAG_NAMES,
+    Resized, Respawned, Screen, ScreenRequest, SetTagsRequest, SetThemeRequest, Signal,
+    SignalRequest, SpawnSpec, Stats, SubscribeRequest, TagName, TagValue, Tags, TerminalId, Theme,
+    Title, Utf8, VersionText, Versions,
 };
+use crate::frame::{request_code, request_name};
 
 /// Adds every body a holder request, reply or event carries to `generator`'s definitions, with
 /// each type it names.
@@ -38,6 +40,43 @@ pub fn add_bodies(generator: &mut SchemaGenerator) {
     generator.subschema_for::<Alternate>();
     generator.subschema_for::<Exited>();
     generator.subschema_for::<Respawned>();
+    generator.subschema_for::<ProcessSpec>();
+    generator.subschema_for::<FrozenProtocol>();
+    generator.subschema_for::<FrozenHelloReply>();
+    generator.subschema_for::<RequestName>();
+}
+
+/// Each request's type byte, in the order the protocol lists their names.
+const REQUESTS: [u8; 14] = [
+    request_code::HELLO,
+    request_code::SNAPSHOT,
+    request_code::SUBSCRIBE,
+    request_code::INPUT,
+    request_code::RESIZE,
+    request_code::STATS,
+    request_code::CLOSE,
+    request_code::SIGNAL,
+    request_code::FOREGROUND,
+    request_code::RESPAWN,
+    request_code::SET_TAGS,
+    request_code::SET_THEME,
+    request_code::PASTE,
+    request_code::SCREEN,
+];
+
+/// A request's name, as `ok` and `error` give it in their `request`: one this build knows.
+#[derive(Debug)]
+pub struct RequestName;
+
+impl JsonSchema for RequestName {
+    fn schema_name() -> Cow<'static, str> {
+        "HolderRequestName".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Cow<'static, str>> = REQUESTS.into_iter().map(request_name).collect();
+        json_schema!({ "type": "string", "enum": names })
+    }
 }
 
 /// The extension that names the rules no keyword states, which `checks.ts` holds a value to.
@@ -319,6 +358,16 @@ mod tests {
             schema.remove("description");
         }
         schema
+    }
+
+    #[test]
+    fn names_each_request_this_build_knows_once() {
+        let known: Vec<u8> = (0..=u8::MAX)
+            .filter(|&code| matches!(request_name(code), Cow::Borrowed(_)))
+            .collect();
+        let mut listed = REQUESTS.to_vec();
+        listed.sort_unstable();
+        assert_eq!(listed, known);
     }
 
     #[test]
