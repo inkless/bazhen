@@ -206,6 +206,7 @@ pub struct Grant {
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequest {
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
     pub brief: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -265,7 +266,7 @@ pub struct FinishTaskRequest {
     pub idempotency_key: String,
     pub outcome: TaskOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::FinishNoteText"))]
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
@@ -278,6 +279,7 @@ pub struct FinishTaskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AddTaskNoteRequest {
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskNoteText"))]
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
@@ -307,6 +309,7 @@ pub struct Launch {
 /// `POST /v1/tasks/delegate`: a subtask given to an agent named, or to one launched for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(extend("x-bazhen-check" = "agentOrLaunch")))]
 #[serde(rename_all = "camelCase")]
 pub struct DelegateTaskRequest {
     pub idempotency_key: String,
@@ -321,6 +324,7 @@ pub struct DelegateTaskRequest {
     pub launch: Option<Launch>,
     #[serde(default)]
     pub role: Role,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
     pub brief: String,
 }
@@ -331,6 +335,7 @@ pub struct DelegateTaskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct EscalateRequest {
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 2000), extend("x-bazhen-transform" = "trim")))]
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]

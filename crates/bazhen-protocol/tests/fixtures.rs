@@ -235,6 +235,58 @@ fn the_schema_names_the_attention_kinds_the_protocol_names_and_each_reads_as_a_k
     }
 }
 
+/// The schema of `T`, or of its property `key`, past every `$ref`, keeping only `keys`.
+fn tagged<T: JsonSchema>(key: Option<&str>, keys: &[&str]) -> Value {
+    let schema = Schema::of::<T>();
+    let mut at = schema.resolved(&schema.root);
+    if let Some(key) = key {
+        at = schema.resolved(
+            at.get("properties")
+                .and_then(|p| p.get(key))
+                .unwrap_or(&Value::Null),
+        );
+    }
+    keys.iter()
+        .filter_map(|k| at.get(*k).map(|v| ((*k).to_owned(), v.clone())))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+#[test]
+fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
+    let keys = [
+        "x-bazhen-transform",
+        "minLength",
+        "maxLength",
+        "x-bazhen-check",
+    ];
+    let title = serde_json::json!({
+        "x-bazhen-transform": "trim", "minLength": 1, "maxLength": 200, "x-bazhen-check": "newTaskTitle",
+    });
+    assert_eq!(tagged::<CreateTaskRequest>(Some("title"), &keys), title);
+    assert_eq!(tagged::<DelegateTaskRequest>(Some("title"), &keys), title);
+    assert_eq!(
+        tagged::<AddTaskNoteRequest>(Some("text"), &keys),
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "x-bazhen-check": "taskNoteText" })
+    );
+    assert_eq!(
+        tagged::<FinishTaskRequest>(Some("note"), &keys),
+        serde_json::json!({ "maxLength": 20_000, "x-bazhen-check": "finishNoteText" })
+    );
+    assert_eq!(
+        tagged::<EscalateRequest>(Some("summary"), &keys),
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "maxLength": 2000 })
+    );
+    assert_eq!(
+        tagged::<DelegateTaskRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "agentOrLaunch" })
+    );
+    assert_eq!(
+        tagged::<OpenShellRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "linkedShellTakesNoCwd" })
+    );
+}
+
 /// The text `T` writes for `x` at `key` of `template`, read back, and whether the schema takes it
 /// there.
 fn writes_what_the_schema_takes<T: DeserializeOwned + Serialize + JsonSchema>(

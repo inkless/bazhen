@@ -6,6 +6,7 @@
  */
 
 import type { z } from "zod";
+import { noteSafe, TASK_NOTE_MAX_BYTES, titleSafe } from "./tasks.ts";
 
 const encoder = new TextEncoder();
 
@@ -33,4 +34,25 @@ export function refusingOwnProto(value: unknown, ctx: z.core.$RefinementCtx) {
     ctx.addIssue({ code: "custom", message: "__proto__ is reserved" });
   }
   return value;
+}
+
+/** A title a request gives a task, once trimmed: `NewTaskTitle`'s rule. */
+export const newTaskTitle = titleSafe;
+
+/** What a task note says, once trimmed: within its UTF-8 budget, and fit for a note. */
+export function taskNoteText(text: string) {
+  return utf8AtMost(TASK_NOTE_MAX_BYTES)(text) && noteSafe(text);
+}
+
+/** What the one who finishes a task says of it: fit for a note. */
+export const finishNoteText = noteSafe;
+
+/** A delegation names the agent to delegate to, or one to launch, and not both. */
+export function agentOrLaunch(request: { agentId?: unknown; launch?: unknown }) {
+  return (request.agentId === undefined) !== (request.launch === undefined);
+}
+
+/** A shell linked to an agent opens in the agent's directory, so it takes no `cwd`. */
+export function linkedShellTakesNoCwd(request: { linkedAgentId?: unknown; cwd?: unknown }) {
+  return request.linkedAgentId === undefined || request.cwd === undefined;
 }

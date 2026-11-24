@@ -118,3 +118,61 @@ impl<T: JsonSchema> JsonSchema for Required<T> {
         Option::<T>::json_schema(generator)
     }
 }
+
+/// A title a request gives a task: trimmed, 1 to 200 long, and fit for a line of mail.
+#[derive(Debug)]
+pub struct NewTaskTitle;
+
+impl JsonSchema for NewTaskTitle {
+    fn schema_name() -> Cow<'static, str> {
+        "NewTaskTitle".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "x-bazhen-transform": "trim",
+            "minLength": 1,
+            "maxLength": 200,
+            "x-bazhen-check": "newTaskTitle",
+        })
+    }
+}
+
+/// What a task note says: trimmed, not empty, and within its UTF-8 budget and fit for a note,
+/// which `checks.ts` holds it to.
+#[derive(Debug)]
+pub struct TaskNoteText;
+
+impl JsonSchema for TaskNoteText {
+    fn schema_name() -> Cow<'static, str> {
+        "TaskNoteText".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "x-bazhen-transform": "trim",
+            "minLength": 1,
+            "x-bazhen-check": "taskNoteText",
+        })
+    }
+}
+
+/// What the one who finishes a task says of it: a message's length, and fit for a note.
+#[derive(Debug)]
+pub struct FinishNoteText;
+
+impl JsonSchema for FinishNoteText {
+    fn schema_name() -> Cow<'static, str> {
+        "FinishNoteText".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "maxLength": 20_000,
+            "x-bazhen-check": "finishNoteText",
+        })
+    }
+}

@@ -33,20 +33,22 @@ export type AssignmentEndReason = z.infer<typeof AssignmentEndReason>;
 export const TaskBrief = z.string().min(1).max(20_000);
 export const TaskTitle = z.string().trim().min(1).max(200);
 
+/** Whether a title is fit for a line of its own: no control, bidirectional override or invisible. */
+export const titleSafe = (title: string) =>
+  showable(title) &&
+  !hasLoneSurrogate(title) &&
+  !INVISIBLE.test(title) &&
+  !TAG_CHARACTERS.test(title);
+
 /**
  * A title a request gives a task. Mail puts it on a line of its own, so it holds
  * no control character, bidirectional override or character that draws as nothing, which could
  * end that line or pass for another. Only requests are held to it: a title stored before keeps
  * loading as `TaskTitle`.
  */
-export const NewTaskTitle = TaskTitle.refine(
-  (title) =>
-    showable(title) &&
-    !hasLoneSurrogate(title) &&
-    !INVISIBLE.test(title) &&
-    !TAG_CHARACTERS.test(title),
-  { message: "a title can't hold control characters, bidirectional overrides or invisible ones" },
-);
+export const NewTaskTitle = TaskTitle.refine(titleSafe, {
+  message: "a title can't hold control characters, bidirectional overrides or invisible ones",
+});
 
 /** A task as the state snapshot shows it: without its brief or note, which only its own read has. */
 export const Task = z.object({
@@ -79,7 +81,7 @@ const encoder = new TextEncoder();
 const NOTE_CONTROLS: ReadonlySet<number> = new Set([0x0a, 0x09]);
 
 /** Whether text is fit for a note: only newline and tab of the controls, and nothing invisible. */
-const noteSafe = (text: string) =>
+export const noteSafe = (text: string) =>
   showable(text, NOTE_CONTROLS) &&
   !hasLoneSurrogate(text) &&
   !INVISIBLE.test(text) &&

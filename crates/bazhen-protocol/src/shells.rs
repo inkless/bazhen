@@ -167,6 +167,7 @@ pub struct Shell {
 /// `POST /v1/shells`: a shell beside an agent, in its directory, or a shell of its own in `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(extend("x-bazhen-check" = "linkedShellTakesNoCwd")))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenShellRequest {
     pub idempotency_key: String,
