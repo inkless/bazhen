@@ -3,7 +3,6 @@
 //! daemon's protocol with.
 
 use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
 use bazhen_protocol::daemon::AgentCli;
@@ -40,12 +39,8 @@ impl Lookup {
     /// entry means the agent's own directory, which isn't known here, so it is skipped.
     pub(crate) fn read(&self) -> AgentCli {
         let home = self.home.as_deref();
-        let on_path = self
-            .path
-            .as_deref()
-            .map_or(&[][..], OsStr::as_bytes)
-            .split(|&b| b == b':')
-            .map(|entry| expanded(OsStr::from_bytes(entry), home))
+        let on_path = std::env::split_paths(self.path.as_deref().unwrap_or_default())
+            .map(|entry| expanded(entry.as_os_str(), home))
             .filter(|dir| dir.is_absolute())
             .find_map(|dir| runnable(&dir.join("bazhen")));
         AgentCli {
@@ -217,11 +212,11 @@ mod tests {
         let bin = root.dir("bin");
         symlink(&root.built, bin.join("bazhen")).unwrap();
         let empty = root.dir("empty").to_string_lossy().into_owned();
-        let relative = bin
-            .strip_prefix("/")
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
+        // Relative to the test's own directory, where a lookup that took it would find the link.
+        let cwd = std::env::current_dir().unwrap();
+        let up = "../".repeat(cwd.components().count() - 1);
+        let relative = format!("{up}{}", bin.strip_prefix("/").unwrap().display());
+        assert!(Path::new(&relative).join("bazhen").is_file());
         let found: Vec<_> = [
             vec![],
             vec![("PATH", "")],
