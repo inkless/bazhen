@@ -225,7 +225,11 @@ pub(crate) fn containment_log(containment: &Containment) -> Option<(bool, String
 /// cut by characters, where TypeScript cuts by grapheme clusters, and not yet redacted as
 /// `failureDetail` redacts: that needs its JavaScript patterns ported, a change of its own.
 fn detail(err: &dyn std::error::Error) -> String {
-    let text = err.to_string();
+    cut_detail(err.to_string())
+}
+
+/// `text` cut as [`detail`] cuts a failure's.
+pub(crate) fn cut_detail(text: String) -> String {
     if text.chars().count() <= DETAIL_MAX {
         return text;
     }

@@ -415,7 +415,7 @@ mod tests {
         _dir: TempDir,
         dir: std::path::PathBuf,
         store: Writer,
-        tokens: AgentTokens,
+        issuer: AgentTokens,
         _thread: crate::writer::Thread,
     }
 
@@ -437,7 +437,7 @@ mod tests {
             let tokens_dir = dir.path().join("agents");
             let uid = rustix::process::getuid().as_raw();
             Self {
-                tokens: AgentTokens::new(tokens_dir.clone(), uid, store.clone()),
+                issuer: AgentTokens::new(tokens_dir.clone(), uid, store.clone()),
                 dir: tokens_dir,
                 store,
                 _dir: dir,
@@ -446,7 +446,7 @@ mod tests {
         }
 
         async fn mint(&self, agent: &str) -> Minted {
-            self.tokens
+            self.issuer
                 .mint(&AgentId::parse(agent).unwrap())
                 .await
                 .unwrap()

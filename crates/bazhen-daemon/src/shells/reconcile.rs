@@ -433,15 +433,7 @@ mod tests {
         async fn turn_awaited(&self, id: &str) {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
-                let waiting = self
-                    .shells
-                    .turns
-                    .0
-                    .lock()
-                    .unwrap()
-                    .get(id)
-                    // The map's, the holder's guard's, and the waiter's.
-                    .is_some_and(|lock| Arc::strong_count(lock) > 2);
+                let waiting = self.shells.turns.waiting(id);
                 if waiting {
                     return;
                 }

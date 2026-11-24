@@ -15,7 +15,7 @@ pub(crate) mod reconcile;
 pub(crate) mod reports;
 pub(crate) mod retype;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -45,6 +45,7 @@ use crate::budget::{Budget, Counts, TerminalLimit};
 use crate::terminals::{
     Event, Events, Exit, Kind, NewTerminal, Recorded, TerminalError, Terminals,
 };
+use crate::turns::Turns;
 use crate::writer::Writer;
 
 /// The runtime every shell this daemon opens is created on.
@@ -232,46 +233,6 @@ pub(crate) fn resolve_directory(requested: &str, home: &str) -> Result<String, S
             Err(ShellError::Invalid(format!("{path} does not exist")))
         }
         Err(err) => Err(ShellError::Internal(format!("{path} can't be read: {err}"))),
-    }
-}
-
-/// Commands on one shell, one at a time, each waiting its turn by the shell's id.
-#[derive(Debug, Default)]
-struct Turns(Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>);
-
-/// A shell's turn, given back as it drops.
-#[derive(Debug)]
-struct Turn<'a> {
-    turns: &'a Turns,
-    id: String,
-    held: Option<tokio::sync::OwnedMutexGuard<()>>,
-}
-
-impl Turns {
-    async fn take(&self, id: &str) -> Turn<'_> {
-        let lock = {
-            let mut turns = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            Arc::clone(turns.entry(id.to_owned()).or_default())
-        };
-        Turn {
-            turns: self,
-            id: id.to_owned(),
-            held: Some(lock.lock_owned().await),
-        }
-    }
-}
-
-impl Drop for Turn<'_> {
-    fn drop(&mut self) {
-        drop(self.held.take());
-        let mut turns = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
-        // Forgotten once no other command holds or waits for it.
-        if turns
-            .get(&self.id)
-            .is_some_and(|lock| Arc::strong_count(lock) == 1)
-        {
-            turns.remove(&self.id);
-        }
     }
 }
 
@@ -1311,6 +1272,7 @@ fn gone_from(state: TerminalState) -> TerminalChange {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::HashMap;
     use std::sync::Mutex as StdMutex;
     use std::time::{Duration, Instant};
 

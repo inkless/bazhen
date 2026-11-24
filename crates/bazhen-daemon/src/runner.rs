@@ -13,6 +13,7 @@ use bazhen_runtime_holder::{HolderRoot, HolderRuntime, RuntimeOptions};
 use crate::budget::Budget;
 use crate::doctor::{self, Settled};
 use crate::env::{self, Env};
+use crate::harnesses::{self, World};
 use crate::holder::{self, Holder, default_runtime_refusal, holder_source, runtime_env};
 use crate::hook_link;
 use crate::serve::{Refused, Startup};
@@ -40,6 +41,8 @@ pub(crate) struct Runner {
     pub(crate) streams: Option<Arc<HolderRuntime>>,
     /// What hooks are given to run, or none when no hook client is built.
     pub(crate) hook: Option<String>,
+    /// The harnesses agents run in, over that hook client; none without one.
+    pub(crate) harnesses: Option<bazhen_harness::Harnesses>,
 }
 
 /// The holder runtime, with the build installed for its new terminals, or why the daemon can't
@@ -91,13 +94,23 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
         hook: hook.as_ref(),
     });
     let holder = Holder::new(runtime, config.history_lines);
+    let hook = hook.map(|hook| hook.path.to_string_lossy().into_owned());
+    let harnesses = hook.as_ref().map(|hook| {
+        harnesses::served(World {
+            hook: hook.clone(),
+            user_env: captured.env.clone(),
+            home: startup.home.clone(),
+            socket: startup.paths.socket.clone(),
+        })
+    });
     Ok(Runner {
         streams: Some(holder.runtime()),
         terminals: Arc::new(holder),
         budget: Arc::new(budget),
         doctor,
         shell: login_shell(&captured.env),
-        hook: hook.map(|hook| hook.path.to_string_lossy().into_owned()),
+        hook,
+        harnesses,
     })
 }
 

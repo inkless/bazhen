@@ -3,6 +3,9 @@
 
 mod accept;
 mod agent_cli;
+pub mod agent_launch;
+mod agent_routes;
+mod agents;
 mod budget;
 mod callers;
 mod channel;
@@ -13,6 +16,7 @@ mod doctor;
 mod env;
 mod events;
 mod guard;
+mod harnesses;
 mod heartbeat;
 mod holder;
 mod hook_link;
@@ -40,6 +44,7 @@ mod terminals;
 #[cfg(test)]
 mod testing;
 mod tokens;
+mod turns;
 mod web;
 mod writer;
 

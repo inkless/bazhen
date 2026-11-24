@@ -9,6 +9,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
+pub(crate) mod stub_harness;
+
 /// A directory of the test's own, removed when the test ends, whether or not it passed.
 pub(crate) struct TempDir(PathBuf);
 

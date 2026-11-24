@@ -24,6 +24,7 @@ use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotV
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
+use crate::agent_routes;
 use crate::callers::{self, Caller};
 use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
@@ -91,6 +92,8 @@ pub(crate) struct Shared {
     pub(crate) pairing: Pairing,
     /// The shells, where this daemon runs terminals.
     pub(crate) shells: Option<Arc<Shells>>,
+    /// The agents, where this daemon runs terminals.
+    pub(crate) agents: Option<Arc<crate::agents::Agents>>,
     /// What doctor says that was settled at start.
     pub(crate) doctor: Option<Arc<crate::doctor::Settled>>,
     /// This machine's name, as the state names its environment's host.
@@ -119,6 +122,7 @@ impl Shared {
             peers: Peers::default(),
             pairing: Pairing::default(),
             shells: None,
+            agents: None,
             doctor: None,
             host: Arc::from(hostname()),
             web: None,
@@ -141,6 +145,12 @@ impl Shared {
     ) -> Self {
         self.shells = Some(shells);
         self.doctor = Some(Arc::new(doctor));
+        self
+    }
+
+    /// The same, launching agents as `agents` does.
+    pub(crate) fn with_agents(mut self, agents: Arc<crate::agents::Agents>) -> Self {
+        self.agents = Some(agents);
         self
     }
 
@@ -381,6 +391,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/devices", get(paired::list))
         .route("/v1/devices/{id}/revoke", post(paired::revoke))
         .route("/v1/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/v1/agents", post(agent_routes::launch))
         .route("/v1/shells", post(shell_routes::open))
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
@@ -429,6 +440,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/tasks", post(create_task))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/agents", post(agent_routes::launch))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
