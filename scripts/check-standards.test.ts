@@ -1900,8 +1900,18 @@ describe("byteTakers", () => {
       "impl O { fn j(&mut self) { fn read(v: &V) {} Self::read(self, &mut b) } }",
       "impl M { fn h(&mut self) { self.read(&mut v) } fn read(&mut self, v: &mut V) {} }",
       "impl S { fn k(&self) { self.read(&v) } fn read(&self, v: &V) {} }",
+      "impl Z { fn k(&self) { self.read_at(&mut b, 0) } fn read_at(&mut self, v: &V, o: u64) {} }",
     ].join("\n");
-    expect(byteTakers(source)).toEqual(["U::c", "W::d", "X::e", "X::read", "R::f", "N::g", "O::j"]);
+    expect(byteTakers(source)).toEqual([
+      "U::c",
+      "W::d",
+      "X::e",
+      "X::read",
+      "R::f",
+      "N::g",
+      "O::j",
+      "Z::k",
+    ]);
   });
 
   it("leaves a function that only returns bytes, takes text, or is test code", () => {

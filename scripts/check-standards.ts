@@ -1883,8 +1883,9 @@ const BARE_READ = new RegExp(`(?<![.:]\\s*|\\bfn\\s+)\\b(${READS}|fill_buf|copy)
 // bytes is a decoder there, and its callers through it. `Self::read` names the impl's own first.
 // `self.read` does only where method lookup reaches it before a trait's: lookup tries the
 // receiver's own type before borrowing it, so `self.read(&mut b)` in a `&mut self` method is
-// io::Read's when the impl's own `read` takes `&self`. The own method wins when it takes self as
-// the caller does, or takes `&mut self`, which no trait's read is tried before.
+// io::Read's when the impl's own `read` takes `&self`, and in a `&self` method a trait's `&self`
+// read wins over an own one taking `&mut self`. The own method wins only when it takes self as the
+// caller does.
 const SELF_READ = new RegExp(`\\b(self\\s*\\.|Self\\s*::)\\s*(${READS})(?=\\s*\\()`, "g");
 
 // How a function takes self: `&mut`, `&` or by value, or none of these, as with `self: Box<Self>`
@@ -2873,9 +2874,7 @@ export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[]
         left.some(
           (g) =>
             g.fn === method &&
-            (via.startsWith("Self") ||
-              (caller !== undefined &&
-                (receiver(g.takes) === caller || receiver(g.takes) === "&mut"))),
+            (via.startsWith("Self") || (caller !== undefined && receiver(g.takes) === caller)),
         );
       const called = body.replace(SELF_READ, (call, via: string, g: string) =>
         reached(via, g) ? call.slice(0, -g.length) + "_".repeat(g.length) : call,
