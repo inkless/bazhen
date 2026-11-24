@@ -188,6 +188,32 @@ mod tests {
     }
 
     proptest! {
+        /// A whole number written as digits is read as itself, and one up to the largest safe
+        /// integer as itself however JSON writes it; past that bound, only as digits, where the
+        /// edge holds it to the bound.
+        #[test]
+        fn reads_a_whole_number_as_digits_and_a_safe_one_however_json_writes_it(
+            n in prop_oneof![
+                any::<u64>(),
+                0..=crate::edge::MAX_SAFE_INTEGER,
+                (crate::edge::MAX_SAFE_INTEGER - 2)..=(crate::edge::MAX_SAFE_INTEGER + 2),
+            ]
+        ) {
+            prop_assert_eq!(read_whole(&n.to_string()), Some(n));
+            let safe = (n <= crate::edge::MAX_SAFE_INTEGER).then_some(n);
+            for written in [format!("{n}.0"), format!("{n}e0"), format!("{n}.000")] {
+                prop_assert_eq!(read_whole(&written), safe, "{}", written);
+            }
+            prop_assert_eq!(read_whole(&format!("-{n}")), (n == 0).then_some(0));
+        }
+
+        /// A fraction a double holds is refused, as zod's `.int()` refuses it: below 2^48 a
+        /// double's step is at most 1/16, so no tenth rounds to a whole.
+        #[test]
+        fn refuses_a_number_with_a_fraction(n in 0..(1_u64 << 48), tenths in 1..10_u8) {
+            prop_assert_eq!(read_whole(&format!("{n}.{tenths}")), None);
+        }
+
         /// Every finite number reads back as itself, written plainly from 1e-6 up to 1e21 and
         /// with a signed exponent past those bounds, as JavaScript writes it.
         #[test]

@@ -1,6 +1,10 @@
 //! What the daemon's edge takes: a request as serde reads it, held to every rule zod holds it to
 //! past its shape, and given back as zod parses it. A message's edge verdict is [`edge`]: its
 //! decode, then its [`EdgeCheck`].
+//!
+//! Where zod holds a request to more than the Rust daemon's handlers check, the edge holds it to
+//! zod's rule: a dismissal's key to 1 to 200 units, and a close's or a restart's generation to the
+//! largest safe integer. The daemon's router test lists both.
 
 use serde::de::DeserializeOwned;
 
@@ -207,6 +211,7 @@ impl EdgeCheck for ShellDecline {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use serde_json::{Value, json};
 
     use super::*;
@@ -369,5 +374,107 @@ mod tests {
         assert!(refused::<ShellPrompt>(&json!({ "token": "t".repeat(129) })));
         assert!(!refused::<ShellDecline>(&json!({ "token": token })));
         assert!(refused::<ShellDecline>(&json!({ "token": "" })));
+    }
+
+    /// Whether any request the edge reads takes `body`.
+    fn taken_by_any(body: &[u8]) -> bool {
+        edge::<CreateTaskRequest>(body).is_ok()
+            || edge::<OpenShellRequest>(body).is_ok()
+            || edge::<CloseShellRequest>(body).is_ok()
+            || edge::<RestartShellRequest>(body).is_ok()
+            || edge::<RenameShellRequest>(body).is_ok()
+            || edge::<DismissNoticeRequest>(body).is_ok()
+            || edge::<PairRequest>(body).is_ok()
+            || edge::<ShellReport>(body).is_ok()
+            || edge::<ShellPrompt>(body).is_ok()
+            || edge::<ShellDecline>(body).is_ok()
+    }
+
+    /// `taken`, written back out, is taken again as itself.
+    fn settled<T>(taken: &T) -> bool
+    where
+        T: DeserializeOwned + EdgeCheck + serde::Serialize + PartialEq,
+    {
+        edge::<T>(&serde_json::to_vec(taken).unwrap()).is_ok_and(|again| again == *taken)
+    }
+
+    /// A body each request takes whole, but for the pairing, which holds a code typed in.
+    const TAKEN: [&str; 4] = [
+        r#"{"idempotencyKey":"k1","title":"  fix it ","brief":"b"}"#,
+        r#"{"idempotencyKey":"k1","generation":2.0,"confirmedProgram":"vim"}"#,
+        r#"{"idempotencyKey":"k1","name":" dev "}"#,
+        r#"{"token":"t","command":"ls"}"#,
+    ];
+
+    /// Text a name or a title might hold: anything, or what sits at their rules' edges.
+    const EDGES: &str = "[ \\t\\x{feff}\\x{85}\\x{7}\\x{202e}\\x{200b}a-z\\x{1f600}]{0,210}";
+
+    /// Short text, padded with what JavaScript trims and what it doesn't.
+    const PADDED: &str =
+        "[ \\t\\x{feff}\\x{85}]{0,3}[a-z\\x{1f600}\\x{200b}]{1,8}[ \\t\\x{feff}\\x{85}]{0,3}";
+
+    proptest! {
+        #[test]
+        fn every_truncation_of_a_taken_request_is_refused(
+            which in prop::sample::select(TAKEN.to_vec()),
+            cut in any::<prop::sample::Index>(),
+        ) {
+            prop_assert!(taken_by_any(which.as_bytes()), "{}", which);
+            let cut = cut.index(which.len());
+            let cut = &which.as_bytes()[..cut];
+            prop_assert!(!taken_by_any(cut), "{}", String::from_utf8_lossy(cut));
+        }
+
+        #[test]
+        fn a_rename_takes_a_name_exactly_when_shell_name_does_and_gives_it_back_trimmed(
+            name in prop_oneof![any::<String>(), EDGES, PADDED],
+        ) {
+            let body = json!({ "idempotencyKey": KEY, "name": name });
+            let taken = edge::<RenameShellRequest>(body.to_string().as_bytes());
+            let read = taken.as_ref().ok().and_then(|rename| rename.name.as_deref());
+            prop_assert_eq!(read, shell_name(&name));
+            prop_assert!(taken.as_ref().ok().is_none_or(settled));
+        }
+
+        #[test]
+        fn a_task_takes_a_title_exactly_when_new_task_title_does_and_gives_it_back_trimmed(
+            title in prop_oneof![any::<String>(), EDGES, PADDED],
+        ) {
+            let body = json!({ "idempotencyKey": KEY, "title": title, "brief": "b" });
+            let taken = edge::<CreateTaskRequest>(body.to_string().as_bytes());
+            let read = taken.as_ref().ok().map(|task| task.title.as_str());
+            prop_assert_eq!(read, new_task_title(&title));
+            prop_assert!(taken.as_ref().ok().is_none_or(settled));
+        }
+
+        #[test]
+        fn a_close_takes_a_generation_up_to_the_largest_safe_integer_however_written(
+            generation in prop_oneof![
+                any::<u64>(),
+                (MAX_SAFE_INTEGER - 2)..=(MAX_SAFE_INTEGER + 2),
+            ],
+            written in prop::sample::select(vec!["", ".0", "e0"]),
+        ) {
+            let number = format!("{generation}{written}");
+            let body = format!(r#"{{"idempotencyKey":"{KEY}","generation":{number}}}"#);
+            let taken = edge::<CloseShellRequest>(body.as_bytes());
+            let read = taken.as_ref().ok().map(|close| close.generation);
+            prop_assert_eq!(read, (generation <= MAX_SAFE_INTEGER).then_some(generation));
+            prop_assert!(taken.as_ref().ok().is_none_or(settled));
+        }
+
+        #[test]
+        fn a_dismissal_takes_a_key_of_1_to_200_utf16_units(
+            key in prop_oneof![
+                any::<String>(),
+                "[a\\x{1f600}]{0,210}",
+            ],
+        ) {
+            let body = json!({ "idempotencyKey": key });
+            let taken = edge::<DismissNoticeRequest>(body.to_string().as_bytes());
+            let units = key.encode_utf16().count();
+            prop_assert_eq!(taken.is_ok(), (1..=200).contains(&units), "{} units", units);
+            prop_assert!(taken.as_ref().ok().is_none_or(settled));
+        }
     }
 }

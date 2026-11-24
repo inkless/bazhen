@@ -11,8 +11,8 @@ use libfuzzer_sys::fuzz_target;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// A request the edge takes, written back out, is taken again as itself: zod parses what it
-/// parsed to the same value.
+/// A request the edge takes, written back out, is taken again as itself. This holds the edge to
+/// its own reading, not to zod's: the planted corpus holds it to zod's.
 fn settled<T: DeserializeOwned + Serialize + EdgeCheck + PartialEq + std::fmt::Debug>(body: &[u8]) {
     if let Ok(taken) = edge::<T>(body) {
         let written = serde_json::to_vec(&taken).unwrap();
