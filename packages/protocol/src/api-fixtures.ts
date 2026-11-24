@@ -1448,6 +1448,8 @@ const OFFER_INPUTS = [
   `msg_${ID_BODY}`,
   `msg_${ID_BODY.toUpperCase()}-1`,
   `msg_${ID_BODY.slice(1)}-1`,
+  `msg_${ID_BODY}0-1`,
+  `msg_${"g".repeat(32)}-1`,
   `agent_${ID_BODY}-1`,
   "",
 ];

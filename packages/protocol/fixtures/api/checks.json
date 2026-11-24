@@ -360,6 +360,16 @@
       "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
     },
     {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d0-1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_gggggggggggggggggggggggggggggggg-1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
       "input": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1",
       "ok": false,
       "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
