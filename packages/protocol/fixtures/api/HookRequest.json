@@ -1,0 +1,173 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "Stop",
+      "pid": 42,
+      "ppid": 41,
+      "payload": {
+        "session_id": "s",
+        "prompt_id": "p",
+        "nested": [
+          1,
+          null,
+          "\ud83d"
+        ]
+      }
+    },
+    "parsed": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "Stop",
+      "pid": 42,
+      "ppid": 41,
+      "payload": {
+        "session_id": "s",
+        "prompt_id": "p",
+        "nested": [
+          1,
+          null,
+          "�"
+        ]
+      }
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "protocolVersion": "1.12",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "wait",
+      "pid": -1,
+      "ppid": 0,
+      "payload": null
+    },
+    "parsed": {
+      "protocolVersion": "1.12",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "wait",
+      "pid": -1,
+      "ppid": 0,
+      "payload": null
+    }
+  },
+  {
+    "name": "example 3",
+    "wire": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "statusline",
+      "pid": 1,
+      "ppid": 1,
+      "payload": 7
+    },
+    "parsed": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "statusline",
+      "pid": 1,
+      "ppid": 1,
+      "payload": 7
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "Stop",
+      "pid": 42,
+      "ppid": 41,
+      "payload": {
+        "session_id": "s",
+        "prompt_id": "p",
+        "nested": [
+          1,
+          null,
+          "\ud83d"
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "Stop",
+      "pid": 42,
+      "ppid": 41,
+      "payload": {
+        "session_id": "s",
+        "prompt_id": "p",
+        "nested": [
+          1,
+          null,
+          "�"
+        ],
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "protocolVersion": "1.12",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "wait",
+      "pid": -1,
+      "ppid": 0,
+      "payload": null,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "protocolVersion": "1.12",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "wait",
+      "pid": -1,
+      "ppid": 0,
+      "payload": null
+    }
+  },
+  {
+    "name": "example 3, with a field no version defines in each of its objects",
+    "wire": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "statusline",
+      "pid": 1,
+      "ppid": 1,
+      "payload": 7,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "protocolVersion": "1.0",
+      "agentId": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "event": "statusline",
+      "pid": 1,
+      "ppid": 1,
+      "payload": 7
+    }
+  }
+]

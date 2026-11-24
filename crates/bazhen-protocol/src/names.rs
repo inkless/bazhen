@@ -143,6 +143,12 @@ impl fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+impl Refused {
+    pub(crate) fn new(what: &'static str, value: String) -> Self {
+        Self { what, value }
+    }
+}
+
 /// An agent's name as a JSON Schema pattern: [`AgentName::parse`]'s rule.
 #[cfg(feature = "schema")]
 fn agent_name_pattern() -> String {

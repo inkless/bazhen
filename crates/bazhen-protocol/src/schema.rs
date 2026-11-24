@@ -20,7 +20,8 @@ use crate::daemon::{
 use crate::events::typed::{TypedEventFrame, TypedRecordedEvent};
 use crate::events::{ClientEventFrame, EventFrame, EventStreamQuery};
 use crate::mail::{
-    SendMessageRequest, SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
+    HookAck, HookReply, HookRequest, SendMessageRequest, SendMessageResponse, WaitMessagesRequest,
+    WaitMessagesResponse,
 };
 use crate::notices::{
     DevicesResponse, DismissNoticeRequest, DismissNoticeResponse, PairRequest, PairResponse,
@@ -114,6 +115,9 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<FinishTaskRequest>();
     generator.subschema_for::<FleetAgent>();
     generator.subschema_for::<HealthResponse>();
+    generator.subschema_for::<HookAck>();
+    generator.subschema_for::<HookReply>();
+    generator.subschema_for::<HookRequest>();
     generator.subschema_for::<LaunchAgentRequest>();
     generator.subschema_for::<LaunchAgentResponse>();
     generator.subschema_for::<OpenShellRequest>();

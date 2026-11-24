@@ -128,8 +128,6 @@ interface NotYet {
 
 const ATTENTION = "the attention routes' port";
 const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
-const HOOKS = "the hook wire types' port";
-const HOOKS_WHY = "the hook wire types aren't in bazhen-protocol yet";
 const HOLDER = "this protocol's holder-proto schema";
 const NAMED = "this protocol's named definitions";
 const NAMED_WHY = "the Rust protocol writes it inline in each message that holds it";
@@ -153,10 +151,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     owner: "the mailbox routes' port",
     why: "the Rust daemon serves no mailbox route yet",
   },
-  { name: "HookAck", owner: HOOKS, why: HOOKS_WHY },
-  { name: "HookReply", owner: HOOKS, why: HOOKS_WHY },
-  { name: "HookRequest", owner: HOOKS, why: HOOKS_WHY },
-  { name: "OfferToken", owner: HOOKS, why: HOOKS_WHY },
   {
     name: "CompactWindowTokens",
     owner: "the agent request checks' move into the protocol",
@@ -198,7 +192,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     why: "what the Rust CLI's `bazhen agents --json` prints, which only the CLI's tests read: the Rust protocol emits FleetAgent, not the list",
   },
   { name: "NoticeAction", owner: NAMED, why: NAMED_WHY },
-  { name: "ProtocolVersion", owner: NAMED, why: NAMED_WHY },
   { name: "RuntimeHealthState", owner: NAMED, why: NAMED_WHY },
   { name: "ShellCommandLine", owner: NAMED, why: NAMED_WHY },
   { name: "TaskBrief", owner: NAMED, why: NAMED_WHY },

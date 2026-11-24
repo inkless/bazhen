@@ -62,6 +62,7 @@ type GeneratedOnly =
   | "HolderSubscribeFrom"
   | "HolderTerminalId"
   | "HookClient"
+  | "HookEvent"
   | "HostPtys"
   | "Lan"
   | "Launch"
