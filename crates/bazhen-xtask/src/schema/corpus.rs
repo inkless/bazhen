@@ -586,6 +586,14 @@ impl<'a> Walk<'a> {
             .flatten()
             .filter_map(Value::as_str)
             .collect();
+        // A check over the whole object may need a field it lets each leave out alone, which the
+        // corpus can't judge: the check's own cases leave its fields out.
+        let checked: BTreeSet<&str> = checks
+            .iter()
+            .filter_map(|check| object_cases(check))
+            .flatten()
+            .flat_map(|(_, fields, _)| fields.into_iter().map(|(key, _)| key))
+            .collect();
         let keys: BTreeSet<&String> = rust
             .into_iter()
             .chain(protocol)
@@ -602,9 +610,7 @@ impl<'a> Walk<'a> {
                 continue;
             };
             let optional = !required.contains(key.as_str());
-            // A check over the whole object may need a field it lets each leave out alone, which
-            // the corpus can't judge: the check's own cases leave its fields out.
-            if !optional || checks.is_empty() {
+            if !optional || !checked.contains(key.as_str()) {
                 self.plant(&at, "leftOut", Edit::Drop, optional);
             }
             if !held.is_null() {
@@ -1291,7 +1297,7 @@ mod tests {
     }
 
     #[test]
-    fn plants_no_optional_field_left_out_under_a_check_of_the_whole_object() {
+    fn plants_no_left_out_for_a_field_a_whole_object_check_reads() {
         let message = |check: Option<&str>| {
             let mut schema = json!({
                 "type": "object",
@@ -1299,6 +1305,7 @@ mod tests {
                     "idempotencyKey": { "type": "string" },
                     "cwd": { "type": "string" },
                     "linkedAgentId": { "type": "string" },
+                    "theme": { "type": "string" },
                 },
                 "required": ["idempotencyKey"],
             });
@@ -1307,7 +1314,7 @@ mod tests {
             }
             schema
         };
-        let example = json!({ "idempotencyKey": "k", "cwd": "/w" });
+        let example = json!({ "idempotencyKey": "k", "cwd": "/w", "theme": "t" });
         let left_out = |cases: &[Case]| {
             cases
                 .iter()
@@ -1320,18 +1327,25 @@ mod tests {
             left_out(&unchecked),
             [
                 ("/cwd".to_owned(), true),
-                ("/idempotencyKey".to_owned(), false)
+                ("/idempotencyKey".to_owned(), false),
+                ("/theme".to_owned(), true),
             ]
         );
         let checked = planted_in(&message(Some("linkedShellTakesNoCwd")), None, &example).unwrap();
-        assert_eq!(left_out(&checked), [("/idempotencyKey".to_owned(), false)]);
+        assert_eq!(
+            left_out(&checked),
+            [
+                ("/idempotencyKey".to_owned(), false),
+                ("/theme".to_owned(), true),
+            ]
+        );
         let neither = checked
             .iter()
             .find(|c| c.kind == "linkedShellTakesNoCwd/neither")
             .unwrap();
         assert_eq!(
             (neither.body.as_str(), neither.accept),
-            (r#"{"idempotencyKey":"k"}"#, true)
+            (r#"{"idempotencyKey":"k","theme":"t"}"#, true)
         );
     }
 
