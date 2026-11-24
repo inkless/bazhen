@@ -4199,7 +4199,8 @@ export const DENY_CONFIG = [
 
 // The moon tasks that run the Rust gates, exactly, and the steps of `check` and `format-check` that
 // run each of them. The commands themselves are fixed in crates/bazhen-xtask/src/gate.rs; the
-// tests run under a cap like any.
+// tests run under a cap like any. `check` also runs `rust-schema-check`, the Rust schema's
+// generator and its leak checks, which nothing else after a merge runs.
 const GATE = "scripts/xtask.sh gate";
 export const RUST_GATE_TASKS: Record<string, string> = {
   "gate-fmt": `${GATE} fmt`,
@@ -4208,7 +4209,7 @@ export const RUST_GATE_TASKS: Record<string, string> = {
   "test-rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
 };
 export const GATE_STEPS: Record<string, readonly string[]> = {
-  check: ["format-check", "lint-rust", "deny", "test-rust"],
+  check: ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"],
   "format-check": ["gate-fmt"],
 };
 

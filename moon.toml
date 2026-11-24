@@ -10,6 +10,7 @@
 deps = [
   "standards",
   "schema-check",
+  "rust-schema-check",
   "lint",
   "format-check",
   "typecheck",
@@ -33,6 +34,10 @@ options = { cache = false, internal = true }
 [tasks.schema]
 command = "node scripts/protocol-schema.ts"
 options = { cache = false }
+
+[tasks.rust-schema-check]
+command = "scripts/xtask.sh schema --check"
+options = { cache = false, internal = true }
 
 [tasks.dev]
 deps = ["daemon:dev", "web:dev"]
