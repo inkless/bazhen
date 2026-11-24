@@ -36,38 +36,45 @@ use crate::tasks::{
 use crate::terminals::TerminalScreen;
 use crate::waits::{WaitRequest, WaitResponse};
 
-/// A generator of the protocol's dialect: JSON Schema 2020-12, each named type under `$defs`, its
-/// 64-bit integers held to what JavaScript reads exactly.
+/// A generator of the protocol's dialect: JSON Schema 2020-12, each named type under `$defs`, each
+/// integer's range stated.
 pub fn generator() -> SchemaGenerator {
     SchemaSettings::draft2020_12()
-        .with_transform(SafeIntegers)
+        .with_transform(IntegerRanges)
         .into_generator()
 }
 
 /// The largest integer a JavaScript number holds exactly, 2^53 - 1: `Number.MAX_SAFE_INTEGER`.
 pub const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
-/// A JavaScript peer reads a JSON number as a double, so the protocol's 64-bit integers are those
-/// a double holds exactly, as zod's `.int()` says. This bounds the schema only: serde still reads
-/// any `u64` or `i64`.
+/// The range each integer format holds, as the protocol states it: schemars states it for some
+/// formats only, and zod reads no format. A JavaScript peer reads a JSON number as a double, so a
+/// 64-bit integer is one a double holds exactly, as zod's `.int()` says. A bound the type states
+/// is kept. This bounds the schema only: serde reads what the Rust type holds.
 #[derive(Debug, Clone)]
-struct SafeIntegers;
+struct IntegerRanges;
 
-impl Transform for SafeIntegers {
+const INTEGER_RANGES: [(&str, i64, i64); 8] = [
+    ("int8", i8::MIN as i64, i8::MAX as i64),
+    ("int16", i16::MIN as i64, i16::MAX as i64),
+    ("int32", i32::MIN as i64, i32::MAX as i64),
+    ("int64", -MAX_SAFE_INTEGER, MAX_SAFE_INTEGER),
+    ("uint8", 0, u8::MAX as i64),
+    ("uint16", 0, u16::MAX as i64),
+    ("uint32", 0, u32::MAX as i64),
+    ("uint64", 0, MAX_SAFE_INTEGER),
+];
+
+impl Transform for IntegerRanges {
     fn transform(&mut self, schema: &mut Schema) {
         let format = schema.get("format").and_then(serde_json::Value::as_str);
-        let signed = match format {
-            Some("uint64") => false,
-            Some("int64") => true,
-            _ => return transform_subschemas(self, schema),
-        };
-        if let Some(object) = schema.as_object_mut() {
-            object.entry("maximum").or_insert(MAX_SAFE_INTEGER.into());
-            if signed {
-                object
-                    .entry("minimum")
-                    .or_insert((-MAX_SAFE_INTEGER).into());
-            }
+        let range = INTEGER_RANGES
+            .iter()
+            .find(|(name, ..)| Some(*name) == format)
+            .map(|(_, low, high)| (*low, *high));
+        if let (Some((low, high)), Some(object)) = (range, schema.as_object_mut()) {
+            object.entry("minimum").or_insert(low.into());
+            object.entry("maximum").or_insert(high.into());
         }
         transform_subschemas(self, schema);
     }
@@ -254,4 +261,15 @@ impl JsonSchema for EventId {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         schemars::json_schema!({ "type": "integer", "minimum": 1, "maximum": MAX_SAFE_INTEGER })
     }
+}
+
+/// A string enum of `variants` as serde writes each, in their order: a derive groups the
+/// variants a doc comment describes apart from the rest, which loses the order zod's `.options`
+/// keeps.
+pub(crate) fn in_order<T: serde::Serialize>(variants: &[T]) -> Schema {
+    let names: Vec<serde_json::Value> = variants
+        .iter()
+        .map(|v| serde_json::to_value(v).unwrap_or_default())
+        .collect();
+    schemars::json_schema!({ "type": "string", "enum": names })
 }

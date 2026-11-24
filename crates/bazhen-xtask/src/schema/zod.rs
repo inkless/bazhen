@@ -35,7 +35,8 @@ const KEYWORDS: [&str; 24] = [
     TRANSFORM,
 ];
 
-/// A rule no keyword states, named: the schema holds `checks.<name>` to it.
+/// A rule no keyword states, named, or several in the order they are judged: the schema holds
+/// `checks.<name>` to each, refused with the message `checks.<name>.message`.
 pub(crate) const CHECK: &str = "x-bazhen-check";
 
 /// A change zod makes to a value before its checks, named: on a string, one of `TRANSFORMS`; on a
@@ -45,14 +46,22 @@ pub(crate) const TRANSFORM: &str = "x-bazhen-transform";
 /// The transforms a schema may name, and how zod spells each.
 const TRANSFORMS: [(&str, &str); 1] = [("trim", ".trim()")];
 
-/// The formats a schema may give a number: each says only the range `minimum` and `maximum`
-/// state, which zod is given.
-const NUMBER_FORMATS: [&str; 9] = [
-    "double", "float", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32",
+/// The formats a schema may give an integer, each with the range it holds. zod knows no format,
+/// so a schema with one must state a range within it, which zod is given.
+const INTEGER_FORMATS: [(&str, i128, i128); 8] = [
+    ("int8", i8::MIN as i128, i8::MAX as i128),
+    ("int16", i16::MIN as i128, i16::MAX as i128),
+    ("int32", i32::MIN as i128, i32::MAX as i128),
+    ("int64", i64::MIN as i128, i64::MAX as i128),
+    ("uint8", 0, u8::MAX as i128),
+    ("uint16", 0, u16::MAX as i128),
+    ("uint32", 0, u32::MAX as i128),
+    ("uint64", 0, u64::MAX as i128),
 ];
 
-/// `uint64`, whose `minimum` schemars states, and whose top zod's safe integers can't reach.
-const UINT64: &str = "uint64";
+/// The format a schema may give a number that needn't be whole: a double, which a JavaScript
+/// number is.
+const DOUBLE: &str = "double";
 
 /// What the source names beyond zod: the checks it calls, for the caller to hold to `checks.ts`.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -187,10 +196,19 @@ impl Writer {
         }
         let mut base = self.base(schema, at, uses);
         if let Some(check) = schema.get(CHECK) {
-            match check.as_str().filter(|c| is_identifier(c)) {
-                Some(name) => {
-                    self.checks.insert(name.to_owned());
-                    let _ = write!(base, ".refine(checks.{name})");
+            let names: Option<Vec<&str>> = match check {
+                Value::String(name) => Some(vec![name.as_str()]),
+                Value::Array(names) if !names.is_empty() => {
+                    names.iter().map(Value::as_str).collect()
+                }
+                _ => None,
+            };
+            match names.filter(|n| n.iter().all(|n| is_identifier(n))) {
+                Some(names) => {
+                    for name in names {
+                        self.checks.insert(name.to_owned());
+                        let _ = write!(base, ".refine(checks.{name}, checks.{name}.message)");
+                    }
                 }
                 None => self.refuse(&format!("{at}/{CHECK}"), "names no check"),
             }
@@ -206,7 +224,7 @@ impl Writer {
         uses: &mut BTreeSet<String>,
     ) -> String {
         if let Some(target) = schema.get("$ref") {
-            self.only(schema, at, &["$ref", "description", "title", "default"]);
+            self.only(schema, at, &["$ref", "description", "title"]);
             let name = target
                 .as_str()
                 .and_then(|t| t.strip_prefix("#/$defs/"))
@@ -237,8 +255,8 @@ impl Writer {
         }
         for key in ["anyOf", "oneOf"] {
             if let Some(branches) = schema.get(key) {
-                self.only(schema, at, &[key, "description", "title", "default"]);
-                return self.union(branches, &format!("{at}/{key}"), uses);
+                self.only(schema, at, &[key, "description", "title"]);
+                return self.union(branches, &format!("{at}/{key}"), key == "oneOf", uses);
             }
         }
         self.typed(schema, at, uses)
@@ -258,7 +276,17 @@ impl Writer {
         }
     }
 
-    fn union(&mut self, branches: &Value, at: &str, uses: &mut BTreeSet<String>) -> String {
+    /// A union of `branches`. One of only constant strings is one `z.enum`, and one with a
+    /// `null` branch is the rest made nullable. zod takes a value any branch takes, so a `oneOf`,
+    /// which takes one exactly one branch takes, is written only where no two can: constants
+    /// that differ, branches pinned to distinct constants, or a branch and null.
+    fn union(
+        &mut self,
+        branches: &Value,
+        at: &str,
+        exclusive: bool,
+        uses: &mut BTreeSet<String>,
+    ) -> String {
         let Some(branches) = branches.as_array().filter(|b| !b.is_empty()) else {
             self.refuse(at, "isn't a list of schemas");
             return String::new();
@@ -267,25 +295,60 @@ impl Writer {
             b.as_object()
                 .is_some_and(|o| o.len() == 1 && o.get("type") == Some(&Value::from("null")))
         };
-        if let [only, last] = branches.as_slice()
-            && null(last)
-            && !null(only)
-        {
-            return format!("{}.nullable()", self.schema(only, &format!("{at}/0"), uses));
-        }
-        let written: Vec<String> = branches
+        let nulls = branches.iter().filter(|b| null(b)).count();
+        let others: Vec<(usize, &Value)> = branches
             .iter()
             .enumerate()
+            .filter(|(_, b)| !null(b))
+            .collect();
+        let nullable = if nulls > 0 { ".nullable()" } else { "" };
+        if let Some(names) = constants(others.iter().map(|(_, b)| *b)) {
+            let mut distinct: Vec<&str> = Vec::new();
+            for name in &names {
+                if !distinct.contains(name) {
+                    distinct.push(name);
+                }
+            }
+            if exclusive && (distinct.len() < names.len() || nulls > 1) {
+                self.refuse(at, "is a `oneOf` two branches of which take one value");
+            }
+            let names: Vec<String> = distinct.into_iter().map(quoted).collect();
+            return format!("z.enum([{}]){nullable}", names.join(", "));
+        }
+        if nulls > 1 || others.is_empty() {
+            self.refuse(at, "holds more than one `null` branch, or nothing else");
+            return String::new();
+        }
+        if let [(i, only)] = others.as_slice() {
+            let written = self.schema(only, &format!("{at}/{i}"), uses);
+            if exclusive && nulls > 0 && only.get("type").is_some_and(|t| t.as_array().is_some()) {
+                self.refuse(
+                    at,
+                    "is a `oneOf` whose branch takes null beside its `null` branch",
+                );
+            }
+            return format!("{written}{nullable}");
+        }
+        let written: Vec<String> = others
+            .iter()
             .map(|(i, b)| self.schema(b, &format!("{at}/{i}"), uses))
             .collect();
-        match discriminator(branches) {
-            Some(key) => format!(
-                "z.discriminatedUnion({}, [{}])",
+        let pinned: Vec<Value> = others.iter().map(|(_, b)| (*b).clone()).collect();
+        if let Some(key) = discriminator(&pinned) {
+            return format!(
+                "z.discriminatedUnion({}, [{}]){nullable}",
                 quoted(&key),
                 written.join(", ")
-            ),
-            None => format!("z.union([{}])", written.join(", ")),
+            );
         }
+        if exclusive {
+            self.refuse(
+                at,
+                "is a `oneOf` with no field every branch pins to its own constant, so zod's \
+                 union would take what two branches take",
+            );
+        }
+        format!("z.union([{}]){nullable}", written.join(", "))
     }
 
     /// A schema decided by its `type`.
@@ -317,7 +380,7 @@ impl Writer {
                 return String::new();
             }
         };
-        let common = ["type", "description", "title", "default"];
+        let common = ["type", "description", "title"];
         let mut written = match name {
             "string" => self.string(schema, at, &common),
             "integer" | "number" => self.number(schema, at, &common, name == "integer"),
@@ -392,14 +455,34 @@ impl Writer {
         }
         .to_owned();
         if let Some(format) = schema.get("format") {
-            let known = format
-                .as_str()
-                .is_some_and(|f| NUMBER_FORMATS.contains(&f) || f == UINT64);
-            if !known {
-                self.refuse(
+            let range = INTEGER_FORMATS
+                .iter()
+                .find(|(name, ..)| format.as_str() == Some(name));
+            match (format.as_str(), range) {
+                (Some(DOUBLE), _) if !integer => {}
+                (_, Some((name, low, high))) if integer => {
+                    let bound = |key: &str| {
+                        schema.get(key).and_then(|n| {
+                            n.as_i64()
+                                .map(i128::from)
+                                .or_else(|| n.as_u64().map(i128::from))
+                        })
+                    };
+                    let within = matches!(
+                        (bound("minimum"), bound("maximum")),
+                        (Some(min), Some(max)) if *low <= min && max <= *high
+                    );
+                    if !within {
+                        self.refuse(
+                            &format!("{at}/format"),
+                            &format!("is `{name}` without a `minimum` and `maximum` within it"),
+                        );
+                    }
+                }
+                _ => self.refuse(
                     &format!("{at}/format"),
                     "is a format the generator doesn't read",
-                );
+                ),
             }
         }
         for (key, method) in [("minimum", "min"), ("maximum", "max")] {
@@ -545,8 +628,12 @@ impl Writer {
             .iter()
             .map(|(name, field)| {
                 let field_at = format!("{at}/properties/{name}");
-                let mut written = self.schema(field, &field_at, uses);
                 let default = field.get("default");
+                let mut bare = field.clone();
+                if let Value::Object(keys) = &mut bare {
+                    keys.remove("default");
+                }
+                let mut written = self.schema(&bare, &field_at, uses);
                 match (required.contains(name.as_str()), default) {
                     (true, None) => {}
                     (true, Some(_)) => self.refuse(
@@ -566,6 +653,33 @@ impl Writer {
         }
         format!("z.object({{ {} }})", fields.join(", "))
     }
+}
+
+/// The strings `branches` hold, when each is a constant string or an enum of them and holds
+/// nothing else but a `type` of string, a description or a title.
+fn constants<'a>(branches: impl Iterator<Item = &'a Value>) -> Option<Vec<&'a str>> {
+    let mut names = Vec::new();
+    for branch in branches {
+        let branch = branch.as_object()?;
+        let plain = branch.iter().all(|(key, value)| match key.as_str() {
+            "const" | "enum" | "description" | "title" => true,
+            "type" => value == "string",
+            _ => false,
+        });
+        if !plain {
+            return None;
+        }
+        match (branch.get("const"), branch.get("enum")) {
+            (Some(Value::String(name)), None) => names.push(name.as_str()),
+            (None, Some(Value::Array(values))) if !values.is_empty() => {
+                for value in values {
+                    names.push(value.as_str()?);
+                }
+            }
+            _ => return None,
+        }
+    }
+    (!names.is_empty()).then_some(names)
 }
 
 /// The property every branch pins to a distinct constant, which zod can switch on.
@@ -656,8 +770,8 @@ mod tests {
                 "z.number().int().min(0).max(65535)",
             ),
             (
-                json!({ "type": "integer", "format": "uint64", "minimum": 0 }),
-                "z.number().int().min(0)",
+                json!({ "type": "integer", "format": "uint64", "minimum": 0, "maximum": 9_007_199_254_740_991_u64 }),
+                "z.number().int().min(0).max(9007199254740991)",
             ),
             (
                 json!({ "type": "number", "format": "double" }),
@@ -712,6 +826,15 @@ mod tests {
                 "z.object({ a: z.string(), b: z.boolean().default(false), \"c-d\": z.string().optional() })",
             ),
             (json!({ "type": "object" }), "z.object({})"),
+        ];
+        for (schema, zod) in cases {
+            assert_eq!(one(&schema), Ok(zod.to_owned()), "{schema}");
+        }
+    }
+
+    #[test]
+    fn writes_unions_and_named_checks_as_zod_spells_them() {
+        let cases = [
             (
                 json!({ "anyOf": [{ "type": "string" }, { "type": "null" }] }),
                 "z.string().nullable()",
@@ -722,7 +845,26 @@ mod tests {
             ),
             (
                 json!({ "type": "string", "x-bazhen-check": "no_lone_surrogate" }),
-                "z.string().refine(checks.no_lone_surrogate)",
+                "z.string().refine(checks.no_lone_surrogate, checks.no_lone_surrogate.message)",
+            ),
+            (
+                json!({ "type": "string", "x-bazhen-check": ["a", "b"] }),
+                "z.string().refine(checks.a, checks.a.message).refine(checks.b, checks.b.message)",
+            ),
+            (
+                json!({ "oneOf": [
+                    { "type": "string", "const": "b", "description": "one" },
+                    { "type": "string", "enum": ["a", "c"] },
+                ] }),
+                "z.enum([\"b\", \"a\", \"c\"])",
+            ),
+            (
+                json!({ "anyOf": [{ "const": "a" }, { "type": "null" }, { "enum": ["a", "b"] }] }),
+                "z.enum([\"a\", \"b\"]).nullable()",
+            ),
+            (
+                json!({ "oneOf": [{ "type": "integer" }, { "type": "null" }] }),
+                "z.number().int().nullable()",
             ),
         ];
         for (schema, zod) in cases {
@@ -749,8 +891,16 @@ mod tests {
                     .to_owned()
             )
         );
-        let repeated = json!({ "oneOf": [branch("a"), branch("a")] });
+        let repeated = json!({ "anyOf": [branch("a"), branch("a")] });
         assert!(one(&repeated).is_ok_and(|z| z.starts_with("z.union(")));
+        assert_eq!(
+            refused(&json!({ "oneOf": [branch("a"), branch("a")] })),
+            vec![
+                "$defs/T/oneOf: is a `oneOf` with no field every branch pins to its own \
+                 constant, so zod's union would take what two branches take"
+                    .to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -905,6 +1055,56 @@ mod tests {
             (
                 json!({ "type": "object", "properties": {}, "required": ["a"] }),
                 "$defs/T/required: names `a`, no field here",
+            ),
+        ];
+        for (schema, why) in cases {
+            assert_eq!(refused(&schema), vec![why.to_owned()], "{schema}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_range_a_union_or_a_default_zod_would_read_otherwise() {
+        let cases = [
+            (
+                json!({ "type": "integer", "format": "int32", "minimum": 0 }),
+                "$defs/T/format: is `int32` without a `minimum` and `maximum` within it",
+            ),
+            (
+                json!({ "type": "integer", "format": "uint8", "minimum": 0, "maximum": 256 }),
+                "$defs/T/format: is `uint8` without a `minimum` and `maximum` within it",
+            ),
+            (
+                json!({ "type": "number", "format": "int64", "minimum": 0, "maximum": 1 }),
+                "$defs/T/format: is a format the generator doesn't read",
+            ),
+            (
+                json!({ "type": "integer", "format": "double" }),
+                "$defs/T/format: is a format the generator doesn't read",
+            ),
+            (
+                json!({ "type": "string", "default": "" }),
+                "$defs/T/default: has no place in zod beside the others here",
+            ),
+            (
+                json!({ "oneOf": [{ "const": "a" }, { "enum": ["a", "b"] }] }),
+                "$defs/T/oneOf: is a `oneOf` two branches of which take one value",
+            ),
+            (
+                json!({ "oneOf": [{ "type": "string" }, { "type": "boolean" }] }),
+                "$defs/T/oneOf: is a `oneOf` with no field every branch pins to its own \
+                 constant, so zod's union would take what two branches take",
+            ),
+            (
+                json!({ "oneOf": [{ "type": ["string", "null"] }, { "type": "null" }] }),
+                "$defs/T/oneOf: is a `oneOf` whose branch takes null beside its `null` branch",
+            ),
+            (
+                json!({ "anyOf": [{ "type": "null" }, { "type": "null" }] }),
+                "$defs/T/anyOf: holds more than one `null` branch, or nothing else",
+            ),
+            (
+                json!({ "type": "string", "x-bazhen-check": [] }),
+                "$defs/T/x-bazhen-check: names no check",
             ),
         ];
         for (schema, why) in cases {

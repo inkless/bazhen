@@ -1,7 +1,8 @@
 //! The Rust schema against the protocol's own: each message the Rust schema emits and
-//! `packages/protocol/schema` holds is walked field by field, and every keyword that limits a
-//! value, whether a field may be left out and whether it may be null, must agree. A refinement
-//! zod makes past a keyword isn't in that JSON Schema; `fixtures.rs` holds those.
+//! `packages/protocol/schema` holds is walked field by field, and its fields, every keyword that
+//! limits a value, its type, whether a field may be left out and whether it may be null must
+//! agree, either way. A refinement zod makes past a keyword isn't in that JSON Schema;
+//! `fixtures.rs` holds those.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -9,8 +10,10 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
-/// The keywords that limit a value, compared at every field.
-const LIMITS: [&str; 10] = [
+/// The keywords that type or limit a value, compared at every field. An enum is compared in
+/// order, which zod's `.options` keeps.
+const LIMITS: [&str; 11] = [
+    "type",
     "minLength",
     "maxLength",
     "pattern",
@@ -21,6 +24,21 @@ const LIMITS: [&str; 10] = [
     "exclusiveMinimum",
     "exclusiveMaximum",
     "enum",
+];
+
+/// The keywords the Rust schema states and the protocol's JSON Schema can't, each where it is and
+/// why: the protocol states the same rule in a way its JSON Schema leaves out.
+const KEPT: [(&str, &str, &str); 2] = [
+    (
+        "HolderEnv.propertyNames",
+        "pattern",
+        "the protocol refuses a reserved name in a preprocess",
+    ),
+    (
+        "HolderTags.propertyNames",
+        "pattern",
+        "the protocol refuses a reserved name in a preprocess",
+    ),
 ];
 
 /// A document's definitions, to follow its `$ref`s by.
@@ -58,7 +76,9 @@ impl Side<'_> {
 
     /// What a field's schema says once null is taken out of it, past `$ref`s and unions of one
     /// branch: a union of constants reads as an enum, and an integer's exclusive bound as the
-    /// inclusive one it comes to. A union of more than one other branch is left as it is.
+    /// inclusive one it comes to. A union of more than one other branch is left as it is. What
+    /// says nothing is dropped: a `minLength` of 0, keys typed only as strings, which every key
+    /// is, and the `type` beside an enum, whose values give it.
     fn core<'s>(
         &'s self,
         schema: &'s Value,
@@ -132,16 +152,25 @@ impl Side<'_> {
         if core.get("minLength").and_then(Value::as_u64) == Some(0) {
             core.remove("minLength");
         }
+        if core.get("propertyNames") == Some(&serde_json::json!({ "type": "string" })) {
+            core.remove("propertyNames");
+        }
+        if core.contains_key("enum") {
+            core.remove("type");
+        }
         (Value::Object(core), nullable, name)
     }
 }
 
-/// `values` without null, in a fixed order.
+/// `values` without null, each once, in the order they first come.
 fn enumerated(values: Vec<Value>) -> Value {
-    let mut values: Vec<Value> = values.into_iter().filter(|v| !v.is_null()).collect();
-    values.sort_by_key(Value::to_string);
-    values.dedup();
-    Value::Array(values)
+    let mut kept: Vec<Value> = Vec::new();
+    for value in values {
+        if !value.is_null() && !kept.contains(&value) {
+            kept.push(value);
+        }
+    }
+    Value::Array(kept)
 }
 
 fn required(schema: &Value) -> BTreeSet<&str> {
@@ -173,16 +202,36 @@ impl Census<'_> {
                 .and_then(Value::as_array)
                 .cloned()
         };
-        if let (Some(p), Some(r)) = (union(&protocol), union(&rust)) {
-            if p.len() == r.len() {
+        match (union(&protocol), union(&rust)) {
+            (Some(p), Some(r)) if p.len() == r.len() => {
                 for (p, r) in p.iter().zip(&r) {
                     self.compare(p, r, &owner);
                 }
+                return;
             }
-            return;
+            (Some(p), Some(r)) => {
+                self.found.insert(format!(
+                    "{owner}: a union of {} branches in the protocol, {} here",
+                    p.len(),
+                    r.len()
+                ));
+                return;
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                self.found.insert(format!(
+                    "{owner}: a union on one side only: {} in the protocol, {} here",
+                    shown(Some(&protocol)),
+                    shown(Some(&rust))
+                ));
+                return;
+            }
+            (None, None) => {}
         }
         for key in LIMITS {
-            if protocol.get(key) != rust.get(key) {
+            let kept = KEPT
+                .iter()
+                .any(|(at, kept, _)| *at == owner && *kept == key && protocol.get(key).is_none());
+            if protocol.get(key) != rust.get(key) && !kept {
                 self.found.insert(format!(
                     "{owner}: {key} is {} in the protocol, {} here",
                     shown(protocol.get(key)),
@@ -199,8 +248,15 @@ impl Census<'_> {
         };
         let (p_fields, r_fields) = (properties(&protocol), properties(&rust));
         let (p_required, r_required) = (required(&protocol), required(&rust));
+        for key in r_fields.keys().filter(|k| !p_fields.contains_key(*k)) {
+            self.found.insert(format!(
+                "{owner}.{key}: a field here the protocol doesn't have"
+            ));
+        }
         for (key, p) in &p_fields {
             let Some(r) = r_fields.get(key) else {
+                self.found
+                    .insert(format!("{owner}.{key}: a field of the protocol's not here"));
                 continue;
             };
             let (_, p_null, _) = self.protocol.core(p, None);
@@ -221,6 +277,17 @@ impl Census<'_> {
             {
                 self.compare(p, r, &format!("{owner}.{key}"));
             }
+        }
+        if protocol
+            .get("additionalProperties")
+            .is_some_and(Value::is_object)
+        {
+            let any_key = serde_json::json!({ "type": "string" });
+            self.compare(
+                protocol.get("propertyNames").unwrap_or(&any_key),
+                rust.get("propertyNames").unwrap_or(&any_key),
+                &format!("{owner}.propertyNames"),
+            );
         }
     }
 }

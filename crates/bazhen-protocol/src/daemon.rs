@@ -492,7 +492,6 @@ pub struct ErrorResponse {
 
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidRequest,
@@ -520,4 +519,39 @@ pub enum ErrorCode {
     RateLimited,
     /// A new agent or shell refused: as many terminals are open as the daemon allows.
     TerminalLimit,
+}
+
+impl ErrorCode {
+    /// Every code, in the order the protocol lists them.
+    pub const ALL: [Self; 18] = [
+        Self::InvalidRequest,
+        Self::Unsupported,
+        Self::LaunchFailed,
+        Self::Conflict,
+        Self::StaleGeneration,
+        Self::NotResumable,
+        Self::Unavailable,
+        Self::ServerUnconfirmed,
+        Self::NeedsRestart,
+        Self::Busy,
+        Self::NotFound,
+        Self::OriginNotAllowed,
+        Self::HostNotAllowed,
+        Self::Forbidden,
+        Self::Unpaired,
+        Self::PairingFailed,
+        Self::RateLimited,
+        Self::TerminalLimit,
+    ];
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for ErrorCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ErrorCode".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::schema::in_order(&Self::ALL)
+    }
 }

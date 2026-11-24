@@ -11,7 +11,6 @@ use crate::shells::{BusyShell, NeedsRestart, Shell, TuiTheme};
 use crate::tasks::{Assignment, Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     /// Until its harness shows a sign of life, even once its terminal runs: a TUI held at a trust
@@ -29,6 +28,18 @@ pub enum AgentState {
 }
 
 impl AgentState {
+    /// Every state, in the order the protocol lists them.
+    pub const ALL: [Self; 8] = [
+        Self::Starting,
+        Self::Running,
+        Self::Exited,
+        Self::Unknown,
+        Self::Lost,
+        Self::Closing,
+        Self::Closed,
+        Self::Failed,
+    ];
+
     /// Closed or failed: its name may be another's now.
     pub fn ended(self) -> bool {
         matches!(self, Self::Closed | Self::Failed)
@@ -45,6 +56,17 @@ impl AgentState {
             Self::Closed => "closed",
             Self::Failed => "failed",
         }
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for AgentState {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AgentState".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::schema::in_order(&Self::ALL)
     }
 }
 
