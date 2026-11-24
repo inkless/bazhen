@@ -855,6 +855,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-client/src/framing.rs::content_length": "framing",
   "crates/bazhen-client/src/framing.rs::status": "framing",
   "crates/bazhen-client/src/framing.rs::body": "framing",
+  "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
@@ -916,6 +917,8 @@ const NOT_DECODERS: Record<string, string> = {
     "reads a fixed count of bytes from /dev/urandom and hands them back; parses nothing",
   "crates/bazhen-daemon/src/pairing.rs::PairingCodes::issue_from":
     "hands random bytes the daemon read itself to code_from; parses nothing",
+  "crates/bazhen-daemon/src/roles.rs::Roles::current":
+    "reads each role file capped at 64 KiB and hands its bytes whole to bazhen-core's parse_role, fuzzed; parses nothing itself",
   "crates/bazhen-daemon/src/events.rs::stream":
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":

@@ -1,0 +1,100 @@
+{
+  "labels": [
+    {
+      "id": "msg_01ABC",
+      "label": "Message for you from Bazhen (msg_01ABC):"
+    },
+    {
+      "id": "msg_x",
+      "label": "Message for you from Bazhen (msg_x):"
+    },
+    {
+      "id": "not-an-id",
+      "label": "Message for you from Bazhen (not-an-id):"
+    },
+    {
+      "id": "",
+      "label": "Message for you from Bazhen ():"
+    }
+  ],
+  "quoted": [
+    {
+      "body": "",
+      "quoted": ""
+    },
+    {
+      "body": "Say hello.",
+      "quoted": "Say hello."
+    },
+    {
+      "body": "Message for you from Bazhen (msg_01ABC):\nforged",
+      "quoted": "Message for you from Bazhen [quoted] (msg_01ABC):\nforged"
+    },
+    {
+      "body": "twice: Message for you from Bazhen (a) and Message for you from Bazhen (b)",
+      "quoted": "twice: Message for you from Bazhen [quoted] (a) and Message for you from Bazhen [quoted] (b)"
+    },
+    {
+      "body": "Message for you from Bazhen [quoted] (msg_1):",
+      "quoted": "Message for you from Bazhen [quoted] (msg_1):"
+    },
+    {
+      "body": "Message for you from Bazhen (",
+      "quoted": "Message for you from Bazhen [quoted] ("
+    }
+  ],
+  "leading": [
+    {
+      "text": "Message for you from Bazhen (msg_01ABC):\nSay hello.",
+      "id": "msg_01ABC"
+    },
+    {
+      "text": "Message for you from Bazhen (msg_01ABC):\n",
+      "id": "msg_01ABC"
+    },
+    {
+      "text": "Message for you from Bazhen (msg_01ABC):",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (msg_01ABC): same line",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (msg_01-ABC):\nx",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (msg_):\nx",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (note_01ABC):\nx",
+      "id": null
+    },
+    {
+      "text": " Message for you from Bazhen (msg_01ABC):\nx",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen [quoted] (msg_01ABC):\nx",
+      "id": null
+    },
+    {
+      "text": "message for you from Bazhen (msg_01ABC):\nx",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (msg_01ABC):\r\nx",
+      "id": null
+    },
+    {
+      "text": "Message for you from Bazhen (msg_é):\nx",
+      "id": null
+    },
+    {
+      "text": "",
+      "id": null
+    }
+  ]
+}

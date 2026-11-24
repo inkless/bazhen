@@ -1,0 +1,876 @@
+{
+  "builtins": [
+    {
+      "key": "coordinator",
+      "title": "coordinator",
+      "description": "",
+      "grants": [
+        "lead",
+        "worker"
+      ],
+      "singlePerTask": false,
+      "maxActiveTasks": null,
+      "prompt": "Be a coordinator.",
+      "source": "builtin"
+    },
+    {
+      "key": "lead",
+      "title": "lead",
+      "description": "",
+      "grants": [
+        "worker"
+      ],
+      "singlePerTask": true,
+      "maxActiveTasks": null,
+      "prompt": "Be a lead.",
+      "source": "builtin"
+    },
+    {
+      "key": "worker",
+      "title": "worker",
+      "description": "",
+      "grants": [],
+      "singlePerTask": false,
+      "maxActiveTasks": 1,
+      "prompt": "Be a worker.",
+      "source": "builtin"
+    },
+    {
+      "key": "reviewer",
+      "title": "reviewer",
+      "description": "",
+      "grants": [],
+      "singlePerTask": false,
+      "maxActiveTasks": null,
+      "prompt": "Be a reviewer.",
+      "source": "builtin"
+    }
+  ],
+  "cases": [
+    {
+      "name": "built-ins alone",
+      "user": [],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a new role",
+      "user": [
+        {
+          "file": "roles/tester.md",
+          "role": {
+            "key": "tester",
+            "title": "tester",
+            "description": "",
+            "grants": [
+              "worker"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a tester.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        },
+        {
+          "key": "tester",
+          "title": "tester",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a tester.",
+          "source": "user"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a built-in replaced",
+      "user": [
+        {
+          "file": "roles/worker.md",
+          "role": {
+            "key": "worker",
+            "title": "worker",
+            "description": "",
+            "grants": [],
+            "singlePerTask": false,
+            "maxActiveTasks": 3,
+            "prompt": "Be a worker.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 3,
+          "prompt": "Be a worker.",
+          "source": "user"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a grant of nothing defined",
+      "user": [
+        {
+          "file": "roles/tester.md",
+          "role": {
+            "key": "tester",
+            "title": "tester",
+            "description": "",
+            "grants": [
+              "ghost",
+              "x"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a tester.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/tester.md",
+          "problem": "grants ghost, x, which no role defines"
+        }
+      ]
+    },
+    {
+      "name": "a role granting itself",
+      "user": [
+        {
+          "file": "roles/tester.md",
+          "role": {
+            "key": "tester",
+            "title": "tester",
+            "description": "",
+            "grants": [
+              "tester"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a tester.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/tester.md",
+          "problem": "a tester can't grant its own role"
+        }
+      ]
+    },
+    {
+      "name": "a cycle through a built-in",
+      "user": [
+        {
+          "file": "roles/worker.md",
+          "role": {
+            "key": "worker",
+            "title": "worker",
+            "description": "",
+            "grants": [
+              "coordinator"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a worker.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/worker.md",
+          "problem": "a worker could be granted again by a role it grants (worker → coordinator → worker)"
+        }
+      ]
+    },
+    {
+      "name": "a longer cycle",
+      "user": [
+        {
+          "file": "roles/a.md",
+          "role": {
+            "key": "a",
+            "title": "a",
+            "description": "",
+            "grants": [
+              "b"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a a.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/b.md",
+          "role": {
+            "key": "b",
+            "title": "b",
+            "description": "",
+            "grants": [
+              "c"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a b.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/c.md",
+          "role": {
+            "key": "c",
+            "title": "c",
+            "description": "",
+            "grants": [
+              "a"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a c.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/a.md",
+          "problem": "a a could be granted again by a role it grants (a → b → c → a)"
+        },
+        {
+          "file": "roles/b.md",
+          "problem": "a b could be granted again by a role it grants (b → c → a → b)"
+        },
+        {
+          "file": "roles/c.md",
+          "problem": "a c could be granted again by a role it grants (c → a → b → c)"
+        }
+      ]
+    },
+    {
+      "name": "a skip that strands another",
+      "user": [
+        {
+          "file": "roles/a.md",
+          "role": {
+            "key": "a",
+            "title": "a",
+            "description": "",
+            "grants": [
+              "b"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a a.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/b.md",
+          "role": {
+            "key": "b",
+            "title": "b",
+            "description": "",
+            "grants": [
+              "b"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a b.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/b.md",
+          "problem": "a b can't grant its own role"
+        },
+        {
+          "file": "roles/a.md",
+          "problem": "grants b, which no role defines"
+        }
+      ]
+    },
+    {
+      "name": "new roles keep their order after the built-ins",
+      "user": [
+        {
+          "file": "roles/zeta.md",
+          "role": {
+            "key": "zeta",
+            "title": "zeta",
+            "description": "",
+            "grants": [],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a zeta.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/reviewer.md",
+          "role": {
+            "key": "reviewer",
+            "title": "R",
+            "description": "",
+            "grants": [],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a reviewer.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/alpha.md",
+          "role": {
+            "key": "alpha",
+            "title": "alpha",
+            "description": "",
+            "grants": [],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a alpha.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "R",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "user"
+        },
+        {
+          "key": "zeta",
+          "title": "zeta",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a zeta.",
+          "source": "user"
+        },
+        {
+          "key": "alpha",
+          "title": "alpha",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a alpha.",
+          "source": "user"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "name": "a grant of a role a skipped file defined",
+      "user": [
+        {
+          "file": "roles/a.md",
+          "role": {
+            "key": "a",
+            "title": "a",
+            "description": "",
+            "grants": [
+              "a"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a a.",
+            "source": "user"
+          }
+        },
+        {
+          "file": "roles/b.md",
+          "role": {
+            "key": "b",
+            "title": "b",
+            "description": "",
+            "grants": [
+              "a"
+            ],
+            "singlePerTask": false,
+            "maxActiveTasks": null,
+            "prompt": "Be a b.",
+            "source": "user"
+          }
+        }
+      ],
+      "roles": [
+        {
+          "key": "coordinator",
+          "title": "coordinator",
+          "description": "",
+          "grants": [
+            "lead",
+            "worker"
+          ],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a coordinator.",
+          "source": "builtin"
+        },
+        {
+          "key": "lead",
+          "title": "lead",
+          "description": "",
+          "grants": [
+            "worker"
+          ],
+          "singlePerTask": true,
+          "maxActiveTasks": null,
+          "prompt": "Be a lead.",
+          "source": "builtin"
+        },
+        {
+          "key": "worker",
+          "title": "worker",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": 1,
+          "prompt": "Be a worker.",
+          "source": "builtin"
+        },
+        {
+          "key": "reviewer",
+          "title": "reviewer",
+          "description": "",
+          "grants": [],
+          "singlePerTask": false,
+          "maxActiveTasks": null,
+          "prompt": "Be a reviewer.",
+          "source": "builtin"
+        }
+      ],
+      "problems": [
+        {
+          "file": "roles/a.md",
+          "problem": "a a can't grant its own role"
+        },
+        {
+          "file": "roles/b.md",
+          "problem": "grants a, which no role defines"
+        }
+      ]
+    }
+  ]
+}

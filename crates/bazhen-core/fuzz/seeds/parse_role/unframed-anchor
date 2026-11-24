@@ -1,0 +1,5 @@
+title: "\u00e9"
+zed: 1
+a: &x [1, {b: c}]
+---
+body

@@ -1,0 +1,3017 @@
+[
+  {
+    "state": "starting",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "starting",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "starting",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "starting",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": []
+  },
+  {
+    "state": "running",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "running",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "signal"
+    ],
+    "offered": [
+      "close",
+      "signal"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": []
+  },
+  {
+    "state": "exited",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close",
+      "respawn"
+    ]
+  },
+  {
+    "state": "exited",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "respawn"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "unknown",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "unknown",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": []
+  },
+  {
+    "state": "lost",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "lost",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close",
+      "relaunch"
+    ],
+    "offered": [
+      "close",
+      "relaunch"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": []
+  },
+  {
+    "state": "closing",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closing",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [
+      "close"
+    ],
+    "offered": [
+      "close"
+    ]
+  },
+  {
+    "state": "closed",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "closed",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": null,
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": null,
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": null,
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "creating",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "creating",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "running",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "running",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "exited",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "exited",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "unknown",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "unknown",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "lost",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "lost",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closing",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closing",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "closed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "failed",
+    "generation": null,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": true,
+    "commands": [],
+    "offered": []
+  },
+  {
+    "state": "failed",
+    "terminalState": "failed",
+    "generation": 3,
+    "resumes": false,
+    "commands": [],
+    "offered": []
+  }
+]
