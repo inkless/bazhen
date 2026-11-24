@@ -1,0 +1,120 @@
+{
+  "titles": [
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2...",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2…",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e",
+      "prefix": null
+    },
+    {
+      "title": "  019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51  ",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    {
+      "title": "\t019a8f3c-5b7e-7d21-9f4a-0c1e2...\n",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1",
+      "prefix": null
+    },
+    {
+      "title": "019A8F3C-5B7E-7D21-9F4A-0C1E2D3B4A51",
+      "prefix": null
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51 ",
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51x",
+      "prefix": null
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2..",
+      "prefix": null
+    },
+    {
+      "title": "019a8f3c-5b7e-7d21-9f4a-0c1e2....",
+      "prefix": null
+    },
+    {
+      "title": "019a8f3c-",
+      "prefix": null
+    },
+    {
+      "title": "019a8f3c-------------------",
+      "prefix": null
+    },
+    {
+      "title": "my project",
+      "prefix": null
+    },
+    {
+      "title": "✳ Claude Code",
+      "prefix": null
+    },
+    {
+      "title": "",
+      "prefix": null
+    },
+    {
+      "title": "   ",
+      "prefix": null
+    }
+  ],
+  "matching": [
+    {
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2",
+      "ids": [
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+        "019a8f40-0000-7000-8000-000000000003"
+      ],
+      "matches": [
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+      ]
+    },
+    {
+      "prefix": "019a8f3c-5b7e-7d21-9",
+      "ids": [
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+        "019a8f40-0000-7000-8000-000000000003",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+      ],
+      "matches": [
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+      ]
+    },
+    {
+      "prefix": "019a8f40-0000-7000-8000-000000000003",
+      "ids": [
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+      ],
+      "matches": []
+    },
+    {
+      "prefix": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "ids": [],
+      "matches": []
+    }
+  ]
+}

@@ -1,0 +1,282 @@
+[
+  {
+    "name": "idle",
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "idle",
+    "notLoaded": false
+  },
+  {
+    "name": "waiting on approval",
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "active",
+          "activeFlags": [
+            "waitingOnApproval"
+          ]
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "needs_approval",
+    "notLoaded": false
+  },
+  {
+    "name": "working",
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "active",
+          "activeFlags": []
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "working",
+    "notLoaded": false
+  },
+  {
+    "name": "working with no flags",
+    "bad": true,
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "active"
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "working",
+    "notLoaded": false
+  },
+  {
+    "name": "not loaded",
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "notLoaded"
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "unknown",
+    "notLoaded": true
+  },
+  {
+    "name": "a system error",
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "systemError"
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "failed",
+    "notLoaded": false
+  },
+  {
+    "name": "an unknown status",
+    "bad": true,
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "paused"
+        },
+        "turns": []
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": "unknown",
+    "notLoaded": false
+  },
+  {
+    "name": "no status",
+    "bad": true,
+    "result": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+      },
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": null,
+    "notLoaded": false
+  },
+  {
+    "name": "no thread",
+    "bad": true,
+    "result": {},
+    "activity": null,
+    "notLoaded": false
+  },
+  {
+    "name": "null",
+    "bad": true,
+    "result": null,
+    "activity": null,
+    "notLoaded": false
+  },
+  {
+    "name": "a thread not an object",
+    "bad": true,
+    "result": {
+      "thread": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "model": "gpt-5.5",
+      "modelProvider": "openai",
+      "cwd": "/work",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      }
+    },
+    "activity": null,
+    "notLoaded": false
+  }
+]

@@ -1,0 +1,948 @@
+[
+  {
+    "name": "plain",
+    "options": {},
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "on the daemon's socket",
+    "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
+    "options": {},
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work",
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+            }
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\""
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true,
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+            }
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\""
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "in light",
+    "options": {
+      "theme": "light"
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "tui.theme=\"one-half-light\""
+        ],
+        "env": {},
+        "theme": "light",
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "tui.theme=\"one-half-light\""
+        ],
+        "env": {},
+        "theme": "light",
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "in dark",
+    "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
+    "options": {
+      "theme": "dark"
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work",
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+            }
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\"",
+          "-c",
+          "tui.theme=\"one-half-dark\""
+        ],
+        "env": {},
+        "theme": "dark",
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true,
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+            }
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\"",
+          "-c",
+          "tui.theme=\"one-half-dark\""
+        ],
+        "env": {},
+        "theme": "dark",
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "with instructions",
+    "options": {
+      "instructions": "Review it twice."
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs.\n\nReview it twice."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "with instructions changed",
+    "options": {
+      "instructions": "Review it twice.",
+      "instructionsChanged": true
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs.\n\nReview it twice."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "Your instructions have changed. These replace the ones this thread was given earlier:\n\nReview it twice."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "changed with no instructions",
+    "options": {
+      "instructionsChanged": true
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "with a compaction window",
+    "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
+    "options": {
+      "compactWindowTokens": 200000
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work",
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": "",
+              "model_auto_compact_token_limit": 200000
+            }
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\"",
+          "-c",
+          "model_auto_compact_token_limit=200000"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true,
+            "config": {
+              "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+              "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+              "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": "",
+              "model_auto_compact_token_limit": 200000
+            }
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_SOCKET=\"/run/user/1000/bazhen/daemon \\\"a\\\".sock\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_ID=\"\"",
+          "-c",
+          "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE=\"\"",
+          "-c",
+          "model_auto_compact_token_limit=200000"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "with a window of 0",
+    "options": {
+      "compactWindowTokens": 0
+    },
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work",
+            "config": {
+              "model_auto_compact_token_limit": 0
+            }
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "model_auto_compact_token_limit=0"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true,
+            "config": {
+              "model_auto_compact_token_limit": 0
+            }
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]",
+          "-c",
+          "model_auto_compact_token_limit=0"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+        }
+      }
+    }
+  },
+  {
+    "name": "resumed on another thread",
+    "options": {},
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "refused": "ThreadMismatch"
+    }
+  },
+  {
+    "name": "resumed with no thread",
+    "bad": true,
+    "options": {},
+    "launch": {
+      "requests": [
+        {
+          "method": "thread/start",
+          "params": {
+            "cwd": "/work"
+          }
+        },
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "This thread belongs to an agent that Bazhen runs."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "spec": {
+        "argv": [
+          "codex",
+          "resume",
+          "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "--remote",
+          "unix:///home/u/.codex/app-server-control/app-server-control.sock",
+          "--no-alt-screen",
+          "-c",
+          "tui.terminal_title=[\"thread-id\"]"
+        ],
+        "env": {},
+        "externalRef": {
+          "kind": "codex-thread",
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+        }
+      }
+    },
+    "resume": {
+      "requests": [
+        {
+          "method": "thread/resume",
+          "params": {
+            "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+            "excludeTurns": true
+          }
+        }
+      ],
+      "refused": "ZodError"
+    }
+  }
+]

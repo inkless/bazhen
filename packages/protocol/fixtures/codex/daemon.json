@@ -1,0 +1,109 @@
+{
+  "startArgs": [
+    "app-server",
+    "daemon",
+    "start"
+  ],
+  "cliVersion": [
+    {
+      "output": "codex-cli 0.167.1\n",
+      "version": "0.167.1"
+    },
+    {
+      "output": "codex-cli 0.167.1-alpha.2",
+      "version": "0.167.1-alpha.2"
+    },
+    {
+      "output": "  codex-cli 0.167.1  ",
+      "version": "0.167.1"
+    },
+    {
+      "output": "0.167.1",
+      "version": null
+    },
+    {
+      "output": "codex-cli",
+      "version": null
+    },
+    {
+      "output": "codex-cli v1",
+      "version": null
+    },
+    {
+      "output": "codex-cli 0.1 extra",
+      "version": null
+    },
+    {
+      "output": "",
+      "version": null
+    }
+  ],
+  "nextDelay": [
+    {
+      "current": 1000,
+      "lived": null,
+      "first": 1000,
+      "next": 2000
+    },
+    {
+      "current": 1000,
+      "lived": 29999,
+      "first": 1000,
+      "next": 2000
+    },
+    {
+      "current": 1000,
+      "lived": 30000,
+      "first": 1000,
+      "next": 1000
+    },
+    {
+      "current": 8000,
+      "lived": 30001,
+      "first": 1000,
+      "next": 1000
+    },
+    {
+      "current": 32000,
+      "lived": null,
+      "first": 1000,
+      "next": 60000
+    },
+    {
+      "current": 60000,
+      "lived": 5,
+      "first": 1000,
+      "next": 60000
+    },
+    {
+      "current": 250,
+      "lived": null,
+      "first": 250,
+      "next": 500
+    }
+  ],
+  "codexHome": [
+    {
+      "env": {
+        "CODEX_HOME": "/elsewhere"
+      },
+      "home": "/home/u",
+      "codexHome": "/elsewhere",
+      "address": "unix:///elsewhere/app-server-control/app-server-control.sock"
+    },
+    {
+      "env": {
+        "CODEX_HOME": ""
+      },
+      "home": "/home/u",
+      "codexHome": "",
+      "address": "unix://app-server-control/app-server-control.sock"
+    },
+    {
+      "env": {},
+      "home": "/home/u",
+      "codexHome": "/home/u/.codex",
+      "address": "unix:///home/u/.codex/app-server-control/app-server-control.sock"
+    }
+  ]
+}

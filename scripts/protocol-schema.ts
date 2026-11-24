@@ -19,6 +19,7 @@ import { configFixture } from "../apps/daemon/src/config/fixture.ts";
 import { HOLDER_PROTOCOL_VERSION } from "../packages/protocol/src/holder.ts";
 import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
 import { agentEventFixture } from "./agent-event-fixtures.ts";
+import { codexFixture } from "./codex-fixtures.ts";
 import { coreFixture } from "./core-fixtures.ts";
 import { numberFixture } from "./number-fixtures.ts";
 import { roleFixture } from "./role-fixtures.ts";
@@ -80,7 +81,7 @@ const root = fileURLToPath(new URL("../packages/protocol/", import.meta.url));
 const holderRoot = join(root, "fixtures/holder");
 
 /** Each generated directory, relative to the package, with the files it should hold. */
-const outputs = (): Record<string, Record<string, string>> => ({
+const outputs = async (): Promise<Record<string, Record<string, string>>> => ({
   "schema/": protocolFiles(),
   [`fixtures/holder/${HOLDER_PROTOCOL_VERSION}/`]: holderFixtures(),
   "fixtures/api/": apiFixtures(),
@@ -90,6 +91,7 @@ const outputs = (): Record<string, Record<string, string>> => ({
   "fixtures/roles/": roleFixture(),
   "fixtures/agents/": agentEventFixture(),
   "fixtures/numbers/": numberFixture(),
+  "fixtures/codex/": await codexFixture(),
 });
 
 /** Where the Rust crates' protocol id is written, relative to the repository. */
@@ -129,7 +131,7 @@ function committed(dir: string): Record<string, string> {
 if (isMain(import.meta)) {
   const check = process.argv.includes("--check");
   let failed = false;
-  for (const [relative, expected] of Object.entries(outputs())) {
+  for (const [relative, expected] of Object.entries(await outputs())) {
     const dir = join(root, relative);
     const stale = drift(expected, committed(dir));
     if (check) {
