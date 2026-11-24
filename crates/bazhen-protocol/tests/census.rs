@@ -68,6 +68,40 @@ impl Side<'_> {
         (schema, name)
     }
 
+    /// The name each of a union's `branches` goes by, after the union's: `(key=value)`, by the
+    /// property each pins to a constant of its own, as the fixtures name a branch. Without it, the
+    /// fields of every branch would go by one name.
+    fn branch_names(&self, branches: &[Value]) -> Option<Vec<String>> {
+        let resolved: Vec<&Value> = branches.iter().map(|b| self.resolved(b, None).0).collect();
+        let pinned = |branch: &Value, key: &str| -> Option<Value> {
+            branch.get("properties")?.get(key)?.get("const").cloned()
+        };
+        let key = resolved
+            .first()?
+            .get("properties")?
+            .as_object()?
+            .keys()
+            .find(|key| {
+                let constants: Option<Vec<Value>> =
+                    resolved.iter().map(|b| pinned(b, key)).collect();
+                constants.is_some_and(|c| {
+                    c.iter()
+                        .enumerate()
+                        .all(|(at, v)| !c.iter().take(at).any(|w| w == v))
+                })
+            })?;
+        resolved
+            .iter()
+            .map(|branch| {
+                let constant = pinned(branch, key)?;
+                let shown = constant
+                    .as_str()
+                    .map_or_else(|| constant.to_string(), str::to_owned);
+                Some(format!("({key}={shown})"))
+            })
+            .collect()
+    }
+
     fn is_null(&self, schema: &Value) -> bool {
         let (schema, _) = self.resolved(schema, None);
         schema.get("type").and_then(Value::as_str) == Some("null")
@@ -204,7 +238,10 @@ impl Census<'_> {
         };
         match (union(&protocol), union(&rust)) {
             (Some(p), Some(r)) if p.len() == r.len() => {
-                for (p, r) in p.iter().zip(&r) {
+                let names = self.rust.branch_names(&r);
+                for (at, (p, r)) in p.iter().zip(&r).enumerate() {
+                    let name = names.as_ref().and_then(|n| n.get(at));
+                    let owner = name.map_or_else(|| owner.clone(), |name| format!("{owner}{name}"));
                     self.compare(p, r, &owner);
                 }
                 return;
