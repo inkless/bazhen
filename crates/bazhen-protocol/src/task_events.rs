@@ -12,6 +12,7 @@ use crate::tasks::{AssignmentEndReason, TaskOutcome};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TaskFinished {
     pub outcome: TaskOutcome,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub note: Option<String>,
 }
 
@@ -21,7 +22,15 @@ pub struct TaskFinished {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskOwnerChanged {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub owner_agent_id: Option<AgentId>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AssignmentId>")
+    )]
     pub delegated_from: Option<AssignmentId>,
 }
 
@@ -32,6 +41,7 @@ pub struct TaskNoted {
     pub text: String,
     pub handoff: bool,
     /// The role its agent held on the task then; null for the human, and for an owner on none.
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<Role>"))]
     pub role: Option<Role>,
 }
 
@@ -43,6 +53,10 @@ pub struct AssignmentGranted {
     pub task_id: TaskId,
     pub agent_id: AgentId,
     pub role: Role,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AssignmentId>")
+    )]
     pub parent_assignment_id: Option<AssignmentId>,
 }
 
