@@ -523,7 +523,7 @@ pub struct LaunchAgentRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(
         feature = "schema",
-        schemars(with = "u32", range(min = 100_000, max = 10_000_000))
+        schemars(with = "crate::schema::CompactWindowTokens")
     )]
     pub compact_window_tokens: Option<u32>,
 }

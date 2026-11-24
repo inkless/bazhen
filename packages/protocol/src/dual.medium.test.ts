@@ -47,8 +47,6 @@ interface NotYet {
 const ATTENTION = "the attention routes' port";
 const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
 const HOLDER = "this protocol's holder-proto schema";
-const NAMED = "this protocol's named definitions";
-const NAMED_WHY = "the Rust protocol writes it inline in each message that holds it";
 
 /**
  * The schemas the protocol exports that the zod generated from the Rust protocol doesn't. A schema
@@ -68,11 +66,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     name: "BroadcastMessageRequest",
     owner: "the mailbox routes' port",
     why: "the Rust daemon serves no mailbox route yet",
-  },
-  {
-    name: "CompactWindowTokens",
-    owner: "the agent request checks' move into the protocol",
-    why: "a launch's compactWindowTokens is a bare number in the Rust protocol, its range checked by the daemon",
   },
   {
     name: "UnlinkShellRequest",
@@ -104,16 +97,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     owner: HOLDER,
     why: "the holder's requests name themselves inline, by each one's tag",
   },
-  {
-    name: "FleetAgents",
-    owner: NAMED,
-    why: "what the Rust CLI's `bazhen agents --json` prints, which only the CLI's tests read: the Rust protocol emits FleetAgent, not the list",
-  },
-  { name: "NoticeAction", owner: NAMED, why: NAMED_WHY },
-  { name: "RuntimeHealthState", owner: NAMED, why: NAMED_WHY },
-  { name: "ShellCommandLine", owner: NAMED, why: NAMED_WHY },
-  { name: "TaskBrief", owner: NAMED, why: NAMED_WHY },
-  { name: "TaskTitle", owner: NAMED, why: NAMED_WHY },
 ];
 
 /**
@@ -201,6 +184,30 @@ function judge(cases: readonly Case[], generated: unknown): Judged {
   return { found, parsed };
 }
 
+/**
+ * Lines `ShellCommandLine` is judged on, each of its rules met and broken: no message holds it,
+ * so the corpus plants no case in it.
+ */
+const COMMAND_LINES = [
+  "git status",
+  "\u{1f600} caf\u00e9",
+  "",
+  " git status",
+  "make\n",
+  "a\x1b[Db",
+  "a\u009bb",
+  "ls \u202e/etc",
+  "a\ud800b",
+  "a\u200bb",
+  "a\u2060b",
+  "\u00e9".repeat(1024),
+  `${"\u00e9".repeat(1024)}a`,
+];
+
+/** Whether `module`'s `ShellCommandLine` takes each of `COMMAND_LINES`. */
+const judgedLines = (module: unknown) =>
+  COMMAND_LINES.map((line) => schemaIn(module, "ShellCommandLine")?.safeParse(line).success);
+
 describe("the protocol and the zod generated from the Rust protocol", async () => {
   const corpus = Corpus.parse(await shadowed("corpus.json", true)).default;
   const generated = await shadowed("gen/protocol.ts");
@@ -213,6 +220,12 @@ describe("the protocol and the zod generated from the Rust protocol", async () =
   it("parse each case both take to the same value", () => {
     expect(Object.keys(parsed.protocol).length).toBeGreaterThan(0);
     expect(parsed.generated).toStrictEqual(parsed.protocol);
+  });
+
+  it("judge each command line ShellCommandLine is given alike", () => {
+    expect(judgedLines(protocol)).toContain(true);
+    expect(judgedLines(protocol)).toContain(false);
+    expect(judgedLines(generated)).toEqual(judgedLines(protocol));
   });
 
   it("differ in the schemas they export only by those NOT_YET_IN_RUST lists", () => {

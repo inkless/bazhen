@@ -310,9 +310,9 @@ pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCreated {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 200)))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskTitle"))]
     pub title: String,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskBrief"))]
     pub brief: String,
     #[cfg_attr(
         feature = "schema",

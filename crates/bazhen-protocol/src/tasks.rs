@@ -211,7 +211,7 @@ pub struct CreateTaskRequest {
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskBrief"))]
     pub brief: String,
     #[serde(
         default,
@@ -347,7 +347,7 @@ pub struct DelegateTaskRequest {
     pub role: Role,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskBrief"))]
     pub brief: String,
 }
 
