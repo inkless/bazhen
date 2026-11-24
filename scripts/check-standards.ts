@@ -929,7 +929,7 @@ const FUZZED_DECODERS: Record<string, string> = {
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-harness/src/js.rs::Js::parse":
-    "hands its bytes whole to serde_json's parser, whose values its visitor only collects; reached from a hook only through ClaudeCode::ingest, which the ingest target fuzzes",
+    "hands its bytes whole to serde_json's parser, whose values its visitor only collects; reached from a hook through ClaudeCode::ingest, which the ingest target fuzzes, and from a Claude Code settings file's text, which serde_json reads the same way",
   "crates/bazhen-harness/src/lib.rs::ingest":
     "Harness::ingest's declaration, with no body: each adapter's implementation is listed with its own fuzz target",
   "crates/bazhen-harness/src/lib.rs::route":

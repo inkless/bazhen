@@ -1,8 +1,8 @@
 #![no_main]
 
 use bazhen_harness::{
-    AgentId, HarnessDeps, HarnessId, Held, IngestContext, Ingested, Key, Observed, Reply, Report,
-    StatusLineChoice, production,
+    AgentId, Gate, HarnessDeps, HarnessId, Held, IngestContext, Ingested, Key, Observed, Reply,
+    Report, production,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -15,8 +15,10 @@ fuzz_target!(|input: (&str, &[u8])| {
     let harnesses = production(HarnessDeps {
         new_session_id: Box::new(|| "s".to_owned()),
         hook_command: "bazhen-hook".to_owned(),
-        permission_mode: None,
-        status_line: Box::new(|_| StatusLineChoice::Leave),
+        daemon_env: Box::new(|_| None),
+        user_env: Box::new(|_| None),
+        home: "/home/u".to_owned(),
+        read_file: Box::new(|_| None),
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
     });
@@ -28,6 +30,7 @@ fuzz_target!(|input: (&str, &[u8])| {
     let context = IngestContext {
         agent: Some(&agent),
         offered: &offered,
+        session: None,
     };
     let read = claude.ingest(Report::Hook { event, payload }, &context);
     if serde_json::from_slice::<serde_json::Value>(payload).is_err() {
@@ -47,6 +50,23 @@ fuzz_target!(|input: (&str, &[u8])| {
         }
         Reply::Quiet => {}
         Reply::Now(_) => panic!("Claude Code answers no hook before the daemon resolves it"),
+    }
+    // Only a waiter or a fold is held for the agent's own session alone, and mail and turns are
+    // taken only from it.
+    let held_for_owner = matches!(read.reply, Reply::Hold(Held::Waiter | Held::Fold { .. }));
+    assert_eq!(read.reply_gate == Gate::Owner, held_for_owner);
+    for k in &read.observed {
+        let owners = matches!(
+            k.fact,
+            Observed::Ready { .. }
+                | Observed::PromptStarted { .. }
+                | Observed::TurnStarted
+                | Observed::TurnEnded { .. }
+                | Observed::TurnFailed { .. }
+                | Observed::MessageObserved { .. }
+                | Observed::SessionStarted { .. }
+        );
+        assert!(!owners || k.gate == Gate::Owner, "{k:?}");
     }
     let activities = read
         .observed

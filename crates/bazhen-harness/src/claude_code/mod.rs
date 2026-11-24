@@ -10,12 +10,11 @@ mod tests;
 use crate::js::Js;
 use crate::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
-    Harness, HarnessDeps, IngestContext, Ingested, LaunchRequest, LaunchSpec, Listen, MailRefusal,
-    Outgoing, Pending, PushPort, Pushed, Refused, Report, Resolution, RunPort, Session, SessionRef,
-    Waiting,
+    Harness, HarnessDeps, HarnessDoctor, IngestContext, Ingested, LaunchRequest, LaunchSpec,
+    Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, Refused, Report, Resolution, RunPort,
+    Session, SessionRef, Waiting,
 };
 use bazhen_protocol::agents::{ActivityValue, ExternalRef, ExternalRefKind};
-use bazhen_protocol::daemon::Codex as HarnessDoctor;
 use bazhen_protocol::shells::TuiTheme;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -23,7 +22,7 @@ use std::sync::Mutex;
 /// Which status line Bazhen's runs inside for a session, or [`StatusLineChoice::Leave`] to set
 /// none, leaving Claude Code's own (foundation-design §11.2).
 #[derive(Debug, Clone, PartialEq)]
-pub enum StatusLineChoice {
+enum StatusLineChoice {
     /// Bazhen's, wrapping the user's own command, or drawing nothing for none.
     Wrap(Option<UserStatusLine>),
     Leave,
@@ -31,9 +30,39 @@ pub enum StatusLineChoice {
 
 /// A Claude Code `statusLine` setting of the command kind.
 #[derive(Debug, Clone, PartialEq)]
-pub struct UserStatusLine {
-    pub command: String,
-    pub padding: Option<f64>,
+struct UserStatusLine {
+    command: String,
+    padding: Option<f64>,
+}
+
+/// What a settings file says of the status line.
+enum SettingsLine {
+    /// It sets none, or the file is missing or isn't JSON.
+    Unset,
+    /// One of another kind than a command, which Bazhen can't run inside its own.
+    Other,
+    Command(UserStatusLine),
+}
+
+/// Where an organisation's managed Claude Code settings live, on this platform.
+fn managed_settings() -> &'static str {
+    if std::env::consts::OS == "macos" {
+        "/Library/Application Support/ClaudeCode/managed-settings.json"
+    } else {
+        "/etc/claude-code/managed-settings.json"
+    }
+}
+
+/// `base` and the names after it as one path, as `path.join` gives it for these.
+fn joined(base: &str, names: &[&str]) -> String {
+    let mut path = base.trim_end_matches('/').to_owned();
+    for name in names {
+        if !path.is_empty() || base.starts_with('/') {
+            path.push('/');
+        }
+        path.push_str(name);
+    }
+    path
 }
 
 /// How long a transcript found to hold a conversation is taken as read before it is looked at
@@ -69,6 +98,8 @@ const READS_A_FILE: &str = "Bash(bazhen *-file*)";
 
 pub(crate) struct ClaudeCode {
     deps: HarnessDeps,
+    /// A mode every agent starts in, overriding the user's settings; unset by default.
+    permission_mode: Option<String>,
     /// When each transcript was last found to hold a conversation: a snapshot asks per agent.
     held: Mutex<HashMap<String, i64>>,
 }
@@ -83,9 +114,62 @@ impl std::fmt::Debug for ClaudeCode {
 
 impl ClaudeCode {
     pub(crate) fn new(deps: HarnessDeps) -> Self {
+        let permission_mode =
+            (deps.daemon_env)("BAZHEN_CLAUDE_PERMISSION_MODE").filter(|mode| !mode.is_empty());
         Self {
             deps,
+            permission_mode,
             held: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Which status line Bazhen's wraps for a session started in `cwd`. Only the user's own is
+    /// lifted into the launch's settings. A project's settings are left to Claude Code, which
+    /// gates them on the folder's trust, and so are managed settings, which outrank every other:
+    /// when either sets a status line, or the user's isn't a command, Bazhen sets none, and that
+    /// agent reports no usage.
+    fn status_line(&self, cwd: &str) -> StatusLineChoice {
+        let theirs = [
+            managed_settings().to_owned(),
+            joined(cwd, &[".claude", "settings.local.json"]),
+            joined(cwd, &[".claude", "settings.json"]),
+        ];
+        if theirs
+            .iter()
+            .any(|file| !matches!(self.settings_line(file), SettingsLine::Unset))
+        {
+            return StatusLineChoice::Leave;
+        }
+        let config = (self.deps.user_env)("CLAUDE_CONFIG_DIR")
+            .unwrap_or_else(|| joined(&self.deps.home, &[".claude"]));
+        match self.settings_line(&joined(&config, &["settings.json"])) {
+            SettingsLine::Unset => StatusLineChoice::Wrap(None),
+            // One Bazhen can't run inside its own is left as it is, too.
+            SettingsLine::Other => StatusLineChoice::Leave,
+            SettingsLine::Command(line) => StatusLineChoice::Wrap(Some(line)),
+        }
+    }
+
+    fn settings_line(&self, file: &str) -> SettingsLine {
+        let Some(settings) = (self.deps.read_file)(file).and_then(|t| Js::parse(t.as_bytes()))
+        else {
+            return SettingsLine::Unset;
+        };
+        // JavaScript's typeof is "object" for an array as for an object.
+        let Some(line @ (Js::Object(_) | Js::Array(_))) = settings.field("statusLine") else {
+            return SettingsLine::Unset;
+        };
+        match (
+            line.field("type").and_then(Js::as_str),
+            line.field("command").and_then(Js::as_str),
+        ) {
+            (Some("command"), Some(command)) if !command.is_empty() => {
+                SettingsLine::Command(UserStatusLine {
+                    command: command.to_owned(),
+                    padding: line.field("padding").and_then(Js::as_number),
+                })
+            }
+            _ => SettingsLine::Other,
         }
     }
 
@@ -106,7 +190,7 @@ impl ClaudeCode {
             argv.extend(["--autocompact".to_owned(), tokens.to_string()]);
         }
         argv.extend(["--settings".to_owned(), self.settings(request).stringify()]);
-        if let Some(mode) = &self.deps.permission_mode {
+        if let Some(mode) = &self.permission_mode {
             argv.extend(["--permission-mode".to_owned(), mode.clone()]);
         }
         // From their file when there is one, which keeps a user's role prompt out of the
@@ -149,7 +233,7 @@ impl ClaudeCode {
                 ]),
             ),
         ];
-        if let StatusLineChoice::Wrap(user) = (self.deps.status_line)(&request.cwd) {
+        if let StatusLineChoice::Wrap(user) = self.status_line(&request.cwd) {
             settings.push((
                 "statusLine".to_owned(),
                 wrapped_status_line(&self.deps.hook_command, user.as_ref()),

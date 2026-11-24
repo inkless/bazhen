@@ -1,5 +1,6 @@
 //! Mail out to a harness, and the answers to what it holds open.
 
+use crate::ToolKey;
 use crate::launch::SessionRef;
 use bazhen_protocol::mail_events::ApprovalDecision;
 
@@ -41,9 +42,11 @@ pub enum Pending<'a> {
     Waiter,
     Fold,
     Approval,
-    /// A request from the harness's server, by its method.
+    /// A request from the harness's server, by its method and the key its approval was asked
+    /// under, from which the adapter reads which request to answer.
     ServerRequest {
         method: &'a str,
+        key: &'a ToolKey,
     },
 }
 

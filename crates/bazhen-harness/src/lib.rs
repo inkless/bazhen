@@ -14,18 +14,17 @@ mod text;
 /// The protocol's ids this API takes, so a caller needs no other crate to drive it.
 pub use bazhen_protocol::agents::HarnessId;
 pub use bazhen_protocol::ids::AgentId;
-pub use claude_code::{StatusLineChoice, UserStatusLine};
 pub use deliver::{
     AgentRef, Answer, HookOutput, Mail, MailRefusal, Outgoing, Pending, Pushed, Resolution,
 };
 pub use launch::{Evidence, LaunchRequest, LaunchSpec, Refused, SessionRef};
 pub use report::{
-    HarnessActivity, Held, IngestContext, Ingested, Key, Keyed, LimitStop, Observed, Origin, Reply,
-    Report, SentMessage, SessionKey, Settled, ToolKey,
+    Gate, HarnessActivity, Held, IngestContext, Ingested, Key, Keyed, LimitStop, Observed, Origin,
+    Reply, Report, SentMessage, SessionKey, Settled, ToolKey,
 };
 
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
-use bazhen_protocol::daemon::Codex as HarnessDoctor;
+use bazhen_protocol::daemon::ToolCalls;
 use bazhen_protocol::shells::TuiTheme;
 use serde_json::Value;
 use std::fmt;
@@ -249,6 +248,9 @@ pub enum Followed {
     Untracked { detail: String },
 }
 
+/// Looks up one text by name, such as a variable in an environment or a file's text by its path.
+pub type Lookup = dyn Fn(&str) -> Option<String> + Send + Sync;
+
 /// Reads the transcript at a path, its first complete line first, until `line` says it is the one
 /// looked for: whether one was. A path that can't be read holds none.
 pub type ScanTranscript = dyn Fn(&str, &mut dyn FnMut(&str) -> bool) -> bool + Send + Sync;
@@ -259,10 +261,16 @@ pub struct HarnessDeps {
     pub new_session_id: Box<dyn Fn() -> String + Send + Sync>,
     /// The hook client as a shell command; the adapter appends the event.
     pub hook_command: String,
-    /// A permission mode every agent starts in; none, and each starts in the user's own.
-    pub permission_mode: Option<String>,
-    /// Which status line runs for a session started in a directory.
-    pub status_line: Box<dyn Fn(&str) -> StatusLineChoice + Send + Sync>,
+    /// The daemon's own environment, by name, for the settings Bazhen takes for a harness.
+    pub daemon_env: Box<Lookup>,
+    /// The user's environment as the daemon captured it, by name, where a harness's own
+    /// configuration is found.
+    pub user_env: Box<Lookup>,
+    /// The user's home directory.
+    pub home: String,
+    /// A file's text, any byte that isn't UTF-8 replaced, or none for one that can't be read: an
+    /// adapter reads its harness's settings with it, knowing their format where the daemon doesn't.
+    pub read_file: Box<Lookup>,
     /// Reads a session's transcript for a line it can be resumed from.
     pub scan_transcript: Box<ScanTranscript>,
     /// The time in ms, for how long a transcript's answer stands.
@@ -273,9 +281,21 @@ impl fmt::Debug for HarnessDeps {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HarnessDeps")
             .field("hook_command", &self.hook_command)
-            .field("permission_mode", &self.permission_mode)
+            .field("home", &self.home)
             .finish_non_exhaustive()
     }
+}
+
+/// A harness's block of `bazhen doctor`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessDoctor {
+    /// The version of the harness's server that answered, if one did.
+    pub server: Option<String>,
+    /// The version of the harness's CLI, if it ran.
+    pub cli: Option<String>,
+    /// Whether the peer reader knows the harness's server, for one whose agents' commands it
+    /// tells apart from the user's; none when that wasn't read.
+    pub tool_calls: Option<ToolCalls>,
 }
 
 /// The harnesses the daemon runs agents in, by id.

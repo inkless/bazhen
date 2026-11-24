@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::{
-    HarnessActivity, Held, HookOutput, Key, Keyed, LimitStop, Mail, Observed, Origin, Reply,
+    Gate, HarnessActivity, Held, HookOutput, Key, Keyed, LimitStop, Mail, Observed, Origin, Reply,
     SentMessage, ToolKey,
 };
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
@@ -14,22 +14,39 @@ use bazhen_protocol::mail_events::ApprovalDecision;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-fn deps(status: StatusLineChoice, mode: Option<&str>) -> HarnessDeps {
+/// The settings file of a user whose status line is a command, with padding.
+const USER_LINE: (&str, &str) = (
+    "/home/u/.claude/settings.json",
+    r#"{"statusLine":{"type":"command","command":"echo 'hi' $X","padding":1}}"#,
+);
+
+/// The settings file of a user whose status line is of a kind Bazhen leaves alone.
+const OTHER_LINE: (&str, &str) = (
+    "/home/u/.claude/settings.json",
+    r#"{"statusLine":{"type":"static"}}"#,
+);
+
+/// An adapter's world: these files, and the daemon's permission mode.
+fn deps(files: &[(&str, &str)], mode: Option<&str>) -> HarnessDeps {
+    let files: HashMap<String, String> = files
+        .iter()
+        .map(|(path, text)| ((*path).to_owned(), (*text).to_owned()))
+        .collect();
+    let mode = mode.map(str::to_owned);
     HarnessDeps {
         new_session_id: Box::new(|| "s-1".to_owned()),
         hook_command: "bazhen-hook".to_owned(),
-        permission_mode: mode.map(str::to_owned),
-        status_line: Box::new(move |_| status.clone()),
+        daemon_env: Box::new(move |name| {
+            (name == "BAZHEN_CLAUDE_PERMISSION_MODE")
+                .then(|| mode.clone())
+                .flatten()
+        }),
+        user_env: Box::new(|_| None),
+        home: "/home/u".to_owned(),
+        read_file: Box::new(move |path| files.get(path).cloned()),
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
     }
-}
-
-fn wrapped() -> StatusLineChoice {
-    StatusLineChoice::Wrap(Some(UserStatusLine {
-        command: "echo 'hi' $X".to_owned(),
-        padding: Some(1.0),
-    }))
 }
 
 fn ready<T>(future: BoxFuture<'_, T>) -> T {
@@ -55,7 +72,7 @@ const RESUME: &str = r#"["claude","--resume","old","--settings","{\"hooks\":{\"S
 
 #[test]
 fn launches_on_a_session_it_chose_with_its_hooks_name_window_theme_mode_and_instructions() {
-    let harness = ClaudeCode::new(deps(wrapped(), Some("plan")));
+    let harness = ClaudeCode::new(deps(&[USER_LINE], Some("plan")));
     let request = LaunchRequest {
         cwd: "/work".to_owned(),
         theme: Some(TuiTheme::Dark),
@@ -81,7 +98,7 @@ fn launches_on_a_session_it_chose_with_its_hooks_name_window_theme_mode_and_inst
 
 #[test]
 fn resumes_the_agents_own_session_reading_instructions_from_their_file() {
-    let harness = ClaudeCode::new(deps(wrapped(), Some("plan")));
+    let harness = ClaudeCode::new(deps(&[USER_LINE], Some("plan")));
     let request = LaunchRequest {
         cwd: "/work".to_owned(),
         instructions: Some("x".to_owned()),
@@ -97,25 +114,117 @@ fn resumes_the_agents_own_session_reading_instructions_from_their_file() {
     assert_eq!(spec.map(argv_of), Some(golden(RESUME)));
 }
 
-#[test]
-fn sets_no_status_line_to_leave_claudes_and_bazhens_alone_for_none() {
-    let settings = |choice| {
-        let harness = ClaudeCode::new(deps(choice, None));
-        let argv = argv_of(ready(harness.launch(&LaunchRequest::default(), None)));
-        let at = argv
-            .iter()
-            .position(|a| a == "--settings")
-            .map_or(0, |i| i + 1);
-        argv.get(at).cloned().unwrap_or_default()
+/// The status line a launch in `/work` sets, given these files and the user's environment.
+fn status_line_with(files: &[(&str, &str)], user_env: &[(&str, &str)]) -> Option<String> {
+    let mut d = deps(files, None);
+    let env: HashMap<String, String> = user_env
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    d.user_env = Box::new(move |name| env.get(name).cloned());
+    let request = LaunchRequest {
+        cwd: "/work".to_owned(),
+        ..LaunchRequest::default()
     };
-    let leave = settings(StatusLineChoice::Leave);
-    let alone = settings(StatusLineChoice::Wrap(None));
-    assert!(!leave.contains("statusLine") && !leave.contains("--permission-mode"));
-    assert!(
-        alone.ends_with(
-            r#""statusLine":{"type":"command","command":"bazhen-hook statusline-wrap"}}"#
+    let argv = argv_of(ready(ClaudeCode::new(d).launch(&request, None)));
+    let at = argv.iter().position(|a| a == "--settings").map(|i| i + 1);
+    let settings = Js::parse(at.and_then(|i| argv.get(i)).unwrap().as_bytes()).unwrap();
+    settings.field("statusLine").map(Js::stringify)
+}
+
+fn status_line(files: &[(&str, &str)]) -> Option<String> {
+    status_line_with(files, &[])
+}
+
+const WRAPPED_USER: &str =
+    r#"{"type":"command","command":"bazhen-hook statusline-wrap sh -c 'user'","padding":2}"#;
+const WRAPPED_NONE: &str = r#"{"type":"command","command":"bazhen-hook statusline-wrap"}"#;
+
+fn line(command: &str) -> String {
+    format!(r#"{{"statusLine":{{"type":"command","command":"{command}"}}}}"#)
+}
+
+#[test]
+fn wraps_the_users_own_status_line_with_its_padding_or_none_when_they_have_none() {
+    let user = r#"{"statusLine":{"type":"command","command":"user","padding":2}}"#;
+    assert_eq!(
+        [
+            status_line(&[("/home/u/.claude/settings.json", user)]),
+            status_line(&[])
+        ],
+        [Some(WRAPPED_USER.to_owned()), Some(WRAPPED_NONE.to_owned())]
+    );
+    // CLAUDE_CONFIG_DIR, in the user's environment, moves their settings.
+    assert_eq!(
+        status_line_with(
+            &[("/cfg/settings.json", user)],
+            &[("CLAUDE_CONFIG_DIR", "/cfg")]
+        ),
+        Some(WRAPPED_USER.to_owned())
+    );
+}
+
+#[test]
+fn leaves_a_projects_status_line_to_claude_code_which_gates_it_on_the_folders_trust() {
+    let user = line("user");
+    for project in [
+        "/work/.claude/settings.local.json",
+        "/work/.claude/settings.json",
+    ] {
+        let theirs = line("project");
+        let files = [
+            (project, theirs.as_str()),
+            ("/home/u/.claude/settings.json", user.as_str()),
+        ];
+        assert_eq!(status_line(&files), None, "{project}");
+    }
+}
+
+#[test]
+fn leaves_a_managed_status_line_and_a_users_of_another_kind_or_with_no_command() {
+    let (managed, user) = (line("managed"), line("user"));
+    assert_eq!(
+        status_line(&[
+            (managed_settings(), managed.as_str()),
+            ("/home/u/.claude/settings.json", user.as_str())
+        ]),
+        None
+    );
+    for theirs in [
+        r#"{"statusLine":{"type":"static"}}"#,
+        r#"{"statusLine":{"type":"command","command":""}}"#,
+        r#"{"statusLine":[]}"#,
+    ] {
+        assert_eq!(
+            status_line(&[("/home/u/.claude/settings.json", theirs)]),
+            None,
+            "{theirs}"
+        );
+    }
+}
+
+#[test]
+fn reads_past_a_settings_file_that_isnt_json_or_sets_no_status_line_and_sets_no_mode_unasked() {
+    let user = line("user");
+    assert_eq!(
+        status_line(&[
+            ("/work/.claude/settings.local.json", "{not json"),
+            (
+                "/work/.claude/settings.json",
+                r#"{"theme":"dark","statusLine":null}"#
+            ),
+            ("/home/u/.claude/settings.json", user.as_str()),
+        ]),
+        Some(
+            r#"{"type":"command","command":"bazhen-hook statusline-wrap sh -c 'user'"}"#.to_owned()
         )
     );
+    for mode in [None, Some("")] {
+        let argv = argv_of(ready(
+            ClaudeCode::new(deps(&[], mode)).launch(&LaunchRequest::default(), None),
+        ));
+        assert!(!argv.iter().any(|a| a == "--permission-mode"), "{mode:?}");
+    }
 }
 
 #[test]
@@ -146,7 +255,7 @@ fn resumable(
     looked: Arc<AtomicUsize>,
     now: Arc<AtomicI64>,
 ) -> ClaudeCode {
-    let mut d = deps(StatusLineChoice::Leave, None);
+    let mut d = deps(&[OTHER_LINE], None);
     d.scan_transcript = Box::new(move |path, line| {
         looked.fetch_add(1, Ordering::SeqCst);
         written.load(Ordering::SeqCst) == 1 && path.starts_with('/') && line(r#"{"type":"user"}"#)
@@ -203,11 +312,12 @@ fn ingest(event: &str, payload: &str) -> Ingested {
 }
 
 fn ingest_offered(event: &str, payload: &str, offered: &[String]) -> Ingested {
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let agent = agent();
     let context = IngestContext {
         agent: Some(&agent),
         offered,
+        session: None,
     };
     harness.ingest(
         Report::Hook {
@@ -234,7 +344,7 @@ const READY: Observed = Observed::Ready {
 fn keys_every_fact_by_the_agent_the_hook_ran_for_and_reads_nothing_without_one() {
     let read = ingest("Stop", r#"{"prompt_id":"p"}"#);
     assert!(read.observed.iter().all(|k| k.key == Key::Agent(agent())));
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let none = harness.ingest(
         Report::Hook {
             event: "Stop",
@@ -244,6 +354,52 @@ fn keys_every_fact_by_the_agent_the_hook_ran_for_and_reads_nothing_without_one()
     );
     assert_eq!(none, Ingested::nothing());
     assert_eq!(ingest("Stop", "{not json"), Ingested::nothing());
+}
+
+/// Each fact's gate, in order, and the reply's.
+fn gates(ingested: &Ingested) -> (Vec<Gate>, Gate) {
+    let gates = ingested.observed.iter().map(|k| k.gate).collect();
+    (gates, ingested.reply_gate)
+}
+
+#[test]
+fn takes_mail_and_turns_only_from_the_agents_own_session_and_activity_from_any_of_its() {
+    use Gate::{InSession, None as Any, Owner};
+    let prompt = r#"{"prompt_id":"p","tool_use_id":"t","tool_name":"Bash","tool_input":{}}"#;
+    for (event, payload, expected) in [
+        // The waiter's every fact, its activity and its hold need the agent's own session.
+        (
+            "wait",
+            r#"{"hook_event_name":"SessionStart","source":"compact"}"#,
+            (vec![Owner, Owner, Owner], Owner),
+        ),
+        (
+            "wait",
+            r#"{"hook_event_name":"Stop","prompt_id":"p"}"#,
+            (vec![Owner, Owner, Owner], Owner),
+        ),
+        (
+            "Stop",
+            r#"{"prompt_id":"p"}"#,
+            (vec![Owner, Owner, InSession, Any], Any),
+        ),
+        (
+            "UserPromptSubmit",
+            r#"{"prompt":"hi","prompt_id":"p"}"#,
+            (vec![InSession, Owner, Owner, Owner], Any),
+        ),
+        ("PostToolUse", prompt, (vec![InSession, Any, Owner], Owner)),
+        ("PreToolUse", prompt, (vec![InSession, Any], Any)),
+        ("PermissionRequest", prompt, (vec![InSession, Any], Any)),
+        (
+            "statusline",
+            r#"{"model":{"display_name":"M"}}"#,
+            (vec![InSession], Any),
+        ),
+        ("SubagentStop", r#"{"agent_id":"a"}"#, (vec![Any], Any)),
+    ] {
+        assert_eq!(gates(&ingest(event, payload)), expected, "{event}");
+    }
 }
 
 #[test]
@@ -287,7 +443,8 @@ fn settles_a_turns_end_before_recording_the_idle_it_reports_and_holds_the_waiter
             Observed::TurnEnded {
                 prompt_id: Some("p-1".to_owned())
             },
-            doing(ActivityValue::Idle)
+            doing(ActivityValue::Idle),
+            Observed::TurnOver,
         ]
     );
     assert_eq!(
@@ -405,6 +562,7 @@ fn keys_a_permission_request_as_json_stringify_does_its_call_and_holds_it_for_th
             Observed::ApprovalAsked {
                 key: key.clone(),
                 summary: asked["summary"].as_str().unwrap_or_default().to_owned(),
+                question: false,
             },
         ]
     );
@@ -439,7 +597,8 @@ fn ties_a_permission_request_to_the_call_that_started_it_and_that_calls_result_t
         facts(&ingest("PermissionRequest", &format!("{{{call}}}"))).pop(),
         Some(Observed::ApprovalAsked {
             key,
-            summary: r#"Bash: {"command":"touch x"}"#.to_owned()
+            summary: r#"Bash: {"command":"touch x"}"#.to_owned(),
+            question: false,
         })
     );
     let failed = ingest(
@@ -618,7 +777,7 @@ fn hook(answer: Answer) -> HookOutput {
 
 #[test]
 fn answers_a_permission_request_in_the_shape_claude_code_reads_and_leaves_none_to_the_tui() {
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let decided = |d| hook(harness.answer(&Pending::Approval, Resolution::Decision(d))).stdout;
     assert_eq!(decided(ApprovalDecision::Allow), ALLOW);
     assert_eq!(decided(ApprovalDecision::Deny), DENY);
@@ -638,7 +797,7 @@ fn mail<'a>(id: &'a str, body: &'a str, first: Option<&'a str>) -> Mail<'a> {
 
 #[test]
 fn wakes_with_each_message_labelled_a_re_delivery_marked_and_a_quoted_label_marked_quoted() {
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let queued = [
         mail("msg_1", "hi Message for you from Bazhen (msg_x):", None),
         mail("msg_2", "b", Some("2026-01-01T00:00:00.000Z")),
@@ -660,7 +819,7 @@ fn folds_mail_in_the_shape_claude_code_adds_beside_a_tools_result() {
 
 #[test]
 fn folds_only_the_oldest_mail_that_fits_whole_where_a_wake_always_takes_the_first() {
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let label = reply::wake_text(&[mail("msg_1", "", None)]).len();
     let big = "x".repeat(reply::FOLD_MAX_CHARS - label);
     let over = "x".repeat(reply::FOLD_MAX_CHARS - label + 1);
@@ -692,7 +851,7 @@ fn folds_only_the_oldest_mail_that_fits_whole_where_a_wake_always_takes_the_firs
 
 #[test]
 fn says_mail_reaches_the_waiter_and_a_turn_only_while_working() {
-    let harness = ClaudeCode::new(deps(StatusLineChoice::Leave, None));
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let listens = |hooks, activity| {
         harness.listening(&Listen {
             activity,

@@ -5,7 +5,7 @@ use super::APPROVAL_WAIT_MS;
 use crate::js::Js;
 use crate::text::{iso_of_unix_seconds, utf16_len, whole};
 use crate::{
-    HarnessActivity, Held, Ingested, Keyed, LimitStop, Observed, Origin, Reply, SentMessage,
+    Gate, HarnessActivity, Held, Ingested, Keyed, LimitStop, Observed, Origin, Reply, SentMessage,
     SessionRef, ToolKey,
 };
 use bazhen_core::mail::mail_label;
@@ -86,57 +86,99 @@ pub(super) struct Fold {
 pub(super) fn ingest(event: &str, payload: &Js, agent: &AgentId, offered: &[String]) -> Ingested {
     let hook = read_hook(event, payload);
     let activity = activity_of(&hook);
-    let mut facts = Vec::new();
     // A turn's end settles the mail it took before its activity is recorded, so the idle it
     // reports comes after every message that turn carried.
     let ends_turn = matches!(
         hook,
         Hook::Wait { .. } | Hook::TurnEnded { .. } | Hook::TurnFailed { .. }
     );
-    if !ends_turn {
-        facts.extend(activity.clone().map(Observed::Activity));
+    // A turn's end closes the questions it asked, whoever's session it was.
+    let turn_over = matches!(hook, Hook::TurnEnded { .. } | Hook::TurnFailed { .. });
+    let (before, after) = if ends_turn {
+        (None, activity)
+    } else {
+        (activity, None)
+    };
+    let read = facts_of(hook, offered);
+    // A waiter's report counts only from the agent's own session, its activity with it.
+    let after_gate = if read.reply_gate == Gate::Owner {
+        Gate::Owner
+    } else {
+        Gate::InSession
+    };
+    let facts = before
+        .map(|a| (Gate::InSession, Observed::Activity(a)))
+        .into_iter()
+        .chain(read.facts)
+        .chain(after.map(|a| (after_gate, Observed::Activity(a))))
+        .chain(turn_over.then_some((Gate::None, Observed::TurnOver)));
+    Ingested {
+        observed: facts
+            .map(|(gate, fact)| Keyed::agent(agent, gate, fact))
+            .collect(),
+        origin: Some(origin_of(payload)),
+        reply: read.reply,
+        reply_gate: read.reply_gate,
     }
+}
+
+/// What a hook says beyond the activity it reports, each fact under its gate, and its reply.
+struct Said {
+    facts: Vec<(Gate, Observed)>,
+    reply: Reply,
+    reply_gate: Gate,
+}
+
+fn facts_of(hook: Hook, offered: &[String]) -> Said {
+    let (none, in_session, owner) = (Gate::None, Gate::InSession, Gate::Owner);
+    let mut facts: Vec<(Gate, Observed)> = Vec::new();
     let ready = Observed::Ready {
         sign: ReadySign::ClaudeHook,
     };
-    let mut reply = Reply::Quiet;
+    let (mut reply, mut reply_gate) = (Reply::Quiet, none);
     match hook {
         Hook::Wait {
             session_started,
             compacted,
             turn_end,
         } => {
-            facts.push(ready);
+            facts.push((owner, ready));
             if session_started {
-                facts.push(Observed::SessionStarted { compacted });
+                facts.push((owner, Observed::SessionStarted { compacted }));
                 if compacted {
-                    facts.push(Observed::Compacted {
-                        sign: CompactedSign::ClaudeHook,
-                    });
+                    let sign = CompactedSign::ClaudeHook;
+                    facts.push((owner, Observed::Compacted { sign }));
                 }
             }
-            facts.extend(turn_end.map(|end| match end {
-                TurnEnd {
-                    prompt_id,
-                    failed: true,
-                    error,
-                } => Observed::TurnFailed { prompt_id, error },
-                TurnEnd { prompt_id, .. } => Observed::TurnEnded { prompt_id },
+            facts.extend(turn_end.map(|end| {
+                let fact = match end {
+                    TurnEnd {
+                        prompt_id,
+                        failed: true,
+                        error,
+                    } => Observed::TurnFailed { prompt_id, error },
+                    TurnEnd { prompt_id, .. } => Observed::TurnEnded { prompt_id },
+                };
+                (owner, fact)
             }));
-            reply = Reply::Hold(Held::Waiter);
+            (reply, reply_gate) = (Reply::Hold(Held::Waiter), owner);
         }
         Hook::Permission { summary, tool } => {
-            facts.push(Observed::ApprovalAsked {
-                key: tool.clone(),
-                summary,
-            });
+            facts.push((
+                none,
+                Observed::ApprovalAsked {
+                    key: tool.clone(),
+                    summary,
+                    question: false,
+                },
+            ));
             reply = Reply::Hold(Held::Approval {
                 key: tool,
                 wait_ms: APPROVAL_WAIT_MS,
             });
         }
         Hook::Question { summary, tool } => {
-            facts.push(Observed::QuestionAsked { key: tool, summary });
+            facts.push((none, Observed::QuestionAsked { key: tool, summary }));
         }
         Hook::PromptStarted { prompt, prompt_id } => {
             let carries = offered
@@ -145,45 +187,43 @@ pub(super) fn ingest(event: &str, payload: &Js, agent: &AgentId, offered: &[Stri
                 .cloned()
                 .collect();
             facts.extend([
-                ready,
-                Observed::PromptStarted { prompt_id, carries },
-                Observed::TurnStarted,
+                (owner, ready),
+                (owner, Observed::PromptStarted { prompt_id, carries }),
+                (owner, Observed::TurnStarted),
             ]);
         }
-        Hook::TurnEnded { prompt_id } => facts.extend([ready, Observed::TurnEnded { prompt_id }]),
+        Hook::TurnEnded { prompt_id } => {
+            facts.extend([(owner, ready), (owner, Observed::TurnEnded { prompt_id })]);
+        }
         Hook::TurnFailed { prompt_id, error } => {
-            facts.extend([ready, Observed::TurnFailed { prompt_id, error }]);
+            let fact = Observed::TurnFailed { prompt_id, error };
+            facts.extend([(owner, ready), (owner, fact)]);
         }
         Hook::ToolStarted { tool, use_id } => {
-            facts.push(Observed::ToolStarted { key: tool, use_id });
+            facts.push((none, Observed::ToolStarted { key: tool, use_id }));
         }
         Hook::ToolSettled { use_id, fold } => {
-            facts.push(Observed::ToolSettled {
+            let settled = Observed::ToolSettled {
                 use_id: use_id.clone(),
-            });
+            };
+            facts.push((none, settled));
             if let Some(Fold { prompt_id, sent }) = fold {
-                facts.push(ready);
-                facts.extend(sent.map(|sent| Observed::MessageObserved { use_id, sent }));
+                facts.push((owner, ready));
+                facts.extend(sent.map(|sent| (owner, Observed::MessageObserved { use_id, sent })));
                 if let Some(prompt_id) = prompt_id {
-                    reply = Reply::Hold(Held::Fold { prompt_id });
+                    (reply, reply_gate) = (Reply::Hold(Held::Fold { prompt_id }), owner);
                 }
             }
         }
-        Hook::Statusline { usage } => facts.push(Observed::Usage(usage)),
-        Hook::SubagentStarted { id } => facts.push(Observed::SubagentStarted { id }),
-        Hook::SubagentStopped { id } => facts.push(Observed::SubagentStopped { id }),
+        Hook::Statusline { usage } => facts.push((in_session, Observed::Usage(usage))),
+        Hook::SubagentStarted { id } => facts.push((none, Observed::SubagentStarted { id })),
+        Hook::SubagentStopped { id } => facts.push((none, Observed::SubagentStopped { id })),
         Hook::Ignored => {}
     }
-    if ends_turn {
-        facts.extend(activity.map(Observed::Activity));
-    }
-    Ingested {
-        observed: facts
-            .into_iter()
-            .map(|fact| Keyed::agent(agent, fact))
-            .collect(),
-        origin: Some(origin_of(payload)),
+    Said {
+        facts,
         reply,
+        reply_gate,
     }
 }
 

@@ -165,12 +165,11 @@ impl<'de> Visitor<'de> for JsVisitor {
         // Where each key sits, so a payload of many keys reads in linear time.
         let mut at: HashMap<String, usize> = HashMap::new();
         while let Some((key, value)) = map.next_entry::<String, Js>()? {
-            match at.get(&key).and_then(|&i| entries.get_mut(i)) {
-                Some(entry) => entry.1 = value,
-                None => {
-                    at.insert(key.clone(), entries.len());
-                    entries.push((key, value));
-                }
+            if let Some(entry) = at.get(&key).and_then(|&i| entries.get_mut(i)) {
+                entry.1 = value;
+            } else {
+                at.insert(key.clone(), entries.len());
+                entries.push((key, value));
             }
         }
         // Stable: the other keys keep the order they came in.

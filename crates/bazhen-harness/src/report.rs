@@ -32,6 +32,9 @@ pub struct IngestContext<'a> {
     /// The agent's messages a prompt may carry as a wake handed them over: written or offered
     /// before, and not yet seen, by id.
     pub offered: &'a [String],
+    /// The session the agent is bound to, against which a harness tells a terminal title naming
+    /// it from one naming another.
+    pub session: Option<&'a SessionRef>,
 }
 
 /// What an adapter read from one report.
@@ -41,6 +44,9 @@ pub struct Ingested {
     /// Which of the harness's sessions made the report, when it says.
     pub origin: Option<Origin>,
     pub reply: Reply,
+    /// What the daemon must find of the report's session to hold the reply; when it doesn't, it
+    /// answers quiet.
+    pub reply_gate: Gate,
 }
 
 impl Ingested {
@@ -50,6 +56,7 @@ impl Ingested {
             observed: Vec::new(),
             origin: None,
             reply: Reply::Quiet,
+            reply_gate: Gate::None,
         }
     }
 }
@@ -77,17 +84,35 @@ pub enum Held {
     Approval { key: ToolKey, wait_ms: u64 },
 }
 
-/// A fact, and who it is about.
+/// A fact, who it is about, and what the daemon must find of the report's session to apply it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Keyed {
     pub key: Key,
+    pub gate: Gate,
     pub fact: Observed,
 }
 
+/// What the daemon must find of the session a report came from before it applies a fact or
+/// holds a reply. It asks once per report, and skips what doesn't pass, keeping the order of the
+/// rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// Nothing: whichever of the agent's sessions or subagents made the report.
+    None,
+    /// That it came from the agent's session, or a subagent of it: a subagent says what the
+    /// agent is doing too, another session never does.
+    InSession,
+    /// That it came from the agent's own session and no subagent: one that takes or confirms
+    /// mail. A report with a [`Observed::SessionStarted`] may first move the agent's binding to
+    /// its session, which then passes.
+    Owner,
+}
+
 impl Keyed {
-    pub(crate) fn agent(agent: &AgentId, fact: Observed) -> Self {
+    pub(crate) fn agent(agent: &AgentId, gate: Gate, fact: Observed) -> Self {
         Self {
             key: Key::Agent(agent.clone()),
+            gate,
             fact,
         }
     }
@@ -120,12 +145,12 @@ pub struct Origin {
 }
 
 /// One fact a report gives, which the daemon turns into events. A report's facts come in the
-/// order the daemon applies them: a turn's end settles the mail it took before its activity is
-/// recorded.
+/// order the daemon applies them, each under its [`Gate`]: a turn's end settles the mail it took
+/// before its activity is recorded.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Observed {
-    /// The report is the agent's own session's, if the daemon finds it is: once it does, and the
-    /// report came from the TUI the daemon started, the TUI is up.
+    /// The report came from the agent's session: when it passes [`Gate::Owner`] and came from the
+    /// TUI the daemon started, the TUI is up.
     Ready {
         sign: ReadySign,
     },
@@ -154,6 +179,9 @@ pub enum Observed {
     ApprovalAsked {
         key: ToolKey,
         summary: String,
+        /// Whether it asks a question the inbox answers with the human's text, rather than allow
+        /// or deny.
+        question: bool,
     },
     /// A question only the TUI can take an answer to.
     QuestionAsked {
@@ -172,6 +200,8 @@ pub enum Observed {
         carries: Vec<String>,
     },
     TurnStarted,
+    /// A turn ended, whoever's session it ran in: the questions it asked are over.
+    TurnOver,
     TurnEnded {
         prompt_id: Option<String>,
     },
