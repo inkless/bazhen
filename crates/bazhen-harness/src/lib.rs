@@ -243,7 +243,8 @@ pub trait Session: Send {
     ) -> BoxFuture<'a, Vec<Keyed>>;
     /// Picks up one session the server unloaded ([`Observed::Unloaded`]), alone: what holds of
     /// the rest of the connection stands. The daemon asks again, from 1 s doubling to 60 s apart,
-    /// until it is loaded or the agent leaves the session.
+    /// until it is loaded, the agent leaves the session, or the connection drops: on the next,
+    /// [`Session::connected`] picks up every bound session again.
     fn reload<'a>(
         &'a mut self,
         agent: &'a Bound,
@@ -259,7 +260,10 @@ pub trait Session: Send {
         channel: &'a dyn ChannelPort,
     ) -> BoxFuture<'a, Followed>;
     /// Whether a follow of `candidate` that is pending, or gave up, may find the session the
-    /// server just announced ([`Observed::SessionAnnounced`]), so the daemon tries it again.
+    /// server just announced ([`Observed::SessionAnnounced`]). On a match the daemon reads the
+    /// terminal's title again and sends it as a fresh [`Report::TerminalTitle`], rather than
+    /// trying the old candidate. A follow with no candidate, its title unread, is never asked
+    /// about.
     fn may_follow_to(&self, candidate: &str, announced: &SessionKey) -> bool;
 }
 
