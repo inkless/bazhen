@@ -5625,13 +5625,7 @@ function usedPaths(code: string): { path: string; as: string }[] {
  * name a glob may bring in, isn't one.
  */
 function harmlessType(type: string, code: string): boolean {
-  const bare = type
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^&\s*(?:'\w+\s+)?(?:mut\s+)?/, "")
-    .replace(/^(?:(?:::\s*)?std\s*::\s*sync\s*::\s*)?Arc\s*<\s*(.*?)\s*>$/, "$1")
-    .replace(/\s*::\s*/g, "::")
-    .replace(/^::/, "");
+  const bare = bareType(type);
   return HARMLESS_CLOSERS.some((path) => {
     if (bare === path) return true;
     const name = path.split("::").at(-1) ?? "";
@@ -5642,6 +5636,30 @@ function harmlessType(type: string, code: string): boolean {
     const item = new RegExp(`\\b(?:struct|enum|union|trait|type)\\s+${name}\\b`).test(code);
     return named.length > 0 && named.every((u) => u.path === path) && !globbed && !item;
   });
+}
+
+/** `type` with a borrow or an `Arc` around it taken off, and its spaces. */
+function bareType(type: string): string {
+  return type
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^&\s*(?:'\w+\s+)?(?:mut\s+)?/, "")
+    .replace(/^(?:(?:::\s*)?std\s*::\s*sync\s*::\s*)?Arc\s*<\s*(.*?)\s*>$/, "$1")
+    .replace(/\s*::\s*/g, "::")
+    .replace(/^::/, "");
+}
+
+/** Whether `code` declares the struct `type` once, with its field `name` one of HARMLESS_CLOSERS. */
+function harmlessField(type: string | undefined, name: string, code: string): boolean {
+  const structs = [...code.matchAll(new RegExp(`\\bstruct\\s+(?:r#)?${type ?? "\\b"}\\b`, "g"))];
+  const item = structs.length === 1 && type !== undefined ? structs[0] : undefined;
+  const fields =
+    item === undefined
+      ? []
+      : (structFields(code.slice(item.index, itemEnd(code, item.index)))?.fields ?? []).filter(
+          (field) => field.name === name,
+        );
+  return fields.length === 1 && harmlessType(fields[0]?.type ?? "", code);
 }
 
 /** The text up to the first `,`, `;`, `=`, `|`, `{` or unopened bracket outside any brackets. */
@@ -5656,21 +5674,26 @@ function toTopLevelEnd(text: string): string {
   return text;
 }
 
-/** Whether `value`, as `code` writes it, makes one of HARMLESS_CLOSERS: `T::new(`, or in `Arc::new(`. */
-function makesHarmless(value: string, code: string): boolean {
+/** Whether `value`, as `code` writes it, makes a type `sure` takes: `T::new(`, or in `Arc::new(`. */
+function makesHarmless(value: string, sure: (type: string) => boolean): boolean {
   const made =
     /^\s*(?:Arc\s*::\s*new\s*\(\s*)?((?:::\s*)?(?:(?:r#)?\w+\s*::\s*)*?\w+)\s*::\s*new\s*\(/.exec(
       value,
     );
-  return made !== null && harmlessType(made[1] ?? "", code);
+  return made !== null && sure(made[1] ?? "");
 }
 
 /**
  * Whether `value`, the rest of a `let` after its `=`, is a call of a function `code` defines once
- * that is declared to return one of HARMLESS_CLOSERS, or a tuple holding one as its part `index`:
+ * that is declared to return a type `sure` takes, or a tuple holding one as its part `index`:
  * `f(..)` or `f(..).await`, and nothing more, before its `;`.
  */
-function returnsHarmless(value: string, index: number | undefined, code: string): boolean {
+function returnsHarmless(
+  value: string,
+  index: number | undefined,
+  code: string,
+  sure: (type: string) => boolean,
+): boolean {
   const call = /^\s*(?:r#)?(\w+)\s*\(/.exec(value);
   if (call === null) return false;
   const after = value.slice(matchingBracket(value, call[0].length - 1) + 1);
@@ -5678,10 +5701,10 @@ function returnsHarmless(value: string, index: number | undefined, code: string)
   const defined = rustFunctions(code).fns.filter((f) => f.fn === call[1]);
   const returns = /->([\s\S]*)$/.exec(defined.length === 1 ? (defined[0]?.sig ?? "") : "")?.[1];
   const type = (returns ?? "").split(/\bwhere\b/)[0]?.trim() ?? "";
-  if (index === undefined) return type !== "" && harmlessType(type, code);
+  if (index === undefined) return type !== "" && sure(type);
   const parts = /^\(([\s\S]*)\)$/.exec(type)?.[1];
   const part = parts === undefined ? undefined : topLevelParts(parts)[index];
-  return part !== undefined && harmlessType(part, code);
+  return part !== undefined && sure(part);
 }
 
 /** Where a `let`'s pattern ends, tried from the character before: at a lone `=`, or a `;`. */
@@ -5760,19 +5783,25 @@ function armPatterns(text: string, start: number, end: number): [number, number]
 
 /**
  * Where `text`, a function from its `fn`, binds `name`, each with whether that binding is surely
- * one of HARMLESS_CLOSERS: `name: T`, as a parameter, a `let` or a closure's; `let name = T::new(`
- * or that in an `Arc`; a tuple `let` whose part for `name` is that; either from a call whose
- * function is declared to return one there (`returnsHarmless`). Any other `name:`, and every
- * mention of the name not followed by a `.` or a `(` where a pattern may bind it
- * (`patternRegions`), counts as a binding, unsure. `text` is the function from its `fn`, its body
+ * of a type `sure` takes, by default one of HARMLESS_CLOSERS: `name: T`, as a parameter, a `let`
+ * or a closure's; `let name = T::new(` or that in an `Arc`; a tuple `let` whose part for `name` is
+ * that; either from a call whose function is declared to return one there (`returnsHarmless`).
+ * Any other `name:`, and every mention of the name not followed by a `.` or a `(` where a pattern
+ * may bind it (`patternRegions`), counts as a binding, unsure. `text` is the function from its `fn`, its body
  * from `body` on.
  */
-function bindingsOf(name: string, text: string, body: number, code: string): Map<number, boolean> {
+function bindingsOf(
+  name: string,
+  text: string,
+  body: number,
+  code: string,
+  sure: (type: string) => boolean = (type) => harmlessType(type, code),
+): Map<number, boolean> {
   const sites = new Map<number, boolean>();
   const word = `(?<![\\w.]\\s*)(?:r#)?${name}\\b`;
   for (const m of text.matchAll(new RegExp(`${word}\\s*:(?!:)`, "g"))) {
     const after = text.slice(m.index + m[0].length);
-    sites.set(m.index, harmlessType(toTopLevelEnd(after), code));
+    sites.set(m.index, sure(toTopLevelEnd(after)));
   }
   for (const m of text.matchAll(/\blet\s+/g)) {
     const rest = text.slice(m.index + m[0].length);
@@ -5787,7 +5816,7 @@ function bindingsOf(name: string, text: string, body: number, code: string): Map
         sites.set(
           offset,
           value.startsWith("=") &&
-            (makesHarmless(made, code) || returnsHarmless(made, undefined, code)),
+            (makesHarmless(made, sure) || returnsHarmless(made, undefined, code, sure)),
         );
       }
       continue;
@@ -5800,16 +5829,16 @@ function bindingsOf(name: string, text: string, body: number, code: string): Map
       const offset = at + found.index;
       if (sites.has(offset)) continue;
       const index = names?.findIndex((n) => new RegExp(`^(?:mut\\s+)?(?:r#)?${name}$`).test(n));
-      let sure = false;
+      let surely = false;
       if (index !== undefined && index >= 0 && tuple !== null) {
         const open = pattern.length + tuple[0].length - 1;
         const inner = rest.slice(open + 1, matchingBracket(rest, open));
         const part = topLevelParts(inner)[index];
-        sure = part !== undefined && makesHarmless(part, code);
+        surely = part !== undefined && makesHarmless(part, sure);
       } else if (index !== undefined && index >= 0 && value.startsWith("=")) {
-        sure = returnsHarmless(value.slice(1), index, code);
+        surely = returnsHarmless(value.slice(1), index, code, sure);
       }
-      sites.set(offset, sure);
+      sites.set(offset, surely);
     }
   }
   // Every other mention of it where a pattern may bind it, not followed by a `.` or a `(`, is a
@@ -5828,36 +5857,32 @@ function bindingsOf(name: string, text: string, body: number, code: string): Map
  * positions hold: a tracker's only stops it taking tasks, and a semaphore's only refuses more
  * permits, waking those waiting with an error; neither signals anything. Only a close with nothing
  * in its parentheses is one, and only on a binding that is surely one: a name the innermost
- * function around it binds once, as one (`bindingsOf`), or `self.<name>`, where the type the
- * function's impl is for is declared once in the file, with that field as one. Anything else, a
- * name bound twice or a field of another type, still counts.
+ * function around it binds once, as one (`bindingsOf`); `self.<name>`, where the type the
+ * function's impl is for is declared once in the file, with that field as one; or
+ * `<binding>.<name>`, where the function binds `binding` once, surely as such a type. Anything
+ * else, a name bound twice or a field of another type, still counts.
  */
 export function withoutHarmlessCloses(code: string): string {
   const { fns } = rustFunctions(code);
-  const close = /(?<![\w.]\s*)(self\s*\.\s*)?(?:r#)?(\w+)\s*\.\s*close\s*\(\s*\)/g;
-  return code.replace(close, (call, self: string | undefined, name: string, at: number) => {
+  const close = /(?<![\w.]\s*)(?:(?:r#)?(\w+)\s*\.\s*)?(?:r#)?(\w+)\s*\.\s*close\s*\(\s*\)/g;
+  return code.replace(close, (call, owner: string | undefined, name: string, at: number) => {
     const f = fns
       .filter((g) => g.m.index < at && at < g.close)
       .toSorted((a, b) => b.m.index - a.m.index)[0];
     if (f === undefined) return call;
+    const text = code.slice(f.m.index, f.close);
+    const once = (binding: string, sure?: (type: string) => boolean) => {
+      const sites = [...bindingsOf(binding, text, f.open - f.m.index, code, sure).values()];
+      return sites.length === 1 && sites[0] === true;
+    };
     let harmless: boolean;
-    if (self === undefined) {
-      const text = code.slice(f.m.index, f.close);
-      const sites = [...bindingsOf(name, text, f.open - f.m.index, code).values()];
-      harmless = sites.length === 1 && sites[0] === true;
-    } else {
-      const type = f.block?.type;
-      const structs = [
-        ...code.matchAll(new RegExp(`\\bstruct\\s+(?:r#)?${type ?? "\\b"}\\b`, "g")),
-      ];
-      const item = structs.length === 1 && type !== undefined ? structs[0] : undefined;
-      const fields =
-        item === undefined
-          ? []
-          : (structFields(code.slice(item.index, itemEnd(code, item.index)))?.fields ?? []).filter(
-              (field) => field.name === name,
-            );
-      harmless = fields.length === 1 && harmlessType(fields[0]?.type ?? "", code);
+    if (owner === undefined) harmless = once(name);
+    else if (owner === "self") harmless = harmlessField(f.block?.type, name, code);
+    else {
+      const types = [...code.matchAll(/\bstruct\s+(?:r#)?(\w+)/g)].map((m) => m[1] ?? "");
+      harmless = types
+        .filter((type) => harmlessField(type, name, code))
+        .some((type) => once(owner, (bound) => bareType(bound) === type));
     }
     return harmless ? call.replace(/[^\n]/g, " ") : call;
   });

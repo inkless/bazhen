@@ -5021,6 +5021,25 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("needn't be marked for a close of a field that is surely one, on a binding of a struct", () => {
+    for (const { type, use } of CLOSERS) {
+      const source = [
+        use,
+        `struct Rig { tasks: ${type}, child: Child }`,
+        "struct Other { tasks: Child }",
+        "fn rig() -> Rig { todo!() }",
+        "#[test]\nfn a() { let rig = rig(); rig.tasks.close(); }",
+        "#[test]\nfn b(r: &Rig) { r.tasks.close(); }",
+        "#[test]\nfn c() { let rig = other(); rig.tasks.close(); }",
+        "#[test]\nfn d() { let rig = rig(); rig.child.close(); }",
+        "#[test]\nfn e(rig: &Other) { rig.tasks.close(); }",
+        "#[test]\nfn f() { let rig = rig(); let rig = other(); rig.tasks.close(); }",
+        "#[test]\nfn g() { let rig = rig(); rig.tasks.close(now); }",
+      ].join("\n");
+      expect(flagged(source)).toEqual(["9", "11", "13", "15", "17"]);
+    }
+  });
+
   it("needn't be marked for a semaphore's own close(), and must be for any other call", () => {
     // A semaphore's close(), with nothing in its parentheses, only refuses more permits. Any other
     // call on it, or a close of one the file never types, still counts.
