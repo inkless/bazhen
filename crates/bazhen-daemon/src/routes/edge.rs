@@ -99,13 +99,111 @@ const UNSHARED_CHECKS: &[Unshared] = &[
         owner: NOTICES,
         why: KEY,
     },
+    Unshared {
+        message: "CloseShellRequest",
+        path: "/confirmedProgram",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "CloseShellRequest",
+        path: "/idempotencyKey",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "OpenShellRequest",
+        path: "/idempotencyKey",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "RenameShellRequest",
+        path: "/idempotencyKey",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "RenameShellRequest",
+        path: "/name",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "RestartShellRequest",
+        path: "/idempotencyKey",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: SHELLS,
+        why: SHELL_UNITS,
+    },
+    Unshared {
+        message: "CreateTaskRequest",
+        path: "/brief",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: TASKS,
+        why: TASK_UNITS,
+    },
+    Unshared {
+        message: "CreateTaskRequest",
+        path: "/idempotencyKey",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: TASKS,
+        why: TASK_UNITS,
+    },
+    Unshared {
+        message: "CreateTaskRequest",
+        path: "/title",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: TASKS,
+        why: TASK_UNITS,
+    },
+    Unshared {
+        message: "PairRequest",
+        path: "/code",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: PAIRING,
+        why: PAIR_UNITS,
+    },
+    Unshared {
+        message: "PairRequest",
+        path: "/name",
+        kind: "astralAtMaxLength",
+        refused_by: Side::Route,
+        owner: PAIRING,
+        why: PAIR_UNITS,
+    },
 ];
 
 const SHELLS: &str = "the shells routes' port";
 const NOTICES: &str = "the notices routes' port";
+const TASKS: &str = "the tasks routes' port";
+const PAIRING: &str = "the pairing route's port";
 
 const GENERATION: &str = "close_request and restart_request read the generation as serde's u64 \
                           and hold it to no bound, so one past 2^53 - 1 goes on to the shells";
+const SHELL_UNITS: &str = "the shells routes count a key, a confirmed program and a name (through \
+                           shell_name) in UTF-16 units, so astral text at zod's bound, which \
+                           counts code points, is refused";
+const TASK_UNITS: &str = "tasks::asked counts a key, a title (through new_task_title) and a brief in \
+                          UTF-16 units, so astral text at zod's bound, which counts code points, \
+                          is refused";
+const PAIR_UNITS: &str = "pairing counts a code and a name in UTF-16 units, so astral text at \
+                          zod's bound, which counts code points, is refused";
 const KEY: &str = "dismiss reads the idempotency key with serde alone and holds it to no \
                    length, so an empty or overlong key goes on to the store";
 
