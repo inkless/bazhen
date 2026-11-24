@@ -23,6 +23,43 @@ pub(super) fn read_thread_started(method: &str, params: &Js) -> Option<String> {
     shown(field(params, "thread")?).map(str::to_owned)
 }
 
+/// One page of a `thread/list` answer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct ThreadPage {
+    /// The shown threads, newest first as the server sorts them.
+    pub(super) threads: Vec<String>,
+    /// The next page's cursor; none when this is the last, or an answer it can't read.
+    pub(super) next_cursor: Option<String>,
+}
+
+pub(super) fn read_thread_list(result: &Js) -> ThreadPage {
+    let page = || {
+        let Some(Js::Array(data)) = field(result, "data") else {
+            return None;
+        };
+        let next_cursor = nullish_string(result, "nextCursor").ok()?;
+        Some(ThreadPage {
+            threads: data
+                .iter()
+                .filter_map(|t| shown(t).map(str::to_owned))
+                .collect(),
+            next_cursor: next_cursor.map(str::to_owned),
+        })
+    };
+    page().unwrap_or_default()
+}
+
+/// The ids among `ids` that start with `prefix`, each once, in the order they came.
+pub(super) fn matching<'a>(prefix: &str, ids: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::new();
+    for id in ids {
+        if id.starts_with(prefix) && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
 /// Whitespace as JavaScript's `trim` takes it: Unicode's, but U+0085, and the byte-order mark.
 pub(super) fn js_space(c: char) -> bool {
     (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}'

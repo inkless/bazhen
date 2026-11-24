@@ -1,22 +1,27 @@
 //! The daemon's one connection to Codex's app-server: the handshake that checks the server is the
-//! user's Codex home's, and every agent's thread picked up again on each connection
-//! (foundation-design §5.8).
+//! user's Codex home's, every agent's thread picked up again on each connection, and an agent
+//! followed to the thread its terminal's title names (foundation-design §5.8).
 
 use super::launch::{control_socket, resume_params};
 use super::signals::{busy, result_activity, result_not_loaded};
-use super::threads::js_space;
+use super::threads::{js_space, matching, read_thread_list, title_prefix};
 use super::wire::string;
 use super::{AUTO_CONTINUED, INTERRUPTED, Threads, lock, on};
 use crate::js::Js;
 use crate::{
-    Bound, BoxFuture, ChannelError, ChannelErrorKind, ChannelPort, Endpoint, Followed, Keyed,
-    Lookup, Observed, Reloaded, Report, Session, SessionKey,
+    AgentId, Bound, BoxFuture, ChannelError, ChannelErrorKind, ChannelPort, Endpoint, Followed,
+    Keyed, Lookup, Observed, Reloaded, Report, Session, SessionKey,
 };
-use bazhen_protocol::agents::ActivityValue;
+use bazhen_protocol::agents::{ActivityValue, ExternalRef, ExternalRefKind};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
-/// Why an agent stays where it is when its title names another thread.
+/// The threads `thread/list` answers with in one page.
+const LIST_PAGE: u64 = 50;
+/// The most pages a move's first try reads, for a thread the TUI resumed from far back; its
+/// retries read only the first, where a thread saved since sorts.
+const LIST_PAGES: usize = 40;
+/// Why an agent stays where it is when its title can't be followed to one thread.
 pub(crate) const UNTRACKED: &str = "thread switches are not being tracked";
 
 /// The Codex home the agents run in, as they name it and with its links resolved, which is how a
@@ -64,6 +69,14 @@ pub(super) fn cli_version(output: &str) -> Option<String> {
     let spaced = output.get(name.len()..)?.starts_with(' ');
     let numbered = version.starts_with(|c: char| c.is_ascii_digit());
     (spaced && numbered && !version.contains(js_space)).then(|| version.to_owned())
+}
+
+/// A move an agent's title asked for that has bound no thread yet: the prefix the title named,
+/// and the one thread it found but couldn't resume.
+#[derive(Debug)]
+pub(super) struct Move {
+    prefix: String,
+    thread: Option<String>,
 }
 
 /// Codex's [`Session`]. It shares what Codex holds of each thread with the adapter that reads the
@@ -115,12 +128,40 @@ impl CodexSession {
             None => Vec::new(),
         }
     }
+
+    /// The threads the server lists in up to `pages` pages, newest first; those it listed before
+    /// a request failed, if one does.
+    async fn listed(channel: &dyn ChannelPort, pages: usize) -> Vec<String> {
+        let mut threads = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..pages {
+            let params = match cursor.take() {
+                None => json!({ "limit": LIST_PAGE }),
+                Some(cursor) => json!({ "limit": LIST_PAGE, "cursor": cursor }),
+            };
+            let Ok(answer) = channel.request("thread/list", params).await else {
+                break;
+            };
+            let page = Js::parse(answer.to_string().as_bytes())
+                .map_or_else(Default::default, |answer| read_thread_list(&answer));
+            threads.extend(page.threads);
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        threads
+    }
 }
 
 fn untracked() -> Followed {
     Followed::Untracked {
         detail: UNTRACKED.to_owned(),
     }
+}
+
+fn owned(found: Vec<&str>) -> Vec<String> {
+    found.into_iter().map(str::to_owned).collect()
 }
 
 impl Session for CodexSession {
@@ -187,6 +228,10 @@ impl Session for CodexSession {
         bound: &'a [Bound],
     ) -> BoxFuture<'a, Vec<Keyed>> {
         Box::pin(async move {
+            // An agent not bound any more isn't moving either.
+            lock(&self.threads)
+                .moves
+                .retain(|moving, _| bound.iter().any(|b| &b.agent == moving));
             let mut out = Vec::new();
             let mut resumed = Vec::new();
             for agent in bound {
@@ -239,18 +284,67 @@ impl Session for CodexSession {
         Vec::new()
     }
 
-    /// Not yet: the next change follows an agent to the thread its title names.
+    /// The thread a title names: one the server announced, the one an earlier try found, or one
+    /// the server lists. Its first try reads many pages, for a thread resumed from far back, and a
+    /// retry of the same title only the first, where a thread saved since sorts. The agent is
+    /// bound once its new thread is resumed, so nothing the thread says after the move is missed.
+    /// A blank title never comes here: ingest reads one as [`Observed::Release`].
     fn follow<'a>(
         &'a mut self,
-        _agent: &'a Bound,
-        _candidate: &'a str,
-        _channel: &'a dyn ChannelPort,
+        agent: &'a Bound,
+        candidate: &'a str,
+        channel: &'a dyn ChannelPort,
     ) -> BoxFuture<'a, Followed> {
-        Box::pin(std::future::ready(untracked()))
+        Box::pin(async move {
+            let waited = lock(&self.threads).moves.remove(&agent.agent);
+            let Some(prefix) = title_prefix(candidate) else {
+                return untracked();
+            };
+            // Still the same thread, as after `/compact`, or back on it.
+            if agent.session.id.starts_with(prefix) {
+                return Followed::Bound(agent.session.clone());
+            }
+            let waited = waited.filter(|m| m.prefix == prefix);
+            let mut found = owned(matching(
+                prefix,
+                lock(&self.threads).seen.iter().map(String::as_str),
+            ));
+            if found.is_empty() {
+                found.extend(waited.as_ref().and_then(|m| m.thread.clone()));
+            }
+            if found.is_empty() {
+                let pages = if waited.is_none() { LIST_PAGES } else { 1 };
+                let listed = Self::listed(channel, pages).await;
+                found = owned(matching(prefix, listed.iter().map(String::as_str)));
+            }
+            let thread = match found.as_slice() {
+                [] => None,
+                [thread] => Some(thread.clone()),
+                _ => return untracked(),
+            };
+            if let Some(thread) = &thread
+                && self.resume(channel, agent, thread).await.is_ok()
+            {
+                return Followed::Bound(ExternalRef {
+                    environment_id: agent.session.environment_id.clone(),
+                    kind: ExternalRefKind::CodexThread,
+                    id: thread.clone(),
+                });
+            }
+            let prefix = prefix.to_owned();
+            lock(&self.threads)
+                .moves
+                .insert(agent.agent.clone(), Move { prefix, thread });
+            Followed::Pending
+        })
     }
 
-    fn may_follow_to(&self, _candidate: &str, _announced: &SessionKey) -> bool {
-        false
+    fn may_follow_to(&self, candidate: &str, announced: &SessionKey) -> bool {
+        title_prefix(candidate).is_some_and(|prefix| announced.0.starts_with(prefix))
+    }
+
+    fn settled(&mut self, agent: &AgentId) {
+        lock(&self.threads).moves.remove(agent);
     }
 }
 

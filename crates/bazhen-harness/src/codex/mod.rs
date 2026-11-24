@@ -14,17 +14,17 @@ mod wire;
 
 use crate::js::Js;
 use crate::{
-    ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
-    Gate, Harness, HarnessActivity, HarnessDeps, HarnessDoctor, Held, IngestContext, Ingested, Key,
-    Keyed, LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal, Observed,
-    Outgoing, Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session, SessionKey,
-    Settled, ToolKey,
+    ActivitySource, AgentId, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery,
+    Evidence, Gate, Harness, HarnessActivity, HarnessDeps, HarnessDoctor, Held, IngestContext,
+    Ingested, Key, Keyed, LaunchError, LaunchRequest, LaunchSpec, LimitStop, Listen, MailRefusal,
+    Observed, Outgoing, Pending, PushPort, Pushed, Reply, Report, Resolution, RunPort, Session,
+    SessionKey, Settled, ToolKey,
 };
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
 use bazhen_protocol::shells::TuiTheme;
-use session::{CodexSession, Home};
-use std::collections::{HashMap, HashSet};
+use session::{CodexSession, Home, Move};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -35,6 +35,9 @@ const THEMES: [TuiTheme; 2] = [TuiTheme::Light, TuiTheme::Dark];
 pub(crate) const AUTO_CONTINUED: &str = "auto-continued after a Codex restart";
 /// The detail of a thread whose turn a server's restart ended, until a turn starts on it.
 pub(crate) const INTERRUPTED: &str = "interrupted by a Codex restart";
+/// How many new threads are kept to find a title's thread in before the server is asked; the
+/// oldest go first.
+const SEEN: usize = 2000;
 /// How long `bazhen doctor` waits on `codex --version`.
 const CLI_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -57,6 +60,12 @@ struct Threads {
     requests: HashMap<String, (String, ToolKey)>,
     /// The question a text answer to a request goes to, by the request's key, and its thread.
     questions: HashMap<String, (String, String)>,
+    /// The threads the server announced, oldest first, where a title's thread is looked for
+    /// before the server is asked.
+    seen: VecDeque<String>,
+    /// Each agent's move its title asked for that has bound no thread yet, until a follow binds
+    /// it or gives up, its title settles on a blank or its own thread, or the agent goes.
+    moves: HashMap<AgentId, Move>,
     /// The version the last handshake named, or none, which stands across a connection that ends.
     version: Option<String>,
 }
@@ -70,6 +79,15 @@ impl Threads {
         self.labels.remove(thread);
         self.requests.retain(|_, (on, _)| on != thread);
         self.questions.retain(|_, (on, _)| on != thread);
+    }
+
+    /// A thread the server announced, kept newest last.
+    fn saw(&mut self, thread: &str) {
+        self.seen.retain(|seen| seen != thread);
+        self.seen.push_back(thread.to_owned());
+        if self.seen.len() > SEEN {
+            self.seen.pop_front();
+        }
     }
 
     /// The thread's activity as a fact, with the error a failed turn names or the thread's label.
@@ -171,6 +189,7 @@ impl Codex {
             return vec![account(Observed::AccountLimits(limits))];
         }
         if let Some(thread) = threads::read_thread_started(method, params) {
+            self.threads().saw(&thread);
             return vec![account(Observed::SessionAnnounced {
                 session: SessionKey(thread),
             })];
@@ -431,7 +450,16 @@ impl Harness for Codex {
                 .map_or_else(Ingested::nothing, |params| {
                     self.request(method, &params, id, bound)
                 }),
-            Report::TerminalTitle { title: text } => title(text, context),
+            Report::TerminalTitle { title: text } => {
+                let ingested = title(text, context);
+                // Back on its own thread, or the TUI gone: no move waits any longer.
+                if let (Some(agent), [fact]) = (context.agent, ingested.observed.as_slice())
+                    && matches!(fact.fact, Observed::Release | Observed::Ready { .. })
+                {
+                    self.threads().moves.remove(agent);
+                }
+                ingested
+            }
             Report::Hook { .. } => Ingested::nothing(),
         }
     }
