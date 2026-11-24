@@ -9,6 +9,7 @@ pub mod events;
 pub mod id;
 pub mod ids;
 pub mod input;
+pub mod js_number;
 pub mod mail;
 pub mod names;
 pub mod notices;
