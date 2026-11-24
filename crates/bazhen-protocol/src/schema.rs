@@ -341,3 +341,29 @@ pub(crate) fn in_order<T: serde::Serialize>(variants: &[T]) -> Schema {
         .collect();
     schemars::json_schema!({ "type": "string", "enum": names })
 }
+
+/// What the edge gives back of a request it took, or the rule it broke.
+fn given<T: serde::Serialize>(
+    taken: Result<T, crate::edge::Refused>,
+) -> Result<serde_json::Value, String> {
+    serde_json::to_value(taken.map_err(|refused| refused.0)?).map_err(|err| err.to_string())
+}
+
+/// The edge's verdict on `body` as the message the schema `name` names, or none where the
+/// daemon's edge doesn't read that message.
+pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, String>> {
+    use crate::edge::edge;
+    Some(match name {
+        "CloseShellRequest" => given(edge::<CloseShellRequest>(body)),
+        "CreateTaskRequest" => given(edge::<CreateTaskRequest>(body)),
+        "DismissNoticeRequest" => given(edge::<DismissNoticeRequest>(body)),
+        "OpenShellRequest" => given(edge::<OpenShellRequest>(body)),
+        "PairRequest" => given(edge::<PairRequest>(body)),
+        "RenameShellRequest" => given(edge::<RenameShellRequest>(body)),
+        "RestartShellRequest" => given(edge::<RestartShellRequest>(body)),
+        "ShellDecline" => given(edge::<ShellDecline>(body)),
+        "ShellPrompt" => given(edge::<ShellPrompt>(body)),
+        "ShellReport" => given(edge::<ShellReport>(body)),
+        _ => return None,
+    })
+}

@@ -90,7 +90,14 @@ pub(crate) fn run<H: Host>(
         Some(("gate", matches)) => matches,
         Some(("schema", matches)) => {
             let check = matches.get_flag("check");
-            return schema::run(check, world.env, &world.places, world.host, err);
+            return schema::run(
+                check,
+                schema::KNOWN_MISMATCHES,
+                world.env,
+                &world.places,
+                world.host,
+                err,
+            );
         }
         _ => return Exit::Usage,
     };

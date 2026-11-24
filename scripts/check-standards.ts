@@ -1216,6 +1216,10 @@ const NOT_DECODERS: Record<string, string> = {
     "hands cargo configs' text to config_failures; parses nothing itself",
   "crates/bazhen-xtask/src/schema/mod.rs::run":
     "hands cargo configs' text to config_failures, and what the protocol crates' own emit_schema example prints to write_shadow; parses nothing itself",
+  "crates/bazhen-protocol/src/schema.rs::verdict":
+    "hands its bytes to edge, which the edge target fuzzes, and writes back what edge took; built only under the schema feature, for the corpus",
+  "crates/bazhen-xtask/src/schema/mod.rs::write_corpus":
+    "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, and the protocol's schemas and fixtures under packages/protocol; reads nothing from outside the repository",
   "crates/bazhen-xtask/src/schema/mod.rs::write_shadow":
     "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, and the names the repository's checks.ts exports; reads nothing from outside the repository",
   "crates/bazhen-xtask/src/main.rs::Real::read":
