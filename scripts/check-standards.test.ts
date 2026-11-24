@@ -5025,16 +5025,17 @@ describe("tests that signal processes they didn't start", () => {
       ).toEqual(["crates/h/src/hub.rs:4", "scripts/check-standards.ts"]);
     });
 
-    it("must be marked for a stream's close() in a function that isn't listed", () => {
+    it("passes over a stream's close() in the listed function alone, not in one beside it", () => {
       const source = [
         "impl<R> Shared<R> {",
         "    fn release(&self) { found.watched.stream.close(); }",
         "    fn release_all(&self) { found.watched.stream.close(); }",
         "}",
-        "#[test]\nfn a() { h.release_all(); }",
+        "#[test]\nfn a() { h.release(); }",
+        "#[test]\nfn b() { h.release_all(); }",
       ].join("\n");
       expect(listed({ "crates/h/src/hub.rs": source }).map((f) => f.split(": ")[0])).toEqual([
-        "crates/h/src/hub.rs:5",
+        "crates/h/src/hub.rs:7",
       ]);
     });
 
