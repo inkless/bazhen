@@ -880,12 +880,14 @@ describe("harnessFailures", () => {
         '[[test]]\nname = "t"\n"\\u0068arness" = false\n',
         '[package]\ndescription = "a \\"quoted\\" word"\n',
         "[lib]\ndoctest = false\n",
+        '[dependencies]\nbazhen-harness = { workspace = true }\n"a-harness" = "1"\n',
       ].map((t) => harnessFailures("crates/a/Cargo.toml", t)),
     ).toEqual([
       [expect.stringContaining("sets a test harness")],
       [expect.stringContaining("sets a test harness")],
       [expect.stringContaining("holds a \\ escape")],
       [expect.stringContaining("holds a \\ escape")],
+      [],
       [],
     ]);
   });

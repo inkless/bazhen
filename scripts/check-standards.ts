@@ -4978,7 +4978,8 @@ export function harnessFailures(manifest: string, text: string): string[] {
         "Write every key and value out plainly.",
     ];
   }
-  return /["']?\bharness["']?\s*=/.test(text)
+  // A bare key may hold `-`, so `bazhen-harness = …`, a dependency, is a key of its own.
+  return /(?<![\w-])["']?harness["']?\s*=/.test(text)
     ? [`${manifest}: sets a test harness. Tests run under libtest, which nextest drives.`]
     : [];
 }
