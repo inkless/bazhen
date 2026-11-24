@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use schemars::generate::SchemaSettings;
+use schemars::transform::{Transform, transform_subschemas};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 
 use crate::agents::{
@@ -35,9 +36,41 @@ use crate::tasks::{
 use crate::terminals::TerminalScreen;
 use crate::waits::{WaitRequest, WaitResponse};
 
-/// A generator of the protocol's dialect: JSON Schema 2020-12, each named type under `$defs`.
+/// A generator of the protocol's dialect: JSON Schema 2020-12, each named type under `$defs`, its
+/// 64-bit integers held to what JavaScript reads exactly.
 pub fn generator() -> SchemaGenerator {
-    SchemaSettings::draft2020_12().into_generator()
+    SchemaSettings::draft2020_12()
+        .with_transform(SafeIntegers)
+        .into_generator()
+}
+
+/// The largest integer a JavaScript number holds exactly, 2^53 - 1: `Number.MAX_SAFE_INTEGER`.
+pub const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
+
+/// A JavaScript peer reads a JSON number as a double, so the protocol's 64-bit integers are those
+/// a double holds exactly, as zod's `.int()` says. This bounds the schema only: serde still reads
+/// any `u64` or `i64`.
+#[derive(Debug, Clone)]
+struct SafeIntegers;
+
+impl Transform for SafeIntegers {
+    fn transform(&mut self, schema: &mut Schema) {
+        let format = schema.get("format").and_then(serde_json::Value::as_str);
+        let signed = match format {
+            Some("uint64") => false,
+            Some("int64") => true,
+            _ => return transform_subschemas(self, schema),
+        };
+        if let Some(object) = schema.as_object_mut() {
+            object.entry("maximum").or_insert(MAX_SAFE_INTEGER.into());
+            if signed {
+                object
+                    .entry("minimum")
+                    .or_insert((-MAX_SAFE_INTEGER).into());
+            }
+        }
+        transform_subschemas(self, schema);
+    }
 }
 
 /// Adds every message of the API to `generator`'s definitions, with each type it names.
@@ -174,5 +207,51 @@ impl JsonSchema for FinishNoteText {
             "maxLength": 20_000,
             "x-bazhen-check": "finishNoteText",
         })
+    }
+}
+
+/// The key a request is made once by: 1 to 200 long.
+#[derive(Debug)]
+pub struct IdempotencyKey;
+
+impl JsonSchema for IdempotencyKey {
+    fn schema_name() -> Cow<'static, str> {
+        "IdempotencyKey".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "string", "minLength": 1, "maxLength": 200 })
+    }
+}
+
+/// An instant as zod's `iso.datetime()` takes it: a real date of the Gregorian calendar, then a
+/// time in UTC to the second or any fraction of one, with `Z`.
+pub const TIMESTAMP_PATTERN: &str = r"^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z))$";
+
+/// An instant: [`TIMESTAMP_PATTERN`].
+#[derive(Debug)]
+pub struct Timestamp;
+
+impl JsonSchema for Timestamp {
+    fn schema_name() -> Cow<'static, str> {
+        "Timestamp".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "string", "pattern": TIMESTAMP_PATTERN })
+    }
+}
+
+/// An event's place in the log: from 1, and within what JavaScript reads exactly.
+#[derive(Debug)]
+pub struct EventId;
+
+impl JsonSchema for EventId {
+    fn schema_name() -> Cow<'static, str> {
+        "EventId".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "integer", "minimum": 1, "maximum": MAX_SAFE_INTEGER })
     }
 }

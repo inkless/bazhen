@@ -35,7 +35,10 @@ impl TuiTheme {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct NeedsRestart {
-    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<u64>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<u64>", range(min = 1))
+    )]
     pub holder_pid: Option<u64>,
     #[serde(default)]
     pub served: bool,
@@ -125,6 +128,7 @@ pub fn shell_commands(state: TerminalState, linked: bool) -> Vec<ShellCommand> {
 #[serde(rename_all = "camelCase")]
 pub struct BusyShell {
     pub terminal_id: TerminalId,
+    #[cfg_attr(feature = "schema", schemars(length(max = 200)))]
     pub program: String,
 }
 
@@ -133,6 +137,7 @@ pub struct BusyShell {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Foreground {
     pub command: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub since: String,
 }
 
@@ -170,6 +175,7 @@ pub struct Shell {
 #[cfg_attr(feature = "schema", schemars(extend("x-bazhen-check" = "linkedShellTakesNoCwd")))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[serde(
         default,
@@ -183,7 +189,7 @@ pub struct OpenShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub cwd: Option<String>,
     #[serde(
         default,
@@ -199,6 +205,7 @@ pub struct OpenShellRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(
@@ -213,7 +220,7 @@ pub struct CloseShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 200)))]
     pub confirmed_program: Option<String>,
     #[serde(
         default,
@@ -230,6 +237,7 @@ pub struct CloseShellRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ShellCommandResponse {
     pub terminal_id: TerminalId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 

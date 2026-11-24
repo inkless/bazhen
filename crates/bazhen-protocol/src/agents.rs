@@ -124,6 +124,7 @@ pub enum ExternalRefKind {
 pub struct ExternalRef {
     pub environment_id: EnvironmentId,
     pub kind: ExternalRefKind,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
     pub id: String,
 }
 
@@ -172,13 +173,15 @@ pub struct Activity {
     pub value: ActivityValue,
     pub source: ActivitySource,
     #[serde(serialize_with = "crate::js_number::number")]
+    #[cfg_attr(feature = "schema", schemars(range(min = 0, max = 1)))]
     pub confidence: f64,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub observed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 200)))]
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub resets_at: Option<String>,
 }
 
@@ -187,11 +190,13 @@ pub struct Activity {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct UsageLimit {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 60)))]
     pub window: String,
     #[serde(serialize_with = "crate::js_number::number")]
+    #[cfg_attr(feature = "schema", schemars(range(min = 0)))]
     pub used_percent: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub resets_at: Option<String>,
 }
 
@@ -202,20 +207,23 @@ pub struct UsageLimit {
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 200)))]
     pub model: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         serialize_with = "crate::js_number::optional"
     )]
-    #[cfg_attr(feature = "schema", schemars(with = "f64"))]
+    #[cfg_attr(feature = "schema", schemars(with = "f64", range(min = 0, max = 100)))]
     pub context_used_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "u64"))]
+    #[cfg_attr(feature = "schema", schemars(with = "u64", range(min = 1)))]
     pub context_window_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "Vec<UsageLimit>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "Vec<UsageLimit>", length(max = 20))
+    )]
     pub limits: Option<Vec<UsageLimit>>,
 }
 
@@ -236,6 +244,7 @@ pub enum AgentCommand {
 pub struct Headline {
     pub text: String,
     pub task_id: TaskId,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub at: String,
 }
 
@@ -346,7 +355,7 @@ pub struct FleetSignal {
     pub source: ActivitySource,
     pub age_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub resets_at: Option<String>,
 }
 
@@ -412,6 +421,7 @@ pub struct FleetAgent {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RenameAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub name: AgentName,
 }
@@ -437,6 +447,7 @@ pub struct CallerResponse {
 #[serde(rename_all = "camelCase")]
 pub struct AgentCommandResponse {
     pub agent_id: AgentId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -469,11 +480,13 @@ impl Signal {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub harness: HarnessId,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
@@ -486,7 +499,10 @@ pub struct LaunchAgentRequest {
     pub role: Option<Role>,
     /// Tokens of context before the harness compacts it, from 100 000 to 10 000 000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "u32"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "u32", range(min = 100_000, max = 10_000_000))
+    )]
     pub compact_window_tokens: Option<u32>,
 }
 
@@ -502,6 +518,7 @@ pub struct LaunchAgentResponse {
         schemars(with = "crate::schema::Required<TerminalId>")
     )]
     pub terminal_id: Option<TerminalId>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -510,6 +527,7 @@ pub struct LaunchAgentResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -531,6 +549,7 @@ pub struct CloseAgentRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RespawnAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -543,6 +562,7 @@ pub struct RespawnAgentRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RelaunchAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -558,6 +578,7 @@ pub struct RelaunchAgentRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SignalAgentRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     pub signal: Signal,

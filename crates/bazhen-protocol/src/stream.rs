@@ -36,6 +36,7 @@ impl AttachmentMode {
 #[serde(rename_all = "camelCase")]
 pub struct Resumes {
     pub attachment_id: AttachmentId,
+    #[cfg_attr(feature = "schema", schemars(length(max = 64)))]
     pub token: String,
 }
 
@@ -51,14 +52,18 @@ pub enum StreamClientFrame {
         #[cfg_attr(feature = "schema", schemars(with = "String"))]
         protocol_id: Option<String>,
         mode: AttachmentMode,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         rows: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[cfg_attr(feature = "schema", schemars(with = "Resumes"))]
         resumes: Option<Resumes>,
     },
     Resize {
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         rows: u16,
     },
     /// Takes the lease, as a click in the web app does.
@@ -115,7 +120,9 @@ pub enum StreamServerFrame {
     },
     SnapshotEnd,
     Geometry {
+        #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 1000)))]
         rows: u16,
     },
     /// Input from a view that wasn't driving was dropped.

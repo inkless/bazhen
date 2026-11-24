@@ -91,6 +91,7 @@ pub struct Notice {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub close_reason: Option<String>,
     pub summary: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub opened_at: String,
     #[cfg_attr(
         feature = "schema",
@@ -112,6 +113,7 @@ pub struct Notice {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DismissNoticeRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
 }
 
@@ -119,6 +121,7 @@ pub struct DismissNoticeRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DismissNoticeResponse {
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -127,9 +130,10 @@ pub struct DismissNoticeResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairRequest {
+    #[cfg_attr(feature = "schema", schemars(length(max = 32)))]
     pub code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 64)))]
     pub name: Option<String>,
 }
 
@@ -149,6 +153,7 @@ pub struct PairResponse {
 pub struct PairingLan {
     pub url: String,
     pub fingerprint: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub expires_at: String,
 }
 
@@ -157,7 +162,9 @@ pub struct PairingLan {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingCodeResponse {
+    #[cfg_attr(feature = "schema", schemars(length(min = 8, max = 8)))]
     pub code: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub expires_at: String,
     pub origins: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,8 +178,11 @@ pub struct PairingCodeResponse {
 pub struct Device {
     pub id: DeviceId,
     pub name: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub paired_at: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub last_seen_at: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub expires_at: String,
 }
 

@@ -166,6 +166,7 @@ pub struct Pairing {
 pub struct Certificate {
     pub fingerprint: String,
     pub path: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub expires_at: String,
 }
 
@@ -238,6 +239,7 @@ pub struct Notifications {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostPtys {
     pub used: u64,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub max: u64,
     pub exact: bool,
 }
@@ -254,6 +256,7 @@ pub enum Refusing {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Terminals {
     pub open: u64,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub max: u64,
     #[cfg_attr(
         feature = "schema",
@@ -294,6 +297,7 @@ pub struct RunningHolder {
         skip_serializing_if = "Nullable::is_absent",
         deserialize_with = "Nullable::present"
     )]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub holder_pid: Nullable<u64>,
     /// Its memory, as it reports it: null where it didn't; absent from an older daemon.
     #[serde(
@@ -374,6 +378,7 @@ fn gib(bytes: u64) -> String {
 pub enum Containment {
     #[serde(rename_all = "camelCase")]
     Scoped {
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
         systemd: u64,
         oom_policy: bool,
         terminal: MemoryCap,

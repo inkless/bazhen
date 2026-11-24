@@ -61,6 +61,7 @@ pub struct ObservedMessage {
     pub to: AgentId,
     pub summary: String,
     pub accepted: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub at: String,
 }
 
@@ -214,6 +215,7 @@ pub struct Attention {
         schemars(with = "crate::schema::Required<MessageId>")
     )]
     pub message_id: Option<MessageId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub opened_at: String,
     pub actions: Vec<AttentionAction>,
 }
@@ -223,7 +225,9 @@ pub struct Attention {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 20_000)))]
     pub body: String,
 }
 
@@ -232,6 +236,7 @@ pub struct SendMessageRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageResponse {
     pub message_id: MessageId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -240,7 +245,9 @@ pub struct SendMessageResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitMessagesRequest {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 100)))]
     pub message_ids: Vec<MessageId>,
+    #[cfg_attr(feature = "schema", schemars(range(max = crate::mail::MESSAGE_WAIT_MAX_MS)))]
     pub timeout_ms: u64,
 }
 

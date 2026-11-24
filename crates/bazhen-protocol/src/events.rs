@@ -241,6 +241,7 @@ pub fn event_kind(name: &str) -> Option<&'static EventKind> {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::EventId"))]
     pub id: u64,
     pub ts: String,
     #[serde(rename = "type")]
@@ -249,7 +250,10 @@ pub struct Event {
     pub entity_id: String,
     pub actor: String,
     #[serde(deserialize_with = "Option::deserialize")]
-    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<u64>"))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<crate::schema::EventId>")
+    )]
     pub causation_id: Option<u64>,
     #[serde(deserialize_with = "Option::deserialize")]
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]

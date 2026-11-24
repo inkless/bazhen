@@ -153,6 +153,7 @@ pub struct Assignment {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskNote {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::EventId"))]
     pub event_id: u64,
     pub task_id: TaskId,
     #[cfg_attr(
@@ -164,6 +165,7 @@ pub struct TaskNote {
     pub role: Option<Role>,
     pub text: String,
     pub handoff: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub at: String,
 }
 
@@ -205,12 +207,14 @@ pub struct Grant {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
     pub brief: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::ids::TaskId"))]
     pub parent_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "Grant"))]
@@ -228,6 +232,7 @@ pub struct CreateTaskResponse {
         schemars(with = "crate::schema::Required<AssignmentId>")
     )]
     pub assignment_id: Option<AssignmentId>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -236,6 +241,7 @@ pub struct CreateTaskResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AssignTaskRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub agent_id: AgentRef,
     pub role: Role,
@@ -246,6 +252,7 @@ pub struct AssignTaskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AssignTaskResponse {
     pub assignment_id: AssignmentId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -254,7 +261,9 @@ pub struct AssignTaskResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct UnassignTaskRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::ids::AssignmentId"))]
     pub assignment_id: String,
 }
 
@@ -263,6 +272,7 @@ pub struct UnassignTaskRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FinishTaskRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub outcome: TaskOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,6 +288,7 @@ pub struct FinishTaskRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AddTaskNoteRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskNoteText"))]
     pub text: String,
@@ -290,6 +301,7 @@ pub struct AddTaskNoteRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCommandResponse {
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -299,7 +311,7 @@ pub struct TaskCommandResponse {
 pub struct Launch {
     pub harness: HarnessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "AgentName"))]
@@ -312,9 +324,10 @@ pub struct Launch {
 #[cfg_attr(feature = "schema", schemars(extend("x-bazhen-check" = "agentOrLaunch")))]
 #[serde(rename_all = "camelCase")]
 pub struct DelegateTaskRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::ids::TaskId"))]
     pub from_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "AgentRef"))]
@@ -326,6 +339,7 @@ pub struct DelegateTaskRequest {
     pub role: Role,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::NewTaskTitle"))]
     pub title: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::tasks::TASK_BRIEF_MAX)))]
     pub brief: String,
 }
 
@@ -334,11 +348,12 @@ pub struct DelegateTaskRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct EscalateRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 2000), extend("x-bazhen-transform" = "trim")))]
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::ids::TaskId"))]
     pub task_id: Option<String>,
 }
 
@@ -373,6 +388,7 @@ pub struct BroadcastMessageResponse {
     pub sent: Vec<SentTo>,
     /// Assignees that take no mail now.
     pub skipped: Vec<Skipped>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 

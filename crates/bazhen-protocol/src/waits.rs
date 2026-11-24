@@ -154,6 +154,7 @@ pub enum WaitCondition {
 #[serde(rename_all = "camelCase")]
 pub struct WaitRequest {
     pub condition: WaitCondition,
+    #[cfg_attr(feature = "schema", schemars(range(max = crate::mail::MESSAGE_WAIT_MAX_MS)))]
     pub timeout_ms: u64,
     /// The caller waited on this condition before, and the daemon answered: a target gone from
     /// the state since then is judged gone, rather than refused as unknown.
