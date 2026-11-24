@@ -5,6 +5,7 @@
 //! `JSON.stringify` does.
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use std::collections::HashMap;
 use std::fmt;
 
 /// One JSON value, as `JSON.parse` gives it.
@@ -161,10 +162,15 @@ impl<'de> Visitor<'de> for JsVisitor {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Js, A::Error> {
         let mut entries: Vec<(String, Js)> = Vec::new();
+        // Where each key sits, so a payload of many keys reads in linear time.
+        let mut at: HashMap<String, usize> = HashMap::new();
         while let Some((key, value)) = map.next_entry::<String, Js>()? {
-            match entries.iter_mut().find(|(k, _)| *k == key) {
+            match at.get(&key).and_then(|&i| entries.get_mut(i)) {
                 Some(entry) => entry.1 = value,
-                None => entries.push((key, value)),
+                None => {
+                    at.insert(key.clone(), entries.len());
+                    entries.push((key, value));
+                }
             }
         }
         // Stable: the other keys keep the order they came in.
@@ -195,6 +201,30 @@ mod tests {
     }
 
     #[test]
+    fn reads_an_object_of_many_keys_each_repeated_in_one_pass() {
+        // 200,000 keys, then each again: well under a second read in one pass, where a search of
+        // the keys so far for each takes minutes.
+        let keys = 200_000;
+        let pairs = |value: usize| (0..keys).map(move |i| format!(r#""k{i}":{value}"#));
+        let text = format!(
+            "{{{}}}",
+            pairs(1).chain(pairs(2)).collect::<Vec<_>>().join(",")
+        );
+        let start = std::time::Instant::now();
+        let Some(Js::Object(entries)) = Js::parse(text.as_bytes()) else {
+            panic!("refused")
+        };
+        let took = start.elapsed();
+        assert_eq!(entries.len(), keys);
+        assert_eq!(entries.first(), Some(&("k0".to_owned(), Js::Number(2.0))));
+        assert_eq!(
+            entries.last(),
+            Some(&(format!("k{}", keys - 1), Js::Number(2.0)))
+        );
+        assert!(took.as_secs() < 20, "took {took:?}");
+    }
+
+    #[test]
     fn writes_numbers_and_strings_as_json_stringify_does() {
         assert_eq!(
             round_trip(
@@ -208,5 +238,6 @@ mod tests {
     fn refuses_text_that_isnt_json_and_a_number_past_a_doubles_range() {
         assert_eq!(round_trip("{not json"), "refused");
         assert_eq!(round_trip("1e400"), "refused");
+        assert_eq!(round_trip("1e308"), "1e+308");
     }
 }
