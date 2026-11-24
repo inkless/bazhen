@@ -264,6 +264,10 @@ const MAX_SAFE: i64 = (1 << 53) - 1;
 /// The longest string or list this plants: a bound past it is left unplanted.
 const LONGEST: u64 = 100_000;
 
+/// The named checks that take a string of emoji, so a length planted in astral text meets them.
+/// A field with any other check may count bytes, or refuse the text.
+const ASTRAL_SAFE_CHECKS: &[&str] = &["newTaskTitle", "shellName", "wellFormed", "noControl"];
+
 /// Where the schemas of a field are, on each side.
 #[derive(Clone, Copy)]
 struct Node<'a> {
@@ -690,6 +694,32 @@ impl<'a> Walk<'a> {
         self.walk(item, first, &at);
     }
 
+    /// A length held in astral text, which zod counts in code points, an astral character being
+    /// one and two UTF-16 units.
+    fn astral_lengths(&mut self, path: &Path, min: u64, max: Option<u64>, checks: &[String]) {
+        if !checks
+            .iter()
+            .all(|check| ASTRAL_SAFE_CHECKS.contains(&check.as_str()))
+        {
+            return;
+        }
+        let astral = |n: u64| "\u{1f600}".repeat(usize::try_from(n).unwrap_or(0));
+        if min >= 2 {
+            let under = astral(min - 1);
+            self.plant(path, "astralUnderMinLength", Edit::Put(json!(under)), false);
+        }
+        if let Some(max) = max.filter(|max| (1..=LONGEST).contains(max)) {
+            self.plant(
+                path,
+                "astralAtMaxLength",
+                Edit::Put(json!(astral(max))),
+                true,
+            );
+            let past = astral(max + 1);
+            self.plant(path, "astralPastMaxLength", Edit::Put(json!(past)), false);
+        }
+    }
+
     fn string(&mut self, node: Node<'a>, value: &Value, path: &Path, checks: &[String]) {
         self.plant(path, "wrongType", Edit::Put(json!(1)), false);
         let pattern = Self::keyword(node, "pattern").and_then(Value::as_str);
@@ -729,14 +759,8 @@ impl<'a> Walk<'a> {
                     Edit::Put(json!(units(max + 1))),
                     false,
                 );
-                if checks.is_empty() && max >= 2 {
-                    let astral = |n: u64| "\u{1f600}".repeat(usize::try_from(n).unwrap_or(0));
-                    let at_max = astral(max / 2) + &units(max % 2);
-                    self.plant(path, "astralAtMaxLength", Edit::Put(json!(at_max)), true);
-                    let past = astral(max / 2 + 1);
-                    self.plant(path, "astralPastMaxLength", Edit::Put(json!(past)), false);
-                }
             }
+            self.astral_lengths(path, min, max, checks);
             if trims && min > 0 {
                 self.plant(path, "blank", Edit::Put(json!("   ")), false);
                 let padded = |pad: &str| json!(format!("{pad}{}{pad}", units(min)));
@@ -1172,6 +1196,42 @@ mod tests {
                 )]
             );
         }
+    }
+
+    #[test]
+    fn plants_astral_lengths_in_code_points_where_no_check_counts_otherwise() {
+        let field = |check: Option<&str>| {
+            let mut name = json!({ "type": "string", "minLength": 2, "maxLength": 3 });
+            if let Some(check) = check {
+                name["x-bazhen-check"] = json!(check);
+            }
+            json!({ "type": "object", "properties": { "s": name }, "required": ["s"] })
+        };
+        let example = json!({ "s": "ab" });
+        let planted = |cases: &[Case], kind: &str| {
+            cases.iter().find(|c| c.kind == kind).map(|c| {
+                let body: Value = serde_json::from_str(&c.body).unwrap();
+                (body["s"].as_str().unwrap().chars().count(), c.accept)
+            })
+        };
+        for check in [None, Some("shellName")] {
+            let cases = planted_in(&field(check), None, &example).unwrap();
+            assert_eq!(planted(&cases, "astralUnderMinLength"), Some((1, false)));
+            assert_eq!(planted(&cases, "astralAtMaxLength"), Some((3, true)));
+            assert_eq!(planted(&cases, "astralPastMaxLength"), Some((4, false)));
+            assert!(
+                cases
+                    .iter()
+                    .filter(|c| c.kind.starts_with("astral"))
+                    .all(|c| c.body.contains('\u{1f600}') && !c.body.contains('a')),
+                "{cases:?}"
+            );
+        }
+        let bytes = planted_in(&field(Some("taskNoteBytes")), None, &example).unwrap();
+        assert!(
+            !bytes.iter().any(|c| c.kind.starts_with("astral")),
+            "{bytes:?}"
+        );
     }
 
     #[test]

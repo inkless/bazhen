@@ -3,25 +3,28 @@
 //! decode, then its [`EdgeCheck`].
 //!
 //! Where zod holds a request to more than the Rust daemon's handlers check, the edge holds it to
-//! zod's rule: a dismissal's key to 1 to 200 units, and a close's or a restart's generation to the
-//! largest safe integer. The daemon's router test lists both.
+//! zod's rule: a dismissal's key to 1 to 200 characters, and a close's or a restart's generation to
+//! the largest safe integer. The daemon's router test lists both.
+//!
+//! zod counts a string's length in code points, so the edge does too. Where a handler shares a
+//! rule with the edge, the handler's helper still counts UTF-16 units, and the edge has its own.
 
 use serde::de::DeserializeOwned;
 
 use crate::ids::TaskId;
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
-    CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest, ShellDecline,
-    ShellPrompt, ShellReport, shell_name,
+    CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
+    SHELL_NAME_MAX_CHARS, ShellDecline, ShellPrompt, ShellReport,
 };
 use crate::tasks::CreateTaskRequest;
-use crate::text::{TASK_BRIEF_MAX_UNITS, new_task_title};
+use crate::text::{TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, showable, title_safe, trim};
 
-/// The most UTF-16 units an idempotency key has.
-pub const IDEMPOTENCY_KEY_MAX_UNITS: usize = 200;
+/// The most code points an idempotency key has.
+pub const IDEMPOTENCY_KEY_MAX_CHARS: usize = 200;
 
-/// The most UTF-16 units the program a close confirms names.
-pub const CONFIRMED_PROGRAM_MAX_UNITS: usize = 200;
+/// The most code points the program a close confirms names.
+pub const CONFIRMED_PROGRAM_MAX_CHARS: usize = 200;
 
 /// The largest integer a JSON number holds exactly, which zod's `.int()` takes at most.
 pub const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
@@ -57,8 +60,9 @@ pub fn edge<T: DeserializeOwned + EdgeCheck>(body: &[u8]) -> Result<T, Refused> 
         .checked()
 }
 
-fn units(text: &str) -> usize {
-    text.encode_utf16().count()
+/// A string's length as zod counts it: in code points.
+fn chars(text: &str) -> usize {
+    text.chars().count()
 }
 
 fn holds(holds: bool, rule: &str) -> Result<(), Refused> {
@@ -71,9 +75,21 @@ fn holds(holds: bool, rule: &str) -> Result<(), Refused> {
 
 fn keyed(key: &str) -> Result<(), Refused> {
     holds(
-        (1..=IDEMPOTENCY_KEY_MAX_UNITS).contains(&units(key)),
+        (1..=IDEMPOTENCY_KEY_MAX_CHARS).contains(&chars(key)),
         "idempotencyKey is 1 to 200 characters",
     )
+}
+
+/// A task's title, trimmed, if it holds to `NewTaskTitle`.
+fn titled(text: &str) -> Option<&str> {
+    let text = trim(text);
+    ((1..=TASK_TITLE_MAX_CHARS).contains(&chars(text)) && title_safe(text)).then_some(text)
+}
+
+/// A shell's name, trimmed, if it holds to `ShellName`.
+fn named(text: &str) -> Option<&str> {
+    let text = trim(text);
+    ((1..=SHELL_NAME_MAX_CHARS).contains(&chars(text)) && showable(text)).then_some(text)
 }
 
 fn generation(generation: u64) -> Result<(), Refused> {
@@ -86,7 +102,7 @@ fn generation(generation: u64) -> Result<(), Refused> {
 impl EdgeCheck for CreateTaskRequest {
     fn checked(mut self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
-        self.title = new_task_title(&self.title)
+        self.title = titled(&self.title)
             .ok_or_else(|| {
                 Refused(
                     "title is 1 to 200 characters once trimmed, with no control characters, \
@@ -96,7 +112,7 @@ impl EdgeCheck for CreateTaskRequest {
             })?
             .to_owned();
         holds(
-            (1..=TASK_BRIEF_MAX_UNITS).contains(&units(&self.brief)),
+            (1..=TASK_BRIEF_MAX_CHARS).contains(&chars(&self.brief)),
             "brief is 1 to 20000 characters",
         )?;
         holds(
@@ -128,7 +144,7 @@ impl EdgeCheck for CloseShellRequest {
         holds(
             self.confirmed_program
                 .as_deref()
-                .is_none_or(|program| units(program) <= CONFIRMED_PROGRAM_MAX_UNITS),
+                .is_none_or(|program| chars(program) <= CONFIRMED_PROGRAM_MAX_CHARS),
             "confirmedProgram is at most 200 characters",
         )?;
         Ok(self)
@@ -148,7 +164,7 @@ impl EdgeCheck for RenameShellRequest {
     fn checked(mut self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
         if let Some(name) = &self.name {
-            let trimmed = shell_name(name).ok_or_else(|| {
+            let trimmed = named(name).ok_or_else(|| {
                 Refused(
                     "name is 1 to 80 characters once trimmed, with no control characters or \
                      bidirectional overrides"
@@ -171,13 +187,13 @@ impl EdgeCheck for DismissNoticeRequest {
 impl EdgeCheck for PairRequest {
     fn checked(self) -> Result<Self, Refused> {
         holds(
-            units(&self.code) <= PAIRING_CODE_TYPED_MAX,
+            chars(&self.code) <= PAIRING_CODE_TYPED_MAX,
             "code is at most 32 characters",
         )?;
         holds(
             self.name
                 .as_deref()
-                .is_none_or(|name| units(name) <= DEVICE_NAME_MAX),
+                .is_none_or(|name| chars(name) <= DEVICE_NAME_MAX),
             "name is at most 64 characters",
         )?;
         Ok(self)
@@ -215,6 +231,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::shells::shell_name;
+    use crate::text::new_task_title;
 
     fn verdict<T: DeserializeOwned + EdgeCheck + serde::Serialize>(
         body: &Value,
@@ -239,10 +257,13 @@ mod tests {
         for broken in [
             json!({ "idempotencyKey": "", "title": "t", "brief": "b" }),
             json!({ "idempotencyKey": "k".repeat(201), "title": "t", "brief": "b" }),
+            json!({ "idempotencyKey": "\u{1f600}".repeat(201), "title": "t", "brief": "b" }),
+            json!({ "idempotencyKey": KEY, "title": "\u{1f600}".repeat(201), "brief": "b" }),
             json!({ "idempotencyKey": KEY, "title": "   ", "brief": "b" }),
             json!({ "idempotencyKey": KEY, "title": "a\u{202e}b", "brief": "b" }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "" }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b".repeat(20_001) }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "\u{1f600}".repeat(20_001) }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "parentTaskId": "x" }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "parentTaskId": null }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "assign": null }),
@@ -250,9 +271,9 @@ mod tests {
             assert!(refused::<CreateTaskRequest>(&broken), "{broken}");
         }
         let at_bounds = json!({
-            "idempotencyKey": "\u{1f600}".repeat(100),
-            "title": "t",
-            "brief": "b".repeat(20_000),
+            "idempotencyKey": "\u{1f600}".repeat(200),
+            "title": "\u{1f600}".repeat(200),
+            "brief": "\u{1f600}".repeat(20_000),
         });
         assert!(!refused::<CreateTaskRequest>(&at_bounds));
     }
@@ -352,7 +373,12 @@ mod tests {
             &"c".repeat(32),
             &"n".repeat(64)
         )));
+        assert!(!refused::<PairRequest>(&pair(
+            &"\u{1f600}".repeat(32),
+            &"\u{1f600}".repeat(64)
+        )));
         assert!(refused::<PairRequest>(&pair(&"c".repeat(33), "n")));
+        assert!(refused::<PairRequest>(&pair(&"\u{1f600}".repeat(33), "n")));
         assert!(refused::<PairRequest>(&pair("c", &"n".repeat(65))));
         assert!(refused::<PairRequest>(
             &json!({ "code": "c", "name": null })
@@ -372,6 +398,9 @@ mod tests {
         assert!(refused::<ShellReport>(&report("", 0)));
         assert!(!refused::<ShellPrompt>(&json!({ "token": token })));
         assert!(refused::<ShellPrompt>(&json!({ "token": "t".repeat(129) })));
+        let astral = "\u{1f600}".repeat(128);
+        assert!(!refused::<ShellPrompt>(&json!({ "token": astral })));
+        assert!(refused::<ShellPrompt>(&json!({ "token": astral + "t" })));
         assert!(!refused::<ShellDecline>(&json!({ "token": token })));
         assert!(refused::<ShellDecline>(&json!({ "token": "" })));
     }
@@ -406,6 +435,12 @@ mod tests {
         r#"{"token":"t","command":"ls"}"#,
     ];
 
+    /// Whether every character of `text` is one UTF-16 unit, where a code point count and a UTF-16
+    /// count agree.
+    fn within_one_unit(text: &str) -> bool {
+        text.chars().all(|c| c.len_utf16() == 1)
+    }
+
     /// Text a name or a title might hold: anything, or what sits at their rules' edges.
     const EDGES: &str = "[ \\t\\x{feff}\\x{85}\\x{7}\\x{202e}\\x{200b}a-z\\x{1f600}]{0,210}";
 
@@ -426,24 +461,34 @@ mod tests {
         }
 
         #[test]
-        fn a_rename_takes_a_name_exactly_when_shell_name_does_and_gives_it_back_trimmed(
+        fn a_rename_takes_a_showable_name_of_1_to_80_code_points_and_gives_it_back_trimmed(
             name in prop_oneof![any::<String>(), EDGES, PADDED],
         ) {
             let body = json!({ "idempotencyKey": KEY, "name": name });
             let taken = edge::<RenameShellRequest>(body.to_string().as_bytes());
             let read = taken.as_ref().ok().and_then(|rename| rename.name.as_deref());
-            prop_assert_eq!(read, shell_name(&name));
+            let trimmed = trim(&name);
+            let held = (1..=80).contains(&trimmed.chars().count()) && showable(trimmed);
+            prop_assert_eq!(read, held.then_some(trimmed));
+            if within_one_unit(&name) {
+                prop_assert_eq!(read, shell_name(&name), "the handler's rule, without astral text");
+            }
             prop_assert!(taken.as_ref().ok().is_none_or(settled));
         }
 
         #[test]
-        fn a_task_takes_a_title_exactly_when_new_task_title_does_and_gives_it_back_trimmed(
+        fn a_task_takes_a_safe_title_of_1_to_200_code_points_and_gives_it_back_trimmed(
             title in prop_oneof![any::<String>(), EDGES, PADDED],
         ) {
             let body = json!({ "idempotencyKey": KEY, "title": title, "brief": "b" });
             let taken = edge::<CreateTaskRequest>(body.to_string().as_bytes());
             let read = taken.as_ref().ok().map(|task| task.title.as_str());
-            prop_assert_eq!(read, new_task_title(&title));
+            let trimmed = trim(&title);
+            let held = (1..=200).contains(&trimmed.chars().count()) && title_safe(trimmed);
+            prop_assert_eq!(read, held.then_some(trimmed));
+            if within_one_unit(&title) {
+                prop_assert_eq!(read, new_task_title(&title), "the handler's rule, without astral text");
+            }
             prop_assert!(taken.as_ref().ok().is_none_or(settled));
         }
 
@@ -464,7 +509,7 @@ mod tests {
         }
 
         #[test]
-        fn a_dismissal_takes_a_key_of_1_to_200_utf16_units(
+        fn a_dismissal_takes_a_key_of_1_to_200_code_points(
             key in prop_oneof![
                 any::<String>(),
                 "[a\\x{1f600}]{0,210}",
@@ -472,8 +517,8 @@ mod tests {
         ) {
             let body = json!({ "idempotencyKey": key });
             let taken = edge::<DismissNoticeRequest>(body.to_string().as_bytes());
-            let units = key.encode_utf16().count();
-            prop_assert_eq!(taken.is_ok(), (1..=200).contains(&units), "{} units", units);
+            let points = key.chars().count();
+            prop_assert_eq!(taken.is_ok(), (1..=200).contains(&points), "{} code points", points);
             prop_assert!(taken.as_ref().ok().is_none_or(settled));
         }
     }

@@ -223,7 +223,7 @@ pub struct CloseShellRequest {
     )]
     #[cfg_attr(
         feature = "schema",
-        schemars(with = "String", length(max = crate::edge::CONFIRMED_PROGRAM_MAX_UNITS))
+        schemars(with = "String", length(max = crate::edge::CONFIRMED_PROGRAM_MAX_CHARS))
     )]
     pub confirmed_program: Option<String>,
     #[serde(
@@ -291,6 +291,10 @@ pub struct RenameShellRequest {
 /// The most UTF-16 units a shell's name has, once trimmed.
 pub const SHELL_NAME_MAX_UNITS: usize = 80;
 
+/// The most code points a shell's name has once trimmed, as zod's `.max(80)` counts them: the
+/// edge's bound. The daemon's handler counts UTF-16 units, through [`shell_name`].
+pub const SHELL_NAME_MAX_CHARS: usize = 80;
+
 /// A name a person gives a shell, trimmed, if it is 1 to 80 UTF-16 units with no control
 /// character or bidirectional override, as `ShellName` in packages/protocol holds it.
 pub fn shell_name(text: &str) -> Option<&str> {
@@ -315,19 +319,19 @@ pub fn shell_command_line(line: &str) -> bool {
         && line.len() <= COMMAND_LINE_MAX_BYTES
 }
 
-/// The most UTF-16 units a reported line has, as zod's `.max(2048)` on `ShellReport`'s `command`
+/// The most code points a reported line has, as zod's `.max(2048)` on `ShellReport`'s `command`
 /// counts them: a bound on the report, not on the line kept, which is [`COMMAND_LINE_MAX_BYTES`].
-pub const REPORTED_LINE_MAX_UNITS: usize = 2048;
+pub const REPORTED_LINE_MAX_CHARS: usize = 2048;
 
-/// The most UTF-16 units a shell's report token has.
-pub const SHELL_TOKEN_MAX_UNITS: usize = 128;
+/// The most code points a shell's report token has.
+pub const SHELL_TOKEN_MAX_CHARS: usize = 128;
 
 /// What a shell's integration reports over the daemon's socket, as the shell starts running a
 /// line: never over HTTP. `token` is the shell's own, from its environment.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellReport {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_CHARS)))]
     pub token: String,
     /// When the shell started running the line, in microseconds since the epoch: a report earlier
     /// than the kept one, arriving late, changes nothing.
@@ -345,14 +349,14 @@ pub struct ShellReport {
 
 impl ShellReport {
     /// Whether the report holds to `ShellReport`'s bounds beyond its shape: a token of 1 to 128
-    /// UTF-16 units, `at` a safe integer, and a line of at most 2048 UTF-16 units.
+    /// code points, `at` a safe integer, and a line of at most 2048 code points.
     pub fn bounded(&self) -> bool {
         token_bounded(&self.token)
             && self.at <= crate::edge::MAX_SAFE_INTEGER
             && self
                 .command
                 .as_ref()
-                .is_none_or(|line| line.encode_utf16().count() <= REPORTED_LINE_MAX_UNITS)
+                .is_none_or(|line| line.chars().count() <= REPORTED_LINE_MAX_CHARS)
     }
 }
 
@@ -374,7 +378,7 @@ impl std::fmt::Debug for ShellReport {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellPrompt {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_CHARS)))]
     pub token: String,
     #[serde(
         default,
@@ -386,7 +390,7 @@ pub struct ShellPrompt {
 }
 
 impl ShellPrompt {
-    /// Whether the token is 1 to 128 UTF-16 units.
+    /// Whether the token is 1 to 128 code points.
     pub fn bounded(&self) -> bool {
         token_bounded(&self.token)
     }
@@ -408,12 +412,12 @@ impl std::fmt::Debug for ShellPrompt {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellDecline {
-    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_UNITS)))]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = SHELL_TOKEN_MAX_CHARS)))]
     pub token: String,
 }
 
 impl ShellDecline {
-    /// Whether the token is 1 to 128 UTF-16 units.
+    /// Whether the token is 1 to 128 code points.
     pub fn bounded(&self) -> bool {
         token_bounded(&self.token)
     }
@@ -427,7 +431,7 @@ impl std::fmt::Debug for ShellDecline {
 }
 
 fn token_bounded(token: &str) -> bool {
-    (1..=SHELL_TOKEN_MAX_UNITS).contains(&token.encode_utf16().count())
+    (1..=SHELL_TOKEN_MAX_CHARS).contains(&token.chars().count())
 }
 
 #[cfg(test)]
@@ -494,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn holds_a_reported_line_to_2048_utf16_units_however_many_bytes_they_take() {
+    fn holds_a_reported_line_to_2048_code_points_however_many_bytes_they_take() {
         let bounded = |line: String| {
             ShellReport {
                 token: "t".to_owned(),
@@ -503,18 +507,18 @@ mod tests {
             }
             .bounded()
         };
-        let taken = ["a".repeat(2048), "é".repeat(2048), "😀".repeat(1024)];
+        let taken = ["a".repeat(2048), "é".repeat(2048), "😀".repeat(2048)];
         let refused = [
             "a".repeat(2049),
             format!("{}a", "é".repeat(2048)),
-            format!("{}a", "😀".repeat(1024)),
+            format!("{}a", "😀".repeat(2048)),
         ];
         assert_eq!(
             taken.map(bounded),
             [true; 3],
-            "2048 units, in 2048 bytes or 4096"
+            "2048 code points, in 2048 bytes, 4096 or 8192"
         );
-        assert_eq!(refused.map(bounded), [false; 3], "2049 units");
+        assert_eq!(refused.map(bounded), [false; 3], "2049 code points");
     }
 
     #[test]

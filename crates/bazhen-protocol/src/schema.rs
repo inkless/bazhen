@@ -202,7 +202,7 @@ impl JsonSchema for ShellName {
             "type": "string",
             "x-bazhen-transform": "trim",
             "minLength": 1,
-            "maxLength": crate::shells::SHELL_NAME_MAX_UNITS,
+            "maxLength": crate::shells::SHELL_NAME_MAX_CHARS,
             "x-bazhen-check": "shellName",
         })
     }
@@ -224,7 +224,7 @@ impl JsonSchema for ReportedLine {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         schemars::json_schema!({
             "type": "string",
-            "maxLength": crate::shells::REPORTED_LINE_MAX_UNITS,
+            "maxLength": crate::shells::REPORTED_LINE_MAX_CHARS,
         })
     }
 }

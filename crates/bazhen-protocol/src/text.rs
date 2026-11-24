@@ -64,17 +64,26 @@ pub fn task_note_text(text: &str) -> Result<String, NoteRefused> {
 pub const TASK_TITLE_MAX_UNITS: usize = 200;
 pub const TASK_BRIEF_MAX_UNITS: usize = 20_000;
 
+/// The most code points a task's title has once trimmed, and its brief, as zod's `.max` counts
+/// them: the edge's bounds. The daemon's handler counts UTF-16 units, to the bounds above.
+pub const TASK_TITLE_MAX_CHARS: usize = 200;
+pub const TASK_BRIEF_MAX_CHARS: usize = 20_000;
+
 /// A title a request gives a task, trimmed, if it is 1 to 200 UTF-16 units and holds nothing that
 /// could end or disguise the line of mail it goes on: no control character, bidirectional
 /// override, invisible or tag character.
 pub fn new_task_title(text: &str) -> Option<&str> {
     let text = trim(text);
     let units = text.encode_utf16().count();
-    ((1..=TASK_TITLE_MAX_UNITS).contains(&units)
-        && !text
-            .chars()
-            .any(|c| unshowable(c) || invisible(c) || tag(c)))
-    .then_some(text)
+    ((1..=TASK_TITLE_MAX_UNITS).contains(&units) && title_safe(text)).then_some(text)
+}
+
+/// Whether a title holds nothing that could end or disguise its line of mail: no control
+/// character, bidirectional override, invisible or tag character.
+pub(crate) fn title_safe(text: &str) -> bool {
+    !text
+        .chars()
+        .any(|c| unshowable(c) || invisible(c) || tag(c))
 }
 
 /// `text` without the white space JavaScript's `trim` takes off each end, which isn't quite
