@@ -14,6 +14,10 @@ type Path = Vec<String>;
 /// Fields to set, or with none to take out.
 type Fields = Vec<(&'static str, Option<Value>)>;
 
+/// A case an object-level check is broken by: its name, its fields, and whether the check takes
+/// them.
+type ObjectCase = (&'static str, Fields, bool);
+
 /// What a case does to its example at its path.
 #[derive(Debug, Clone, PartialEq)]
 enum Edit {
@@ -244,12 +248,11 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
     })
 }
 
-/// The fields an object-level check is broken by, each case with its name, and whether the check
-/// takes them.
-fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
+/// Each object-level check, with the cases it is broken by.
+fn object_checks() -> Vec<(&'static str, Vec<ObjectCase>)> {
     const AGENT: &str = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
-    Some(match check {
-        "agentOrLaunch" => {
+    vec![
+        ("agentOrLaunch", {
             let launch = || Some(json!({ "harness": "codex" }));
             vec![
                 (
@@ -269,34 +272,44 @@ fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
                 ),
                 ("neither", vec![("agentId", None), ("launch", None)], false),
             ]
-        }
-        "linkedShellTakesNoCwd" => vec![
-            (
-                "linkedWithCwd",
-                vec![
-                    ("linkedAgentId", Some(json!(AGENT))),
-                    ("cwd", Some(json!("/w"))),
-                ],
-                false,
-            ),
-            (
-                "unlinkedWithCwd",
-                vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
-                true,
-            ),
-            (
-                "linkedWithoutCwd",
-                vec![("linkedAgentId", Some(json!(AGENT))), ("cwd", None)],
-                true,
-            ),
-            (
-                "neither",
-                vec![("linkedAgentId", None), ("cwd", None)],
-                true,
-            ),
-        ],
-        _ => return None,
-    })
+        }),
+        (
+            "linkedShellTakesNoCwd",
+            vec![
+                (
+                    "linkedWithCwd",
+                    vec![
+                        ("linkedAgentId", Some(json!(AGENT))),
+                        ("cwd", Some(json!("/w"))),
+                    ],
+                    false,
+                ),
+                (
+                    "unlinkedWithCwd",
+                    vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
+                    true,
+                ),
+                (
+                    "linkedWithoutCwd",
+                    vec![("linkedAgentId", Some(json!(AGENT))), ("cwd", None)],
+                    true,
+                ),
+                (
+                    "neither",
+                    vec![("linkedAgentId", None), ("cwd", None)],
+                    true,
+                ),
+            ],
+        ),
+    ]
+}
+
+/// The cases `check` is broken by, if it is an object-level check.
+fn object_cases(check: &str) -> Option<Vec<ObjectCase>> {
+    object_checks()
+        .into_iter()
+        .find(|(name, _)| *name == check)
+        .map(|(_, cases)| cases)
 }
 
 /// The JSON text of the largest safe integer plus two, which a double reads as plus one.
@@ -1385,8 +1398,7 @@ mod tests {
 
     #[test]
     fn breaks_each_whole_object_check_by_every_set_of_its_fields_left_out() {
-        for check in ["agentOrLaunch", "linkedShellTakesNoCwd"] {
-            let cases = object_cases(check).unwrap();
+        for (check, cases) in object_checks() {
             let fields: BTreeSet<&str> = cases
                 .iter()
                 .flat_map(|(_, fields, _)| fields.iter().map(|(key, _)| *key))
