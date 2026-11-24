@@ -4266,6 +4266,29 @@ describe("decoderFailures", () => {
       failures(fuzzed, exempt, decodeTargetCalling("p::decoded::<Frame>(b)")),
     ]).toEqual([[], [], [expect.stringContaining("doesn't call decode")]]);
   });
+
+  it("counts a method's call that names its type parameters, and no turbofish past its statement", () => {
+    const methods = {
+      ...repo,
+      "crates/p/src/lib.rs": `${lib}pub struct Reader;\nimpl Reader { pub fn decode<T>(&self, b: &[u8]) {} }\n`,
+    };
+    const reading = (call: string) => ({
+      ...methods,
+      "crates/p/fuzz/fuzz_targets/decode.rs": `fuzz_target!(|b: &[u8]| { p::decode(b); let r = p::Reader; ${call}; });`,
+    });
+    const both = { ...fuzzed, "crates/p/src/lib.rs::Reader::decode": "decode" };
+    expect([
+      failures(both, exempt, reading("r.decode::<Frame>(b)")),
+      failures(both, exempt, reading("r.decode::<Frame>; Box::<u8>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<T>; Box::<u8>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<T> { Box::<u8>(b) }")),
+    ]).toEqual([
+      [],
+      [expect.stringContaining("doesn't call Reader::decode")],
+      [expect.stringContaining("doesn't call decode")],
+      [expect.stringContaining("doesn't call decode")],
+    ]);
+  });
 });
 
 const fuzzFailures = (text: string) => fuzzManifestFailures("crates/p/fuzz/Cargo.toml", text);

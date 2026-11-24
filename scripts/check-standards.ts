@@ -3739,8 +3739,8 @@ export function decoderFailures(
     const path = key.slice(key.indexOf(".rs::") + 5);
     const [owner, fn] = path.includes("::") ? path.split("::") : [undefined, path];
     const code = paths.includes(file) ? rustCode(read(file)) : "";
-    // A call may name its type parameters, as `edge::<T>(body)` does.
-    const turbofish = String.raw`(?:\s*::\s*<[^()]*>)?`;
+    // A call may name its type parameters, as `edge::<T>(body)` does, within one expression.
+    const turbofish = String.raw`(?:\s*::\s*<[^(){};]*>)?`;
     const calls =
       owner === undefined
         ? new RegExp(`\\b${fn}${turbofish}\\s*\\(`).test(code)
