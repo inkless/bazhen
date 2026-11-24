@@ -172,6 +172,7 @@ impl Thread {
 mod tests {
     use bazhen_protocol::events::TaskCreated;
     use bazhen_protocol::ids::TaskId;
+    use bazhen_protocol::nullable::Nullable;
     use bazhen_store::{AppendError, NewEvent};
 
     use super::*;
@@ -186,7 +187,7 @@ mod tests {
                 brief: "b".to_owned(),
                 owner_agent_id: None,
                 parent_task_id: None,
-                delegated_from: None,
+                delegated_from: Nullable::Null,
             },
         }
     }

@@ -12,6 +12,7 @@ use crate::ids::{
     AgentId, AssignmentId, AttachmentId, DeviceId, EnvironmentId, TaskId, TerminalId,
 };
 use crate::notices::{NoticeCloseReason, NoticeCloser, NoticeDevice};
+use crate::nullable::Nullable;
 use crate::record::Record;
 use crate::shells::TuiTheme;
 use crate::stream::AttachmentMode;
@@ -321,7 +322,14 @@ pub struct TaskCreated {
     pub owner_agent_id: Option<AgentId>,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<TaskId>"))]
     pub parent_task_id: Option<TaskId>,
-    pub delegated_from: Option<AssignmentId>,
+    /// The assignment an agent delegated it under; null when delegated as the parent's owner, and
+    /// absent from a daemon from before the field.
+    #[serde(
+        default,
+        skip_serializing_if = "Nullable::is_absent",
+        deserialize_with = "Nullable::present"
+    )]
+    pub delegated_from: Nullable<AssignmentId>,
 }
 
 /// The payload of `device.paired`: never the token, its hash or the code it was paired with.
@@ -544,4 +552,36 @@ pub struct LeaseGranted {
     pub attachment_id: AttachmentId,
     #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub epoch: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::TaskCreated;
+
+    #[test]
+    fn a_task_created_keeps_its_delegated_from_absent_null_or_a_value_as_it_came() {
+        let base = json!({
+            "title": "Port events",
+            "brief": "b",
+            "ownerAgentId": null,
+            "parentTaskId": null,
+        });
+        let with = |from: Option<Value>| {
+            let mut payload = base.clone();
+            if let Some(from) = from {
+                payload["delegatedFrom"] = from;
+            }
+            payload
+        };
+        for payload in [
+            with(None),
+            with(Some(Value::Null)),
+            with(Some(json!("asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"))),
+        ] {
+            let decoded: TaskCreated = serde_json::from_value(payload.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&decoded).unwrap(), payload);
+        }
+    }
 }

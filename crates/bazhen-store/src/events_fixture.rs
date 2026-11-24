@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use bazhen_protocol::events::{EVENT_KINDS, TaskCreated};
 use bazhen_protocol::ids::{DeviceId, TaskId};
+use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::tasks::CreateTaskResponse;
 use rusqlite::Connection;
 use serde_json::Value;
@@ -150,7 +151,7 @@ fn appends_a_task_as_the_typescript_daemon_writes_it_event_and_row() {
                     brief: request["brief"].as_str().unwrap().to_owned(),
                     owner_agent_id: None,
                     parent_task_id: None,
-                    delegated_from: None,
+                    delegated_from: Nullable::Null,
                 },
             })
         })
