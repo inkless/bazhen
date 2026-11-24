@@ -234,7 +234,11 @@ pub fn event_kind(name: &str) -> Option<&'static EventKind> {
 
 /// One event, as the stream sends it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "EventEnvelope")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
     pub id: u64,
@@ -253,7 +257,11 @@ pub struct Event {
 
 /// A text frame the daemon sends on `/v1/events`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "EventEnvelopeFrame")
+)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum EventFrame {
     Event {

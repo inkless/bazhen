@@ -279,4 +279,33 @@ mod tests {
         let id = HostId::mint(u64::MAX, [0xff; 16]);
         assert_eq!(HostId::parse(id.as_str()), Some(id));
     }
+
+    /// A body the pattern matches, with one character replaced, removed or added at `at`.
+    fn edited(body: &str, edit: u8, at: usize, with: char) -> String {
+        let mut chars: Vec<char> = body.chars().collect();
+        let at = at.min(chars.len());
+        match edit {
+            0 => {}
+            1 if at < chars.len() => chars[at] = with,
+            2 if at < chars.len() => {
+                chars.remove(at);
+            }
+            _ => chars.insert(at, with),
+        }
+        chars.into_iter().collect()
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn the_schema_pattern_matches_exactly_the_bodies_is_id_body_takes(
+            body in proptest::string::string_regex(ID_BODY_PATTERN).unwrap(),
+            edit in 0u8..4,
+            at in 0usize..33,
+            with in proptest::sample::select("0789abfgA".chars().collect::<Vec<_>>()),
+        ) {
+            let pattern = regex_automata::meta::Regex::new(&format!("^{ID_BODY_PATTERN}$")).unwrap();
+            let body = edited(&body, edit, at, with);
+            proptest::prop_assert_eq!(pattern.is_match(&body), is_id_body(&body), "{}", body);
+        }
+    }
 }

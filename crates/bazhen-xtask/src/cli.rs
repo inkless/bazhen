@@ -5,6 +5,7 @@ use clap::error::ErrorKind;
 use clap::{Arg, ArgAction, Command, value_parser};
 
 use crate::gate::{self, Env, Host, Places};
+use crate::schema;
 
 /// How a command ended: a contract the scripts that call xtask branch on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,15 @@ fn command() -> Command {
                         .value_parser(value_parser!(OsString)),
                 ),
         )
+        .subcommand(
+            Command::new("schema")
+                .about(
+                    "Write the protocol's JSON Schema and zod into target/protocol-shadow; \
+                     with --check, also hold schemars to the protocol crates' tests",
+                )
+                .disable_help_flag(true)
+                .arg(Arg::new("check").long("check").action(ArgAction::SetTrue)),
+        )
 }
 
 /// What a command reaches outside itself: the environment it was started in, where the
@@ -76,8 +86,13 @@ pub(crate) fn run<H: Host>(
             return Exit::Usage;
         }
     };
-    let Some(("gate", matches)) = matches.subcommand() else {
-        return Exit::Usage;
+    let matches = match matches.subcommand() {
+        Some(("gate", matches)) => matches,
+        Some(("schema", matches)) => {
+            let check = matches.get_flag("check");
+            return schema::run(check, world.env, &world.places, world.host, err);
+        }
+        _ => return Exit::Usage,
     };
     let name = matches
         .get_one::<OsString>("gate")
@@ -121,6 +136,9 @@ mod tests {
         fn output(&mut self, _: &[&str], _: &Env) -> std::io::Result<Option<String>> {
             Ok(None)
         }
+        fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
     }
 
     fn call(args: &[&str]) -> (Exit, String, String) {
@@ -143,7 +161,14 @@ mod tests {
         let (exit, out, err) = call(&["help"]);
         assert_eq!((exit, err.as_str()), (Exit::Done, ""));
         assert!(out.contains("Usage: cargo xtask <COMMAND>"), "{out}");
-        assert!(out.contains("\n  gate  Run one of the Rust gates"), "{out}");
+        assert!(
+            out.contains("\n  gate    Run one of the Rust gates"),
+            "{out}"
+        );
+        assert!(
+            out.contains("\n  schema  Write the protocol's JSON Schema"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -156,6 +181,8 @@ mod tests {
             &["--version"],
             &["-V"],
             &["gate", "-h"],
+            &["schema", "-h"],
+            &["schema", "--fix"],
         ] {
             let (exit, out, err) = call(args);
             assert_eq!((exit, out.as_str()), (Exit::Usage, ""), "{args:?}");

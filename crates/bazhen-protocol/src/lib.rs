@@ -18,6 +18,8 @@ pub mod notices;
 pub mod nullable;
 pub mod record;
 pub mod roles;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod shells;
 pub mod stream;
 pub mod task_events;

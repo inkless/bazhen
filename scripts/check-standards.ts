@@ -1213,6 +1213,10 @@ const NOT_DECODERS: Record<string, string> = {
     "asks only whether the repository's .cargo/config is there, never what it says",
   "crates/bazhen-xtask/src/gate.rs::run":
     "hands cargo configs' text to config_failures; parses nothing itself",
+  "crates/bazhen-xtask/src/schema/mod.rs::run":
+    "hands cargo configs' text to config_failures, and what the protocol crates' own emit_schema example prints to write_shadow; parses nothing itself",
+  "crates/bazhen-xtask/src/schema/mod.rs::write_shadow":
+    "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, and the names the repository's checks.ts exports; reads nothing from outside the repository",
   "crates/bazhen-xtask/src/main.rs::Real::read":
     "reads a cargo config's text for config_failures; parses nothing",
   "crates/bazhen-holder/src/process.rs::procargs2_split":
@@ -3129,9 +3133,9 @@ const BUILTIN_ATTRIBUTES = new Set(
 // all in TRAIT_METHODS.
 const STD_DERIVES = new Set("Clone Copy Debug Default Eq Hash Ord PartialEq PartialOrd".split(" "));
 
-// The helper attributes of the derives the workspace uses (serde's, thiserror's, Default's), which
-// the derive reads and the compiler drops.
-const DERIVE_HELPERS = new Set("backtrace default error from serde source".split(" "));
+// The helper attributes of the derives the workspace uses (serde's, thiserror's, Default's,
+// schemars'), which the derive reads and the compiler drops.
+const DERIVE_HELPERS = new Set("backtrace default error from schemars serde source".split(" "));
 
 // The `!` of a macro call, its path read back from it, so a long run of names is read once.
 const MACRO_BANG = /!\s*[({[]/g;

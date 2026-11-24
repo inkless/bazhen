@@ -58,6 +58,10 @@ impl<V: schemars::JsonSchema> schemars::JsonSchema for Record<V> {
         format!("Record_of_{}", V::schema_name()).into()
     }
 
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        format!("bazhen_protocol::Record<{}>", V::schema_id()).into()
+    }
+
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         HashMap::<String, V>::json_schema(generator)
     }

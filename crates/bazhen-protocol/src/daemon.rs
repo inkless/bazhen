@@ -277,7 +277,11 @@ pub struct RunningHolder {
 
 /// A holder's memory, in bytes, and the lines of history it holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "DaemonHolderStats")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct HolderStats {
     pub engine_bytes: u64,

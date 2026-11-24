@@ -15,8 +15,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+bazhen-holder-proto = { workspace = true, features = ["schema"] }
 bazhen-protocol = { workspace = true, features = ["schema"] }
 proptest = { workspace = true }
+regex-automata = { workspace = true }
 
 [lints]
 workspace = true
