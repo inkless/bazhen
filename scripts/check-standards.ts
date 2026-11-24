@@ -515,9 +515,11 @@ function closingBracket(code: string, open: number): number {
 const CFG_ALLOWED: Record<string, string> = {
   test: "nextest and clippy's --all-targets build the test configuration",
   feature:
-    "bazhen-holder's sandbox-tripwire is on in every test build, by its dev-dependency on " +
-    "itself, which the workspace's clippy and nextest build; and off in the holder as it ships, " +
-    "which lint checks too, in each crate's as-shipped pass (`alone_as_shipped` in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds it to that one",
+    "bazhen-holder's sandbox-tripwire, and the protocol crates' schema, are each on in every " +
+    "test build, by the crate's dev-dependency on itself, which the workspace's clippy and " +
+    "nextest build; and off in the crate as it ships, which lint checks too, in each crate's " +
+    "as-shipped pass (`alone_as_shipped` in crates/bazhen-xtask/src/gate.rs). CFG_VALUES holds " +
+    "it to those two",
   target_os:
     "`check` builds Linux and `rust-macos` builds macOS, each running clippy and nextest; " +
     "CFG_VALUES holds it to those two",
@@ -526,7 +528,7 @@ const CFG_ALLOWED: Record<string, string> = {
 // The values a CFG_ALLOWED key that takes one may be given: only those a gate builds.
 const CFG_VALUES: Record<string, readonly string[]> = {
   target_os: ["linux", "macos"],
-  feature: ["sandbox-tripwire"],
+  feature: ["sandbox-tripwire", "schema"],
 };
 
 /** The predicate of a cfg or cfg_attr attribute, or undefined for any other attribute. */
@@ -802,6 +804,24 @@ const FOREIGN_MACROS: Record<string, ForeignMacro> = {
     },
     reason:
       "read serde_json@1.0.154 src/macros.rs (json!, json_internal!): expansion writes no impl",
+  },
+  "schemars::json_schema": {
+    read: {
+      schemars: {
+        version: "1.2.3",
+        checksum: "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e",
+      },
+      serde_json: {
+        version: "1.0.154",
+        checksum: "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6",
+      },
+    },
+    reason:
+      "read schemars@1.2.3 src/macros.rs (json_schema!, whose unwrap can't fire: its `{…}` arm " +
+      "always builds an object, and Schema::try_from in src/schema.rs fails only on a value that " +
+      "is neither an object nor a bool) and serde_json@1.0.154 src/macros.rs (json!, " +
+      "json_internal!, which it calls as schemars::_private::serde_json::json!): expansion " +
+      "writes no impl",
   },
   "clap::value_parser": {
     read: {

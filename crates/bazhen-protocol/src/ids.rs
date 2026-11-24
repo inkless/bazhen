@@ -118,6 +118,28 @@ impl<'de, K: Kind> Deserialize<'de> for Id<K> {
     }
 }
 
+/// What follows an id's prefix and `_`, as a JSON Schema pattern: [`is_id_body`]'s rule.
+#[cfg(feature = "schema")]
+pub(crate) const ID_BODY_PATTERN: &str = "[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}";
+
+#[cfg(feature = "schema")]
+impl<K: Kind> schemars::JsonSchema for Id<K> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("{}Id", K::PREFIX).into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": format!("^{}_{ID_BODY_PATTERN}$", K::PREFIX),
+        })
+    }
+}
+
 /// The kinds of id the API's messages carry, each named by its prefix.
 pub mod kind {
     use super::Kind;

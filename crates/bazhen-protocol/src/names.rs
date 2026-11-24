@@ -143,6 +143,58 @@ impl fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+/// An agent's name as a JSON Schema pattern: [`AgentName::parse`]'s rule.
+#[cfg(feature = "schema")]
+fn agent_name_pattern() -> String {
+    format!(
+        "(?!(?:{})_{}$)[A-Za-z0-9][A-Za-z0-9_-]{{0,{}}}",
+        ID_PREFIXES.join("|"),
+        crate::ids::ID_BODY_PATTERN,
+        AGENT_NAME_MAX - 1,
+    )
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for AgentName {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AgentName".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": format!("^{}$", agent_name_pattern()),
+        })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for AgentRef {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AgentRef".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "anyOf": [
+                generator.subschema_for::<crate::ids::AgentId>(),
+                generator.subschema_for::<AgentName>(),
+            ]
+        })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for Role {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Role".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" })
+    }
+}
+
 impl TryFrom<String> for AgentName {
     type Error = Refused;
     fn try_from(value: String) -> Result<Self, Refused> {

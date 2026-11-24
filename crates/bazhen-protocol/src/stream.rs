@@ -12,6 +12,7 @@ pub const STREAM_FRAME_MAX_BYTES: usize = 1 << 20;
 
 /// Whether a view may drive the terminal, or only watches it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AttachmentMode {
     Observe,
@@ -31,6 +32,7 @@ impl AttachmentMode {
 
 /// A view's own earlier attachment, which it ends as it reattaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Resumes {
     pub attachment_id: AttachmentId,
@@ -39,6 +41,7 @@ pub struct Resumes {
 
 /// A text frame a view sends. `Hello` comes first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamClientFrame {
     #[serde(rename_all = "camelCase")]
@@ -67,6 +70,7 @@ pub enum StreamClientFrame {
 
 /// Why the daemon ended a view while the terminal goes on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum EndedReason {
     /// It fell too far behind the terminal's output.
@@ -77,6 +81,7 @@ pub enum EndedReason {
 
 /// A text frame the daemon sends.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamServerFrame {
     #[serde(rename_all = "camelCase")]

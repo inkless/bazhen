@@ -61,3 +61,18 @@ impl<T: Serialize> Serialize for Nullable<T> {
         }
     }
 }
+
+#[cfg(feature = "schema")]
+impl<T: schemars::JsonSchema> schemars::JsonSchema for Nullable<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        Option::<T>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        Option::<T>::json_schema(generator)
+    }
+}

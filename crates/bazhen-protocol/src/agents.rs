@@ -11,6 +11,7 @@ use crate::shells::{BusyShell, NeedsRestart, Shell, TuiTheme};
 use crate::tasks::{Assignment, Task};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     /// Until its harness shows a sign of life, even once its terminal runs: a TUI held at a trust
@@ -49,6 +50,7 @@ impl AgentState {
 
 /// The harnesses Bazhen runs agents in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum HarnessId {
     ClaudeCode,
@@ -71,6 +73,7 @@ impl HarnessId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum EnvironmentKind {
     Local,
@@ -87,6 +90,7 @@ impl EnvironmentKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Environment {
     pub id: EnvironmentId,
     pub kind: EnvironmentKind,
@@ -97,6 +101,7 @@ pub struct Environment {
 
 /// How a process ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ExitStatus {
     Exited { code: i64 },
@@ -105,6 +110,7 @@ pub enum ExitStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ExternalRefKind {
     ClaudeSession,
@@ -113,6 +119,7 @@ pub enum ExternalRefKind {
 
 /// A harness- or server-side object, such as a Claude Code session or a Codex thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalRef {
     pub environment_id: EnvironmentId,
@@ -121,6 +128,7 @@ pub struct ExternalRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ActivityValue {
     Working,
@@ -149,6 +157,7 @@ impl ActivityValue {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ActivitySource {
     Native,
@@ -157,6 +166,7 @@ pub enum ActivitySource {
 
 /// What a harness last reported an agent doing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Activity {
     pub value: ActivityValue,
@@ -172,6 +182,7 @@ pub struct Activity {
 
 /// One of an account's usage limits: the share of it in use, and when it resets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct UsageLimit {
     pub window: String,
@@ -184,6 +195,7 @@ pub struct UsageLimit {
 /// The model an agent runs, how full its context is and how near each usage limit its account
 /// is, each part once its harness says it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -201,6 +213,7 @@ pub struct Usage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentCommand {
     Close,
@@ -211,6 +224,7 @@ pub enum AgentCommand {
 
 /// An agent's latest note on any task, the first line of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Headline {
     pub text: String,
@@ -228,6 +242,7 @@ fn only_dark() -> Vec<TuiTheme> {
 
 /// An agent. A field with a default is missing from a daemon older than it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     pub id: AgentId,
@@ -279,6 +294,7 @@ pub struct Agent {
 /// Everything the daemon holds, consistent as of `event_id` in store `epoch`. A list is missing
 /// from a daemon older than it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StateSnapshot {
     pub epoch: String,
@@ -301,6 +317,7 @@ pub struct StateSnapshot {
 
 /// What an agent last reported doing, and how long ago, by the clock of the CLI that printed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetSignal {
     pub value: ActivityValue,
@@ -311,6 +328,7 @@ pub struct FleetSignal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetHeadline {
     pub text: String,
@@ -319,6 +337,7 @@ pub struct FleetHeadline {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetTask {
     pub task_id: TaskId,
@@ -327,6 +346,7 @@ pub struct FleetTask {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FleetAttention {
     pub id: AttentionId,
     pub kind: AttentionKind,
@@ -335,6 +355,7 @@ pub struct FleetAttention {
 /// One agent as `bazhen agents --json` prints it for a program. The fields are in the order it
 /// prints them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAgent {
     pub id: AgentId,
@@ -353,6 +374,7 @@ pub struct FleetAgent {
 
 /// `POST /v1/agents/:id/rename`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RenameAgentRequest {
     pub idempotency_key: String,
@@ -361,6 +383,7 @@ pub struct RenameAgentRequest {
 
 /// Who the daemon takes the request that asked to be: an agent, or the human as none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CallerResponse {
     /// Required, null for the human: optional, any JSON object would read as the human, such as
@@ -371,6 +394,7 @@ pub struct CallerResponse {
 
 /// What a command on an agent produced: the events it recorded, none if there was nothing to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCommandResponse {
     pub agent_id: AgentId,
@@ -379,6 +403,7 @@ pub struct AgentCommandResponse {
 
 /// A signal a running agent's process may be sent, in place of typing a key into it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Signal {
     Sigint,
@@ -402,6 +427,7 @@ impl Signal {
 
 /// `POST /v1/agents`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchAgentRequest {
     pub idempotency_key: String,
@@ -422,6 +448,7 @@ pub struct LaunchAgentRequest {
 
 /// What a launch produced: the agent, its terminal once it has one, and the events recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchAgentResponse {
     pub agent_id: AgentId,
@@ -432,6 +459,7 @@ pub struct LaunchAgentResponse {
 
 /// `POST /v1/agents/:id/close`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseAgentRequest {
     pub idempotency_key: String,
@@ -448,6 +476,7 @@ pub struct CloseAgentRequest {
 
 /// `POST /v1/agents/:id/respawn`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RespawnAgentRequest {
     pub idempotency_key: String,
@@ -458,6 +487,7 @@ pub struct RespawnAgentRequest {
 
 /// `POST /v1/agents/:id/relaunch`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RelaunchAgentRequest {
     pub idempotency_key: String,
@@ -470,6 +500,7 @@ pub struct RelaunchAgentRequest {
 
 /// `POST /v1/agents/:id/signal`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SignalAgentRequest {
     pub idempotency_key: String,

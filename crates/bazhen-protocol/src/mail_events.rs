@@ -10,6 +10,7 @@ use crate::mail::{AttentionCloseReason, AttentionKind};
 /// The payload of `mailbox.queued`: a message for an agent, delivered at least once through its
 /// harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailQueued {
     pub agent_id: AgentId,
@@ -22,6 +23,7 @@ pub struct MailQueued {
 
 /// The payload of `mailbox.offered`: a hook took the message to hand to the harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailOffered {
     /// The prompt of the turn a fold's offer is folded into, whose Stop delivers it.
@@ -32,6 +34,7 @@ pub struct MailOffered {
 /// The payload of `mailbox.seen`: a prompt carrying its id started, and that prompt's end
 /// delivers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailSeen {
     pub prompt_id: String,
@@ -40,12 +43,14 @@ pub struct MailSeen {
 /// The payload of `mailbox.accepted`: `codex queue` stored it in Codex, on a live app-server or,
 /// `offline`, in the Codex home.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MailAccepted {
     pub offline: bool,
 }
 
 /// Why a message will never reach its agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UndeliverableReason {
     AgentClosed,
@@ -54,12 +59,14 @@ pub enum UndeliverableReason {
 
 /// The payload of `mailbox.undeliverable`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MailUndeliverable {
     pub reason: UndeliverableReason,
 }
 
 /// Why a message went back to the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RequeueReason {
     NotWritten,
@@ -83,6 +90,7 @@ impl RequeueReason {
 
 /// The payload of `mailbox.requeued`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MailRequeued {
     pub reason: RequeueReason,
 }
@@ -90,6 +98,7 @@ pub struct MailRequeued {
 /// The payload of `message.observed`: the agent sent another Bazhen agent a message through its
 /// harness's own channel, which Bazhen sees sent but can't follow to delivery.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MessageObserved {
     pub from: AgentId,
@@ -105,6 +114,7 @@ pub struct MessageObserved {
 
 /// The payload of `attention.opened`: something needs the human.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AttentionOpened {
     pub agent_id: AgentId,
@@ -124,6 +134,7 @@ pub struct AttentionOpened {
 
 /// The human's answer to an approval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ApprovalDecision {
     Allow,
@@ -132,12 +143,14 @@ pub enum ApprovalDecision {
 
 /// The payload of `attention.answered`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttentionAnswered {
     pub decision: ApprovalDecision,
 }
 
 /// Why an item closed other than by the human's answer, which `attention.answered` records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionClosedReason {
     AnsweredInTui,
@@ -168,6 +181,7 @@ impl AttentionClosedReason {
 
 /// The payload of `attention.closed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttentionClosed {
     pub reason: AttentionClosedReason,
 }

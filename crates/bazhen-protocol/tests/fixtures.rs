@@ -44,6 +44,7 @@ use bazhen_protocol::text::{
 use bazhen_protocol::time::timestamp_ms;
 use bazhen_protocol::waits::{AgentCondition, ShellCondition, WaitRequest, WaitResponse};
 use bazhen_protocol::wire;
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -77,7 +78,7 @@ fn same(a: &Value, b: &Value) -> bool {
 
 /// Every example of the message `name` decodes as `T` and encodes back to its parsed form; how
 /// many there were.
-fn round_trips<T: DeserializeOwned + Serialize>(name: &str) -> Result<usize> {
+fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Result<usize> {
     let examples = read(&format!("{name}.json"))?;
     let examples = examples.as_array().ok_or(format!("{name}: not a list"))?;
     for example in examples {

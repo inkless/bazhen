@@ -11,6 +11,7 @@ use crate::tasks::Task;
 /// harness up, as `running` says; or `idle`, its harness reporting an ended turn that came after
 /// every message sent to it reached it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentCondition {
     Starting,
@@ -64,6 +65,7 @@ impl AgentCondition {
 
 /// What a shell is waited on to be: a lifecycle state, or `ended`, closed or failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ShellCondition {
     Creating,
@@ -112,6 +114,7 @@ impl ShellCondition {
 /// What a task is waited on to be: `done` once it is finished done, or once no one is still on it
 /// and someone completed their part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskCondition {
     Done,
@@ -120,6 +123,7 @@ pub enum TaskCondition {
 /// What a wait is on. A reply is the first message the recipient of `message_id` queued back to
 /// its sender after it, which only that sender may wait on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "on", rename_all = "lowercase")]
 pub enum WaitCondition {
     Agent {
@@ -146,6 +150,7 @@ pub enum WaitCondition {
 /// `POST /v1/waits`: answered once the condition is met or can't be, or at `timeout_ms`, which is
 /// at most `MESSAGE_WAIT_MAX_MS`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitRequest {
     pub condition: WaitCondition,
@@ -157,6 +162,7 @@ pub struct WaitRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum WaitVerdict {
     Met,
@@ -172,6 +178,7 @@ pub enum WaitVerdict {
 /// caller's `/v1/state` shows it: the agent (for a reply, its message's recipient), the shell or
 /// the task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitResponse {
     pub verdict: WaitVerdict,

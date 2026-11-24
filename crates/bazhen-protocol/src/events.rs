@@ -15,6 +15,7 @@ use crate::stream::AttachmentMode;
 
 /// Why the stream couldn't resume from a cursor: older than retention, or not from this store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ResetReason {
     Stale,
@@ -233,6 +234,7 @@ pub fn event_kind(name: &str) -> Option<&'static EventKind> {
 
 /// One event, as the stream sends it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
     pub id: u64,
@@ -251,6 +253,7 @@ pub struct Event {
 
 /// A text frame the daemon sends on `/v1/events`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum EventFrame {
     Event {
@@ -264,6 +267,7 @@ pub enum EventFrame {
 
 /// A text frame a client sends on `/v1/events`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ClientEventFrame {
     /// Whether the client's page is in sight.
@@ -275,6 +279,7 @@ pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
 
 /// The payload of `task.created`, in the order the TypeScript daemon writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCreated {
     pub title: String,
@@ -286,16 +291,19 @@ pub struct TaskCreated {
 
 /// The payload of `device.paired`: never the token, its hash or the code it was paired with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DevicePaired {
     pub name: String,
 }
 
 /// The payload of `device.revoked`, which is empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeviceRevoked {}
 
 /// The payload of `notice.opened`, in the order the TypeScript daemon writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NoticeOpened {
     pub kind: String,
     pub summary: String,
@@ -305,6 +313,7 @@ pub struct NoticeOpened {
 /// The payload of `notice.closed`. `from_device` is advisory: the device whose shell the socket
 /// call came from, as its environment claimed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct NoticeClosed {
     pub reason: NoticeCloseReason,
@@ -315,6 +324,7 @@ pub struct NoticeClosed {
 
 /// The payload of `environment.registered`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnvironmentRegistered {
     pub kind: EnvironmentKind,
 }
@@ -322,6 +332,7 @@ pub struct EnvironmentRegistered {
 /// A runtime incarnation as an event records it: the runtime, and where it keeps the terminal,
 /// every value a string, in the order the runtime wrote them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeRefPayload {
     pub runtime: String,
     pub locator: Record<String>,
@@ -329,6 +340,7 @@ pub struct RuntimeRefPayload {
 
 /// The payload of `terminal.opened`, in the order the TypeScript daemon writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalOpened {
     pub environment_id: EnvironmentId,
@@ -347,6 +359,7 @@ pub struct TerminalOpened {
 
 /// The payload of `terminal.running` and of `terminal.process_adopted`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalIncarnation {
     pub runtime_ref: RuntimeRefPayload,
@@ -354,6 +367,7 @@ pub struct TerminalIncarnation {
 
 /// Why a terminal failed: its runtime refused it, or the daemon died while opening it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalFailedReason {
     OpenRejected,
@@ -362,6 +376,7 @@ pub enum TerminalFailedReason {
 
 /// The payload of `terminal.failed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalFailed {
     pub reason: TerminalFailedReason,
 }
@@ -369,6 +384,7 @@ pub struct TerminalFailed {
 /// Why a terminal closed: the user closed it, its shell exited, the agent it was linked to
 /// closed, or a new shell replaced the lost one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TerminalClosedReason {
     User,
@@ -379,6 +395,7 @@ pub enum TerminalClosedReason {
 
 /// The payload of `terminal.closed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalClosed {
     pub reason: TerminalClosedReason,
 }
@@ -386,18 +403,21 @@ pub struct TerminalClosed {
 /// The payload of `terminal.foreground_changed`: what runs in the shell's foreground, by name, or
 /// `None` at its prompt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalForegroundChanged {
     pub command: Option<String>,
 }
 
 /// The payload of `terminal.needs_restart`: the versions the terminal's holder speaks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalNeedsRestart {
     pub protocol: Vec<String>,
 }
 
 /// The payload of `terminal.renamed`: the name the user gave, or `None` once taken away.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalRenamed {
     pub name: Option<String>,
 }
@@ -405,10 +425,12 @@ pub struct TerminalRenamed {
 /// The payload of `terminal.lost`, `terminal.closing` and `terminal.restart_cleared`, which is
 /// empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalNoted {}
 
 /// The payload of `attachment.started`: a view of a terminal, watching or driving it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentStarted {
     pub terminal_id: TerminalId,
@@ -417,6 +439,7 @@ pub struct AttachmentStarted {
 
 /// Why an attachment ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentEndReason {
     ClientClosed,
@@ -431,6 +454,7 @@ pub enum AttachmentEndReason {
 
 /// The payload of `attachment.ended`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttachmentEnded {
     pub reason: AttachmentEndReason,
 }
@@ -438,6 +462,7 @@ pub struct AttachmentEnded {
 /// The payload of `lease.granted`: the attachment that now drives the terminal, and the epoch its
 /// input is typed under, higher than any granted on the terminal before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LeaseGranted {
     pub attachment_id: AttachmentId,

@@ -11,6 +11,7 @@ use crate::shells::BusyShell;
 /// A runtime's state as the daemon reports it: its health when it was read, or `Unused` when it
 /// wasn't, since it is not the default and no terminal is open on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeReportState {
     Healthy,
@@ -21,6 +22,7 @@ pub enum RuntimeReportState {
 
 /// One runtime's health, as `bazhen status` and `bazhen doctor` show it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeHealthReport {
     pub kind: String,
     pub state: RuntimeReportState,
@@ -32,6 +34,7 @@ pub struct RuntimeHealthReport {
 
 /// A health answer's status, which is only ever "ok".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum HealthStatus {
     Ok,
@@ -39,6 +42,7 @@ pub enum HealthStatus {
 
 /// `GET /v1/health`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: HealthStatus,
@@ -50,6 +54,7 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HookClient {
     pub path: String,
     pub fallback: bool,
@@ -57,6 +62,7 @@ pub struct HookClient {
 
 /// The program the daemon reads which process calls on its socket with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PeerReader {
     pub path: String,
 }
@@ -64,6 +70,7 @@ pub struct PeerReader {
 /// The `bazhen` agents run: the first on the PATH the daemon captured for them, and the one built
 /// beside the daemon, each as a resolved path, none as null.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCli {
     pub expected: Option<String>,
@@ -71,12 +78,14 @@ pub struct AgentCli {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConfigFile {
     pub path: String,
     pub found: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentShell {
     Direct,
@@ -84,6 +93,7 @@ pub enum AgentShell {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentsSettings {
     pub shell: AgentShell,
@@ -91,6 +101,7 @@ pub struct AgentsSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Codex {
     pub daemon: Option<String>,
     pub cli: Option<String>,
@@ -107,6 +118,7 @@ pub struct Codex {
 
 /// What the peer reader made of Codex's app-server, whose commands it must tell from the human's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ToolCalls {
     /// It reads the server as Codex's.
@@ -118,6 +130,7 @@ pub enum ToolCalls {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum OriginsFrom {
     #[serde(rename = "BAZHEN_EXTERNAL_ORIGINS")]
     Environment,
@@ -126,6 +139,7 @@ pub enum OriginsFrom {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum PairingMode {
     Auto,
@@ -133,12 +147,14 @@ pub enum PairingMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Pairing {
     pub mode: PairingMode,
     pub required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Certificate {
     pub fingerprint: String,
@@ -147,6 +163,7 @@ pub struct Certificate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Subnet {
     pub interface: String,
     pub cidr: String,
@@ -154,6 +171,7 @@ pub struct Subnet {
 
 /// The LAN listener, where one is configured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Lan {
     pub url: String,
     pub allow: Vec<String>,
@@ -163,6 +181,7 @@ pub struct Lan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Web {
     pub external_origins: Vec<String>,
@@ -190,12 +209,14 @@ pub struct Web {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Notifications {
     pub desktop: bool,
     pub notifier: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostPtys {
     pub used: u64,
     pub max: u64,
@@ -203,6 +224,7 @@ pub struct HostPtys {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Refusing {
     Budget,
@@ -210,6 +232,7 @@ pub enum Refusing {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Terminals {
     pub open: u64,
     pub max: u64,
@@ -219,6 +242,7 @@ pub struct Terminals {
 
 /// A holder that answered, the build it runs, and the holder/1 versions it speaks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RunningHolder {
     pub terminal_id: String,
@@ -253,6 +277,7 @@ pub struct RunningHolder {
 
 /// A holder's memory, in bytes, and the lines of history it holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HolderStats {
     pub engine_bytes: u64,
@@ -266,6 +291,7 @@ pub struct HolderStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Holder {
     pub binary: Option<String>,
     pub build: Option<String>,
@@ -275,6 +301,7 @@ pub struct Holder {
 
 /// A memory cap as configured, and the bytes it came to, null for no cap.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MemoryCap {
     pub asked: String,
     pub bytes: Option<u64>,
@@ -303,6 +330,7 @@ fn gib(bytes: u64) -> String {
 
 /// Whether new holder terminals start in a systemd scope of their own, and with what caps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum Containment {
     #[serde(rename_all = "camelCase")]
@@ -320,6 +348,7 @@ pub enum Containment {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum EnvSource {
     Start,
@@ -328,6 +357,7 @@ pub enum EnvSource {
 
 /// The environment the daemon captured, counted, never listed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CapturedEnv {
     pub captured_at: String,
@@ -339,6 +369,7 @@ pub struct CapturedEnv {
 /// `GET /v1/daemon/doctor`: what `bazhen doctor` shows. Each optional part is absent from a daemon
 /// older than it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorResponse {
     pub app_version: String,
@@ -373,11 +404,13 @@ pub struct DoctorResponse {
 
 /// `POST /v1/daemon/env`: the environment of the shell running `bazhen env refresh`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnvRefreshRequest {
     pub env: Record<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct EnvRefreshResponse {
     pub captured_at: String,
@@ -391,10 +424,12 @@ pub struct EnvRefreshResponse {
 
 /// `POST /v1/daemon/stop`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StopResponse {}
 
 /// What every refused request answers, whatever the route.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ErrorResponse {
     pub error: ErrorCode,
     pub message: String,
@@ -405,6 +440,7 @@ pub struct ErrorResponse {
 
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidRequest,

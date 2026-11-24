@@ -48,6 +48,21 @@ impl<'de, V: Deserialize<'de>> Deserialize<'de> for Record<V> {
     }
 }
 
+#[cfg(feature = "schema")]
+impl<V: schemars::JsonSchema> schemars::JsonSchema for Record<V> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Record_of_{}", V::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        HashMap::<String, V>::json_schema(generator)
+    }
+}
+
 struct Entries<V>(PhantomData<V>);
 
 impl<'de, V: Deserialize<'de>> Visitor<'de> for Entries<V> {

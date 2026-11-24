@@ -8,6 +8,7 @@ pub const SCREEN_HISTORY_MAX: u32 = 10_000;
 /// `GET /v1/terminals/:id/screen`: the newest rows of history asked for, then the screen shown,
 /// a line a row, each ended by `\n`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalScreen {
     /// No control but the newline ending each row, as the daemon sends it.
     pub text: String,
