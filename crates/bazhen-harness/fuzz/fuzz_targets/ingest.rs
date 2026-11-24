@@ -5,6 +5,11 @@ use bazhen_harness::{
     Report, production,
 };
 use libfuzzer_sys::fuzz_target;
+use serde::de::IgnoredAny;
+
+/// The key serde_json's `Value` takes for a raw value's: `serde_json::raw::TOKEN`, which it
+/// doesn't export.
+const RAW_VALUE_KEY: &[u8] = b"$serde_json::private::RawValue";
 
 // A hook's event and payload, as a hook client could post them: no report may panic the
 // adapter, text that isn't JSON says nothing, every fact is about the agent the hook ran for, a
@@ -36,10 +41,15 @@ fuzz_target!(|input: (&str, &[u8])| {
     };
     let read = claude.ingest(Report::Hook { event, payload }, &context);
     // serde_json refuses text JavaScript reads: a lone surrogate's escape, a byte that isn't
-    // UTF-8, nesting past its limit. Text with none of them that it refuses isn't JSON.
+    // UTF-8, nesting past its limit, and, with the workspace's `raw_value`, an object whose first
+    // key is its raw value's private name, whose value it reads again as JSON text. Text with none
+    // of them that it refuses isn't JSON.
     let plain = !payload.contains(&b'\\')
         && std::str::from_utf8(payload).is_ok()
-        && payload.iter().filter(|&&b| b == b'[' || b == b'{').count() < 128;
+        && payload.iter().filter(|&&b| b == b'[' || b == b'{').count() < 128
+        && !payload
+            .windows(RAW_VALUE_KEY.len())
+            .any(|w| w == RAW_VALUE_KEY);
     if plain && serde_json::from_slice::<serde_json::Value>(payload).is_err() {
         assert_eq!(read, Ingested::nothing());
         return;
@@ -99,13 +109,11 @@ fuzz_target!(|input: (&str, &[u8])| {
         };
         let mut text = serde_json::Deserializer::from_str(&key.key);
         text.disable_recursion_limit();
-        let parts: Vec<serde_json::Value> =
-            serde::Deserialize::deserialize(&mut text).expect("a tool key is a JSON array");
-        assert_eq!(parts.len(), 4);
-        assert_eq!(
-            parts[0].as_str(),
-            Some(key.caller.as_deref().unwrap_or("main"))
-        );
-        assert_eq!(parts[1].as_str(), key.prompt_id.as_deref());
+        // The call is passed over, not read as a `Value`, which would read a tool input whose
+        // first key is serde_json's raw value's name as JSON text.
+        let (caller, prompt_id, _, _): (String, Option<String>, IgnoredAny, IgnoredAny) =
+            serde::Deserialize::deserialize(&mut text).expect("a tool key is a JSON array of four");
+        assert_eq!(caller, key.caller.as_deref().unwrap_or("main"));
+        assert_eq!(prompt_id.as_deref(), key.prompt_id.as_deref());
     }
 });
