@@ -55,7 +55,8 @@ pub const HOOK_PROTOCOL_VERSION: &str = "1.0";
 /// The `Content-Type` of a framed [`HookReply`].
 pub const HOOK_REPLY_TYPE: &str = "application/vnd.bazhen.hook-reply";
 
-/// A protocol's version, `<major>.<minor>`.
+/// A protocol's version, `<major>.<minor>`: the rule bazhen-holder-proto's `ProtocolVersion::new`
+/// holds the holder's version to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ProtocolVersion(String);
@@ -83,11 +84,15 @@ pub struct HookRequest {
     pub event: HookEvent,
     pub pid: i64,
     pub ppid: i64,
-    // The harness's own hook input, any JSON, null included: its text as the client sent it,
-    // which the harness's adapter reads as `JSON.parse` would. A lone surrogate's escape and any
-    // depth pass through, where reading it here as a value would refuse them. Not a doc comment,
-    // which schemars would make the schema's description: the protocol's is `{}`, any value.
-    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
+    /// The harness's own hook input, any JSON, null included: its text as the client sent it,
+    /// which the harness's adapter reads as `JSON.parse` would. A lone surrogate's escape and any
+    /// depth pass through, where reading it here as a value would refuse them.
+    // The empty description keeps the doc out of the schema, which stays `true`: as an object
+    // with a description and no type, the zod writer would refuse it.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "serde_json::Value", description = "")
+    )]
     pub payload: Box<serde_json::value::RawValue>,
 }
 
