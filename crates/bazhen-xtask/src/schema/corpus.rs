@@ -327,8 +327,18 @@ struct Walk<'a> {
     schema: &'a str,
 }
 
-/// The keywords that describe a value without holding it to anything.
-const ANNOTATIONS: &[&str] = &["description", "title", "examples", "$comment"];
+/// The keywords that describe a value without holding it to anything: the walk plants no case for
+/// them, and a schema of them alone takes any value.
+const ANNOTATIONS: &[&str] = &[
+    "description",
+    "title",
+    "examples",
+    "$comment",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+];
 
 /// Whether `schema` takes any value, null too: `true`, or one of annotations alone.
 fn takes_any(schema: &Value) -> bool {
@@ -931,10 +941,11 @@ impl<'a> Walk<'a> {
 /// Whether the corpus plants the cases `key` makes in `schema`, or `key` makes none.
 fn handled(key: &str, schema: &Value) -> bool {
     match key {
-        "$ref" | "$schema" | "$id" | "$defs" | "description" | "default" | "type"
-        | "properties" | "required" | "items" | "enum" | "const" | "oneOf" | "anyOf"
-        | "minLength" | "maxLength" | "pattern" | "minimum" | "maximum" | "exclusiveMinimum"
-        | "minItems" | "maxItems" | "x-bazhen-check" | "propertyNames" => true,
+        _ if ANNOTATIONS.contains(&key) => true,
+        "$ref" | "$schema" | "$id" | "$defs" | "type" | "properties" | "required" | "items"
+        | "enum" | "const" | "oneOf" | "anyOf" | "minLength" | "maxLength" | "pattern"
+        | "minimum" | "maximum" | "exclusiveMinimum" | "minItems" | "maxItems"
+        | "x-bazhen-check" | "propertyNames" => true,
         "additionalProperties" => schema
             .get(key)
             .is_some_and(|v| v.is_object() || v.is_boolean()),
@@ -1309,6 +1320,9 @@ mod tests {
             null_taken(json!({ "description": "any" }), None),
             Some(true)
         );
+        let annotated =
+            json!({ "default": 1, "deprecated": true, "readOnly": true, "writeOnly": false });
+        assert_eq!(null_taken(annotated, None), Some(true));
         assert_eq!(
             null_taken(json!(true), Some(json!({ "type": "number" }))),
             Some(false)
