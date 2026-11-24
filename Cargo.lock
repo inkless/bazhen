@@ -148,6 +148,7 @@ dependencies = [
  "axum",
  "bazhen-client",
  "bazhen-fs-trust",
+ "bazhen-holder-engine",
  "bazhen-holder-proto",
  "bazhen-host-guard",
  "bazhen-peer",
