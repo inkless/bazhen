@@ -1,8 +1,9 @@
 //! The hook client agents and shells run (`mailbox/hook-link.ts`): a copy of the build under its
-//! content's hash, which no rebuild or move of the checkout touches, reached through a link each
-//! start points at it.
+//! content's hash, which no rebuild or move of the checkout touches, reached through a hard link
+//! each start points at it.
 
 use std::collections::BTreeSet;
+use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -29,9 +30,11 @@ pub(crate) struct InstalledHook {
 
 /// A path in `dir` that runs `client`, for hooks that outlive this daemon: running agents and
 /// shells keep the path they were given, and each start points it at wherever the client now is.
-/// The new link is renamed over the old one, so a hook running meanwhile never finds the path
-/// missing. `dir` must be private to `uid`, since whoever can write it chooses what every hook
-/// runs. Where it can't be made, `client` itself, said.
+/// It is a hard link, renamed over the old one, so a hook running meanwhile never finds the path
+/// missing: the name is always there, and it names a file, never a link to follow. A symbolic link
+/// renamed over can't promise that, since on macOS a reader following the old one as it is
+/// replaced fails with EINVAL. `dir` must be private to `uid`, since whoever can write it chooses
+/// what every hook runs. Where it can't be made, as across file systems, `client` itself, said.
 fn stable_link(dir: &Path, client: &Path, uid: u32) -> PathBuf {
     let link = dir.join(HOOK_COMMAND);
     let next = dir.join(format!("{HOOK_COMMAND}.tmp"));
@@ -50,23 +53,31 @@ fn stable_link(dir: &Path, client: &Path, uid: u32) -> PathBuf {
     }
 }
 
-/// Points `link` at `client` through a new link at `next`, renamed over it.
+/// Points `link` at `client` through a new hard link at `next`, renamed over it.
 fn relink(client: &Path, next: &Path, link: &Path) -> std::io::Result<()> {
     match std::fs::remove_file(next) {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
         _ => {}
     }
-    std::os::unix::fs::symlink(client, next)?;
+    std::fs::hard_link(client, next)?;
     std::fs::rename(next, link)
 }
 
-/// The build in `dir` that `link` points at, if it points at one.
+/// The build in `dir` that `link` is a hard link to, if it is one: the one whose copy is the same
+/// file.
 fn linked_build(link: &Path, dir: &Path) -> Option<String> {
-    let target = std::fs::read_link(link).ok()?;
-    let build = target.parent()?;
-    (build.parent() == Some(dir) && target.file_name() == Some(HOOK_COMMAND.as_ref()))
-        .then(|| build.file_name()?.to_str().map(str::to_owned))
+    let file = |path: &Path| {
+        std::fs::symlink_metadata(path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map(|meta| (meta.dev(), meta.ino()))
+    };
+    let linked = file(link)?;
+    std::fs::read_dir(dir)
+        .ok()?
         .flatten()
+        .find(|entry| file(&entry.path().join(HOOK_COMMAND)) == Some(linked))
+        .and_then(|entry| entry.file_name().to_str().map(str::to_owned))
 }
 
 /// Installs `source` in `dir` under its content's hash and points the link at that copy. Once
@@ -158,19 +169,19 @@ mod tests {
         }
     }
 
-    fn real(path: &Path) -> PathBuf {
-        std::fs::canonicalize(path).unwrap()
+    /// Which file `path` is, by its device and inode.
+    fn file(path: &Path) -> (u64, u64) {
+        let meta = std::fs::metadata(path).unwrap();
+        (meta.dev(), meta.ino())
     }
 
     #[test]
     fn names_the_client_through_a_link_the_next_start_points_at_a_moved_client() {
         let d = dir();
         let path = stable_link(&d.root, &d.first, uid());
-        let before = real(&path);
-        assert_eq!(
-            [stable_link(&d.root, &d.second, uid()), before, real(&path)],
-            [path, real(&d.first), real(&d.second)]
-        );
+        let before = file(&path);
+        assert_eq!(stable_link(&d.root, &d.second, uid()), path);
+        assert_eq!([before, file(&path)], [file(&d.first), file(&d.second)]);
     }
 
     #[test]
@@ -208,10 +219,8 @@ mod tests {
         let d = dir();
         symlink(&d.first, d.root.join("bazhen-hook.tmp")).unwrap();
         let path = stable_link(&d.root, &d.second, uid());
-        assert_eq!(
-            [path.clone(), real(&path)],
-            [d.root.join("bazhen-hook"), real(&d.second)]
-        );
+        assert_eq!(path, d.root.join("bazhen-hook"));
+        assert_eq!(file(&path), file(&d.second));
     }
 
     #[test]
@@ -351,8 +360,13 @@ mod tests {
             i.age();
             stable_link(&i.state, &other.client, uid());
         });
-        std::fs::remove_file(&i.source).unwrap();
-        assert_eq!(runs(&path), "build one");
+        let mut expected = vec![
+            build_of("build one"),
+            build_of("build two"),
+            "bazhen-hook".to_owned(),
+        ];
+        expected.sort();
+        assert_eq!((runs(&path), i.names()), ("build one".to_owned(), expected));
     }
 
     #[test]
@@ -382,6 +396,45 @@ mod tests {
         assert_eq!(
             (runs(&path), said.times("hook")),
             ("build one".to_owned(), 0)
+        );
+    }
+
+    /// The link is the copy itself, not a path to it: removing the build it was made from, as a
+    /// prune by an older daemon that can't tell a hard link is in use would, leaves it runnable,
+    /// where a symbolic link to the same copy (the control) is left naming nothing.
+    #[test]
+    fn keeps_hooks_running_once_the_build_the_link_was_made_from_is_removed() {
+        let i = installing();
+        let InstalledHook { path, client } = i.install();
+        let symbolic = i.state.join("symbolic");
+        symlink(&client, &symbolic).unwrap();
+        std::fs::remove_dir_all(client.parent().unwrap()).unwrap();
+        assert_eq!(
+            [
+                std::fs::read_to_string(&path).ok(),
+                std::fs::read_to_string(&symbolic).ok()
+            ],
+            [Some("build one".to_owned()), None]
+        );
+    }
+
+    /// The link hooks are given is a file only its owner may run, in a directory only its owner
+    /// may enter, and running it by that path runs the client.
+    #[test]
+    fn runs_the_client_by_the_links_path_which_only_its_owner_may_run() {
+        let i = installing();
+        std::fs::write(&i.source, "#!/bin/sh\necho hooked\n").unwrap();
+        let InstalledHook { path, .. } = i.install();
+        let mode = |path: &Path| std::fs::symlink_metadata(path).unwrap().mode() & 0o7777;
+        let out = std::process::Command::new(&path).output().unwrap();
+        assert_eq!(
+            (
+                mode(&path),
+                mode(&i.state),
+                std::fs::symlink_metadata(&path).unwrap().is_file(),
+                String::from_utf8_lossy(&out.stdout).into_owned()
+            ),
+            (0o500, 0o700, true, "hooked\n".to_owned())
         );
     }
 
