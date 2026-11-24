@@ -3735,11 +3735,14 @@ export function decoderFailures(
     const path = key.slice(key.indexOf(".rs::") + 5);
     const [owner, fn] = path.includes("::") ? path.split("::") : [undefined, path];
     const code = paths.includes(file) ? rustCode(read(file)) : "";
+    // A call may name its type parameters, as `edge::<T>(body)` does.
+    const turbofish = String.raw`(?:\s*::\s*<[^()]*>)?`;
     const calls =
       owner === undefined
-        ? new RegExp(`\\b${fn}\\s*\\(`).test(code)
-        : new RegExp(`\\b${owner}::${fn}\\s*\\(`).test(code) ||
-          (new RegExp(`\\b${owner}\\b`).test(code) && new RegExp(`\\.${fn}\\s*\\(`).test(code));
+        ? new RegExp(`\\b${fn}${turbofish}\\s*\\(`).test(code)
+        : new RegExp(`\\b${owner}::${fn}${turbofish}\\s*\\(`).test(code) ||
+          (new RegExp(`\\b${owner}\\b`).test(code) &&
+            new RegExp(`\\.${fn}${turbofish}\\s*\\(`).test(code));
     if (!paths.includes(file)) {
       out.push(`${key}: its fuzz target ${file} doesn't exist.`);
     } else if (!calls) {

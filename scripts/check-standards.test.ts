@@ -2050,6 +2050,11 @@ describe("decoderFailures", () => {
     "crates/p/fuzz/fuzz_targets/decode.rs": "fuzz_target!(|b: &[u8]| { p::decode(b); });",
     "crates/p/tests/api.rs": "fn helper(b: &[u8]) {}",
   };
+  /** The repo with decode's fuzz target making `call`. */
+  const decodeTargetCalling = (call: string) => ({
+    ...repo,
+    "crates/p/fuzz/fuzz_targets/decode.rs": `fuzz_target!(|b: &[u8]| { ${call}; });`,
+  });
   const failures = (
     fuzzed: Record<string, string>,
     notDecoders: Record<string, string>,
@@ -4252,6 +4257,14 @@ describe("decoderFailures", () => {
       [expect.stringContaining("its fuzz target crates/p/fuzz/fuzz_targets/gone.rs doesn't exist")],
       [expect.stringContaining("doesn't call decode")],
     ]);
+  });
+
+  it("counts a call that names its type parameters, by path or as a method", () => {
+    expect([
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode::<Frame>(b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decode :: <Vec<Frame>> (b)")),
+      failures(fuzzed, exempt, decodeTargetCalling("p::decoded::<Frame>(b)")),
+    ]).toEqual([[], [], [expect.stringContaining("doesn't call decode")]]);
   });
 });
 
