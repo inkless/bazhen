@@ -264,6 +264,16 @@ fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
                 vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
                 true,
             ),
+            (
+                "linkedWithoutCwd",
+                vec![("linkedAgentId", Some(json!(AGENT))), ("cwd", None)],
+                true,
+            ),
+            (
+                "neither",
+                vec![("linkedAgentId", None), ("cwd", None)],
+                true,
+            ),
         ],
         _ => return None,
     })
@@ -591,7 +601,12 @@ impl<'a> Walk<'a> {
             let Some(held) = object.get(key) else {
                 continue;
             };
-            self.plant(&at, "leftOut", Edit::Drop, !required.contains(key.as_str()));
+            let optional = !required.contains(key.as_str());
+            // A check over the whole object may need a field it lets each leave out alone, which
+            // the corpus can't judge: the check's own cases leave its fields out.
+            if !optional || checks.is_empty() {
+                self.plant(&at, "leftOut", Edit::Drop, optional);
+            }
             if !held.is_null() {
                 self.plant(&at, "null", Edit::Put(Value::Null), self.nullable(field));
             }
@@ -1273,6 +1288,51 @@ mod tests {
             Some(false)
         );
         assert_eq!(null_taken(json!({ "type": "number" }), None), Some(false));
+    }
+
+    #[test]
+    fn plants_no_optional_field_left_out_under_a_check_of_the_whole_object() {
+        let message = |check: Option<&str>| {
+            let mut schema = json!({
+                "type": "object",
+                "properties": {
+                    "idempotencyKey": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "linkedAgentId": { "type": "string" },
+                },
+                "required": ["idempotencyKey"],
+            });
+            if let Some(check) = check {
+                schema["x-bazhen-check"] = json!(check);
+            }
+            schema
+        };
+        let example = json!({ "idempotencyKey": "k", "cwd": "/w" });
+        let left_out = |cases: &[Case]| {
+            cases
+                .iter()
+                .filter(|c| c.kind == "leftOut")
+                .map(|c| (c.path.clone(), c.accept))
+                .collect::<Vec<_>>()
+        };
+        let unchecked = planted_in(&message(None), None, &example).unwrap();
+        assert_eq!(
+            left_out(&unchecked),
+            [
+                ("/cwd".to_owned(), true),
+                ("/idempotencyKey".to_owned(), false)
+            ]
+        );
+        let checked = planted_in(&message(Some("linkedShellTakesNoCwd")), None, &example).unwrap();
+        assert_eq!(left_out(&checked), [("/idempotencyKey".to_owned(), false)]);
+        let neither = checked
+            .iter()
+            .find(|c| c.kind == "linkedShellTakesNoCwd/neither")
+            .unwrap();
+        assert_eq!(
+            (neither.body.as_str(), neither.accept),
+            (r#"{"idempotencyKey":"k"}"#, true)
+        );
     }
 
     #[test]
