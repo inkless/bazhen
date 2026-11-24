@@ -780,6 +780,17 @@ const FOREIGN_MACROS: Record<string, ForeignMacro> = {
       "read tracing@0.1.44 src/macros.rs and tracing-core@0.1.36 src/lib.rs (metadata!, " +
       "identify_callsite!): expansion writes no impl",
   },
+  "tokio::join": {
+    read: {
+      tokio: {
+        version: "1.54.1",
+        checksum: "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
+      },
+    },
+    reason:
+      "read tokio@1.54.1 src/macros/join.rs and src/macros/support.rs (calls of maybe_done and " +
+      "poll_fn, and a const in a closure): expansion writes no impl",
+  },
   "tokio::select": {
     read: {
       tokio: {
