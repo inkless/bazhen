@@ -12,7 +12,7 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
 use crate::testing::TempDir;
-use crate::{AgentChange, NewEvent, Store};
+use crate::{AgentChange, AppendError, NewEvent, Store};
 
 /// The fixture, each step's payload kept as its text: decoded through a `Value`, whose map sorts
 /// its keys, a locator would lose the order the TypeScript daemon wrote it in.
@@ -139,15 +139,22 @@ fn appends_and_refuses_each_agent_event_as_the_typescript_store_did_and_leaves_i
     for (i, step) in fixture.steps.iter().enumerate() {
         let event = event(step);
         let got = store.write(|w| w.append(&event));
-        match (&got, &step.refused) {
-            (Ok(_), None) | (Err(_), Some(_)) => {}
-            (Ok(_), Some(refused)) => wrong.push(format!(
-                "step {i} {}: taken, where TypeScript said {refused}",
+        // TypeScript records a refusal as its Error's text.
+        let refused = step
+            .refused
+            .as_deref()
+            .map(|r| r.strip_prefix("Error: ").unwrap_or(r));
+        match (&got, refused) {
+            (Ok(_), None) => {}
+            (Err(AppendError::Refused { reason, .. }), Some(want)) if reason == want => {}
+            (Ok(_), Some(want)) => wrong.push(format!(
+                "step {i} {}: taken, where TypeScript refused it: {want}",
                 step.kind
             )),
-            (Err(err), None) => wrong.push(format!(
-                "step {i} {}: refused with {err}, where TypeScript took it",
-                step.kind
+            (Err(err), want) => wrong.push(format!(
+                "step {i} {}: {err:?}, where TypeScript {}",
+                step.kind,
+                want.map_or_else(|| "took it".to_owned(), |w| format!("refused it: {w}"))
             )),
         }
     }
