@@ -1,8 +1,11 @@
 //! What the daemon reads of agents to tell who called it: an agent by its token's hash, one known
 //! by its id alone, a Codex agent by its thread, and the terminals whose processes a caller may
-//! run under.
+//! run under. And what a launch reads and writes beside its events: the names agents hold, and
+//! each start's token.
 
-use crate::events::Reads;
+use bazhen_protocol::names::name_base;
+
+use crate::events::{Reads, Writer};
 
 /// A terminal not yet ended that a runtime holds, as its row records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +74,69 @@ impl Reads<'_> {
         self.first("SELECT state FROM agent_sessions WHERE id = ?", agent_id)
     }
 
+    /// The agent not ended that holds `name`, ignoring case.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn live_agent_named(self, name: &str) -> rusqlite::Result<Option<String>> {
+        self.first(
+            "SELECT id FROM agent_sessions
+             WHERE name = ? COLLATE NOCASE AND state NOT IN ('closed', 'failed')",
+            name,
+        )
+    }
+
+    /// The default name a new agent in `project` takes, and its number: the first after the last
+    /// one given under its base that no agent not ended holds. Read and recorded in one
+    /// transaction, by the launch that records it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn next_default_name(self, project: &str) -> rusqlite::Result<(String, u64)> {
+        let base = name_base(project);
+        let last: Option<i64> =
+            self.first("SELECT last FROM agent_name_counters WHERE base = ?", &base)?;
+        let mut ordinal = last.map_or(0, |last| u64::try_from(last).unwrap_or(0));
+        loop {
+            ordinal = ordinal.saturating_add(1);
+            let name = format!("{base}-{ordinal}");
+            if self.live_agent_named(&name)?.is_none() {
+                return Ok((name, ordinal));
+            }
+        }
+    }
+
+    /// The hash of the agent's current token, or `None` for one that has none.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_token_hash(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        let hash: Option<Option<String>> = self.first(
+            "SELECT token_hash FROM agent_sessions WHERE id = ?",
+            agent_id,
+        )?;
+        Ok(hash.flatten())
+    }
+
+    /// Why the agent's last failure says it failed, when its event is kept and says why.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_failure_detail(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        let payload: Option<String> = self.first(
+            "SELECT payload FROM events WHERE entity_id = ? AND type = 'agent.failed'
+             ORDER BY id DESC LIMIT 1",
+            agent_id,
+        )?;
+        Ok(payload
+            .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
+            .and_then(|payload| payload.get("detail")?.as_str().map(str::to_owned)))
+    }
+
     /// Every terminal not yet ended that a runtime holds.
     ///
     /// # Errors
@@ -99,6 +165,35 @@ impl Reads<'_> {
         let mut rows = self.0.prepare(sql)?;
         let mut found = rows.query([key])?;
         found.next()?.map(|row| row.get(0)).transpose()
+    }
+}
+
+impl Writer<'_> {
+    /// Makes `hash` the agent's token's, which takes the place of the last at once: the start it
+    /// was minted for may call before that start returns.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn note_agent_token(&self, agent_id: &str, hash: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE agent_sessions SET token_hash = ? WHERE id = ?",
+            (hash, agent_id),
+        )?;
+        Ok(())
+    }
+
+    /// A start of the agent's own went ahead on a token: its bare id no longer names it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn kept_agent_token(&self, agent_id: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE agent_sessions SET untokened = 0 WHERE id = ?",
+            [agent_id],
+        )?;
+        Ok(())
     }
 }
 
@@ -407,5 +502,141 @@ mod tests {
                 }
             ]
         );
+    }
+
+    /// An agent `id` in `state` holding `name`.
+    fn named(store: &Store, id: &str, name: &str, state: &str) {
+        seed(store, &Agent { id, state, ..AGENT });
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET name = ? WHERE id = ?",
+                (name, id),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn gives_a_default_name_no_live_agent_holds_and_never_a_number_given_before() {
+        let dir = TempDir::new("default-name");
+        let store = store(&dir);
+        named(&store, "agent_01", "p-1", "failed");
+        store
+            .db
+            .execute(
+                "INSERT INTO agent_name_counters (base, last) VALUES ('p', 1)",
+                (),
+            )
+            .unwrap();
+        named(&store, "agent_02", "P-2", "running");
+        assert_eq!(
+            [
+                store.reads().next_default_name("p").unwrap(),
+                store.reads().next_default_name("other project").unwrap(),
+            ],
+            [("p-3".to_owned(), 3), ("other-project-1".to_owned(), 1)]
+        );
+    }
+
+    #[test]
+    fn finds_the_agent_not_ended_that_holds_a_name_in_any_case() {
+        let dir = TempDir::new("live-name");
+        let store = store(&dir);
+        named(&store, "agent_01", "lead", "closed");
+        named(&store, "agent_02", "Lead", "running");
+        named(&store, "agent_03", "gone", "failed");
+        let reads = store.reads();
+        assert_eq!(
+            [
+                reads.live_agent_named("LEAD").unwrap(),
+                reads.live_agent_named("gone").unwrap(),
+                reads.live_agent_named("lea").unwrap(),
+            ],
+            [Some("agent_02".to_owned()), None, None]
+        );
+    }
+
+    #[test]
+    fn takes_a_new_tokens_hash_in_place_of_the_last_and_keeps_the_start_that_went_ahead_on_it() {
+        let dir = TempDir::new("token-hash");
+        let mut store = store(&dir);
+        seed(
+            &store,
+            &Agent {
+                token_hash: Some("old"),
+                untokened: true,
+                ..AGENT
+            },
+        );
+        seed(
+            &store,
+            &Agent {
+                id: "agent_02",
+                ..AGENT
+            },
+        );
+        let before = store.reads().agent_untokened("agent_01").unwrap();
+        store
+            .write(|w| {
+                w.note_agent_token("agent_01", "new")?;
+                w.kept_agent_token("agent_01")
+            })
+            .unwrap();
+        let reads = store.reads();
+        assert_eq!(
+            [
+                reads.agent_token_hash("agent_01").unwrap(),
+                reads.agent_token_hash("agent_02").unwrap(),
+                reads.agent_token_hash("agent_09").unwrap(),
+            ],
+            [Some("new".to_owned()), None, None]
+        );
+        assert_eq!(
+            (before, reads.agent_untokened("agent_01").unwrap()),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn says_why_the_agents_last_failure_said_it_failed_when_it_said() {
+        let dir = TempDir::new("failure-detail");
+        let store = store(&dir);
+        store
+            .db
+            .execute_batch(
+                "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_01',
+                     'system', '{\"reason\":\"launch_rejected\",\"detail\":\"first\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_01',
+                     'system', '{\"reason\":\"launch_rejected\",\"detail\":\"last\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_02',
+                     'system', '{\"reason\":\"launch_rejected\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.running', 'agent', 'agent_03',
+                     'system', '{\"detail\":\"not a failure\"}' FROM host;",
+            )
+            .unwrap();
+        let reads = store.reads();
+        assert_eq!(
+            ["agent_01", "agent_02", "agent_03"].map(|id| reads.agent_failure_detail(id).unwrap()),
+            [Some("last".to_owned()), None, None]
+        );
+    }
+
+    #[test]
+    fn recalls_what_a_key_recorded_as_it_was_recorded_and_nothing_for_a_key_never_used() {
+        let dir = TempDir::new("recall");
+        let mut store = store(&dir);
+        let record = serde_json::json!({"request": {"cwd": "/w"}, "response": {}, "failed": true});
+        let recalled = store
+            .write(|w| -> Result<_, crate::OnceError> {
+                w.remember("launch", &serde_json::json!({"failed": false}))?;
+                w.remember("launch", &record)?;
+                Ok([w.recall("launch")?, w.recall("never")?])
+            })
+            .unwrap();
+        assert_eq!(recalled, [Some(record), None]);
     }
 }
