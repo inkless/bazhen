@@ -46,6 +46,8 @@ fn deps(files: &[(&str, &str)], mode: Option<&str>) -> HarnessDeps {
         read_file: Box::new(move |path| files.get(path).cloned()),
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
+        daemon_socket: "/run/bazhen.sock".to_owned(),
+        real_path: Box::new(|_| None),
     }
 }
 
@@ -59,7 +61,7 @@ fn ready<T>(future: BoxFuture<'_, T>) -> T {
     }
 }
 
-fn argv_of(spec: Result<LaunchSpec, Refused>) -> Vec<String> {
+fn argv_of(spec: Result<LaunchSpec, LaunchError>) -> Vec<String> {
     spec.unwrap().argv
 }
 

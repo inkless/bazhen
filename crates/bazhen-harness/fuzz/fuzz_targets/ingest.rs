@@ -21,6 +21,8 @@ fuzz_target!(|input: (&str, &[u8])| {
         read_file: Box::new(|_| None),
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
+        daemon_socket: String::new(),
+        real_path: Box::new(|_| None),
     });
     let claude = harnesses
         .get(HarnessId::ClaudeCode)
