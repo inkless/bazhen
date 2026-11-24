@@ -1,12 +1,12 @@
-// What the TypeScript daemon makes of what Codex's app-server sends, recorded for the Rust
-// adapter, which reads the same messages: every reader run on every message, so a reader that
-// takes another method's message is caught too; what thread/start, thread/resume and thread/list
-// answer; the titles a TUI sets; what the daemon sends back and starts; and the launch and resume
-// requests and argv over a channel that records them. Each message and answer follows the JSON
-// Schema that `codex app-server generate-json-schema` printed for the CLI tests/api pins, committed
-// in packages/protocol/fixtures/codex-schema/, unless it is marked `bad`: off that schema on purpose,
-// with a field the readers take absent, null or of the wrong type. codex-fixtures.medium.test.ts holds
-// each case to the schema.
+// What the TypeScript daemon makes of what Codex's app-server sends, recorded for the Rust adapter,
+// which reads the same messages: every reader run on every message, so a reader that takes another
+// method's message is caught too; what thread/start, thread/resume and thread/list answer; the
+// titles a TUI sets; what the daemon sends back and starts; and the launch and resume requests and
+// argv over a channel that answers as a server does and records them. Each message and answer
+// follows the JSON Schema that `codex app-server generate-json-schema` printed for the CLI
+// tests/api pins, committed in packages/protocol/fixtures/codex-schema/, unless it is marked `bad`:
+// off that schema on purpose, with a field the readers take absent, null or of the wrong type.
+// codex-fixtures.medium.test.ts holds each case to the schema.
 // `moon run :schema` writes it to packages/protocol/fixtures/codex/. This script is a parity
 // capture: it goes with the TypeScript daemon, and the fixtures it wrote stay.
 
@@ -711,19 +711,21 @@ const MATCHING: readonly { readonly prefix: string; readonly ids: readonly strin
 ];
 
 /**
- * A channel that answers each launch's requests as a Codex server does, and records them. A
- * resume answers with the thread `resumed` names, so a server that moved the agent shows.
+ * What a Codex server answers each of a launch's requests with. A resume answers with the thread
+ * `resumed` names, so a server that moved the agent shows.
  */
-function channel(resumed: unknown): {
+const answersTo = (resumed: unknown): Record<string, unknown> => ({
+  "thread/start": STARTED,
+  "thread/resume": resumed,
+  "thread/inject_items": {},
+});
+
+/** A channel that answers each launch's requests with `answers`, and records them. */
+function channel(answers: Record<string, unknown>): {
   port: HarnessChannelPort;
   sent: { method: string; params: unknown }[];
 } {
   const sent: { method: string; params: unknown }[] = [];
-  const answers: Record<string, unknown> = {
-    "thread/start": STARTED,
-    "thread/resume": resumed,
-    "thread/inject_items": {},
-  };
   return {
     sent,
     port: {
@@ -781,7 +783,8 @@ const REQUEST: AgentLaunchRequest = { harness: "codex", project: "bazhen", cwd: 
 async function starts(): Promise<unknown[]> {
   const out = [];
   for (const s of STARTS) {
-    const launch = channel(s.resumed ?? response(thread()));
+    const answers = answersTo(s.resumed ?? response(thread()));
+    const launch = channel(answers);
     const harness = (port: HarnessChannelPort) =>
       new CodexHarness(
         port,
@@ -789,7 +792,7 @@ async function starts(): Promise<unknown[]> {
         s.socket,
       );
     const launched = await started(() => harness(launch.port).launchSpec(REQUEST, s.options));
-    const resume = channel(s.resumed ?? response(thread()));
+    const resume = channel(answers);
     const resumed = await started(() =>
       harness(resume.port).resumeSpec(REQUEST, { kind: "codex-thread", id: T1 }, s.options),
     );
@@ -798,6 +801,7 @@ async function starts(): Promise<unknown[]> {
       ...(s.bad === undefined ? {} : { bad: true }),
       ...(s.socket === undefined ? {} : { socket: s.socket }),
       options: s.options,
+      answers,
       launch: { requests: launch.sent, ...launched },
       resume: { requests: resume.sent, ...resumed },
     });

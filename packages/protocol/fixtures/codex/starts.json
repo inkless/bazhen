@@ -2,6 +2,63 @@
   {
     "name": "plain",
     "options": {},
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -80,6 +137,63 @@
     "name": "on the daemon's socket",
     "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
     "options": {},
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -181,6 +295,63 @@
     "options": {
       "theme": "light"
     },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -266,6 +437,63 @@
     "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
     "options": {
       "theme": "dark"
+    },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
     },
     "launch": {
       "requests": [
@@ -374,6 +602,63 @@
     "options": {
       "instructions": "Review it twice."
     },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -453,6 +738,63 @@
     "options": {
       "instructions": "Review it twice.",
       "instructionsChanged": true
+    },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
     },
     "launch": {
       "requests": [
@@ -551,6 +893,63 @@
     "options": {
       "instructionsChanged": true
     },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -630,6 +1029,63 @@
     "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
     "options": {
       "compactWindowTokens": 200000
+    },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
     },
     "launch": {
       "requests": [
@@ -738,6 +1194,63 @@
     "options": {
       "compactWindowTokens": 0
     },
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -825,6 +1338,63 @@
   {
     "name": "resumed on another thread",
     "options": {},
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {
+        "thread": {
+          "id": "019a8f40-0000-7000-8000-000000000003",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
@@ -887,6 +1457,37 @@
     "name": "resumed with no thread",
     "bad": true,
     "options": {},
+    "answers": {
+      "thread/start": {
+        "thread": {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "cwd": "/work",
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "dangerFullAccess"
+        }
+      },
+      "thread/resume": {},
+      "thread/inject_items": {}
+    },
     "launch": {
       "requests": [
         {
