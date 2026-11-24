@@ -27,7 +27,8 @@ pub enum Report<'a> {
 /// What the daemon holds for the reporting agent that an adapter reads a report against.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct IngestContext<'a> {
-    /// The agent a hook names, once the daemon has identified it; none for a channel's report.
+    /// The agent the report is for: the one a hook names, once the daemon has identified it, or
+    /// the one bound to the session [`crate::Session::route`] found for a channel's report.
     pub agent: Option<&'a AgentId>,
     /// The agent's messages a prompt may carry as a wake handed them over: written or offered
     /// before, and not yet seen, by id.
@@ -126,7 +127,8 @@ pub enum Key {
     /// A session of the harness's, such as a thread: the daemon finds the agents on it by their
     /// stored external refs, and never parses one itself.
     Session(SessionKey),
-    /// The harness's account, whose limits cover every agent on it.
+    /// The harness as a whole: its account, whose limits cover every agent on it, and what its
+    /// server announces to all of them.
     Account,
 }
 
@@ -166,6 +168,14 @@ pub enum Observed {
     Usage(Usage),
     /// The account's usage limits, under [`Key::Account`].
     AccountLimits(Vec<UsageLimit>),
+    /// The server unloaded the session, so its facts stop until [`crate::Session::reload`] picks
+    /// it up again.
+    Unloaded,
+    /// The server started a session, under [`Key::Account`]: each follow that is pending, or gave
+    /// up, and [`crate::Session::may_follow_to`] it, is tried again.
+    SessionAnnounced {
+        session: SessionKey,
+    },
     /// A tool call started, keyed as the permission request about it will be.
     ToolStarted {
         key: ToolKey,

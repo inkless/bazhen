@@ -1,5 +1,6 @@
 //! What starting a harness's TUI takes and gives.
 
+use crate::{ChannelError, ChannelErrorKind};
 use bazhen_protocol::agents::ExternalRefKind;
 use bazhen_protocol::shells::TuiTheme;
 use std::fmt;
@@ -52,16 +53,62 @@ pub struct Evidence<'a> {
     pub transcript: Option<&'a str>,
 }
 
-/// A harness's refusal of a launch or a resume, such as a server's to load a session.
+/// Why a launch or a resume didn't happen.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refused {
-    pub reason: String,
+pub enum LaunchError {
+    /// The harness refused it, as a server refuses a request it can't take: trying it again as it
+    /// is won't help.
+    Refused(String),
+    /// The harness couldn't be reached, or it failed some other way.
+    Unavailable(String),
 }
 
-impl fmt::Display for Refused {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.reason)
+impl From<ChannelError> for LaunchError {
+    fn from(error: ChannelError) -> Self {
+        match error.kind {
+            ChannelErrorKind::Refused => Self::Refused(error.message),
+            ChannelErrorKind::Failed => Self::Unavailable(error.message),
+        }
     }
 }
 
-impl std::error::Error for Refused {}
+impl fmt::Display for LaunchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(reason) | Self::Unavailable(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for LaunchError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn takes_a_channels_refusal_for_a_refused_launch_and_any_other_error_for_an_unavailable_one() {
+        let error = |kind| ChannelError {
+            kind,
+            message: "no such thread".to_owned(),
+        };
+        let launch = |kind| LaunchError::from(error(kind));
+        assert_eq!(
+            [
+                launch(ChannelErrorKind::Refused),
+                launch(ChannelErrorKind::Failed)
+            ],
+            [
+                LaunchError::Refused("no such thread".to_owned()),
+                LaunchError::Unavailable("no such thread".to_owned()),
+            ]
+        );
+        assert_eq!(
+            [
+                launch(ChannelErrorKind::Refused).to_string(),
+                launch(ChannelErrorKind::Failed).to_string()
+            ],
+            ["no such thread", "no such thread"]
+        );
+    }
+}

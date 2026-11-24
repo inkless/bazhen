@@ -17,7 +17,7 @@ pub use bazhen_protocol::ids::AgentId;
 pub use deliver::{
     AgentRef, Answer, HookOutput, Mail, MailRefusal, Outgoing, Pending, Pushed, Resolution,
 };
-pub use launch::{Evidence, LaunchRequest, LaunchSpec, Refused, SessionRef};
+pub use launch::{Evidence, LaunchError, LaunchRequest, LaunchSpec, SessionRef};
 pub use report::{
     Gate, HarnessActivity, Held, IngestContext, Ingested, Key, Keyed, LimitStop, Observed, Origin,
     Reply, Report, SentMessage, SessionKey, Settled, ToolKey,
@@ -46,7 +46,7 @@ pub trait Harness: Send + Sync {
         &'a self,
         request: &'a LaunchRequest,
         channel: Option<&'a dyn ChannelPort>,
-    ) -> BoxFuture<'a, Result<LaunchSpec, Refused>>;
+    ) -> BoxFuture<'a, Result<LaunchSpec, LaunchError>>;
     /// How to start the TUI again on the agent's session, or none for a harness that can't: a
     /// fresh session would rebind the agent (foundation-design §3.1).
     fn resume<'a>(
@@ -54,7 +54,7 @@ pub trait Harness: Send + Sync {
         request: &'a LaunchRequest,
         session: &'a ExternalRef,
         channel: Option<&'a dyn ChannelPort>,
-    ) -> Option<BoxFuture<'a, Result<LaunchSpec, Refused>>>;
+    ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>>;
     /// Whether [`Harness::resume`] would find the session, by what its reports said of it.
     fn can_resume(&self, evidence: &Evidence<'_>) -> bool;
     /// One report in, the facts it gives and how to answer it out.
@@ -146,12 +146,29 @@ pub trait ChannelPort: Send + Sync {
         method: &'a str,
         params: Value,
     ) -> BoxFuture<'a, Result<Value, ChannelError>>;
+    /// One notification, which the server answers with nothing: an error is the channel's.
+    fn notify<'a>(
+        &'a self,
+        method: &'a str,
+        params: Value,
+    ) -> BoxFuture<'a, Result<(), ChannelError>>;
 }
 
 /// A request over a channel that failed: the server's JSON-RPC error, or the channel's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelError {
+    pub kind: ChannelErrorKind,
     pub message: String,
+}
+
+/// Whether the server refused a request, or it failed some other way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelErrorKind {
+    /// The server can't take the request as sent: JSON-RPC's invalid request, method not found or
+    /// invalid params (-32600 to -32602). Sending it again won't help.
+    Refused,
+    /// Anything else: any other error the server answered, a timeout, or the connection ending.
+    Failed,
 }
 
 impl fmt::Display for ChannelError {
@@ -162,7 +179,8 @@ impl fmt::Display for ChannelError {
 
 impl std::error::Error for ChannelError {}
 
-/// The daemon's bounded run of a command, such as a harness's CLI.
+/// The daemon's bounded run of a command, such as a harness's CLI, in the user's environment as
+/// the daemon captured it for agents, so the command finds the harness the agents run.
 pub trait RunPort: Send + Sync {
     fn run<'a>(
         &'a self,
@@ -203,15 +221,35 @@ pub trait PushPort: RunPort {
 pub trait Session: Send {
     /// Where its server listens, and how to start it.
     fn endpoint(&self) -> Endpoint;
-    /// The session a report over the channel is from.
+    /// The session a report over the channel is from. The daemon calls it before
+    /// [`Harness::ingest`], and hands `ingest` the agent bound to that session and the session.
     fn route(&self, report: &Report<'_>) -> Option<SessionKey>;
-    /// The connection is up: picks up each bound session again, so its facts come back.
+    /// What the daemon says first on each connection, before anything else is sent: the server's
+    /// version, or why the server can't be used.
+    ///
+    /// # Errors
+    ///
+    /// The request's, or the server's refusal to serve Bazhen, as one set up for another home.
+    fn handshake<'a>(
+        &'a mut self,
+        channel: &'a dyn ChannelPort,
+    ) -> BoxFuture<'a, Result<String, ChannelError>>;
+    /// The connection is up, after [`Session::handshake`]: picks up each bound session again, so
+    /// its facts come back.
     fn connected<'a>(
         &'a mut self,
-        version: &'a str,
         channel: &'a dyn ChannelPort,
         bound: &'a [Bound],
     ) -> BoxFuture<'a, Vec<Keyed>>;
+    /// Picks up one session the server unloaded ([`Observed::Unloaded`]), alone: what holds of
+    /// the rest of the connection stands. The daemon asks again, from 1 s doubling to 60 s apart,
+    /// until it is loaded, the agent leaves the session, or the connection drops: on the next,
+    /// [`Session::connected`] picks up every bound session again.
+    fn reload<'a>(
+        &'a mut self,
+        agent: &'a Bound,
+        channel: &'a dyn ChannelPort,
+    ) -> BoxFuture<'a, Reloaded>;
     /// The connection went down.
     fn disconnected(&mut self) -> Vec<Keyed>;
     /// One try at moving an agent to the session its terminal's title names.
@@ -221,6 +259,12 @@ pub trait Session: Send {
         candidate: &'a str,
         channel: &'a dyn ChannelPort,
     ) -> BoxFuture<'a, Followed>;
+    /// Whether a follow of `candidate` that is pending, or gave up, may find the session the
+    /// server just announced ([`Observed::SessionAnnounced`]). On a match the daemon reads the
+    /// terminal's title again and sends it as a fresh [`Report::TerminalTitle`], rather than
+    /// trying the old candidate. A follow with no candidate, its title unread, is never asked
+    /// about.
+    fn may_follow_to(&self, candidate: &str, announced: &SessionKey) -> bool;
 }
 
 /// Where a harness's server listens, and the command that starts it.
@@ -230,11 +274,22 @@ pub struct Endpoint {
     pub start: Vec<String>,
 }
 
-/// A running agent and the session it is bound to.
+/// A running agent, the session it is bound to, and the launch it was last started with, which
+/// picking the session up again keeps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bound {
     pub agent: AgentId,
     pub session: ExternalRef,
+    pub launch: LaunchRequest,
+}
+
+/// What one try at picking up an unloaded session did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reloaded {
+    /// It is loaded again, with what holds of it now.
+    Loaded(Vec<Keyed>),
+    /// It isn't yet: try again later.
+    NotYet,
 }
 
 /// What one try at following a title did.
@@ -275,6 +330,11 @@ pub struct HarnessDeps {
     pub scan_transcript: Box<ScanTranscript>,
     /// The time in ms, for how long a transcript's answer stands.
     pub now_ms: Box<dyn Fn() -> i64 + Send + Sync>,
+    /// The daemon's socket, for a harness's server to reach the daemon back on.
+    pub daemon_socket: String,
+    /// A path with every link in it resolved, as `realpath` gives it, or none for one that
+    /// doesn't exist: a harness's server may name the same directory by another path.
+    pub real_path: Box<Lookup>,
 }
 
 impl fmt::Debug for HarnessDeps {
@@ -282,6 +342,7 @@ impl fmt::Debug for HarnessDeps {
         f.debug_struct("HarnessDeps")
             .field("hook_command", &self.hook_command)
             .field("home", &self.home)
+            .field("daemon_socket", &self.daemon_socket)
             .finish_non_exhaustive()
     }
 }

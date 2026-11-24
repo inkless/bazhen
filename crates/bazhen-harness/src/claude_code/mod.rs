@@ -10,9 +10,9 @@ mod tests;
 use crate::js::Js;
 use crate::{
     ActivitySource, AgentRef, Answer, BoxFuture, Capabilities, ChannelPort, Delivery, Evidence,
-    Harness, HarnessDeps, HarnessDoctor, IngestContext, Ingested, LaunchRequest, LaunchSpec,
-    Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, Refused, Report, Resolution, RunPort,
-    Session, SessionRef, Waiting,
+    Harness, HarnessDeps, HarnessDoctor, IngestContext, Ingested, LaunchError, LaunchRequest,
+    LaunchSpec, Listen, MailRefusal, Outgoing, Pending, PushPort, Pushed, Report, Resolution,
+    RunPort, Session, SessionRef, Waiting,
 };
 use bazhen_protocol::agents::{ActivityValue, ExternalRef, ExternalRefKind};
 use bazhen_protocol::shells::TuiTheme;
@@ -380,7 +380,7 @@ impl Harness for ClaudeCode {
         &'a self,
         request: &'a LaunchRequest,
         _channel: Option<&'a dyn ChannelPort>,
-    ) -> BoxFuture<'a, Result<LaunchSpec, Refused>> {
+    ) -> BoxFuture<'a, Result<LaunchSpec, LaunchError>> {
         let id = (self.deps.new_session_id)();
         let spec = self.spec(["--session-id", &id], request);
         Box::pin(std::future::ready(Ok(spec)))
@@ -391,7 +391,7 @@ impl Harness for ClaudeCode {
         request: &'a LaunchRequest,
         session: &'a ExternalRef,
         _channel: Option<&'a dyn ChannelPort>,
-    ) -> Option<BoxFuture<'a, Result<LaunchSpec, Refused>>> {
+    ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>> {
         let spec = self.spec(["--resume", &session.id], request);
         Some(Box::pin(std::future::ready(Ok(spec))))
     }
