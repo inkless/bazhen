@@ -5,6 +5,7 @@
 //! `JSON.stringify` does.
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -20,10 +21,19 @@ pub(crate) enum Js {
 }
 
 impl Js {
-    /// The JSON text `bytes` holds, or none for text that isn't JSON. A number past a double's
-    /// range is refused, where JavaScript would read it as Infinity.
+    /// The JSON text `bytes` holds, read as the TypeScript daemon read a request: as UTF-8, any
+    /// other byte replaced, then by `JSON.parse`. A string's lone surrogate, which JavaScript keeps
+    /// and a Rust string can't hold, reads as U+FFFD. None for text that isn't JSON, a number past
+    /// a double's range, which JavaScript would read as Infinity, and nesting past [`MAX_DEPTH`].
     pub(crate) fn parse(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+        let text = String::from_utf8_lossy(bytes);
+        let text = prepared(&text)?;
+        let mut deserializer = serde_json::Deserializer::from_str(&text);
+        // prepared() has bounded the depth to what a thread's first stack holds.
+        deserializer.disable_recursion_limit();
+        let js = Self::deserialize(&mut deserializer).ok()?;
+        deserializer.end().ok()?;
+        Some(js)
     }
 
     /// `payload[name]`, for an object that has it: `Reflect.get` on anything else is undefined.
@@ -85,6 +95,74 @@ impl Js {
             }
         }
     }
+}
+
+/// The deepest a value may nest. JavaScript reads any depth; here a value is read, compared,
+/// written and dropped by recursion, about 1 KiB of stack a level in a build without
+/// optimisation, where 2,500 levels overflow the 2 MiB a thread starts with. This many take a
+/// quarter of it, and are four times `serde_json`'s own limit; no hook payload comes near.
+pub(crate) const MAX_DEPTH: usize = 512;
+
+/// `text` with each lone surrogate's escape, which `serde_json` refuses, made U+FFFD's; none when
+/// it nests deeper than [`MAX_DEPTH`]. One pass: JSON's structure is ASCII, which no byte of a
+/// multibyte character is.
+fn prepared(text: &str) -> Option<Cow<'_, str>> {
+    let bytes = text.as_bytes();
+    let mut lone = Vec::new();
+    let (mut depth, mut in_string, mut at) = (0_usize, false, 0);
+    while let Some(&byte) = bytes.get(at) {
+        match (in_string, byte) {
+            (_, b'"') => in_string = !in_string,
+            (true, b'\\') => {
+                let step = match escaped_unit(text, at) {
+                    // A pair, which serde_json reads whole.
+                    Some(0xD800..=0xDBFF)
+                        if matches!(escaped_unit(text, at + 6), Some(0xDC00..=0xDFFF)) =>
+                    {
+                        12
+                    }
+                    Some(0xD800..=0xDFFF) => {
+                        lone.push(at);
+                        6
+                    }
+                    Some(_) => 6,
+                    None => 2,
+                };
+                at += step;
+                continue;
+            }
+            (false, b'[' | b'{') => {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return None;
+                }
+            }
+            (false, b']' | b'}') => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        at += 1;
+    }
+    if lone.is_empty() {
+        return Some(Cow::Borrowed(text));
+    }
+    let mut fixed = String::with_capacity(text.len());
+    let mut from = 0;
+    for start in lone {
+        fixed.push_str(text.get(from..start)?);
+        fixed.push_str("\\ufffd");
+        from = start + 6;
+    }
+    fixed.push_str(text.get(from..)?);
+    Some(Cow::Owned(fixed))
+}
+
+/// The UTF-16 unit a `\uXXXX` escape at `at` stands for.
+fn escaped_unit(text: &str, at: usize) -> Option<u32> {
+    let hex = text.get(at..at + 6)?.strip_prefix("\\u")?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(hex, 16).ok()
 }
 
 /// A number as `JSON.stringify` writes it.
@@ -221,6 +299,37 @@ mod tests {
             Some(&(format!("k{}", keys - 1), Js::Number(2.0)))
         );
         assert!(took.as_secs() < 20, "took {took:?}");
+    }
+
+    #[test]
+    fn reads_a_lone_surrogate_as_u_fffd_and_a_byte_that_isnt_utf_8_as_the_daemon_did() {
+        // What Node's JSON.parse gives, each lone surrogate made well-formed.
+        assert_eq!(
+            round_trip(
+                r#"["\ud83d x","\udc00\ud83d\ude00","\\ud83d",{"\udbff":"\ud800\ud800\udfff"},"\ud83d"]"#
+            ),
+            r#"["� x","�😀","\\ud83d",{"�":"�𐏿"},"�"]"#
+        );
+        let read = Js::parse(b"[\"a\xffb\"]").map(|js| js.stringify());
+        assert_eq!(read.as_deref(), Some("[\"a\u{fffd}b\"]"));
+    }
+
+    #[test]
+    fn reads_nesting_to_its_bound_within_a_threads_first_stack_and_none_past_it() {
+        let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        let deepest = nested(MAX_DEPTH);
+        let read = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                let js = Js::parse(deepest.as_bytes());
+                let copy = js.clone();
+                (js == copy).then(|| js.map(|js| js.stringify() == deepest))
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(read, Some(Some(true)));
+        assert_eq!(Js::parse(nested(MAX_DEPTH + 1).as_bytes()), None);
     }
 
     #[test]

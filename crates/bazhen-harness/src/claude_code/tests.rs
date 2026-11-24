@@ -343,7 +343,7 @@ const READY: Observed = Observed::Ready {
 #[test]
 fn keys_every_fact_by_the_agent_the_hook_ran_for_and_reads_nothing_without_one() {
     let read = ingest("Stop", r#"{"prompt_id":"p"}"#);
-    assert!(!read.observed.is_empty());
+    assert_ne!(read.observed, Vec::<Keyed>::new());
     assert!(read.observed.iter().all(|k| k.key == Key::Agent(agent())));
     let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let none = harness.ingest(
@@ -397,7 +397,16 @@ fn takes_mail_and_turns_only_from_the_agents_own_session_and_activity_from_any_o
             r#"{"model":{"display_name":"M"}}"#,
             (vec![InSession], Any),
         ),
-        ("SubagentStop", r#"{"agent_id":"a"}"#, (vec![Any], Any)),
+        (
+            "SubagentStart",
+            r#"{"agent_id":"a"}"#,
+            (vec![InSession], Any),
+        ),
+        (
+            "SubagentStop",
+            r#"{"agent_id":"a"}"#,
+            (vec![InSession, Any], Any),
+        ),
     ] {
         assert_eq!(gates(&ingest(event, payload)), expected, "{event}");
     }
@@ -682,7 +691,7 @@ fn reads_a_question_for_the_human_as_one_only_the_tui_can_answer() {
     let asked = r#"{"prompt_id":"p","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"A?"},{"q":1},{"question":"B?"}]}}"#;
     let read = ingest("PermissionRequest", asked);
     let Some(Observed::QuestionAsked { summary, .. }) = facts(&read).pop() else {
-        panic!("no usage")
+        panic!("no question")
     };
     assert_eq!((summary.as_str(), &read.reply), ("A? / B?", &Reply::Quiet));
     assert_eq!(
@@ -752,9 +761,14 @@ fn reads_a_subagents_start_and_stop_by_its_id_and_ignores_a_hook_it_did_not_inst
     );
     assert_eq!(
         facts(&ingest("SubagentStop", r#"{"agent_id":"a-1"}"#)),
-        [Observed::SubagentStopped {
-            id: "a-1".to_owned()
-        }]
+        [
+            Observed::SubagentStopped {
+                id: "a-1".to_owned()
+            },
+            Observed::SubagentOver {
+                id: "a-1".to_owned()
+            }
+        ]
     );
     assert_eq!(facts(&ingest("SubagentStop", r#"{"agent_id":""}"#)), []);
     assert_eq!(ingest("Notification", "{}").observed, Vec::<Keyed>::new());
@@ -848,6 +862,35 @@ fn folds_only_the_oldest_mail_that_fits_whole_where_a_wake_always_takes_the_firs
     );
     let many: Vec<Mail<'_>> = (0..101).map(|_| mail("msg_1", "", None)).collect();
     assert_eq!(carried(Pending::Waiter, &many).len(), 100);
+}
+
+#[test]
+fn caps_a_wake_in_utf_8_bytes_and_a_fold_in_utf_16_units_to_the_unit_and_each_at_100_messages() {
+    let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
+    let carried = |pending, queued: &[Mail<'_>]| {
+        hook(harness.answer(&pending, Resolution::Mail(queued))).carried
+    };
+    // Two messages' labels and the blank line between them, then a first body of `room` filling
+    // the rest: of two-byte characters for a wake, of two-unit ones for a fold, and one narrow.
+    let label = reply::wake_text(&[mail("msg_1", "", None)]).len();
+    let filled = |max: usize, wide: &str, narrow: &str| {
+        let room = max - 2 * label - 2;
+        format!("{}{}", wide.repeat(room / 2), narrow.repeat(room % 2))
+    };
+    let both = |pending, first: &str| {
+        carried(
+            pending,
+            &[mail("msg_1", first, None), mail("msg_2", "", None)],
+        )
+    };
+    let wake = filled(HOOK_REPLY_MAX_BYTES, "é", "x");
+    assert_eq!(both(Pending::Waiter, &wake), ["msg_1", "msg_2"]);
+    assert_eq!(both(Pending::Waiter, &format!("{wake}x")), ["msg_1"]);
+    let fold = filled(reply::FOLD_MAX_CHARS, "😀", "é");
+    assert_eq!(both(Pending::Fold, &fold), ["msg_1", "msg_2"]);
+    assert_eq!(both(Pending::Fold, &format!("{fold}é")), ["msg_1"]);
+    let many: Vec<Mail<'_>> = (0..101).map(|_| mail("msg_1", "", None)).collect();
+    assert_eq!(carried(Pending::Fold, &many).len(), 100);
 }
 
 #[test]

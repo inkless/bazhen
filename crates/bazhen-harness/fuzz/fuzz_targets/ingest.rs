@@ -33,7 +33,12 @@ fuzz_target!(|input: (&str, &[u8])| {
         session: None,
     };
     let read = claude.ingest(Report::Hook { event, payload }, &context);
-    if serde_json::from_slice::<serde_json::Value>(payload).is_err() {
+    // serde_json refuses text JavaScript reads: a lone surrogate's escape, a byte that isn't
+    // UTF-8, nesting past its limit. Text with none of them that it refuses isn't JSON.
+    let plain = !payload.contains(&b'\\')
+        && std::str::from_utf8(payload).is_ok()
+        && payload.iter().filter(|&&b| b == b'[' || b == b'{').count() < 128;
+    if plain && serde_json::from_slice::<serde_json::Value>(payload).is_err() {
         assert_eq!(read, Ingested::nothing());
         return;
     }
@@ -67,6 +72,16 @@ fuzz_target!(|input: (&str, &[u8])| {
                 | Observed::SessionStarted { .. }
         );
         assert!(!owners || k.gate == Gate::Owner, "{k:?}");
+        let in_session = matches!(
+            k.fact,
+            Observed::Activity(_)
+                | Observed::Usage(_)
+                | Observed::SubagentStarted { .. }
+                | Observed::SubagentStopped { .. }
+        );
+        assert!(!in_session || k.gate != Gate::None, "{k:?}");
+        let anyones = matches!(k.fact, Observed::TurnOver | Observed::SubagentOver { .. });
+        assert!(!anyones || k.gate == Gate::None, "{k:?}");
     }
     let activities = read
         .observed
@@ -80,8 +95,10 @@ fuzz_target!(|input: (&str, &[u8])| {
             | Observed::QuestionAsked { key, .. } => key,
             _ => continue,
         };
+        let mut text = serde_json::Deserializer::from_str(&key.key);
+        text.disable_recursion_limit();
         let parts: Vec<serde_json::Value> =
-            serde_json::from_str(&key.key).expect("a tool key is a JSON array");
+            serde::Deserialize::deserialize(&mut text).expect("a tool key is a JSON array");
         assert_eq!(parts.len(), 4);
         assert_eq!(
             parts[0].as_str(),

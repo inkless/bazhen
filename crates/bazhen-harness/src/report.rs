@@ -225,6 +225,10 @@ pub enum Observed {
     SubagentStopped {
         id: String,
     },
+    /// A subagent stopped, whoever's session it ran in: the requests it made are over.
+    SubagentOver {
+        id: String,
+    },
     /// Hold the agent's mail: its TUI is moving between sessions.
     Hold,
     Release,

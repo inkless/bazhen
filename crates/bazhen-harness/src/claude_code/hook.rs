@@ -216,8 +216,15 @@ fn facts_of(hook: Hook, offered: &[String]) -> Said {
             }
         }
         Hook::Statusline { usage } => facts.push((in_session, Observed::Usage(usage))),
-        Hook::SubagentStarted { id } => facts.push((none, Observed::SubagentStarted { id })),
-        Hook::SubagentStopped { id } => facts.push((none, Observed::SubagentStopped { id })),
+        // What a subagent does is the agent's activity, from its session alone; the requests a
+        // stopped one made are over whoever's session it ran in.
+        Hook::SubagentStarted { id } => {
+            facts.push((in_session, Observed::SubagentStarted { id }));
+        }
+        Hook::SubagentStopped { id } => facts.extend([
+            (in_session, Observed::SubagentStopped { id: id.clone() }),
+            (none, Observed::SubagentOver { id }),
+        ]),
         Hook::Ignored => {}
     }
     Said {

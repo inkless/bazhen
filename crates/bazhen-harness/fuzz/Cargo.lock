@@ -40,6 +40,7 @@ version = "0.0.0"
 dependencies = [
  "bazhen-harness",
  "libfuzzer-sys",
+ "serde",
  "serde_json",
 ]
 
