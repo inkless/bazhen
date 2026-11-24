@@ -4217,7 +4217,14 @@ export const RUST_GATE_TASKS: Record<string, string> = {
   "test-rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
 };
 export const GATE_STEPS: Record<string, readonly string[]> = {
-  check: ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"],
+  check: [
+    "format-check",
+    "lint-rust",
+    "deny",
+    "test-rust",
+    "rust-schema-check",
+    "protocol-dual-types",
+  ],
   "format-check": ["gate-fmt"],
 };
 
@@ -5132,6 +5139,10 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
   "crates/bazhen-store/src/agents.rs": {
     names: ["codex_agent", '"codex', '"codex-thread'],
     why: "caller identity's query, for callers.rs: the live agent bound to a Codex thread",
+  },
+  "crates/bazhen-xtask/src/schema/corpus.rs": {
+    names: ['"codex'],
+    why: "a launch agentOrLaunch's cases plant, which must name a harness the protocol's HarnessId holds",
   },
 };
 

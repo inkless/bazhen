@@ -327,6 +327,10 @@ fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
         tagged::<OpenShellRequest>(None, &keys),
         serde_json::json!({ "x-bazhen-check": "linkedShellTakesNoCwd" })
     );
+    assert_eq!(
+        tagged::<TerminalScreen>(Some("text"), &keys),
+        serde_json::json!({ "x-bazhen-check": ["wellFormed", "screenText"] })
+    );
 }
 
 #[test]

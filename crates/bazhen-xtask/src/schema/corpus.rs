@@ -14,6 +14,10 @@ type Path = Vec<String>;
 /// Fields to set, or with none to take out.
 type Fields = Vec<(&'static str, Option<Value>)>;
 
+/// A case an object-level check is broken by: its name, its fields, and whether the check takes
+/// them.
+type ObjectCase = (&'static str, Fields, bool);
+
 /// What a case does to its example at its path.
 #[derive(Debug, Clone, PartialEq)]
 enum Edit {
@@ -214,6 +218,20 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
             ("zeroWidth", r#""a\u200bb""#, false),
             ("loneSurrogate", r#""a\ud800b""#, false),
         ]),
+        "wellFormed" => text(&[
+            ("plain", r#""row""#, true),
+            ("pair", r#""a\ud83d\ude00b""#, true),
+            ("loneSurrogate", r#""a\ud800b""#, false),
+        ]),
+        "screenText" => text(&[
+            ("rows", r#""one\ntwo\n""#, true),
+            ("tab", r#""a\tb""#, false),
+            ("return", r#""a\rb""#, false),
+            ("control", r#""a\u0007b""#, false),
+            ("delete", r#""a\u007fb""#, false),
+            ("nextLine", r#""a\u0085b""#, false),
+            ("bidi", r#""a\u202eb""#, true),
+        ]),
         "taskNoteBytes" => vec![
             (
                 "atMaxBytes",
@@ -230,29 +248,68 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
     })
 }
 
-/// The fields an object-level check is broken by, each case with its name, and whether the check
-/// takes them.
-fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
+/// Each object-level check, with the cases it is broken by.
+fn object_checks() -> Vec<(&'static str, Vec<ObjectCase>)> {
     const AGENT: &str = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
-    Some(match check {
-        "agentOrLaunch" => vec![("neither", vec![("agentId", None), ("launch", None)], false)],
-        "linkedShellTakesNoCwd" => vec![
-            (
-                "linkedWithCwd",
-                vec![
-                    ("linkedAgentId", Some(json!(AGENT))),
-                    ("cwd", Some(json!("/w"))),
-                ],
-                false,
-            ),
-            (
-                "unlinkedWithCwd",
-                vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
-                true,
-            ),
-        ],
-        _ => return None,
-    })
+    vec![
+        ("agentOrLaunch", {
+            let launch = || Some(json!({ "harness": "codex" }));
+            vec![
+                (
+                    "both",
+                    vec![("agentId", Some(json!(AGENT))), ("launch", launch())],
+                    false,
+                ),
+                (
+                    "agentOnly",
+                    vec![("agentId", Some(json!(AGENT))), ("launch", None)],
+                    true,
+                ),
+                (
+                    "launchOnly",
+                    vec![("agentId", None), ("launch", launch())],
+                    true,
+                ),
+                ("neither", vec![("agentId", None), ("launch", None)], false),
+            ]
+        }),
+        (
+            "linkedShellTakesNoCwd",
+            vec![
+                (
+                    "linkedWithCwd",
+                    vec![
+                        ("linkedAgentId", Some(json!(AGENT))),
+                        ("cwd", Some(json!("/w"))),
+                    ],
+                    false,
+                ),
+                (
+                    "unlinkedWithCwd",
+                    vec![("linkedAgentId", None), ("cwd", Some(json!("/w")))],
+                    true,
+                ),
+                (
+                    "linkedWithoutCwd",
+                    vec![("linkedAgentId", Some(json!(AGENT))), ("cwd", None)],
+                    true,
+                ),
+                (
+                    "neither",
+                    vec![("linkedAgentId", None), ("cwd", None)],
+                    true,
+                ),
+            ],
+        ),
+    ]
+}
+
+/// The cases `check` is broken by, if it is an object-level check.
+fn object_cases(check: &str) -> Option<Vec<ObjectCase>> {
+    object_checks()
+        .into_iter()
+        .find(|(name, _)| *name == check)
+        .map(|(_, cases)| cases)
 }
 
 /// The JSON text of the largest safe integer plus two, which a double reads as plus one.
@@ -281,6 +338,28 @@ struct Walk<'a> {
     plants: Vec<Plant>,
     problems: BTreeSet<String>,
     schema: &'a str,
+}
+
+/// The keywords that describe a value without holding it to anything: the walk plants no case for
+/// them, and a schema of them alone takes any value.
+const ANNOTATIONS: &[&str] = &[
+    "description",
+    "title",
+    "examples",
+    "$comment",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+];
+
+/// Whether `schema` takes any value, null too: `true`, or one of annotations alone.
+fn takes_any(schema: &Value) -> bool {
+    match schema {
+        Value::Bool(any) => *any,
+        Value::Object(keywords) => keywords.keys().all(|k| ANNOTATIONS.contains(&k.as_str())),
+        _ => false,
+    }
 }
 
 fn pointer(path: &[String]) -> String {
@@ -387,6 +466,7 @@ impl<'a> Walk<'a> {
             .flatten()
             .all(|schema| {
                 is_null(schema)
+                    || takes_any(schema)
                     || branches(schema).is_some_and(|b| b.iter().any(|b| is_null(self.resolved(b))))
                     || schema
                         .get("type")
@@ -549,6 +629,14 @@ impl<'a> Walk<'a> {
             .flatten()
             .filter_map(Value::as_str)
             .collect();
+        // A check over the whole object may need a field it lets each leave out alone, which the
+        // corpus can't judge: the check's own cases leave its fields out.
+        let checked: BTreeSet<&str> = checks
+            .iter()
+            .filter_map(|check| object_cases(check))
+            .flatten()
+            .flat_map(|(_, fields, _)| fields.into_iter().map(|(key, _)| key))
+            .collect();
         let keys: BTreeSet<&String> = rust
             .into_iter()
             .chain(protocol)
@@ -564,7 +652,10 @@ impl<'a> Walk<'a> {
             let Some(held) = object.get(key) else {
                 continue;
             };
-            self.plant(&at, "leftOut", Edit::Drop, !required.contains(key.as_str()));
+            let optional = !required.contains(key.as_str());
+            if !optional || !checked.contains(key.as_str()) {
+                self.plant(&at, "leftOut", Edit::Drop, optional);
+            }
             if !held.is_null() {
                 self.plant(&at, "null", Edit::Put(Value::Null), self.nullable(field));
             }
@@ -863,10 +954,11 @@ impl<'a> Walk<'a> {
 /// Whether the corpus plants the cases `key` makes in `schema`, or `key` makes none.
 fn handled(key: &str, schema: &Value) -> bool {
     match key {
-        "$ref" | "$schema" | "$id" | "$defs" | "description" | "default" | "type"
-        | "properties" | "required" | "items" | "enum" | "const" | "oneOf" | "anyOf"
-        | "minLength" | "maxLength" | "pattern" | "minimum" | "maximum" | "exclusiveMinimum"
-        | "minItems" | "maxItems" | "x-bazhen-check" | "propertyNames" => true,
+        _ if ANNOTATIONS.contains(&key) => true,
+        "$ref" | "$schema" | "$id" | "$defs" | "type" | "properties" | "required" | "items"
+        | "enum" | "const" | "oneOf" | "anyOf" | "minLength" | "maxLength" | "pattern"
+        | "minimum" | "maximum" | "exclusiveMinimum" | "minItems" | "maxItems"
+        | "x-bazhen-check" | "propertyNames" => true,
         "additionalProperties" => schema
             .get(key)
             .is_some_and(|v| v.is_object() || v.is_boolean()),
@@ -1225,6 +1317,110 @@ mod tests {
             !bytes.iter().any(|c| c.kind.starts_with("astral")),
             "{bytes:?}"
         );
+    }
+
+    #[test]
+    fn plants_null_as_taken_where_the_schema_takes_any_value() {
+        let field = |schema: Value| json!({ "type": "object", "properties": { "v": schema }, "required": ["v"] });
+        let example = json!({ "v": 1 });
+        let null_taken = |rust: Value, protocol: Option<Value>| {
+            let protocol = protocol.map(field);
+            let cases = planted_in(&field(rust), protocol.as_ref(), &example).unwrap();
+            cases.iter().find(|c| c.kind == "null").map(|c| c.accept)
+        };
+        assert_eq!(null_taken(json!(true), Some(json!({}))), Some(true));
+        assert_eq!(
+            null_taken(json!({ "description": "any" }), None),
+            Some(true)
+        );
+        let annotated =
+            json!({ "default": 1, "deprecated": true, "readOnly": true, "writeOnly": false });
+        assert_eq!(null_taken(annotated, None), Some(true));
+        assert_eq!(
+            null_taken(json!(true), Some(json!({ "type": "number" }))),
+            Some(false)
+        );
+        assert_eq!(null_taken(json!({ "type": "number" }), None), Some(false));
+    }
+
+    #[test]
+    fn plants_no_left_out_for_a_field_a_whole_object_check_reads() {
+        let message = |check: Option<&str>| {
+            let mut schema = json!({
+                "type": "object",
+                "properties": {
+                    "idempotencyKey": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "linkedAgentId": { "type": "string" },
+                    "theme": { "type": "string" },
+                },
+                "required": ["idempotencyKey"],
+            });
+            if let Some(check) = check {
+                schema["x-bazhen-check"] = json!(check);
+            }
+            schema
+        };
+        let example = json!({ "idempotencyKey": "k", "cwd": "/w", "theme": "t" });
+        let left_out = |cases: &[Case]| {
+            cases
+                .iter()
+                .filter(|c| c.kind == "leftOut")
+                .map(|c| (c.path.clone(), c.accept))
+                .collect::<Vec<_>>()
+        };
+        let unchecked = planted_in(&message(None), None, &example).unwrap();
+        assert_eq!(
+            left_out(&unchecked),
+            [
+                ("/cwd".to_owned(), true),
+                ("/idempotencyKey".to_owned(), false),
+                ("/theme".to_owned(), true),
+            ]
+        );
+        let checked = planted_in(&message(Some("linkedShellTakesNoCwd")), None, &example).unwrap();
+        assert_eq!(
+            left_out(&checked),
+            [
+                ("/idempotencyKey".to_owned(), false),
+                ("/theme".to_owned(), true),
+            ]
+        );
+        let neither = checked
+            .iter()
+            .find(|c| c.kind == "linkedShellTakesNoCwd/neither")
+            .unwrap();
+        assert_eq!(
+            (neither.body.as_str(), neither.accept),
+            (r#"{"idempotencyKey":"k","theme":"t"}"#, true)
+        );
+    }
+
+    #[test]
+    fn breaks_each_whole_object_check_by_every_set_of_its_fields_left_out() {
+        for (check, cases) in object_checks() {
+            let fields: BTreeSet<&str> = cases
+                .iter()
+                .flat_map(|(_, fields, _)| fields.iter().map(|(key, _)| *key))
+                .collect();
+            let held: BTreeSet<Vec<&str>> = cases
+                .iter()
+                .map(|(_, set, _)| {
+                    let mut held: Vec<&str> = set
+                        .iter()
+                        .filter(|(_, value)| value.is_some())
+                        .map(|(key, _)| *key)
+                        .collect();
+                    held.sort_unstable();
+                    held
+                })
+                .collect();
+            assert_eq!(
+                (cases.len(), held.len()),
+                (1 << fields.len(), 1 << fields.len()),
+                "{check}: {held:?}"
+            );
+        }
     }
 
     #[test]

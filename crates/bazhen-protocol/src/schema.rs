@@ -229,6 +229,27 @@ impl JsonSchema for ReportedLine {
     }
 }
 
+/// A terminal's screen as text: well formed, with no control but the newline ending each row.
+#[derive(Debug)]
+pub struct ScreenText;
+
+impl JsonSchema for ScreenText {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "ScreenText".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "x-bazhen-check": ["wellFormed", "screenText"],
+        })
+    }
+}
+
 /// `true`, the one value a flag that can only be set takes.
 #[derive(Debug)]
 pub struct OnlyTrue;

@@ -11,6 +11,7 @@ pub const SCREEN_HISTORY_MAX: u32 = 10_000;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalScreen {
     /// No control but the newline ending each row, as the daemon sends it.
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::ScreenText"))]
     pub text: String,
     /// How many of its rows are history.
     pub history: u64,
