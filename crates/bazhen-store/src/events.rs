@@ -11,7 +11,8 @@ use bazhen_protocol::events::{
     TerminalNoted, TerminalOpened, TerminalRenamed, event_kind,
 };
 use bazhen_protocol::ids::{
-    AgentId, AttachmentId, DeviceId, EnvironmentId, NoticeId, TaskId, TerminalId,
+    AgentId, AssignmentId, AttachmentId, AttentionId, DeviceId, EnvironmentId, MessageId, NoticeId,
+    ObservedId, TaskId, TerminalId,
 };
 use bazhen_protocol::record::Record;
 use rusqlite::{Connection, OptionalExtension, Transaction};
@@ -19,8 +20,12 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
+use bazhen_protocol::mail_events::MessageObserved;
+
 use crate::agent_events::AgentChange;
+use crate::mail_events::{AttentionChange, MailChange};
 use crate::projections;
+use crate::task_events::{AssignmentChange, TaskChange};
 
 /// An event this build records, with the entity it is about and who it came from: an agent's id,
 /// or a word naming the human or the system. A device's events and a notice's closing come from
@@ -78,6 +83,36 @@ pub enum NewEvent {
         agent: AgentId,
         actor: String,
         change: AgentChange,
+    },
+    /// A change to a message in an agent's mailbox.
+    Mail {
+        message: MessageId,
+        actor: String,
+        change: MailChange,
+    },
+    /// A message one agent sent another through its harness's own channel.
+    MessageObserved {
+        observed: ObservedId,
+        actor: String,
+        payload: MessageObserved,
+    },
+    /// A change to an item for the human.
+    Attention {
+        attention: AttentionId,
+        actor: String,
+        change: AttentionChange,
+    },
+    /// A change to a task after its creation.
+    Task {
+        task: TaskId,
+        actor: String,
+        change: TaskChange,
+    },
+    /// A change to an assignment.
+    Assignment {
+        assignment: AssignmentId,
+        actor: String,
+        change: AssignmentChange,
     },
 }
 
@@ -162,12 +197,17 @@ impl NewEvent {
             Self::AttachmentEnded { .. } => "attachment.ended",
             Self::LeaseGranted { .. } => "lease.granted",
             Self::Agent { change, .. } => change.name(),
+            Self::Mail { change, .. } => change.name(),
+            Self::MessageObserved { .. } => "message.observed",
+            Self::Attention { change, .. } => change.name(),
+            Self::Task { change, .. } => change.name(),
+            Self::Assignment { change, .. } => change.name(),
         }
     }
 
     fn entity_id(&self) -> &str {
         match self {
-            Self::TaskCreated { task, .. } => task.as_str(),
+            Self::TaskCreated { task, .. } | Self::Task { task, .. } => task.as_str(),
             Self::DevicePaired { device, .. } | Self::DeviceRevoked { device } => device.as_str(),
             Self::NoticeOpened { notice, .. } | Self::NoticeClosed { notice, .. } => {
                 notice.as_str()
@@ -179,12 +219,22 @@ impl NewEvent {
             Self::AttachmentStarted { attachment, .. }
             | Self::AttachmentEnded { attachment, .. } => attachment.as_str(),
             Self::Agent { agent, .. } => agent.as_str(),
+            Self::Mail { message, .. } => message.as_str(),
+            Self::MessageObserved { observed, .. } => observed.as_str(),
+            Self::Attention { attention, .. } => attention.as_str(),
+            Self::Assignment { assignment, .. } => assignment.as_str(),
         }
     }
 
     fn actor(&self) -> &str {
         match self {
-            Self::TaskCreated { actor, .. } | Self::Agent { actor, .. } => actor,
+            Self::TaskCreated { actor, .. }
+            | Self::Agent { actor, .. }
+            | Self::Mail { actor, .. }
+            | Self::MessageObserved { actor, .. }
+            | Self::Attention { actor, .. }
+            | Self::Task { actor, .. }
+            | Self::Assignment { actor, .. } => actor,
             Self::DevicePaired { .. } | Self::DeviceRevoked { .. } | Self::NoticeClosed { .. } => {
                 "user"
             }
@@ -210,6 +260,11 @@ impl NewEvent {
             Self::AttachmentEnded { payload, .. } => serde_json::to_string(payload),
             Self::LeaseGranted { payload, .. } => serde_json::to_string(payload),
             Self::Agent { change, .. } => change.payload(),
+            Self::Mail { change, .. } => change.payload(),
+            Self::MessageObserved { payload, .. } => serde_json::to_string(payload),
+            Self::Attention { change, .. } => change.payload(),
+            Self::Task { change, .. } => change.payload(),
+            Self::Assignment { change, .. } => change.payload(),
         }
     }
 }

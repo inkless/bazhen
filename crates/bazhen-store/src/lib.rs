@@ -13,10 +13,12 @@ mod events;
 mod events_fixture;
 #[cfg(test)]
 mod fixture;
+mod mail_events;
 mod migrations;
 mod private;
 mod projections;
 mod snapshot;
+mod task_events;
 mod tasks;
 mod terminals;
 #[cfg(test)]
@@ -44,8 +46,10 @@ pub use events::{
     Actor, AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, TerminalChange,
     Writer,
 };
+pub use mail_events::{AttentionChange, MailChange};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::{SnapshotError, SnapshotView};
+pub use task_events::{AssignmentChange, TaskChange};
 pub use tasks::{CreateTaskError, NewTask};
 pub use terminals::{RuntimeRow, ShellRow};
 

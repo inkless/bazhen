@@ -826,6 +826,441 @@
           }
         }
       }
+    },
+    {
+      "type": "agent.launched",
+      "entityId": "agent_0190000000007000800000000000000b",
+      "actor": "user",
+      "payload": {
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "mail",
+        "cwd": "/g",
+        "terminalId": "term_0190000000007000800000000000000c"
+      }
+    },
+    {
+      "type": "agent.running",
+      "entityId": "agent_0190000000007000800000000000000b",
+      "actor": "system",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s7"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "socket": "/run/bazhen/holder.sock",
+            "generation": "0"
+          }
+        }
+      }
+    },
+    {
+      "type": "mailbox.queued",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "agentId": "agent_0190000000007000800000000000000b",
+        "body": "hello",
+        "from": "agent_01900000000070008000000000000005"
+      }
+    },
+    {
+      "type": "mailbox.queued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "user",
+      "payload": {
+        "agentId": "agent_0190000000007000800000000000000b",
+        "body": "again"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.emitted",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.seen",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "promptId": "p1"
+      }
+    },
+    {
+      "type": "mailbox.delivered",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.delivered",
+      "entityId": "msg_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {},
+      "refused": "Error: mailbox message cannot handle confirm while delivered"
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "promptId": "p2"
+      }
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "not_seen"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "daemon_restart"
+      }
+    },
+    {
+      "type": "mailbox.undeliverable",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "gave_up"
+      }
+    },
+    {
+      "type": "mailbox.queued",
+      "entityId": "msg_01900000000070008000000000000003",
+      "actor": "user",
+      "payload": {
+        "agentId": "agent_01900000000070008000000000000005",
+        "body": "for codex"
+      }
+    },
+    {
+      "type": "mailbox.accepted",
+      "entityId": "msg_01900000000070008000000000000003",
+      "actor": "system",
+      "payload": {
+        "offline": true
+      }
+    },
+    {
+      "type": "mailbox.seen",
+      "entityId": "msg_01900000000070008000000000000003",
+      "actor": "agent_01900000000070008000000000000005",
+      "payload": {
+        "promptId": "p3"
+      },
+      "refused": "Error: mailbox message cannot handle seen while queued_in_codex"
+    },
+    {
+      "type": "mailbox.undeliverable",
+      "entityId": "msg_01900000000070008000000000000003",
+      "actor": "system",
+      "payload": {
+        "reason": "agent_closed"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000009",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {},
+      "refused": "Error: no message msg_01900000000070008000000000000009"
+    },
+    {
+      "type": "message.observed",
+      "entityId": "obs_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "from": "agent_0190000000007000800000000000000b",
+        "to": "agent_01900000000070008000000000000005",
+        "summary": "a note",
+        "text": "a note, whole",
+        "accepted": true,
+        "toolUseId": "tu1"
+      }
+    },
+    {
+      "type": "message.observed",
+      "entityId": "obs_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "from": "agent_0190000000007000800000000000000b",
+        "to": "agent_01900000000070008000000000000005",
+        "summary": "again",
+        "text": "again",
+        "accepted": false,
+        "toolUseId": "tu1"
+      },
+      "refused": "Error: UNIQUE constraint failed: observed_messages.from_agent_id, observed_messages.tool_use_id"
+    },
+    {
+      "type": "attention.opened",
+      "entityId": "attn_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "agentId": "agent_0190000000007000800000000000000b",
+        "summary": "run ls?",
+        "toolUseId": "tu2",
+        "mainAgent": true
+      }
+    },
+    {
+      "type": "attention.opened",
+      "entityId": "attn_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "agentId": "agent_0190000000007000800000000000000b",
+        "summary": "which?",
+        "kind": "question",
+        "taskId": "task_01900000000070008000000000000001",
+        "messageId": "msg_01900000000070008000000000000001",
+        "toolUseId": null,
+        "mainAgent": false
+      }
+    },
+    {
+      "type": "attention.answered",
+      "entityId": "attn_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "decision": "allow"
+      }
+    },
+    {
+      "type": "attention.answered",
+      "entityId": "attn_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "decision": "deny"
+      },
+      "refused": "Error: attention item cannot handle answered while closed"
+    },
+    {
+      "type": "attention.closed",
+      "entityId": "attn_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "timed_out"
+      }
+    },
+    {
+      "type": "attention.closed",
+      "entityId": "attn_01900000000070008000000000000009",
+      "actor": "system",
+      "payload": {
+        "reason": "stale"
+      },
+      "refused": "Error: no attention item attn_01900000000070008000000000000009"
+    },
+    {
+      "type": "task.created",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "title": "Ship",
+        "brief": "the brief",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "lead",
+        "parentAssignmentId": null
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000001"
+      }
+    },
+    {
+      "type": "task.created",
+      "entityId": "task_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "title": "Part",
+        "brief": "a part",
+        "ownerAgentId": "agent_0190000000007000800000000000000b",
+        "parentTaskId": "task_01900000000070008000000000000001",
+        "delegatedFrom": "asgn_01900000000070008000000000000001"
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000003",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000002"
+      }
+    },
+    {
+      "type": "task.noted",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "text": "on it",
+        "handoff": true,
+        "role": "lead"
+      }
+    },
+    {
+      "type": "task.noted",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "text": "thanks",
+        "handoff": false,
+        "role": null
+      }
+    },
+    {
+      "type": "task.noted",
+      "entityId": "task_01900000000070008000000000000009",
+      "actor": "user",
+      "payload": {
+        "text": "nobody",
+        "handoff": false,
+        "role": null
+      },
+      "refused": "Error: no task task_01900000000070008000000000000009"
+    },
+    {
+      "type": "task.owner_changed",
+      "entityId": "task_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "ownerAgentId": null,
+        "delegatedFrom": null
+      }
+    },
+    {
+      "type": "assignment.ended",
+      "entityId": "asgn_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "reason": "unassigned"
+      }
+    },
+    {
+      "type": "assignment.ended",
+      "entityId": "asgn_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "reason": "completed"
+      },
+      "refused": "Error: assignment cannot handle completed while ended"
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000004",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    },
+    {
+      "type": "task.finished",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "outcome": "done",
+        "note": "shipped"
+      }
+    },
+    {
+      "type": "task.finished",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "user",
+      "payload": {
+        "outcome": "cancelled",
+        "note": null
+      },
+      "refused": "Error: task cannot handle cancelled while done"
+    },
+    {
+      "type": "task.finished",
+      "entityId": "task_01900000000070008000000000000002",
+      "actor": "user",
+      "payload": {
+        "outcome": "cancelled",
+        "note": null
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000005",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000006",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000005"
+      }
+    },
+    {
+      "type": "agent.closing",
+      "entityId": "agent_0190000000007000800000000000000b",
+      "actor": "user",
+      "payload": {}
+    },
+    {
+      "type": "agent.closed",
+      "entityId": "agent_0190000000007000800000000000000b",
+      "actor": "system",
+      "payload": {}
     }
   ],
   "tables": {
@@ -1017,6 +1452,28 @@
         "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"codex-thread\",\"id\":\"t5\"}",
         "created_event_id": 54,
         "updated_event_id": 61,
+        "usage": null,
+        "transcript": null,
+        "launched_by": null,
+        "name": null,
+        "harness_name": null,
+        "token_hash": null,
+        "untokened": 0,
+        "role": null,
+        "prompt_hash": null,
+        "compact_window": null
+      },
+      {
+        "id": "agent_0190000000007000800000000000000b",
+        "environment_id": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "mail",
+        "cwd": "/g",
+        "state": "closed",
+        "terminal_id": "term_0190000000007000800000000000000c",
+        "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s7\"}",
+        "created_event_id": 62,
+        "updated_event_id": 98,
         "usage": null,
         "transcript": null,
         "launched_by": null,
@@ -1279,6 +1736,31 @@
         "report_token_hash": null,
         "runtime_kind": "tmux",
         "restart_protocol": null
+      },
+      {
+        "id": "term_0190000000007000800000000000000c",
+        "host_id": "host_01900000000070008000000000000001",
+        "state": "closed",
+        "generation": 0,
+        "runtime": "holder",
+        "locator": "{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}",
+        "environment_id": "env_01900000000070008000000000000001",
+        "kind": "agent",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "created_event_id": 62,
+        "updated_event_id": 98,
+        "exit": null,
+        "theme": null,
+        "cwd": null,
+        "linked_agent_id": null,
+        "name": null,
+        "foreground": null,
+        "current_cwd": null,
+        "last_command": null,
+        "last_command_seq": null,
+        "report_token_hash": null,
+        "runtime_kind": "tmux",
+        "restart_protocol": null
       }
     ],
     "activity_latest": [
@@ -1296,6 +1778,200 @@
       {
         "base": "agent",
         "last": 1
+      }
+    ],
+    "mailbox": [
+      {
+        "id": "msg_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "body": "hello",
+        "state": "delivered",
+        "prompt_id": "p1",
+        "created_event_id": 64,
+        "updated_event_id": 69,
+        "first_offered_event_id": 66,
+        "failures": 0,
+        "from_agent_id": "agent_01900000000070008000000000000005",
+        "settled_event_id": 68
+      },
+      {
+        "id": "msg_01900000000070008000000000000002",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "body": "again",
+        "state": "undeliverable",
+        "prompt_id": null,
+        "created_event_id": 65,
+        "updated_event_id": 74,
+        "first_offered_event_id": 70,
+        "failures": 1,
+        "from_agent_id": null,
+        "settled_event_id": 74
+      },
+      {
+        "id": "msg_01900000000070008000000000000003",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "body": "for codex",
+        "state": "undeliverable",
+        "prompt_id": null,
+        "created_event_id": 75,
+        "updated_event_id": 77,
+        "first_offered_event_id": null,
+        "failures": 0,
+        "from_agent_id": null,
+        "settled_event_id": 77
+      }
+    ],
+    "observed_messages": [
+      {
+        "id": "obs_01900000000070008000000000000001",
+        "from_agent_id": "agent_0190000000007000800000000000000b",
+        "to_agent_id": "agent_01900000000070008000000000000005",
+        "summary": "a note",
+        "accepted": 1,
+        "tool_use_id": "tu1",
+        "created_event_id": 78
+      }
+    ],
+    "attention_items": [
+      {
+        "id": "attn_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "state": "closed",
+        "close_reason": "answered",
+        "summary": "run ls?",
+        "tool_use_id": "tu2",
+        "main_agent": 1,
+        "created_event_id": 79,
+        "updated_event_id": 81,
+        "kind": "approval",
+        "task_id": null,
+        "message_id": null
+      },
+      {
+        "id": "attn_01900000000070008000000000000002",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "state": "closed",
+        "close_reason": "timed_out",
+        "summary": "which?",
+        "tool_use_id": null,
+        "main_agent": 0,
+        "created_event_id": 80,
+        "updated_event_id": 82,
+        "kind": "question",
+        "task_id": "task_01900000000070008000000000000001",
+        "message_id": "msg_01900000000070008000000000000001"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task_01900000000070008000000000000001",
+        "title": "Ship",
+        "brief": "the brief",
+        "state": "done",
+        "owner_agent_id": null,
+        "parent_task_id": null,
+        "note": "shipped",
+        "created_event_id": 83,
+        "updated_event_id": 93,
+        "delegated_from": null
+      },
+      {
+        "id": "task_01900000000070008000000000000002",
+        "title": "Part",
+        "brief": "a part",
+        "state": "cancelled",
+        "owner_agent_id": null,
+        "parent_task_id": "task_01900000000070008000000000000001",
+        "note": null,
+        "created_event_id": 86,
+        "updated_event_id": 94,
+        "delegated_from": null
+      }
+    ],
+    "task_notes": [
+      {
+        "event_id": 88,
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "author_role": "lead",
+        "text": "on it",
+        "handoff": 1
+      },
+      {
+        "event_id": 89,
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": null,
+        "author_role": null,
+        "text": "thanks",
+        "handoff": 0
+      }
+    ],
+    "assignments": [
+      {
+        "id": "asgn_01900000000070008000000000000001",
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "role": "lead",
+        "parent_assignment_id": null,
+        "state": "ended",
+        "end_reason": "unassigned",
+        "created_event_id": 84,
+        "updated_event_id": 91
+      },
+      {
+        "id": "asgn_01900000000070008000000000000002",
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parent_assignment_id": "asgn_01900000000070008000000000000001",
+        "state": "ended",
+        "end_reason": "parent_ended",
+        "created_event_id": 85,
+        "updated_event_id": 91
+      },
+      {
+        "id": "asgn_01900000000070008000000000000003",
+        "task_id": "task_01900000000070008000000000000002",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parent_assignment_id": "asgn_01900000000070008000000000000002",
+        "state": "ended",
+        "end_reason": "parent_ended",
+        "created_event_id": 87,
+        "updated_event_id": 91
+      },
+      {
+        "id": "asgn_01900000000070008000000000000004",
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parent_assignment_id": null,
+        "state": "ended",
+        "end_reason": "task_finished",
+        "created_event_id": 92,
+        "updated_event_id": 93
+      },
+      {
+        "id": "asgn_01900000000070008000000000000005",
+        "task_id": "task_01900000000070008000000000000002",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parent_assignment_id": null,
+        "state": "ended",
+        "end_reason": "agent_closed",
+        "created_event_id": 95,
+        "updated_event_id": 98
+      },
+      {
+        "id": "asgn_01900000000070008000000000000006",
+        "task_id": "task_01900000000070008000000000000002",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parent_assignment_id": "asgn_01900000000070008000000000000005",
+        "state": "ended",
+        "end_reason": "parent_ended",
+        "created_event_id": 96,
+        "updated_event_id": 98
       }
     ],
     "events": [
@@ -1969,6 +2645,413 @@
         "causation_id": null,
         "correlation_id": null,
         "payload": "{\"externalRef\":{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"codex-thread\",\"id\":\"t5\"},\"runtimeRef\":{\"runtime\":\"holder\",\"locator\":{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"2\"}}}"
+      },
+      {
+        "id": 62,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.launched",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000b",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"mail\",\"cwd\":\"/g\",\"terminalId\":\"term_0190000000007000800000000000000c\"}"
+      },
+      {
+        "id": 63,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.running",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000b",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"externalRef\":{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s7\"},\"runtimeRef\":{\"runtime\":\"holder\",\"locator\":{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}}}"
+      },
+      {
+        "id": 64,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.queued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"body\":\"hello\",\"from\":\"agent_01900000000070008000000000000005\"}"
+      },
+      {
+        "id": 65,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.queued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"body\":\"again\"}"
+      },
+      {
+        "id": 66,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 67,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.emitted",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 68,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.seen",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"promptId\":\"p1\"}"
+      },
+      {
+        "id": 69,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.delivered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 70,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"promptId\":\"p2\"}"
+      },
+      {
+        "id": 71,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"not_seen\"}"
+      },
+      {
+        "id": 72,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 73,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"daemon_restart\"}"
+      },
+      {
+        "id": 74,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.undeliverable",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"gave_up\"}"
+      },
+      {
+        "id": 75,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.queued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000003",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_01900000000070008000000000000005\",\"body\":\"for codex\"}"
+      },
+      {
+        "id": 76,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.accepted",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000003",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"offline\":true}"
+      },
+      {
+        "id": 77,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.undeliverable",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000003",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"agent_closed\"}"
+      },
+      {
+        "id": 78,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "message.observed",
+        "entity_type": "observed_message",
+        "entity_id": "obs_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"from\":\"agent_0190000000007000800000000000000b\",\"to\":\"agent_01900000000070008000000000000005\",\"summary\":\"a note\",\"text\":\"a note, whole\",\"accepted\":true,\"toolUseId\":\"tu1\"}"
+      },
+      {
+        "id": 79,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.opened",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"summary\":\"run ls?\",\"toolUseId\":\"tu2\",\"mainAgent\":true}"
+      },
+      {
+        "id": 80,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.opened",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"summary\":\"which?\",\"kind\":\"question\",\"taskId\":\"task_01900000000070008000000000000001\",\"messageId\":\"msg_01900000000070008000000000000001\",\"toolUseId\":null,\"mainAgent\":false}"
+      },
+      {
+        "id": 81,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.answered",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"decision\":\"allow\"}"
+      },
+      {
+        "id": 82,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.closed",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"timed_out\"}"
+      },
+      {
+        "id": 83,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.created",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"title\":\"Ship\",\"brief\":\"the brief\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}"
+      },
+      {
+        "id": 84,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"lead\",\"parentAssignmentId\":null}"
+      },
+      {
+        "id": 85,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000001\"}"
+      },
+      {
+        "id": 86,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.created",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"title\":\"Part\",\"brief\":\"a part\",\"ownerAgentId\":\"agent_0190000000007000800000000000000b\",\"parentTaskId\":\"task_01900000000070008000000000000001\",\"delegatedFrom\":\"asgn_01900000000070008000000000000001\"}"
+      },
+      {
+        "id": 87,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000003",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000002\"}"
+      },
+      {
+        "id": 88,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.noted",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"text\":\"on it\",\"handoff\":true,\"role\":\"lead\"}"
+      },
+      {
+        "id": 89,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.noted",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"text\":\"thanks\",\"handoff\":false,\"role\":null}"
+      },
+      {
+        "id": 90,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.owner_changed",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"ownerAgentId\":null,\"delegatedFrom\":null}"
+      },
+      {
+        "id": 91,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.ended",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"unassigned\"}"
+      },
+      {
+        "id": 92,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000004",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
+      },
+      {
+        "id": 93,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.finished",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"outcome\":\"done\",\"note\":\"shipped\"}"
+      },
+      {
+        "id": 94,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.finished",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000002",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"outcome\":\"cancelled\",\"note\":null}"
+      },
+      {
+        "id": 95,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000005",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
+      },
+      {
+        "id": 96,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000006",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000005\"}"
+      },
+      {
+        "id": 97,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.closing",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000b",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 98,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.closed",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000b",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
       }
     ]
   }

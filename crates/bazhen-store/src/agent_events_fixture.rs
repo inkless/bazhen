@@ -1,6 +1,7 @@
-//! Agent events against what `moon run :schema` records of the TypeScript store
-//! (packages/protocol/fixtures/agents/events.json): the same run of events appended, each taken or
-//! refused as it was there, leaving the same rows in every table they write.
+//! The events of agents, their mail, their items for the human and their tasks, against what
+//! `moon run :schema` records of the TypeScript store (packages/protocol/fixtures/agents/events.json):
+//! the same run of events appended, each taken or refused as it was there, leaving the same rows
+//! in every table they write.
 
 use std::path::PathBuf;
 
@@ -12,7 +13,10 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
 use crate::testing::TempDir;
-use crate::{AgentChange, AppendError, NewEvent, Store};
+use crate::{
+    AgentChange, AppendError, AssignmentChange, AttentionChange, MailChange, NewEvent, Store,
+    TaskChange,
+};
 
 /// The fixture, each step's payload kept as its text: decoded through a `Value`, whose map sorts
 /// its keys, a locator would lose the order the TypeScript daemon wrote it in.
@@ -73,19 +77,78 @@ fn change(kind: &str, payload: &str) -> AgentChange {
     }
 }
 
+/// The change a `mailbox.*` event of `kind` makes.
+fn mail_change(kind: &str, payload: &str) -> MailChange {
+    match kind {
+        "mailbox.queued" => MailChange::Queued(decode(payload)),
+        "mailbox.offered" => MailChange::Offered(decode(payload)),
+        "mailbox.emitted" => MailChange::Emitted,
+        "mailbox.seen" => MailChange::Seen(decode(payload)),
+        "mailbox.delivered" => MailChange::Delivered,
+        "mailbox.accepted" => MailChange::Accepted(decode(payload)),
+        "mailbox.undeliverable" => MailChange::Undeliverable(decode(payload)),
+        "mailbox.requeued" => MailChange::Requeued(decode(payload)),
+        other => panic!("no mailbox event {other}"),
+    }
+}
+
 /// The event a recorded step appends.
 fn event(step: &Step) -> NewEvent {
     let entity = format!("{:?}", step.entity_id);
-    if step.kind == "environment.registered" {
-        return NewEvent::EnvironmentRegistered {
+    let payload = step.payload.get();
+    let actor = step.actor.clone();
+    match step.kind.split_once('.').map_or("", |(family, _)| family) {
+        "environment" => NewEvent::EnvironmentRegistered {
             environment: decode(&entity),
-            payload: decode(step.payload.get()),
-        };
-    }
-    NewEvent::Agent {
-        agent: decode(&entity),
-        actor: step.actor.clone(),
-        change: change(&step.kind, step.payload.get()),
+            payload: decode(payload),
+        },
+        "agent" => NewEvent::Agent {
+            agent: decode(&entity),
+            actor,
+            change: change(&step.kind, payload),
+        },
+        "mailbox" => NewEvent::Mail {
+            message: decode(&entity),
+            actor,
+            change: mail_change(&step.kind, payload),
+        },
+        "message" => NewEvent::MessageObserved {
+            observed: decode(&entity),
+            actor,
+            payload: decode(payload),
+        },
+        "attention" => NewEvent::Attention {
+            attention: decode(&entity),
+            actor,
+            change: match step.kind.as_str() {
+                "attention.opened" => AttentionChange::Opened(decode(payload)),
+                "attention.answered" => AttentionChange::Answered(decode(payload)),
+                _ => AttentionChange::Closed(decode(payload)),
+            },
+        },
+        "task" if step.kind == "task.created" => NewEvent::TaskCreated {
+            task: decode(&entity),
+            actor,
+            payload: decode(payload),
+        },
+        "task" => NewEvent::Task {
+            task: decode(&entity),
+            actor,
+            change: match step.kind.as_str() {
+                "task.finished" => TaskChange::Finished(decode(payload)),
+                "task.owner_changed" => TaskChange::OwnerChanged(decode(payload)),
+                _ => TaskChange::Noted(decode(payload)),
+            },
+        },
+        "assignment" => NewEvent::Assignment {
+            assignment: decode(&entity),
+            actor,
+            change: match step.kind.as_str() {
+                "assignment.granted" => AssignmentChange::Granted(decode(payload)),
+                _ => AssignmentChange::Ended(decode(payload)),
+            },
+        },
+        _ => panic!("no event {}", step.kind),
     }
 }
 
@@ -131,7 +194,7 @@ fn rows(store: &Store, table: &str) -> Vec<Value> {
 }
 
 #[test]
-fn appends_and_refuses_each_agent_event_as_the_typescript_store_did_and_leaves_its_rows() {
+fn appends_and_refuses_each_event_as_the_typescript_store_did_and_leaves_its_rows() {
     let fixture = fixture();
     let dir = TempDir::new("agent-events");
     let mut store = store_of_host(&dir, &fixture.host);
@@ -147,6 +210,8 @@ fn appends_and_refuses_each_agent_event_as_the_typescript_store_did_and_leaves_i
         match (&got, refused) {
             (Ok(_), None) => {}
             (Err(AppendError::Refused { reason, .. }), Some(want)) if reason == want => {}
+            // A constraint of the schema both stores share refuses it in each, with SQLite's text.
+            (Err(AppendError::Sqlite(err)), Some(want)) if err.to_string() == want => {}
             (Ok(_), Some(want)) => wrong.push(format!(
                 "step {i} {}: taken, where TypeScript refused it: {want}",
                 step.kind

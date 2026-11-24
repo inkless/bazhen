@@ -94,6 +94,23 @@ pub(crate) fn project(
         NewEvent::Agent { agent, change, .. } => {
             crate::agent_events::project(tx, at, agent, change)?;
         }
+        NewEvent::Mail {
+            message, change, ..
+        } => crate::mail_events::project_mail(tx, at, message.as_str(), change)?,
+        NewEvent::MessageObserved {
+            observed, payload, ..
+        } => crate::mail_events::project_observed(tx, at, observed.as_str(), payload)?,
+        NewEvent::Attention {
+            attention, change, ..
+        } => crate::mail_events::project_attention(tx, at, attention.as_str(), change)?,
+        NewEvent::Task {
+            task,
+            actor,
+            change,
+        } => crate::task_events::project_task(tx, at, task.as_str(), actor, change)?,
+        NewEvent::Assignment {
+            assignment, change, ..
+        } => crate::task_events::project_assignment(tx, at, assignment.as_str(), change)?,
         NewEvent::LeaseGranted { terminal, payload } => {
             attachments::granted(tx, id, terminal, payload)?;
         }
