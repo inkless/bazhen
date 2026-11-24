@@ -101,6 +101,23 @@ mod tests {
         assert_eq!(serde_json::to_string(&Maybe(Some(50.0))).unwrap(), "50");
     }
 
+    #[test]
+    fn reads_each_number_as_json_parse_does_to_the_nearest_double() {
+        // Node's JSON.parse of each, as the double's bits. serde_json's default parse misses the
+        // nearest by a unit on each; its `float_roundtrip` feature doesn't.
+        for (text, bits) in [
+            ("1.818278397972953e245", 0x72da_a12a_71e7_7155_u64),
+            ("7.856605151738947e-160", 0x1ee6_1763_e9dd_d4b0),
+            ("1.1459324015945358e-106", 0x29f0_d208_9e6d_3e4e),
+            ("2.2250738585072011e-308", 0x000f_ffff_ffff_ffff),
+            ("3.363491038161739523e-23", 0x3b44_54c0_12ab_c946),
+            ("1.017748214402220190e136", 0x5c2c_0139_c717_e041),
+        ] {
+            let read: f64 = serde_json::from_str(text).unwrap();
+            assert_eq!(read.to_bits(), bits, "{text}");
+        }
+    }
+
     proptest! {
         /// Every finite number reads back as itself, written plainly from 1e-6 up to 1e21 and
         /// with a signed exponent past those bounds, as JavaScript writes it.
@@ -115,6 +132,8 @@ mod tests {
             let zero = x.abs().to_bits() == 0;
             let expected = if zero { 0 } else { bits };
             prop_assert_eq!(text.parse::<f64>().unwrap().to_bits(), expected);
+            let read: f64 = serde_json::from_str(&text).unwrap();
+            prop_assert_eq!(read.to_bits(), expected, "{}", text);
             let plain = zero || (1e-6..1e21).contains(&x.abs());
             prop_assert_eq!(!text.contains('e'), plain, "{}", text);
             prop_assert!(plain || text.contains("e+") || text.contains("e-"), "{}", text);
