@@ -249,7 +249,27 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
 fn object_cases(check: &str) -> Option<Vec<(&'static str, Fields, bool)>> {
     const AGENT: &str = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
     Some(match check {
-        "agentOrLaunch" => vec![("neither", vec![("agentId", None), ("launch", None)], false)],
+        "agentOrLaunch" => {
+            let launch = || Some(json!({ "harness": "codex" }));
+            vec![
+                (
+                    "both",
+                    vec![("agentId", Some(json!(AGENT))), ("launch", launch())],
+                    false,
+                ),
+                (
+                    "agentOnly",
+                    vec![("agentId", Some(json!(AGENT))), ("launch", None)],
+                    true,
+                ),
+                (
+                    "launchOnly",
+                    vec![("agentId", None), ("launch", launch())],
+                    true,
+                ),
+                ("neither", vec![("agentId", None), ("launch", None)], false),
+            ]
+        }
         "linkedShellTakesNoCwd" => vec![
             (
                 "linkedWithCwd",
@@ -1347,6 +1367,34 @@ mod tests {
             (neither.body.as_str(), neither.accept),
             (r#"{"idempotencyKey":"k","theme":"t"}"#, true)
         );
+    }
+
+    #[test]
+    fn breaks_each_whole_object_check_by_every_set_of_its_fields_left_out() {
+        for check in ["agentOrLaunch", "linkedShellTakesNoCwd"] {
+            let cases = object_cases(check).unwrap();
+            let fields: BTreeSet<&str> = cases
+                .iter()
+                .flat_map(|(_, fields, _)| fields.iter().map(|(key, _)| *key))
+                .collect();
+            let held: BTreeSet<Vec<&str>> = cases
+                .iter()
+                .map(|(_, set, _)| {
+                    let mut held: Vec<&str> = set
+                        .iter()
+                        .filter(|(_, value)| value.is_some())
+                        .map(|(key, _)| *key)
+                        .collect();
+                    held.sort_unstable();
+                    held
+                })
+                .collect();
+            assert_eq!(
+                (cases.len(), held.len()),
+                (1 << fields.len(), 1 << fields.len()),
+                "{check}: {held:?}"
+            );
+        }
     }
 
     #[test]
