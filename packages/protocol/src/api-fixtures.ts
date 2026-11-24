@@ -331,6 +331,13 @@ const ENTITY_IDS: Readonly<Record<string, string>> = {
 
 const EVENT_ENTITIES: Readonly<Record<string, { readonly entity: string }>> = EVENTS;
 
+/** `items`, as the list of at least one item it must be. */
+function atLeastOne<T>(items: readonly T[]): readonly [T, ...T[]] {
+  const [first, ...rest] = items;
+  if (first === undefined) throw new Error("expected at least one item");
+  return [first, ...rest];
+}
+
 /** Every example of `EVENT_PAYLOADS` as an event, the first of each type caused by none. */
 const EVENT_WIRE = Object.entries(EVENT_PAYLOADS).flatMap(([type, payloads], t) => {
   const entity = EVENT_ENTITIES[type]?.entity ?? "";
@@ -920,7 +927,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
    * enum would be planted in another's payload. Its own branches, discriminated by type, keep
    * each type's apart, and parse every event alike.
    */
-  Event: { schema: z.discriminatedUnion("type", Event.options), wire: EVENT_WIRE },
+  Event: { schema: z.discriminatedUnion("type", atLeastOne(Event.options)), wire: EVENT_WIRE },
   EventStreamQuery: {
     schema: EventStreamQuery,
     wire: [{ epoch: "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", after: "41" }],
