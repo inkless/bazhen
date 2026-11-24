@@ -20,11 +20,21 @@ const C = id("agent", 3);
 const D = id("agent", 4);
 const E = id("agent", 5);
 const F = id("agent", 6);
+const G = id("agent", 7);
+const H = id("agent", 8);
+const J = id("agent", 9);
+const K = id("agent", 10);
 const T1 = id("term", 1);
 const T2 = id("term", 2);
 const T3 = id("term", 3);
 const T4 = id("term", 4);
 const T5 = id("term", 5);
+const T6 = id("term", 6);
+const T7 = id("term", 7);
+const T8 = id("term", 8);
+const T9 = id("term", 9);
+const T10 = id("term", 10);
+const T11 = id("term", 11);
 const HOST = id("host", 1);
 
 const ref = (generation: number) => ({
@@ -166,6 +176,61 @@ const STEPS: readonly NewEvent<EventType>[] = [
   step("agent.activity", E, E, { ...activity, value: "idle", confidence: 0.5 }),
   step("agent.usage", F, F, usage),
   step("agent.renamed", F, "user", { name: "f", previous: "" }),
+  step("agent.relaunch_requested", F, "user", { terminalId: T11, generation: 1, fresh: true }),
+  // A base differing only in case is the same counter, which keeps the highest ordinal: 7, not 2.
+  step("agent.launched", K, "user", {
+    environmentId: ENV,
+    harness: "claude-code",
+    project: "My Project",
+    cwd: "/k",
+    terminalId: null,
+    nameOrdinal: 7,
+  }),
+  step("agent.launched", G, "user", {
+    environmentId: ENV,
+    harness: "claude-code",
+    project: "MY PROJECT!",
+    cwd: "/g",
+    terminalId: null,
+    nameOrdinal: 2,
+  }),
+  // Lost twice: a rejected relaunch goes back to the terminal it was last lost on.
+  step("agent.launched", H, "user", {
+    environmentId: ENV,
+    harness: "claude-code",
+    project: "h",
+    cwd: "/h",
+    terminalId: T6,
+  }),
+  step("agent.running", H, "system", { externalRef: session("s7"), runtimeRef: ref(0) }),
+  step("agent.lost", H, "system", {}),
+  step("agent.relaunch_requested", H, "user", { terminalId: T7, generation: 1, fresh: false }),
+  step("agent.relaunched", H, "system", { externalRef: session("s7"), runtimeRef: ref(1) }),
+  step("agent.lost", H, "system", {}),
+  step("agent.relaunch_requested", H, "user", { terminalId: T8, generation: 2, fresh: false }),
+  step("agent.relaunch_rejected", H, "system", { reason: "unavailable" }),
+  // A thread held only by a closed agent is free to take.
+  step("agent.closing", D, "user", {}),
+  step("agent.closed", D, "system", {}),
+  step("agent.running", E, "system", { externalRef: thread("t1"), runtimeRef: null }),
+  // Each way of binding to a thread another live agent holds is refused.
+  step("agent.launched", J, "user", {
+    environmentId: ENV,
+    harness: "codex",
+    project: "j",
+    cwd: "/j",
+    terminalId: T9,
+  }),
+  step("agent.running", J, "system", { externalRef: thread("t5"), runtimeRef: ref(0) }),
+  step("agent.external_ref_updated", J, J, { externalRef: thread("t1") }),
+  step("agent.exited", J, "system", { exit: { type: "exited", code: 0 } }),
+  step("agent.respawn_requested", J, "user", {}),
+  step("agent.respawned", J, "system", { externalRef: thread("t1"), runtimeRef: ref(1) }),
+  step("agent.respawned", J, "system", { externalRef: thread("t5"), runtimeRef: ref(1) }),
+  step("agent.lost", J, "system", {}),
+  step("agent.relaunch_requested", J, "user", { terminalId: T10, generation: 2, fresh: false }),
+  step("agent.relaunched", J, "system", { externalRef: thread("t1"), runtimeRef: ref(2) }),
+  step("agent.relaunched", J, "system", { externalRef: thread("t5"), runtimeRef: ref(2) }),
 ];
 
 /**
