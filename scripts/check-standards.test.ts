@@ -4872,11 +4872,14 @@ describe("tests that signal processes they didn't start", () => {
         pkg("apart", [], [dep("serde")]),
       ),
     );
-    expect([...reaching].toSorted()).toEqual([
-      "crates/bazhen-holder",
-      "crates/deep",
-      "crates/tested",
-    ]);
+    expect(reaching).toEqual(new Set(["crates/bazhen-holder", "crates/deep", "crates/tested"]));
+  });
+
+  it("can't tell the crates that reach the holder when the holder isn't under the root", () => {
+    const rootless = { ...meta(pkg("bazhen-holder", [])), workspace_root: "/elsewhere" };
+    expect(holderReachingCrates(rootless)).toMatch(
+      /names no bazhen-holder at crates\/bazhen-holder/,
+    );
   });
 
   it("must be marked when an ending is given a real session, and needn't when given a stand-in", () => {
