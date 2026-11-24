@@ -126,6 +126,69 @@
     }
   },
   {
+    "name": "a multi-line plain title",
+    "key": "tester",
+    "text": "---\ntitle: Two\n  lines\n\n  and a third\n---\nDo the work.\n",
+    "role": {
+      "key": "tester",
+      "title": "Two lines\nand a third",
+      "description": "",
+      "grants": [],
+      "singlePerTask": false,
+      "maxActiveTasks": null,
+      "prompt": "Do the work.",
+      "source": "user"
+    }
+  },
+  {
+    "name": "a multi-line plain description",
+    "key": "tester",
+    "text": "---\ntitle: T\ndescription: one\n  two\n---\nDo the work.\n",
+    "role": {
+      "key": "tester",
+      "title": "T",
+      "description": "one two",
+      "grants": [],
+      "singlePerTask": false,
+      "maxActiveTasks": null,
+      "prompt": "Do the work.",
+      "source": "user"
+    }
+  },
+  {
+    "name": "keys a number and a string",
+    "key": "tester",
+    "text": "---\ntitle: T\n1: a\n\"1\": b\n---\nDo the work.\n",
+    "problem": "front matter Unrecognized key: \"1\""
+  },
+  {
+    "name": "keys a bool and a string",
+    "key": "tester",
+    "text": "---\ntitle: T\ntrue: a\n'true': b\n---\nDo the work.\n",
+    "problem": "front matter Unrecognized key: \"true\""
+  },
+  {
+    "name": "keys a number twice",
+    "key": "tester",
+    "text": "---\ntitle: T\n1: a\n1.0: b\n---\nDo the work.\n",
+    "problem": "its front matter isn't YAML: Map keys must be unique at line 3, column 1:",
+    "syntax": true
+  },
+  {
+    "name": "keys null twice",
+    "key": "tester",
+    "text": "---\ntitle: T\n~: a\nnull: b\n---\nDo the work.\n",
+    "problem": "its front matter isn't YAML: Map keys must be unique at line 3, column 1:",
+    "syntax": true
+  },
+  {
+    "name": "a title keyed twice by quoting",
+    "key": "tester",
+    "text": "---\ntitle: A\n'title': B\n---\nDo the work.\n",
+    "problem": "its front matter isn't YAML: Map keys must be unique at line 2, column 1:",
+    "syntax": true
+  },
+  {
     "name": "a title trimmed",
     "key": "tester",
     "text": "---\ntitle: '  T  '\n---\nDo the work.\n",

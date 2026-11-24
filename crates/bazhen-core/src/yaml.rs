@@ -27,10 +27,38 @@ pub(crate) enum Refused {
     Unsupported(&'static str),
 }
 
-/// What's being built: a list, or a map and the key whose value comes next.
+/// The deepest a role file's front matter nests. Its keys hold at most a list of words, so this is
+/// far more than any needs; deeper is refused before the value is built, as a value nested much
+/// deeper would take more stack to drop than a blocking thread has.
+pub(crate) const DEPTH_MAX: usize = 32;
+
+/// The most keys one map holds. A role file has five; each key is checked against the map's others,
+/// so a cap keeps that work small.
+pub(crate) const KEYS_MAX: usize = 256;
+
+/// What's being built: a list, or a map with each key as the YAML read it and the key whose value
+/// comes next.
 enum Open {
     Array(Vec<Value>),
-    Object(Vec<(String, Value)>, Option<String>),
+    Object(Map),
+}
+
+/// A map being built: its entries under the names JavaScript gives their keys, the keys as YAML
+/// typed them, and the name whose value comes next.
+#[derive(Default)]
+struct Map {
+    entries: Vec<(String, Value)>,
+    keys: Vec<Value>,
+    next: Option<String>,
+}
+
+/// Opens a collection inside those open, unless it nests too deep.
+fn open(stack: &mut Vec<Open>, collection: Open) -> Result<(), Refused> {
+    if stack.len() >= DEPTH_MAX {
+        return Err(Refused::Unsupported("YAML nested more than 32 deep"));
+    }
+    stack.push(collection);
+    Ok(())
 }
 
 /// The document `text` holds, or None for none.
@@ -73,18 +101,22 @@ pub(crate) fn parse(text: &str) -> Result<Option<Value>, Refused> {
             }
             Event::SequenceStart(anchor, tag) => {
                 plain(anchor, tag.is_some())?;
-                stack.push(Open::Array(Vec::new()));
+                open(&mut stack, Open::Array(Vec::new()))?;
                 continue;
             }
             Event::MappingStart(anchor, tag) => {
                 plain(anchor, tag.is_some())?;
-                stack.push(Open::Object(Vec::new(), None));
+                open(&mut stack, Open::Object(Map::default()))?;
                 continue;
             }
             Event::SequenceEnd | Event::MappingEnd => match stack.pop() {
                 Some(Open::Array(items)) => Value::Array(items),
-                Some(Open::Object(entries, None)) => Value::Object(entries),
-                Some(Open::Object(_, Some(_))) | None => {
+                Some(Open::Object(Map {
+                    entries,
+                    next: None,
+                    ..
+                })) => Value::Object(entries),
+                Some(Open::Object(_)) | None => {
                     return Err(Refused::Syntax(
                         "a collection ended out of place".to_owned(),
                     ));
@@ -94,30 +126,42 @@ pub(crate) fn parse(text: &str) -> Result<Option<Value>, Refused> {
         match stack.last_mut() {
             None => root = Some(value),
             Some(Open::Array(items)) => items.push(value),
-            Some(Open::Object(entries, key @ None)) => {
-                let name = match value {
-                    Value::String(name) => name,
-                    Value::Null => String::new(),
-                    Value::Bool(b) => b.to_string(),
-                    // Only an unknown key's message shows it, which JavaScript may write otherwise.
-                    Value::Number(n) => n.to_string(),
-                    Value::Array(_) | Value::Object(_) => {
-                        return Err(Refused::Unsupported("a key that isn't a scalar"));
-                    }
-                };
-                if entries.iter().any(|(k, _)| *k == name) {
-                    return Err(Refused::Syntax("Map keys must be unique".to_owned()));
-                }
-                *key = Some(name);
-            }
-            Some(Open::Object(entries, key)) => {
-                if let Some(name) = key.take() {
-                    entries.push((name, value));
-                }
-            }
+            Some(Open::Object(map)) => match map.next.take() {
+                None => map.next = Some(key(map, value)?),
+                // Keys YAML tells apart, as `1` and `"1"`, can share a name in JavaScript, where
+                // the later value takes the earlier one's place.
+                Some(name) => match map.entries.iter_mut().find(|(k, _)| *k == name) {
+                    Some(entry) => entry.1 = value,
+                    None => map.entries.push((name, value)),
+                },
+            },
         }
     }
     Ok(root)
+}
+
+/// The name JavaScript gives a key, once the map holds no key YAML reads as the same: the `yaml`
+/// package compares keys as the values they resolve to, so `1` and `1.0` are one key, and `1` and
+/// `"1"` are two.
+fn key(map: &mut Map, key: Value) -> Result<String, Refused> {
+    let name = match &key {
+        Value::String(name) => name.clone(),
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        // Only an unknown key's message shows it, which JavaScript may write otherwise.
+        Value::Number(n) => n.to_string(),
+        Value::Array(_) | Value::Object(_) => {
+            return Err(Refused::Unsupported("a key that isn't a scalar"));
+        }
+    };
+    if map.keys.contains(&key) {
+        return Err(Refused::Syntax("Map keys must be unique".to_owned()));
+    }
+    if map.keys.len() >= KEYS_MAX {
+        return Err(Refused::Unsupported("a map of more than 256 keys"));
+    }
+    map.keys.push(key);
+    Ok(name)
 }
 
 /// Refuses an anchor or a tag: the core schema would read neither as the file means it.
@@ -208,6 +252,69 @@ mod tests {
                 .map(|(k, v)| ((*k).to_owned(), v.clone()))
                 .collect(),
         )
+    }
+
+    /// `parse` on a thread with the stack a blocking task of the daemon's runtime gets.
+    fn parse_on_a_small_stack(text: String) -> Result<Option<Value>, Refused> {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || parse(&text))
+            .and_then(|thread| {
+                thread
+                    .join()
+                    .map_err(|_| std::io::Error::other("it panicked"))
+            })
+            .unwrap_or(Err(Refused::Syntax("the thread didn't finish".to_owned())))
+    }
+
+    #[test]
+    fn refuses_nesting_past_the_cap_however_deep_a_role_file_could_hold_it() {
+        let deep = |n: usize| format!("{}x\n", "- ".repeat(n));
+        let at_cap = parse(&deep(32)).map(|v| v.is_some());
+        assert_eq!(at_cap, Ok(true));
+        let refused = Err(Refused::Unsupported("YAML nested more than 32 deep"));
+        assert_eq!(parse(&deep(33)), refused);
+        let whole_file = deep(crate::role_file::FILE_MAX / 2 - 2);
+        assert!(whole_file.len() <= crate::role_file::FILE_MAX);
+        assert_eq!(parse_on_a_small_stack(whole_file), refused);
+        let flow = format!("{}{}", "[".repeat(33), "]".repeat(33));
+        assert_eq!(parse(&flow), refused);
+    }
+
+    #[test]
+    fn tells_keys_apart_as_the_values_they_resolve_to_and_names_them_as_javascript_does() {
+        let b = Value::String("b".to_owned());
+        assert_eq!(
+            parse("1: a\n\"1\": b\n"),
+            Ok(Some(object(&[("1", b.clone())])))
+        );
+        assert_eq!(
+            parse("true: a\n'true': b\n"),
+            Ok(Some(object(&[("true", b)])))
+        );
+        let duplicate = Err(Refused::Syntax("Map keys must be unique".to_owned()));
+        for text in [
+            "1: a\n1.0: b\n",
+            "~: a\nnull: b\n",
+            "0x1: a\n1: b\n",
+            "a: 1\na: 2\n",
+        ] {
+            assert_eq!(parse(text), duplicate, "{text}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_map_of_more_keys_than_the_cap() {
+        let keys = |n: usize| {
+            (0..n)
+                .map(|i| ["k", &i.to_string(), ": 1\n"].concat())
+                .collect::<String>()
+        };
+        assert!(parse(&keys(256)).is_ok());
+        assert_eq!(
+            parse(&keys(257)),
+            Err(Refused::Unsupported("a map of more than 256 keys"))
+        );
     }
 
     #[test]
