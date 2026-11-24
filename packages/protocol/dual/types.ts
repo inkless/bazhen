@@ -151,7 +151,11 @@ type Streamed<E> = E extends { streamed: infer P }
   ? [Sided<P, "output">, Sided<P, "input">]
   : "none";
 
-/** Whether kind `K`'s entry in `EVENTS` is the same on both: its entity, payload and streamed one. */
+/**
+ * Whether kind `K`'s entry in `EVENTS` is the same on both: its entity, payload and streamed one.
+ * A field a kind doesn't stream has no other check: the corpus plants cases only in what `Event`
+ * streams, so its bounds and patterns go unjudged until a corpus covers the whole payloads.
+ */
 type EntryAgrees<K extends Kind> = K extends keyof TheirEvents
   ? [
       Equal<TheirEvents[K]["entity"], OurEvents[K]["entity"]>,
