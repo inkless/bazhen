@@ -1,5 +1,6 @@
 //! `/v1/events`: the log from a client's cursor, the backlog then each new event, every one once.
 
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -161,11 +162,12 @@ struct Out {
     ends_page: bool,
 }
 
-/// How a stream ended: with frames still to send or a close to answer, or with no one to say
-/// anything to.
+/// How a stream ended: with a close of the daemon's own queued, with a client's close to answer,
+/// or with no one to say anything to.
 #[derive(Debug, PartialEq, Eq)]
 enum Ending {
-    Close,
+    Closing,
+    Answering,
     Gone,
 }
 
@@ -188,19 +190,55 @@ async fn over<E>(
     let (out, queued) = mpsc::unbounded_channel();
     let unsent = Arc::new(AtomicUsize::new(0));
     let written = Arc::new(Notify::new());
-    let mut writing = std::pin::pin!(write(
+    let mut writing = pin!(write(
         sink,
         queued,
         Arc::clone(&unsent),
         Arc::clone(&written)
     ));
+    let mut heard = pin!(heard);
     let ending = tokio::select! {
-        ending = follow(heard, &out, cursor, &how, &unsent, &written) => ending,
+        ending = follow(heard.as_mut(), &out, cursor, &how, &unsent, &written) => ending,
         () = &mut writing => return,
     };
     drop(out);
-    if ending == Ending::Close {
-        let _ = tokio::time::timeout(how.heartbeat.close_within(), writing).await;
+    let by = Instant::now() + how.heartbeat.close_within();
+    match ending {
+        Ending::Closing => close_by(heard, writing, by).await,
+        Ending::Answering => {
+            let _ = tokio::time::timeout_at(by, writing).await;
+        }
+        Ending::Gone => {}
+    }
+}
+
+/// Sends what is queued and the daemon's close, reading what the client still sends meanwhile,
+/// until the client closes too, goes, or `by` comes: dropped at once, unread input would reset the
+/// connection under the close.
+async fn close_by<E>(
+    mut heard: Pin<&mut impl Stream<Item = Result<Message, E>>>,
+    mut writing: Pin<&mut impl Future<Output = ()>>,
+    by: Instant,
+) {
+    let (mut written, mut peer_closed) = (false, false);
+    loop {
+        tokio::select! {
+            biased;
+            () = &mut writing, if !written => {
+                if peer_closed {
+                    return;
+                }
+                written = true;
+            }
+            () = tokio::time::sleep_until(by) => return,
+            // A client that closed first is answered by the writer's flush, so it is heard no more.
+            message = heard.next(), if !peer_closed => match message {
+                None | Some(Err(_)) => return,
+                Some(Ok(Message::Close(_))) if written => return,
+                Some(Ok(Message::Close(_))) => peer_closed = true,
+                Some(Ok(_)) => {}
+            },
+        }
     }
 }
 
@@ -212,7 +250,7 @@ async fn write(
     unsent: Arc<AtomicUsize>,
     written: Arc<Notify>,
 ) {
-    let mut sink = std::pin::pin!(sink);
+    let mut sink = pin!(sink);
     while let Some(Out { message, ends_page }) = queued.recv().await {
         let counted = matches!(message, Message::Text(_));
         let closing = matches!(message, Message::Close(_));
@@ -240,7 +278,7 @@ fn closing(code: u16, reason: &'static str) -> Message {
 
 /// Feeds the log to the writer and listens to the client, until the stream ends.
 async fn follow<E>(
-    heard: impl Stream<Item = Result<Message, E>>,
+    mut heard: Pin<&mut impl Stream<Item = Result<Message, E>>>,
     out: &mpsc::UnboundedSender<Out>,
     cursor: Cursor,
     how: &Streaming,
@@ -257,7 +295,7 @@ async fn follow<E>(
     let failed = |err: &dyn std::fmt::Display| {
         tracing::error!("an event stream failed: {err}");
         send(closing(close_code::ERROR, "internal error"), false);
-        Ending::Close
+        Ending::Closing
     };
     let mut reader = match how.store.reader() {
         Ok(reader) => reader,
@@ -273,7 +311,6 @@ async fn follow<E>(
     // A stall doesn't fire the beats it missed back to back, a ping then at once its verdict, which
     // would find a peer gone that had no turn to answer; the next beat is a whole beat on.
     beat.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut heard = std::pin::pin!(heard);
     let mut pump = true;
     loop {
         if pump {
@@ -294,7 +331,7 @@ async fn follow<E>(
             // sent none of it.
             if device_ended(how) {
                 send(closing(device_close(how), ""), false);
-                return Ending::Close;
+                return Ending::Closing;
             }
             match next {
                 Ok(Next::Wait) => {}
@@ -310,7 +347,7 @@ async fn follow<E>(
                         Err(err) => return failed(&err),
                     }
                     send(Message::Close(None), false);
-                    return Ending::Close;
+                    return Ending::Closing;
                 }
                 Err(err) => return failed(&err),
             }
@@ -318,15 +355,15 @@ async fn follow<E>(
         tokio::select! {
             () = how.stop.cancelled() => {
                 send(closing(close_code::AWAY, ""), false);
-                return Ending::Close;
+                return Ending::Closing;
             }
             () = ended(how.device.as_ref()) => {
                 send(closing(device_close(how), ""), false);
-                return Ending::Close;
+                return Ending::Closing;
             }
             message = heard.next() => match message {
                 None | Some(Err(_)) => return Ending::Gone,
-                Some(Ok(Message::Close(_))) => return Ending::Close,
+                Some(Ok(Message::Close(_))) => return Ending::Answering,
                 Some(Ok(message)) => {
                     pulse.heard();
                     // Presence is read here once the daemon keeps it; a frame this build doesn't
@@ -343,7 +380,7 @@ async fn follow<E>(
             changed = committed.changed() => {
                 if changed.is_err() {
                     send(closing(close_code::AWAY, ""), false);
-                    return Ending::Close;
+                    return Ending::Closing;
                 }
                 pump = true;
             }
@@ -720,6 +757,40 @@ mod tests {
     }
 
     #[test]
+    fn sends_its_close_whole_to_a_client_that_sent_on_after_the_close_began() {
+        let daemon = Daemon::start("stream-close-unread");
+        // A page far larger than the client's receive buffer, so the close waits behind it in the
+        // daemon's send queue.
+        let db = rusqlite::Connection::open(daemon.dir.path().join("bazhen.db")).unwrap();
+        db.execute(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200)
+             INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+             SELECT (SELECT id FROM host), '2026-11-01T00:00:00.000Z', 'attachment.ended',
+               'attachment', 'att_' || hex(zeroblob(20000)), 'system',
+               '{\"reason\":\"client_closed\"}'
+             FROM n",
+            (),
+        )
+        .unwrap();
+        let mut ws = daemon.follow(0);
+        // Left to grow, loopback's receive buffer could take the whole page, and the close with it.
+        rustix::net::sockopt::set_socket_recv_buffer_size(ws.get_ref(), 1 << 16).unwrap();
+        daemon.stop.now(crate::routes::Reason::Requested);
+        // It reports with each event it reads, so most of what it says comes once the stream has
+        // stopped reading it to close.
+        let report = r#"{"type":"visibility","visible":true}"#;
+        let last = loop {
+            match heard(&mut ws) {
+                Some(frame) if frame["type"] == "event" => {
+                    let _ = ws.send(tungstenite::Message::text(report));
+                }
+                other => break other,
+            }
+        };
+        assert_eq!(last, Some(serde_json::json!({"close": 1001, "reason": ""})));
+    }
+
+    #[test]
     fn answers_a_client_that_closes_with_a_close_of_its_own() {
         let daemon = Daemon::start("stream-client-close");
         let mut ws = daemon.follow(0);
@@ -765,32 +836,37 @@ mod tests {
     /// A stream to a client in this process, on a paused clock: what the client gets, what it
     /// says, and the stream's task, which ends when the stream does.
     struct Peer {
-        gets: mpsc::UnboundedReceiver<Message>,
+        gets: mpsc::Receiver<Message>,
         says: mpsc::UnboundedSender<Message>,
         ended: tokio::task::JoinHandle<()>,
         tasks: TaskTracker,
+        stop: CancellationToken,
     }
+
+    /// Room for more frames than any test here sends a peer that doesn't read them.
+    const ROOMY: usize = 1024;
 
     fn peer(store: &Writer) -> Peer {
-        peer_of(store, None)
+        peer_of(store, None, ROOMY)
     }
 
-    /// The same, for a device's stream that ends with `device`.
-    fn peer_of(store: &Writer, device: Option<CancellationToken>) -> Peer {
+    /// The same, for a device's stream that ends with `device`, whose writer waits once `room`
+    /// frames are queued for the peer and unread.
+    fn peer_of(store: &Writer, device: Option<CancellationToken>, room: usize) -> Peer {
         let epoch = store.reader().unwrap().reads().epoch().unwrap();
-        let (to_peer, gets) = mpsc::unbounded_channel();
+        let (to_peer, gets) = mpsc::channel(room);
         let (says, from_peer) = mpsc::unbounded_channel::<Message>();
-        let sink = futures_util::sink::unfold(to_peer, |to: mpsc::UnboundedSender<Message>, m| {
-            let sent = to.send(m).map(|()| to);
-            async move { sent }
+        let sink = futures_util::sink::unfold(to_peer, |to: mpsc::Sender<Message>, m| async move {
+            to.send(m).await.map(|()| to)
         });
         let heard = futures_util::stream::unfold(from_peer, |mut from| async move {
             let message = from.recv().await?;
             Some((Ok::<_, std::convert::Infallible>(message), from))
         });
+        let stop = CancellationToken::new();
         let how = Streaming {
             store: store.clone(),
-            stop: CancellationToken::new(),
+            stop: stop.clone(),
             device,
             heartbeat: BEAT,
         };
@@ -801,6 +877,7 @@ mod tests {
             says,
             ended,
             tasks,
+            stop,
         }
     }
 
@@ -812,6 +889,7 @@ mod tests {
                 says,
                 ended,
                 tasks,
+                ..
             } = self;
             let (ids, events) = mpsc::unbounded_channel();
             tasks.spawn(async move {
@@ -853,13 +931,98 @@ mod tests {
             appended(&store, 1).await;
             let device = CancellationToken::new();
             device.cancel();
-            let mut peer = peer_of(&store, Some(device));
+            let mut peer = peer_of(&store, Some(device), ROOMY);
             peer.ended.await.unwrap();
             let mut got = Vec::new();
             while let Ok(message) = peer.gets.try_recv() {
                 got.push(message);
             }
             assert_eq!(got, vec![closing(close_code::POLICY, "")]);
+        });
+        thread.finish();
+    }
+
+    impl Peer {
+        /// Waits for the daemon's close, returning what came with it.
+        async fn closed(&mut self) -> Message {
+            loop {
+                match self.gets.recv().await {
+                    Some(message @ Message::Close(_)) => return message,
+                    Some(_) => {}
+                    None => panic!("ended with no close"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reads_a_client_that_never_answers_the_close_until_it_may_take_no_longer() {
+        let dir = TempDir::new("stream-close-unanswered");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let mut peer = peer(&store);
+            let start = Instant::now();
+            peer.stop.cancel();
+            assert_eq!(peer.closed().await, closing(close_code::AWAY, ""));
+            let says = peer.says.clone();
+            peer.tasks.spawn(async move {
+                let report = r#"{"type":"visibility","visible":true}"#;
+                while says.send(Message::text(report)).is_ok() {
+                    tokio::time::sleep(BEAT.every / 4).await;
+                }
+            });
+            peer.ended.await.unwrap();
+            assert_eq!(start.elapsed(), BEAT.close_within());
+        });
+        thread.finish();
+    }
+
+    #[test]
+    fn ends_at_once_once_a_client_answers_the_daemon_s_close() {
+        let dir = TempDir::new("stream-close-answered");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            let mut peer = peer(&store);
+            let start = Instant::now();
+            peer.stop.cancel();
+            peer.closed().await;
+            peer.says.send(Message::Close(None)).unwrap();
+            peer.ended.await.unwrap();
+            assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+        });
+        thread.finish();
+    }
+
+    #[test]
+    fn answers_a_client_that_closes_while_the_daemon_s_close_waits_and_ends_at_once() {
+        let dir = TempDir::new("stream-close-crossed");
+        let (store, thread) = writer(&dir);
+        paused().block_on(async {
+            for n in 1..=3 {
+                appended(&store, n).await;
+            }
+            let mut peer = peer_of(&store, None, 1);
+            let start = Instant::now();
+            // On a paused clock, a sleep ends only once every other task has nothing left to do.
+            let idle = || tokio::time::sleep(std::time::Duration::from_millis(1));
+            peer.stop.cancel();
+            idle().await;
+            // The page waits on the peer, the daemon's close behind it, as the peer closes.
+            peer.says.send(Message::Close(None)).unwrap();
+            idle().await;
+            let mut got = Vec::new();
+            while let Some(message) = peer.gets.recv().await {
+                got.push(message);
+            }
+            peer.ended.await.unwrap();
+            assert_eq!(
+                (got.len(), got.last(), start.elapsed()),
+                (
+                    4,
+                    Some(&closing(close_code::AWAY, "")),
+                    std::time::Duration::from_millis(2)
+                )
+            );
         });
         thread.finish();
     }
