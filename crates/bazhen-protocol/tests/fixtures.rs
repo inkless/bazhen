@@ -479,6 +479,19 @@ fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
         tagged::<TerminalScreen>(Some("text"), &keys),
         serde_json::json!({ "x-bazhen-check": ["wellFormed", "screenText"] })
     );
+    assert_eq!(
+        tagged::<bazhen_protocol::events::TaskCreated>(Some("title"), &keys),
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "maxLength": 200 })
+    );
+    assert_eq!(
+        tagged::<bazhen_protocol::schema::ShellCommandLine>(None, &keys),
+        serde_json::json!({
+            "minLength": 1,
+            "x-bazhen-check": [
+                "commandLineInHistory", "commandLineShowable", "commandLineVisible", "commandLineBytes",
+            ],
+        })
+    );
 }
 
 #[test]

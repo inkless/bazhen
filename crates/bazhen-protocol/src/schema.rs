@@ -150,6 +150,19 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<WaitMessagesResponse>();
     generator.subschema_for::<WaitRequest>();
     generator.subschema_for::<WaitResponse>();
+    add_definitions(generator);
+}
+
+/// Adds the definitions the protocol names that no message holds: what a client checks with, and
+/// what a program reads from the CLI.
+fn add_definitions(generator: &mut SchemaGenerator) {
+    generator.subschema_for::<CompactWindowTokens>();
+    generator.subschema_for::<FleetAgents>();
+    generator.subschema_for::<NoticeAction>();
+    generator.subschema_for::<RuntimeHealthState>();
+    generator.subschema_for::<ShellCommandLine>();
+    generator.subschema_for::<TaskBrief>();
+    generator.subschema_for::<TaskTitle>();
 }
 
 /// The schema of a field that must be there and may be null, as `Option::deserialize` reads an
@@ -192,6 +205,136 @@ impl JsonSchema for NewTaskTitle {
             "minLength": 1,
             "maxLength": 200,
             "x-bazhen-check": "newTaskTitle",
+        })
+    }
+}
+
+/// A task's title as a task holds it: trimmed and 1 to 200 long. A request's is [`NewTaskTitle`].
+#[derive(Debug)]
+pub struct TaskTitle;
+
+impl JsonSchema for TaskTitle {
+    fn schema_name() -> Cow<'static, str> {
+        "TaskTitle".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "x-bazhen-transform": "trim",
+            "minLength": 1,
+            "maxLength": crate::text::TASK_TITLE_MAX_CHARS,
+        })
+    }
+}
+
+/// A task's brief: 1 to 20 000 long.
+#[derive(Debug)]
+pub struct TaskBrief;
+
+impl JsonSchema for TaskBrief {
+    fn schema_name() -> Cow<'static, str> {
+        "TaskBrief".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": crate::text::TASK_BRIEF_MAX_CHARS,
+        })
+    }
+}
+
+/// Tokens of context a harness is given before it compacts: 100 000 to 10 000 000.
+#[derive(Debug)]
+pub struct CompactWindowTokens;
+
+impl JsonSchema for CompactWindowTokens {
+    fn schema_name() -> Cow<'static, str> {
+        "CompactWindowTokens".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 100_000,
+            "maximum": 10_000_000,
+        })
+    }
+}
+
+/// A runtime's health when it was read: [`RuntimeReportState`] but `Unused`.
+///
+/// [`RuntimeReportState`]: crate::daemon::RuntimeReportState
+#[derive(Debug)]
+pub struct RuntimeHealthState;
+
+impl JsonSchema for RuntimeHealthState {
+    fn schema_name() -> Cow<'static, str> {
+        "RuntimeHealthState".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "enum": ["healthy", "unreachable", "not-running"],
+        })
+    }
+}
+
+/// An action a notice offers, as this version names them. A notice's `actions` are strings, so a
+/// client of another version reads them.
+#[derive(Debug)]
+pub struct NoticeAction;
+
+impl JsonSchema for NoticeAction {
+    fn schema_name() -> Cow<'static, str> {
+        "NoticeAction".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "type": "string", "enum": ["dismiss"] })
+    }
+}
+
+/// The agents `bazhen agents --json` prints, in order.
+#[derive(Debug)]
+pub struct FleetAgents;
+
+impl JsonSchema for FleetAgents {
+    fn schema_name() -> Cow<'static, str> {
+        "FleetAgents".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        Vec::<FleetAgent>::json_schema(generator)
+    }
+}
+
+/// A line kept to type back into a shell's replacement without Enter, as
+/// [`shell_command_line`](crate::shells::shell_command_line) keeps it: no leading space, control,
+/// bidirectional override or character that draws as nothing, and at most
+/// [`COMMAND_LINE_MAX_BYTES`](crate::shells::COMMAND_LINE_MAX_BYTES) of UTF-8.
+#[derive(Debug)]
+pub struct ShellCommandLine;
+
+impl JsonSchema for ShellCommandLine {
+    fn schema_name() -> Cow<'static, str> {
+        "ShellCommandLine".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "minLength": 1,
+            "x-bazhen-check": [
+                "commandLineInHistory",
+                "commandLineShowable",
+                "commandLineVisible",
+                "commandLineBytes",
+            ],
         })
     }
 }

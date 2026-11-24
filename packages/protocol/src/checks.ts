@@ -7,9 +7,10 @@
  */
 
 import type { z } from "zod";
-import { hasControl } from "./holder.ts";
+import { hasControl, hasLoneSurrogate } from "./holder.ts";
+import { COMMAND_LINE_MAX_BYTES } from "./shells.ts";
 import { noteSafe, TASK_NOTE_MAX_BYTES, titleSafe } from "./tasks.ts";
-import { showable } from "./text.ts";
+import { INVISIBLE, showable } from "./text.ts";
 
 const encoder = new TextEncoder();
 
@@ -70,6 +71,30 @@ export const newTaskTitle = check(
 export const shellName = check(
   "a shell's name can't hold control characters or bidirectional overrides",
   (name: string) => showable(name),
+);
+
+/** A command line the user kept in their history, which one starting with a space isn't. */
+export const commandLineInHistory = check(
+  "a line starting with a space is kept out of history, so it isn't kept",
+  (line: string) => !line.startsWith(" "),
+);
+
+/** A command line with no control character, bidirectional override or lone surrogate. */
+export const commandLineShowable = check(
+  "a command line can't hold control characters or bidirectional overrides",
+  (line: string) => showable(line) && !hasLoneSurrogate(line),
+);
+
+/** A command line with no character that draws as nothing. */
+export const commandLineVisible = check(
+  "a command line can't hold a character that draws as nothing",
+  (line: string) => !INVISIBLE.test(line),
+);
+
+/** A command line within its UTF-8 budget. */
+export const commandLineBytes = check(
+  `a command line is at most ${COMMAND_LINE_MAX_BYTES} bytes`,
+  (line: string) => encoder.encode(line).length <= COMMAND_LINE_MAX_BYTES,
 );
 
 /** A task note within its UTF-8 budget. */
