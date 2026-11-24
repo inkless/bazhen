@@ -876,6 +876,11 @@ pub struct HelloReply {
 )]
 pub(crate) struct FrozenHelloReply {
     pub(crate) version: ProtocolVersion,
+    /// Every version the holder speaks, frozen with `version` so a daemon of any major can show
+    /// it.
+    // Read only to refuse a reply whose `protocol` is invalid, before its version is judged.
+    #[serde(rename = "protocol")]
+    pub(crate) _protocol: Versions,
 }
 
 /// Memory per terminal. `rss` is `None` where the OS won't say.

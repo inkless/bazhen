@@ -820,6 +820,20 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_hello_reply_without_its_frozen_protocol_before_judging_its_version() {
+        let refused = |body: serde_json::Value| {
+            hello_reply(body.to_string().as_bytes())
+                .unwrap_err()
+                .reason()
+                .to_owned()
+        };
+        let without = refused(serde_json::json!({ "version": "9.0" }));
+        assert!(without.contains("missing field `protocol`"), "{without}");
+        let foreign = refused(serde_json::json!({ "version": "9.0", "protocol": ["9.0"] }));
+        assert!(foreign.starts_with("hello agrees on 9.0"), "{foreign}");
+    }
+
+    #[test]
     fn refuses_a_frame_over_the_cap_from_its_header_alone() {
         let header = u32::try_from(MAX_REQUEST_BYTES + 1).unwrap().to_be_bytes();
         let mut decoder = request_decoder();
