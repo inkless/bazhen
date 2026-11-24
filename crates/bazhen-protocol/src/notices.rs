@@ -8,6 +8,9 @@ use crate::ids::{DeviceId, NoticeId};
 pub const PAIRING_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 pub const PAIRING_CODE_LENGTH: usize = 8;
 
+/// The most UTF-16 units a code has as typed, with the spaces and dashes a person adds.
+pub const PAIRING_CODE_TYPED_MAX: usize = 32;
+
 /// The most characters a device's name holds, as JavaScript counts them: UTF-16 code units.
 pub const DEVICE_NAME_MAX: usize = 64;
 

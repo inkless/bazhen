@@ -271,6 +271,9 @@ pub struct RestartShellRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RenameShellRequest {
     pub idempotency_key: String,
+    /// Required, null or not, as zod's `.nullable()` holds it: a rename that leaves it out asks
+    /// for nothing.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub name: Option<String>,
 }
 
@@ -305,9 +308,6 @@ pub fn shell_command_line(line: &str) -> bool {
 /// counts them: a bound on the report, not on the line kept, which is [`COMMAND_LINE_MAX_BYTES`].
 pub const REPORTED_LINE_MAX_UNITS: usize = 2048;
 
-/// The largest integer a JSON number holds exactly, as zod's `.max(Number.MAX_SAFE_INTEGER)`.
-const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
-
 /// The most UTF-16 units a shell's report token has.
 pub const SHELL_TOKEN_MAX_UNITS: usize = 128;
 
@@ -332,7 +332,7 @@ impl ShellReport {
     /// UTF-16 units, `at` a safe integer, and a line of at most 2048 UTF-16 units.
     pub fn bounded(&self) -> bool {
         token_bounded(&self.token)
-            && self.at <= MAX_SAFE_INTEGER
+            && self.at <= crate::edge::MAX_SAFE_INTEGER
             && self
                 .command
                 .as_ref()

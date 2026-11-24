@@ -1,0 +1,352 @@
+//! What the daemon's edge takes: a request as serde reads it, held to every rule zod holds it to
+//! past its shape, and given back as zod parses it. A message's edge verdict is [`edge`]: its
+//! decode, then its [`EdgeCheck`].
+
+use serde::de::DeserializeOwned;
+
+use crate::ids::TaskId;
+use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
+use crate::shells::{
+    CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest, ShellDecline,
+    ShellPrompt, ShellReport, shell_name,
+};
+use crate::tasks::CreateTaskRequest;
+use crate::text::{TASK_BRIEF_MAX_UNITS, new_task_title};
+
+/// The most UTF-16 units an idempotency key has.
+pub const IDEMPOTENCY_KEY_MAX_UNITS: usize = 200;
+
+/// The most UTF-16 units the program a close confirms names.
+pub const CONFIRMED_PROGRAM_MAX_UNITS: usize = 200;
+
+/// The largest integer a JSON number holds exactly, which zod's `.int()` takes at most.
+pub const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+/// Why the edge refuses a request: the rule it breaks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A request's rules past what serde reads.
+pub trait EdgeCheck: Sized {
+    /// The request as zod parses it, or the first rule it breaks.
+    ///
+    /// # Errors
+    ///
+    /// [`Refused`], naming the rule.
+    fn checked(self) -> Result<Self, Refused>;
+}
+
+/// `body` as the edge takes the request `T`.
+///
+/// # Errors
+///
+/// [`Refused`], when serde can't read it as a `T` or it breaks one of `T`'s rules.
+pub fn edge<T: DeserializeOwned + EdgeCheck>(body: &[u8]) -> Result<T, Refused> {
+    serde_json::from_slice::<T>(body)
+        .map_err(|err| Refused(err.to_string()))?
+        .checked()
+}
+
+fn units(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+fn holds(holds: bool, rule: &str) -> Result<(), Refused> {
+    if holds {
+        Ok(())
+    } else {
+        Err(Refused(rule.to_owned()))
+    }
+}
+
+fn keyed(key: &str) -> Result<(), Refused> {
+    holds(
+        (1..=IDEMPOTENCY_KEY_MAX_UNITS).contains(&units(key)),
+        "idempotencyKey is 1 to 200 characters",
+    )
+}
+
+fn generation(generation: u64) -> Result<(), Refused> {
+    holds(
+        generation <= MAX_SAFE_INTEGER,
+        "generation is a safe integer",
+    )
+}
+
+impl EdgeCheck for CreateTaskRequest {
+    fn checked(mut self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        self.title = new_task_title(&self.title)
+            .ok_or_else(|| {
+                Refused(
+                    "title is 1 to 200 characters once trimmed, with no control characters, \
+                     bidirectional overrides or invisible ones"
+                        .to_owned(),
+                )
+            })?
+            .to_owned();
+        holds(
+            (1..=TASK_BRIEF_MAX_UNITS).contains(&units(&self.brief)),
+            "brief is 1 to 20000 characters",
+        )?;
+        holds(
+            self.parent_task_id
+                .as_deref()
+                .is_none_or(|id| TaskId::parse(id).is_some()),
+            "parentTaskId is a task id",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for OpenShellRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        holds(self.cwd.as_deref() != Some(""), "cwd is a path")?;
+        holds(
+            self.linked_agent_id.is_none() || self.cwd.is_none(),
+            "a linked shell opens in its agent's directory, so it takes no cwd",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for CloseShellRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        holds(
+            self.confirmed_program
+                .as_deref()
+                .is_none_or(|program| units(program) <= CONFIRMED_PROGRAM_MAX_UNITS),
+            "confirmedProgram is at most 200 characters",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for RestartShellRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        holds(self.retype != Some(false), "retype is only ever true")?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for RenameShellRequest {
+    fn checked(mut self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        if let Some(name) = &self.name {
+            let trimmed = shell_name(name).ok_or_else(|| {
+                Refused(
+                    "name is 1 to 80 characters once trimmed, with no control characters or \
+                     bidirectional overrides"
+                        .to_owned(),
+                )
+            })?;
+            self.name = Some(trimmed.to_owned());
+        }
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for DismissNoticeRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for PairRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(
+            units(&self.code) <= PAIRING_CODE_TYPED_MAX,
+            "code is at most 32 characters",
+        )?;
+        holds(
+            self.name
+                .as_deref()
+                .is_none_or(|name| units(name) <= DEVICE_NAME_MAX),
+            "name is at most 64 characters",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for ShellReport {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(
+            self.bounded(),
+            "a report is a token of 1 to 128 characters, a safe integer and a line of at most \
+             2048",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for ShellPrompt {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(self.bounded(), "token is 1 to 128 characters")?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for ShellDecline {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(self.bounded(), "token is 1 to 128 characters")?;
+        Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn verdict<T: DeserializeOwned + EdgeCheck + serde::Serialize>(
+        body: &Value,
+    ) -> Result<Value, String> {
+        edge::<T>(body.to_string().as_bytes())
+            .map(|taken| serde_json::to_value(taken).unwrap())
+            .map_err(|refused| refused.0)
+    }
+
+    fn refused<T: DeserializeOwned + EdgeCheck + serde::Serialize>(body: &Value) -> bool {
+        verdict::<T>(body).is_err()
+    }
+
+    const KEY: &str = "k1";
+
+    #[test]
+    fn a_task_is_taken_with_its_title_trimmed_and_refused_past_each_bound() {
+        let taken = verdict::<CreateTaskRequest>(
+            &json!({ "idempotencyKey": KEY, "title": "  fix it ", "brief": "b" }),
+        );
+        assert_eq!(taken.unwrap()["title"], "fix it");
+        for broken in [
+            json!({ "idempotencyKey": "", "title": "t", "brief": "b" }),
+            json!({ "idempotencyKey": "k".repeat(201), "title": "t", "brief": "b" }),
+            json!({ "idempotencyKey": KEY, "title": "   ", "brief": "b" }),
+            json!({ "idempotencyKey": KEY, "title": "a\u{202e}b", "brief": "b" }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "" }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "b".repeat(20_001) }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "parentTaskId": "x" }),
+        ] {
+            assert!(refused::<CreateTaskRequest>(&broken), "{broken}");
+        }
+        let at_bounds = json!({
+            "idempotencyKey": "\u{1f600}".repeat(100),
+            "title": "t",
+            "brief": "b".repeat(20_000),
+        });
+        assert!(!refused::<CreateTaskRequest>(&at_bounds));
+    }
+
+    #[test]
+    fn a_shell_opens_with_a_cwd_or_a_linked_agent_and_not_both() {
+        let agent = "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+        assert!(!refused::<OpenShellRequest>(
+            &json!({ "idempotencyKey": KEY, "cwd": "/w" })
+        ));
+        assert!(!refused::<OpenShellRequest>(
+            &json!({ "idempotencyKey": KEY, "linkedAgentId": agent })
+        ));
+        for broken in [
+            json!({ "idempotencyKey": KEY, "cwd": "" }),
+            json!({ "idempotencyKey": KEY, "cwd": "/w", "linkedAgentId": agent }),
+            json!({ "idempotencyKey": "" }),
+        ] {
+            assert!(refused::<OpenShellRequest>(&broken), "{broken}");
+        }
+    }
+
+    #[test]
+    fn a_close_and_a_restart_hold_their_generation_and_their_options_to_the_protocol() {
+        let safe = MAX_SAFE_INTEGER;
+        let close = |extra: Value| {
+            let mut body = json!({ "idempotencyKey": KEY, "generation": safe });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        assert!(!refused::<CloseShellRequest>(&close(
+            json!({ "confirmedProgram": "p".repeat(200) })
+        )));
+        assert!(refused::<CloseShellRequest>(&close(
+            json!({ "confirmedProgram": "p".repeat(201) })
+        )));
+        assert!(refused::<CloseShellRequest>(&close(
+            json!({ "generation": safe + 1 })
+        )));
+        assert!(!refused::<RestartShellRequest>(&close(
+            json!({ "retype": true })
+        )));
+        assert!(refused::<RestartShellRequest>(&close(
+            json!({ "retype": false })
+        )));
+        assert!(refused::<RestartShellRequest>(&close(
+            json!({ "generation": safe + 1 })
+        )));
+    }
+
+    #[test]
+    fn a_rename_needs_its_name_null_or_not_and_trims_it() {
+        assert!(refused::<RenameShellRequest>(
+            &json!({ "idempotencyKey": KEY })
+        ));
+        assert_eq!(
+            verdict::<RenameShellRequest>(&json!({ "idempotencyKey": KEY, "name": null })),
+            Ok(json!({ "idempotencyKey": KEY, "name": null }))
+        );
+        assert_eq!(
+            verdict::<RenameShellRequest>(&json!({ "idempotencyKey": KEY, "name": " dev " })),
+            Ok(json!({ "idempotencyKey": KEY, "name": "dev" }))
+        );
+        for name in [" ", "a\u{7}", "n".repeat(81).as_str()] {
+            let body = json!({ "idempotencyKey": KEY, "name": name });
+            assert!(refused::<RenameShellRequest>(&body), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_dismissal_and_a_pairing_are_held_to_their_lengths() {
+        assert!(!refused::<DismissNoticeRequest>(
+            &json!({ "idempotencyKey": KEY })
+        ));
+        assert!(refused::<DismissNoticeRequest>(
+            &json!({ "idempotencyKey": "" })
+        ));
+        let pair = |code: &str, name: &str| json!({ "code": code, "name": name });
+        assert!(!refused::<PairRequest>(&pair(
+            &"c".repeat(32),
+            &"n".repeat(64)
+        )));
+        assert!(refused::<PairRequest>(&pair(&"c".repeat(33), "n")));
+        assert!(refused::<PairRequest>(&pair("c", &"n".repeat(65))));
+    }
+
+    #[test]
+    fn a_shell_s_reports_are_held_to_their_bounds() {
+        let token = "t".repeat(128);
+        let report = |token: &str, at: u64| json!({ "token": token, "at": at, "command": null });
+        assert!(!refused::<ShellReport>(&report(&token, MAX_SAFE_INTEGER)));
+        assert!(refused::<ShellReport>(&report(
+            &token,
+            MAX_SAFE_INTEGER + 1
+        )));
+        assert!(refused::<ShellReport>(&report("", 0)));
+        assert!(!refused::<ShellPrompt>(&json!({ "token": token })));
+        assert!(refused::<ShellPrompt>(&json!({ "token": "t".repeat(129) })));
+        assert!(!refused::<ShellDecline>(&json!({ "token": token })));
+        assert!(refused::<ShellDecline>(&json!({ "token": "" })));
+    }
+}
