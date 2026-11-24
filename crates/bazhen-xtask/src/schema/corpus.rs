@@ -1083,13 +1083,6 @@ pub(crate) fn mismatched(cases: &[Case], verdicts: &[Value], known: Known<'_>) -
             case.schema, case.path, case.kind, case.body
         ));
     }
-    if verdicts.len() != cases.len() {
-        found.push(format!(
-            "{} verdicts for {} cases",
-            verdicts.len(),
-            cases.len()
-        ));
-    }
     for (schema, path, kind, _, _) in known {
         if !listed.contains(&(*schema, *path, *kind)) {
             found.push(format!(
@@ -1458,10 +1451,6 @@ mod tests {
                     .to_owned(),
                 "KNOWN_MISMATCHES lists M/a (gone), which the edge now agrees with".to_owned(),
             ]
-        );
-        assert_eq!(
-            mismatched(&cases[..1], &[], &[]),
-            vec!["0 verdicts for 1 cases".to_owned()]
         );
     }
 }

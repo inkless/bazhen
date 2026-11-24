@@ -174,6 +174,13 @@ fn write_corpus(
         Ok(None) => return vec!["the example failed to judge the corpus".to_owned()],
         Err(error) => return vec![format!("cargo: {error}")],
     };
+    if verdicts.len() != cases.len() {
+        return vec![format!(
+            "the example judged {} of {} cases",
+            verdicts.len(),
+            cases.len()
+        )];
+    }
     let judged: Vec<serde_json::Value> = listed
         .into_iter()
         .zip(&verdicts)
@@ -387,6 +394,26 @@ mod tests {
             _ => json!({ "refused": "no" }),
         });
         assert_eq!((exit, err.as_str()), (Exit::Done, ""));
+    }
+
+    #[test]
+    fn fails_without_writing_the_corpus_when_the_example_judges_too_few_cases() {
+        let message = json!({
+            "type": "object",
+            "properties": { "n": { "type": "integer", "minimum": 0, "maximum": 9 } },
+            "required": ["n"],
+        });
+        for check in [false, true] {
+            let mut host = fake(&json!({ "M": message }));
+            let fixture = Path::new("/a/repo").join(FIXTURES).join("M.json");
+            let example = json!([{ "name": "one", "wire": { "n": 1 } }]);
+            host.files.insert(fixture, example.to_string());
+            let (exit, err) = ran(&mut host, check);
+            assert_eq!(exit, Exit::Failed, "{err}");
+            assert!(err.contains("the example judged 0 of "), "{err}");
+            let corpus = Path::new("/a/repo").join(SHADOW).join("corpus.json");
+            assert!(!host.written.contains_key(&corpus), "check {check}");
+        }
     }
 
     #[test]
