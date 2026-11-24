@@ -30,7 +30,7 @@ pub enum Report<'a> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct IngestContext<'a> {
     /// The agent the report is for: the one a hook names, once the daemon has identified it, or
-    /// the one bound to the session [`crate::Session::route`] found for a channel's report.
+    /// the one bound to the session [`crate::Harness::route`] found for a channel's report.
     pub agent: Option<&'a AgentId>,
     /// The agent's messages a prompt may carry as a wake handed them over: written or offered
     /// before, and not yet seen, by id.

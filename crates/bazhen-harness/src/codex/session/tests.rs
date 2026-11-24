@@ -2,13 +2,12 @@
 
 use super::*;
 use crate::codex::tests::{
-    HOME, THREAD, activity, agent, ask, command, fixture, launch_request, notify, ready, status,
-    tool, turn,
+    HOME, THREAD, activity, agent, ask, command, fixture, launch_request, notify, ready, tool, turn,
 };
 use crate::codex::{Codex, launch};
 use crate::{
-    Answer, Harness, HarnessActivity, HarnessDoctor, IngestContext, Output, Pending, Resolution,
-    RunError, RunPort, SessionRef,
+    Answer, Harness, HarnessActivity, HarnessDoctor, IngestContext, Output, Pending, Report,
+    Resolution, RunError, RunPort, SessionRef,
 };
 use bazhen_protocol::ids::EnvironmentId;
 use std::time::Duration;
@@ -183,42 +182,6 @@ fn codexs_server_is_the_one_its_cli_starts_in_the_users_codex_home() {
             .clone(),
     );
     assert_eq!(json!(endpoint.start), json!(start));
-}
-
-#[test]
-fn a_report_from_the_server_is_routed_to_the_thread_it_names() {
-    let s = session(&served(&[]));
-    let route = |report: Report<'_>| s.route(&report).map(|key| key.0);
-    let params = status("idle").to_string();
-    let notification = Report::Notification {
-        method: "thread/status/changed",
-        params: params.as_bytes(),
-    };
-    assert_eq!(route(notification), Some(THREAD.to_owned()));
-    let params = command().to_string();
-    let request = Report::ServerRequest {
-        method: "item/commandExecution/requestApproval",
-        params: params.as_bytes(),
-        id: "7",
-    };
-    assert_eq!(route(request), Some(THREAD.to_owned()));
-    let started = json!({ "thread": { "id": OTHER } }).to_string();
-    let announced = Report::Notification {
-        method: "thread/started",
-        params: started.as_bytes(),
-    };
-    assert_eq!(route(announced), None);
-    let garbled = Report::Notification {
-        method: "thread/status/changed",
-        params: b"{",
-    };
-    assert_eq!(route(garbled), None);
-    assert_eq!(route(Report::TerminalTitle { title: THREAD }), None);
-    let hook = Report::Hook {
-        event: "Stop",
-        payload: params.as_bytes(),
-    };
-    assert_eq!(route(hook), None);
 }
 
 #[test]
