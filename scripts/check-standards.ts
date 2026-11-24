@@ -878,6 +878,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-core/src/role_file.rs::parse_role": "parse_role",
   "crates/bazhen-daemon/src/channel/rpc.rs::decode": "rpc_frame",
   "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
+  "crates/bazhen-harness/src/codex/mod.rs::Codex::ingest": "codex_ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
@@ -5149,6 +5150,36 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
 };
 
 /**
+ * Where bazhen-daemon's product code reaches `bazhen_harness::compiled`: by its path, a `use`
+ * that names it, or a bare `compiled(..)` call in a file that glob-imports the crate. `compiled`
+ * holds every adapter the build has, served or not, so its tests and fuzz targets can drive one;
+ * the daemon serves what `production` gives it, so an adapter isn't reached by a user before it
+ * is served. The daemon's tests may call it. An accepted gap: a crate imported by another name
+ * (`use bazhen_harness as h;` then `h::compiled`) isn't seen.
+ */
+export function compiledFailures(paths: string[], read: (path: string) => string): string[] {
+  const sources = paths.filter((p) => /^crates\/bazhen-daemon\/src\/.+\.rs$/.test(p));
+  const testOnly = testModuleFiles(sources, read);
+  const out: string[] = [];
+  for (const file of sources.filter((p) => !testOnly.has(p))) {
+    const product = withoutTests(rustCode(read(file)));
+    const named = product.matchAll(/\bbazhen_harness\s*::\s*(?:compiled\b|\{[^;]*\bcompiled\b)/g);
+    // A glob brings it in unnamed, so each call by the bare name may be it.
+    const globbed = /\bbazhen_harness\s*::\s*(?:\*|\{[^;]*\*)/.test(product)
+      ? product.matchAll(/(?<![\w:.]\s*|\bfn\s+)\bcompiled\s*\(/g)
+      : [];
+    for (const m of [...named, ...globbed]) {
+      out.push(
+        `${file}:${product.slice(0, m.index).split("\n").length}: the daemon serves the ` +
+          "harnesses bazhen_harness::production gives it; compiled holds adapters it doesn't " +
+          "serve yet, so only its tests may call it.",
+      );
+    }
+  }
+  return out;
+}
+
+/**
  * The names in a Rust file's product code that name a harness, once as an identifier and once in
  * a string literal, each with its first line.
  */
@@ -5390,6 +5421,7 @@ export function rustFailures(
       options.harnessNamed ?? {},
     ),
   );
+  out.push(...compiledFailures(paths, read));
   return out;
 }
 
@@ -5489,10 +5521,37 @@ function closingBrace(code: string, from: number): number {
 // send through the guard alone isn't one: off a disposable host, a test build's guard sends
 // nothing. An ending signals only through a `Session` it was given, so what is matched is any
 // mention of `Session`, however one is made or named, and `Ending::start`, which takes one. Not
-// `Ending::new` on its own, which a test gives a stand-in that signals nothing.
+// `Ending::new` on its own, which a test gives a stand-in that signals nothing. That `Session` is
+// bazhen-holder's, so the mention counts only in a crate that can reach it; another `Session`,
+// such as a key's variant, signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b|\bSession\b/;
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
+const SIGNALLING_OR_SESSION = new RegExp(`${SIGNALLING_CALL.source}|\\bSession\\b`);
+
+/**
+ * The workspace crates, by directory, that can name bazhen-holder's `Session`: the holder, and
+ * each member that depends on it through a dependency of any kind, dev-dependencies too, however
+ * many members deep. Read from Cargo, so a crate that comes to depend on the holder is in it.
+ */
+export function holderReachingCrates(meta: CargoMetadata): Set<string> {
+  const reaches = new Set(["bazhen-holder"]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of meta.packages) {
+      if (!reaches.has(p.name) && p.dependencies.some((d) => reaches.has(d.name))) {
+        reaches.add(p.name);
+        grew = true;
+      }
+    }
+  }
+  const workspace = meta.workspace_root.replace(/\/?$/, "/");
+  return new Set(
+    meta.packages
+      .filter((p) => reaches.has(p.name) && p.manifest_path.startsWith(workspace))
+      .map((p) => p.manifest_path.slice(workspace.length).replace(/\/Cargo\.toml$/, "")),
+  );
+}
 
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
@@ -5829,11 +5888,14 @@ function listedCloseFailures(listed: Record<string, string>, seen: Map<string, n
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
+ * A mention of `Session` counts only in the crates `holderCrates` names, by directory; with none
+ * given, it counts in every crate.
  */
 export function unmarkedSignallingTests(
   files: readonly string[],
   read: (file: string) => string,
   nonSignallingCloses: Record<string, string> = {},
+  holderCrates?: ReadonlySet<string>,
 ): string[] {
   const rust = files.filter((f) => /^crates\/.+\.rs$/.test(f) && !f.includes("/fuzz/"));
   const holderBinaries = new Set(
@@ -5850,6 +5912,11 @@ export function unmarkedSignallingTests(
       seen,
     );
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
+    const crate = /^crates\/[^/]+/.exec(file)?.[0] ?? "";
+    const signalling =
+      holderCrates === undefined || holderCrates.has(crate)
+        ? SIGNALLING_OR_SESSION
+        : SIGNALLING_CALL;
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however
     // many deep; product code one call deep, since methods are matched by name alone and a
@@ -5863,13 +5930,13 @@ export function unmarkedSignallingTests(
       test: product[m.index] !== "f",
     }));
     const values = [...code.matchAll(/\b(?:const|static)\s+(\w+)\s*:([^;]*);/g)].flatMap((m) =>
-      SIGNALLING_CALL.test(m[2] ?? "") ? [new RegExp(`\\b${m[1] ?? ""}\\b`)] : [],
+      signalling.test(m[2] ?? "") ? [new RegExp(`\\b${m[1] ?? ""}\\b`)] : [],
     );
     const helpers = new Set<string>();
     const callsHelper = (body: string) =>
       values.some((value) => value.test(body)) ||
       [...helpers].some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body));
-    for (const { name, body } of fns) if (SIGNALLING_CALL.test(body)) helpers.add(name);
+    for (const { name, body } of fns) if (signalling.test(body)) helpers.add(name);
     for (let grew = true; grew;) {
       grew = false;
       for (const { name, body, test } of fns) {
@@ -5882,17 +5949,17 @@ export function unmarkedSignallingTests(
     // A type whose Drop closes or signals, one helper deep, makes each test naming it signal.
     const dropping = [...code.matchAll(/\bimpl\s+Drop\s+for\s+(\w+)[^{]*\{/g)].flatMap((m) => {
       const block = code.slice(m.index, closingBrace(code, m.index + m[0].length));
-      return SIGNALLING_CALL.test(block) || callsHelper(block) ? [m[1] ?? ""] : [];
+      return signalling.test(block) || callsHelper(block) ? [m[1] ?? ""] : [];
     });
     // A macro's test body can come from where it is invoked, so a file that closes or sweeps
     // anywhere makes each test its macros generate a signalling one.
-    const fileSignals = SIGNALLING_CALL.test(code);
+    const fileSignals = signalling.test(code);
     const macros = [...code.matchAll(/\bmacro_rules\s*!\s*\w+\s*\{/g)].map((m) => ({
       from: m.index,
       to: closingBrace(code, m.index + m[0].length),
     }));
     const signals = (body: string, at: number) =>
-      SIGNALLING_CALL.test(body) ||
+      signalling.test(body) ||
       callsHelper(body) ||
       dropping.some((type) => new RegExp(`\\b${type}\\b`).test(body)) ||
       (fileSignals && macros.some((m) => at >= m.from && at < m.to));
@@ -6084,7 +6151,12 @@ function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
   failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
-  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile, NON_SIGNALLING_CLOSES));
+  // With no report from Cargo, every crate is taken to reach the holder.
+  const metadata = cargoMetadata();
+  const holderCrates = typeof metadata === "string" ? undefined : holderReachingCrates(metadata);
+  failures.push(
+    ...unmarkedSignallingTests(repoFiles(), readRepoFile, NON_SIGNALLING_CLOSES, holderCrates),
+  );
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 

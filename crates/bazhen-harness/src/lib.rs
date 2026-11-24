@@ -2,9 +2,11 @@
 //! is reached by its hooks, by its own server over a channel the daemon provides, or both. An
 //! adapter never opens a socket or a process and never touches the store: it is handed ports,
 //! reads the reports it is given, and says what they mean and how to answer them. So the daemon
-//! names no harness, and [`production`] is the only way to an adapter.
+//! names no harness: it reaches the adapters it serves only through [`production`], and
+//! [`compiled`], which also builds those it doesn't serve yet, is for tests and fuzz targets.
 
 mod claude_code;
+mod codex;
 mod deliver;
 mod js;
 mod launch;
@@ -393,4 +395,16 @@ pub fn production(deps: HarnessDeps) -> Harnesses {
         HarnessId::ClaudeCode,
         Box::new(claude_code::ClaudeCode::new(deps)),
     )])
+}
+
+/// Every adapter this build has, served or not, as a test or a fuzz target drives one the daemon
+/// doesn't serve yet. The daemon's own code builds from [`production`].
+pub fn compiled(deps: HarnessDeps) -> Harnesses {
+    Harnesses::new(vec![
+        (
+            HarnessId::ClaudeCode,
+            Box::new(claude_code::ClaudeCode::new(deps)),
+        ),
+        (HarnessId::Codex, Box::new(codex::Codex::new())),
+    ])
 }

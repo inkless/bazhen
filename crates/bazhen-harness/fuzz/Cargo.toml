@@ -23,4 +23,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "codex_ingest"
+path = "fuzz_targets/codex_ingest.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
