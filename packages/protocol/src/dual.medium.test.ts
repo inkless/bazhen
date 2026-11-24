@@ -31,11 +31,76 @@ interface Known {
   readonly why: string;
 }
 
+const AGENT_EVENTS = "the port of agent_events.rs";
+const MAIL_EVENTS = "the port of mail_events.rs";
+const TASK_EVENTS = "the port of task_events.rs";
+
+const WHY: Record<string, string> = {
+  null: "the Rust payload takes null where the protocol takes the field only left out",
+  leftOut: "the Rust payload takes the field left out where the protocol requires it",
+};
+const BOUND_WHY = "the Rust payload holds the field to no bound where the protocol does";
+
+/** A case of kind `type`'s payload at `field` the generated side alone takes. */
+const payload = (owner: string, type: string, field: string, kind: string): Known => ({
+  side: "generated",
+  schema: "Event",
+  path: `/(type=${type})/payload/${field}`,
+  kind,
+  owner,
+  why: WHY[kind] ?? BOUND_WHY,
+});
+
 /**
  * Where a side judges a case otherwise than the corpus expects. Each case of an entry's key must
  * be judged so, by that side alone. The list only shrinks: an entry no case meets fails.
  */
-const DUAL_KNOWN: readonly Known[] = [];
+const DUAL_KNOWN: readonly Known[] = [
+  payload(AGENT_EVENTS, "agent.compacted", "before", "null"),
+  payload(AGENT_EVENTS, "agent.compacted", "hook", "null"),
+  payload(AGENT_EVENTS, "agent.compacted", "hook/sessionId", "leftOut"),
+  payload(AGENT_EVENTS, "agent.failed", "detail", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "pastMaximum"),
+  payload(AGENT_EVENTS, "agent.launched", "compactWindowTokens", "underMinimum"),
+  payload(AGENT_EVENTS, "agent.launched", "launchedBy", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "name", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "atExclusiveMinimum"),
+  payload(AGENT_EVENTS, "agent.launched", "nameOrdinal", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "promptHash", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "role", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "runtime", "null"),
+  payload(AGENT_EVENTS, "agent.launched", "runtime", "underMinLength"),
+  payload(AGENT_EVENTS, "agent.launched", "terminalId", "leftOut"),
+  payload(AGENT_EVENTS, "agent.relaunch_rejected", "detail", "null"),
+  payload(AGENT_EVENTS, "agent.relaunch_requested", "generation", "atExclusiveMinimum"),
+  payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "null"),
+  payload(AGENT_EVENTS, "agent.relaunch_requested", "runtime", "underMinLength"),
+  payload(AGENT_EVENTS, "agent.relaunched", "externalRef", "leftOut"),
+  payload(AGENT_EVENTS, "agent.relaunched", "harnessName", "null"),
+  payload(AGENT_EVENTS, "agent.relaunched", "promptHash", "null"),
+  payload(AGENT_EVENTS, "agent.relaunched", "theme", "null"),
+  payload(AGENT_EVENTS, "agent.respawn_rejected", "detail", "null"),
+  payload(AGENT_EVENTS, "agent.respawned", "externalRef", "leftOut"),
+  payload(AGENT_EVENTS, "agent.respawned", "harnessName", "null"),
+  payload(AGENT_EVENTS, "agent.respawned", "promptHash", "null"),
+  payload(AGENT_EVENTS, "agent.respawned", "theme", "null"),
+  payload(AGENT_EVENTS, "agent.running", "externalRef", "leftOut"),
+  payload(AGENT_EVENTS, "agent.running", "harnessName", "null"),
+  payload(AGENT_EVENTS, "agent.running", "runtimeRef", "leftOut"),
+  payload(AGENT_EVENTS, "agent.running", "theme", "null"),
+  payload(AGENT_EVENTS, "agent.transcript_recorded", "sessionId", "underMinLength"),
+  payload(TASK_EVENTS, "assignment.granted", "parentAssignmentId", "leftOut"),
+  payload(MAIL_EVENTS, "attention.opened", "kind", "null"),
+  payload(MAIL_EVENTS, "attention.opened", "messageId", "null"),
+  payload(MAIL_EVENTS, "attention.opened", "taskId", "null"),
+  payload(MAIL_EVENTS, "attention.opened", "toolUseId", "leftOut"),
+  payload(MAIL_EVENTS, "mailbox.offered", "promptId", "null"),
+  payload(MAIL_EVENTS, "mailbox.queued", "from", "null"),
+  payload(TASK_EVENTS, "task.noted", "role", "leftOut"),
+  payload(TASK_EVENTS, "task.owner_changed", "delegatedFrom", "leftOut"),
+  payload(TASK_EVENTS, "task.owner_changed", "ownerAgentId", "leftOut"),
+];
 
 /** A schema the protocol exports that the Rust protocol doesn't emit yet, with what owns it. */
 interface NotYet {
@@ -48,8 +113,6 @@ const ATTENTION = "the attention routes' port";
 const ATTENTION_WHY = "the Rust daemon serves no attention route yet";
 const HOOKS = "the hook wire types' port";
 const HOOKS_WHY = "the hook wire types aren't in bazhen-protocol yet";
-const EVENTS = "this protocol's event typing";
-const EVENTS_WHY = "the Rust protocol emits the event envelope, not the typed events";
 const HOLDER = "this protocol's holder-proto schema";
 const NAMED = "this protocol's named definitions";
 const NAMED_WHY = "the Rust protocol writes it inline in each message that holds it";
@@ -62,7 +125,6 @@ const NAMED_WHY = "the Rust protocol writes it inline in each message that holds
 const NOT_YET_IN_RUST: readonly NotYet[] = [
   { name: "AnswerAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
   { name: "AnswerAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
-  { name: "ApprovalDecision", owner: ATTENTION, why: ATTENTION_WHY },
   { name: "DismissAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
   { name: "DismissAttentionResponse", owner: ATTENTION, why: ATTENTION_WHY },
   { name: "ReplyAttentionRequest", owner: ATTENTION, why: ATTENTION_WHY },
@@ -93,10 +155,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     owner: "the tmux runtime",
     why: "/v1/codex/pane-title goes with tmux at the cutover, and is removed at the flip, not ported",
   },
-  { name: "ClientEventFrame", owner: EVENTS, why: EVENTS_WHY },
-  { name: "Event", owner: EVENTS, why: EVENTS_WHY },
-  { name: "EventFrame", owner: EVENTS, why: EVENTS_WHY },
-  { name: "EventStreamQuery", owner: EVENTS, why: EVENTS_WHY },
   {
     name: "HolderHelloFrozen",
     owner: HOLDER,
@@ -123,8 +181,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     why: "what the Rust CLI's `bazhen agents --json` prints, which only the CLI's tests read: the Rust protocol emits FleetAgent, not the list",
   },
   { name: "NoticeAction", owner: NAMED, why: NAMED_WHY },
-  { name: "NoticeCloseReason", owner: NAMED, why: NAMED_WHY },
-  { name: "NoticeCloser", owner: NAMED, why: NAMED_WHY },
   { name: "ProtocolVersion", owner: NAMED, why: NAMED_WHY },
   { name: "RuntimeHealthState", owner: NAMED, why: NAMED_WHY },
   { name: "ShellCommandLine", owner: NAMED, why: NAMED_WHY },

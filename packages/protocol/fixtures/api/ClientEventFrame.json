@@ -1,0 +1,29 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "type": "visibility",
+      "visible": true
+    },
+    "parsed": {
+      "type": "visibility",
+      "visible": true
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "type": "visibility",
+      "visible": true,
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "type": "visibility",
+      "visible": true
+    }
+  }
+]

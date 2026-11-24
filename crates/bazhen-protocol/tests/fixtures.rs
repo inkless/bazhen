@@ -17,7 +17,7 @@ use bazhen_protocol::daemon::{
 };
 use bazhen_protocol::detach_keys::DetachKeys;
 use bazhen_protocol::edge::{EdgeCheck, edge};
-use bazhen_protocol::events::EventFrame;
+use bazhen_protocol::events::{ClientEventFrame, Event, EventFrame, EventStreamQuery, typed};
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
@@ -110,6 +110,13 @@ fn round_trips_at_edge<T: DeserializeOwned + Serialize + JsonSchema + EdgeCheck>
     })
 }
 
+/// As [`round_trips`], for an event read with its payload typed, as the protocol's `Event` reads it.
+fn round_trips_typed(name: &str) -> Result<Report> {
+    examined::<Event>(name, |wire| {
+        typed::read(serde_json::from_value(wire.clone()).map_err(|e| e.to_string())?)
+    })
+}
+
 fn examined<T: DeserializeOwned + Serialize + JsonSchema>(
     name: &str,
     decode: impl Fn(&Value) -> Result<T>,
@@ -175,6 +182,7 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
         round_trips::<BroadcastMessageResponse>,
     ),
     ("CallerResponse", round_trips::<CallerResponse>),
+    ("ClientEventFrame", round_trips::<ClientEventFrame>),
     ("CloseAgentRequest", round_trips::<CloseAgentRequest>),
     (
         "CloseShellRequest",
@@ -201,7 +209,9 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("ErrorResponse", round_trips::<ErrorResponse>),
     ("EscalateRequest", round_trips::<EscalateRequest>),
     ("EscalateResponse", round_trips::<EscalateResponse>),
+    ("Event", round_trips_typed),
     ("EventEnvelopeFrame", round_trips::<EventFrame>),
+    ("EventStreamQuery", round_trips::<EventStreamQuery>),
     ("FinishTaskRequest", round_trips::<FinishTaskRequest>),
     ("FleetAgent", round_trips::<FleetAgent>),
     ("HealthResponse", round_trips::<HealthResponse>),

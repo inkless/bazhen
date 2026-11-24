@@ -41,6 +41,200 @@ const KEPT: [(&str, &str, &str); 2] = [
     ),
 ];
 
+const AGENT_EVENTS: &str = "the port of agent_events.rs";
+const MAIL_EVENTS: &str = "the port of mail_events.rs";
+const TASK_EVENTS: &str = "the port of task_events.rs";
+
+/// The differences the Rust schema keeps today, each with what owns its fix: an event payload
+/// whose field Rust takes as null or left out, or holds to no bound, where the protocol doesn't.
+/// The list only shrinks: an entry the census no longer finds fails.
+const KNOWN: &[(&str, &str)] = &[
+    (
+        "CompactedHook.sessionId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.compacted).payload.before: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.compacted).payload.hook: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.failed).payload.detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.compactWindowTokens: maximum is 10000000 in the protocol, 4294967295 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.compactWindowTokens: minimum is 100000 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.compactWindowTokens: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.launchedBy: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.nameOrdinal: minimum is 1 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.nameOrdinal: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.name: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.role: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.runtime: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.runtime: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.launched).payload.terminalId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunched).payload.externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunched).payload.harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunched).payload.promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunched).payload.theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunch_rejected).payload.detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunch_requested).payload.generation: minimum is 1 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunch_requested).payload.runtime: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.relaunch_requested).payload.runtime: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.respawned).payload.externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.respawned).payload.harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.respawned).payload.promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.respawned).payload.theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.respawn_rejected).payload.detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.running).payload.externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.running).payload.harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.running).payload.runtimeRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.running).payload.theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=agent.transcript_recorded).payload.sessionId: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "Event(type=assignment.granted).payload.parentAssignmentId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "Event(type=attention.opened).payload.kind: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=attention.opened).payload.messageId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=attention.opened).payload.taskId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=attention.opened).payload.toolUseId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=mailbox.offered).payload.promptId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=mailbox.queued).payload.from: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "Event(type=task.noted).payload.role: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "Event(type=task.owner_changed).payload.delegatedFrom: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "Event(type=task.owner_changed).payload.ownerAgentId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "RelaunchRejectedReason: enum is [\"not_resumable\",\"terminal_exists\",\"harness_refused\",\"unavailable\",\"daemon_restart\"] in the protocol, [\"not_resumable\",\"terminal_exists\",\"unavailable\",\"harness_refused\",\"daemon_restart\"] here",
+        AGENT_EVENTS,
+    ),
+    (
+        "RespawnRejectedReason: enum is [\"not_resumable\",\"no_terminal\",\"terminal_changed\",\"harness_refused\",\"unavailable\",\"daemon_restart\"] in the protocol, [\"not_resumable\",\"no_terminal\",\"terminal_changed\",\"unavailable\",\"harness_refused\",\"daemon_restart\"] here",
+        AGENT_EVENTS,
+    ),
+];
+
 /// A document's definitions, to follow its `$ref`s by.
 struct Side<'a> {
     definitions: &'a Map<String, Value>,
@@ -367,6 +561,13 @@ fn each_field_the_schema_emits_has_the_limits_the_protocol_gives_it() {
         compared += 1;
     }
     assert!(compared > 100, "only {compared} messages compared");
+    for (known, owner) in KNOWN {
+        if !found.remove(*known) {
+            found.insert(format!(
+                "KNOWN lists `{known}`, owned by {owner}, which the census no longer finds"
+            ));
+        }
+    }
     assert!(
         found.is_empty(),
         "{} differences:\n{}",

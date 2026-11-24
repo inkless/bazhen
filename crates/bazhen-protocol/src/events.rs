@@ -4,7 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::agents::EnvironmentKind;
+#[cfg(feature = "schema")]
+pub mod typed;
+
+use crate::agents::{EnvironmentKind, HarnessId};
 use crate::ids::{
     AgentId, AssignmentId, AttachmentId, DeviceId, EnvironmentId, TaskId, TerminalId,
 };
@@ -288,6 +291,17 @@ pub enum ClientEventFrame {
     Visibility { visible: bool },
 }
 
+/// The query that opens `/v1/events`: the client's protocol version, and the cursor `/v1/state`
+/// or the last event it saw gave it. The stream resumes after `after`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EventStreamQuery {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
+    pub epoch: String,
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = r"^\d+$")))]
+    pub after: String,
+}
+
 /// The largest frame a client sends on `/v1/events`, which carries only whether its page is seen.
 pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
 
@@ -296,9 +310,15 @@ pub const EVENT_FRAME_MAX_BYTES: usize = 1024;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCreated {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 200)))]
     pub title: String,
     pub brief: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub owner_agent_id: Option<AgentId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<TaskId>"))]
     pub parent_task_id: Option<TaskId>,
     pub delegated_from: Option<AssignmentId>,
 }
@@ -321,6 +341,10 @@ pub struct DeviceRevoked {}
 pub struct NoticeOpened {
     pub kind: String,
     pub summary: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<NoticeDevice>")
+    )]
     pub device: Option<NoticeDevice>,
 }
 
@@ -333,7 +357,22 @@ pub struct NoticeClosed {
     pub reason: NoticeCloseReason,
     pub by: NoticeCloser,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "DeviceId"))]
     pub from_device: Option<DeviceId>,
+}
+
+/// The payload of `environment.harness_version`: a harness's own server answers on a version
+/// other than the last one recorded, as after a Codex self-update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EnvironmentHarnessVersion {
+    pub harness: HarnessId,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1)))]
+    pub version: String,
+    /// `None` for the first version recorded.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
+    pub previous: Option<String>,
 }
 
 /// The payload of `environment.registered`.
@@ -359,15 +398,22 @@ pub struct RuntimeRefPayload {
 pub struct TerminalOpened {
     pub environment_id: EnvironmentId,
     pub cwd: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub linked_agent_id: Option<AgentId>,
     /// The theme it is opened for, when one was named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
     pub theme: Option<TuiTheme>,
     /// The lost shell it was opened to restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "TerminalId"))]
     pub restart_of: Option<TerminalId>,
     /// The runtime its terminal is created on; tmux, from an older daemon that says none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub runtime: Option<String>,
 }
 
@@ -419,6 +465,10 @@ pub struct TerminalClosed {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalForegroundChanged {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<String>", length(max = 200))
+    )]
     pub command: Option<String>,
 }
 
@@ -426,6 +476,10 @@ pub struct TerminalForegroundChanged {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalNeedsRestart {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::HolderVersionList")
+    )]
     pub protocol: Vec<String>,
 }
 
@@ -433,14 +487,21 @@ pub struct TerminalNeedsRestart {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalRenamed {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub name: Option<String>,
 }
 
-/// The payload of `terminal.lost`, `terminal.closing` and `terminal.restart_cleared`, which is
-/// empty.
+/// The payload of `terminal.lost`, `terminal.closing`, `terminal.restart_cleared` and
+/// `terminal.unlinked`, which is empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TerminalNoted {}
+
+/// The payload of `agent.lost`, `agent.respawn_requested`, `agent.closing`, `agent.closed`,
+/// `mailbox.emitted` and `mailbox.delivered`, which is empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Noted {}
 
 /// The payload of `attachment.started`: a view of a terminal, watching or driving it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,5 +541,6 @@ pub struct AttachmentEnded {
 #[serde(rename_all = "camelCase")]
 pub struct LeaseGranted {
     pub attachment_id: AttachmentId,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub epoch: u64,
 }
