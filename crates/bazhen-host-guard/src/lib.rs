@@ -291,7 +291,7 @@ fn child_then_send(target: Target, pid: Pid, signal: Signal) -> Result<bool, Err
 /// Ends this process as `signal` ends one by its default action, so whatever waits for it sees it
 /// die by that signal, as a wrapper that passes its command's death on must. The signal's action is
 /// set back to its default and it is unblocked first, and before one whose default dumps core the
-/// core limit goes to 0, so no core is left behind. A signal whose default doesn't end a process,
+/// process is set up to leave none (`leaves_no_core`). A signal whose default doesn't end a process,
 /// one ignored or one that stops it, isn't sent; nor is any signal once a step before it fails:
 /// the process then exits 128 plus the signal's number, as a shell reports a death by it.
 pub fn die_by(signal: Signal) -> ! {
@@ -346,18 +346,39 @@ fn ready_to_die_by(raw: i32) -> bool {
     if raw == libc::SIGKILL {
         return true;
     }
-    if dumps_core(raw) {
-        use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
-        let limit = getrlimit(Resource::Core);
-        let none = Rlimit {
-            current: Some(0),
-            maximum: limit.maximum,
-        };
-        if setrlimit(Resource::Core, none).is_err() {
-            return false;
-        }
+    if dumps_core(raw) && !leaves_no_core() {
+        return false;
     }
     bazhen_pid::default_action(raw).is_ok() && bazhen_pid::unblock(raw).is_ok()
+}
+
+/// Sets this process up so that a signal that dumps core leaves none. On Linux a core pattern
+/// that pipes the core to a handler, as apport's and systemd-coredump's do, ignores a core limit of
+/// 0 and reads one of 1 as no dump, and a dump to a file needs at least a page, so the limit goes
+/// to one byte. The process is made non-dumpable too, which stops every dump but one an
+/// administrator allows for setuid programs. Whether both took.
+#[cfg(target_os = "linux")]
+fn leaves_no_core() -> bool {
+    use rustix::process::{DumpableBehavior, set_dumpable_behavior};
+    core_limit(1) && set_dumpable_behavior(DumpableBehavior::NotDumpable).is_ok()
+}
+
+/// Sets this process up so that a signal that dumps core leaves none: macOS writes a core only up
+/// to the core limit, so the limit goes to 0. Whether it took.
+#[cfg(target_os = "macos")]
+fn leaves_no_core() -> bool {
+    core_limit(0)
+}
+
+/// Sets the core limit this process runs under to `bytes`, keeping its ceiling. Whether it took.
+fn core_limit(bytes: u64) -> bool {
+    use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+    let limit = getrlimit(Resource::Core);
+    let lowered = Rlimit {
+        current: Some(bytes),
+        maximum: limit.maximum,
+    };
+    setrlimit(Resource::Core, lowered).is_ok()
 }
 
 /// Whether a process has `pid`, by signal 0, which sends nothing, once the floor passes it. One
