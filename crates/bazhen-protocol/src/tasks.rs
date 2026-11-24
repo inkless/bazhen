@@ -3,25 +3,16 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agents::HarnessId;
+use crate::edge::is_task_title_length;
 use crate::ids::{AgentId, AssignmentId, AttentionId, MessageId, TaskId};
 use crate::names::{AgentName, AgentRef, Role};
 use crate::text::trim;
 
-/// The longest title a task holds, in UTF-16 code units, as zod counts a string's length.
-pub const TASK_TITLE_MAX: usize = 200;
-/// The longest brief a task holds, counted as a title is.
-pub const TASK_BRIEF_MAX: usize = 20_000;
-
-/// Whether `title` is one a task is stored with: trimmed, and neither empty nor too long.
+/// Whether `title` is one a task is stored with: trimmed, and as long as the edge holds a title
+/// to, in code points. A brief is held to [`crate::edge::is_task_brief`].
 #[must_use]
 pub fn is_task_title(title: &str) -> bool {
-    trim(title) == title && (1..=TASK_TITLE_MAX).contains(&title.encode_utf16().count())
-}
-
-/// Whether `brief` is one a task is stored with: neither empty nor too long.
-#[must_use]
-pub fn is_task_brief(brief: &str) -> bool {
-    (1..=TASK_BRIEF_MAX).contains(&brief.encode_utf16().count())
+    trim(title) == title && is_task_title_length(title)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -403,10 +394,12 @@ pub struct BroadcastMessageResponse {
 #[cfg(test)]
 mod stored_text {
     use super::*;
+    use crate::edge::is_task_brief;
+    use crate::text::TASK_BRIEF_MAX_CHARS;
 
     #[test]
-    fn takes_a_title_trimmed_and_up_to_200_utf16_units_as_zod_counts_them() {
-        let astral = "\u{1f600}".repeat(100);
+    fn takes_a_title_trimmed_and_up_to_200_code_points_as_zod_counts_them() {
+        let astral = "\u{1f600}".repeat(200);
         let verdicts = [
             is_task_title("Ship"),
             is_task_title(&astral),
@@ -420,13 +413,14 @@ mod stored_text {
     }
 
     #[test]
-    fn takes_a_brief_up_to_20000_utf16_units_untrimmed() {
+    fn takes_a_brief_up_to_20000_code_points_untrimmed() {
         let verdicts = [
             is_task_brief(" "),
-            is_task_brief(&"b".repeat(TASK_BRIEF_MAX)),
-            is_task_brief(&"b".repeat(TASK_BRIEF_MAX + 1)),
+            is_task_brief(&"b".repeat(TASK_BRIEF_MAX_CHARS)),
+            is_task_brief(&"\u{1f600}".repeat(TASK_BRIEF_MAX_CHARS)),
+            is_task_brief(&"b".repeat(TASK_BRIEF_MAX_CHARS + 1)),
             is_task_brief(""),
         ];
-        assert_eq!(verdicts, [true, true, false, false]);
+        assert_eq!(verdicts, [true, true, true, false, false]);
     }
 }

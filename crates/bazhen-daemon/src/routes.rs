@@ -1118,6 +1118,31 @@ mod tests {
     }
 
     #[test]
+    fn makes_a_task_whose_title_and_brief_are_astral_text_at_their_bounds() {
+        let (socket, _, _, _finish) = over_a_store();
+        let emoji = |n: usize| "\u{1f600}".repeat(n);
+        let ask = |key: &str, title: String, brief: String| {
+            let body = json!({ "idempotencyKey": key, "title": title, "brief": brief });
+            let (status, answer) = send(socket.clone(), post("/v1/tasks", &[], &body));
+            (status, answer["error"].clone())
+        };
+        assert_eq!(
+            [
+                ask("t", emoji(200), "b".to_owned()),
+                ask("b", "T".to_owned(), emoji(20_000)),
+                ask("t2", emoji(201), "b".to_owned()),
+                ask("b2", "T".to_owned(), emoji(20_001)),
+            ],
+            [
+                (200, Value::Null),
+                (200, Value::Null),
+                (400, json!("invalid_request")),
+                (400, json!("invalid_request")),
+            ]
+        );
+    }
+
+    #[test]
     fn refuses_a_task_it_cant_make_as_the_typescript_daemon_does() {
         let (socket, _, path, _finish) = over_a_store();
         let missing = "task_01900000000070008000000000000009";

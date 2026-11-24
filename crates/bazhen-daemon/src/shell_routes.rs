@@ -10,11 +10,12 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_protocol::daemon::{ErrorCode, ErrorResponse};
+use bazhen_protocol::edge::{EdgeCheck, OBJECT_RULE, Refused, is_object};
 use bazhen_protocol::ids::DeviceId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport, shell_name,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -23,14 +24,6 @@ use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
 use crate::shells::reports::{ReportKind, ReportOutcome};
 use crate::shells::{ShellError, Shells};
-
-/// The most UTF-16 units an idempotency key has, and a confirmed program's name.
-const KEY_MAX_UNITS: usize = 200;
-const PROGRAM_MAX_UNITS: usize = 200;
-
-fn units(text: &str) -> usize {
-    text.encode_utf16().count()
-}
 
 /// The protocol's error for a shell's failure.
 pub(crate) fn refusal(err: &ShellError) -> Response {
@@ -62,56 +55,29 @@ pub(crate) fn refusal(err: &ShellError) -> Response {
 
 /// `body` as the request `what` names, or why it isn't one.
 fn parsed<R: DeserializeOwned>(body: &[u8], what: &str) -> Result<R, ShellError> {
+    if !is_object(body) {
+        return Err(ShellError::Invalid(OBJECT_RULE.to_owned()));
+    }
     serde_json::from_slice(body)
         .map_err(|err| ShellError::Invalid(format!("the body is not a {what}: {err}")))
 }
 
-fn keyed(key: &str) -> Result<(), ShellError> {
-    if (1..=KEY_MAX_UNITS).contains(&units(key)) {
-        Ok(())
-    } else {
-        Err(ShellError::Invalid(
-            "idempotencyKey is 1 to 200 characters".to_owned(),
-        ))
-    }
+/// `req` held to the edge's rules, or the first it breaks.
+fn checked<R: EdgeCheck>(req: R) -> Result<R, ShellError> {
+    req.checked()
+        .map_err(|Refused(rule)| ShellError::Invalid(rule))
 }
 
 fn open_request(body: &[u8]) -> Result<OpenShellRequest, ShellError> {
-    let req: OpenShellRequest = parsed(body, "shell to open")?;
-    keyed(&req.idempotency_key)?;
-    if req.cwd.as_deref() == Some("") {
-        return Err(ShellError::Invalid("cwd is a path".to_owned()));
-    }
-    if req.linked_agent_id.is_some() && req.cwd.is_some() {
-        return Err(ShellError::Invalid(
-            "a linked shell opens in its agent's directory, so it takes no cwd".to_owned(),
-        ));
-    }
-    Ok(req)
+    checked(parsed::<OpenShellRequest>(body, "shell to open")?)
 }
 
 fn close_request(body: &[u8]) -> Result<CloseShellRequest, ShellError> {
-    let req: CloseShellRequest = parsed(body, "shell's close")?;
-    keyed(&req.idempotency_key)?;
-    if req
-        .confirmed_program
-        .as_deref()
-        .is_some_and(|p| units(p) > PROGRAM_MAX_UNITS)
-    {
-        return Err(ShellError::Invalid(
-            "confirmedProgram is at most 200 characters".to_owned(),
-        ));
-    }
-    Ok(req)
+    checked(parsed::<CloseShellRequest>(body, "shell's close")?)
 }
 
 fn restart_request(body: &[u8]) -> Result<RestartShellRequest, ShellError> {
-    let req: RestartShellRequest = parsed(body, "shell's restart")?;
-    keyed(&req.idempotency_key)?;
-    if req.retype == Some(false) {
-        return Err(ShellError::Invalid("retype is only ever true".to_owned()));
-    }
-    Ok(req)
+    checked(parsed::<RestartShellRequest>(body, "shell's restart")?)
 }
 
 /// A rename as sent: its name may be null, but must be there.
@@ -123,10 +89,10 @@ struct Rename {
     name: Nullable<String>,
 }
 
-/// The rename asked for, its name trimmed as the schema keeps it.
+/// The rename asked for, its name trimmed as the schema keeps it. An absent name is refused here,
+/// before the edge, so the refusal says what a rename's name may be.
 fn rename_request(body: &[u8]) -> Result<RenameShellRequest, ShellError> {
     let req: Rename = parsed(body, "shell's name")?;
-    keyed(&req.idempotency_key)?;
     let name = match req.name {
         Nullable::Absent => {
             return Err(ShellError::Invalid(
@@ -134,13 +100,9 @@ fn rename_request(body: &[u8]) -> Result<RenameShellRequest, ShellError> {
             ));
         }
         Nullable::Null => None,
-        Nullable::Value(name) => Some(shell_name(&name).map(str::to_owned).ok_or_else(|| {
-            ShellError::Invalid(
-                "name is 1 to 80 characters once trimmed, with no control characters or bidirectional overrides".to_owned(),
-            )
-        })?),
+        Nullable::Value(name) => Some(name),
     };
-    Ok(RenameShellRequest {
+    checked(RenameShellRequest {
         idempotency_key: req.idempotency_key,
         name,
     })
@@ -265,8 +227,9 @@ fn reported<R: DeserializeOwned>(
         Err(err) if err.status() == StatusCode::PAYLOAD_TOO_LARGE => return Err(Unread::TooLarge),
         Err(_) => return Err(Unread::Malformed),
     };
-    serde_json::from_slice(&body)
-        .ok()
+    is_object(&body)
+        .then(|| serde_json::from_slice(&body).ok())
+        .flatten()
         .filter(bounded)
         .ok_or(Unread::Malformed)
 }
@@ -426,6 +389,62 @@ mod tests {
     }
 
     #[test]
+    fn counts_each_bound_in_code_points_so_astral_text_at_it_is_taken_and_one_past_refused() {
+        let emoji = |n: usize| "\u{1f600}".repeat(n);
+        let body = |value: serde_json::Value| serde_json::to_vec(&value).unwrap();
+        let named = |n: usize| {
+            rename_request(&body(
+                serde_json::json!({ "idempotencyKey": "n", "name": emoji(n) }),
+            ))
+            .map(|rename| rename.name)
+            .map_err(|err| err.to_string())
+        };
+        for (n, taken) in [(200, true), (201, false)] {
+            let key = emoji(n);
+            let judged = [
+                open_request(&body(serde_json::json!({ "idempotencyKey": key }))).is_ok(),
+                close_request(&body(
+                    serde_json::json!({ "idempotencyKey": key, "generation": 0 }),
+                ))
+                .is_ok(),
+                close_request(&body(serde_json::json!({
+                    "idempotencyKey": "c", "generation": 0, "confirmedProgram": key,
+                })))
+                .is_ok(),
+                restart_request(&body(
+                    serde_json::json!({ "idempotencyKey": key, "generation": 0 }),
+                ))
+                .is_ok(),
+                rename_request(&body(
+                    serde_json::json!({ "idempotencyKey": key, "name": null }),
+                ))
+                .is_ok(),
+            ];
+            assert_eq!(judged, [taken; 5], "{n} code points");
+        }
+        assert_eq!(named(80), Ok(Some(emoji(80))));
+        assert!(named(81).is_err_and(|refused| refused.starts_with("name is 1 to 80")));
+    }
+
+    #[test]
+    fn refuses_a_generation_past_the_largest_safe_integer() {
+        let ask = |generation: u64| {
+            let body = format!(r#"{{"idempotencyKey":"g","generation":{generation}}}"#);
+            (
+                close_request(body.as_bytes())
+                    .map(drop)
+                    .map_err(|e| e.to_string()),
+                restart_request(body.as_bytes())
+                    .map(drop)
+                    .map_err(|e| e.to_string()),
+            )
+        };
+        let past = Err("generation is a safe integer".to_owned());
+        assert_eq!(ask((1 << 53) - 1), (Ok(()), Ok(())));
+        assert_eq!(ask(1 << 53), (past.clone(), past));
+    }
+
+    #[test]
     fn refuses_null_for_a_field_a_request_may_only_leave_out() {
         let opens = ["linkedAgentId", "cwd", "theme"]
             .map(|field| format!(r#"{{"idempotencyKey":"o","{field}":null}}"#));
@@ -579,6 +598,7 @@ mod tests {
             json(serde_json::json!({ "token": token, "at": 1 })),
             json(serde_json::json!({ "token": token, "at": -1, "command": null })),
             b"not json".to_vec(),
+            json(serde_json::json!([token, 4, "rm -rf ~"])),
         ];
         let expected = "expected { token, at, command }";
         assert_eq!(
@@ -598,12 +618,13 @@ mod tests {
         );
         assert_eq!(
             malformed.map(|body| posted(&runtime, socket(), &at("report"), body)),
-            [(); 4].map(|()| said("invalid_request", expected))
+            [(); 5].map(|()| said("invalid_request", expected))
         );
         assert_eq!(h.last_command(&id), Some("make".to_owned()));
         let marked_null = json(serde_json::json!({ "token": token, "brackets": null }));
         let forged = json(serde_json::json!({ "token": "forged" }));
         let long = json(serde_json::json!({ "token": "x".repeat(1024) }));
+        let listed = json(serde_json::json!([token]));
         let too_large = (
             413,
             serde_json::json!({ "error": "invalid_request", "message": "report too large" }),
@@ -618,6 +639,8 @@ mod tests {
                 posted(&runtime, socket(), &at("decline"), b"{}".to_vec()),
                 posted(&runtime, socket(), &at("prompt"), long.clone()),
                 posted(&runtime, socket(), &at("decline"), long),
+                posted(&runtime, socket(), &at("prompt"), listed.clone()),
+                posted(&runtime, socket(), &at("decline"), listed),
             ],
             [
                 (204, serde_json::Value::Null),
@@ -628,6 +651,8 @@ mod tests {
                 said("invalid_request", "expected { token }"),
                 too_large.clone(),
                 too_large,
+                said("invalid_request", "expected { token }"),
+                said("invalid_request", "expected { token }"),
             ]
         );
         let gate = crate::routes::Gate {
