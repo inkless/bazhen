@@ -1127,26 +1127,22 @@ mod tests {
     }
 
     /// The cases planted in one example of `M`, whose Rust schema is `rust` and whose protocol
-    /// schema is `protocol`, as (path, kind, accept, body), or the problems.
+    /// schema is `protocol`, or the problems.
     fn planted_in(
-        rust: Value,
-        protocol: Option<Value>,
-        example: Value,
-    ) -> Result<Vec<(String, String, bool, String)>, Vec<String>> {
+        rust: &Value,
+        protocol: Option<&Value>,
+        example: &Value,
+    ) -> Result<Vec<Case>, Vec<String>> {
         let mut defs = Map::new();
-        defs.insert("M".to_owned(), rust);
+        defs.insert("M".to_owned(), rust.clone());
         let fixture = json!([{ "name": "one", "wire": example }]);
-        let cases = plant(&defs, &|_| protocol.clone(), &|_| Some(fixture.clone()))?;
-        Ok(cases
-            .into_iter()
-            .map(|c| (c.path, c.kind, c.accept, c.body))
-            .collect())
+        plant(&defs, &|_| protocol.cloned(), &|_| Some(fixture.clone()))
     }
 
-    fn has(cases: &[(String, String, bool, String)], path: &str, kind: &str, accept: bool) -> bool {
+    fn has(cases: &[Case], path: &str, kind: &str, accept: bool) -> bool {
         cases
             .iter()
-            .any(|(p, k, a, _)| p == path && k == kind && *a == accept)
+            .any(|c| c.path == path && c.kind == kind && c.accept == accept)
     }
 
     #[test]
@@ -1159,16 +1155,16 @@ mod tests {
             })
         };
         let example = json!({ "id": "task_1" });
-        let cases = planted_in(field("^task_[0-9]$"), None, example.clone()).unwrap();
+        let cases = planted_in(&field("^task_[0-9]$"), None, &example).unwrap();
         for kind in ["patternLeading", "patternTrailing"] {
             assert!(has(&cases, "/id", kind, false), "{kind} in {cases:?}");
         }
         assert!(
-            cases.iter().any(|c| c.3 == r#"{"id":"task_1!"}"#),
+            cases.iter().any(|c| c.body == r#"{"id":"task_1!"}"#),
             "{cases:?}"
         );
         for unbreakable in ["^task_.*$", "task_[0-9]", "^task_[^x]$", "^task_!?$"] {
-            let problems = planted_in(field(unbreakable), None, example.clone()).unwrap_err();
+            let problems = planted_in(&field(unbreakable), None, &example).unwrap_err();
             assert_eq!(
                 problems,
                 [format!(
@@ -1187,18 +1183,18 @@ mod tests {
                 "required": ["n"],
             })
         };
-        let cases = planted_in(field(9), Some(field(5)), json!({ "n": 1 })).unwrap();
+        let cases = planted_in(&field(9), Some(&field(5)), &json!({ "n": 1 })).unwrap();
         assert!(has(&cases, "/n", "atMaximum", true), "{cases:?}");
         assert!(
             cases
                 .iter()
-                .any(|c| c.1 == "atMaximum" && c.3 == r#"{"n":5}"#),
+                .any(|c| c.kind == "atMaximum" && c.body == r#"{"n":5}"#),
             "{cases:?}"
         );
         assert!(
             cases
                 .iter()
-                .any(|c| c.1 == "pastMaximum" && c.3 == r#"{"n":6}"#),
+                .any(|c| c.kind == "pastMaximum" && c.body == r#"{"n":6}"#),
             "{cases:?}"
         );
     }
@@ -1213,12 +1209,12 @@ mod tests {
             },
             "required": ["n", "x"],
         });
-        let cases = planted_in(message, None, json!({ "n": 1, "x": 0.5 })).unwrap();
+        let cases = planted_in(&message, None, &json!({ "n": 1, "x": 0.5 })).unwrap();
         let body = |kind: &str, path: &str| {
             cases
                 .iter()
-                .find(|c| c.0 == path && c.1 == kind)
-                .map(|c| (c.2, c.3.as_str()))
+                .find(|c| c.path == path && c.kind == kind)
+                .map(|c| (c.accept, c.body.as_str()))
         };
         assert_eq!(
             body("atExclusiveMinimum", "/n"),
@@ -1248,7 +1244,7 @@ mod tests {
             },
             "x-bazhen-transform": "refusingOwnProto",
         });
-        let cases = planted_in(record, None, json!({ "k": "v" })).unwrap();
+        let cases = planted_in(&record, None, &json!({ "k": "v" })).unwrap();
         for (kind, accept, body) in [
             ("emptyKey", false, r#"{"":"v","k":"v"}"#.to_owned()),
             (
@@ -1274,12 +1270,15 @@ mod tests {
         ] {
             let found = cases
                 .iter()
-                .find(|c| c.1 == kind)
-                .map(|c| (c.2, c.3.clone()));
+                .find(|c| c.kind == kind)
+                .map(|c| (c.accept, c.body.clone()));
             assert_eq!(found, Some((accept, body)), "{kind} in {cases:?}");
         }
         let own = r#"{"__proto__":"v","k":"v"}"#;
-        assert!(cases.iter().any(|c| c.3 == own && !c.2), "{cases:?}");
+        assert!(
+            cases.iter().any(|c| c.body == own && !c.accept),
+            "{cases:?}"
+        );
     }
 
     #[test]
@@ -1291,13 +1290,13 @@ mod tests {
                 .extend(extra.as_object().unwrap().clone());
             json!({ "type": "object", "properties": { "n": n }, "required": ["n"] })
         };
-        let problems = planted_in(field(json!({ "multipleOf": 2 })), None, json!({ "n": 2 }));
+        let problems = planted_in(&field(json!({ "multipleOf": 2 })), None, &json!({ "n": 2 }));
         assert_eq!(
             problems.unwrap_err(),
             ["M/n: the corpus plants no case for `multipleOf`"]
         );
         let protocol = field(json!({ "exclusiveMaximum": 9 }));
-        let problems = planted_in(field(json!({})), Some(protocol), json!({ "n": 2 }));
+        let problems = planted_in(&field(json!({})), Some(&protocol), &json!({ "n": 2 }));
         assert_eq!(
             problems.unwrap_err(),
             ["M/n: the corpus plants no case for `exclusiveMaximum`"]
@@ -1308,7 +1307,7 @@ mod tests {
             "required": ["at"],
         });
         assert_eq!(
-            planted_in(text, None, json!({ "at": "x" })).unwrap_err(),
+            planted_in(&text, None, &json!({ "at": "x" })).unwrap_err(),
             ["M/at: the corpus plants no case for `format`"]
         );
     }
