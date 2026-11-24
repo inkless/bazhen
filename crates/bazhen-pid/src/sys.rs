@@ -6,13 +6,16 @@
               socket_peercred builds one from the 0 the kernel answers for a peer outside it, and \
               std's peer_cred is unstable; and on macOS getpeereid and getsockopt's \
               LOCAL_PEERPID, the calls that name a socket peer's user and process, which rustix \
-              doesn't cover; and libc's sigaction, the one call that sets SIGCHLD's disposition \
-              and reads its SA_NOCLDWAIT flag, which rustix covers neither of"
+              doesn't cover; and libc's sigaction, the one call that sets a signal's disposition \
+              and reads SIGCHLD's SA_NOCLDWAIT flag, and sigemptyset, sigaddset and \
+              pthread_sigmask, which unblock a signal, none of which rustix covers; and on macOS \
+              proc_pidinfo, the one call that names another process's parent"
 )]
 
 //! The kernel's answers, as the plain integers it gives them.
 
 use std::io;
+use std::mem::MaybeUninit;
 use std::os::fd::{AsRawFd as _, BorrowedFd};
 use std::ptr;
 
@@ -141,6 +144,74 @@ pub(crate) fn peer_pid(socket: BorrowedFd<'_>) -> io::Result<RawPid> {
         )));
     }
     Ok(pid)
+}
+
+/// `pid`'s parent, from `proc_pidinfo`'s `proc_bsdshortinfo`, which, unlike `proc_bsdinfo`, it
+/// gives for another user's process too. The error is the call's own: `ESRCH` for a pid with no
+/// process, or a zombie's.
+#[cfg(target_os = "macos")]
+pub(crate) fn parent(pid: Pid) -> io::Result<RawPid> {
+    let mut info = MaybeUninit::<libc::proc_bsdshortinfo>::uninit();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>())
+        .map_err(io::Error::other)?;
+    // SAFETY: `info` is writable for `size` bytes, which the call writes no more than, and it
+    // returns how many it wrote.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid.as_raw_pid(),
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written <= 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if written != size {
+        return Err(io::Error::other(format!(
+            "process {pid:?}'s record came short: {written} of {size} bytes"
+        )));
+    }
+    // SAFETY: the call wrote the whole struct, which is plain integers and bytes.
+    let info = unsafe { info.assume_init() };
+    RawPid::try_from(info.pbsi_ppid).map_err(io::Error::other)
+}
+
+/// Sets `signal`'s action back to its default, with no flags and an empty mask.
+pub(crate) fn default_action(signal: libc::c_int) -> io::Result<()> {
+    let action = blank();
+    // SAFETY: `action` is `SIG_DFL` with no flags and an empty mask, which any signal that can be
+    // caught may be set to; a null old action asks for nothing back.
+    let set = unsafe { libc::sigaction(signal, &raw const action, ptr::null_mut()) };
+    if set != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Unblocks `signal` for the calling thread.
+pub(crate) fn unblock(signal: libc::c_int) -> io::Result<()> {
+    let mut set = MaybeUninit::<libc::sigset_t>::uninit();
+    // SAFETY: `set` is writable, and sigemptyset initialises the whole of it.
+    let emptied = unsafe { libc::sigemptyset(set.as_mut_ptr()) };
+    if emptied != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: sigemptyset, which succeeded, initialised the whole set.
+    let mut set = unsafe { set.assume_init() };
+    // SAFETY: `set` is an initialised signal set, writable for the call.
+    let added = unsafe { libc::sigaddset(&raw mut set, signal) };
+    if added != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `set` is an initialised signal set; a null old set asks for nothing back.
+    let unblocked =
+        unsafe { libc::pthread_sigmask(libc::SIG_UNBLOCK, &raw const set, ptr::null_mut()) };
+    if unblocked != 0 {
+        return Err(io::Error::from_raw_os_error(unblocked));
+    }
+    Ok(())
 }
 
 /// SIGCHLD's action, as the kernel gave it back. Only an action read from the kernel can be set

@@ -5,13 +5,18 @@
 //! goes to init, whose group is every process, to this process, to any process it descends from,
 //! or to its own group, and nothing goes to any group while this process can't read which group is
 //! its own or which processes it descends from. A process group is reached only while this process
-//! holds its leader unreaped (`group`), so the group's number can't since have become another's. A
-//! single process is reached only as a `bazhen-holder` checked by its name and start time
-//! (`holder`), checked again on Linux once a pidfd holds it and signalled through that pidfd, or
-//! by signal 0, which sends nothing (`is_alive`). Holding a leader unreaped holds only while
-//! SIGCHLD is neither ignored nor set with `SA_NOCLDWAIT`: either way the kernel reaps children
-//! itself, and a group is then refused once its leader has exited. A daemon undoes both before it
-//! starts a child (`keep_exited_children`), and keeps any handler already set.
+//! holds its leader unreaped (`group`, `signal_group`), so the group's number can't since have
+//! become another's. A single process is reached only as a `bazhen-holder` checked by its name and
+//! start time (`holder`), checked again on Linux once a pidfd holds it and signalled through that
+//! pidfd; as a child this process holds unreaped, spawned or adopted, which on Linux the kernel's
+//! wait on a pidfd shows to be its child before the signal goes through that pidfd
+//! (`signal_child`); or by signal 0, which sends nothing (`is_alive`). The one signal to this
+//! process is the one it dies by (`die_by`).
+//!
+//! Holding a leader unreaped holds only while SIGCHLD is neither ignored nor set with
+//! `SA_NOCLDWAIT`: either way the kernel reaps children itself, and a group is then refused once
+//! its leader has exited. A daemon undoes both before it starts a child (`keep_exited_children`),
+//! and keeps any handler already set.
 
 mod group;
 pub mod holder;
@@ -21,7 +26,7 @@ pub mod scope;
 use std::fmt;
 
 use rustix::io::Errno;
-use rustix::process::{Pid, RawPid, Signal};
+use rustix::process::{Pid, RawPid, Signal, WaitId, WaitIdOptions};
 
 pub use bazhen_pid::{children_kept, keep_exited_children};
 pub use group::{Ended, run_bounded};
@@ -94,7 +99,7 @@ impl Own {
         let pid = rustix::process::getpid();
         Self {
             pid,
-            ancestors: bazhen_peer::ancestors(pid, bazhen_holder::process::parent).ok(),
+            ancestors: bazhen_pid::ancestors(pid, bazhen_pid::parent).ok(),
             group: bazhen_pid::own_group(),
         }
     }
@@ -131,8 +136,9 @@ fn send(leader: Pid, signal: Signal) -> Result<bool, Error> {
     sent(target, rustix::process::kill_process_group(leader, signal))
 }
 
-/// Sends `signal` to `pid` alone, once the floor passes it. Only `signal_child` calls it, with a
-/// child held unreaped. Whether the process was still there.
+/// Sends `signal` to `pid` alone, once the floor passes it. Only `signal_child` calls it, on macOS,
+/// with a child held unreaped. Whether the process was still there.
+#[cfg(target_os = "macos")]
 fn send_process(pid: Pid, signal: Signal) -> Result<bool, Error> {
     let target = Target::Process(pid);
     floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
@@ -208,16 +214,150 @@ fn sent(target: Target, answer: Result<(), Errno>) -> Result<bool, Error> {
     }
 }
 
-/// Sends `signal` to `pid` alone, a child this process spawned, while the kernel holds it
-/// unreaped, so its pid is still its own. Whether it was sent.
-fn signal_child(pid: Pid, signal: Signal) -> Result<bool, Error> {
-    if !group::unreaped(pid) {
+/// Whether the kernel holds `leader` as this process's child, running or exited, and not yet
+/// reaped. Anything else, a leader reaped by something but its `Child` included, is no.
+pub(crate) fn unreaped(leader: Pid) -> bool {
+    let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    rustix::process::waitid(WaitId::Pid(leader), unreaped).is_ok()
+}
+
+/// Sends `signal` to the group `leader` leads, a child this process spawned into a group of its
+/// own, while the kernel holds the leader unreaped, so the group's number is still the leader's.
+/// Whether the group was still there.
+///
+/// # Errors
+///
+/// `Reaped` for a leader the kernel holds as no unreaped child of this process's, and otherwise
+/// when the floor refuses it or the kernel refuses the send.
+pub fn signal_group(leader: Pid, signal: Signal) -> Result<bool, Error> {
+    if !unreaped(leader) {
         return Err(Error::Unsafe {
-            target: Target::Process(pid),
+            target: Target::Group(leader),
+            why: Unsafe::Reaped,
+        });
+    }
+    send(leader, signal)
+}
+
+/// Sends `signal` to `pid` alone, a child of this process's, spawned or adopted as a subreaper's
+/// orphan, while the kernel holds it unreaped, so its pid is still its own. On Linux a pidfd holds
+/// it first, the kernel's own wait on that pidfd shows it is this process's child, and the signal
+/// goes through it, so `/proc` is never asked whose child it is. Whether it was sent: `false` for
+/// a child that has exited, whose pid it still holds.
+///
+/// # Errors
+///
+/// `Reaped` for a pid the kernel holds as no unreaped child of this process's, and otherwise when
+/// the floor refuses it or the kernel refuses the send.
+pub fn signal_child(pid: Pid, signal: Signal) -> Result<bool, Error> {
+    let target = Target::Process(pid);
+    floor(pid.as_raw_pid(), &Own::read()).map_err(|why| Error::Unsafe { target, why })?;
+    child_then_send(target, pid, signal)
+}
+
+#[cfg(target_os = "linux")]
+fn child_then_send(target: Target, pid: Pid, signal: Signal) -> Result<bool, Error> {
+    use std::os::fd::AsFd as _;
+
+    let reaped = Error::Unsafe {
+        target,
+        why: Unsafe::Reaped,
+    };
+    let pinned = match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
+        Ok(pinned) => pinned,
+        Err(Errno::SRCH | Errno::INVAL) => return Err(reaped),
+        Err(source) => return Err(Error::Os { target, source }),
+    };
+    let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    match rustix::process::waitid(WaitId::PidFd(pinned.as_fd()), unreaped) {
+        Ok(None) => sent(target, rustix::process::pidfd_send_signal(&pinned, signal)),
+        Ok(Some(_)) => Ok(false),
+        Err(Errno::CHILD) => Err(reaped),
+        Err(source) => Err(Error::Os { target, source }),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn child_then_send(target: Target, pid: Pid, signal: Signal) -> Result<bool, Error> {
+    if !unreaped(pid) {
+        return Err(Error::Unsafe {
+            target,
             why: Unsafe::Reaped,
         });
     }
     send_process(pid, signal)
+}
+
+/// Ends this process as `signal` ends one by its default action, so whatever waits for it sees it
+/// die by that signal, as a wrapper that passes its command's death on must. The signal's action is
+/// set back to its default and it is unblocked first, and before one whose default dumps core the
+/// core limit goes to 0, so no core is left behind. A signal whose default doesn't end a process,
+/// one ignored or one that stops it, isn't sent; nor is any signal once a step before it fails:
+/// the process then exits 128 plus the signal's number, as a shell reports a death by it.
+pub fn die_by(signal: Signal) -> ! {
+    let raw = signal.as_raw();
+    if ends_by_default(raw) && ready_to_die_by(raw) {
+        // Nothing to do with an error: the exit below follows either way.
+        let _ = rustix::process::kill_process(rustix::process::getpid(), signal);
+    }
+    std::process::exit(128_i32.saturating_add(raw))
+}
+
+/// Whether a signal's default action ends a process: all but those ignored, and those that stop
+/// or continue one.
+fn ends_by_default(raw: i32) -> bool {
+    ![
+        libc::SIGCHLD,
+        libc::SIGCONT,
+        libc::SIGSTOP,
+        libc::SIGTSTP,
+        libc::SIGTTIN,
+        libc::SIGTTOU,
+        libc::SIGURG,
+        libc::SIGWINCH,
+        #[cfg(target_os = "macos")]
+        libc::SIGINFO,
+    ]
+    .contains(&raw)
+}
+
+/// Whether a signal's default action dumps core.
+fn dumps_core(raw: i32) -> bool {
+    [
+        libc::SIGQUIT,
+        libc::SIGILL,
+        libc::SIGTRAP,
+        libc::SIGABRT,
+        libc::SIGBUS,
+        libc::SIGFPE,
+        libc::SIGSEGV,
+        libc::SIGXCPU,
+        libc::SIGXFSZ,
+        libc::SIGSYS,
+        #[cfg(target_os = "macos")]
+        libc::SIGEMT,
+    ]
+    .contains(&raw)
+}
+
+/// Sets this process up to die by `raw`: no core, its default action, and unblocked. SIGKILL's
+/// action can't be set and it can't be blocked, so it is ready as it is.
+fn ready_to_die_by(raw: i32) -> bool {
+    if raw == libc::SIGKILL {
+        return true;
+    }
+    if dumps_core(raw) {
+        use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+        let limit = getrlimit(Resource::Core);
+        let none = Rlimit {
+            current: Some(0),
+            maximum: limit.maximum,
+        };
+        if setrlimit(Resource::Core, none).is_err() {
+            return false;
+        }
+    }
+    bazhen_pid::default_action(raw).is_ok() && bazhen_pid::unblock(raw).is_ok()
 }
 
 /// Whether a process has `pid`, by signal 0, which sends nothing, once the floor passes it. One
@@ -245,10 +385,11 @@ fn alive(target: Target, probed: Result<(), Errno>) -> Result<bool, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt as _;
+    use std::io::BufRead as _;
+    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     use std::process::Command;
 
-    use rustix::process::{Pid, Signal, getpgrp, getpid, getppid};
+    use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, getpgrp, getpid, getppid};
 
     use rustix::io::Errno;
 
@@ -536,5 +677,200 @@ mod tests {
         }
         assert_eq!(is_alive(pid(raw)), Ok(true));
         child.wait().unwrap();
+    }
+
+    /// A child that runs `sleep 30` in a process group of its own.
+    fn sleeping_group() -> (std::process::Child, Pid) {
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let raw = i32::try_from(child.id()).unwrap();
+        (child, pid(raw))
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn signals_a_child_it_holds_unreaped_and_its_group() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (mut child, at) = sleeping();
+        let sent = super::signal_child(at, Signal::KILL);
+        let ended = bazhen_test_signal::end_within(&mut child, ENDS).unwrap();
+        let (mut led, leader) = sleeping_group();
+        let group_sent = super::signal_group(leader, Signal::KILL);
+        let group_ended = bazhen_test_signal::end_within(&mut led, ENDS).unwrap();
+        assert_eq!(
+            (
+                sent,
+                ended.map(|e| e.signal()),
+                group_sent,
+                group_ended.map(|e| e.signal())
+            ),
+            (
+                Ok(true),
+                Some(Some(Signal::KILL.as_raw())),
+                Ok(true),
+                Some(Some(Signal::KILL.as_raw()))
+            )
+        );
+    }
+
+    /// A child that has exited holds its pid until it is reaped, so a send to it reaches nothing
+    /// and says so; once reaped, it is no child of this process's at all.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_nothing_to_a_child_that_has_exited_and_refuses_one_reaped() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut child = Command::new("true").spawn().unwrap();
+        let at = pid(i32::try_from(child.id()).unwrap());
+        let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOWAIT;
+        rustix::process::waitid(WaitId::Pid(at), unreaped).unwrap();
+        let exited = super::signal_child(at, Signal::KILL);
+        child.wait().unwrap();
+        let reaped = super::signal_child(at, Signal::KILL);
+        let group_reaped = super::signal_group(at, Signal::KILL);
+        assert_eq!(
+            (exited, reaped, group_reaped),
+            (
+                Ok(false),
+                Err(Error::Unsafe {
+                    target: Target::Process(at),
+                    why: Unsafe::Reaped
+                }),
+                Err(Error::Unsafe {
+                    target: Target::Group(at),
+                    why: Unsafe::Reaped
+                })
+            )
+        );
+    }
+
+    /// A grandchild runs, and its pid is held, but by its own parent: the kernel's wait shows it
+    /// is no child of this process's, whatever its pid, so nothing is sent.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn sends_nothing_to_a_process_that_is_no_child_of_its_own() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let mut parent = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!; wait"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(parent.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let grandchild = pid(line.trim().parse().unwrap());
+        let refused = super::signal_child(grandchild, Signal::KILL);
+        let group_refused = super::signal_group(grandchild, Signal::KILL);
+        let alive = is_alive(grandchild);
+        bazhen_test_signal::signal_group(parent.id(), Signal::KILL).unwrap();
+        parent.wait().unwrap();
+        assert_eq!(
+            (refused, group_refused, alive),
+            (
+                Err(Error::Unsafe {
+                    target: Target::Process(grandchild),
+                    why: Unsafe::Reaped
+                }),
+                Err(Error::Unsafe {
+                    target: Target::Group(grandchild),
+                    why: Unsafe::Reaped
+                }),
+                Ok(true)
+            )
+        );
+    }
+
+    /// The floor refuses first, so the kernel is never asked whose child it is.
+    #[test]
+    fn refuses_a_child_send_to_init_or_this_process() {
+        for (target, why) in [(pid(1), Unsafe::NotAboveInit), (getpid(), Unsafe::This)] {
+            assert_eq!(
+                super::signal_child(target, Signal::CONT),
+                Err(Error::Unsafe {
+                    target: Target::Process(target),
+                    why
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn knows_which_signals_end_a_process_and_which_dump_core_by_default() {
+        let ends = [
+            libc::SIGTERM,
+            libc::SIGKILL,
+            libc::SIGSEGV,
+            libc::SIGWINCH,
+            libc::SIGTSTP,
+            libc::SIGCHLD,
+        ]
+        .map(super::ends_by_default);
+        let dumps =
+            [libc::SIGSEGV, libc::SIGABRT, libc::SIGTERM, libc::SIGKILL].map(super::dumps_core);
+        assert_eq!(
+            (ends, dumps),
+            (
+                [true, true, true, false, false, false],
+                [true, true, false, false]
+            )
+        );
+    }
+
+    /// Names the signal `dies_by_the_signal_it_is_given` has this test binary die by.
+    const DIE_BY: &str = "BAZHEN_HOST_GUARD_TEST_DIE_BY";
+
+    /// Run by `dies_by_the_signal_it_is_given`, in a process of its own, which it ends; run alone,
+    /// it does nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn die_by_the_signal_named() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let Some(raw) = std::env::var(DIE_BY).ok().and_then(|n| n.parse().ok()) else {
+            return;
+        };
+        let signal = Signal::from_named_raw(raw).unwrap();
+        super::die_by(signal);
+    }
+
+    /// A signal that ends a process ends it by that signal, with no core even for one whose
+    /// default dumps one; any other, which would leave it running or stopped, exits it 128 + n.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn dies_by_the_signal_it_is_given() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let died = [
+            libc::SIGTERM,
+            libc::SIGSEGV,
+            libc::SIGKILL,
+            libc::SIGWINCH,
+            libc::SIGTSTP,
+        ]
+        .map(|raw| {
+            let status = Command::new(&exe)
+                .args(["--exact", "tests::die_by_the_signal_named", "--ignored"])
+                .env(DIE_BY, raw.to_string())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            (status.signal(), status.core_dumped(), status.code())
+        });
+        assert_eq!(
+            died,
+            [
+                (Some(libc::SIGTERM), false, None),
+                (Some(libc::SIGSEGV), false, None),
+                (Some(libc::SIGKILL), false, None),
+                (None, false, Some(128 + libc::SIGWINCH)),
+                (None, false, Some(128 + libc::SIGTSTP)),
+            ]
+        );
     }
 }

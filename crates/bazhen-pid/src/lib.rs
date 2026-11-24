@@ -5,17 +5,40 @@
 //! unchecked, which is undefined behaviour, so these read the kernel through libc instead.
 //!
 //! And whether a child's pid stays its own until it is waited for: SIGCHLD's disposition
-//! (`children_kept`, `keep_exited_children`).
+//! (`children_kept`, `keep_exited_children`); which processes another descends from (`parent`,
+//! `ancestors`), from the fields of its `/proc/<pid>/stat` (`stat`); and a signal's action and
+//! mask, set back for a process about to die by it (`default_action`, `unblock`).
 
 use std::io;
 use std::os::fd::BorrowedFd;
 
 use rustix::process::{Pid, RawPid};
 
+mod ancestry;
 mod sigchld;
+pub mod stat;
 mod sys;
 
+pub use ancestry::{MAX_ANCESTORS, Unwalked, ancestors, parent, walk};
 pub use sigchld::{children_kept, keep_exited_children};
+
+/// Sets `signal`'s action back to its default, as a process about to die by it needs.
+///
+/// # Errors
+///
+/// When the kernel refuses, as it does for SIGKILL and SIGSTOP, whose action can't be set.
+pub fn default_action(signal: i32) -> io::Result<()> {
+    sys::default_action(signal)
+}
+
+/// Unblocks `signal` for the calling thread.
+///
+/// # Errors
+///
+/// When the kernel refuses, as for a number that is no signal.
+pub fn unblock(signal: i32) -> io::Result<()> {
+    sys::unblock(signal)
+}
 
 /// `raw`, as the kernel answered it for `what`, when it is a pid this process can name.
 ///

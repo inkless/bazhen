@@ -240,7 +240,6 @@ version = "0.1.0"
 dependencies = [
  "bazhen-holder",
  "bazhen-holder-proto",
- "bazhen-peer",
  "bazhen-pid",
  "bazhen-test-signal",
  "futures-util",
@@ -266,6 +265,7 @@ name = "bazhen-pid"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "proptest",
  "rustix",
 ]
 

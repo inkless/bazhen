@@ -32,8 +32,7 @@ use bazhen_holder::process::Credentials;
 use bazhen_holder::{process, start_time};
 use rustix::process::{Pid, geteuid};
 
-/// Past any real process tree's depth: a walk this long is a cycle, and is refused.
-pub const MAX_ANCESTORS: usize = 256;
+pub use bazhen_pid::MAX_ANCESTORS;
 
 /// How many times `line_of` reads a caller's line before it refuses one that keeps changing.
 pub const LINE_TRIES: usize = 8;
@@ -99,6 +98,15 @@ pub enum Refused {
     Endless,
 }
 
+impl From<bazhen_pid::Unwalked> for Refused {
+    fn from(unwalked: bazhen_pid::Unwalked) -> Self {
+        match unwalked {
+            bazhen_pid::Unwalked::Unreadable(why) => Self::Unreadable(why),
+            bazhen_pid::Unwalked::Endless => Self::Endless,
+        }
+    }
+}
+
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
 /// it (`bazhen_pid::peer_pid`). Its start is read again once the walk is done: a process that started
 /// since the connection was accepted holds a pid its caller gave up.
@@ -155,13 +163,7 @@ pub fn ancestors(
     pid: Pid,
     parent: impl Fn(Pid) -> io::Result<Option<Pid>>,
 ) -> Result<Vec<Pid>, Refused> {
-    let walked = walk(pid, |at| {
-        Ok(Step {
-            parent: parent(at)?,
-            started: 0,
-        })
-    })?;
-    Ok(walked.into_iter().skip(1).map(|(at, _)| at).collect())
+    Ok(bazhen_pid::ancestors(pid, parent)?)
 }
 
 /// `pid` and its ancestors as `step` reads each, nearest first, through init or a process with no
@@ -171,20 +173,11 @@ pub fn ancestors(
 ///
 /// As `ancestors`.
 fn walk(pid: Pid, step: impl Fn(Pid) -> io::Result<Step>) -> Result<Vec<(Pid, u64)>, Refused> {
-    let mut walked = Vec::new();
-    let mut at = pid;
-    while !at.is_init() {
-        let Step { parent, started } = step(at)?;
-        walked.push((at, started));
-        let Some(next) = parent else {
-            return Ok(walked);
-        };
-        if walked.len() > MAX_ANCESTORS {
-            return Err(Refused::Endless);
-        }
-        at = next;
-    }
-    walked.push((at, 0));
+    let walked = bazhen_pid::walk(
+        pid,
+        |at| step(at).map(|Step { parent, started }| (parent, started)),
+        0,
+    )?;
     Ok(walked)
 }
 

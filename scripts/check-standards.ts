@@ -495,7 +495,10 @@ const UNSAFE_MODULES: Record<string, string> = {
     "getpeereid and getsockopt's LOCAL_PEERPID, which name a socket peer's user and process, " +
     "which rustix doesn't cover; and libc's sigaction, the one call that gives SIGCHLD its " +
     "default disposition with no SA_NOCLDWAIT, so the kernel keeps a daemon's exited children " +
-    "for it to wait for, and reads back whether it does; rustix covers neither",
+    "for it to wait for, and reads back whether it does, and sets back to its default the action " +
+    "of a signal a process is about to die by; and sigemptyset, sigaddset and pthread_sigmask, " +
+    "which unblock that signal; rustix covers none of them. And on macOS proc_pidinfo, the one " +
+    "call that names another process's parent",
 };
 
 /** The index just past the `]` that closes the `[` at `open`, or the end of `code`. */
@@ -882,11 +885,11 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder-engine/src/lib.rs::Engine::advance": "advance",
   "crates/bazhen-holder-engine/src/replies.rs::replies_are_whole": "advance",
   "crates/bazhen-holder/src/start_time.rs::epoch_seconds": "proc_stat",
-  "crates/bazhen-holder/src/start_time.rs::start_ticks": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::start_ticks": "proc_stat",
   "crates/bazhen-holder/src/start_time.rs::boot_time": "proc_stat",
   "crates/bazhen-holder/src/rss.rs::resident_pages": "proc_stat",
-  "crates/bazhen-holder/src/start_time.rs::stat_field": "proc_stat",
-  "crates/bazhen-holder/src/start_time.rs::own_pid": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::stat_field": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::own_pid": "proc_stat",
   "crates/bazhen-host-guard/src/scope.rs::parse_probe": "containment",
   "crates/bazhen-host-guard/src/scope.rs::systemd_version": "containment",
   "crates/bazhen-host-guard/src/scope.rs::cgroup_of": "containment",
@@ -894,9 +897,9 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-host-guard/src/scope.rs::memory_max_refusal": "containment",
   "crates/bazhen-host-guard/src/scope.rs::swap_max_refusal": "containment",
   "crates/bazhen-host-guard/src/scope.rs::is_terminal_scope": "containment",
-  "crates/bazhen-holder/src/start_time.rs::parent_field": "proc_stat",
-  "crates/bazhen-holder/src/start_time.rs::session_field": "proc_stat",
-  "crates/bazhen-holder/src/start_time.rs::has_exited": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::parent_field": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::session_field": "proc_stat",
+  "crates/bazhen-pid/src/stat.rs::has_exited": "proc_stat",
   "crates/bazhen-holder/src/session.rs::member_state": "proc_stat",
   "crates/bazhen-holder/src/process.rs::status_uid": "proc_args",
   "crates/bazhen-holder/src/process.rs::status_credentials": "proc_args",
@@ -1166,15 +1169,17 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-host-guard/src/holder.rs::quoted":
     "shows a holder's first line, lossily, as a JSON string in an error; parses nothing",
   "crates/bazhen-host-guard/src/lib.rs::send_process":
-    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+    "reads its own ancestry only through bazhen_pid::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-host-guard/src/lib.rs::send_pinned":
-    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+    "reads its own ancestry only through bazhen_pid::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+  "crates/bazhen-host-guard/src/lib.rs::signal_child":
+    "reads its own ancestry only through bazhen_pid::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-host-guard/src/lib.rs::is_alive":
-    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+    "reads its own ancestry only through bazhen_pid::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-holder/src/process.rs::comm":
     "hands back a process's name from /proc/<pid>/comm or proc_pidinfo less its newline, which is compared whole, never parsed",
   "crates/bazhen-host-guard/src/lib.rs::send":
-    "reads its own ancestry only through bazhen_holder::process::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
+    "reads its own ancestry only through bazhen_pid::parent, whose parent_field proc_stat fuzzes; parses nothing itself",
   "crates/bazhen-store/src/lib.rs::Reader::reads":
     "wraps its connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/config.rs::read_config_file":
@@ -1400,7 +1405,9 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/signals.rs::Wakeups::clear":
     "discards signal wake-ups, whose bytes the handler wrote and which carry no content",
   "crates/bazhen-holder/src/start_time.rs::decimal":
-    "reached only through start_ticks and boot_time, which proc_stat fuzzes",
+    "reached only through boot_time, which proc_stat fuzzes",
+  "crates/bazhen-pid/src/stat.rs::decimal":
+    "reached only through own_pid, parent_field, session_field and start_ticks, which proc_stat fuzzes",
   "crates/bazhen-holder/src/holder.rs::write":
     "the Output trait's method: a sink handed the child's bytes in order, to keep",
   "crates/bazhen-holder/src/holder.rs::Discard::write":
@@ -1595,7 +1602,7 @@ const NOT_DECODERS: Record<string, string> = {
     "reads stdin or read_regular's bytes as lossy UTF-8 text, parsing none of them",
   "crates/bazhen-holder/src/guard.rs::parent":
     "reads /proc/<pid>/stat for parent_field, which proc_stat fuzzes",
-  "crates/bazhen-holder/src/process.rs::parent":
+  "crates/bazhen-pid/src/ancestry.rs::parent":
     "reads /proc/<pid>/stat for has_exited and parent_field, which proc_stat fuzzes",
   "crates/bazhen-peer/src/lib.rs::step":
     "reads /proc/<pid>/stat for has_exited, parent_field and start_ticks, which proc_stat fuzzes",

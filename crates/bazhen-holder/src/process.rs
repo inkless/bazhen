@@ -7,33 +7,7 @@ use std::os::unix::ffi::OsStringExt as _;
 
 use rustix::process::Pid;
 
-/// `pid`'s parent: `None` for a process that has none, init or a PID namespace's first process.
-///
-/// # Errors
-///
-/// When `pid` has gone or exited, a zombie included, or its record can't be read: which parent it
-/// had is then unknown, or no longer its.
-pub fn parent(pid: Pid) -> io::Result<Option<Pid>> {
-    #[cfg(target_os = "linux")]
-    {
-        let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid()))?;
-        if crate::start_time::has_exited(&stat) {
-            return Err(io::Error::other(format!("process {pid:?} has exited")));
-        }
-        let raw = crate::start_time::parent_field(&stat)
-            .ok_or_else(|| io::Error::other(format!("process {pid:?} names no parent")))?;
-        Ok(Pid::from_raw(raw))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if pid.is_init() {
-            return Ok(None);
-        }
-        crate::macos::parent(pid)
-            .map(Some)
-            .ok_or_else(|| io::Error::other(format!("process {pid:?} can't be read")))
-    }
-}
+pub use bazhen_pid::parent;
 
 /// The effective uid `pid` runs as.
 ///

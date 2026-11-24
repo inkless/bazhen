@@ -5,12 +5,12 @@ use std::io;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use rustix::process::{Pid, Signal, WaitId, WaitIdOptions};
+use rustix::process::{Pid, Signal};
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 use tokio::process::{Child, Command};
 use tokio::time::{Instant, timeout, timeout_at};
 
-use crate::{Error, Target, Unsafe, send};
+use crate::{Error, Target, Unsafe, send, unreaped};
 
 /// How long a killed group's leader is waited for before it is left to tokio to reap.
 const REAP_GRACE: Duration = Duration::from_secs(1);
@@ -72,13 +72,6 @@ impl Drop for OwnGroup {
         // Refused for a leader already reaped, which is every run that ended.
         let _ = self.signal(Signal::KILL);
     }
-}
-
-/// Whether the kernel holds `leader` as this process's child, running or exited, and not yet
-/// reaped. Anything else, a leader reaped by something but its `Child` included, is no.
-pub(crate) fn unreaped(leader: Pid) -> bool {
-    let unreaped = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
-    rustix::process::waitid(WaitId::Pid(leader), unreaped).is_ok()
 }
 
 /// How a bounded run ended.
