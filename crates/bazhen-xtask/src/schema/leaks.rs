@@ -47,8 +47,9 @@ pub(crate) fn in_tree(printed: &str) -> Vec<String> {
 
 /// Each way a member's manifest, as `METADATA` printed it, could turn `schema` on outside the
 /// declaring crates' own tests: a feature of that name elsewhere, a feature of any member that
-/// forwards to one, or a normal or build dependency that names it. A default-features tree
-/// misses the second, so it is read from the manifests.
+/// forwards to one, a declarer's feature other than `schema` that turns it or schemars on, which
+/// a dependency could then name, or a normal or build dependency that names it. A
+/// default-features tree misses all but the last, so they are read from the manifests.
 pub(crate) fn in_manifests(json: &str) -> Result<Vec<String>, String> {
     let metadata: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let packages = metadata
@@ -75,8 +76,10 @@ pub(crate) fn in_manifests(json: &str) -> Result<Vec<String>, String> {
             let enables = enables
                 .as_array()
                 .ok_or_else(|| format!("{name}: feature `{feature}` lists nothing"))?;
+            let own = DECLARERS.contains(&name) && feature == FEATURE;
             for enabled in enables.iter().filter_map(Value::as_str) {
-                if forwards(enabled) {
+                let aliases = enabled == FEATURE && DECLARERS.contains(&name);
+                if forwards(enabled) || (!own && (aliases || schemars(enabled))) {
                     found.push(format!("{name}'s feature `{feature}` turns on `{enabled}`"));
                 }
             }
@@ -104,6 +107,14 @@ pub(crate) fn in_manifests(json: &str) -> Result<Vec<String>, String> {
         }
     }
     Ok(found)
+}
+
+/// Whether a feature's entry turns schemars on: as the optional dependency, by its implicit
+/// feature, or by one of its own features.
+fn schemars(enabled: &str) -> bool {
+    let crate_name = enabled.split_once('/').map_or(enabled, |(name, _)| name);
+    let crate_name = crate_name.strip_prefix("dep:").unwrap_or(crate_name);
+    crate_name.trim_end_matches('?') == "schemars"
 }
 
 /// Whether a feature's entry turns on another crate's `schema`: `<crate>/schema` or
@@ -204,6 +215,38 @@ mod tests {
                     .to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn finds_a_feature_besides_schema_that_turns_it_or_schemars_on() {
+        for (declarer, enabled) in [
+            (true, "schema"),
+            (true, "dep:schemars"),
+            (true, "schemars"),
+            (true, "schemars/derive"),
+            (false, "dep:schemars"),
+            (false, "schemars?/preserve_order"),
+        ] {
+            let mut packages = clean();
+            let name = if declarer {
+                "bazhen-holder-proto"
+            } else {
+                "bazhen-cli"
+            };
+            packages.push(member(name, &json!({ "x": [enabled] }), &json!([])));
+            assert_eq!(
+                found(&packages),
+                vec![format!("{name}'s feature `x` turns on `{enabled}`")],
+                "{name}: {enabled}"
+            );
+        }
+        let mut packages = clean();
+        packages.push(member(
+            "bazhen-cli",
+            &json!({ "schema-ish": ["serde"] }),
+            &json!([]),
+        ));
+        assert_eq!(found(&packages), Vec::<String>::new());
     }
 
     #[test]
