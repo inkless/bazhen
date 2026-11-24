@@ -3,8 +3,8 @@
 
 use bazhen_protocol::agents::{LaunchAgentRequest, RenameAgentRequest};
 
-/// The most UTF-16 units an idempotency key has.
-const KEY_MAX_UNITS: usize = 200;
+/// The most code points an idempotency key has, counted as zod counts a string's length.
+const KEY_MAX_POINTS: usize = 200;
 /// The compaction windows a launch may ask for, in tokens.
 const COMPACT_WINDOW: std::ops::RangeInclusive<u32> = 100_000..=10_000_000;
 
@@ -46,7 +46,7 @@ pub fn rename_request(body: &[u8]) -> Result<RenameAgentRequest, String> {
 
 /// Refuses an idempotency key past its schema's bounds.
 fn keyed(key: &str) -> Result<(), String> {
-    if (1..=KEY_MAX_UNITS).contains(&key.encode_utf16().count()) {
+    if (1..=KEY_MAX_POINTS).contains(&key.chars().count()) {
         Ok(())
     } else {
         Err("idempotencyKey is 1 to 200 characters".to_owned())
@@ -91,7 +91,8 @@ mod tests {
         let keyed = |key: &str| {
             format!(r#"{{"idempotencyKey":"{key}","harness":"claude-code","cwd":"/"}}"#)
         };
-        let key = "é".repeat(200);
+        // Each is one code point and two UTF-16 units: zod counts the points.
+        let key = "😀".repeat(200);
         assert_eq!(refused(&keyed(&key)), None);
         assert_eq!(
             [
