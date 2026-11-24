@@ -7,9 +7,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use bazhen_protocol::agents::{
-    AgentCommandResponse, CallerResponse, CloseAgentRequest, FleetAgent, HarnessId,
+    Activity, AgentCommandResponse, CallerResponse, CloseAgentRequest, FleetAgent, HarnessId,
     LaunchAgentRequest, LaunchAgentResponse, RelaunchAgentRequest, RenameAgentRequest,
-    RespawnAgentRequest, SignalAgentRequest, StateSnapshot,
+    RespawnAgentRequest, SignalAgentRequest, StateSnapshot, Usage, UsageLimit,
 };
 use bazhen_protocol::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, ErrorResponse, HealthResponse,
@@ -20,7 +20,7 @@ use bazhen_protocol::events::EventFrame;
 use bazhen_protocol::ids::{TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
-    MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
+    AttentionKind, MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
     WaitMessagesRequest, WaitMessagesResponse,
 };
 use bazhen_protocol::names::{AGENT_NAME_MAX, AgentName, AgentRef, Role};
@@ -51,6 +51,9 @@ use serde_json::Value;
 
 type Result<T> = std::result::Result<T, String>;
 
+/// Whether a text reads as some type.
+type Reads = fn(&str) -> bool;
+
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/protocol/fixtures/api")
 }
@@ -76,22 +79,48 @@ fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// Every example of the message `name` decodes as `T` and encodes back to its parsed form; how
-/// many there were.
-fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Result<usize> {
+/// What a message's examples showed.
+struct Report {
+    examples: usize,
+    /// Each field, at its path in an example, that the schema takes left out or null where serde
+    /// refuses it. The schema may refuse what serde takes: it holds the protocol's contract, which
+    /// can be stricter than the reader.
+    unlike: Vec<String>,
+}
+
+/// Every example of the message `name` decodes as `T` and encodes back to its parsed form, and
+/// each of its fields is left out and nulled in turn, for serde's answer and the schema's.
+fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Result<Report> {
     let examples = read(&format!("{name}.json"))?;
     let examples = examples.as_array().ok_or(format!("{name}: not a list"))?;
+    let schema = Schema::of::<T>();
+    let mut unlike = Vec::new();
     for example in examples {
         let what = example.get("name").cloned().unwrap_or_default();
         let wire = example.get("wire").cloned().unwrap_or_default();
         let parsed = example.get("parsed").cloned().unwrap_or_default();
         let decoded: T =
-            serde_json::from_value(wire).map_err(|e| format!("{name}, {what}: {e}"))?;
+            serde_json::from_value(wire.clone()).map_err(|e| format!("{name}, {what}: {e}"))?;
         let encoded = serde_json::to_value(&decoded).map_err(|e| format!("{name}, {what}: {e}"))?;
         if !same(&encoded, &parsed) {
             return Err(format!(
                 "{name}, {what}:\n  encoded {encoded}\n  parsed  {parsed}"
             ));
+        }
+        for (at, field) in schema.fields(&wire) {
+            let serde = |edited: Value| serde_json::from_value::<T>(edited).is_ok();
+            let left_out = serde(edited(&wire, &at, None));
+            let null = serde(edited(&wire, &at, Some(Value::Null)));
+            if field.optional && !left_out {
+                unlike.push(format!(
+                    "{name}, {at}: the schema takes it left out, serde doesn't"
+                ));
+            }
+            if field.nullable && !null {
+                unlike.push(format!(
+                    "{name}, {at}: the schema takes it null, serde doesn't"
+                ));
+            }
         }
         if let Some(text) = example.get("text").and_then(Value::as_str) {
             let printed =
@@ -103,10 +132,15 @@ fn round_trips<T: DeserializeOwned + Serialize + JsonSchema>(name: &str) -> Resu
             }
         }
     }
-    Ok(examples.len())
+    unlike.sort();
+    unlike.dedup();
+    Ok(Report {
+        examples: examples.len(),
+        unlike,
+    })
 }
 
-type RoundTrip = fn(&str) -> Result<usize>;
+type RoundTrip = fn(&str) -> Result<Report>;
 
 /// Each message the fixtures hold, and the type that reads it.
 const MESSAGES: &[(&str, RoundTrip)] = &[
@@ -172,7 +206,377 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
 #[test]
 fn every_message_decodes_its_examples_and_encodes_what_the_protocol_makes_of_them() {
     for (name, round_trip) in MESSAGES {
-        assert!(round_trip(name).unwrap() > 0, "{name} has no examples");
+        assert!(
+            round_trip(name).unwrap().examples > 0,
+            "{name} has no examples"
+        );
+    }
+}
+
+#[test]
+fn the_schema_takes_a_field_left_out_or_null_only_where_serde_does() {
+    let unlike: Vec<String> = MESSAGES
+        .iter()
+        .flat_map(|(name, round_trip)| round_trip(name).unwrap().unlike)
+        .collect();
+    assert!(unlike.is_empty(), "{}", unlike.join("\n"));
+}
+
+#[test]
+fn the_schema_names_the_attention_kinds_the_protocol_names_and_each_reads_as_a_known_kind() {
+    let path = fixtures().join("../../schema/AttentionKind.json");
+    let protocol: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let names = &protocol["enum"];
+    let schema = Schema::of::<AttentionKind>();
+    assert_eq!(&schema.resolved(&schema.root)["enum"], names);
+    for name in names.as_array().unwrap() {
+        let kind: AttentionKind = serde_json::from_value(name.clone()).unwrap();
+        assert!(AttentionKind::KNOWN.contains(&kind), "{name}");
+    }
+}
+
+/// The schema of `T`, or of its property `key`, past every `$ref`, keeping only `keys`.
+fn tagged<T: JsonSchema>(key: Option<&str>, keys: &[&str]) -> Value {
+    let schema = Schema::of::<T>();
+    let mut at = schema.resolved(&schema.root);
+    if let Some(key) = key {
+        at = schema.resolved(
+            at.get("properties")
+                .and_then(|p| p.get(key))
+                .unwrap_or(&Value::Null),
+        );
+    }
+    keys.iter()
+        .filter_map(|k| at.get(*k).map(|v| ((*k).to_owned(), v.clone())))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+#[test]
+fn each_refinement_the_protocol_makes_is_named_where_it_makes_it() {
+    let keys = [
+        "x-bazhen-transform",
+        "minLength",
+        "maxLength",
+        "x-bazhen-check",
+    ];
+    let title = serde_json::json!({
+        "x-bazhen-transform": "trim", "minLength": 1, "maxLength": 200, "x-bazhen-check": "newTaskTitle",
+    });
+    assert_eq!(tagged::<CreateTaskRequest>(Some("title"), &keys), title);
+    assert_eq!(tagged::<DelegateTaskRequest>(Some("title"), &keys), title);
+    assert_eq!(
+        tagged::<AddTaskNoteRequest>(Some("text"), &keys),
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "x-bazhen-check": ["taskNoteBytes", "noteText"] })
+    );
+    assert_eq!(
+        tagged::<FinishTaskRequest>(Some("note"), &keys),
+        serde_json::json!({ "maxLength": 20_000, "x-bazhen-check": "noteText" })
+    );
+    assert_eq!(
+        tagged::<EscalateRequest>(Some("summary"), &keys),
+        serde_json::json!({ "x-bazhen-transform": "trim", "minLength": 1, "maxLength": 2000 })
+    );
+    assert_eq!(
+        tagged::<DelegateTaskRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "agentOrLaunch" })
+    );
+    assert_eq!(
+        tagged::<OpenShellRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "linkedShellTakesNoCwd" })
+    );
+}
+
+#[test]
+fn each_refinement_the_holder_protocol_makes_is_named_where_it_makes_it() {
+    use bazhen_holder_proto::body::{
+        Argv, Env, ErrorBody, ExitStatus, HelloReply, OkBody, PasteRequest, Screen, SpawnSpec,
+        Title,
+    };
+    let keys = ["minLength", "x-bazhen-check"];
+    let well_formed = serde_json::json!({ "x-bazhen-check": "wellFormed" });
+    let checks = |names: &[&str]| serde_json::json!({ "x-bazhen-check": names });
+    assert_eq!(
+        tagged::<PasteRequest>(Some("text"), &keys),
+        checks(&["wellFormed", "noControl"])
+    );
+    assert_eq!(
+        tagged::<PasteRequest>(None, &keys),
+        serde_json::json!({ "x-bazhen-check": "unmarkedPasteIsAscii" })
+    );
+    assert_eq!(
+        tagged::<Screen>(Some("text"), &keys),
+        checks(&["wellFormed", "screenText"])
+    );
+    let non_empty = serde_json::json!({ "minLength": 1, "x-bazhen-check": ["wellFormed"] });
+    assert_eq!(tagged::<SpawnSpec>(Some("cwd"), &keys), non_empty);
+    assert_eq!(tagged::<SpawnSpec>(Some("socket"), &keys), non_empty);
+    assert_eq!(tagged::<HelloReply>(Some("title"), &keys), well_formed);
+    assert_eq!(tagged::<Title>(Some("text"), &keys), well_formed);
+    assert_eq!(tagged::<OkBody>(Some("request"), &keys), well_formed);
+    for key in ["request", "code", "message"] {
+        assert_eq!(tagged::<ErrorBody>(Some(key), &keys), well_formed, "{key}");
+    }
+    let argv = Schema::of::<Argv>();
+    assert_eq!(
+        argv.resolved(&argv.root)["items"]["x-bazhen-check"],
+        "wellFormed"
+    );
+    let env = Schema::of::<Env>();
+    let env = env.resolved(&env.root);
+    assert_eq!(env["propertyNames"]["x-bazhen-check"], "wellFormed");
+    assert_eq!(env["additionalProperties"]["x-bazhen-check"], "wellFormed");
+    let exit = Schema::of::<ExitStatus>();
+    let signalled = exit.resolved(&exit.root)["oneOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|b| b["properties"]["type"]["const"] == "signalled");
+    assert_eq!(
+        signalled.map(|b| &b["properties"]["signal"]["x-bazhen-check"]),
+        Some(&Value::from("wellFormed"))
+    );
+}
+
+/// The text `T` writes for `x` at `key` of `template`, read back, and whether the schema takes it
+/// there.
+fn writes_what_the_schema_takes<T: DeserializeOwned + Serialize + JsonSchema>(
+    template: &Value,
+    key: &str,
+    x: f64,
+) -> Result<(String, bool)> {
+    let mut wire = template.clone();
+    if let Value::Object(fields) = &mut wire {
+        fields.insert(key.to_owned(), Value::from(x));
+    }
+    let decoded: T = serde_json::from_value(wire).map_err(|e| format!("{key}, {x}: {e}"))?;
+    let text = serde_json::to_string(&decoded).map_err(|e| format!("{key}, {x}: {e}"))?;
+    let written: Value = serde_json::from_str(&text).map_err(|e| format!("{text}: {e}"))?;
+    let schema = Schema::of::<T>();
+    let property = schema
+        .resolved(&schema.root)
+        .get("properties")
+        .and_then(|p| p.get(key))
+        .ok_or(format!("no property {key}"))?;
+    let value = written.get(key).ok_or(format!("{text} has no {key}"))?;
+    let takes = schema.fits(property, value);
+    Ok((text, takes))
+}
+
+#[test]
+fn a_number_written_as_javascript_writes_it_is_one_the_schema_takes_and_only_a_finite_one_is_read()
+{
+    let activity = serde_json::json!({
+        "value": "idle", "source": "native", "confidence": 0.5, "observedAt": "2026-01-01T00:00:00.000Z",
+    });
+    let limit = serde_json::json!({ "window": "5h", "usedPercent": 0.5 });
+    let usage = serde_json::json!({ "contextUsedPercent": 0.5 });
+    let numbers = [
+        1.0,
+        0.1,
+        -0.0,
+        1e21,
+        1.5e-7,
+        f64::MAX,
+        f64::MIN_POSITIVE,
+        -2.0,
+    ];
+    for x in numbers {
+        for (text, takes) in [
+            writes_what_the_schema_takes::<Activity>(&activity, "confidence", x).unwrap(),
+            writes_what_the_schema_takes::<UsageLimit>(&limit, "usedPercent", x).unwrap(),
+            writes_what_the_schema_takes::<Usage>(&usage, "contextUsedPercent", x).unwrap(),
+        ] {
+            assert!(takes, "{x}: {text}");
+        }
+    }
+    let reads: [(&Value, Reads); 3] = [
+        (&activity, |t| serde_json::from_str::<Activity>(t).is_ok()),
+        (&limit, |t| serde_json::from_str::<UsageLimit>(t).is_ok()),
+        (&usage, |t| serde_json::from_str::<Usage>(t).is_ok()),
+    ];
+    for (template, read) in reads {
+        assert!(read(&template.to_string()));
+        for not_finite in ["1e400", "-1e400", "NaN", "Infinity"] {
+            let text = template.to_string().replace("0.5", not_finite);
+            assert!(!read(&text), "{text}");
+        }
+    }
+}
+
+/// The example `wire` with the field at `at` left out, or set to `value`.
+fn edited(wire: &Value, at: &str, value: Option<Value>) -> Value {
+    let mut wire = wire.clone();
+    let (parent, key) = at.rsplit_once('/').unwrap_or_default();
+    let key = key.replace("~1", "/").replace("~0", "~");
+    if let Some(Value::Object(parent)) = wire.pointer_mut(parent) {
+        match value {
+            Some(value) => {
+                parent.insert(key, value);
+            }
+            None => {
+                parent.remove(&key);
+            }
+        }
+    }
+    wire
+}
+
+/// What a schema says of one field of an object.
+struct Field {
+    optional: bool,
+    nullable: bool,
+}
+
+/// A message's schema, with the definitions it names.
+struct Schema {
+    root: Value,
+    definitions: serde_json::Map<String, Value>,
+}
+
+impl Schema {
+    fn of<T: JsonSchema>() -> Self {
+        let mut generator = bazhen_protocol::schema::generator();
+        let root = generator.subschema_for::<T>().to_value();
+        Self {
+            root,
+            definitions: generator.take_definitions(true),
+        }
+    }
+
+    /// `schema`, past every `$ref`.
+    fn resolved<'a>(&'a self, mut schema: &'a Value) -> &'a Value {
+        while let Some(name) = schema
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+        {
+            match self.definitions.get(name) {
+                Some(named) => schema = named,
+                None => break,
+            }
+        }
+        schema
+    }
+
+    /// The one branch of `schema` that `value` fits, past every `$ref` and union; none when no
+    /// branch or more than one does.
+    fn branch<'a>(&'a self, schema: &'a Value, value: &Value) -> Option<&'a Value> {
+        let schema = self.resolved(schema);
+        let Some(branches) = schema
+            .get("anyOf")
+            .or_else(|| schema.get("oneOf"))
+            .and_then(Value::as_array)
+        else {
+            return Some(schema);
+        };
+        let mut fitting = branches.iter().filter(|b| self.fits(b, value));
+        match (fitting.next(), fitting.next()) {
+            (Some(only), None) => self.branch(only, value),
+            _ => None,
+        }
+    }
+
+    /// Whether `value` is of `schema`'s type and holds its constants and required fields.
+    fn fits(&self, schema: &Value, value: &Value) -> bool {
+        let schema = self.resolved(schema);
+        if schema == &Value::Bool(true) {
+            return true;
+        }
+        if let Some(branches) = schema
+            .get("anyOf")
+            .or_else(|| schema.get("oneOf"))
+            .and_then(Value::as_array)
+        {
+            return branches.iter().any(|b| self.fits(b, value));
+        }
+        if let Some(constant) = schema.get("const") {
+            return constant == value;
+        }
+        if let Some(Value::Array(values)) = schema.get("enum") {
+            return values.contains(value);
+        }
+        let typed = |name: &str| match schema.get("type") {
+            Some(Value::String(t)) => t == name,
+            Some(Value::Array(ts)) => ts.iter().any(|t| t == name),
+            _ => false,
+        };
+        match value {
+            Value::Null => typed("null"),
+            Value::Bool(_) => typed("boolean"),
+            Value::Number(n) => typed("number") || (typed("integer") && (n.is_i64() || n.is_u64())),
+            Value::String(_) => typed("string"),
+            Value::Array(_) => typed("array"),
+            Value::Object(object) => {
+                let required = schema
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str);
+                let properties = schema.get("properties").and_then(Value::as_object);
+                typed("object")
+                    && required.into_iter().all(|r| object.contains_key(r))
+                    && properties.into_iter().flatten().all(|(k, p)| {
+                        object
+                            .get(k)
+                            .is_none_or(|v| p.get("const").is_none_or(|c| c == v))
+                    })
+            }
+        }
+    }
+
+    /// Whether `schema` takes null.
+    fn nullable(&self, schema: &Value) -> bool {
+        self.fits(schema, &Value::Null)
+    }
+
+    /// Each field of every object in `wire`, by its JSON pointer, with what the schema says of
+    /// it: a field of a union no branch alone fits is skipped, as is a record's.
+    fn fields(&self, wire: &Value) -> Vec<(String, Field)> {
+        let mut found = Vec::new();
+        self.walk(&self.root, wire, "", &mut found);
+        found
+    }
+
+    fn walk(&self, schema: &Value, value: &Value, at: &str, found: &mut Vec<(String, Field)>) {
+        let Some(schema) = self.branch(schema, value) else {
+            return;
+        };
+        match value {
+            Value::Object(object) => {
+                let properties = schema.get("properties").and_then(Value::as_object);
+                let required: BTreeSet<&str> = schema
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                for (key, field) in object {
+                    let Some(property) = properties.and_then(|p| p.get(key)) else {
+                        continue;
+                    };
+                    let path = format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"));
+                    found.push((
+                        path.clone(),
+                        Field {
+                            optional: !required.contains(key.as_str()),
+                            nullable: self.nullable(property),
+                        },
+                    ));
+                    self.walk(property, field, &path, found);
+                }
+            }
+            Value::Array(items) => {
+                if let Some(each) = schema.get("items") {
+                    for (i, item) in items.iter().enumerate() {
+                        self.walk(each, item, &format!("{at}/{i}"), found);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 

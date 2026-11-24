@@ -10,6 +10,7 @@
 deps = [
   "standards",
   "schema-check",
+  "rust-schema-check",
   "lint",
   "format-check",
   "typecheck",
@@ -33,6 +34,10 @@ options = { cache = false, internal = true }
 [tasks.schema]
 command = "node scripts/protocol-schema.ts"
 options = { cache = false }
+
+[tasks.rust-schema-check]
+command = "scripts/xtask.sh schema --check"
+options = { cache = false, internal = true }
 
 [tasks.dev]
 deps = ["daemon:dev", "web:dev"]
@@ -108,7 +113,7 @@ options = { cache = false }
 
 [tasks.test-medium]
 command = "node scripts/capped.ts --memory 8G --time 20m -- node_modules/.bin/vitest run --project medium --project cli"
-deps = ["build-hook", "build-cli", "build-engine"]
+deps = ["build-hook", "build-cli", "build-engine", "rust-schema-check"]
 options = { cache = false, runDepsInParallel = false }
 
 [tasks.test-bench]

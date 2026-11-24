@@ -26,9 +26,11 @@ pub enum RuntimeReportState {
 pub struct RuntimeHealthReport {
     pub kind: String,
     pub state: RuntimeReportState,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub version: Option<String>,
     /// Each defect of this runtime's that Bazhen works around.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     pub workarounds: Option<Vec<String>>,
 }
 
@@ -73,7 +75,9 @@ pub struct PeerReader {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCli {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub expected: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub on_path: Option<String>,
 }
 
@@ -97,13 +101,16 @@ pub enum AgentShell {
 #[serde(rename_all = "camelCase")]
 pub struct AgentsSettings {
     pub shell: AgentShell,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub login_shell: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Codex {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub daemon: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub cli: Option<String>,
     /// Whether the peer reader knows the app-server for Codex's, read while a Codex agent is live;
     /// null otherwise, and absent from an older daemon.
@@ -159,6 +166,7 @@ pub struct Pairing {
 pub struct Certificate {
     pub fingerprint: String,
     pub path: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub expires_at: String,
 }
 
@@ -175,7 +183,12 @@ pub struct Subnet {
 pub struct Lan {
     pub url: String,
     pub allow: Vec<String>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<Certificate>")
+    )]
     pub certificate: Option<Certificate>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub error: Option<String>,
     pub subnets: Vec<Subnet>,
 }
@@ -185,9 +198,14 @@ pub struct Lan {
 #[serde(rename_all = "camelCase")]
 pub struct Web {
     pub external_origins: Vec<String>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<OriginsFrom>")
+    )]
     pub from: Option<OriginsFrom>,
     pub allow_insecure_origins: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Pairing"))]
     pub pairing: Option<Pairing>,
     /// The built web client, null before `moon run :build`; absent from an older daemon.
     #[serde(
@@ -198,6 +216,7 @@ pub struct Web {
     pub app: Nullable<String>,
     /// Why the build where the daemon looks isn't served, `app` null then; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub app_refused: Option<String>,
     /// The LAN listener, null without one; absent from an older daemon.
     #[serde(
@@ -212,6 +231,7 @@ pub struct Web {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Notifications {
     pub desktop: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub notifier: Option<String>,
 }
 
@@ -219,6 +239,7 @@ pub struct Notifications {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HostPtys {
     pub used: u64,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub max: u64,
     pub exact: bool,
 }
@@ -235,8 +256,17 @@ pub enum Refusing {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Terminals {
     pub open: u64,
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub max: u64,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<HostPtys>")
+    )]
     pub host: Option<HostPtys>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<Refusing>")
+    )]
     pub refusing: Option<Refusing>,
 }
 
@@ -246,6 +276,7 @@ pub struct Terminals {
 #[serde(rename_all = "camelCase")]
 pub struct RunningHolder {
     pub terminal_id: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub build: Option<String>,
     pub protocol: Vec<String>,
     /// Whether it runs in a scope of its own: null where that can't be told, absent from an older daemon.
@@ -257,6 +288,7 @@ pub struct RunningHolder {
     pub contained: Nullable<bool>,
     /// The socket it answers on; absent from an older daemon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub socket: Option<String>,
     /// Its process: null for one that shares no protocol with this build, which names none;
     /// absent from an older daemon.
@@ -265,6 +297,7 @@ pub struct RunningHolder {
         skip_serializing_if = "Nullable::is_absent",
         deserialize_with = "Nullable::present"
     )]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub holder_pid: Nullable<u64>,
     /// Its memory, as it reports it: null where it didn't; absent from an older daemon.
     #[serde(
@@ -277,24 +310,33 @@ pub struct RunningHolder {
 
 /// A holder's memory, in bytes, and the lines of history it holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "DaemonHolderStats")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct HolderStats {
     pub engine_bytes: u64,
     /// Null where the OS won't say.
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<u64>"))]
     pub rss: Option<u64>,
     pub ring_bytes: u64,
     pub history_lines: u64,
     /// Attempts to replace a failed engine; absent from a holder before 1.2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "u64"))]
     pub engine_resets: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Holder {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub binary: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub build: Option<String>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub reason: Option<String>,
     pub holders: Vec<RunningHolder>,
 }
@@ -304,6 +346,7 @@ pub struct Holder {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MemoryCap {
     pub asked: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<u64>"))]
     pub bytes: Option<u64>,
 }
 
@@ -335,6 +378,7 @@ fn gib(bytes: u64) -> String {
 pub enum Containment {
     #[serde(rename_all = "camelCase")]
     Scoped {
+        #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
         systemd: u64,
         oom_policy: bool,
         terminal: MemoryCap,
@@ -384,20 +428,27 @@ pub struct DoctorResponse {
     )]
     pub peer_reader: Nullable<PeerReader>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentCli"))]
     pub agent_cli: Option<AgentCli>,
     pub config: ConfigFile,
     pub agents: AgentsSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Codex"))]
     pub codex: Option<Codex>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Web"))]
     pub web: Option<Web>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Notifications"))]
     pub notifications: Option<Notifications>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Terminals"))]
     pub terminals: Option<Terminals>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Holder"))]
     pub holder: Option<Holder>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Containment"))]
     pub containment: Option<Containment>,
     pub env: CapturedEnv,
 }
@@ -435,12 +486,12 @@ pub struct ErrorResponse {
     pub message: String,
     /// With `busy`: each shell, and what runs in it, that the close would end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<BusyShell>"))]
     pub busy: Option<Vec<BusyShell>>,
 }
 
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidRequest,
@@ -468,4 +519,39 @@ pub enum ErrorCode {
     RateLimited,
     /// A new agent or shell refused: as many terminals are open as the daemon allows.
     TerminalLimit,
+}
+
+impl ErrorCode {
+    /// Every code, in the order the protocol lists them.
+    pub const ALL: [Self; 18] = [
+        Self::InvalidRequest,
+        Self::Unsupported,
+        Self::LaunchFailed,
+        Self::Conflict,
+        Self::StaleGeneration,
+        Self::NotResumable,
+        Self::Unavailable,
+        Self::ServerUnconfirmed,
+        Self::NeedsRestart,
+        Self::Busy,
+        Self::NotFound,
+        Self::OriginNotAllowed,
+        Self::HostNotAllowed,
+        Self::Forbidden,
+        Self::Unpaired,
+        Self::PairingFailed,
+        Self::RateLimited,
+        Self::TerminalLimit,
+    ];
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for ErrorCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ErrorCode".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::schema::in_order(&Self::ALL)
+    }
 }

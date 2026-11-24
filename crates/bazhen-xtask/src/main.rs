@@ -4,6 +4,7 @@ mod cargo_config;
 mod cli;
 mod gate;
 mod sandbox;
+mod schema;
 mod tools;
 
 use std::ffi::{OsStr, OsString};
@@ -54,6 +55,13 @@ impl Host for Real {
         String::from_utf8(output.stdout)
             .map(Some)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    fn write(&mut self, path: &Path, text: &str) -> io::Result<()> {
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        std::fs::write(path, text)
     }
 }
 

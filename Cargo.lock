@@ -306,8 +306,10 @@ dependencies = [
 name = "bazhen-protocol"
 version = "0.1.0"
 dependencies = [
+ "bazhen-holder-proto",
  "bazhen-protocol",
  "proptest",
+ "regex-automata",
  "ryu-js",
  "schemars",
  "serde",

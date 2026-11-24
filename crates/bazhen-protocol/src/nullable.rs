@@ -72,6 +72,10 @@ impl<T: schemars::JsonSchema> schemars::JsonSchema for Nullable<T> {
         Option::<T>::schema_name()
     }
 
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        Option::<T>::schema_id()
+    }
+
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         Option::<T>::json_schema(generator)
     }

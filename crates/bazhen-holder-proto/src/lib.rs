@@ -10,6 +10,8 @@
 pub mod body;
 mod frame;
 mod json;
+#[cfg(feature = "schema")]
+pub mod schema;
 mod version;
 
 pub use frame::{

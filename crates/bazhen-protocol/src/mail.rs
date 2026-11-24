@@ -61,6 +61,7 @@ pub struct ObservedMessage {
     pub to: AgentId,
     pub summary: String,
     pub accepted: bool,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub at: String,
 }
 
@@ -125,7 +126,6 @@ impl AttentionCloseReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionKind {
     Approval,
@@ -142,6 +142,17 @@ pub enum AttentionKind {
 }
 
 impl AttentionKind {
+    /// Every kind this build knows: all but `Unknown`.
+    pub const KNOWN: [Self; 7] = [
+        Self::Approval,
+        Self::Question,
+        Self::Failed,
+        Self::Undeliverable,
+        Self::Escalation,
+        Self::TaskDone,
+        Self::StuckStarting,
+    ];
+
     /// The kind's name, as it is stored and written.
     pub fn as_str(&self) -> &str {
         match self {
@@ -154,6 +165,20 @@ impl AttentionKind {
             Self::StuckStarting => "stuck_starting",
             Self::Unknown(name) => name,
         }
+    }
+}
+
+/// The protocol's kinds, closed: `Unknown` lets this build read a newer daemon's answer, and the
+/// protocol names no such kind.
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for AttentionKind {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AttentionKind".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let names: Vec<&str> = Self::KNOWN.iter().map(Self::as_str).collect();
+        schemars::json_schema!({ "type": "string", "enum": names })
     }
 }
 
@@ -176,11 +201,21 @@ pub struct Attention {
     pub id: AttentionId,
     pub agent_id: AgentId,
     pub state: AttentionState,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AttentionCloseReason>")
+    )]
     pub close_reason: Option<AttentionCloseReason>,
     pub summary: String,
     pub kind: AttentionKind,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub task_id: Option<String>,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<MessageId>")
+    )]
     pub message_id: Option<MessageId>,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub opened_at: String,
     pub actions: Vec<AttentionAction>,
 }
@@ -190,7 +225,9 @@ pub struct Attention {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 20_000)))]
     pub body: String,
 }
 
@@ -199,6 +236,7 @@ pub struct SendMessageRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageResponse {
     pub message_id: MessageId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -207,7 +245,9 @@ pub struct SendMessageResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitMessagesRequest {
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 100)))]
     pub message_ids: Vec<MessageId>,
+    #[cfg_attr(feature = "schema", schemars(range(max = crate::mail::MESSAGE_WAIT_MAX_MS)))]
     pub timeout_ms: u64,
 }
 
@@ -235,17 +275,8 @@ mod tests {
 
     #[test]
     fn names_each_attention_kind_as_it_is_written() {
-        let kinds = [
-            AttentionKind::Approval,
-            AttentionKind::Question,
-            AttentionKind::Failed,
-            AttentionKind::Undeliverable,
-            AttentionKind::Escalation,
-            AttentionKind::TaskDone,
-            AttentionKind::StuckStarting,
-            AttentionKind::Unknown("a_kind_from_later".to_owned()),
-        ];
-        for kind in kinds {
+        let unknown = AttentionKind::Unknown("a_kind_from_later".to_owned());
+        for kind in AttentionKind::KNOWN.into_iter().chain([unknown]) {
             let written = serde_json::to_value(&kind).unwrap();
             assert_eq!(written.as_str(), Some(kind.as_str()), "{kind:?}");
         }

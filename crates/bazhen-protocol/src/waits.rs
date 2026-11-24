@@ -154,10 +154,12 @@ pub enum WaitCondition {
 #[serde(rename_all = "camelCase")]
 pub struct WaitRequest {
     pub condition: WaitCondition,
+    #[cfg_attr(feature = "schema", schemars(range(max = crate::mail::MESSAGE_WAIT_MAX_MS)))]
     pub timeout_ms: u64,
     /// The caller waited on this condition before, and the daemon answered: a target gone from
     /// the state since then is judged gone, rather than refused as unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub resumed: Option<bool>,
 }
 
@@ -184,11 +186,15 @@ pub struct WaitResponse {
     pub verdict: WaitVerdict,
     pub said: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Agent"))]
     pub agent: Option<Agent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Shell"))]
     pub shell: Option<Shell>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "Task"))]
     pub task: Option<Task>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "MessageId"))]
     pub reply_id: Option<MessageId>,
 }

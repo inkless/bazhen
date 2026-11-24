@@ -313,7 +313,7 @@ export type HolderSetThemeRequest = z.infer<typeof HolderSetThemeRequest>;
  * Whether a character is a C0 or C1 control or DEL: a key, such as Enter, or the start of a
  * sequence, not text. Every one is a single UTF-16 unit.
  */
-const hasControl = (text: string) => {
+export const hasControl = (text: string) => {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
     if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return true;

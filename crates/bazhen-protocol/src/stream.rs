@@ -36,6 +36,7 @@ impl AttachmentMode {
 #[serde(rename_all = "camelCase")]
 pub struct Resumes {
     pub attachment_id: AttachmentId,
+    #[cfg_attr(feature = "schema", schemars(length(max = 64)))]
     pub token: String,
 }
 
@@ -48,15 +49,21 @@ pub enum StreamClientFrame {
     Hello {
         /// The build the view is from; a daemon of another refuses it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         protocol_id: Option<String>,
         mode: AttachmentMode,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         rows: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "Resumes"))]
         resumes: Option<Resumes>,
     },
     Resize {
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 2, max = 1000)))]
         rows: u16,
     },
     /// Takes the lease, as a click in the web app does.
@@ -88,6 +95,7 @@ pub enum StreamServerFrame {
     Attached {
         attachment_id: AttachmentId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         resume_token: Option<String>,
     },
     /// Who drives now.
@@ -96,8 +104,10 @@ pub enum StreamServerFrame {
         driver: bool,
         epoch: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "bool"))]
         driven: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         driver_device: Option<String>,
     },
     Pong,
@@ -105,11 +115,14 @@ pub enum StreamServerFrame {
     #[serde(rename_all = "camelCase")]
     SnapshotStart {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "schema", schemars(with = "u64"))]
         history_lines: Option<u64>,
     },
     SnapshotEnd,
     Geometry {
+        #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 1000)))]
         cols: u16,
+        #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 1000)))]
         rows: u16,
     },
     /// Input from a view that wasn't driving was dropped.

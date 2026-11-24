@@ -35,6 +35,10 @@ impl TuiTheme {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct NeedsRestart {
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<u64>", range(min = 1))
+    )]
     pub holder_pid: Option<u64>,
     #[serde(default)]
     pub served: bool,
@@ -124,6 +128,7 @@ pub fn shell_commands(state: TerminalState, linked: bool) -> Vec<ShellCommand> {
 #[serde(rename_all = "camelCase")]
 pub struct BusyShell {
     pub terminal_id: TerminalId,
+    #[cfg_attr(feature = "schema", schemars(length(max = 200)))]
     pub program: String,
 }
 
@@ -132,6 +137,7 @@ pub struct BusyShell {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Foreground {
     pub command: String,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Timestamp"))]
     pub since: String,
 }
 
@@ -144,12 +150,17 @@ pub struct Shell {
     pub state: TerminalState,
     pub generation: u64,
     pub cwd: String,
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<AgentId>")
+    )]
     pub linked_agent_id: Option<AgentId>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub foreground: Option<Foreground>,
     pub theme: TuiTheme,
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub attach_command: Option<String>,
     pub commands: Vec<ShellCommand>,
     #[serde(default)]
@@ -161,26 +172,31 @@ pub struct Shell {
 /// `POST /v1/shells`: a shell beside an agent, in its directory, or a shell of its own in `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(extend("x-bazhen-check" = "linkedShellTakesNoCwd")))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     #[serde(
         default,
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "AgentId"))]
     pub linked_agent_id: Option<AgentId>,
     #[serde(
         default,
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub cwd: Option<String>,
     #[serde(
         default,
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
     pub theme: Option<TuiTheme>,
 }
 
@@ -189,6 +205,7 @@ pub struct OpenShellRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub generation: u64,
     #[serde(
@@ -196,18 +213,21 @@ pub struct CloseShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub confirm_busy: Option<bool>,
     #[serde(
         default,
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 200)))]
     pub confirmed_program: Option<String>,
     #[serde(
         default,
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub force: Option<bool>,
 }
 
@@ -217,6 +237,7 @@ pub struct CloseShellRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ShellCommandResponse {
     pub terminal_id: TerminalId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,
 }
 
@@ -232,6 +253,7 @@ pub struct RestartShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "TuiTheme"))]
     pub theme: Option<TuiTheme>,
     /// Type the lost shell's last line at the new shell's first prompt; only ever `true`.
     #[serde(
@@ -239,6 +261,7 @@ pub struct RestartShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub retype: Option<bool>,
 }
 
@@ -300,6 +323,7 @@ pub struct ShellReport {
     /// The line, or `None` for one its client couldn't send whole: too long, or not UTF-8. The
     /// field is required, null or not, as zod's `.nullable()` holds it.
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub command: Option<String>,
 }
 
@@ -340,6 +364,7 @@ pub struct ShellPrompt {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub brackets: Option<bool>,
 }
 

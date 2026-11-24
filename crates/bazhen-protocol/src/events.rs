@@ -234,9 +234,14 @@ pub fn event_kind(name: &str) -> Option<&'static EventKind> {
 
 /// One event, as the stream sends it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "EventEnvelope")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::EventId"))]
     pub id: u64,
     pub ts: String,
     #[serde(rename = "type")]
@@ -245,15 +250,24 @@ pub struct Event {
     pub entity_id: String,
     pub actor: String,
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<crate::schema::EventId>")
+    )]
     pub causation_id: Option<u64>,
     #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::Required<String>"))]
     pub correlation_id: Option<String>,
     pub payload: serde_json::Value,
 }
 
 /// A text frame the daemon sends on `/v1/events`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    derive(schemars::JsonSchema),
+    schemars(rename = "EventEnvelopeFrame")
+)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum EventFrame {
     Event {

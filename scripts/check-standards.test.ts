@@ -1451,7 +1451,10 @@ describe("moonFailures", () => {
     task(name, `command = "${command}"\n${uncached}`),
   );
   const root = [
-    task("check", 'deps = ["format-check", "lint-rust", "deny", "test-rust"]\n' + uncached),
+    task(
+      "check",
+      'deps = ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"]\n' + uncached,
+    ),
     task("format-check", 'command = "oxfmt --check"\ndeps = ["root:gate-fmt"]\n' + uncached),
     ...gates,
   ].join("\n");
@@ -1587,22 +1590,22 @@ describe("moonFailures", () => {
         expect.stringContaining("list the projects as a table"),
         expect.stringContaining("moon.toml: moon reads it, and this check doesn't"),
         ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
-        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
-          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
+          (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
         ),
       ],
       [
         ".moon/workspace.toml is missing; moon's tasks are the repository's commands.",
         ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
-        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
-          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
+          (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
         ),
       ],
       [
         expect.stringContaining("moon.toml: moon can't read it"),
         ...Object.keys(RUST_GATE_TASKS).map(() => expect.stringContaining("task must run")),
-        ...["format-check", "lint-rust", "deny", "test-rust", "gate-fmt"].map((step) =>
-          expect.stringContaining(`must run \`${step}\` among its deps`),
+        ...["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check", "gate-fmt"].map(
+          (step) => expect.stringContaining(`must run \`${step}\` among its deps`),
         ),
       ],
     ]);

@@ -22,6 +22,10 @@ pub struct RoleDefinition {
     pub grants: Vec<Role>,
     pub single_per_task: bool,
     /// Null for no limit.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<u64>", range(min = 1))
+    )]
     pub max_active_tasks: Option<u64>,
     pub prompt: String,
     pub source: RoleSource,

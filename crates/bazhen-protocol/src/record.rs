@@ -58,6 +58,10 @@ impl<V: schemars::JsonSchema> schemars::JsonSchema for Record<V> {
         format!("Record_of_{}", V::schema_name()).into()
     }
 
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        format!("bazhen_protocol::Record<{}>", V::schema_id()).into()
+    }
+
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         HashMap::<String, V>::json_schema(generator)
     }
@@ -90,7 +94,24 @@ impl<'de, V: Deserialize<'de>> Visitor<'de> for Entries<V> {
 
 #[cfg(test)]
 mod tests {
+    use schemars::JsonSchema;
+
     use super::*;
+    use crate::nullable::Nullable;
+
+    #[test]
+    fn a_record_and_a_nullable_take_their_schema_id_from_what_they_hold() {
+        assert_eq!(
+            Nullable::<String>::schema_id(),
+            Option::<String>::schema_id()
+        );
+        assert_ne!(
+            Nullable::<String>::schema_id(),
+            Nullable::<u32>::schema_id()
+        );
+        assert_ne!(Record::<String>::schema_id(), Record::<u32>::schema_id());
+        assert_ne!(Record::<String>::schema_id(), String::schema_id());
+    }
 
     #[test]
     fn keeps_the_order_keys_came_in_and_a_repeated_key_its_first_place_and_last_value() {

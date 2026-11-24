@@ -312,6 +312,8 @@ pub(crate) trait Host {
     fn run(&mut self, argv: &[&str], env: &Env, quiet: bool) -> std::io::Result<Status>;
     /// What `argv` printed to stdout, run as `run` does, `None` when it did not exit 0.
     fn output(&mut self, argv: &[&str], env: &Env) -> std::io::Result<Option<String>>;
+    /// Writes `text` to `path`, making the folders it is in.
+    fn write(&mut self, path: &Path, text: &str) -> std::io::Result<()>;
 }
 
 /// The names of the crates `cargo metadata --no-deps` printed as `json`.
@@ -677,6 +679,9 @@ mod tests {
             self.runs
                 .push(argv.iter().map(|a| (*a).to_owned()).collect());
             Ok(self.metadata.map(str::to_owned))
+        }
+        fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
         }
     }
 
