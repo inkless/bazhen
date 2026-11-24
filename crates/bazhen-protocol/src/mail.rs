@@ -40,6 +40,9 @@ impl MailboxState {
 /// The longest a sender may wait on its messages, in milliseconds.
 pub const MESSAGE_WAIT_MAX_MS: u64 = 600_000;
 
+/// The largest hook reply body a hook client takes; it fails open on a larger one.
+pub const HOOK_REPLY_MAX_BYTES: usize = 1 << 20;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
