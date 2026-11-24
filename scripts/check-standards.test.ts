@@ -5453,7 +5453,7 @@ const compiledRefused = (where: string) =>
   "holds adapters it doesn't serve yet, so only its tests may call it.";
 
 describe("compiledFailures", () => {
-  it("refuses the daemon's product code reaching compiled by a path or a use", () => {
+  it("refuses the daemon's product code reaching compiled by a path, a use or a glob", () => {
     expect(
       compiledIn({
         "crates/bazhen-daemon/src/a.rs":
@@ -5461,11 +5461,14 @@ describe("compiledFailures", () => {
         "crates/bazhen-daemon/src/b.rs": "use bazhen_harness::compiled;\n",
         "crates/bazhen-daemon/src/c.rs":
           "use bazhen_harness::{\n  production,\n  compiled as all,\n};\n",
+        "crates/bazhen-daemon/src/e.rs":
+          "use bazhen_harness::*;\nfn e(d: HarnessDeps) {\n  compiled (d);\n}\n",
       }),
     ).toEqual([
       compiledRefused("crates/bazhen-daemon/src/a.rs:2"),
       compiledRefused("crates/bazhen-daemon/src/b.rs:1"),
       compiledRefused("crates/bazhen-daemon/src/c.rs:1"),
+      compiledRefused("crates/bazhen-daemon/src/e.rs:3"),
     ]);
   });
 
@@ -5479,6 +5482,9 @@ describe("compiledFailures", () => {
         "crates/bazhen-cli/src/x.rs": "use bazhen_harness::compiled;\n",
         "crates/bazhen-daemon/src/d.rs":
           '// bazhen_harness::compiled\nconst S: &str = "bazhen_harness::compiled";\nuse bazhen_harness::production;\nfn compiled() {}\nuse regex::compiled;\n',
+        "crates/bazhen-daemon/src/f.rs":
+          "use bazhen_harness::*;\nfn compiled() {}\nfn f(r: R) {\n  r.compiled();\n  regex::compiled(1);\n}\n",
+        "crates/bazhen-daemon/src/g.rs": "use other::*;\nfn g() {\n  compiled();\n}\n",
       }),
     ).toEqual([]);
   });

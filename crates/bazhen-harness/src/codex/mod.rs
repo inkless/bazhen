@@ -137,11 +137,17 @@ impl Codex {
         let Some(thread) = thread_of(params) else {
             return Vec::new();
         };
+        // On any thread: the daemon confirms a message by the message, not by the thread, so one
+        // that Codex held for a thread no agent is on any more is still taken there.
+        let mut out: Vec<Keyed> = mail::read_user_message(method, params)
+            .and_then(|m| m.message_id)
+            .map(|message_id| on(&thread, Observed::MailTaken { message_id }))
+            .into_iter()
+            .collect();
         if !bound {
             t.forget(&thread);
-            return Vec::new();
+            return out;
         }
-        let mut out = Vec::new();
         if signals::read_compaction(method, params).is_some() {
             out.push(on(
                 &thread,
@@ -189,11 +195,6 @@ impl Codex {
                 }
             }
         } else {
-            if let Some(message_id) =
-                mail::read_user_message(method, params).and_then(|m| m.message_id)
-            {
-                out.push(on(&thread, Observed::MailTaken { message_id }));
-            }
             let item = signals::read_item_started(method, params);
             if let Some(item) = item.filter(|i| t.first_item.remove(&thread) && !i.user_input) {
                 // Nothing but the new server starts a turn on an interrupted thread with no input.
@@ -217,14 +218,20 @@ fn thread_of(params: &Js) -> Option<String> {
 }
 
 /// What a terminal's title says of its agent: up, on the thread it is bound to; moving, to the
-/// thread it names; or, when it names none, nothing held any longer.
+/// thread it names; or, blank as the TUI leaves it when it exits, nothing held any longer.
+///
+/// A title that names no thread, as the user's own title config makes, is its own candidate:
+/// [`Session::follow`](crate::Session::follow) reads no thread in it and leaves the agent where it
+/// was, untracked, settling any move the title had started.
 fn title(title: &str, context: &IngestContext<'_>) -> Ingested {
     let Some(agent) = context.agent else {
         return Ingested::nothing();
     };
     let fact = match threads::title_prefix(title) {
-        None if title.is_empty() => Observed::Release,
-        None => return Ingested::nothing(),
+        None if title.trim_matches(threads::js_space).is_empty() => Observed::Release,
+        None => Observed::TitleNames {
+            candidate: title.to_owned(),
+        },
         Some(prefix) => match context.session {
             Some(session) if session.id.starts_with(prefix) => Observed::Ready {
                 sign: ReadySign::CodexTitle,

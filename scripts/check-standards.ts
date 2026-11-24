@@ -5150,8 +5150,8 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
 };
 
 /**
- * Where bazhen-daemon's product code reaches `bazhen_harness::compiled`, by its path or a `use`
- * that names it. `compiled` holds every adapter the build has, served or not, so its tests and
+ * Where bazhen-daemon's product code reaches `bazhen_harness::compiled`: by its path, a `use`
+ * that names it, or a bare `compiled(..)` call in a file that glob-imports the crate. `compiled` holds every adapter the build has, served or not, so its tests and
  * fuzz targets can drive one; the daemon serves what `production` gives it, so an adapter isn't
  * reached by a user before it is served. The daemon's tests may call it. An accepted gap: a crate
  * imported by another name (`use bazhen_harness as h;` then `h::compiled`) isn't seen.
@@ -5162,9 +5162,12 @@ export function compiledFailures(paths: string[], read: (path: string) => string
   const out: string[] = [];
   for (const file of sources.filter((p) => !testOnly.has(p))) {
     const product = withoutTests(rustCode(read(file)));
-    for (const m of product.matchAll(
-      /\bbazhen_harness\s*::\s*(?:compiled\b|\{[^;]*\bcompiled\b)/g,
-    )) {
+    const named = product.matchAll(/\bbazhen_harness\s*::\s*(?:compiled\b|\{[^;]*\bcompiled\b)/g);
+    // A glob brings it in unnamed, so each call by the bare name may be it.
+    const globbed = /\bbazhen_harness\s*::\s*(?:\*|\{[^;]*\*)/.test(product)
+      ? product.matchAll(/(?<![\w:.]\s*|\bfn\s+)\bcompiled\s*\(/g)
+      : [];
+    for (const m of [...named, ...globbed]) {
       out.push(
         `${file}:${product.slice(0, m.index).split("\n").length}: the daemon serves the ` +
           "harnesses bazhen_harness::production gives it; compiled holds adapters it doesn't " +

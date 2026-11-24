@@ -2,7 +2,8 @@
 //! is reached by its hooks, by its own server over a channel the daemon provides, or both. An
 //! adapter never opens a socket or a process and never touches the store: it is handed ports,
 //! reads the reports it is given, and says what they mean and how to answer them. So the daemon
-//! names no harness, and [`production`] is the only way to an adapter.
+//! names no harness: it reaches the adapters it serves only through [`production`], and
+//! [`compiled`], which also builds those it doesn't serve yet, is for tests and fuzz targets.
 
 mod claude_code;
 mod codex;

@@ -4,7 +4,9 @@ use super::*;
 use crate::{Reply, SessionRef};
 use bazhen_protocol::agents::{ExternalRefKind, UsageLimit};
 use bazhen_protocol::ids::AgentId;
+use proptest::prelude::*;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 
 const THREAD: &str = "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51";
 
@@ -350,6 +352,26 @@ fn a_turn_that_takes_one_of_bazhens_messages_says_so_under_its_thread() {
 }
 
 #[test]
+fn a_message_taken_on_a_thread_no_agent_is_on_is_still_said_to_be_taken() {
+    let codex = harness();
+    let id = "msg_0190000000007000800000000000001";
+    let input = json!({
+        "threadId": THREAD, "turnId": "t1",
+        "item": { "type": "userMessage", "id": "u1",
+                  "content": [{ "type": "text", "text": format!("{}\nhi", bazhen_core::mail::mail_label(id)) }] },
+    });
+    assert_eq!(
+        notify(&codex, None, "item/started", &input),
+        vec![on(
+            THREAD,
+            Observed::MailTaken {
+                message_id: id.to_owned()
+            }
+        )]
+    );
+}
+
+#[test]
 fn compaction_rate_limits_and_new_threads_are_the_threads_and_the_accounts() {
     let codex = harness();
     let a = agent();
@@ -399,7 +421,7 @@ fn titled(title: &str, bound: Option<&AgentId>, session: Option<&SessionRef>) ->
 }
 
 #[test]
-fn a_title_naming_the_agents_thread_says_its_tui_is_up_and_another_names_where_it_moved() {
+fn a_title_naming_the_agents_thread_says_its_tui_is_up_and_any_other_is_followed() {
     let a = agent();
     let session = SessionRef {
         kind: ExternalRefKind::CodexThread,
@@ -430,7 +452,16 @@ fn a_title_naming_the_agents_thread_says_its_tui_is_up_and_another_names_where_i
         titled("", Some(&a), Some(&session)),
         fact(Observed::Release)
     );
-    assert_eq!(titled("my project", Some(&a), Some(&session)), vec![]);
+    assert_eq!(
+        titled(" \t\u{feff}", Some(&a), Some(&session)),
+        fact(Observed::Release)
+    );
+    assert_eq!(
+        titled("my project", Some(&a), Some(&session)),
+        fact(Observed::TitleNames {
+            candidate: "my project".to_owned()
+        })
+    );
     assert_eq!(titled(cut, None, Some(&session)), vec![]);
 }
 
@@ -454,4 +485,101 @@ fn codex_takes_mail_by_push_and_says_what_it_does_over_its_server() {
         codex.ingest(hook, &IngestContext::default()),
         Ingested::nothing()
     );
+}
+
+/// Every recorded message, as its method and its params' text.
+fn recorded() -> Vec<(String, String)> {
+    let cases = fixture("messages.json");
+    let cases = cases.as_array().unwrap();
+    cases
+        .iter()
+        .map(|case| {
+            let params = case.get("params").unwrap_or(&Value::Null);
+            (
+                case["method"].as_str().unwrap().to_owned(),
+                params.to_string(),
+            )
+        })
+        .collect()
+}
+
+proptest! {
+    /// A TUI titles its terminal with its thread's id, whole or cut short, and the prefix that
+    /// gives is read back as itself, so the daemon can follow by it.
+    #[test]
+    fn a_title_naming_a_thread_reads_as_a_prefix_of_its_id_and_reads_back_as_itself(
+        id in "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        shown in 20_usize..=27,
+        cut in prop::sample::select(vec!["", "...", "…"]),
+        pad in prop::sample::select(vec!["", " ", "\t", "\u{feff}"]),
+    ) {
+        let prefix = id.get(..9 + shown).unwrap();
+        let title = format!("{pad}{prefix}{cut}{pad}");
+        prop_assert_eq!(threads::title_prefix(&title), Some(prefix));
+        prop_assert_eq!(threads::title_prefix(prefix), Some(prefix));
+    }
+
+    /// Whatever a title is, a prefix read from it begins it and reads back as itself.
+    #[test]
+    fn any_prefix_a_title_gives_begins_it_and_reads_back_as_itself(
+        title in "[ \t]?[0-9a-f]{8}-?[0-9a-f-]{0,30}(\\.\\.\\.|…|\\.)?[ a]?",
+    ) {
+        if let Some(prefix) = threads::title_prefix(&title) {
+            prop_assert!(title.trim_matches(threads::js_space).starts_with(prefix));
+            prop_assert_eq!(threads::title_prefix(prefix), Some(prefix));
+        }
+    }
+
+    /// A message cut short isn't JSON, and says nothing.
+    #[test]
+    fn a_recorded_message_cut_short_says_nothing(
+        case in prop::sample::select(recorded()),
+        cut in any::<prop::sample::Index>(),
+    ) {
+        let (method, params) = case;
+        let a = agent();
+        let report = Report::Notification {
+            method: &method,
+            params: &params.as_bytes()[..cut.index(params.len())],
+        };
+        let context = IngestContext {
+            agent: Some(&a),
+            ..IngestContext::default()
+        };
+        prop_assert_eq!(harness().ingest(report, &context), Ingested::nothing());
+    }
+
+    /// Over any run of the recorded messages, each fact names the thread its message came from,
+    /// or, from one that names none, the account, and is ungated; and once no agent is on those
+    /// threads, nothing of them is held.
+    #[test]
+    fn every_fact_names_its_thread_and_nothing_is_held_of_threads_no_agent_is_on(
+        picks in prop::collection::vec(any::<prop::sample::Index>(), 1..40),
+    ) {
+        let cases = recorded();
+        let codex = harness();
+        let a = agent();
+        let mut seen = BTreeSet::new();
+        for pick in picks {
+            let (method, params) = &cases[pick.index(cases.len())];
+            let params: Value = serde_json::from_str(params).unwrap();
+            let thread = params["threadId"].as_str().map(str::to_owned);
+            for keyed in notify(&codex, Some(&a), method, &params) {
+                prop_assert_eq!(keyed.gate, Gate::None);
+                let want = match &thread {
+                    Some(thread) => on(thread, keyed.fact.clone()).key,
+                    None => Key::Account,
+                };
+                prop_assert_eq!(keyed.key, want);
+            }
+            seen.extend(thread);
+        }
+        for thread in &seen {
+            let status = json!({ "threadId": thread, "status": { "type": "idle" } });
+            notify(&codex, None, "thread/status/changed", &status);
+        }
+        let t = codex.threads();
+        let held = t.activity.len() + t.failed.len() + t.first_item.len() + t.labels.len();
+        prop_assert_eq!(held, 0);
+    }
 }

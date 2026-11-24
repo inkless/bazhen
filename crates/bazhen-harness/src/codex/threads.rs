@@ -22,7 +22,7 @@ pub(super) fn read_thread_started(method: &str, params: &Js) -> Option<String> {
 }
 
 /// Whitespace as JavaScript's `trim` takes it: Unicode's, but U+0085, and the byte-order mark.
-fn js_space(c: char) -> bool {
+pub(super) fn js_space(c: char) -> bool {
     (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}'
 }
 
