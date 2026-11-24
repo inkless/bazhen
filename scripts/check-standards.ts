@@ -5140,6 +5140,10 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
     names: ["codex_agent", '"codex', '"codex-thread'],
     why: "caller identity's query, for callers.rs: the live agent bound to a Codex thread",
   },
+  "crates/bazhen-xtask/src/schema/corpus.rs": {
+    names: ['"codex'],
+    why: "a launch agentOrLaunch's cases plant, which must name a harness the protocol's HarnessId holds",
+  },
 };
 
 /**
