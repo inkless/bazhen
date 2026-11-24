@@ -39,7 +39,14 @@ import {
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
 import { AgentCondition, ShellCondition, WaitRequest, WaitResponse } from "./waits.ts";
 import {
+  HOOK_PROTOCOL_VERSION,
+  HOOK_REPLY_MAX_BYTES,
+  HOOK_REPLY_TYPE,
+  HookAck,
+  HookReply,
+  HookRequest,
   MESSAGE_WAIT_MAX_MS,
+  OfferToken,
   SETTLED,
   SendMessageRequest,
   SendMessageResponse,
@@ -50,6 +57,7 @@ import { DEVICE_PAIRED, DismissNoticeRequest, DismissNoticeResponse } from "./no
 import { hasKeystrokes, withoutReplies } from "./input.ts";
 import { isOrigin, isPlainRemote } from "./origins.ts";
 import { Role, RolesResponse } from "./roles.ts";
+import { ProtocolVersion } from "./version.ts";
 import { TerminalScreen } from "./terminals.ts";
 import {
   CloseShellRequest,
@@ -112,6 +120,7 @@ const DEV = "dev_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const OBS = "obs_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const ATT = "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const AT = "2026-11-16T12:00:00.000Z";
+const OFFER = `${MSG}-k3x9`;
 const KEY = "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10";
 
 const HOLDER_REF = { runtime: "holder", locator: { pid: "4242" } };
@@ -1070,6 +1079,29 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       },
     ],
   },
+  HookAck: { schema: HookAck, wire: [{ agentId: AGENT, offered: [OFFER] }] },
+  HookReply: {
+    schema: HookReply,
+    wire: [
+      { exitCode: 2, stdout: "", stderr: "Message for you", offered: [OFFER, `${MSG}-1`] },
+      { exitCode: 0, stdout: "{}", stderr: "", offered: [] },
+    ],
+  },
+  HookRequest: {
+    schema: HookRequest,
+    wire: [
+      {
+        protocolVersion: "1.0",
+        agentId: AGENT,
+        event: "Stop",
+        pid: 42,
+        ppid: 41,
+        payload: { session_id: "s", prompt_id: "p", nested: [1, null, "\ud83d"] },
+      },
+      { protocolVersion: "1.12", agentId: AGENT, event: "wait", pid: -1, ppid: 0, payload: null },
+      { protocolVersion: "1.0", agentId: AGENT, event: "statusline", pid: 1, ppid: 1, payload: 7 },
+    ],
+  },
   LaunchAgentRequest: {
     schema: LaunchAgentRequest,
     wire: [
@@ -1406,6 +1438,20 @@ const ID_INPUTS = [
   "task_x",
   "",
 ];
+const OFFER_INPUTS = [
+  `msg_${ID_BODY}-k3x9`,
+  `msg_${ID_BODY}-${"z".repeat(32)}`,
+  `msg_${ID_BODY}-${"z".repeat(33)}`,
+  `msg_${ID_BODY}-`,
+  `msg_${ID_BODY}-K`,
+  `msg_${ID_BODY}-a-b`,
+  `msg_${ID_BODY}`,
+  `msg_${ID_BODY.toUpperCase()}-1`,
+  `msg_${ID_BODY.slice(1)}-1`,
+  `agent_${ID_BODY}-1`,
+  "",
+];
+const VERSION_INPUTS = ["1.0", "10.12", "1", "1.", ".1", "1.0.0", "v1.0", "1.x", "١.٠", ""];
 const ROLE_INPUTS = ["worker", "a", "a-1", "x".repeat(32), "x".repeat(33), "Lead", "1x", "-x", ""];
 const BIG = "é".repeat(TASK_NOTE_MAX_BYTES / 2);
 const NOTE_INPUTS = [
@@ -1736,6 +1782,9 @@ export function checkFixtures() {
       pairingCodeLength: PAIRING_CODE_LENGTH,
       deviceNameMax: DEVICE_NAME_MAX,
       devicePaired: DEVICE_PAIRED,
+      hookProtocolVersion: HOOK_PROTOCOL_VERSION,
+      hookReplyType: HOOK_REPLY_TYPE,
+      hookReplyMaxBytes: HOOK_REPLY_MAX_BYTES,
       settled: [...SETTLED].toSorted(),
       harnesses: HarnessId.options,
       agentConditions: AgentCondition.options.flatMap((o) => o.options),
@@ -1745,6 +1794,8 @@ export function checkFixtures() {
     agentRef: verdicts(AgentRef, NAME_INPUTS),
     taskId: verdicts(Id("task"), ID_INPUTS),
     role: verdicts(Role, ROLE_INPUTS),
+    offerToken: verdicts(OfferToken, OFFER_INPUTS),
+    protocolVersion: verdicts(ProtocolVersion, VERSION_INPUTS),
     taskNoteText: verdicts(TaskNoteText, NOTE_INPUTS),
     plainRemote: ORIGIN_INPUTS.map((input) => ({ input, plain: isPlainRemote(input) })),
     origin: ORIGIN_FORMS.map((input) => ({ input, origin: isOrigin(input) })),

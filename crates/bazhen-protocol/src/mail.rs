@@ -1,8 +1,11 @@
 //! Mail between agents, its states, and the items agents raise for the human.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, AttentionId, MessageId, ObservedId};
+use crate::names::Refused;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -42,6 +45,213 @@ pub const MESSAGE_WAIT_MAX_MS: u64 = 600_000;
 
 /// The largest hook reply body a hook client takes; it fails open on a larger one.
 pub const HOOK_REPLY_MAX_BYTES: usize = 1 << 20;
+
+/// The hook client's own contract, apart from the build's protocol: a hook already running in an
+/// agent's session outlives a daemon upgrade, so it keeps working while the major is the same.
+/// Within a major, [`HookRequest`] and [`HookReply`] change only by addition, never renaming,
+/// removing or tightening what has shipped, and the minor is bumped with each addition.
+pub const HOOK_PROTOCOL_VERSION: &str = "1.0";
+
+/// The `Content-Type` of a framed [`HookReply`].
+pub const HOOK_REPLY_TYPE: &str = "application/vnd.bazhen.hook-reply";
+
+/// A protocol's version, `<major>.<minor>`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ProtocolVersion(String);
+
+impl ProtocolVersion {
+    pub fn parse(text: &str) -> Option<Self> {
+        let (major, minor) = text.split_once('.')?;
+        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        (digits(major) && digits(minor)).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What the hook client sends for every hook a harness runs, over the daemon's Unix socket
+/// (foundation-design §5.6).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct HookRequest {
+    pub protocol_version: ProtocolVersion,
+    pub agent_id: AgentId,
+    pub event: HookEvent,
+    pub pid: i64,
+    pub ppid: i64,
+    // The harness's own hook input, any JSON, null included: its text as the client sent it,
+    // which the harness's adapter reads as `JSON.parse` would. A lone surrogate's escape and any
+    // depth pass through, where reading it here as a value would refuse them. Not a doc comment,
+    // which schemars would make the schema's description: the protocol's is `{}`, any value.
+    #[cfg_attr(feature = "schema", schemars(with = "serde_json::Value"))]
+    pub payload: Box<serde_json::value::RawValue>,
+}
+
+/// The hook a request is for, as the hook client names it: the harness's event, or `wait`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct HookEvent(String);
+
+impl HookEvent {
+    pub fn parse(text: &str) -> Option<Self> {
+        (!text.is_empty()).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One offer of a message, `<message id>-<offer id>`: plain token characters, so every client
+/// echoes it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct OfferToken(String);
+
+impl OfferToken {
+    pub fn parse(text: &str) -> Option<Self> {
+        let (message, offer) = text.strip_prefix("msg_")?.split_once('-')?;
+        let hex = message.len() == 32
+            && message
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        let plain = (1..=32).contains(&offer.len())
+            && offer
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_lowercase());
+        (hex && plain).then(|| Self(text.to_owned()))
+    }
+
+    /// The token for one offer of a message.
+    pub fn of(message: &MessageId, offer: &str) -> Option<Self> {
+        Self::parse(&format!("{message}-{offer}"))
+    }
+
+    /// The id of the message it is an offer of.
+    pub fn message(&self) -> &str {
+        self.0
+            .split_once('-')
+            .map_or(self.0.as_str(), |(message, _)| message)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What the hook client prints and exits with, verbatim; it knows no harness format.
+///
+/// On the wire it is framed rather than JSON, so a client with no JSON parser can read it byte for
+/// byte: `Content-Type` is [`HOOK_REPLY_TYPE`], `Content-Length` is set, `Bazhen-Exit-Code`
+/// carries `exit_code`, `Bazhen-Offered` the comma-separated `offered` tokens,
+/// `Bazhen-Stdout-Bytes` the UTF-8 length of `stdout`, and the body is `stdout` then `stderr`. A
+/// client fails open on anything else, or on a body over [`HOOK_REPLY_MAX_BYTES`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct HookReply {
+    pub exit_code: u8,
+    pub stdout: String,
+    pub stderr: String,
+    /// One token per message this reply hands to the harness, which the client acks once it has
+    /// written: the message's id and this offer's own, so an ack names the offer it confirms and a
+    /// late one for an earlier offer of the same message confirms nothing.
+    pub offered: Vec<OfferToken>,
+}
+
+/// The hook client's word that it wrote a reply's offered messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct HookAck {
+    pub agent_id: AgentId,
+    pub offered: Vec<OfferToken>,
+}
+
+impl TryFrom<String> for ProtocolVersion {
+    type Error = Refused;
+    fn try_from(value: String) -> Result<Self, Refused> {
+        Self::parse(&value).ok_or_else(|| Refused::new("a protocol version", value))
+    }
+}
+
+impl TryFrom<String> for HookEvent {
+    type Error = Refused;
+    fn try_from(value: String) -> Result<Self, Refused> {
+        Self::parse(&value).ok_or_else(|| Refused::new("a hook event", value))
+    }
+}
+
+impl TryFrom<String> for OfferToken {
+    type Error = Refused;
+    fn try_from(value: String) -> Result<Self, Refused> {
+        Self::parse(&value).ok_or_else(|| Refused::new("an offer token", value))
+    }
+}
+
+impl From<ProtocolVersion> for String {
+    fn from(version: ProtocolVersion) -> Self {
+        version.0
+    }
+}
+
+impl From<HookEvent> for String {
+    fn from(event: HookEvent) -> Self {
+        event.0
+    }
+}
+
+impl From<OfferToken> for String {
+    fn from(token: OfferToken) -> Self {
+        token.0
+    }
+}
+
+impl fmt::Display for OfferToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for ProtocolVersion {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ProtocolVersion".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for HookEvent {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "HookEvent".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string", "minLength": 1 })
+    }
+}
+
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for OfferToken {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "OfferToken".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$",
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

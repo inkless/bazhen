@@ -1,0 +1,84 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "exitCode": 2,
+      "stdout": "",
+      "stderr": "Message for you",
+      "offered": [
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9",
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1"
+      ]
+    },
+    "parsed": {
+      "exitCode": 2,
+      "stdout": "",
+      "stderr": "Message for you",
+      "offered": [
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9",
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1"
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "exitCode": 0,
+      "stdout": "{}",
+      "stderr": "",
+      "offered": []
+    },
+    "parsed": {
+      "exitCode": 0,
+      "stdout": "{}",
+      "stderr": "",
+      "offered": []
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "exitCode": 2,
+      "stdout": "",
+      "stderr": "Message for you",
+      "offered": [
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9",
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1"
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "exitCode": 2,
+      "stdout": "",
+      "stderr": "Message for you",
+      "offered": [
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9",
+        "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1"
+      ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "exitCode": 0,
+      "stdout": "{}",
+      "stderr": "",
+      "offered": [],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "exitCode": 0,
+      "stdout": "{}",
+      "stderr": "",
+      "offered": []
+    }
+  }
+]

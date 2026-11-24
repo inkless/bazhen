@@ -21,11 +21,12 @@ use bazhen_protocol::events::typed::{TypedEvent, TypedRecordedEvent};
 use bazhen_protocol::events::{
     ClientEventFrame, EVENT_KINDS, Event, EventFrame, EventStreamQuery, event_kind, typed,
 };
-use bazhen_protocol::ids::{TaskId, is_id};
+use bazhen_protocol::ids::{MessageId, TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
-    AttentionKind, MESSAGE_WAIT_MAX_MS, MailboxState, SendMessageRequest, SendMessageResponse,
-    WaitMessagesRequest, WaitMessagesResponse,
+    AttentionKind, HOOK_PROTOCOL_VERSION, HOOK_REPLY_MAX_BYTES, HOOK_REPLY_TYPE, HookAck,
+    HookReply, HookRequest, MESSAGE_WAIT_MAX_MS, MailboxState, OfferToken, ProtocolVersion,
+    SendMessageRequest, SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
 };
 use bazhen_protocol::names::{AGENT_NAME_MAX, AgentName, AgentRef, Role};
 use bazhen_protocol::notices::{
@@ -336,6 +337,9 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("FinishTaskRequest", round_trips::<FinishTaskRequest>),
     ("FleetAgent", round_trips::<FleetAgent>),
     ("HealthResponse", round_trips::<HealthResponse>),
+    ("HookAck", round_trips::<HookAck>),
+    ("HookReply", round_trips::<HookReply>),
+    ("HookRequest", round_trips::<HookRequest>),
     ("LaunchAgentRequest", round_trips::<LaunchAgentRequest>),
     ("LaunchAgentResponse", round_trips::<LaunchAgentResponse>),
     ("OpenShellRequest", round_trips_at_edge::<OpenShellRequest>),
@@ -815,15 +819,17 @@ fn verdict(case: &Value) -> std::result::Result<String, String> {
 }
 
 /// Each section of `checks.json` a test here reads; one it doesn't fails.
-const CHECKS: [&str; 12] = [
+const CHECKS: [&str; 14] = [
     "agentName",
     "agentRef",
     "constants",
     "datetime",
     "detachKeys",
     "keystrokes",
+    "offerToken",
     "origin",
     "plainRemote",
+    "protocolVersion",
     "quoteNote",
     "role",
     "taskId",
@@ -874,6 +880,39 @@ fn names_and_references_are_what_the_protocol_takes() {
             "{case}"
         );
         assert_eq!(is_id("task", input(&case)), case["ok"] == true, "{case}");
+    }
+}
+
+#[test]
+fn a_hook_request_keeps_its_payloads_text_whatever_json_parse_takes() {
+    let deep = format!("{}{}", "[".repeat(600), "]".repeat(600));
+    for payload in [r#"{"a":"\ud83d x","b":"\udc00"}"#, &deep, "null", "7"] {
+        let body = format!(
+            r#"{{"protocolVersion":"1.0","agentId":"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d","event":"Stop","pid":1,"ppid":0,"payload":{payload}}}"#
+        );
+        let read: HookRequest = serde_json::from_str(&body).unwrap();
+        assert_eq!(read.payload.get(), payload);
+    }
+    let empty = r#"{"protocolVersion":"1.0","agentId":"agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d","event":"","pid":1,"ppid":0,"payload":null}"#;
+    assert!(serde_json::from_str::<HookRequest>(empty).is_err());
+}
+
+#[test]
+fn offer_tokens_and_protocol_versions_are_what_the_protocol_takes() {
+    for case in cases("offerToken").unwrap() {
+        let token = OfferToken::parse(input(&case));
+        let got = token.as_ref().map(|t| t.as_str().to_owned());
+        assert_eq!(got.ok_or(()), verdict(&case).map_err(|_| ()), "{case}");
+        if let Some(token) = token {
+            let (message, offer) = input(&case).split_once('-').unwrap();
+            assert_eq!(token.message(), message, "{case}");
+            let id = MessageId::parse(message);
+            assert_eq!(id.and_then(|id| OfferToken::of(&id, offer)), Some(token));
+        }
+    }
+    for case in cases("protocolVersion").unwrap() {
+        let got = ProtocolVersion::parse(input(&case)).map(|v| v.as_str().to_owned());
+        assert_eq!(got.ok_or(()), verdict(&case).map_err(|_| ()), "{case}");
     }
 }
 
@@ -957,6 +996,9 @@ fn the_constants_are_the_protocols() {
     assert_eq!(constants["pairingCodeLength"], PAIRING_CODE_LENGTH);
     assert_eq!(constants["deviceNameMax"], DEVICE_NAME_MAX);
     assert_eq!(constants["devicePaired"], DEVICE_PAIRED);
+    assert_eq!(constants["hookProtocolVersion"], HOOK_PROTOCOL_VERSION);
+    assert_eq!(constants["hookReplyType"], HOOK_REPLY_TYPE);
+    assert_eq!(constants["hookReplyMaxBytes"], HOOK_REPLY_MAX_BYTES);
     let harnesses: Vec<&str> = HarnessId::ALL.iter().map(|h| h.as_str()).collect();
     assert_eq!(constants["harnesses"], serde_json::json!(harnesses));
     let all = [

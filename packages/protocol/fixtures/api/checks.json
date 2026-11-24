@@ -8,6 +8,9 @@
     "pairingCodeLength": 8,
     "deviceNameMax": 64,
     "devicePaired": "device_paired",
+    "hookProtocolVersion": "1.0",
+    "hookReplyType": "application/vnd.bazhen.hook-reply",
+    "hookReplyMaxBytes": 1048576,
     "settled": [
       "delivered",
       "seen",
@@ -308,6 +311,115 @@
       "input": "",
       "ok": false,
       "message": "a role is 1 to 32 lowercase letters, digits or -, starting with a letter"
+    }
+  ],
+  "offerToken": [
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9",
+      "ok": true,
+      "value": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-k3x9"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "ok": true,
+      "value": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-K",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-a-b",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_0190C3B2A1D47A3B8C1D2E3F4A5B6C7D-1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "msg_190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "agent_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d-1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    },
+    {
+      "input": "",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$/"
+    }
+  ],
+  "protocolVersion": [
+    {
+      "input": "1.0",
+      "ok": true,
+      "value": "1.0"
+    },
+    {
+      "input": "10.12",
+      "ok": true,
+      "value": "10.12"
+    },
+    {
+      "input": "1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "1.",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": ".1",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "1.0.0",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "v1.0",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "1.x",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "١.٠",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
+    },
+    {
+      "input": "",
+      "ok": false,
+      "message": "Invalid string: must match pattern /^[0-9]+\\.[0-9]+$/"
     }
   ],
   "taskNoteText": [
