@@ -16,6 +16,7 @@ pub const DEVICE_PAIRED: &str = "device_paired";
 
 /// Why a notice closed: the human put it away, or the device it is about was revoked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum NoticeCloseReason {
     Dismissed,
@@ -34,6 +35,7 @@ impl NoticeCloseReason {
 /// Who closed a notice: the owner on the Unix socket, the owner from a loopback browser where no
 /// device must pair, or the device's revocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum NoticeCloser {
     OwnerSocket,
@@ -52,6 +54,7 @@ impl NoticeCloser {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum NoticeState {
     Open,
@@ -60,6 +63,7 @@ pub enum NoticeState {
 
 /// The device a notice is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NoticeDevice {
     pub id: DeviceId,
     pub name: String,
@@ -68,6 +72,7 @@ pub struct NoticeDevice {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClosedFrom {
     pub id: DeviceId,
     pub name: String,
@@ -76,6 +81,7 @@ pub struct ClosedFrom {
 /// A notice. `kind`, `close_reason` and `actions` are strings, not enums: a value a later daemon
 /// adds must not fail an older client's whole snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Notice {
     pub id: NoticeId,
@@ -92,12 +98,14 @@ pub struct Notice {
 
 /// `POST /v1/notices/:id/dismiss`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DismissNoticeRequest {
     pub idempotency_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DismissNoticeResponse {
     pub event_ids: Vec<u64>,
@@ -106,6 +114,7 @@ pub struct DismissNoticeResponse {
 /// `POST /v1/pairing`: a browser trades a code for a device cookie. The code is as typed: case,
 /// spaces and dashes don't matter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PairRequest {
     pub code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,6 +123,7 @@ pub struct PairRequest {
 
 /// The token itself travels only in the `Set-Cookie` header of this response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
     pub device_id: DeviceId,
@@ -122,6 +132,7 @@ pub struct PairResponse {
 
 /// The LAN listener a pairing code names, with the certificate's fingerprint to check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingLan {
     pub url: String,
@@ -131,6 +142,7 @@ pub struct PairingLan {
 
 /// `POST /v1/pairing/codes`: a fresh code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingCodeResponse {
     pub code: String,
@@ -141,6 +153,7 @@ pub struct PairingCodeResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
     pub id: DeviceId,
@@ -152,10 +165,12 @@ pub struct Device {
 
 /// `GET /v1/devices`: every device not revoked, expired ones too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DevicesResponse {
     pub devices: Vec<Device>,
 }
 
 /// `POST /v1/devices/:id/revoke`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RevokeDeviceResponse {}

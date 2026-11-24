@@ -25,6 +25,7 @@ pub fn is_task_brief(brief: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskState {
     Open,
@@ -44,6 +45,7 @@ impl TaskState {
 
 /// How a task is finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskOutcome {
     Done,
@@ -62,6 +64,7 @@ impl TaskOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum AssignmentState {
     Active,
@@ -78,6 +81,7 @@ impl AssignmentState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AssignmentEndReason {
     Unassigned,
@@ -108,6 +112,7 @@ impl AssignmentEndReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
     pub id: TaskId,
@@ -118,6 +123,7 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Assignment {
     pub id: AssignmentId,
@@ -131,6 +137,7 @@ pub struct Assignment {
 
 /// A note on a task, from the agent working it or the human: progress, or a handoff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskNote {
     pub event_id: u64,
@@ -144,6 +151,7 @@ pub struct TaskNote {
 
 /// `GET /v1/tasks/:id`: a task with its brief, assignments, subtasks and notes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskDetail {
     pub id: TaskId,
@@ -161,6 +169,7 @@ pub struct TaskDetail {
 
 /// An agent given a role on a task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
     pub agent_id: AgentRef,
@@ -169,6 +178,7 @@ pub struct Grant {
 
 /// `POST /v1/tasks`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequest {
     pub idempotency_key: String,
@@ -181,6 +191,7 @@ pub struct CreateTaskRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskResponse {
     pub task_id: TaskId,
@@ -191,6 +202,7 @@ pub struct CreateTaskResponse {
 
 /// `POST /v1/tasks/:id/assign`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AssignTaskRequest {
     pub idempotency_key: String,
@@ -199,6 +211,7 @@ pub struct AssignTaskRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AssignTaskResponse {
     pub assignment_id: AssignmentId,
@@ -207,6 +220,7 @@ pub struct AssignTaskResponse {
 
 /// `POST /v1/tasks/:id/unassign`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct UnassignTaskRequest {
     pub idempotency_key: String,
@@ -215,6 +229,7 @@ pub struct UnassignTaskRequest {
 
 /// `POST /v1/tasks/:id/finish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FinishTaskRequest {
     pub idempotency_key: String,
@@ -227,6 +242,7 @@ pub struct FinishTaskRequest {
 
 /// `POST /v1/tasks/:id/notes`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AddTaskNoteRequest {
     pub idempotency_key: String,
@@ -236,6 +252,7 @@ pub struct AddTaskNoteRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCommandResponse {
     pub event_ids: Vec<u64>,
@@ -243,6 +260,7 @@ pub struct TaskCommandResponse {
 
 /// A new agent to launch for a delegated task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Launch {
     pub harness: HarnessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +271,7 @@ pub struct Launch {
 
 /// `POST /v1/tasks/delegate`: a subtask given to an agent named, or to one launched for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DelegateTaskRequest {
     pub idempotency_key: String,
@@ -270,6 +289,7 @@ pub struct DelegateTaskRequest {
 
 /// `POST /v1/escalations`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct EscalateRequest {
     pub idempotency_key: String,
@@ -279,12 +299,14 @@ pub struct EscalateRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct EscalateResponse {
     pub attention_id: AttentionId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SentTo {
     pub agent_id: AgentId,
@@ -292,6 +314,7 @@ pub struct SentTo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Skipped {
     pub agent_id: AgentId,
@@ -300,6 +323,7 @@ pub struct Skipped {
 
 /// `POST /v1/tasks/:id/messages`: one message to each of the task's assignees but the sender.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct BroadcastMessageResponse {
     pub sent: Vec<SentTo>,

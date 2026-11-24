@@ -7,6 +7,7 @@ use crate::ids::{AgentId, EnvironmentId, TerminalId};
 
 /// Light or dark: the background a TUI is started for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TuiTheme {
     Light,
@@ -31,6 +32,7 @@ impl TuiTheme {
 
 /// Set while a terminal runs on a holder this build can't fully serve.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct NeedsRestart {
     pub holder_pid: Option<u64>,
@@ -39,6 +41,7 @@ pub struct NeedsRestart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalState {
     Creating,
@@ -88,6 +91,7 @@ impl TerminalState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ShellCommand {
     Close,
@@ -116,6 +120,7 @@ pub fn shell_commands(state: TerminalState, linked: bool) -> Vec<ShellCommand> {
 
 /// A program the user was shown running in a shell, and chose to end with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct BusyShell {
     pub terminal_id: TerminalId,
@@ -124,12 +129,14 @@ pub struct BusyShell {
 
 /// The program a shell runs in its foreground, and since when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Foreground {
     pub command: String,
     pub since: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Shell {
     pub id: TerminalId,
@@ -153,6 +160,7 @@ pub struct Shell {
 
 /// `POST /v1/shells`: a shell beside an agent, in its directory, or a shell of its own in `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenShellRequest {
     pub idempotency_key: String,
@@ -178,6 +186,7 @@ pub struct OpenShellRequest {
 
 /// `POST /v1/shells/:id/close`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseShellRequest {
     pub idempotency_key: String,
@@ -204,6 +213,7 @@ pub struct CloseShellRequest {
 
 /// What a command on a shell produced: the shell it was on, and the events it recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ShellCommandResponse {
     pub terminal_id: TerminalId,
@@ -212,6 +222,7 @@ pub struct ShellCommandResponse {
 
 /// `POST /v1/shells/:id/restart`: a new shell in a lost one's place.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RestartShellRequest {
     pub idempotency_key: String,
@@ -233,6 +244,7 @@ pub struct RestartShellRequest {
 
 /// `POST /v1/shells/:id/rename`: a name for the shell, or `None` to take it away.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RenameShellRequest {
     pub idempotency_key: String,
@@ -279,6 +291,7 @@ pub const SHELL_TOKEN_MAX_UNITS: usize = 128;
 /// What a shell's integration reports over the daemon's socket, as the shell starts running a
 /// line: never over HTTP. `token` is the shell's own, from its environment.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellReport {
     pub token: String,
     /// When the shell started running the line, in microseconds since the epoch: a report earlier
@@ -319,6 +332,7 @@ impl std::fmt::Debug for ShellReport {
 /// so the daemon marks it itself. Only a shell's own integration says so: no request from a client
 /// carries it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellPrompt {
     pub token: String,
     #[serde(
@@ -350,6 +364,7 @@ impl std::fmt::Debug for ShellPrompt {
 /// at once. It has a route of its own, so a daemon that predates it answers 404 rather than read
 /// it as a prompt.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ShellDecline {
     pub token: String,
 }

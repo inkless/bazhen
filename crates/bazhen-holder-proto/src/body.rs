@@ -33,6 +33,7 @@ pub struct Invalid(String);
 /// An integer in `MIN..=MAX`. `K` tells apart integers with the same bounds and other meanings,
 /// so an offset can't be passed where a generation is wanted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "u64", into = "u64", bound = "K: Copy")]
 pub struct Bounded<const MIN: u64, const MAX: u64, K = ()>(u64, PhantomData<K>);
 
@@ -97,6 +98,7 @@ pub type HistoryLines = Bounded<0, MAX_HISTORY_LINES>;
 
 /// An exit code: any integer a JavaScript peer holds exactly, negative ones included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "i64", into = "i64")]
 pub struct ExitCode(i64);
 
@@ -133,6 +135,7 @@ impl From<ExitCode> for i64 {
 
 /// A string of `MIN..=MAX` UTF-8 bytes. The TypeScript peer counts the same bytes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
 pub struct Utf8<const MAX: usize, const MIN: usize = 0>(String);
 
@@ -181,6 +184,7 @@ pub type VersionText = Utf8<VERSION_MAX_BYTES>;
 
 /// The highest version a peer speaks in each major it supports, 1 to 16 of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "Vec<VersionText>", into = "Vec<VersionText>")]
 pub struct Versions(Vec<VersionText>);
 
@@ -235,6 +239,7 @@ impl<const MAX: usize, const MIN: usize> AsRef<str> for Utf8<MAX, MIN> {
 
 /// `major.minor` in ASCII digits, as an agreed version is written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
 pub struct ProtocolVersion(String);
 
@@ -278,6 +283,7 @@ impl From<ProtocolVersion> for String {
 
 /// Names the holder's socket file, so it stays a plain file name: 1 to 64 of `[A-Za-z0-9_-]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
 pub struct TerminalId(String);
 
@@ -319,6 +325,7 @@ impl From<TerminalId> for String {
 /// Whatever the daemon writes beside a terminal: the holder stores and echoes them, and reads
 /// none.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     try_from = "BTreeMap<TagName, TagValue>",
     into = "BTreeMap<TagName, TagValue>"
@@ -363,6 +370,7 @@ pub const RESERVED_ENV_NAMES: [&str; 1] = ["__proto__"];
 
 /// A program's environment.
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     try_from = "BTreeMap<String, String>",
     into = "BTreeMap<String, String>"
@@ -413,6 +421,7 @@ impl From<Env> for BTreeMap<String, String> {
 
 /// A program's argv: at least its name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "Vec<String>", into = "Vec<String>")]
 pub struct Argv(Vec<String>);
 
@@ -448,6 +457,7 @@ impl From<Argv> for Vec<String> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Size {
     pub cols: Cols,
     pub rows: Rows,
@@ -456,6 +466,7 @@ pub struct Size {
 /// Read from a JSON string only: serde would also read an enum from a one-key object
 /// (`{"SIGINT": null}`), which zod refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "&'static str")]
 pub enum Signal {
     Sigint,
@@ -498,6 +509,7 @@ impl From<Signal> for &'static str {
 /// [`Theme::colours`] gives it. A terminal with no theme is told dark. Read from a JSON string
 /// only, as `Signal` is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "&'static str")]
 pub enum Theme {
     Light,
@@ -556,6 +568,7 @@ impl From<Theme> for &'static str {
 
 /// How a child ended: with a code, by a signal named as in `SIGTERM`, or in a way not known.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ExitStatus {
     Exited { code: ExitCode },
@@ -565,6 +578,7 @@ pub enum ExitStatus {
 
 /// What a terminal runs. `respawn` replaces it, keeping the terminal, its tags and its size.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ProcessSpec {
     pub argv: Argv,
     pub cwd: NonEmpty,
@@ -584,6 +598,7 @@ fn default_history_lines() -> HistoryLines {
 
 /// What a holder reads from its stdin when the daemon starts it; `decode_spawn_spec` reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SpawnSpec {
     pub argv: Argv,
@@ -622,6 +637,7 @@ impl SpawnSpec {
 
 /// What every major reads of a spawn spec or a `hello` request first: the frozen `protocol`.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub(crate) struct FrozenProtocol {
     pub(crate) protocol: Versions,
 }
@@ -629,6 +645,7 @@ pub(crate) struct FrozenProtocol {
 /// Opens every connection, with the versions the client speaks; `writer` asks for the slot whose
 /// `input` the holder takes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HelloRequest {
     pub protocol: Versions,
     #[serde(
@@ -640,6 +657,7 @@ pub struct HelloRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubscribeFrom {
     pub generation: Generation,
     pub offset: Offset,
@@ -649,6 +667,7 @@ pub struct SubscribeFrom {
 /// just before, refused `stale-generation` if a respawn has since overtaken it; with no snapshot
 /// just before, from the holder's offset as it reads the request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubscribeRequest {
     #[serde(
         default,
@@ -659,17 +678,20 @@ pub struct SubscribeRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SignalRequest {
     pub signal: Signal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SetTagsRequest {
     pub tags: Tags,
 }
 
 /// `None` is a terminal with no theme, which is told dark, as at spawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SetThemeRequest {
     #[serde(deserialize_with = "json::nullable")]
     pub theme: Option<Theme>,
@@ -680,6 +702,7 @@ pub struct SetThemeRequest {
 /// C1 control or DEL, and, unless marked with `brackets`, nothing beyond printable ASCII. Why a
 /// text is refused never quotes it. Since 1.3.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "PasteFields", into = "PasteFields")]
 pub struct PasteRequest(PasteFields);
 
@@ -694,6 +717,7 @@ impl std::fmt::Debug for PasteRequest {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 struct PasteFields {
     generation: Generation,
     text: String,
@@ -757,6 +781,7 @@ impl From<PasteRequest> for PasteFields {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HelloReply {
     /// The version agreed on, in which both sides speak from here on.
@@ -793,12 +818,14 @@ pub struct HelloReply {
 
 /// What every major reads of a hello reply first, to know which major's schema the rest is in.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub(crate) struct FrozenHelloReply {
     pub(crate) version: ProtocolVersion,
 }
 
 /// Memory per terminal. `rss` is `None` where the OS won't say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
     pub engine_bytes: Count,
@@ -819,6 +846,7 @@ pub struct Stats {
 
 /// The PTY's foreground group, from its master, with start times.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Foreground {
     pub child_pid: Pid,
@@ -830,6 +858,7 @@ pub struct Foreground {
 /// Reads the screen shown as plain text, after the newest `history` rows of the main screen's
 /// history: see `HolderScreenRequest` in `holder.ts` for the answers. Since 1.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ScreenRequest {
     pub history: Count,
 }
@@ -837,10 +866,12 @@ pub struct ScreenRequest {
 /// The screen as text: a line a row, each ended by `\n`, with no other control, so it can be
 /// printed to a terminal as it is. `history` is how many rows of the text are history. Since 1.4.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(try_from = "ScreenFields", into = "ScreenFields")]
 pub struct Screen(ScreenFields);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 struct ScreenFields {
     text: String,
     history: Count,
@@ -884,12 +915,14 @@ impl From<Screen> for ScreenFields {
 /// The subscriber isn't sent `[from, to)`: the ring no longer holds it, or the subscriber was
 /// owed more `resized` than the holder keeps for one that lags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Gap {
     pub from: Offset,
     pub to: Offset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Resized {
     pub offset: Offset,
     pub cols: Cols,
@@ -897,12 +930,14 @@ pub struct Resized {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Title {
     pub offset: Offset,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Alternate {
     pub offset: Offset,
     pub on: bool,
@@ -913,6 +948,7 @@ pub struct Alternate {
 /// sent it again after its subscription's `ok`, and output can follow the first. A consumer takes
 /// the first of a generation's and ignores the rest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Exited {
     pub generation: Generation,
     #[serde(deserialize_with = "json::object")]
@@ -923,6 +959,7 @@ pub struct Exited {
 /// main screen into history as `CSI 2 J` does, and resets as RIS does but keeps the history; a
 /// mirror whose reset clears its history snapshots again instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Respawned {
     pub generation: Generation,
@@ -932,6 +969,7 @@ pub struct Respawned {
 
 /// The `request` of `ok` and `error` names the request answered, for logs: its id says which.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OkBody {
     pub request: String,
 }
@@ -1007,6 +1045,7 @@ impl ErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ErrorBody {
     pub request: String,
     pub code: String,

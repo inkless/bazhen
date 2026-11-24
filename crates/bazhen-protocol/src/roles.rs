@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::names::Role;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum RoleSource {
     Builtin,
@@ -12,6 +13,7 @@ pub enum RoleSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RoleDefinition {
     pub key: Role,
@@ -27,6 +29,7 @@ pub struct RoleDefinition {
 
 /// A role file that was skipped, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RoleProblem {
     pub file: String,
     pub problem: String,
@@ -34,6 +37,7 @@ pub struct RoleProblem {
 
 /// `GET /v1/roles`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RolesResponse {
     pub roles: Vec<RoleDefinition>,
     pub problems: Vec<RoleProblem>,

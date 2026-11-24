@@ -5,12 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+schema = ["dep:schemars"]
+
 [dependencies]
 ryu-js = { workspace = true }
+schemars = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+bazhen-protocol = { workspace = true, features = ["schema"] }
 proptest = { workspace = true }
 
 [lints]
