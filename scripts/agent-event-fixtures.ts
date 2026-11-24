@@ -28,14 +28,18 @@ const K = id("agent", 10);
 const L = id("agent", 11);
 const [M1, M2, M3, M9] = [id("msg", 1), id("msg", 2), id("msg", 3), id("msg", 9)];
 const O1 = id("obs", 1);
+const O2 = id("obs", 2);
 const [N1, N2, N9] = [id("attn", 1), id("attn", 2), id("attn", 9)];
-const [TK1, TK2, TK9] = [id("task", 1), id("task", 2), id("task", 9)];
+const [TK1, TK2, TK3, TK9] = [id("task", 1), id("task", 2), id("task", 3), id("task", 9)];
 const AS1 = id("asgn", 1);
 const AS2 = id("asgn", 2);
 const AS3 = id("asgn", 3);
 const AS4 = id("asgn", 4);
 const AS5 = id("asgn", 5);
 const AS6 = id("asgn", 6);
+const AS7 = id("asgn", 7);
+const AS8 = id("asgn", 8);
+const AS9 = id("asgn", 9);
 const T1 = id("term", 1);
 const T2 = id("term", 2);
 const T3 = id("term", 3);
@@ -265,6 +269,15 @@ const STEPS: readonly NewEvent<EventType>[] = [
   step("mailbox.requeued", M2, "system", { reason: "not_seen" }),
   step("mailbox.offered", M2, L, {}),
   step("mailbox.requeued", M2, "system", { reason: "daemon_restart" }),
+  // Each reason the agent's side caused counts a failure; the rest count none.
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "stop_failed" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "interrupted" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "not_written" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "session_started" }),
   step("mailbox.undeliverable", M2, "system", { reason: "gave_up" }),
   step("mailbox.queued", M3, "user", { agentId: E, body: "for codex" }),
   step("mailbox.accepted", M3, "system", { offline: true }),
@@ -279,7 +292,8 @@ const STEPS: readonly NewEvent<EventType>[] = [
     accepted: true,
     toolUseId: "tu1",
   }),
-  step("message.observed", O1, L, {
+  // The same tool call observed again, under the id the daemon mints for each observation.
+  step("message.observed", O2, L, {
     from: L,
     to: E,
     summary: "again",
@@ -353,6 +367,27 @@ const STEPS: readonly NewEvent<EventType>[] = [
     role: "worker",
     parentAssignmentId: null,
   }),
+  // A child on another task, which the parent's ending ends; and one beside it, which stays.
+  step("task.created", TK3, "user", {
+    title: "Other",
+    brief: "another",
+    ownerAgentId: null,
+    parentTaskId: null,
+    delegatedFrom: null,
+  }),
+  step("assignment.granted", AS7, "user", {
+    taskId: TK3,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: AS4,
+  }),
+  step("assignment.granted", AS8, "user", {
+    taskId: TK3,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: null,
+  }),
+  step("assignment.ended", AS9, "user", { reason: "completed" }),
   step("task.finished", TK1, "user", { outcome: "done", note: "shipped" }),
   step("task.finished", TK1, "user", { outcome: "cancelled", note: null }),
   step("task.finished", TK2, "user", { outcome: "cancelled", note: null }),

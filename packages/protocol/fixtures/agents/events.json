@@ -941,6 +941,62 @@
       }
     },
     {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "stop_failed"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "interrupted"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "not_written"
+      }
+    },
+    {
+      "type": "mailbox.offered",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {}
+    },
+    {
+      "type": "mailbox.requeued",
+      "entityId": "msg_01900000000070008000000000000002",
+      "actor": "system",
+      "payload": {
+        "reason": "session_started"
+      }
+    },
+    {
       "type": "mailbox.undeliverable",
       "entityId": "msg_01900000000070008000000000000002",
       "actor": "system",
@@ -1004,7 +1060,7 @@
     },
     {
       "type": "message.observed",
-      "entityId": "obs_01900000000070008000000000000001",
+      "entityId": "obs_01900000000070008000000000000002",
       "actor": "agent_0190000000007000800000000000000b",
       "payload": {
         "from": "agent_0190000000007000800000000000000b",
@@ -1199,6 +1255,49 @@
         "role": "worker",
         "parentAssignmentId": null
       }
+    },
+    {
+      "type": "task.created",
+      "entityId": "task_01900000000070008000000000000003",
+      "actor": "user",
+      "payload": {
+        "title": "Other",
+        "brief": "another",
+        "ownerAgentId": null,
+        "parentTaskId": null,
+        "delegatedFrom": null
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000007",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000004"
+      }
+    },
+    {
+      "type": "assignment.granted",
+      "entityId": "asgn_01900000000070008000000000000008",
+      "actor": "user",
+      "payload": {
+        "taskId": "task_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": null
+      }
+    },
+    {
+      "type": "assignment.ended",
+      "entityId": "asgn_01900000000070008000000000000009",
+      "actor": "user",
+      "payload": {
+        "reason": "completed"
+      },
+      "refused": "Error: no assignment asgn_01900000000070008000000000000009"
     },
     {
       "type": "task.finished",
@@ -1473,7 +1572,7 @@
         "terminal_id": "term_0190000000007000800000000000000c",
         "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s7\"}",
         "created_event_id": 62,
-        "updated_event_id": 98,
+        "updated_event_id": 109,
         "usage": null,
         "transcript": null,
         "launched_by": null,
@@ -1748,7 +1847,7 @@
         "kind": "agent",
         "agent_session_id": "agent_0190000000007000800000000000000b",
         "created_event_id": 62,
-        "updated_event_id": 98,
+        "updated_event_id": 109,
         "exit": null,
         "theme": null,
         "cwd": null,
@@ -1801,11 +1900,11 @@
         "state": "undeliverable",
         "prompt_id": null,
         "created_event_id": 65,
-        "updated_event_id": 74,
+        "updated_event_id": 82,
         "first_offered_event_id": 70,
-        "failures": 1,
+        "failures": 3,
         "from_agent_id": null,
-        "settled_event_id": 74
+        "settled_event_id": 82
       },
       {
         "id": "msg_01900000000070008000000000000003",
@@ -1813,12 +1912,12 @@
         "body": "for codex",
         "state": "undeliverable",
         "prompt_id": null,
-        "created_event_id": 75,
-        "updated_event_id": 77,
+        "created_event_id": 83,
+        "updated_event_id": 85,
         "first_offered_event_id": null,
         "failures": 0,
         "from_agent_id": null,
-        "settled_event_id": 77
+        "settled_event_id": 85
       }
     ],
     "observed_messages": [
@@ -1829,7 +1928,7 @@
         "summary": "a note",
         "accepted": 1,
         "tool_use_id": "tu1",
-        "created_event_id": 78
+        "created_event_id": 86
       }
     ],
     "attention_items": [
@@ -1841,8 +1940,8 @@
         "summary": "run ls?",
         "tool_use_id": "tu2",
         "main_agent": 1,
-        "created_event_id": 79,
-        "updated_event_id": 81,
+        "created_event_id": 87,
+        "updated_event_id": 89,
         "kind": "approval",
         "task_id": null,
         "message_id": null
@@ -1855,8 +1954,8 @@
         "summary": "which?",
         "tool_use_id": null,
         "main_agent": 0,
-        "created_event_id": 80,
-        "updated_event_id": 82,
+        "created_event_id": 88,
+        "updated_event_id": 90,
         "kind": "question",
         "task_id": "task_01900000000070008000000000000001",
         "message_id": "msg_01900000000070008000000000000001"
@@ -1871,8 +1970,8 @@
         "owner_agent_id": null,
         "parent_task_id": null,
         "note": "shipped",
-        "created_event_id": 83,
-        "updated_event_id": 93,
+        "created_event_id": 91,
+        "updated_event_id": 104,
         "delegated_from": null
       },
       {
@@ -1883,14 +1982,26 @@
         "owner_agent_id": null,
         "parent_task_id": "task_01900000000070008000000000000001",
         "note": null,
-        "created_event_id": 86,
-        "updated_event_id": 94,
+        "created_event_id": 94,
+        "updated_event_id": 105,
+        "delegated_from": null
+      },
+      {
+        "id": "task_01900000000070008000000000000003",
+        "title": "Other",
+        "brief": "another",
+        "state": "open",
+        "owner_agent_id": null,
+        "parent_task_id": null,
+        "note": null,
+        "created_event_id": 101,
+        "updated_event_id": 101,
         "delegated_from": null
       }
     ],
     "task_notes": [
       {
-        "event_id": 88,
+        "event_id": 96,
         "task_id": "task_01900000000070008000000000000001",
         "agent_session_id": "agent_0190000000007000800000000000000b",
         "author_role": "lead",
@@ -1898,7 +2009,7 @@
         "handoff": 1
       },
       {
-        "event_id": 89,
+        "event_id": 97,
         "task_id": "task_01900000000070008000000000000001",
         "agent_session_id": null,
         "author_role": null,
@@ -1915,8 +2026,8 @@
         "parent_assignment_id": null,
         "state": "ended",
         "end_reason": "unassigned",
-        "created_event_id": 84,
-        "updated_event_id": 91
+        "created_event_id": 92,
+        "updated_event_id": 99
       },
       {
         "id": "asgn_01900000000070008000000000000002",
@@ -1926,8 +2037,8 @@
         "parent_assignment_id": "asgn_01900000000070008000000000000001",
         "state": "ended",
         "end_reason": "parent_ended",
-        "created_event_id": 85,
-        "updated_event_id": 91
+        "created_event_id": 93,
+        "updated_event_id": 99
       },
       {
         "id": "asgn_01900000000070008000000000000003",
@@ -1937,8 +2048,8 @@
         "parent_assignment_id": "asgn_01900000000070008000000000000002",
         "state": "ended",
         "end_reason": "parent_ended",
-        "created_event_id": 87,
-        "updated_event_id": 91
+        "created_event_id": 95,
+        "updated_event_id": 99
       },
       {
         "id": "asgn_01900000000070008000000000000004",
@@ -1948,8 +2059,30 @@
         "parent_assignment_id": null,
         "state": "ended",
         "end_reason": "task_finished",
-        "created_event_id": 92,
-        "updated_event_id": 93
+        "created_event_id": 100,
+        "updated_event_id": 104
+      },
+      {
+        "id": "asgn_01900000000070008000000000000007",
+        "task_id": "task_01900000000070008000000000000003",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parent_assignment_id": "asgn_01900000000070008000000000000004",
+        "state": "ended",
+        "end_reason": "parent_ended",
+        "created_event_id": 102,
+        "updated_event_id": 104
+      },
+      {
+        "id": "asgn_01900000000070008000000000000008",
+        "task_id": "task_01900000000070008000000000000003",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parent_assignment_id": null,
+        "state": "active",
+        "end_reason": null,
+        "created_event_id": 103,
+        "updated_event_id": 103
       },
       {
         "id": "asgn_01900000000070008000000000000005",
@@ -1959,8 +2092,8 @@
         "parent_assignment_id": null,
         "state": "ended",
         "end_reason": "agent_closed",
-        "created_event_id": 95,
-        "updated_event_id": 98
+        "created_event_id": 106,
+        "updated_event_id": 109
       },
       {
         "id": "asgn_01900000000070008000000000000006",
@@ -1970,8 +2103,8 @@
         "parent_assignment_id": "asgn_01900000000070008000000000000005",
         "state": "ended",
         "end_reason": "parent_ended",
-        "created_event_id": 96,
-        "updated_event_id": 98
+        "created_event_id": 107,
+        "updated_event_id": 109
       }
     ],
     "events": [
@@ -2781,6 +2914,94 @@
       {
         "id": 74,
         "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 75,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"stop_failed\"}"
+      },
+      {
+        "id": 76,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 77,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"interrupted\"}"
+      },
+      {
+        "id": 78,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 79,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"not_written\"}"
+      },
+      {
+        "id": 80,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.offered",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{}"
+      },
+      {
+        "id": 81,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "mailbox.requeued",
+        "entity_type": "message",
+        "entity_id": "msg_01900000000070008000000000000002",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"reason\":\"session_started\"}"
+      },
+      {
+        "id": 82,
+        "host_id": "host_01900000000070008000000000000001",
         "type": "mailbox.undeliverable",
         "entity_type": "message",
         "entity_id": "msg_01900000000070008000000000000002",
@@ -2790,7 +3011,7 @@
         "payload": "{\"reason\":\"gave_up\"}"
       },
       {
-        "id": 75,
+        "id": 83,
         "host_id": "host_01900000000070008000000000000001",
         "type": "mailbox.queued",
         "entity_type": "message",
@@ -2801,7 +3022,7 @@
         "payload": "{\"agentId\":\"agent_01900000000070008000000000000005\",\"body\":\"for codex\"}"
       },
       {
-        "id": 76,
+        "id": 84,
         "host_id": "host_01900000000070008000000000000001",
         "type": "mailbox.accepted",
         "entity_type": "message",
@@ -2812,7 +3033,7 @@
         "payload": "{\"offline\":true}"
       },
       {
-        "id": 77,
+        "id": 85,
         "host_id": "host_01900000000070008000000000000001",
         "type": "mailbox.undeliverable",
         "entity_type": "message",
@@ -2823,7 +3044,7 @@
         "payload": "{\"reason\":\"agent_closed\"}"
       },
       {
-        "id": 78,
+        "id": 86,
         "host_id": "host_01900000000070008000000000000001",
         "type": "message.observed",
         "entity_type": "observed_message",
@@ -2834,7 +3055,7 @@
         "payload": "{\"from\":\"agent_0190000000007000800000000000000b\",\"to\":\"agent_01900000000070008000000000000005\",\"summary\":\"a note\",\"text\":\"a note, whole\",\"accepted\":true,\"toolUseId\":\"tu1\"}"
       },
       {
-        "id": 79,
+        "id": 87,
         "host_id": "host_01900000000070008000000000000001",
         "type": "attention.opened",
         "entity_type": "attention",
@@ -2845,7 +3066,7 @@
         "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"summary\":\"run ls?\",\"toolUseId\":\"tu2\",\"mainAgent\":true}"
       },
       {
-        "id": 80,
+        "id": 88,
         "host_id": "host_01900000000070008000000000000001",
         "type": "attention.opened",
         "entity_type": "attention",
@@ -2856,7 +3077,7 @@
         "payload": "{\"agentId\":\"agent_0190000000007000800000000000000b\",\"summary\":\"which?\",\"kind\":\"question\",\"taskId\":\"task_01900000000070008000000000000001\",\"messageId\":\"msg_01900000000070008000000000000001\",\"toolUseId\":null,\"mainAgent\":false}"
       },
       {
-        "id": 81,
+        "id": 89,
         "host_id": "host_01900000000070008000000000000001",
         "type": "attention.answered",
         "entity_type": "attention",
@@ -2867,7 +3088,7 @@
         "payload": "{\"decision\":\"allow\"}"
       },
       {
-        "id": 82,
+        "id": 90,
         "host_id": "host_01900000000070008000000000000001",
         "type": "attention.closed",
         "entity_type": "attention",
@@ -2878,7 +3099,7 @@
         "payload": "{\"reason\":\"timed_out\"}"
       },
       {
-        "id": 83,
+        "id": 91,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.created",
         "entity_type": "task",
@@ -2889,7 +3110,7 @@
         "payload": "{\"title\":\"Ship\",\"brief\":\"the brief\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}"
       },
       {
-        "id": 84,
+        "id": 92,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -2900,7 +3121,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"lead\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 85,
+        "id": 93,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -2911,7 +3132,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000001\"}"
       },
       {
-        "id": 86,
+        "id": 94,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.created",
         "entity_type": "task",
@@ -2922,7 +3143,7 @@
         "payload": "{\"title\":\"Part\",\"brief\":\"a part\",\"ownerAgentId\":\"agent_0190000000007000800000000000000b\",\"parentTaskId\":\"task_01900000000070008000000000000001\",\"delegatedFrom\":\"asgn_01900000000070008000000000000001\"}"
       },
       {
-        "id": 87,
+        "id": 95,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -2933,7 +3154,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000002\"}"
       },
       {
-        "id": 88,
+        "id": 96,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.noted",
         "entity_type": "task",
@@ -2944,7 +3165,7 @@
         "payload": "{\"text\":\"on it\",\"handoff\":true,\"role\":\"lead\"}"
       },
       {
-        "id": 89,
+        "id": 97,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.noted",
         "entity_type": "task",
@@ -2955,7 +3176,7 @@
         "payload": "{\"text\":\"thanks\",\"handoff\":false,\"role\":null}"
       },
       {
-        "id": 90,
+        "id": 98,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.owner_changed",
         "entity_type": "task",
@@ -2966,7 +3187,7 @@
         "payload": "{\"ownerAgentId\":null,\"delegatedFrom\":null}"
       },
       {
-        "id": 91,
+        "id": 99,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.ended",
         "entity_type": "assignment",
@@ -2977,7 +3198,7 @@
         "payload": "{\"reason\":\"unassigned\"}"
       },
       {
-        "id": 92,
+        "id": 100,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -2988,7 +3209,40 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 93,
+        "id": 101,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.created",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000003",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"title\":\"Other\",\"brief\":\"another\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}"
+      },
+      {
+        "id": 102,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000007",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000003\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000004\"}"
+      },
+      {
+        "id": 103,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "assignment.granted",
+        "entity_type": "assignment",
+        "entity_id": "asgn_01900000000070008000000000000008",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"taskId\":\"task_01900000000070008000000000000003\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":null}"
+      },
+      {
+        "id": 104,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.finished",
         "entity_type": "task",
@@ -2999,7 +3253,7 @@
         "payload": "{\"outcome\":\"done\",\"note\":\"shipped\"}"
       },
       {
-        "id": 94,
+        "id": 105,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.finished",
         "entity_type": "task",
@@ -3010,7 +3264,7 @@
         "payload": "{\"outcome\":\"cancelled\",\"note\":null}"
       },
       {
-        "id": 95,
+        "id": 106,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3021,7 +3275,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 96,
+        "id": 107,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3032,7 +3286,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000005\"}"
       },
       {
-        "id": 97,
+        "id": 108,
         "host_id": "host_01900000000070008000000000000001",
         "type": "agent.closing",
         "entity_type": "agent",
@@ -3043,7 +3297,7 @@
         "payload": "{}"
       },
       {
-        "id": 98,
+        "id": 109,
         "host_id": "host_01900000000070008000000000000001",
         "type": "agent.closed",
         "entity_type": "agent",

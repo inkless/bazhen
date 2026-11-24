@@ -74,7 +74,11 @@ fn optional(value: Option<&str>) -> Value {
 }
 
 /// A row's `state`, or `None` when there is no such row.
-fn state_of(tx: &Transaction<'_>, table: &str, id: &str) -> rusqlite::Result<Option<String>> {
+fn state_of(
+    tx: &Transaction<'_>,
+    table: &'static str,
+    id: &str,
+) -> rusqlite::Result<Option<String>> {
     tx.query_row(
         &format!("SELECT state FROM {table} WHERE id = ?"),
         [id],

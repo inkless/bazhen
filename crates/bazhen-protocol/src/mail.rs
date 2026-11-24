@@ -132,6 +132,22 @@ pub enum AttentionKind {
     Unknown(String),
 }
 
+impl AttentionKind {
+    /// The kind's name, as it is stored and written.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Approval => "approval",
+            Self::Question => "question",
+            Self::Failed => "failed",
+            Self::Undeliverable => "undeliverable",
+            Self::Escalation => "escalation",
+            Self::TaskDone => "task_done",
+            Self::StuckStarting => "stuck_starting",
+            Self::Unknown(name) => name,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AttentionAction {
@@ -200,5 +216,23 @@ mod tests {
         );
         let known: AttentionKind = serde_json::from_str(r#""stuck_starting""#).unwrap();
         assert_eq!(known, AttentionKind::StuckStarting);
+    }
+
+    #[test]
+    fn names_each_attention_kind_as_it_is_written() {
+        let kinds = [
+            AttentionKind::Approval,
+            AttentionKind::Question,
+            AttentionKind::Failed,
+            AttentionKind::Undeliverable,
+            AttentionKind::Escalation,
+            AttentionKind::TaskDone,
+            AttentionKind::StuckStarting,
+            AttentionKind::Unknown("a_kind_from_later".to_owned()),
+        ];
+        for kind in kinds {
+            let written = serde_json::to_value(&kind).unwrap();
+            assert_eq!(written.as_str(), Some(kind.as_str()), "{kind:?}");
+        }
     }
 }

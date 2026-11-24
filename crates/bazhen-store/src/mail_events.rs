@@ -222,10 +222,7 @@ pub(crate) fn project_attention(
                     &p.summary,
                     &p.tool_use_id,
                     i64::from(p.main_agent),
-                    serde_json::to_value(kind)?
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_owned(),
+                    kind.as_str(),
                     &p.task_id,
                     p.message_id.as_ref().map(Id::as_str),
                     int(at.id)?,
