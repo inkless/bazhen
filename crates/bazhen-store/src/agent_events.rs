@@ -313,7 +313,8 @@ fn transcript_recorded(
 ) -> Result<(), AppendError> {
     let (tx, id) = (moving.tx, moving.id);
     let stored = stored_ref(tx, id)?.ok_or_else(|| moving.refuse(no_agent(id)))?;
-    if session_id_of(stored.0.as_deref()) != Some(serde_json::json!(payload.session_id)) {
+    let bound = session_id_of(stored.0.as_deref()).map_err(|r| moving.refuse(r))?;
+    if bound != Some(serde_json::json!(payload.session_id)) {
         return Ok(());
     }
     update(
@@ -572,14 +573,14 @@ fn stored_ref(tx: &Transaction<'_>, id: &str) -> rusqlite::Result<Option<StoredR
 }
 
 /// The `id` of a stored external ref, null for none, or `None` where the stored JSON names no
-/// id, which matches nothing, as TypeScript's `undefined` matches nothing.
-fn session_id_of(stored: Option<&str>) -> Option<serde_json::Value> {
+/// id, which matches nothing, as TypeScript's `undefined` matches nothing. Stored JSON that doesn't
+/// parse is refused, as `JSON.parse` throws on it.
+fn session_id_of(stored: Option<&str>) -> Result<Option<serde_json::Value>, String> {
     match stored {
-        None => Some(serde_json::Value::Null),
+        None => Ok(Some(serde_json::Value::Null)),
         Some(json) => serde_json::from_str::<serde_json::Value>(json)
-            .ok()?
-            .get("id")
-            .cloned(),
+            .map(|value| value.get("id").cloned())
+            .map_err(|e| format!("the stored external ref isn't JSON: {e}")),
     }
 }
 
@@ -595,7 +596,7 @@ fn bound_to(
         .map_err(|e| e.to_string())?
         .and_then(|s| s.0);
     let wanted = external_ref.map_or(serde_json::Value::Null, |r| serde_json::json!(r.id));
-    let moved = session_id_of(stored.as_deref()) != Some(wanted);
+    let moved = session_id_of(stored.as_deref())? != Some(wanted);
     if let Some(r) = external_ref.filter(|r| moved && r.kind == ExternalRefKind::CodexThread) {
         let holder: Option<String> = tx
             .query_row(
@@ -729,4 +730,141 @@ pub(crate) fn end_descendants(tx: &Transaction<'_>, at: &At<'_>) -> Result<(), A
         (event, event),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use bazhen_protocol::ids::{AgentId, EnvironmentId};
+
+    use super::AgentChange;
+    use crate::testing::TempDir;
+    use crate::{AppendError, NewEvent, Store};
+
+    const ENV: &str = "env_01900000000070008000000000000001";
+
+    fn agent(n: u8) -> AgentId {
+        AgentId::parse(&format!("agent_0190000000007000800000000000000{n}")).unwrap()
+    }
+
+    fn change(json: &str) -> AgentChange {
+        let (kind, payload) = json.split_once(' ').unwrap();
+        match kind {
+            "launched" => AgentChange::Launched(serde_json::from_str(payload).unwrap()),
+            "running" => AgentChange::Running(serde_json::from_str(payload).unwrap()),
+            "transcript" => AgentChange::TranscriptRecorded(serde_json::from_str(payload).unwrap()),
+            "closing" => AgentChange::Closing,
+            "closed" => AgentChange::Closed,
+            other => panic!("no change {other}"),
+        }
+    }
+
+    fn append(store: &mut Store, agent: &AgentId, json: &str) -> Result<u64, AppendError> {
+        let event = NewEvent::Agent {
+            agent: agent.clone(),
+            actor: "system".to_owned(),
+            change: change(json),
+        };
+        store.write(|w| w.append(&event))
+    }
+
+    /// A store with an environment and agents 1 to `count` running, each on no terminal.
+    fn running(dir: &TempDir, count: u8) -> Store {
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let env = NewEvent::EnvironmentRegistered {
+            environment: EnvironmentId::parse(ENV).unwrap(),
+            payload: serde_json::from_str(r#"{"kind":"local"}"#).unwrap(),
+        };
+        store.write(|w| w.append(&env)).unwrap();
+        for n in 1..=count {
+            let launched = format!(
+                r#"launched {{"environmentId":"{ENV}","harness":"claude-code","project":"p","cwd":"/","terminalId":null}}"#
+            );
+            append(&mut store, &agent(n), &launched).unwrap();
+            append(
+                &mut store,
+                &agent(n),
+                r#"running {"externalRef":null,"runtimeRef":null}"#,
+            )
+            .unwrap();
+        }
+        store
+    }
+
+    fn assignments(store: &Store) -> Vec<(String, String, Option<String>)> {
+        let mut statement = store
+            .db
+            .prepare("SELECT id, state, end_reason FROM assignments ORDER BY id")
+            .unwrap();
+        statement
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn closing_an_agent_ends_its_assignments_and_every_one_granted_under_them_however_deep() {
+        let dir = TempDir::new("agent-close-assignments");
+        let mut store = running(&dir, 4);
+        let [a1, a2, a3, a4] = [1, 2, 3, 4].map(|n| agent(n).as_str().to_owned());
+        // a1 leads; a2 works under it, and a3 under a2; a4 works on its own.
+        store
+            .db
+            .execute_batch(&format!(
+                "INSERT INTO tasks (id, title, brief, state, created_event_id, updated_event_id)
+                   VALUES ('task_1', 'T', '', 'open', 1, 1);
+                 INSERT INTO assignments (id, task_id, agent_session_id, role,
+                   parent_assignment_id, state, created_event_id, updated_event_id) VALUES
+                   ('asgn_1', 'task_1', '{a1}', 'lead', NULL, 'active', 1, 1),
+                   ('asgn_2', 'task_1', '{a2}', 'worker', 'asgn_1', 'active', 1, 1),
+                   ('asgn_3', 'task_1', '{a3}', 'worker', 'asgn_2', 'active', 1, 1),
+                   ('asgn_4', 'task_1', '{a4}', 'worker', NULL, 'active', 1, 1);"
+            ))
+            .unwrap();
+        append(&mut store, &agent(1), "closing {}").unwrap();
+        let closed = append(&mut store, &agent(1), "closed {}").unwrap();
+        let ended =
+            |id: &str, reason: &str| (id.to_owned(), "ended".to_owned(), Some(reason.to_owned()));
+        assert_eq!(
+            assignments(&store),
+            [
+                ended("asgn_1", "agent_closed"),
+                ended("asgn_2", "parent_ended"),
+                ended("asgn_3", "parent_ended"),
+                ("asgn_4".to_owned(), "active".to_owned(), None),
+            ]
+        );
+        let updated: i64 = store
+            .db
+            .query_row(
+                "SELECT updated_event_id FROM assignments WHERE id = 'asgn_3'",
+                (),
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(u64::try_from(updated).ok(), Some(closed));
+    }
+
+    #[test]
+    fn refuses_a_transcript_or_a_bind_for_an_agent_whose_stored_external_ref_isn_t_json() {
+        let dir = TempDir::new("agent-bad-ref");
+        let mut store = running(&dir, 1);
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET external_ref = '{not json' WHERE id = ?",
+                [agent(1).as_str()],
+            )
+            .unwrap();
+        for json in [
+            r#"transcript {"sessionId":"s1","path":"/t.jsonl"}"#,
+            r#"running {"externalRef":null,"runtimeRef":null}"#,
+        ] {
+            let got = append(&mut store, &agent(1), json);
+            assert!(
+                matches!(&got, Err(AppendError::Refused { reason, .. }) if reason.starts_with("the stored external ref isn't JSON")),
+                "{json}: {got:?}"
+            );
+        }
+    }
 }
