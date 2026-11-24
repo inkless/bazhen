@@ -297,6 +297,18 @@ struct Walk<'a> {
     schema: &'a str,
 }
 
+/// The keywords that describe a value without holding it to anything.
+const ANNOTATIONS: &[&str] = &["description", "title", "examples", "$comment"];
+
+/// Whether `schema` takes any value, null too: `true`, or one of annotations alone.
+fn takes_any(schema: &Value) -> bool {
+    match schema {
+        Value::Bool(any) => *any,
+        Value::Object(keywords) => keywords.keys().all(|k| ANNOTATIONS.contains(&k.as_str())),
+        _ => false,
+    }
+}
+
 fn pointer(path: &[String]) -> String {
     path.iter().fold(String::new(), |mut pointer, segment| {
         pointer.push('/');
@@ -401,6 +413,7 @@ impl<'a> Walk<'a> {
             .flatten()
             .all(|schema| {
                 is_null(schema)
+                    || takes_any(schema)
                     || branches(schema).is_some_and(|b| b.iter().any(|b| is_null(self.resolved(b))))
                     || schema
                         .get("type")
@@ -1239,6 +1252,27 @@ mod tests {
             !bytes.iter().any(|c| c.kind.starts_with("astral")),
             "{bytes:?}"
         );
+    }
+
+    #[test]
+    fn plants_null_as_taken_where_the_schema_takes_any_value() {
+        let field = |schema: Value| json!({ "type": "object", "properties": { "v": schema }, "required": ["v"] });
+        let example = json!({ "v": 1 });
+        let null_taken = |rust: Value, protocol: Option<Value>| {
+            let protocol = protocol.map(field);
+            let cases = planted_in(&field(rust), protocol.as_ref(), &example).unwrap();
+            cases.iter().find(|c| c.kind == "null").map(|c| c.accept)
+        };
+        assert_eq!(null_taken(json!(true), Some(json!({}))), Some(true));
+        assert_eq!(
+            null_taken(json!({ "description": "any" }), None),
+            Some(true)
+        );
+        assert_eq!(
+            null_taken(json!(true), Some(json!({ "type": "number" }))),
+            Some(false)
+        );
+        assert_eq!(null_taken(json!({ "type": "number" }), None), Some(false));
     }
 
     #[test]
