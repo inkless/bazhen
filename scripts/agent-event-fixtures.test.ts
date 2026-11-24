@@ -23,14 +23,11 @@ describe("the agent event fixture", () => {
     expect(Object.keys(files)).toEqual(["events.json"]);
   });
 
-  it("appends every agent event the protocol has at least once", () => {
-    const agentEvents = Object.keys(EVENTS)
-      .filter((type) => type.startsWith("agent."))
-      .toSorted(byName);
-    const seen = [...new Set(appended.map((s) => s.type))]
-      .filter((type) => type.startsWith("agent."))
-      .toSorted(byName);
-    expect(seen).toEqual(agentEvents);
+  it("appends every event of agents, mail, attention and tasks the protocol has at least once", () => {
+    const families = ["agent.", "mailbox.", "message.", "attention.", "task.", "assignment."];
+    const ofThem = (type: string) => families.some((family) => type.startsWith(family));
+    const seen = [...new Set(appended.map((s) => s.type))].filter(ofThem).toSorted(byName);
+    expect(seen).toEqual(Object.keys(EVENTS).filter(ofThem).toSorted(byName));
   });
 
   it("records refusals as well as appends", () => {

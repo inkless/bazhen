@@ -1,5 +1,6 @@
-// What the Rust store's agent events are held to: a run of `agent.*` events the TypeScript store
-// appended, each with the payload it wrote or the refusal it gave, and the rows they left.
+// What the Rust store's agent events are held to: a run of the events of agents, their mail, the
+// items they raise for the human and their tasks, as the TypeScript store appended them, each with
+// the payload it wrote or the refusal it gave, and the rows they left.
 // `moon run :schema` writes it to packages/protocol/fixtures/agents/, where crates/bazhen-store's
 // tests replay the same events and compare.
 
@@ -24,6 +25,21 @@ const G = id("agent", 7);
 const H = id("agent", 8);
 const J = id("agent", 9);
 const K = id("agent", 10);
+const L = id("agent", 11);
+const [M1, M2, M3, M9] = [id("msg", 1), id("msg", 2), id("msg", 3), id("msg", 9)];
+const O1 = id("obs", 1);
+const O2 = id("obs", 2);
+const [N1, N2, N9] = [id("attn", 1), id("attn", 2), id("attn", 9)];
+const [TK1, TK2, TK3, TK9] = [id("task", 1), id("task", 2), id("task", 3), id("task", 9)];
+const AS1 = id("asgn", 1);
+const AS2 = id("asgn", 2);
+const AS3 = id("asgn", 3);
+const AS4 = id("asgn", 4);
+const AS5 = id("asgn", 5);
+const AS6 = id("asgn", 6);
+const AS7 = id("asgn", 7);
+const AS8 = id("asgn", 8);
+const AS9 = id("asgn", 9);
 const T1 = id("term", 1);
 const T2 = id("term", 2);
 const T3 = id("term", 3);
@@ -35,6 +51,7 @@ const T8 = id("term", 8);
 const T9 = id("term", 9);
 const T10 = id("term", 10);
 const T11 = id("term", 11);
+const T12 = id("term", 12);
 const HOST = id("host", 1);
 
 const ref = (generation: number) => ({
@@ -231,6 +248,163 @@ const STEPS: readonly NewEvent<EventType>[] = [
   step("agent.relaunch_requested", J, "user", { terminalId: T10, generation: 2, fresh: false }),
   step("agent.relaunched", J, "system", { externalRef: thread("t1"), runtimeRef: ref(2) }),
   step("agent.relaunched", J, "system", { externalRef: thread("t5"), runtimeRef: ref(2) }),
+  // Mail: delivered once, then refused; requeued for the agent's failure and for the daemon's;
+  // given up on; stored in Codex; and one that was never queued.
+  step("agent.launched", L, "user", {
+    environmentId: ENV,
+    harness: "claude-code",
+    project: "mail",
+    cwd: "/g",
+    terminalId: T12,
+  }),
+  step("agent.running", L, "system", { externalRef: session("s7"), runtimeRef: ref(0) }),
+  step("mailbox.queued", M1, "user", { agentId: L, body: "hello", from: E }),
+  step("mailbox.queued", M2, "user", { agentId: L, body: "again" }),
+  step("mailbox.offered", M1, L, {}),
+  step("mailbox.emitted", M1, L, {}),
+  step("mailbox.seen", M1, L, { promptId: "p1" }),
+  step("mailbox.delivered", M1, L, {}),
+  step("mailbox.delivered", M1, L, {}),
+  step("mailbox.offered", M2, L, { promptId: "p2" }),
+  step("mailbox.requeued", M2, "system", { reason: "not_seen" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "daemon_restart" }),
+  // Each reason the agent's side caused counts a failure; the rest count none.
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "stop_failed" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "interrupted" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "not_written" }),
+  step("mailbox.offered", M2, L, {}),
+  step("mailbox.requeued", M2, "system", { reason: "session_started" }),
+  step("mailbox.undeliverable", M2, "system", { reason: "gave_up" }),
+  step("mailbox.queued", M3, "user", { agentId: E, body: "for codex" }),
+  step("mailbox.accepted", M3, "system", { offline: true }),
+  step("mailbox.seen", M3, E, { promptId: "p3" }),
+  step("mailbox.undeliverable", M3, "system", { reason: "agent_closed" }),
+  step("mailbox.offered", M9, L, {}),
+  step("message.observed", O1, L, {
+    from: L,
+    to: E,
+    summary: "a note",
+    text: "a note, whole",
+    accepted: true,
+    toolUseId: "tu1",
+  }),
+  // The same tool call observed again, under the id the daemon mints for each observation.
+  step("message.observed", O2, L, {
+    from: L,
+    to: E,
+    summary: "again",
+    text: "again",
+    accepted: false,
+    toolUseId: "tu1",
+  }),
+  // Items for the human: an approval from before kinds, answered once; a question, timed out.
+  step("attention.opened", N1, L, {
+    agentId: L,
+    summary: "run ls?",
+    toolUseId: "tu2",
+    mainAgent: true,
+  }),
+  step("attention.opened", N2, L, {
+    agentId: L,
+    summary: "which?",
+    kind: "question",
+    taskId: TK1,
+    messageId: M1,
+    toolUseId: null,
+    mainAgent: false,
+  }),
+  step("attention.answered", N1, "user", { decision: "allow" }),
+  step("attention.answered", N1, "user", { decision: "deny" }),
+  step("attention.closed", N2, "system", { reason: "timed_out" }),
+  step("attention.closed", N9, "system", { reason: "stale" }),
+  // Tasks: a subtask delegated under a lead's assignment, which ending takes the worker's with
+  // it; a task finished, ending what is still active on it; an agent closing, ending its own.
+  step("task.created", TK1, "user", {
+    title: "Ship",
+    brief: "the brief",
+    ownerAgentId: null,
+    parentTaskId: null,
+    delegatedFrom: null,
+  }),
+  step("assignment.granted", AS1, "user", {
+    taskId: TK1,
+    agentId: L,
+    role: "lead",
+    parentAssignmentId: null,
+  }),
+  step("assignment.granted", AS2, L, {
+    taskId: TK1,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: AS1,
+  }),
+  step("task.created", TK2, L, {
+    title: "Part",
+    brief: "a part",
+    ownerAgentId: L,
+    parentTaskId: TK1,
+    delegatedFrom: AS1,
+  }),
+  step("assignment.granted", AS3, L, {
+    taskId: TK2,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: AS2,
+  }),
+  step("task.noted", TK1, L, { text: "on it", handoff: true, role: "lead" }),
+  step("task.noted", TK1, "user", { text: "thanks", handoff: false, role: null }),
+  step("task.noted", TK9, "user", { text: "nobody", handoff: false, role: null }),
+  step("task.owner_changed", TK2, "system", { ownerAgentId: null, delegatedFrom: null }),
+  step("assignment.ended", AS1, "user", { reason: "unassigned" }),
+  step("assignment.ended", AS1, "user", { reason: "completed" }),
+  step("assignment.granted", AS4, "user", {
+    taskId: TK1,
+    agentId: L,
+    role: "worker",
+    parentAssignmentId: null,
+  }),
+  // A child on another task, which the parent's ending ends; and one beside it, which stays.
+  step("task.created", TK3, "user", {
+    title: "Other",
+    brief: "another",
+    ownerAgentId: null,
+    parentTaskId: null,
+    delegatedFrom: null,
+  }),
+  step("assignment.granted", AS7, "user", {
+    taskId: TK3,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: AS4,
+  }),
+  step("assignment.granted", AS8, "user", {
+    taskId: TK3,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: null,
+  }),
+  step("assignment.ended", AS9, "user", { reason: "completed" }),
+  step("task.finished", TK1, "user", { outcome: "done", note: "shipped" }),
+  step("task.finished", TK1, "user", { outcome: "cancelled", note: null }),
+  step("task.finished", TK2, "user", { outcome: "cancelled", note: null }),
+  step("assignment.granted", AS5, "user", {
+    taskId: TK2,
+    agentId: L,
+    role: "worker",
+    parentAssignmentId: null,
+  }),
+  step("assignment.granted", AS6, "user", {
+    taskId: TK2,
+    agentId: E,
+    role: "worker",
+    parentAssignmentId: AS5,
+  }),
+  step("agent.closing", L, "user", {}),
+  step("agent.closed", L, "system", {}),
 ];
 
 /**
@@ -238,7 +412,19 @@ const STEPS: readonly NewEvent<EventType>[] = [
  * the clock's at the append, so it is left out, as is every other column that would differ from
  * one run to the next.
  */
-const TABLES = ["agent_sessions", "terminals", "activity_latest", "agent_name_counters", "events"];
+const TABLES = [
+  "agent_sessions",
+  "terminals",
+  "activity_latest",
+  "agent_name_counters",
+  "mailbox",
+  "observed_messages",
+  "attention_items",
+  "tasks",
+  "task_notes",
+  "assignments",
+  "events",
+];
 
 export function agentEventFixture(): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "bazhen-agent-events-"));

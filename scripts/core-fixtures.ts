@@ -5,15 +5,18 @@
 
 import {
   AgentState,
+  AssignmentState,
   AttentionCloseReason,
   AttentionState,
   HarnessId,
   MailboxState,
+  TaskState,
   TerminalState,
   type RoleDefinition,
 } from "@bazhen/protocol";
 import { agent, agentCommands, offeredCommands } from "../packages/core/src/agent.ts";
 import { attention } from "../packages/core/src/attention.ts";
+import { assignment, task } from "../packages/core/src/task.ts";
 import { InvalidTransition, type Machine } from "../packages/core/src/machine.ts";
 import { leadingMailId, mailLabel, mailbox, quoteLabels } from "../packages/core/src/mailbox.ts";
 import { resolveRoles, type UserRole } from "../packages/core/src/roles.ts";
@@ -161,6 +164,8 @@ export function coreFixture(): Record<string, string> {
       agent: table(agent, AgentState.options, agent.events),
       mailbox: table(mailbox, MailboxState.options, mailbox.events),
       attention: table(attention, AttentionState.options, AttentionCloseReason.options),
+      task: table(task, TaskState.options, task.events),
+      assignment: table(assignment, AssignmentState.options, assignment.events),
     }),
     "commands.json": json(commands()),
     "mail.json": json({
