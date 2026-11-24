@@ -721,7 +721,7 @@ fn restartable(state: TerminalState) -> bool {
 }
 
 /// The terminal states a view can attach to.
-fn attachable(state: TerminalState) -> bool {
+pub(crate) fn attachable(state: TerminalState) -> bool {
     matches!(
         state,
         TerminalState::Running | TerminalState::Unknown | TerminalState::Exited
@@ -730,7 +730,7 @@ fn attachable(state: TerminalState) -> bool {
 
 /// A terminal's restart prompt, or `None` when it needs none or has ended, naming the holder to end
 /// where `holder_pid` proved it still runs.
-fn needs_restart(
+pub(crate) fn needs_restart(
     protocol: Option<&str>,
     state: TerminalState,
     holder_pid: Option<u64>,
@@ -744,7 +744,7 @@ fn needs_restart(
 
 /// The command that attaches to a terminal on `runtime`: the holder's, the only runtime this
 /// daemon runs. A terminal id is letters, digits and `_`, so it needs no quoting.
-fn attach_command(runtime: Option<&str>, id: &str) -> Option<String> {
+pub(crate) fn attach_command(runtime: Option<&str>, id: &str) -> Option<String> {
     (runtime == Some("holder")).then(|| format!("bazhen terminals attach {id}"))
 }
 

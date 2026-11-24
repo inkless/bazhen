@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EVENTS } from "@bazhen/protocol";
+import { EVENTS, type StateSnapshot } from "@bazhen/protocol";
 import { agentEventFixture } from "./agent-event-fixtures.ts";
 
 const files = agentEventFixture();
@@ -12,6 +12,7 @@ interface Fixture {
 }
 
 const fixture: Fixture = JSON.parse(files["events.json"] ?? "null");
+const { snapshot }: { snapshot: StateSnapshot } = JSON.parse(files["snapshot.json"] ?? "null");
 const appended = fixture.steps.filter((s) => s.refused === undefined);
 const hosts = Object.values(fixture.tables)
   .flat()
@@ -19,8 +20,28 @@ const hosts = Object.values(fixture.tables)
   .filter((host) => host !== undefined);
 
 describe("the agent event fixture", () => {
-  it("writes only the events and what they left", () => {
-    expect(Object.keys(files)).toEqual(["events.json"]);
+  it("writes only the events, what they left and the snapshot of it", () => {
+    expect(Object.keys(files)).toEqual(["events.json", "snapshot.json"]);
+  });
+
+  it("snapshots agents and items for the human, with what the view said of them", () => {
+    expect({
+      agents: snapshot.agents.length,
+      attention: snapshot.attention.length,
+      listening: snapshot.agents.some((a) => a.listening),
+      resumable: new Set(snapshot.agents.map((a) => a.resumable)),
+      promptChanged: new Set(snapshot.agents.map((a) => a.promptChanged)),
+      headlines: snapshot.agents.filter((a) => a.headline !== null).length,
+      actions: new Set(snapshot.attention.map((i) => i.actions.length)).size,
+    }).toEqual({
+      agents: 10,
+      attention: 4,
+      listening: true,
+      resumable: new Set([true, false]),
+      promptChanged: new Set([true, false]),
+      headlines: 2,
+      actions: 3,
+    });
   });
 
   it("appends every event of agents, mail, attention and tasks the protocol has at least once", () => {

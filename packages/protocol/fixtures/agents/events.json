@@ -541,7 +541,9 @@
         "project": "My Project",
         "cwd": "/k",
         "terminalId": null,
-        "nameOrdinal": 7
+        "nameOrdinal": 7,
+        "role": "reviewer",
+        "promptHash": "hash-reviewer"
       }
     },
     {
@@ -554,7 +556,9 @@
         "project": "MY PROJECT!",
         "cwd": "/g",
         "terminalId": null,
-        "nameOrdinal": 2
+        "nameOrdinal": 2,
+        "role": "worker",
+        "promptHash": "hash-from-before"
       }
     },
     {
@@ -1210,6 +1214,26 @@
     },
     {
       "type": "task.noted",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "agent_0190000000007000800000000000000b",
+      "payload": {
+        "text": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\nthe rest",
+        "handoff": false,
+        "role": "lead"
+      }
+    },
+    {
+      "type": "task.noted",
+      "entityId": "task_01900000000070008000000000000001",
+      "actor": "agent_01900000000070008000000000000005",
+      "payload": {
+        "text": "fine\nmore",
+        "handoff": false,
+        "role": null
+      }
+    },
+    {
+      "type": "task.noted",
       "entityId": "task_01900000000070008000000000000009",
       "actor": "user",
       "payload": {
@@ -1360,6 +1384,68 @@
       "entityId": "agent_0190000000007000800000000000000b",
       "actor": "system",
       "payload": {}
+    },
+    {
+      "type": "agent.ready",
+      "entityId": "agent_01900000000070008000000000000009",
+      "actor": "system",
+      "payload": {
+        "sign": "claude_hook"
+      }
+    },
+    {
+      "type": "agent.activity",
+      "entityId": "agent_01900000000070008000000000000009",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "value": "idle",
+        "source": "native",
+        "confidence": 1,
+        "observedAt": "2026-11-01T00:00:00.000Z"
+      }
+    },
+    {
+      "type": "agent.usage",
+      "entityId": "agent_01900000000070008000000000000009",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "model": "opus",
+        "contextUsedPercent": 12.5,
+        "contextWindowTokens": 200000
+      }
+    },
+    {
+      "type": "agent.transcript_recorded",
+      "entityId": "agent_01900000000070008000000000000009",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "sessionId": "t5",
+        "path": "/home/u/.codex/t5.jsonl"
+      }
+    },
+    {
+      "type": "attention.opened",
+      "entityId": "attn_01900000000070008000000000000003",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "agentId": "agent_01900000000070008000000000000009",
+        "summary": "edit it?",
+        "toolUseId": "tu3",
+        "mainAgent": true
+      }
+    },
+    {
+      "type": "attention.opened",
+      "entityId": "attn_01900000000070008000000000000004",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "agentId": "agent_01900000000070008000000000000009",
+        "summary": "not delivered",
+        "kind": "undeliverable",
+        "messageId": "msg_01900000000070008000000000000002",
+        "toolUseId": null,
+        "mainAgent": false
+      }
     }
   ],
   "tables": {
@@ -1492,8 +1578,8 @@
         "harness_name": null,
         "token_hash": null,
         "untokened": 0,
-        "role": null,
-        "prompt_hash": null,
+        "role": "reviewer",
+        "prompt_hash": "hash-reviewer",
         "compact_window": null
       },
       {
@@ -1514,8 +1600,8 @@
         "harness_name": null,
         "token_hash": null,
         "untokened": 0,
-        "role": null,
-        "prompt_hash": null,
+        "role": "worker",
+        "prompt_hash": "hash-from-before",
         "compact_window": null
       },
       {
@@ -1546,13 +1632,13 @@
         "harness": "codex",
         "project": "j",
         "cwd": "/j",
-        "state": "starting",
+        "state": "running",
         "terminal_id": "term_0190000000007000800000000000000a",
         "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"codex-thread\",\"id\":\"t5\"}",
         "created_event_id": 54,
-        "updated_event_id": 61,
-        "usage": null,
-        "transcript": null,
+        "updated_event_id": 115,
+        "usage": "{\"model\":\"opus\",\"contextUsedPercent\":12.5,\"contextWindowTokens\":200000}",
+        "transcript": "/home/u/.codex/t5.jsonl",
         "launched_by": null,
         "name": null,
         "harness_name": null,
@@ -1572,7 +1658,7 @@
         "terminal_id": "term_0190000000007000800000000000000c",
         "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s7\"}",
         "created_event_id": 62,
-        "updated_event_id": 109,
+        "updated_event_id": 111,
         "usage": null,
         "transcript": null,
         "launched_by": null,
@@ -1847,7 +1933,7 @@
         "kind": "agent",
         "agent_session_id": "agent_0190000000007000800000000000000b",
         "created_event_id": 62,
-        "updated_event_id": 109,
+        "updated_event_id": 111,
         "exit": null,
         "theme": null,
         "cwd": null,
@@ -1867,6 +1953,11 @@
         "agent_session_id": "agent_01900000000070008000000000000005",
         "activity": "{\"value\":\"idle\",\"source\":\"native\",\"confidence\":0.5,\"observedAt\":\"2026-11-01T00:00:00.000Z\"}",
         "updated_event_id": 39
+      },
+      {
+        "agent_session_id": "agent_01900000000070008000000000000009",
+        "activity": "{\"value\":\"idle\",\"source\":\"native\",\"confidence\":1,\"observedAt\":\"2026-11-01T00:00:00.000Z\"}",
+        "updated_event_id": 113
       }
     ],
     "agent_name_counters": [
@@ -1959,6 +2050,34 @@
         "kind": "question",
         "task_id": "task_01900000000070008000000000000001",
         "message_id": "msg_01900000000070008000000000000001"
+      },
+      {
+        "id": "attn_01900000000070008000000000000003",
+        "agent_session_id": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "close_reason": null,
+        "summary": "edit it?",
+        "tool_use_id": "tu3",
+        "main_agent": 1,
+        "created_event_id": 116,
+        "updated_event_id": 116,
+        "kind": "approval",
+        "task_id": null,
+        "message_id": null
+      },
+      {
+        "id": "attn_01900000000070008000000000000004",
+        "agent_session_id": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "close_reason": null,
+        "summary": "not delivered",
+        "tool_use_id": null,
+        "main_agent": 0,
+        "created_event_id": 117,
+        "updated_event_id": 117,
+        "kind": "undeliverable",
+        "task_id": null,
+        "message_id": "msg_01900000000070008000000000000002"
       }
     ],
     "tasks": [
@@ -1971,7 +2090,7 @@
         "parent_task_id": null,
         "note": "shipped",
         "created_event_id": 91,
-        "updated_event_id": 104,
+        "updated_event_id": 106,
         "delegated_from": null
       },
       {
@@ -1983,7 +2102,7 @@
         "parent_task_id": "task_01900000000070008000000000000001",
         "note": null,
         "created_event_id": 94,
-        "updated_event_id": 105,
+        "updated_event_id": 107,
         "delegated_from": null
       },
       {
@@ -1994,8 +2113,8 @@
         "owner_agent_id": null,
         "parent_task_id": null,
         "note": null,
-        "created_event_id": 101,
-        "updated_event_id": 101,
+        "created_event_id": 103,
+        "updated_event_id": 103,
         "delegated_from": null
       }
     ],
@@ -2015,6 +2134,22 @@
         "author_role": null,
         "text": "thanks",
         "handoff": 0
+      },
+      {
+        "event_id": 98,
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_0190000000007000800000000000000b",
+        "author_role": "lead",
+        "text": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\nthe rest",
+        "handoff": 0
+      },
+      {
+        "event_id": 99,
+        "task_id": "task_01900000000070008000000000000001",
+        "agent_session_id": "agent_01900000000070008000000000000005",
+        "author_role": null,
+        "text": "fine\nmore",
+        "handoff": 0
       }
     ],
     "assignments": [
@@ -2027,7 +2162,7 @@
         "state": "ended",
         "end_reason": "unassigned",
         "created_event_id": 92,
-        "updated_event_id": 99
+        "updated_event_id": 101
       },
       {
         "id": "asgn_01900000000070008000000000000002",
@@ -2038,7 +2173,7 @@
         "state": "ended",
         "end_reason": "parent_ended",
         "created_event_id": 93,
-        "updated_event_id": 99
+        "updated_event_id": 101
       },
       {
         "id": "asgn_01900000000070008000000000000003",
@@ -2049,7 +2184,7 @@
         "state": "ended",
         "end_reason": "parent_ended",
         "created_event_id": 95,
-        "updated_event_id": 99
+        "updated_event_id": 101
       },
       {
         "id": "asgn_01900000000070008000000000000004",
@@ -2059,8 +2194,8 @@
         "parent_assignment_id": null,
         "state": "ended",
         "end_reason": "task_finished",
-        "created_event_id": 100,
-        "updated_event_id": 104
+        "created_event_id": 102,
+        "updated_event_id": 106
       },
       {
         "id": "asgn_01900000000070008000000000000007",
@@ -2070,8 +2205,8 @@
         "parent_assignment_id": "asgn_01900000000070008000000000000004",
         "state": "ended",
         "end_reason": "parent_ended",
-        "created_event_id": 102,
-        "updated_event_id": 104
+        "created_event_id": 104,
+        "updated_event_id": 106
       },
       {
         "id": "asgn_01900000000070008000000000000008",
@@ -2081,8 +2216,8 @@
         "parent_assignment_id": null,
         "state": "active",
         "end_reason": null,
-        "created_event_id": 103,
-        "updated_event_id": 103
+        "created_event_id": 105,
+        "updated_event_id": 105
       },
       {
         "id": "asgn_01900000000070008000000000000005",
@@ -2092,8 +2227,8 @@
         "parent_assignment_id": null,
         "state": "ended",
         "end_reason": "agent_closed",
-        "created_event_id": 106,
-        "updated_event_id": 109
+        "created_event_id": 108,
+        "updated_event_id": 111
       },
       {
         "id": "asgn_01900000000070008000000000000006",
@@ -2103,8 +2238,8 @@
         "parent_assignment_id": "asgn_01900000000070008000000000000005",
         "state": "ended",
         "end_reason": "parent_ended",
-        "created_event_id": 107,
-        "updated_event_id": 109
+        "created_event_id": 109,
+        "updated_event_id": 111
       }
     ],
     "events": [
@@ -2557,7 +2692,7 @@
         "actor": "user",
         "causation_id": null,
         "correlation_id": null,
-        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"My Project\",\"cwd\":\"/k\",\"terminalId\":null,\"nameOrdinal\":7}"
+        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"My Project\",\"cwd\":\"/k\",\"terminalId\":null,\"nameOrdinal\":7,\"role\":\"reviewer\",\"promptHash\":\"hash-reviewer\"}"
       },
       {
         "id": 42,
@@ -2568,7 +2703,7 @@
         "actor": "user",
         "causation_id": null,
         "correlation_id": null,
-        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"MY PROJECT!\",\"cwd\":\"/g\",\"terminalId\":null,\"nameOrdinal\":2}"
+        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"MY PROJECT!\",\"cwd\":\"/g\",\"terminalId\":null,\"nameOrdinal\":2,\"role\":\"worker\",\"promptHash\":\"hash-from-before\"}"
       },
       {
         "id": 43,
@@ -3178,6 +3313,28 @@
       {
         "id": 98,
         "host_id": "host_01900000000070008000000000000001",
+        "type": "task.noted",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "agent_0190000000007000800000000000000b",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"text\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\\nthe rest\",\"handoff\":false,\"role\":\"lead\"}"
+      },
+      {
+        "id": 99,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "task.noted",
+        "entity_type": "task",
+        "entity_id": "task_01900000000070008000000000000001",
+        "actor": "agent_01900000000070008000000000000005",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"text\":\"fine\\nmore\",\"handoff\":false,\"role\":null}"
+      },
+      {
+        "id": 100,
+        "host_id": "host_01900000000070008000000000000001",
         "type": "task.owner_changed",
         "entity_type": "task",
         "entity_id": "task_01900000000070008000000000000002",
@@ -3187,7 +3344,7 @@
         "payload": "{\"ownerAgentId\":null,\"delegatedFrom\":null}"
       },
       {
-        "id": 99,
+        "id": 101,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.ended",
         "entity_type": "assignment",
@@ -3198,7 +3355,7 @@
         "payload": "{\"reason\":\"unassigned\"}"
       },
       {
-        "id": 100,
+        "id": 102,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3209,7 +3366,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000001\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 101,
+        "id": 103,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.created",
         "entity_type": "task",
@@ -3220,7 +3377,7 @@
         "payload": "{\"title\":\"Other\",\"brief\":\"another\",\"ownerAgentId\":null,\"parentTaskId\":null,\"delegatedFrom\":null}"
       },
       {
-        "id": 102,
+        "id": 104,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3231,7 +3388,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000003\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000004\"}"
       },
       {
-        "id": 103,
+        "id": 105,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3242,7 +3399,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000003\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 104,
+        "id": 106,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.finished",
         "entity_type": "task",
@@ -3253,7 +3410,7 @@
         "payload": "{\"outcome\":\"done\",\"note\":\"shipped\"}"
       },
       {
-        "id": 105,
+        "id": 107,
         "host_id": "host_01900000000070008000000000000001",
         "type": "task.finished",
         "entity_type": "task",
@@ -3264,7 +3421,7 @@
         "payload": "{\"outcome\":\"cancelled\",\"note\":null}"
       },
       {
-        "id": 106,
+        "id": 108,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3275,7 +3432,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_0190000000007000800000000000000b\",\"role\":\"worker\",\"parentAssignmentId\":null}"
       },
       {
-        "id": 107,
+        "id": 109,
         "host_id": "host_01900000000070008000000000000001",
         "type": "assignment.granted",
         "entity_type": "assignment",
@@ -3286,7 +3443,7 @@
         "payload": "{\"taskId\":\"task_01900000000070008000000000000002\",\"agentId\":\"agent_01900000000070008000000000000005\",\"role\":\"worker\",\"parentAssignmentId\":\"asgn_01900000000070008000000000000005\"}"
       },
       {
-        "id": 108,
+        "id": 110,
         "host_id": "host_01900000000070008000000000000001",
         "type": "agent.closing",
         "entity_type": "agent",
@@ -3297,7 +3454,7 @@
         "payload": "{}"
       },
       {
-        "id": 109,
+        "id": 111,
         "host_id": "host_01900000000070008000000000000001",
         "type": "agent.closed",
         "entity_type": "agent",
@@ -3306,6 +3463,72 @@
         "causation_id": null,
         "correlation_id": null,
         "payload": "{}"
+      },
+      {
+        "id": 112,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.ready",
+        "entity_type": "agent",
+        "entity_id": "agent_01900000000070008000000000000009",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"sign\":\"claude_hook\"}"
+      },
+      {
+        "id": 113,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.activity",
+        "entity_type": "agent",
+        "entity_id": "agent_01900000000070008000000000000009",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"value\":\"idle\",\"source\":\"native\",\"confidence\":1,\"observedAt\":\"2026-11-01T00:00:00.000Z\"}"
+      },
+      {
+        "id": 114,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.usage",
+        "entity_type": "agent",
+        "entity_id": "agent_01900000000070008000000000000009",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"model\":\"opus\",\"contextUsedPercent\":12.5,\"contextWindowTokens\":200000}"
+      },
+      {
+        "id": 115,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.transcript_recorded",
+        "entity_type": "agent",
+        "entity_id": "agent_01900000000070008000000000000009",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"sessionId\":\"t5\",\"path\":\"/home/u/.codex/t5.jsonl\"}"
+      },
+      {
+        "id": 116,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.opened",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000003",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_01900000000070008000000000000009\",\"summary\":\"edit it?\",\"toolUseId\":\"tu3\",\"mainAgent\":true}"
+      },
+      {
+        "id": 117,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.opened",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000004",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_01900000000070008000000000000009\",\"summary\":\"not delivered\",\"kind\":\"undeliverable\",\"messageId\":\"msg_01900000000070008000000000000002\",\"toolUseId\":null,\"mainAgent\":false}"
       }
     ]
   }

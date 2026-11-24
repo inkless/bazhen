@@ -5,6 +5,7 @@
 mod agent_events;
 #[cfg(test)]
 mod agent_events_fixture;
+mod agent_snapshot;
 mod agents;
 mod attachments;
 mod devices;
@@ -35,6 +36,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use agent_events::AgentChange;
+pub use agent_snapshot::{AgentView, Evidence, Listener, OpenAttention};
 pub use agents::LiveTerminal;
 /// Every event type, with the payload keys a frame of it keeps.
 pub use bazhen_protocol::events::EVENT_KINDS;

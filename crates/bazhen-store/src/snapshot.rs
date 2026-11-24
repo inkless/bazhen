@@ -8,19 +8,19 @@ use bazhen_protocol::notices::Notice;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
+use crate::agent_snapshot::AgentView;
 use crate::events::Reads;
 
-/// A section of the snapshot this build can't describe yet. Each needs what the daemon knows of
-/// runtimes and harnesses (how to attach, which themes, what can be resumed, what the human can do
-/// now); a database the TypeScript daemon used may hold its rows, and a snapshot that left them out
-/// or guessed would be wrong rather than incomplete.
+/// A section of the snapshot a daemon can describe only with an [`AgentView`]: each needs what it
+/// knows of harnesses (which themes, what can be resumed, what the human can do now). A database
+/// the TypeScript daemon used may hold its rows, and a snapshot that left them out or guessed would
+/// be wrong rather than incomplete.
 struct Unported {
     section: &'static str,
     rows: &'static str,
 }
 
 const UNPORTED: [Unported; 2] = [
-    // Lifted by the slice that brings agents, their mail and the human's inbox.
     Unported {
         section: "agents",
         rows: "SELECT 1 FROM agent_sessions",
@@ -66,29 +66,60 @@ pub enum SnapshotError {
 }
 
 impl Reads<'_> {
-    /// The snapshot, and the cursor after its newest event.
+    /// The snapshot, and the cursor after its newest event, for a daemon that can't describe
+    /// agents or their items.
     ///
     /// # Errors
     ///
-    /// [`SnapshotError::Unported`] when the database holds what this build can't describe.
+    /// [`SnapshotError::Unported`] when the database holds agents or items for the human.
     pub fn snapshot(self, view: &SnapshotView) -> Result<StateSnapshot, SnapshotError> {
+        self.compose(view, None)
+    }
+
+    /// The snapshot, and the cursor after its newest event, its agents and items for the human
+    /// described as `agents` says.
+    ///
+    /// # Errors
+    ///
+    /// A stored row that doesn't read as the protocol's.
+    pub fn snapshot_with_agents(
+        self,
+        view: &SnapshotView,
+        agents: &dyn AgentView,
+    ) -> Result<StateSnapshot, SnapshotError> {
+        self.compose(view, Some(agents))
+    }
+
+    fn compose(
+        self,
+        view: &SnapshotView,
+        agents: Option<&dyn AgentView>,
+    ) -> Result<StateSnapshot, SnapshotError> {
         let tx = self.0.unchecked_transaction()?;
         let reads = Reads(&tx);
-        let mut unported = Vec::new();
-        for section in &UNPORTED {
-            if tx.prepare(section.rows)?.exists(())? {
-                unported.push(section.section);
+        if agents.is_none() {
+            let mut unported = Vec::new();
+            for section in &UNPORTED {
+                if tx.prepare(section.rows)?.exists(())? {
+                    unported.push(section.section);
+                }
             }
-        }
-        if !unported.is_empty() {
-            return Err(SnapshotError::Unported(unported));
+            if !unported.is_empty() {
+                return Err(SnapshotError::Unported(unported));
+            }
         }
         let snapshot = StateSnapshot {
             epoch: reads.epoch()?,
             event_id: reads.latest_event_id()?,
             environments: crate::terminals::environments(&tx, &view.host)?,
-            agents: Vec::new(),
-            attention: Vec::new(),
+            agents: match agents {
+                Some(agents) => crate::agent_snapshot::agents(&tx, view, agents)?,
+                None => Vec::new(),
+            },
+            attention: match agents {
+                Some(agents) => crate::agent_snapshot::attention(&tx, agents)?,
+                None => Vec::new(),
+            },
             messages: rows(
                 &tx,
                 "SELECT id, agent_session_id AS agentId, state FROM mailbox ORDER BY created_event_id",

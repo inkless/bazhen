@@ -1,6 +1,7 @@
 // What the Rust store's agent events are held to: a run of the events of agents, their mail, the
 // items they raise for the human and their tasks, as the TypeScript store appended them, each with
-// the payload it wrote or the refusal it gave, and the rows they left.
+// the payload it wrote or the refusal it gave, and the rows they left; and the `/v1/state`
+// snapshot of what they left, under a view a test can answer the same.
 // `moon run :schema` writes it to packages/protocol/fixtures/agents/, where crates/bazhen-store's
 // tests replay the same events and compare.
 
@@ -9,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Activity, EventPayload, EventType, ExternalRef } from "@bazhen/protocol";
-import { type NewEvent, Store } from "../apps/daemon/src/store/store.ts";
+import { type NewEvent, type SnapshotView, Store } from "../apps/daemon/src/store/store.ts";
 
 const id = (prefix: string, n: number) =>
   `${prefix}_0190000000007000800000000000${n.toString(16).padStart(4, "0")}`;
@@ -30,6 +31,8 @@ const [M1, M2, M3, M9] = [id("msg", 1), id("msg", 2), id("msg", 3), id("msg", 9)
 const O1 = id("obs", 1);
 const O2 = id("obs", 2);
 const [N1, N2, N9] = [id("attn", 1), id("attn", 2), id("attn", 9)];
+const N3 = id("attn", 3);
+const N4 = id("attn", 4);
 const [TK1, TK2, TK3, TK9] = [id("task", 1), id("task", 2), id("task", 3), id("task", 9)];
 const AS1 = id("asgn", 1);
 const AS2 = id("asgn", 2);
@@ -202,6 +205,8 @@ const STEPS: readonly NewEvent<EventType>[] = [
     cwd: "/k",
     terminalId: null,
     nameOrdinal: 7,
+    role: "reviewer",
+    promptHash: "hash-reviewer",
   }),
   step("agent.launched", G, "user", {
     environmentId: ENV,
@@ -210,6 +215,8 @@ const STEPS: readonly NewEvent<EventType>[] = [
     cwd: "/g",
     terminalId: null,
     nameOrdinal: 2,
+    role: "worker",
+    promptHash: "hash-from-before",
   }),
   // Lost twice: a rejected relaunch goes back to the terminal it was last lost on.
   step("agent.launched", H, "user", {
@@ -357,6 +364,13 @@ const STEPS: readonly NewEvent<EventType>[] = [
   }),
   step("task.noted", TK1, L, { text: "on it", handoff: true, role: "lead" }),
   step("task.noted", TK1, "user", { text: "thanks", handoff: false, role: null }),
+  // A headline is a note's first line, cut at 200 graphemes however many code points each is.
+  step("task.noted", TK1, L, {
+    text: `${"e\u0301".repeat(205)}\nthe rest`,
+    handoff: false,
+    role: "lead",
+  }),
+  step("task.noted", TK1, E, { text: "fine\nmore", handoff: false, role: null }),
   step("task.noted", TK9, "user", { text: "nobody", handoff: false, role: null }),
   step("task.owner_changed", TK2, "system", { ownerAgentId: null, delegatedFrom: null }),
   step("assignment.ended", AS1, "user", { reason: "unassigned" }),
@@ -405,7 +419,52 @@ const STEPS: readonly NewEvent<EventType>[] = [
   }),
   step("agent.closing", L, "user", {}),
   step("agent.closed", L, "system", {}),
+  // A running agent, idle, with what it raised still open.
+  step("agent.ready", J, "system", { sign: "claude_hook" }),
+  step("agent.activity", J, J, { ...activity, value: "idle" }),
+  step("agent.usage", J, J, usage),
+  step("agent.transcript_recorded", J, J, { sessionId: "t5", path: "/home/u/.codex/t5.jsonl" }),
+  step("attention.opened", N3, J, {
+    agentId: J,
+    summary: "edit it?",
+    toolUseId: "tu3",
+    mainAgent: true,
+  }),
+  step("attention.opened", N4, J, {
+    agentId: J,
+    summary: "not delivered",
+    kind: "undeliverable",
+    messageId: M2,
+    toolUseId: null,
+    mainAgent: false,
+  }),
 ];
+
+/** Every event's time, set before the snapshot so its times are the same on every run. */
+const TS = "2026-11-01T00:00:00.000Z";
+const EPOCH = "e".repeat(32);
+
+/**
+ * What a daemon would answer the snapshot, fixed so the Rust store's test can answer the same: a
+ * holder's attach command, a session resumed once its transcript is known, Claude Code's two
+ * themes, mail heard by an idle agent, and actions by the item's kind.
+ */
+const VIEW: SnapshotView = {
+  host: (kind) => (kind === "local" ? "fixture-host" : ""),
+  attachCommand: (terminal) =>
+    terminal.runtime === "holder" ? `bazhen terminals attach ${terminal.terminalId}` : null,
+  resumes: (evidence) => evidence.transcript !== null,
+  themes: (harness) => (harness === "claude-code" ? ["dark", "light"] : ["dark"]),
+  attentionActions: (item) => {
+    if (item.kind === "approval")
+      return item.mainAgent ? ["allow", "deny", "reply"] : ["allow", "deny"];
+    return item.messageId === null ? ["dismiss"] : ["resend", "dismiss"];
+  },
+  noticeActions: () => ["dismiss"],
+  shellsReport: true,
+  listening: (agent) => agent.activity === "idle",
+  promptHash: (role) => `hash-${role ?? "none"}`,
+};
 
 /**
  * Each table the agent events write, as rows in the order they were inserted. An event's `ts` is
@@ -449,10 +508,18 @@ export function agentEventFixture(): Record<string, string> {
           .all()
           .map(({ ts: _ts, ...row }) => row);
       const tables = Object.fromEntries(TABLES.map((t) => [t, rows(t)]));
-      const text = `${JSON.stringify({ host: HOST, steps, tables }, null, 2)}\n`;
-      return { "events.json": text.replaceAll(host, HOST) };
-    } finally {
+      db.prepare("UPDATE events SET ts = ?").run(TS);
       db.close();
+      const reopened = Store.open(path);
+      const snapshot = { ...reopened.snapshot(VIEW), epoch: EPOCH };
+      reopened.close();
+      const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`.replaceAll(host, HOST);
+      return {
+        "events.json": json({ host: HOST, steps, tables }),
+        "snapshot.json": json({ ts: TS, epoch: EPOCH, snapshot }),
+      };
+    } finally {
+      if (db.isOpen) db.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
