@@ -135,7 +135,11 @@ pub struct DismissNoticeResponse {
 pub struct PairRequest {
     #[cfg_attr(feature = "schema", schemars(length(max = 32)))]
     pub code: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 64)))]
     pub name: Option<String>,
 }

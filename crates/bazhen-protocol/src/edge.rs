@@ -239,6 +239,8 @@ mod tests {
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "" }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b".repeat(20_001) }),
             json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "parentTaskId": "x" }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "parentTaskId": null }),
+            json!({ "idempotencyKey": KEY, "title": "t", "brief": "b", "assign": null }),
         ] {
             assert!(refused::<CreateTaskRequest>(&broken), "{broken}");
         }
@@ -296,6 +298,21 @@ mod tests {
         assert!(refused::<RestartShellRequest>(&close(
             json!({ "generation": safe + 1 })
         )));
+        let written =
+            |generation: &str| format!(r#"{{"idempotencyKey":"{KEY}","generation":{generation}}}"#);
+        for (text, read) in [
+            ("2.0", Some(2)),
+            ("2e0", Some(2)),
+            ("9007199254740991.0", Some(safe)),
+            ("2.5", None),
+            ("9007199254740992", None),
+            ("9007199254740992.0", None),
+        ] {
+            let close = edge::<CloseShellRequest>(written(text).as_bytes()).ok();
+            assert_eq!(close.map(|c| c.generation), read, "close {text}");
+            let restart = edge::<RestartShellRequest>(written(text).as_bytes()).ok();
+            assert_eq!(restart.map(|r| r.generation), read, "restart {text}");
+        }
     }
 
     #[test]
@@ -332,6 +349,10 @@ mod tests {
         )));
         assert!(refused::<PairRequest>(&pair(&"c".repeat(33), "n")));
         assert!(refused::<PairRequest>(&pair("c", &"n".repeat(65))));
+        assert!(refused::<PairRequest>(
+            &json!({ "code": "c", "name": null })
+        ));
+        assert!(!refused::<PairRequest>(&json!({ "code": "c" })));
     }
 
     #[test]

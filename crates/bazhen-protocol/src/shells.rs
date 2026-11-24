@@ -207,6 +207,7 @@ pub struct OpenShellRequest {
 pub struct CloseShellRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[serde(deserialize_with = "crate::js_number::whole")]
     pub generation: u64,
     #[serde(
         default,
@@ -248,6 +249,7 @@ pub struct ShellCommandResponse {
 pub struct RestartShellRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[serde(deserialize_with = "crate::js_number::whole")]
     pub generation: u64,
     #[serde(
         default,
@@ -326,6 +328,7 @@ pub struct ShellReport {
     pub token: String,
     /// When the shell started running the line, in microseconds since the epoch: a report earlier
     /// than the kept one, arriving late, changes nothing.
+    #[serde(deserialize_with = "crate::js_number::whole")]
     pub at: u64,
     /// The line, or `None` for one its client couldn't send whole: too long, or not UTF-8. The
     /// field is required, null or not, as zod's `.nullable()` holds it.
