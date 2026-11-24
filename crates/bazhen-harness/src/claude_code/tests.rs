@@ -343,6 +343,7 @@ const READY: Observed = Observed::Ready {
 #[test]
 fn keys_every_fact_by_the_agent_the_hook_ran_for_and_reads_nothing_without_one() {
     let read = ingest("Stop", r#"{"prompt_id":"p"}"#);
+    assert!(!read.observed.is_empty());
     assert!(read.observed.iter().all(|k| k.key == Key::Agent(agent())));
     let harness = ClaudeCode::new(deps(&[OTHER_LINE], None));
     let none = harness.ingest(
