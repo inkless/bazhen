@@ -12,10 +12,19 @@ cargo-fuzz = true
 [dependencies]
 bazhen-protocol = { path = ".." }
 libfuzzer-sys = "=0.4.13"
+serde = "=1.0.229"
+serde_json = "=1.0.154"
 
 [[bin]]
 name = "detach_keys"
 path = "fuzz_targets/detach_keys.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "edge"
+path = "fuzz_targets/edge.rs"
 test = false
 doc = false
 bench = false
