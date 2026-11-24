@@ -112,7 +112,24 @@ pub(crate) fn run<H: Host>(
         .cloned()
         .collect();
     match gate::parse(name, &tests) {
-        Ok((gate, tests)) => gate::run(gate, &tests, world.env, &world.places, world.host, err),
+        Ok((gate, tests)) => {
+            // The daemon's router test reads the corpus the schema's run writes.
+            if gate.takes_tests() {
+                let known = schema::KNOWN_MISMATCHES;
+                let written = schema::run(
+                    false,
+                    known,
+                    world.env.clone(),
+                    &world.places,
+                    world.host,
+                    err,
+                );
+                if written != Exit::Done {
+                    return written;
+                }
+            }
+            gate::run(gate, &tests, world.env, &world.places, world.host, err)
+        }
         Err(usage) => {
             let _ = writeln!(err, "{usage}");
             Exit::Usage
@@ -161,6 +178,59 @@ mod tests {
         let exit = run(args.iter().map(OsString::from), world, &mut out, &mut err);
         let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
         (exit, text(out), text(err))
+    }
+
+    /// A host with no cargo config, on which every command succeeds and prints nothing.
+    #[derive(Default)]
+    struct Recording {
+        calls: Vec<String>,
+    }
+
+    impl Host for Recording {
+        fn sandboxed(&self) -> bool {
+            true
+        }
+        fn read(&self, _: &Path) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn run(&mut self, argv: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
+            self.calls.push(argv.join(" "));
+            Ok(Some(0))
+        }
+        fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
+            self.calls.push(argv.join(" "));
+            Ok(None)
+        }
+        fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
+    }
+
+    #[test]
+    fn writes_the_schema_before_a_test_gate_and_stops_where_that_fails() {
+        const EMIT: &str = "cargo run --quiet --locked -p bazhen-protocol --example emit_schema";
+        for gate in ["fmt", "lint", "deny", "test", "test-all"] {
+            let mut host = Recording::default();
+            let world = World {
+                env: Env::new(),
+                places: Places {
+                    root: "/a/repo".into(),
+                    cargo_home: "/home/u/.cargo".into(),
+                },
+                host: &mut host,
+            };
+            let exit = run(
+                ["gate", gate].map(OsString::from),
+                world,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            if gate.starts_with("test") {
+                assert_eq!((exit, host.calls), (Exit::Failed, vec![EMIT.to_owned()]));
+            } else {
+                assert!(!host.calls.contains(&EMIT.to_owned()), "{gate}");
+            }
+        }
     }
 
     #[test]

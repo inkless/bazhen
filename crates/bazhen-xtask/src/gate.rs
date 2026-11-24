@@ -166,7 +166,7 @@ impl Gate {
         }
     }
 
-    fn takes_tests(self) -> bool {
+    pub(crate) fn takes_tests(self) -> bool {
         matches!(self, Self::Test | Self::TestAll)
     }
 }
