@@ -221,7 +221,10 @@ pub struct CloseShellRequest {
         deserialize_with = "crate::nullable::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    #[cfg_attr(feature = "schema", schemars(with = "String", length(max = 200)))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "String", length(max = crate::edge::CONFIRMED_PROGRAM_MAX_UNITS))
+    )]
     pub confirmed_program: Option<String>,
     #[serde(
         default,
