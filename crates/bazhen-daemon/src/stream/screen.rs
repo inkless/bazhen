@@ -8,19 +8,19 @@ use super::seam::Position;
 
 /// A terminal's screen and history as VT, which a view that replays it into a fresh terminal of
 /// the same size sees as the terminal shows them, and where the stream was as it was taken.
-pub struct Snapshot {
+pub(crate) struct Snapshot {
     vt: Vec<u8>,
     at: Position,
 }
 
 impl Snapshot {
     #[must_use]
-    pub const fn new(vt: Vec<u8>, at: Position) -> Self {
+    pub(crate) const fn new(vt: Vec<u8>, at: Position) -> Self {
         Self { vt, at }
     }
 
     #[must_use]
-    pub const fn at(&self) -> Position {
+    pub(crate) const fn at(&self) -> Position {
         self.at
     }
 

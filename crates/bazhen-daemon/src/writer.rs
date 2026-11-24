@@ -111,6 +111,24 @@ impl Writer {
         answered.await.map_err(|_| Closed)
     }
 
+    /// Queues `job` on the writing connection at once, without waiting for it, so what is
+    /// queued from code that can't wait runs in the order it was queued, ahead of anything
+    /// queued after it.
+    ///
+    /// # Errors
+    ///
+    /// [`Closed`] once the daemon has closed the store.
+    pub(crate) fn queue(
+        &self,
+        job: impl FnOnce(&mut Store) + Send + 'static,
+    ) -> Result<(), Closed> {
+        let job: Job = Box::new(move |store| {
+            job(store);
+            Box::new(|| {})
+        });
+        self.work.send(Work::Job(job)).map_err(|_| Closed)
+    }
+
     /// The id of the newest event committed, changing as each commit adds one.
     pub(crate) fn committed(&self) -> watch::Receiver<u64> {
         self.committed.clone()

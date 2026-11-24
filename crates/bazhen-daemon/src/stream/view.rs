@@ -4,27 +4,37 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use bazhen_protocol::stream::StreamServerFrame;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 /// The most output a view may have unsent before more is refused. Above the 4 MiB a view may
 /// lag by, with room for the 1 MiB piece of a snapshot in flight.
-pub const MOST_UNSENT: usize = 5 << 20;
+pub(crate) const MOST_UNSENT: usize = 5 << 20;
 
 /// A view's queue: the hub's end and the writer's.
 #[must_use]
-pub fn queue(most_unsent: usize) -> (Outbox, Inbox) {
+pub(crate) fn queue(most_unsent: usize) -> (Outbox, Inbox) {
     let (tx, rx) = mpsc::unbounded_channel();
     let unsent = Arc::new(AtomicUsize::new(0));
+    let released = CancellationToken::new();
+    let quiet = Arc::new(AtomicBool::new(false));
     (
         Outbox {
             tx,
             unsent: Arc::clone(&unsent),
             most_unsent,
+            quiet: Arc::clone(&quiet),
+            _released: released.clone().drop_guard(),
         },
-        Inbox { rx },
+        Inbox {
+            rx,
+            unsent: Unsent(unsent),
+            released,
+            quiet: Quiet(quiet),
+        },
     )
 }
 
@@ -32,15 +42,20 @@ pub fn queue(most_unsent: usize) -> (Outbox, Inbox) {
 /// a hole in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the view is too far behind its terminal's output")]
-pub struct Behind;
+pub(crate) struct Behind;
 
 /// The hub's end of a view's queue. Dropping it ends the view's stream once what it holds is
 /// written.
 #[derive(Debug)]
-pub struct Outbox {
+pub(crate) struct Outbox {
     tx: mpsc::UnboundedSender<Out>,
     unsent: Arc<AtomicUsize>,
     most_unsent: usize,
+    /// Set once the view's socket stopped answering.
+    quiet: Arc<AtomicBool>,
+    /// Tells the writer's end the moment the hub lets go of the view, before what it holds is
+    /// written.
+    _released: DropGuard,
 }
 
 impl Outbox {
@@ -93,29 +108,79 @@ impl Outbox {
 
     /// What was given to the view, output and frames, that its writer has not finished sending.
     #[must_use]
-    pub fn unsent(&self) -> usize {
+    pub(crate) fn unsent(&self) -> usize {
         self.unsent.load(Ordering::Acquire)
+    }
+
+    /// Whether the view's socket stopped answering, so it ends as timed out, not as closed.
+    #[must_use]
+    pub(crate) fn timed_out(&self) -> bool {
+        self.quiet.load(Ordering::Acquire)
     }
 }
 
 /// The writer's end of a view's queue.
 #[derive(Debug)]
-pub struct Inbox {
+pub(crate) struct Inbox {
     rx: mpsc::UnboundedReceiver<Out>,
+    unsent: Unsent,
+    released: CancellationToken,
+    quiet: Quiet,
 }
 
 impl Inbox {
+    /// What the view was given and has yet to be sent, read as the writer goes.
+    pub(crate) fn unsent(&self) -> Unsent {
+        self.unsent.clone()
+    }
+
+    /// Cancelled once the hub has let go of the view, which then closes as soon as what it was
+    /// given is written.
+    pub(crate) fn released(&self) -> CancellationToken {
+        self.released.clone()
+    }
+
+    /// What says the view's socket stopped answering, for the hub to read as the view ends.
+    pub(crate) fn timed_out(&self) -> Quiet {
+        self.quiet.clone()
+    }
+
     /// What to send next, in the order the hub queued it; `None` once the hub is done with the
     /// view and everything before has been taken.
-    pub async fn recv(&mut self) -> Option<Out> {
+    pub(crate) async fn recv(&mut self) -> Option<Out> {
         self.rx.recv().await
+    }
+
+    /// What is queued to send next, if anything is yet.
+    pub(crate) fn try_recv(&mut self) -> Option<Out> {
+        self.rx.try_recv().ok()
+    }
+}
+
+/// How much a view was given that its writer has not finished sending.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Unsent(Arc<AtomicUsize>);
+
+impl Unsent {
+    pub(crate) fn get(&self) -> usize {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// Says a view's socket stopped answering.
+#[derive(Debug, Clone)]
+pub(crate) struct Quiet(Arc<AtomicBool>);
+
+impl Quiet {
+    pub(crate) fn timed_out(&self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
 /// One thing for a view's socket: output as a binary message, or a frame as a text one. Each
 /// counts unsent until its [`Sent`] is dropped.
 #[derive(Debug)]
-pub enum Out {
+pub(crate) enum Out {
     Output(Output),
     Frame {
         frame: StreamServerFrame,
@@ -125,7 +190,7 @@ pub enum Out {
 
 /// Output for a view, counted unsent until what [`Output::into_parts`] gives with it is dropped.
 #[derive(Debug)]
-pub struct Output {
+pub(crate) struct Output {
     output: Vec<u8>,
     sent: Sent,
 }
@@ -133,14 +198,14 @@ pub struct Output {
 impl Output {
     /// The output, and what to drop once the send of it has finished.
     #[must_use]
-    pub fn into_parts(self) -> (Vec<u8>, Sent) {
+    pub(crate) fn into_parts(self) -> (Vec<u8>, Sent) {
         (self.output, self.sent)
     }
 }
 
 /// Counts its output sent when dropped, and tells whoever waits for it to be written.
 #[derive(Debug)]
-pub struct Sent {
+pub(crate) struct Sent {
     len: usize,
     unsent: Arc<AtomicUsize>,
     written: Option<oneshot::Sender<()>>,
@@ -156,7 +221,7 @@ impl Drop for Sent {
 }
 
 /// A view's socket, as its writer sends to it.
-pub trait ViewSocket: Send {
+pub(crate) trait ViewSocket: Send {
     type Error: Send;
 
     fn output(&mut self, output: Vec<u8>) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -173,18 +238,33 @@ pub trait ViewSocket: Send {
 /// # Errors
 ///
 /// The socket's, the first time a send fails.
-pub async fn write_to<S: ViewSocket>(mut inbox: Inbox, socket: &mut S) -> Result<(), S::Error> {
+#[cfg(test)]
+pub(crate) async fn write_to<S: ViewSocket>(
+    mut inbox: Inbox,
+    socket: &mut S,
+) -> Result<(), S::Error> {
     while let Some(out) = inbox.recv().await {
-        match out {
-            Out::Frame { frame, sent } => {
-                socket.frame(&frame).await?;
-                drop(sent);
-            }
-            Out::Output(output) => {
-                let (output, sent) = output.into_parts();
-                socket.output(output).await?;
-                drop(sent);
-            }
+        write_one(out, socket).await?;
+    }
+    Ok(())
+}
+
+/// Writes one thing the hub queued for a view to its socket, counted sent once its send has
+/// finished.
+///
+/// # Errors
+///
+/// The socket's, if the send fails.
+pub(crate) async fn write_one<S: ViewSocket>(out: Out, socket: &mut S) -> Result<(), S::Error> {
+    match out {
+        Out::Frame { frame, sent } => {
+            socket.frame(&frame).await?;
+            drop(sent);
+        }
+        Out::Output(output) => {
+            let (output, sent) = output.into_parts();
+            socket.output(output).await?;
+            drop(sent);
         }
     }
     Ok(())

@@ -8,23 +8,23 @@ use bazhen_protocol::stream::AttachmentMode;
 /// The number a lease is granted under. A view's input carries the epoch it was typed under, so
 /// a key typed before the view heard of a takeover is told apart from one typed after.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Epoch(u64);
+pub(crate) struct Epoch(u64);
 
 impl Epoch {
     #[must_use]
-    pub const fn new(epoch: u64) -> Self {
+    pub(crate) const fn new(epoch: u64) -> Self {
         Self(epoch)
     }
 
     #[must_use]
-    pub const fn get(self) -> u64 {
+    pub(crate) const fn get(self) -> u64 {
         self.0
     }
 }
 
 /// Who drives a terminal, if anyone, and the epoch of its last grant.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Lease {
+pub(crate) struct Lease {
     holder: Option<AttachmentId>,
     epoch: Epoch,
 }
@@ -32,7 +32,7 @@ pub struct Lease {
 impl Lease {
     /// No holder, at `epoch`: a terminal's lease as its last grant left it.
     #[must_use]
-    pub const fn released_at(epoch: Epoch) -> Self {
+    pub(crate) const fn released_at(epoch: Epoch) -> Self {
         Self {
             holder: None,
             epoch,
@@ -40,19 +40,19 @@ impl Lease {
     }
 
     #[must_use]
-    pub const fn holder(&self) -> Option<&AttachmentId> {
+    pub(crate) const fn holder(&self) -> Option<&AttachmentId> {
         self.holder.as_ref()
     }
 
     #[must_use]
-    pub const fn epoch(&self) -> Epoch {
+    pub(crate) const fn epoch(&self) -> Epoch {
         self.epoch
     }
 
     /// An engaged interactive view takes the lease at once; an observer never holds it, and the
     /// driver engaging again keeps the epoch it has.
     #[must_use]
-    pub fn engage(&self, by: &AttachmentId, mode: AttachmentMode) -> Self {
+    pub(crate) fn engage(&self, by: &AttachmentId, mode: AttachmentMode) -> Self {
         if mode == AttachmentMode::Observe || self.holder.as_ref() == Some(by) {
             return self.clone();
         }
@@ -64,7 +64,7 @@ impl Lease {
 
     /// The lease ends with its attachment; there is no time-based expiry.
     #[must_use]
-    pub fn release(&self, attachment: &AttachmentId) -> Self {
+    pub(crate) fn release(&self, attachment: &AttachmentId) -> Self {
         if self.holder.as_ref() == Some(attachment) {
             Self::released_at(self.epoch)
         } else {
@@ -75,7 +75,7 @@ impl Lease {
     /// Input is applied only from the driver, at the epoch it was granted; anything else is
     /// dropped.
     #[must_use]
-    pub fn accepts_input(&self, from: &AttachmentId, epoch: Epoch) -> bool {
+    pub(crate) fn accepts_input(&self, from: &AttachmentId, epoch: Epoch) -> bool {
         self.holder.as_ref() == Some(from) && self.epoch == epoch
     }
 }
