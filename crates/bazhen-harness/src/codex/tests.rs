@@ -566,11 +566,13 @@ proptest! {
             let thread = params["threadId"].as_str().map(str::to_owned);
             for keyed in notify(&codex, Some(&a), method, &params) {
                 prop_assert_eq!(keyed.gate, Gate::None);
-                let want = match &thread {
-                    Some(thread) => on(thread, keyed.fact.clone()).key,
-                    None => Key::Account,
-                };
-                prop_assert_eq!(keyed.key, want);
+                match keyed.key {
+                    Key::Session(SessionKey(session)) => {
+                        prop_assert_eq!(Some(&session), thread.as_ref());
+                    }
+                    Key::Account => prop_assert_eq!(thread.as_ref(), None),
+                    Key::Agent(agent) => prop_assert!(false, "keyed to {}", agent),
+                }
             }
             seen.extend(thread);
         }

@@ -43,6 +43,7 @@ import {
   signalChokepointFailures,
   allowedSignalFileFailures,
   testSignalDependencyFailures,
+  holderReachingCrates,
   unmarkedSignallingTests,
   skillFailures,
   suppressionFailures,
@@ -4809,10 +4810,15 @@ const rebinding = (type: string, use: string, body: string) =>
       `#[test]\nfn a() { let client = ${type}::new(0); ${body} }`,
   );
 
-const unmarked = (sources: Record<string, string>) =>
-  unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "").map(
+const unmarked = (sources: Record<string, string>, holderCrates?: ReadonlySet<string>) =>
+  unmarkedSignallingTests(Object.keys(sources), (f) => sources[f] ?? "", {}, holderCrates).map(
     (f) => f.split(": ")[0],
   );
+
+/** One test, in crate `crate`, whose body is `call`. */
+const testIn = (crate: string, call: string) => ({
+  [`crates/${crate}/src/t.rs`]: `#[test]\nfn a() { ${call} }`,
+});
 
 describe("tests that signal processes they didn't start", () => {
   const MARK = '#[ignore = "signals processes; runs in moon run :test-real -- rust"]';
@@ -4843,6 +4849,34 @@ describe("tests that signal processes they didn't start", () => {
     expect(unmarked({ "crates/h/src/session.rs": source })).toEqual(
       bodies.slice(0, -1).map((_, i) => `crates/h/src/session.rs:${String(2 * i + 1)}`),
     );
+  });
+
+  it("names the holder's Session only in a crate that can reach the holder", () => {
+    const sources = {
+      ...testIn("holder", "let s = Session::led_by(pid);"),
+      ...testIn("harness", "assert_eq!(k, Key::Session(s));"),
+      ...testIn("core", "child.close();"),
+    };
+    expect(unmarked(sources, new Set(["crates/holder"]))).toEqual([
+      "crates/holder/src/t.rs:1",
+      "crates/core/src/t.rs:1",
+    ]);
+  });
+
+  it("finds the crates that reach the holder through any dependency, however deep", () => {
+    const reaching = holderReachingCrates(
+      meta(
+        pkg("bazhen-holder", []),
+        pkg("tested", [], [dep("bazhen-holder", "dev")]),
+        pkg("deep", [], [dep("tested")]),
+        pkg("apart", [], [dep("serde")]),
+      ),
+    );
+    expect([...reaching].toSorted()).toEqual([
+      "crates/bazhen-holder",
+      "crates/deep",
+      "crates/tested",
+    ]);
   });
 
   it("must be marked when an ending is given a real session, and needn't when given a stand-in", () => {
