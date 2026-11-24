@@ -4,7 +4,7 @@
 //! edge's verdict. No route here runs a terminal or writes a store: the shells are absent and the
 //! store closed, so a case the edge takes is answered past its validation without doing anything.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use axum::body::Body;
@@ -23,58 +23,82 @@ const CORPUS: &str = "target/protocol-shadow/corpus.json";
 const HOST: &str = "127.0.0.1:7900";
 const ORIGIN: &str = "http://127.0.0.1:7900";
 
-/// Where a case the route refuses differs from the edge, as (message, path, kind, owner, why): the
-/// route's own check, written before the edge's, still decides it.
-const UNSHARED_CHECKS: &[(&str, &str, &str, &str, &str)] = &[
-    (
-        "CloseShellRequest",
-        "/generation",
-        "pastMaximum",
-        SHELLS,
-        GENERATION,
-    ),
-    (
-        "CloseShellRequest",
-        "/generation",
-        "pastSafe",
-        SHELLS,
-        GENERATION,
-    ),
-    (
-        "RestartShellRequest",
-        "/generation",
-        "pastMaximum",
-        SHELLS,
-        GENERATION,
-    ),
-    (
-        "RestartShellRequest",
-        "/generation",
-        "pastSafe",
-        SHELLS,
-        GENERATION,
-    ),
-    (
-        "DismissNoticeRequest",
-        "/idempotencyKey",
-        "underMinLength",
-        NOTICES,
-        KEY,
-    ),
-    (
-        "DismissNoticeRequest",
-        "/idempotencyKey",
-        "pastMaxLength",
-        NOTICES,
-        KEY,
-    ),
-    (
-        "DismissNoticeRequest",
-        "/idempotencyKey",
-        "astralPastMaxLength",
-        NOTICES,
-        KEY,
-    ),
+/// A planted case the route judges otherwise than the edge: the route's own check, written before
+/// the edge's, still decides it.
+struct Unshared {
+    message: &'static str,
+    path: &'static str,
+    kind: &'static str,
+    /// Which of the two refuses the case; the other takes it.
+    refused_by: Side,
+    owner: &'static str,
+    why: &'static str,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Side {
+    Edge,
+    Route,
+}
+
+/// Every case of each entry is judged otherwise, the same way round.
+const UNSHARED_CHECKS: &[Unshared] = &[
+    Unshared {
+        message: "CloseShellRequest",
+        path: "/generation",
+        kind: "pastMaximum",
+        refused_by: Side::Edge,
+        owner: SHELLS,
+        why: GENERATION,
+    },
+    Unshared {
+        message: "CloseShellRequest",
+        path: "/generation",
+        kind: "pastSafe",
+        refused_by: Side::Edge,
+        owner: SHELLS,
+        why: GENERATION,
+    },
+    Unshared {
+        message: "RestartShellRequest",
+        path: "/generation",
+        kind: "pastMaximum",
+        refused_by: Side::Edge,
+        owner: SHELLS,
+        why: GENERATION,
+    },
+    Unshared {
+        message: "RestartShellRequest",
+        path: "/generation",
+        kind: "pastSafe",
+        refused_by: Side::Edge,
+        owner: SHELLS,
+        why: GENERATION,
+    },
+    Unshared {
+        message: "DismissNoticeRequest",
+        path: "/idempotencyKey",
+        kind: "underMinLength",
+        refused_by: Side::Edge,
+        owner: NOTICES,
+        why: KEY,
+    },
+    Unshared {
+        message: "DismissNoticeRequest",
+        path: "/idempotencyKey",
+        kind: "pastMaxLength",
+        refused_by: Side::Edge,
+        owner: NOTICES,
+        why: KEY,
+    },
+    Unshared {
+        message: "DismissNoticeRequest",
+        path: "/idempotencyKey",
+        kind: "astralPastMaxLength",
+        refused_by: Side::Edge,
+        owner: NOTICES,
+        why: KEY,
+    },
 ];
 
 const SHELLS: &str = "the shells routes' port";
@@ -85,21 +109,29 @@ const GENERATION: &str = "close_request and restart_request read the generation 
 const KEY: &str = "dismiss reads the idempotency key with serde alone and holds it to no \
                    length, so an empty or overlong key goes on to the store";
 
-/// The route that reads each message, and whether it is the HTTP listener's alone.
+/// Each message a route reads, the route, and whether it is the HTTP listener's alone.
+const ROUTES: &[(&str, &str, bool)] = &[
+    ("CreateTaskRequest", "/v1/tasks", false),
+    (
+        "DismissNoticeRequest",
+        "/v1/notices/notice_1/dismiss",
+        false,
+    ),
+    ("OpenShellRequest", "/v1/shells", false),
+    ("CloseShellRequest", "/v1/shells/term_1/close", false),
+    ("RestartShellRequest", "/v1/shells/term_1/restart", false),
+    ("RenameShellRequest", "/v1/shells/term_1/rename", false),
+    ("ShellReport", "/v1/shells/term_1/report", false),
+    ("ShellPrompt", "/v1/shells/term_1/prompt", false),
+    ("ShellDecline", "/v1/shells/term_1/decline", false),
+    ("PairRequest", "/v1/pairing", true),
+];
+
 fn route(message: &str) -> Option<(&'static str, bool)> {
-    Some(match message {
-        "CreateTaskRequest" => ("/v1/tasks", false),
-        "DismissNoticeRequest" => ("/v1/notices/notice_1/dismiss", false),
-        "OpenShellRequest" => ("/v1/shells", false),
-        "CloseShellRequest" => ("/v1/shells/term_1/close", false),
-        "RestartShellRequest" => ("/v1/shells/term_1/restart", false),
-        "RenameShellRequest" => ("/v1/shells/term_1/rename", false),
-        "ShellReport" => ("/v1/shells/term_1/report", false),
-        "ShellPrompt" => ("/v1/shells/term_1/prompt", false),
-        "ShellDecline" => ("/v1/shells/term_1/decline", false),
-        "PairRequest" => ("/v1/pairing", true),
-        _ => return None,
-    })
+    ROUTES
+        .iter()
+        .find(|(m, _, _)| *m == message)
+        .map(|(_, path, http)| (*path, *http))
 }
 
 fn router(http: bool) -> Router {
@@ -151,7 +183,8 @@ fn each_route_refuses_as_invalid_what_the_edge_refuses_and_nothing_it_takes() {
         .unwrap();
     let mut found = Vec::new();
     let mut listed = BTreeSet::new();
-    let mut sent = 0;
+    // For each message, how many cases the edge took and refused.
+    let mut judged: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     let cases = corpus();
     for case in &cases {
         let message = case["schema"].as_str().unwrap_or_default();
@@ -163,40 +196,64 @@ fn each_route_refuses_as_invalid_what_the_edge_refuses_and_nothing_it_takes() {
             (_, Value::Null) => false,
             _ => true,
         };
+        let counts = judged.entry(message).or_default();
+        if edge_refuses {
+            counts.1 += 1;
+        } else {
+            counts.0 += 1;
+        }
         let body = case["body"].as_str().unwrap_or_default();
         let (route_refuses, status, answer) = runtime.block_on(refused(path, http, body));
-        sent += 1;
-        if route_refuses == edge_refuses {
-            continue;
-        }
         let key = (
             message,
             case["path"].as_str().unwrap_or_default(),
             case["kind"].as_str().unwrap_or_default(),
         );
-        if UNSHARED_CHECKS
+        let entry = UNSHARED_CHECKS
             .iter()
-            .any(|(m, p, k, _, _)| (*m, *p, *k) == key)
-        {
+            .find(|e| (e.message, e.path, e.kind) == key);
+        let side = (route_refuses != edge_refuses).then_some(if edge_refuses {
+            Side::Edge
+        } else {
+            Side::Route
+        });
+        if let Some(entry) = entry {
             listed.insert(key);
+            if side == Some(entry.refused_by) {
+                continue;
+            }
+        } else if side.is_none() {
             continue;
         }
         let edge = if edge_refuses { "refuses" } else { "takes" };
+        let listing = entry.map_or(String::new(), |e| {
+            format!(
+                " (UNSHARED_CHECKS says {:?} alone refuses it: {})",
+                e.refused_by, e.why
+            )
+        });
         found.push(format!(
-            "{}{} ({}): the edge {edge} {body}, and {path} answers {status} {answer}",
+            "{}{} ({}): the edge {edge} {body}, and {path} answers {status} {answer}{listing}",
             key.0, key.1, key.2
         ));
     }
-    for (message, path, kind, _, _) in UNSHARED_CHECKS {
-        if !listed.contains(&(*message, *path, *kind)) {
+    for entry in UNSHARED_CHECKS {
+        let key = (entry.message, entry.path, entry.kind);
+        if !listed.contains(&key) {
             found.push(format!(
-                "UNSHARED_CHECKS lists {message}{path} ({kind}), which its route now agrees with"
+                "UNSHARED_CHECKS lists {}{} ({}), owned by {}, which the corpus holds no case of",
+                key.0, key.1, key.2, entry.owner
             ));
         }
     }
-    assert!(
-        sent > 0,
-        "{CORPUS} holds no case of a route this daemon serves"
-    );
+    for (message, _, _) in ROUTES {
+        let (taken, refused) = judged.get(message).copied().unwrap_or_default();
+        if taken == 0 || refused == 0 {
+            found.push(format!(
+                "{CORPUS} holds {taken} cases of {message} the edge takes and {refused} it \
+                 refuses; each route needs both"
+            ));
+        }
+    }
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
