@@ -917,8 +917,6 @@ const NOT_DECODERS: Record<string, string> = {
     "reads a fixed count of bytes from /dev/urandom and hands them back; parses nothing",
   "crates/bazhen-daemon/src/pairing.rs::PairingCodes::issue_from":
     "hands random bytes the daemon read itself to code_from; parses nothing",
-  "crates/bazhen-daemon/src/roles.rs::Roles::current":
-    "reads each role file capped at 64 KiB and hands its bytes whole to bazhen-core's parse_role, fuzzed; parses nothing itself",
   "crates/bazhen-daemon/src/events.rs::stream":
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
@@ -1880,6 +1878,25 @@ const BODY_READS = new RegExp(
 // function of the file's own by that name is read where it is defined, so a call to it isn't one.
 const BARE_READ = new RegExp(`(?<![.:]\\s*|\\bfn\\s+)\\b(${READS}|fill_buf|copy)\\s*\\(`, "g");
 
+// A call through `self.` or `Self::` to a method named as a read. When the call is to a method the
+// type's impl defines, it is read where that method is defined, as a bare name's is: one that takes
+// bytes is a decoder there, and its callers through it. `Self::read` names the impl's own first.
+// `self.read` does only where method lookup reaches it before a trait's: lookup tries the
+// receiver's own type before borrowing it, so `self.read(&mut b)` in a `&mut self` method is
+// io::Read's when the impl's own `read` takes `&self`, and in a `&self` method a trait's `&self`
+// read wins over an own one taking `&mut self`. The own method wins only when it takes self as the
+// caller does.
+const SELF_READ = new RegExp(`\\b(self\\s*\\.|Self\\s*::)\\s*(${READS})(?=\\s*\\()`, "g");
+
+// How a function takes self: `&mut`, `&` or by value, or none of these, as with `self: Box<Self>`
+// or no self at all.
+const receiver = (takes: string): "&mut" | "&" | "self" | undefined => {
+  const first = /\(\s*(&\s*(?:'\w+\s+)?(mut\s+)?)?(?:mut\s+)?self\s*[,)]/.exec(takes);
+  if (first === null) return undefined;
+  if (first[1] === undefined) return "self";
+  return first[2] === undefined ? "&" : "&mut";
+};
+
 // The names a `use … as` may not rename: each byte type above, and the containers that hold u8s.
 const BYTE_TYPE_NAMES = new Set(
   (
@@ -2832,30 +2849,58 @@ export function byteTakers(source: string, scope: Scope = NO_CARRIERS): string[]
       }
     }
   }
-  return fns.flatMap((f) => {
-    const { fn, block, takes, body } = f;
-    const name = block === undefined ? fn : `${block.type}::${fn}`;
-    const takesSelfType =
-      block !== undefined &&
-      (carrierOf.get(block) ?? null) !== null &&
-      /\bSelf\b/.test(takes.replace(/\bself\s*:[^,)]*/, ""));
-    const reads =
-      BODY_READS.test(body) ||
-      [...body.matchAll(BARE_READ)].some(([, g]) => !own.has(g)) ||
-      bindsByteVariant(
-        body,
-        f.open,
-        scope,
-        block === undefined ? undefined : { named: block.named, at: block.start },
+  // A call through `self` to a method of the type's own is left to that method, until the method
+  // is found to be a decoder: then the call is read again, so its caller is one too.
+  const nameOf = ({ fn, block }: (typeof fns)[number]) =>
+    block === undefined ? fn : `${block.type}::${fn}`;
+  const takersLeaving = (decoders: Set<string>) =>
+    fns.flatMap((f) => {
+      const { block, takes, body } = f;
+      const name = nameOf(f);
+      const takesSelfType =
+        block !== undefined &&
+        (carrierOf.get(block) ?? null) !== null &&
+        /\bSelf\b/.test(takes.replace(/\bself\s*:[^,)]*/, ""));
+      // The impl's own methods, not a function declared inside one's body, that aren't decoders.
+      const left = fns.filter(
+        (g) =>
+          block !== undefined &&
+          g.block === block &&
+          !inside(g.m.index, bodies) &&
+          !decoders.has(nameOf(g)),
       );
-    return BYTES_IN.test(takes) ||
-      scope.names(takes, f.m.index) ||
-      takesSelfType ||
-      viaSelf.has(f) ||
-      reads
-      ? [name]
-      : [];
-  });
+      const caller = receiver(takes);
+      const reached = (via: string, method: string) =>
+        left.some(
+          (g) =>
+            g.fn === method &&
+            (via.startsWith("Self") || (caller !== undefined && receiver(g.takes) === caller)),
+        );
+      const called = body.replace(SELF_READ, (call, via: string, g: string) =>
+        reached(via, g) ? call.slice(0, -g.length) + "_".repeat(g.length) : call,
+      );
+      const reads =
+        BODY_READS.test(called) ||
+        [...called.matchAll(BARE_READ)].some(([, g]) => !own.has(g)) ||
+        bindsByteVariant(
+          body,
+          f.open,
+          scope,
+          block === undefined ? undefined : { named: block.named, at: block.start },
+        );
+      return BYTES_IN.test(takes) ||
+        scope.names(takes, f.m.index) ||
+        takesSelfType ||
+        viaSelf.has(f) ||
+        reads
+        ? [name]
+        : [];
+    });
+  for (let found = takersLeaving(new Set()); ;) {
+    const next = takersLeaving(new Set(found));
+    if (next.length === found.length) return next;
+    found = next;
+  }
 }
 
 /**

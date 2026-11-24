@@ -1,7 +1,8 @@
 //! The events of agents, their mail, their items for the human and their tasks, against what
 //! `moon run :schema` records of the TypeScript store (packages/protocol/fixtures/agents/events.json):
 //! the same run of events appended, each taken or refused as it was there, leaving the same rows
-//! in every table they write.
+//! in every table they write; and the `/v1/state` snapshot of what they left (snapshot.json),
+//! under the same answers to what the snapshot asks of a daemon.
 
 use std::path::PathBuf;
 
@@ -12,10 +13,15 @@ use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
+use bazhen_protocol::agents::{ActivityValue, HarnessId};
+use bazhen_protocol::mail::{AttentionAction, AttentionKind};
+use bazhen_protocol::names::Role;
+use bazhen_protocol::shells::TuiTheme;
+
 use crate::testing::TempDir;
 use crate::{
-    AgentChange, AppendError, AssignmentChange, AttentionChange, MailChange, NewEvent, Store,
-    TaskChange,
+    Actor, AgentChange, AgentView, AppendError, AssignmentChange, AttentionChange, Evidence,
+    Listener, MailChange, NewEvent, OpenAttention, SnapshotView, Store, TaskChange, TerminalChange,
 };
 
 /// The fixture, each step's payload kept as its text: decoded through a `Value`, whose map sorts
@@ -38,10 +44,58 @@ struct Step {
     refused: Option<String>,
 }
 
-fn fixture() -> Fixture {
+fn read<T: DeserializeOwned>(name: &str) -> T {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packages/protocol/fixtures/agents/events.json");
+        .join("../../packages/protocol/fixtures/agents")
+        .join(name);
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn fixture() -> Fixture {
+    read("events.json")
+}
+
+/// The snapshot the TypeScript store answered once the fixture's events were appended, every
+/// event's time set to `ts` and the store's epoch written as `epoch`.
+#[derive(Deserialize)]
+struct Snapshotted {
+    ts: String,
+    epoch: String,
+    snapshot: Value,
+}
+
+/// The answers the fixture's generator gave the TypeScript store's snapshot.
+struct FixtureView;
+
+impl AgentView for FixtureView {
+    fn resumes(&self, evidence: &Evidence<'_>) -> bool {
+        evidence.transcript.is_some()
+    }
+
+    fn themes(&self, harness: HarnessId) -> Vec<TuiTheme> {
+        match harness {
+            HarnessId::ClaudeCode => vec![TuiTheme::Dark, TuiTheme::Light],
+            HarnessId::Codex => vec![TuiTheme::Dark],
+        }
+    }
+
+    fn listening(&self, agent: &Listener<'_>) -> bool {
+        agent.activity == Some(ActivityValue::Idle)
+    }
+
+    fn prompt_hash(&self, role: Option<&Role>) -> String {
+        format!("hash-{}", role.map_or("none", Role::as_str))
+    }
+
+    fn attention_actions(&self, item: &OpenAttention<'_>) -> Vec<AttentionAction> {
+        use AttentionAction::{Allow, Deny, Dismiss, Reply, Resend};
+        match (item.kind, item.main_agent, item.message_id) {
+            (AttentionKind::Approval, true, _) => vec![Allow, Deny, Reply],
+            (AttentionKind::Approval, false, _) => vec![Allow, Deny],
+            (_, _, None) => vec![Dismiss],
+            (_, _, Some(_)) => vec![Resend, Dismiss],
+        }
+    }
 }
 
 fn decode<T: DeserializeOwned>(text: &str) -> T {
@@ -148,6 +202,18 @@ fn event(step: &Step) -> NewEvent {
                 _ => AssignmentChange::Ended(decode(payload)),
             },
         },
+        "terminal" => NewEvent::Terminal {
+            terminal: decode(&entity),
+            actor: match actor.as_str() {
+                "user" => Actor::User,
+                "system" => Actor::System,
+                other => panic!("no terminal actor {other}"),
+            },
+            change: match step.kind.as_str() {
+                "terminal.needs_restart" => TerminalChange::NeedsRestart(decode(payload)),
+                _ => panic!("no event {}", step.kind),
+            },
+        },
         _ => panic!("no event {}", step.kind),
     }
 }
@@ -193,11 +259,8 @@ fn rows(store: &Store, table: &str) -> Vec<Value> {
         .unwrap()
 }
 
-#[test]
-fn appends_and_refuses_each_event_as_the_typescript_store_did_and_leaves_its_rows() {
-    let fixture = fixture();
-    let dir = TempDir::new("agent-events");
-    let mut store = store_of_host(&dir, &fixture.host);
+/// Appends each of the fixture's steps, and says of each how it went otherwise than in TypeScript.
+fn replay(fixture: &Fixture, store: &mut Store) -> Vec<String> {
     let mut wrong = Vec::new();
     for (i, step) in fixture.steps.iter().enumerate() {
         let event = event(step);
@@ -223,6 +286,15 @@ fn appends_and_refuses_each_event_as_the_typescript_store_did_and_leaves_its_row
             )),
         }
     }
+    wrong
+}
+
+#[test]
+fn appends_and_refuses_each_event_as_the_typescript_store_did_and_leaves_its_rows() {
+    let fixture = fixture();
+    let dir = TempDir::new("agent-events");
+    let mut store = store_of_host(&dir, &fixture.host);
+    let wrong = replay(&fixture, &mut store);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     for (table, want) in &fixture.tables {
         let got = rows(&store, table);
@@ -232,4 +304,50 @@ fn appends_and_refuses_each_event_as_the_typescript_store_did_and_leaves_its_row
             assert_eq!(got, want, "{table} row {i}");
         }
     }
+}
+
+#[test]
+fn snapshots_agents_and_their_items_as_the_typescript_store_did_under_the_same_view() {
+    let fixture = fixture();
+    let want: Snapshotted = read("snapshot.json");
+    let dir = TempDir::new("agent-snapshot");
+    let mut store = store_of_host(&dir, &fixture.host);
+    assert_eq!(replay(&fixture, &mut store), Vec::<String>::new());
+    store
+        .db
+        .execute("UPDATE events SET ts = ?", [&want.ts])
+        .unwrap();
+    let view = SnapshotView {
+        host: "fixture-host".to_owned(),
+        restart_holders: std::collections::HashMap::new(),
+        shells_report: true,
+    };
+    let mut got = store
+        .reads()
+        .snapshot_with_agents(&view, &FixtureView)
+        .unwrap();
+    got.epoch = want.epoch;
+    let got = serde_json::to_value(got).unwrap();
+    for section in ["agents", "attention"] {
+        let (got, want) = (&got[section], &want.snapshot[section]);
+        let rows = want.as_array().unwrap();
+        assert_eq!(got.as_array().unwrap().len(), rows.len(), "the {section}");
+        for (i, (got, want)) in got.as_array().unwrap().iter().zip(rows).enumerate() {
+            assert_eq!(got, want, "{section} {i}");
+        }
+    }
+    assert_eq!(got, want.snapshot);
+}
+
+#[test]
+fn still_refuses_a_snapshot_of_agents_to_a_daemon_that_can_t_describe_them() {
+    let fixture = fixture();
+    let dir = TempDir::new("agent-snapshot-needs-view");
+    let mut store = store_of_host(&dir, &fixture.host);
+    replay(&fixture, &mut store);
+    let refused = store.reads().snapshot(&crate::testing::view());
+    assert!(
+        matches!(&refused, Err(crate::SnapshotError::NeedsAgentView(s)) if s == &["agents", "attention"]),
+        "{refused:?}"
+    );
 }

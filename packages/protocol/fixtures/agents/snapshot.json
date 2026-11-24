@@ -1,0 +1,626 @@
+{
+  "ts": "2026-11-01T00:00:00.000Z",
+  "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "snapshot": {
+    "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "eventId": 125,
+    "environments": [
+      {
+        "id": "env_01900000000070008000000000000001",
+        "kind": "local",
+        "host": "fixture-host"
+      }
+    ],
+    "agents": [
+      {
+        "id": "agent_01900000000070008000000000000001",
+        "name": "renamed",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "my project!",
+        "cwd": "/work/a",
+        "state": "closed",
+        "terminalId": "term_01900000000070008000000000000003",
+        "generation": 6,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s3"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": "worker",
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000002",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "",
+        "cwd": "/work/b",
+        "state": "failed",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": "agent_01900000000070008000000000000001",
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000003",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "x",
+        "cwd": "/c",
+        "state": "failed",
+        "terminalId": "term_01900000000070008000000000000004",
+        "generation": 0,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000004",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "x",
+        "cwd": "/d",
+        "state": "closed",
+        "terminalId": "term_01900000000070008000000000000005",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t1"
+        },
+        "exit": {
+          "type": "unknown"
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000005",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "x",
+        "cwd": "/e",
+        "state": "starting",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t1"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "native",
+          "confidence": 0.5,
+          "observedAt": "2026-11-01T00:00:00.000Z"
+        },
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": {
+          "text": "fine",
+          "taskId": "task_01900000000070008000000000000001",
+          "at": "2026-11-01T00:00:00.000Z"
+        },
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000a",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "My Project",
+        "cwd": "/k",
+        "state": "starting",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": "reviewer",
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000007",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "MY PROJECT!",
+        "cwd": "/g",
+        "state": "starting",
+        "terminalId": null,
+        "generation": null,
+        "externalRef": null,
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": "worker",
+        "promptChanged": true
+      },
+      {
+        "id": "agent_01900000000070008000000000000008",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "h",
+        "cwd": "/h",
+        "state": "lost",
+        "terminalId": "term_01900000000070008000000000000007",
+        "generation": 1,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s7"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [
+          "close",
+          "relaunch"
+        ],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_01900000000070008000000000000009",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "j",
+        "cwd": "/j",
+        "state": "running",
+        "terminalId": "term_0190000000007000800000000000000a",
+        "generation": 2,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t5"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "activity": {
+          "value": "idle",
+          "source": "native",
+          "confidence": 1,
+          "observedAt": "2026-11-01T00:00:00.000Z"
+        },
+        "usage": {
+          "model": "opus",
+          "contextUsedPercent": 12.5,
+          "contextWindowTokens": 200000
+        },
+        "attachCommand": "bazhen terminals attach term_0190000000007000800000000000000a",
+        "commands": [
+          "close",
+          "signal"
+        ],
+        "resumable": true,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": true,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": true
+        },
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000b",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "mail",
+        "cwd": "/g",
+        "state": "closed",
+        "terminalId": "term_0190000000007000800000000000000c",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s7"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [],
+        "resumable": false,
+        "canOpenShell": false,
+        "launchedBy": null,
+        "listening": false,
+        "headline": {
+          "text": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+          "taskId": "task_01900000000070008000000000000001",
+          "at": "2026-11-01T00:00:00.000Z"
+        },
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000c",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "restart",
+        "cwd": "/p",
+        "state": "starting",
+        "terminalId": "term_0190000000007000800000000000000d",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s8"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [
+          "close",
+          "signal"
+        ],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000d",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "exit",
+        "cwd": "/q",
+        "state": "exited",
+        "terminalId": "term_0190000000007000800000000000000e",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t9"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 0
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": "bazhen terminals attach term_0190000000007000800000000000000e",
+        "commands": [
+          "close"
+        ],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      }
+    ],
+    "attention": [
+      {
+        "id": "attn_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "state": "closed",
+        "closeReason": "answered",
+        "summary": "run ls?",
+        "kind": "approval",
+        "taskId": null,
+        "messageId": null,
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": []
+      },
+      {
+        "id": "attn_01900000000070008000000000000002",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "state": "closed",
+        "closeReason": "timed_out",
+        "summary": "which?",
+        "kind": "question",
+        "taskId": "task_01900000000070008000000000000001",
+        "messageId": "msg_01900000000070008000000000000001",
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": []
+      },
+      {
+        "id": "attn_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "closeReason": null,
+        "summary": "edit it?",
+        "kind": "approval",
+        "taskId": null,
+        "messageId": null,
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": [
+          "allow",
+          "deny",
+          "reply"
+        ]
+      },
+      {
+        "id": "attn_01900000000070008000000000000004",
+        "agentId": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "closeReason": null,
+        "summary": "not delivered",
+        "kind": "undeliverable",
+        "taskId": null,
+        "messageId": "msg_01900000000070008000000000000002",
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": [
+          "resend",
+          "dismiss"
+        ]
+      },
+      {
+        "id": "attn_01900000000070008000000000000005",
+        "agentId": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "closeReason": null,
+        "summary": "a subagent's edit?",
+        "kind": "approval",
+        "taskId": null,
+        "messageId": null,
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": [
+          "allow",
+          "deny"
+        ]
+      }
+    ],
+    "messages": [
+      {
+        "id": "msg_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "state": "delivered"
+      },
+      {
+        "id": "msg_01900000000070008000000000000002",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "state": "undeliverable"
+      },
+      {
+        "id": "msg_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000005",
+        "state": "undeliverable"
+      }
+    ],
+    "shells": [],
+    "tasks": [
+      {
+        "id": "task_01900000000070008000000000000001",
+        "title": "Ship",
+        "state": "done",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      },
+      {
+        "id": "task_01900000000070008000000000000002",
+        "title": "Part",
+        "state": "cancelled",
+        "ownerAgentId": null,
+        "parentTaskId": "task_01900000000070008000000000000001"
+      },
+      {
+        "id": "task_01900000000070008000000000000003",
+        "title": "Other",
+        "state": "open",
+        "ownerAgentId": null,
+        "parentTaskId": null
+      }
+    ],
+    "assignments": [
+      {
+        "id": "asgn_01900000000070008000000000000001",
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "lead",
+        "parentAssignmentId": null,
+        "state": "ended",
+        "endReason": "unassigned"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000002",
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000001",
+        "state": "ended",
+        "endReason": "parent_ended"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000003",
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000002",
+        "state": "ended",
+        "endReason": "parent_ended"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000004",
+        "taskId": "task_01900000000070008000000000000001",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parentAssignmentId": null,
+        "state": "ended",
+        "endReason": "task_finished"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000007",
+        "taskId": "task_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000004",
+        "state": "ended",
+        "endReason": "parent_ended"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000008",
+        "taskId": "task_01900000000070008000000000000003",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": null,
+        "state": "active",
+        "endReason": null
+      },
+      {
+        "id": "asgn_01900000000070008000000000000005",
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_0190000000007000800000000000000b",
+        "role": "worker",
+        "parentAssignmentId": null,
+        "state": "ended",
+        "endReason": "agent_closed"
+      },
+      {
+        "id": "asgn_01900000000070008000000000000006",
+        "taskId": "task_01900000000070008000000000000002",
+        "agentId": "agent_01900000000070008000000000000005",
+        "role": "worker",
+        "parentAssignmentId": "asgn_01900000000070008000000000000005",
+        "state": "ended",
+        "endReason": "parent_ended"
+      }
+    ],
+    "notices": [],
+    "observed": [
+      {
+        "id": "obs_01900000000070008000000000000001",
+        "from": "agent_0190000000007000800000000000000b",
+        "to": "agent_01900000000070008000000000000005",
+        "summary": "a note",
+        "accepted": true,
+        "at": "2026-11-01T00:00:00.000Z"
+      }
+    ]
+  }
+}

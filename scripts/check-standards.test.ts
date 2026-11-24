@@ -1888,6 +1888,32 @@ describe("byteTakers", () => {
     ]);
   });
 
+  it("leaves a call to a method of the type's own named as a read, but not one of another's", () => {
+    const source = [
+      "impl T { fn a(self) { self.read(v, None) } fn read(self, v: &V, a: Option<u32>) {} }",
+      "impl P { fn b(self) { Self::recv(self, v) } fn recv(self, v: &V) {} }",
+      "impl U { fn c(&mut self) { self.read(&mut b) } }",
+      "impl W { fn d(&mut self) { self.inner.read(&mut b) } fn read(&self) {} }",
+      "impl X { fn e(&mut self) { self.read(&mut b) } fn read(&mut self, b: &mut [u8]) {} }",
+      "impl R { fn f(&mut self) { self.read(&mut b) } fn read(&self, v: &V) {} }",
+      "impl N { fn g(&mut self) { fn read(v: &V) {} self.read(&mut b) } }",
+      "impl O { fn j(&mut self) { fn read(v: &V) {} Self::read(self, &mut b) } }",
+      "impl M { fn h(&mut self) { self.read(&mut v) } fn read(&mut self, v: &mut V) {} }",
+      "impl S { fn k(&self) { self.read(&v) } fn read(&self, v: &V) {} }",
+      "impl Z { fn k(&self) { self.read_at(&mut b, 0) } fn read_at(&mut self, v: &V, o: u64) {} }",
+    ].join("\n");
+    expect(byteTakers(source)).toEqual([
+      "U::c",
+      "W::d",
+      "X::e",
+      "X::read",
+      "R::f",
+      "N::g",
+      "O::j",
+      "Z::k",
+    ]);
+  });
+
   it("leaves a function that only returns bytes, takes text, or is test code", () => {
     const source = [
       "fn encode(x: u8) -> Vec<u8> { vec![x] }",
