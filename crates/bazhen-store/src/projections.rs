@@ -91,6 +91,9 @@ pub(crate) fn project(
             payload,
         } => attachments::started(tx, id, attachment, payload)?,
         NewEvent::AttachmentEnded { attachment, .. } => attachments::ended(tx, id, attachment)?,
+        NewEvent::Agent { agent, change, .. } => {
+            crate::agent_events::project(tx, at, agent, change)?;
+        }
         NewEvent::LeaseGranted { terminal, payload } => {
             attachments::granted(tx, id, terminal, payload)?;
         }

@@ -2,6 +2,7 @@
 //! fixtures `moon run :schema` writes from the TypeScript protocol (packages/protocol), and the
 //! checks a client makes before it asks the daemon. No I/O.
 
+pub mod agent_events;
 pub mod agents;
 pub mod daemon;
 pub mod detach_keys;
@@ -9,6 +10,7 @@ pub mod events;
 pub mod id;
 pub mod ids;
 pub mod input;
+pub mod js_number;
 pub mod mail;
 pub mod names;
 pub mod notices;

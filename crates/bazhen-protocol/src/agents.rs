@@ -161,6 +161,7 @@ pub enum ActivitySource {
 pub struct Activity {
     pub value: ActivityValue,
     pub source: ActivitySource,
+    #[serde(serialize_with = "crate::js_number::number")]
     pub confidence: f64,
     pub observed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,6 +175,7 @@ pub struct Activity {
 #[serde(rename_all = "camelCase")]
 pub struct UsageLimit {
     pub window: String,
+    #[serde(serialize_with = "crate::js_number::number")]
     pub used_percent: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<String>,
@@ -186,7 +188,11 @@ pub struct UsageLimit {
 pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::js_number::optional"
+    )]
     pub context_used_percent: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u64>,

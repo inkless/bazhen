@@ -208,3 +208,55 @@ impl fmt::Display for Role {
         f.write_str(&self.0)
     }
 }
+
+/// The longest base a default name keeps, leaving room within a name's 40 characters for `-` and
+/// a seven-digit number.
+const BASE_MAX: usize = 32;
+
+/// A project made into the start of a default name, as `nameBase` makes it: each run of
+/// characters a name can't hold becomes `-`, and the ends lose their `-` and `_`. The daemon keys
+/// its never-reused name counters by this, so it must match the TypeScript one's exactly.
+pub fn name_base(project: &str) -> String {
+    let mut replaced = String::with_capacity(project.len());
+    let mut in_run = false;
+    for c in project.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            replaced.push(c);
+            in_run = false;
+        } else if !in_run {
+            replaced.push('-');
+            in_run = true;
+        }
+    }
+    let ends = |c: char| c == '-' || c == '_';
+    let base: String = replaced.trim_matches(ends).chars().take(BASE_MAX).collect();
+    let base = base.trim_matches(ends);
+    if base.is_empty() {
+        "agent".to_owned()
+    } else {
+        base.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod name_base_tests {
+    use super::name_base;
+
+    #[test]
+    fn makes_a_project_the_start_of_a_default_name_as_typescript_does() {
+        for (project, base) in [
+            ("bazhen", "bazhen"),
+            ("my project!", "my-project"),
+            ("__x__", "x"),
+            ("", "agent"),
+            ("--", "agent"),
+            ("a  b", "a-b"),
+            ("日本", "agent"),
+            ("a日本b", "a-b"),
+            (&"x".repeat(40), &"x".repeat(32)),
+            (&format!("{}-y", "x".repeat(31)), &"x".repeat(31)),
+        ] {
+            assert_eq!(name_base(project), base, "{project}");
+        }
+    }
+}
