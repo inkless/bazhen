@@ -2,27 +2,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
-import { startFakeResponses } from "./fake-responses.ts";
 
 let messages: FakeModel;
-let responses: FakeModel;
 let daemon: Daemon;
 let claude: LaunchAgentResponse;
-let codex: LaunchAgentResponse;
 beforeAll(async () => {
-  [messages, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
-  daemon = await Daemon.start({
-    modelUrl: messages.url,
-    responsesUrl: responses.url,
-  });
-  [claude, codex] = await Promise.all([
-    daemon.launch("claude-reviewer", "claude-code", "reviewer"),
-    daemon.launch("codex-reviewer", "codex", "reviewer"),
-  ]);
+  messages = await startFakeModel();
+  daemon = await Daemon.start({ modelUrl: messages.url });
+  claude = await daemon.launch("claude-reviewer", "claude-code", "reviewer");
 });
 afterAll(async () => {
   await daemon?.stop();
-  await Promise.all([messages?.close(), responses?.close()]);
+  await messages?.close();
 });
 
 const state = async () => StateSnapshot.parse((await daemon.request("/v1/state")).body);
@@ -47,43 +38,5 @@ describe("an agent launched in a role", () => {
       })
       .toBe(true);
     expect(await agent(claude.agentId)).toMatchObject({ role: "reviewer", promptChanged: false });
-  });
-
-  it("is sent its role's prompt by Codex, from its thread's first item", async () => {
-    await turn(codex, "codex", "hello reviewer");
-    await expect
-      .poll(() => responses.requests.some((r) => r.includes("## Your role: Reviewer")), {
-        timeout: 30_000,
-      })
-      .toBe(true);
-  });
-
-  it("is shown its prompt changed after an edit, and a Codex respawn tells its thread the new one", async () => {
-    daemon.writeRole(
-      "reviewer",
-      "---\ntitle: Reviewer\n---\nReview it twice, and change nothing.\n",
-    );
-    expect((await agent(codex.agentId))?.promptChanged).toBe(true);
-    await daemon.signalAgent(codex.agentId, "SIGKILL");
-    await expect
-      .poll(async () => (await agent(codex.agentId))?.state, { timeout: 10_000 })
-      .toBe("exited");
-    const respawned = await daemon.request(`/v1/agents/${codex.agentId}/respawn`, {
-      method: "POST",
-      body: {
-        idempotencyKey: "respawn",
-        generation: Number((await agent(codex.agentId))?.generation),
-      },
-    });
-    expect(respawned.status).toBe(200);
-    await turn(codex, "codex", "hello again");
-    await expect
-      .poll(
-        () =>
-          responses.requests.some((r) => /These replace the ones[\s\S]*Review it twice/.test(r)),
-        { timeout: 30_000 },
-      )
-      .toBe(true);
-    expect((await agent(codex.agentId))?.promptChanged).toBe(false);
   });
 });

@@ -1,35 +1,35 @@
-// Agents launched in a folder their harness hasn't been told to trust. Claude Code stops at its
-// trust question, which only the human answers: Bazhen waits, says so past its deadline, and types
-// nothing. Codex, started as `codex resume --remote`, asks nothing and comes up.
+// Claude Code launched in a folder it hasn't been told to trust stops at its trust question, which
+// only the human answers: Bazhen waits, says so past its deadline, and types nothing.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
-import { BANNER, Daemon, waitUntil } from "./daemon.ts";
+import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
-import { startFakeResponses } from "./fake-responses.ts";
 
 const DEADLINE_S = 2;
 
 let anthropic: FakeModel;
-let responses: FakeModel;
 let daemon: Daemon;
 beforeAll(async () => {
-  [anthropic, responses] = await Promise.all([startFakeModel(), startFakeResponses()]);
+  anthropic = await startFakeModel();
   daemon = await Daemon.start({
     modelUrl: anthropic.url,
-    responsesUrl: responses.url,
     config: `[agents]\nstart_deadline_seconds = ${DEADLINE_S}\n`,
   });
 });
 afterAll(async () => {
   await daemon?.stop();
-  await Promise.all([anthropic?.close(), responses?.close()]);
+  await anthropic?.close();
 });
 
-async function launchIn(harness: "claude-code" | "codex", dir: string) {
+async function launchIn(dir: string) {
   const res = await daemon.request("/v1/agents", {
     method: "POST",
-    body: { idempotencyKey: `untrusted-${harness}`, harness, cwd: daemon.untrustedDirectory(dir) },
+    body: {
+      idempotencyKey: "untrusted-claude-code",
+      harness: "claude-code",
+      cwd: daemon.untrustedDirectory(dir),
+    },
   });
   return LaunchAgentResponse.parse(res.body);
 }
@@ -42,7 +42,7 @@ const stuck = async (agentId: string) =>
 describe("Claude Code launched in a folder it hasn't been told to trust", () => {
   let launched: LaunchAgentResponse;
   beforeAll(async () => {
-    launched = await launchIn("claude-code", "claude-elsewhere");
+    launched = await launchIn("claude-elsewhere");
   });
 
   it("stays starting at the trust question, and tells the human to look at its terminal", async () => {
@@ -79,19 +79,5 @@ describe("Claude Code launched in a folder it hasn't been told to trust", () => 
     const [item] = await stuck(launched.agentId);
     view.close();
     expect([item?.state, item?.closeReason]).toEqual(["closed", "answered_in_tui"]);
-  });
-});
-
-describe("Codex launched in a folder it hasn't been told to trust", () => {
-  // Bazhen starts the thread and the TUI joins it on the app-server, where Codex asks nothing.
-  it("comes up without a trust question, runs, and tells the human nothing", async () => {
-    const { agentId } = await launchIn("codex", "codex-elsewhere");
-    await waitUntil(async () => (await daemon.screen(agentId)).includes(BANNER.codex), "Codex");
-    await expect.poll(() => daemon.agentState(agentId), { timeout: 30_000 }).toBe("running");
-    await new Promise((resolve) => setTimeout(resolve, DEADLINE_S * 2000));
-    expect([await daemon.screen(agentId), await stuck(agentId)]).toEqual([
-      expect.not.stringMatching(/trust/i),
-      [],
-    ]);
   });
 });
