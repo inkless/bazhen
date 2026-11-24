@@ -35,13 +35,22 @@ exit "\${STUB_EXIT:-0}"
 `;
 
 // `cargo metadata`, which `lint` asks for the crates to lint alone: two crates, named out of order.
+// The schema's example, which a test gate runs first, prints a schema of no messages, and judges
+// the corpus that leaves, which is empty.
 const CARGO_STUB = `#!/bin/sh
 echo "ARGV: $*" >> "$STUB_LOG"
 echo "ENV:" >> "$STUB_LOG"
 env -0 >> "$STUB_LOG"
 echo >> "$STUB_LOG"
-echo '{"packages":[{"name":"two"},{"name":"one"}]}'
+case "$*" in
+  *emit_schema*verdicts*) echo '[]' ;;
+  *emit_schema*) echo '{"$defs":{}}' ;;
+  *) echo '{"packages":[{"name":"two"},{"name":"one"}]}' ;;
+esac
 `;
+
+/** The schema's example as the cargo stub logs it, and its judging of the corpus. */
+const EMIT = "run --quiet --locked -p bazhen-protocol --example emit_schema";
 
 let xtask: string;
 let xtaskDir: string | undefined;
@@ -144,6 +153,19 @@ function gate(command: string[], env: Record<string, string> = {}) {
 
 const rust = (args: string[], env?: Record<string, string>) => gate([xtask, "gate", ...args], env);
 
+/**
+ * A test gate, in a repository of its own that holds only an empty checks.ts: the gate writes the
+ * schema's output under its root, which here is never the real repository's.
+ */
+function testGate(args: string[], env: Record<string, string> = {}) {
+  const repo = join(dir, "repo");
+  mkdirSync(join(repo, "packages", "protocol", "src"), { recursive: true });
+  writeFileSync(join(repo, "packages", "protocol", "src", "checks.ts"), "");
+  const run = rust(args, { ...env, BAZHEN_XTASK_ROOT: repo });
+  const corpus = join(repo, "target", "protocol-shadow", "corpus.json");
+  return { ...run, corpus: existsSync(corpus) ? readFileSync(corpus, "utf8") : undefined, repo };
+}
+
 /** The variables the stub itself adds, or that its shell sets: not the gate's. */
 const OWN = new Set(["PWD", "SHLVL", "_", "OLDPWD"]);
 const gateVars = (env: Record<string, string> | undefined) =>
@@ -178,12 +200,18 @@ const asShipped = (name: string) =>
 
 describe("cargo xtask gate", () => {
   it("hands the tool its fixed command, the tests named after it, and no caller's flags", () => {
-    const { status, logged } = rust(["test", "tests::a", "b"], CALLER);
-    expect({ status, argv: logged.map((l) => l.argv) }).toEqual({
+    const { status, logged, corpus, repo } = testGate(["test", "tests::a", "b"], CALLER);
+    expect({ status, argv: logged.map((l) => l.argv), corpus }).toEqual({
       status: 0,
-      argv: [[...TEST_COMMAND, "tests::a", "b"].join(" ")],
+      argv: [
+        EMIT,
+        `${EMIT} -- verdicts ${join(repo, "target", "protocol-shadow", "corpus", "cases.json")}`,
+        [...TEST_COMMAND, "tests::a", "b"].join(" "),
+      ],
+      corpus: "[]\n",
     });
-    expect(gateVars(logged[0]?.env)).toEqual(gateEnv(startEnv(CALLER)));
+    const caller = { ...CALLER, BAZHEN_XTASK_ROOT: repo };
+    expect(gateVars(logged.at(-1)?.env)).toEqual(gateEnv(startEnv(caller)));
   });
 
   it("lints the workspace, then each crate cargo metadata names alone, with its tests and as it ships", () => {
@@ -295,7 +323,7 @@ describe("the rules the TypeScript rails share with the Rust gate", () => {
   });
 
   it("build the tests falsify lists as the test gate builds them", () => {
-    expect(rust(["test"]).logged[0]?.argv).toBe(TEST_COMMAND.join(" "));
+    expect(testGate(["test"]).logged.at(-1)?.argv).toBe(TEST_COMMAND.join(" "));
   });
 });
 

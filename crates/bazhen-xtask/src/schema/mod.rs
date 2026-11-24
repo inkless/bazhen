@@ -2,8 +2,8 @@
 //! written from it, into `target/protocol-shadow/`. Nothing there is committed yet: the
 //! TypeScript protocol in packages/protocol is still the one the daemon and clients run. With
 //! `--check` it also holds schemars to the crates' own tests (`leaks`). Beside them it writes the
-//! planted corpus (`corpus`), with the daemon edge's verdict on each case, and fails where the
-//! edge's verdict isn't the protocol's.
+//! planted corpus (`corpus`), with the daemon edge's verdict on each case, and with `--check` fails
+//! where the edge's verdict isn't the protocol's.
 
 mod corpus;
 mod leaks;
@@ -48,8 +48,8 @@ const CHECKS: &str = "packages/protocol/src/checks.ts";
 /// `CHECKS` as the generated module, in `SHADOW/gen/`, imports it.
 const CHECKS_FROM_SHADOW: &str = "../../../packages/protocol/src/checks.ts";
 
-/// Writes the schema and its zod into `SHADOW`, with the corpus judged against `known`, and with
-/// `check` holds schemars to the crates' tests.
+/// Writes the schema, its zod and the corpus into `SHADOW`, and with `check` holds the corpus to
+/// the edge's verdicts but for `known`, and schemars to the crates' tests.
 pub(crate) fn run(
     check: bool,
     known: corpus::Known<'_>,
@@ -71,7 +71,13 @@ pub(crate) fn run(
         Ok(Some(printed)) => {
             problems.extend(write_shadow(&printed, places, host));
             if problems.is_empty() {
-                problems.extend(write_corpus(&printed, known, &env, places, host));
+                problems.extend(write_corpus(
+                    &printed,
+                    check.then_some(known),
+                    &env,
+                    places,
+                    host,
+                ));
             }
         }
         Ok(None) => problems
@@ -115,11 +121,11 @@ fn write_shadow(printed: &str, places: &Places, host: &mut impl Host) -> Vec<Str
 }
 
 /// Plants the corpus from the schema `printed` holds, has the example judge each case as the
-/// daemon's edge does, and writes both: each disagreement outside `known` is a
-/// problem.
+/// daemon's edge does, and writes both. With `known`, each disagreement outside it is a problem,
+/// and each entry of it the edge now agrees with.
 fn write_corpus(
     printed: &str,
-    known: corpus::Known<'_>,
+    known: Option<corpus::Known<'_>>,
     env: &Env,
     places: &Places,
     host: &mut impl Host,
@@ -168,6 +174,13 @@ fn write_corpus(
         Ok(None) => return vec!["the example failed to judge the corpus".to_owned()],
         Err(error) => return vec![format!("cargo: {error}")],
     };
+    if verdicts.len() != cases.len() {
+        return vec![format!(
+            "the example judged {} of {} cases",
+            verdicts.len(),
+            cases.len()
+        )];
+    }
     let judged: Vec<serde_json::Value> = listed
         .into_iter()
         .zip(&verdicts)
@@ -178,7 +191,9 @@ fn write_corpus(
             case
         })
         .collect();
-    let mut problems = corpus::mismatched(&cases, &verdicts, known);
+    let mut problems = known.map_or_else(Vec::new, |known| {
+        corpus::mismatched(&cases, &verdicts, known)
+    });
     let written = shadow.join("corpus.json");
     let text = serde_json::to_string_pretty(&judged).unwrap_or_default() + "\n";
     if let Err(error) = host.write(&written, &text) {
@@ -379,6 +394,26 @@ mod tests {
             _ => json!({ "refused": "no" }),
         });
         assert_eq!((exit, err.as_str()), (Exit::Done, ""));
+    }
+
+    #[test]
+    fn fails_without_writing_the_corpus_when_the_example_judges_too_few_cases() {
+        let message = json!({
+            "type": "object",
+            "properties": { "n": { "type": "integer", "minimum": 0, "maximum": 9 } },
+            "required": ["n"],
+        });
+        for check in [false, true] {
+            let mut host = fake(&json!({ "M": message }));
+            let fixture = Path::new("/a/repo").join(FIXTURES).join("M.json");
+            let example = json!([{ "name": "one", "wire": { "n": 1 } }]);
+            host.files.insert(fixture, example.to_string());
+            let (exit, err) = ran(&mut host, check);
+            assert_eq!(exit, Exit::Failed, "{err}");
+            assert!(err.contains("the example judged 0 of "), "{err}");
+            let corpus = Path::new("/a/repo").join(SHADOW).join("corpus.json");
+            assert!(!host.written.contains_key(&corpus), "check {check}");
+        }
     }
 
     #[test]

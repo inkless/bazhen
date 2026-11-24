@@ -2594,9 +2594,10 @@ const RUNS_BINARIES: Record<string, string[]> = {
 };
 // Files whose paths into a target/ are data, not binaries they run: falsify itself, its tests'
 // fixtures, absolute paths in doctor's fixtures, a store test's scratch folder named target, the
-// scratch build tree of the test of where agents find the CLI, the text of scripts/xtask.sh
-// that the standards check pins, and the zod `cargo xtask schema` generates, which a test loads as
-// source and the medium project resolves the imports of.
+// scratch build tree of the test of where agents find the CLI, the corpus the gate writes into
+// its test's scratch repository, the text of scripts/xtask.sh that the standards check pins, and
+// the zod `cargo xtask schema` generates, which a test loads as source and the medium project
+// resolves the imports of.
 const MENTIONS_TARGET = [
   "apps/daemon/src/env/agent-cli.medium.test.ts",
   "apps/daemon/src/store/store.medium.test.ts",
@@ -2606,6 +2607,7 @@ const MENTIONS_TARGET = [
   "scripts/falsify.medium.test.ts",
   "scripts/falsify.test.ts",
   "scripts/falsify.ts",
+  "scripts/xtask-gate.medium.test.ts",
   "tests/cli/daemon.test.ts",
   "tests/cli/fixtures.ts",
   "vitest.config.ts",

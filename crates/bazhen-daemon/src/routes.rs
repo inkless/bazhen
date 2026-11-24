@@ -502,6 +502,9 @@ async fn guarded(State(gate): State<Arc<Gate>>, request: Request, next: Next) ->
 }
 
 #[cfg(test)]
+mod edge;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
