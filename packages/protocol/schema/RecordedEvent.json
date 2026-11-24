@@ -1,0 +1,2346 @@
+{
+  "$id": "RecordedEvent",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "environment.registered"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "local",
+                "opencode-server"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "environment.harness_version"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude-code",
+                "codex"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "previous": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "harness",
+            "version",
+            "previous"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.launched"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "environmentId": {
+              "type": "string",
+              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude-code",
+                "codex"
+              ]
+            },
+            "project": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "terminalId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "launchedBy": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "name": {
+              "type": "string"
+            },
+            "nameOrdinal": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}$"
+            },
+            "promptHash": {
+              "type": "string"
+            },
+            "compactWindowTokens": {
+              "type": "integer",
+              "minimum": 100000,
+              "maximum": 10000000
+            }
+          },
+          "required": [
+            "environmentId",
+            "harness",
+            "project",
+            "cwd",
+            "terminalId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.renamed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "previous": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "previous"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.running"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "externalRef": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "environmentId": {
+                      "type": "string",
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "claude-session",
+                        "codex-thread"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "environmentId",
+                    "kind",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "runtimeRef": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "type": "string"
+                    },
+                    "locator": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "runtime",
+                    "locator"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "harnessName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "externalRef",
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.ready"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sign": {
+              "type": "string",
+              "enum": [
+                "claude_hook",
+                "codex_title"
+              ]
+            }
+          },
+          "required": [
+            "sign"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.failed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "launch_rejected",
+                "daemon_restart"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.lost"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.process_adopted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            }
+          },
+          "required": [
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.respawn_requested"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.respawned"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "externalRef": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "environmentId": {
+                      "type": "string",
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "claude-session",
+                        "codex-thread"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "environmentId",
+                    "kind",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "harnessName": {
+              "type": "string"
+            },
+            "promptHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "externalRef",
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.respawn_rejected"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not_resumable",
+                "no_terminal",
+                "terminal_changed",
+                "harness_refused",
+                "unavailable",
+                "daemon_restart"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.relaunch_requested"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "generation": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "fresh": {
+              "type": "boolean"
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "terminalId",
+            "generation",
+            "fresh"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.relaunched"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "externalRef": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "environmentId": {
+                      "type": "string",
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "claude-session",
+                        "codex-thread"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "environmentId",
+                    "kind",
+                    "id"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "harnessName": {
+              "type": "string"
+            },
+            "promptHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "externalRef",
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.relaunch_rejected"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not_resumable",
+                "terminal_exists",
+                "harness_refused",
+                "unavailable",
+                "daemon_restart"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.external_ref_updated"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "externalRef": {
+              "type": "object",
+              "properties": {
+                "environmentId": {
+                  "type": "string",
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "claude-session",
+                    "codex-thread"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "environmentId",
+                "kind",
+                "id"
+              ]
+            }
+          },
+          "required": [
+            "externalRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.transcript_recorded"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "format": "starts_with",
+              "pattern": "^\\/.*"
+            }
+          },
+          "required": [
+            "sessionId",
+            "path"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.signalled"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "signal": {
+              "type": "string",
+              "enum": [
+                "SIGINT",
+                "SIGTERM",
+                "SIGHUP",
+                "SIGKILL"
+              ]
+            }
+          },
+          "required": [
+            "signal"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.activity"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "string",
+              "enum": [
+                "working",
+                "waiting_input",
+                "needs_approval",
+                "idle",
+                "done",
+                "failed",
+                "limited",
+                "unknown"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "native",
+                "heuristic"
+              ]
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "observedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "resetsAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            }
+          },
+          "required": [
+            "value",
+            "source",
+            "confidence",
+            "observedAt"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.usage"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "contextUsedPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "contextWindowTokens": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limits": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "window": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "usedPercent": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "resetsAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": [
+                  "window",
+                  "usedPercent"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.compacted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sign": {
+              "type": "string",
+              "enum": [
+                "claude_hook",
+                "codex_item"
+              ]
+            },
+            "before": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "contextUsedPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "contextWindowTokens": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "limits": {
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "window": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60
+                      },
+                      "usedPercent": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "resetsAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      }
+                    },
+                    "required": [
+                      "window",
+                      "usedPercent"
+                    ]
+                  }
+                }
+              }
+            },
+            "hook": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pid": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "sessionId",
+                "pid"
+              ]
+            }
+          },
+          "required": [
+            "sign"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.exited"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "exit": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "exited"
+                    },
+                    "code": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "signalled"
+                    },
+                    "signal": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "signal"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "exit"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.closing"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent.closed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.opened"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "environmentId": {
+              "type": "string",
+              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "linkedAgentId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "restartOf": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "runtime": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "environmentId",
+            "cwd",
+            "linkedAgentId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.running"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            }
+          },
+          "required": [
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.failed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "open_rejected",
+                "daemon_restart"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.process_adopted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtimeRef": {
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "locator": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ]
+            }
+          },
+          "required": [
+            "runtimeRef"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.lost"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.closing"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.closed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "user",
+                "exited",
+                "agent_closed",
+                "restarted"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.foreground_changed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.needs_restart"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "minItems": 1,
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 0,
+                "description": "At most 32 UTF-8 bytes."
+              }
+            }
+          },
+          "required": [
+            "protocol"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.restart_cleared"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.unlinked"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "terminal.renamed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "attachment.started"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "observe",
+                "interactive"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "mode"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "attachment.ended"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "client_closed",
+                "terminal_closed",
+                "attach_failed",
+                "daemon_restart",
+                "disconnected",
+                "evicted_slow",
+                "timed_out",
+                "replaced"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.queued"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "body": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            }
+          },
+          "required": [
+            "agentId",
+            "body"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.offered"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "promptId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.emitted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.seen"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "promptId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "promptId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.delivered"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.accepted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "offline": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "offline"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.undeliverable"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "agent_closed",
+                "gave_up"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "message.observed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "toolUseId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "summary",
+            "text",
+            "accepted",
+            "toolUseId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mailbox.requeued"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not_written",
+                "daemon_restart",
+                "session_started",
+                "stop_failed",
+                "interrupted",
+                "not_seen"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "attention.opened"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "approval",
+                "question",
+                "failed",
+                "undeliverable",
+                "escalation",
+                "task_done",
+                "stuck_starting"
+              ]
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string",
+              "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "toolUseId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mainAgent": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "agentId",
+            "summary",
+            "toolUseId",
+            "mainAgent"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "attention.answered"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny"
+              ]
+            }
+          },
+          "required": [
+            "decision"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "attention.closed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "answered_in_tui",
+                "timed_out",
+                "superseded",
+                "agent_closed",
+                "stale",
+                "replied",
+                "dismissed",
+                "resent"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "device.paired"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "device.revoked"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "notice.opened"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "device": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "origin": {
+                      "type": "string"
+                    },
+                    "address": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "origin",
+                    "address"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "summary",
+            "device"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "notice.closed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "dismissed",
+                "revoked"
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "owner-socket",
+                "owner-loopback",
+                "revoke"
+              ]
+            },
+            "fromDevice": {
+              "type": "string",
+              "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            }
+          },
+          "required": [
+            "reason",
+            "by"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "lease.granted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attachmentId": {
+              "type": "string",
+              "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "epoch": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "attachmentId",
+            "epoch"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "task.created"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "brief": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000
+            },
+            "ownerAgentId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parentTaskId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegatedFrom": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "title",
+            "brief",
+            "ownerAgentId",
+            "parentTaskId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "task.finished"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "done",
+                "cancelled"
+              ]
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "outcome",
+            "note"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "task.owner_changed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ownerAgentId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delegatedFrom": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ownerAgentId",
+            "delegatedFrom"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "task.noted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "handoff": {
+              "type": "boolean"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "text",
+            "handoff",
+            "role"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "assignment.granted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "agentId": {
+              "type": "string",
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            },
+            "role": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}$"
+            },
+            "parentAssignmentId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "taskId",
+            "agentId",
+            "role",
+            "parentAssignmentId"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "assignment.ended"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "unassigned",
+                "completed"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ]
+    }
+  ]
+}

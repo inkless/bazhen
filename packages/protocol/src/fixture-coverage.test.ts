@@ -92,6 +92,18 @@ describe("enumPaths and replaceAt", () => {
     expect(replaceAt({ items: [] }, "items[].exit.(type=x).how", "b")).toBeUndefined();
     expect(replaceAt({ owner: null }, "owner.name", "b")).toBeUndefined();
   });
+
+  it("replaces in the branch told by a value that holds a dot, and only there", () => {
+    const events = [
+      { type: "agent.closed", payload: { reason: "a" } },
+      { type: "agent", payload: { reason: "a" } },
+    ];
+    expect(replaceAt(events[0], ".(type=agent.closed).payload.reason", "b")).toEqual({
+      type: "agent.closed",
+      payload: { reason: "b" },
+    });
+    expect(replaceAt(events[1], ".(type=agent.closed).payload.reason", "b")).toBeUndefined();
+  });
 });
 
 describe("withField and wellFormed", () => {

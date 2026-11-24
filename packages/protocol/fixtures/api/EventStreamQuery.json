@@ -1,0 +1,29 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "epoch": "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "after": "41"
+    },
+    "parsed": {
+      "epoch": "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "after": "41"
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "epoch": "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "after": "41",
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "epoch": "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "after": "41"
+    }
+  }
+]

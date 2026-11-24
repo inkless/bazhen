@@ -27,7 +27,15 @@ import {
   RevokeDeviceResponse,
 } from "./devices.ts";
 import { HarnessId, Id } from "./ids.ts";
-import { EventEnvelopeFrame } from "./events.ts";
+import {
+  ClientEventFrame,
+  EVENTS,
+  Event,
+  RecordedEvent,
+  EventEnvelopeFrame,
+  EventStreamQuery,
+  type EventType,
+} from "./events.ts";
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
 import { AgentCondition, ShellCondition, WaitRequest, WaitResponse } from "./waits.ts";
 import {
@@ -105,6 +113,301 @@ const OBS = "obs_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const ATT = "att_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
 const AT = "2026-11-16T12:00:00.000Z";
 const KEY = "0b8f8a52-58a3-4c49-9e2f-5d0f8c1c2a10";
+
+const HOLDER_REF = { runtime: "holder", locator: { pid: "4242" } };
+const SESSION = "5f0c2a8e-7b1d-4c3e-9f2a-1d0e8c7b6a59";
+const USAGE = {
+  model: "claude-opus",
+  contextUsedPercent: 42.5,
+  contextWindowTokens: 200_000,
+  limits: [
+    { window: "5h", usedPercent: 12, resetsAt: AT },
+    { window: "weekly", usedPercent: 3 },
+  ],
+};
+const restarted = (theme: string, harnessName: string) => [
+  {
+    externalRef: { environmentId: ENV, kind: "codex-thread", id: "t-1" },
+    runtimeRef: HOLDER_REF,
+    theme,
+    harnessName,
+    promptHash: "9f86d081",
+  },
+  { externalRef: null, runtimeRef: HOLDER_REF },
+];
+
+/** Each event type's payloads as the stream sends them. */
+const EVENT_PAYLOADS: { readonly [T in EventType]: readonly unknown[] } = {
+  "environment.registered": [{ kind: "local" }],
+  "environment.harness_version": [
+    { harness: "codex", version: "0.80.0", previous: "0.79.0" },
+    { harness: "codex", version: "0.79.0", previous: null },
+  ],
+  "agent.launched": [
+    {
+      environmentId: ENV,
+      harness: "claude-code",
+      project: "bazhen",
+      cwd: "/work",
+      terminalId: TERM,
+      launchedBy: AGENT2,
+      name: "BZ-127",
+      nameOrdinal: 3,
+      runtime: "holder",
+      role: "worker",
+      promptHash: "9f86d081",
+      compactWindowTokens: 200_000,
+    },
+    { environmentId: ENV, harness: "codex", project: "bazhen", cwd: "/work", terminalId: null },
+  ],
+  "agent.renamed": [{ name: "reviewer", previous: "bazhen-3" }],
+  "agent.running": [
+    {
+      externalRef: { environmentId: ENV, kind: "claude-session", id: SESSION },
+      runtimeRef: HOLDER_REF,
+      theme: "dark",
+      harnessName: "Claude Code",
+    },
+    { externalRef: null, runtimeRef: null },
+  ],
+  "agent.ready": [{ sign: "claude_hook" }],
+  "agent.failed": [
+    { reason: "launch_rejected", detail: "no such cwd" },
+    { reason: "daemon_restart" },
+  ],
+  "agent.lost": [{}],
+  "agent.process_adopted": [{ runtimeRef: HOLDER_REF }],
+  "agent.respawn_requested": [{}],
+  "agent.respawned": restarted("light", "Codex"),
+  "agent.respawn_rejected": [
+    { reason: "not_resumable", detail: "no session" },
+    { reason: "unavailable" },
+  ],
+  "agent.relaunch_requested": [
+    { terminalId: TERM, generation: 2, fresh: true, runtime: "holder" },
+    { terminalId: TERM, generation: 3, fresh: false },
+  ],
+  "agent.relaunched": restarted("dark", "Claude Code"),
+  "agent.relaunch_rejected": [
+    { reason: "terminal_exists", detail: "still open" },
+    { reason: "daemon_restart" },
+  ],
+  "agent.external_ref_updated": [
+    { externalRef: { environmentId: ENV, kind: "codex-thread", id: "t-2" } },
+  ],
+  "agent.transcript_recorded": [{ sessionId: SESSION }],
+  "agent.signalled": [{ signal: "SIGINT" }],
+  "agent.activity": [
+    {
+      value: "working",
+      source: "native",
+      confidence: 1,
+      observedAt: AT,
+      detail: "Editing",
+      resetsAt: AT,
+    },
+    { value: "idle", source: "heuristic", confidence: 0.5, observedAt: AT },
+  ],
+  "agent.usage": [USAGE, {}],
+  "agent.compacted": [
+    { sign: "claude_hook", before: USAGE, hook: { sessionId: SESSION, pid: 4242 } },
+    { sign: "codex_item", before: {}, hook: { sessionId: null, pid: 4242 } },
+    { sign: "codex_item" },
+  ],
+  "agent.exited": [
+    { exit: { type: "exited", code: 0 } },
+    { exit: { type: "signalled", signal: "SIGTERM" } },
+    { exit: { type: "unknown" } },
+  ],
+  "agent.closing": [{}],
+  "agent.closed": [{}],
+  "terminal.opened": [
+    {
+      environmentId: ENV,
+      cwd: "/work",
+      linkedAgentId: AGENT,
+      theme: "dark",
+      restartOf: TERM,
+      runtime: "holder",
+    },
+    { environmentId: ENV, cwd: "/work", linkedAgentId: null },
+  ],
+  "terminal.running": [{ runtimeRef: HOLDER_REF }],
+  "terminal.failed": [{ reason: "open_rejected" }],
+  "terminal.process_adopted": [{ runtimeRef: HOLDER_REF }],
+  "terminal.lost": [{}],
+  "terminal.closing": [{}],
+  "terminal.closed": [{ reason: "user" }],
+  "terminal.foreground_changed": [{ command: "vim" }, { command: null }],
+  "terminal.needs_restart": [{ protocol: ["2"] }],
+  "terminal.restart_cleared": [{}],
+  "terminal.unlinked": [{}],
+  "terminal.renamed": [{ name: "build" }, { name: null }],
+  "attachment.started": [{ terminalId: TERM, mode: "interactive" }],
+  "attachment.ended": [{ reason: "client_closed" }],
+  "mailbox.queued": [{ agentId: AGENT, from: AGENT2 }, { agentId: AGENT }],
+  "mailbox.offered": [{ promptId: "p-1" }, {}],
+  "mailbox.emitted": [{}],
+  "mailbox.seen": [{ promptId: "p-1" }],
+  "mailbox.delivered": [{}],
+  "mailbox.accepted": [{ offline: false }],
+  "mailbox.undeliverable": [{ reason: "gave_up" }],
+  "message.observed": [
+    { from: AGENT, to: AGENT2, summary: "Review it?", accepted: true, toolUseId: "toolu_01" },
+  ],
+  "mailbox.requeued": [{ reason: "not_seen" }],
+  "attention.opened": [
+    {
+      agentId: AGENT,
+      summary: "Run the migration?",
+      kind: "approval",
+      taskId: TASK,
+      messageId: MSG,
+      toolUseId: "toolu_01",
+      mainAgent: true,
+    },
+    { agentId: AGENT, summary: "Stuck?", toolUseId: null, mainAgent: false },
+  ],
+  "attention.answered": [{ decision: "allow" }],
+  "attention.closed": [{ reason: "replied" }],
+  "device.paired": [{ name: "iPad" }],
+  "device.revoked": [{}],
+  "notice.opened": [
+    {
+      kind: DEVICE_PAIRED,
+      summary: "iPad paired",
+      device: {
+        id: DEV,
+        name: "iPad",
+        origin: "https://192.168.1.20:7777",
+        address: "192.168.1.20",
+      },
+    },
+    {
+      kind: DEVICE_PAIRED,
+      summary: "iPad paired",
+      device: { id: DEV, name: "iPad", origin: "https://ipad.local:7777", address: null },
+    },
+    { kind: "daemon_restarted", summary: "Restarted", device: null },
+  ],
+  "notice.closed": [
+    { reason: "revoked", by: "revoke", fromDevice: DEV },
+    { reason: "dismissed", by: "owner-socket" },
+  ],
+  "lease.granted": [{ attachmentId: ATT, epoch: 1 }],
+  "task.created": [
+    { title: "Port events", ownerAgentId: AGENT, parentTaskId: TASK2, delegatedFrom: ASGN },
+    { title: "Port events", ownerAgentId: null, parentTaskId: null, delegatedFrom: null },
+    { title: "Port events", ownerAgentId: null, parentTaskId: null },
+  ],
+  "task.finished": [{ outcome: "done" }],
+  "task.owner_changed": [
+    { ownerAgentId: AGENT, delegatedFrom: ASGN },
+    { ownerAgentId: null, delegatedFrom: null },
+  ],
+  "task.noted": [
+    { handoff: true, role: "reviewer" },
+    { handoff: false, role: null },
+  ],
+  "assignment.granted": [
+    { taskId: TASK, agentId: AGENT, role: "worker", parentAssignmentId: ASGN },
+    { taskId: TASK, agentId: AGENT, role: "worker", parentAssignmentId: null },
+  ],
+  "assignment.ended": [{ reason: "completed" }],
+};
+
+const ENTITY_IDS: Readonly<Record<string, string>> = {
+  environment: ENV,
+  agent: AGENT,
+  terminal: TERM,
+  attachment: ATT,
+  message: MSG,
+  observed_message: OBS,
+  attention: ATTN,
+  device: DEV,
+  notice: NTC,
+  task: TASK,
+  assignment: ASGN,
+};
+
+const EVENT_ENTITIES: Readonly<Record<string, { readonly entity: string }>> = EVENTS;
+
+/** `items`, as the list of at least one item it must be. */
+function atLeastOne<T>(items: readonly T[]): readonly [T, ...T[]] {
+  const [first, ...rest] = items;
+  if (first === undefined) throw new Error("expected at least one item");
+  return [first, ...rest];
+}
+
+/** Each type's payloads as the store records them, where that is more than the stream sends. */
+const RECORDED: Readonly<Record<string, readonly unknown[]>> = {
+  "agent.transcript_recorded": [{ sessionId: SESSION, path: "/home/u/.claude/projects/p/s.jsonl" }],
+  "mailbox.queued": [
+    { agentId: AGENT, from: AGENT2, body: "Review the port." },
+    { agentId: AGENT, body: "Ship it." },
+  ],
+  "message.observed": [
+    {
+      from: AGENT,
+      to: AGENT2,
+      summary: "Review it?",
+      accepted: true,
+      toolUseId: "toolu_01",
+      text: "Review the port, please.",
+    },
+  ],
+  "task.created": [
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: AGENT,
+      parentTaskId: TASK2,
+      delegatedFrom: ASGN,
+    },
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: null,
+      parentTaskId: null,
+      delegatedFrom: null,
+    },
+    {
+      title: "Port events",
+      brief: "Port the event stream.",
+      ownerAgentId: null,
+      parentTaskId: null,
+    },
+  ],
+  "task.finished": [
+    { outcome: "done", note: "Shipped." },
+    { outcome: "done", note: null },
+  ],
+  "task.noted": [
+    { text: "Over to you.", handoff: true, role: "reviewer" },
+    { text: "Noted.", handoff: false, role: null },
+  ],
+};
+
+/** Every type's payloads as the store records them, each with its type. */
+const PAYLOAD_WIRE = Object.entries(EVENT_PAYLOADS).flatMap(([type, payloads]) =>
+  (RECORDED[type] ?? payloads).map((payload) => ({ type, payload })),
+);
+
+/** Every example of `EVENT_PAYLOADS` as an event, the first of each type caused by none. */
+const EVENT_WIRE = Object.entries(EVENT_PAYLOADS).flatMap(([type, payloads], t) => {
+  const entity = EVENT_ENTITIES[type]?.entity ?? "";
+  return payloads.map((payload, i) => ({
+    id: 100 * (t + 1) + i,
+    ts: AT,
+    type,
+    entityType: entity,
+    entityId: ENTITY_IDS[entity],
+    actor: i === 0 ? "user" : AGENT,
+    causationId: i === 0 ? null : 100 * (t + 1),
+    correlationId: i === 0 ? null : KEY,
+    payload,
+  }));
+});
 
 const fullAgent = {
   id: AGENT,
@@ -512,6 +815,7 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   },
   AssignTaskResponse: { schema: AssignTaskResponse, wire: [{ assignmentId: ASGN, eventIds: [3] }] },
   CallerResponse: { schema: CallerResponse, wire: [{ agentId: AGENT }, { agentId: null }] },
+  ClientEventFrame: { schema: ClientEventFrame, wire: [{ type: "visibility", visible: true }] },
   CloseAgentRequest: {
     schema: CloseAgentRequest,
     wire: [
@@ -672,6 +976,20 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       { type: "reset", reason: "stale" },
       { type: "reset", reason: "foreign" },
     ],
+  },
+  /**
+   * zod writes `Event` as an `anyOf` whose branches share their payloads' paths, so one type's
+   * enum would be planted in another's payload. Its own branches, discriminated by type, keep
+   * each type's apart, and parse every event alike.
+   */
+  Event: { schema: z.discriminatedUnion("type", atLeastOne(Event.options)), wire: EVENT_WIRE },
+  RecordedEvent: {
+    schema: z.discriminatedUnion("type", atLeastOne(RecordedEvent.options)),
+    wire: PAYLOAD_WIRE,
+  },
+  EventStreamQuery: {
+    schema: EventStreamQuery,
+    wire: [{ epoch: "0190c3b2a1d47a3b8c1d2e3f4a5b6c7d", after: "41" }],
   },
   FinishTaskRequest: {
     schema: FinishTaskRequest,

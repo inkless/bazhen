@@ -244,6 +244,14 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
                 false,
             ),
         ],
+        "utf8AtMost32Bytes" => vec![
+            ("atMaxBytes", Value::from("é".repeat(16)).to_string(), true),
+            (
+                "pastMaxBytes",
+                Value::from("é".repeat(16) + "a").to_string(),
+                false,
+            ),
+        ],
         _ => return None,
     })
 }
@@ -391,6 +399,34 @@ fn branches(schema: &Value) -> Option<&Vec<Value>> {
         .get("anyOf")
         .or_else(|| schema.get("oneOf"))
         .and_then(Value::as_array)
+}
+
+/// The step a case's path takes into the branch of a union of `branches` that `value` is:
+/// `(key=value)`, by the property each branch pins to a constant of its own, as the fixtures name
+/// a branch. Branches can share their fields' paths, so without it two branches' cases would share
+/// a key. `planted` passes over it.
+fn branch_step(branches: &[&Value], value: &Value) -> Option<String> {
+    let pinned = |branch: &Value, key: &str| -> Option<Value> {
+        branch.get("properties")?.get(key)?.get("const").cloned()
+    };
+    let first = branches.first()?.get("properties")?.as_object()?;
+    let key = first.keys().find(|key| {
+        let constants: Option<Vec<Value>> = branches.iter().map(|b| pinned(b, key)).collect();
+        constants.is_some_and(|c| {
+            c.iter()
+                .enumerate()
+                .all(|(i, v)| !c.iter().take(i).any(|w| w == v))
+        })
+    })?;
+    let constant = value.get(key)?;
+    let shown = constant
+        .as_str()
+        .map_or_else(|| constant.to_string(), str::to_owned);
+    Some(format!("({key}={shown})"))
+}
+
+fn is_branch_step(segment: &str) -> bool {
+    segment.starts_with('(') && segment.ends_with(')')
 }
 
 /// Whether `value` could be what `schema` describes, by its type, its constants and its
@@ -548,7 +584,21 @@ impl<'a> Walk<'a> {
             if rust.is_none() && protocol.is_none() {
                 return;
             }
-            return self.walk(Node { rust, protocol }, value, path);
+            let mut path = path.clone();
+            path.extend(
+                [node.rust, node.protocol]
+                    .into_iter()
+                    .flatten()
+                    .find_map(|union| {
+                        let all: Vec<&Value> = branches(union)?
+                            .iter()
+                            .map(|b| self.resolved(b))
+                            .filter(|b| !is_null(b))
+                            .collect();
+                        branch_step(&all, value)
+                    }),
+            );
+            return self.walk(Node { rust, protocol }, value, &path);
         }
         if value.is_null() {
             return;
@@ -823,6 +873,10 @@ impl<'a> Walk<'a> {
                 let trailing = json!(format!("{held}!"));
                 self.plant(path, "patternTrailing", Edit::Put(trailing), false);
             }
+            (Some(pattern), Some(held)) if starts_with_literal(pattern) => {
+                let leading = json!(format!("!{held}"));
+                self.plant(path, "patternLeading", Edit::Put(leading), false);
+            }
             (Some(pattern), _) => {
                 self.problem(path, &format!("the corpus plants no case for `{pattern}`"));
             }
@@ -987,6 +1041,31 @@ fn refuses_bang(pattern: &str) -> bool {
         && !body.contains("[^")
 }
 
+/// Whether `pattern` is zod's `startsWith`, `^` and a literal text and `.*`, which a `!` before
+/// what it takes breaks, and nothing after it does.
+fn starts_with_literal(pattern: &str) -> bool {
+    let Some(literal) = pattern
+        .strip_prefix('^')
+        .and_then(|rest| rest.strip_suffix(".*"))
+    else {
+        return false;
+    };
+    let mut text = String::new();
+    let mut chars = literal.chars();
+    while let Some(c) = chars.next() {
+        let c = match c {
+            '\\' => match chars.next() {
+                Some(escaped) if !escaped.is_ascii_alphanumeric() => escaped,
+                _ => return false,
+            },
+            c if r"\.^$*+?()[]{}|".contains(c) => return false,
+            c => c,
+        };
+        text.push(c);
+    }
+    !text.is_empty() && !text.starts_with('!')
+}
+
 /// The names a key pattern written `^(?!(?:a|b)$)` reserves, or `None` for any other pattern.
 fn reserved(pattern: &str) -> Option<Vec<&str>> {
     let names = pattern.strip_prefix("^(?!(?:")?.strip_suffix(")$)")?;
@@ -1003,14 +1082,15 @@ fn reserved(pattern: &str) -> Option<Vec<&str>> {
 fn planted(example: &Value, plant: &Plant) -> Option<String> {
     const MARK: &str = "\u{0}planted\u{0}";
     let mut body = example.clone();
-    let (last, parents) = match plant.path.split_last() {
-        Some((last, parents)) => (Some(last), parents),
+    let steps: Vec<&String> = plant.path.iter().filter(|s| !is_branch_step(s)).collect();
+    let (last, parents) = match steps.split_last() {
+        Some((last, parents)) => (Some(*last), parents),
         None => (None, &[][..]),
     };
     let mut at = &mut body;
     for segment in parents {
         at = match at {
-            Value::Object(object) => object.get_mut(segment)?,
+            Value::Object(object) => object.get_mut(segment.as_str())?,
             Value::Array(items) => items.get_mut(segment.parse::<usize>().ok()?)?,
             _ => return None,
         };
@@ -1252,6 +1332,66 @@ mod tests {
         cases
             .iter()
             .any(|c| c.path == path && c.kind == kind && c.accept == accept)
+    }
+
+    #[test]
+    fn names_the_branch_of_a_union_its_cases_are_planted_in() {
+        let branch = |tag: &str| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "entity": { "type": "string", "const": "e" },
+                    "type": { "type": "string", "const": tag },
+                    "n": { "type": "string", "minLength": 1 },
+                },
+                "required": ["entity", "type", "n"],
+            })
+        };
+        let union = json!({ "anyOf": [branch("a.b"), branch("c")] });
+        let example = json!({ "entity": "e", "type": "a.b", "n": "x" });
+        let cases = planted_in(&union, None, &example).unwrap();
+        assert!(
+            has(&cases, "/(type=a.b)/n", "underMinLength", false),
+            "{cases:?}"
+        );
+        assert!(!cases.iter().any(|c| c.path == "/n"), "{cases:?}");
+        assert!(
+            cases
+                .iter()
+                .any(|c| c.body == r#"{"entity":"e","n":"","type":"a.b"}"#),
+            "{cases:?}"
+        );
+    }
+
+    #[test]
+    fn plants_only_a_leading_break_for_a_pattern_a_literal_starts() {
+        let field = |pattern: &str| {
+            json!({
+                "type": "object",
+                "properties": { "path": { "type": "string", "pattern": pattern } },
+                "required": ["path"],
+            })
+        };
+        let example = json!({ "path": "/a" });
+        let cases = planted_in(&field("^\\/.*"), None, &example).unwrap();
+        assert!(has(&cases, "/path", "patternLeading", false), "{cases:?}");
+        assert!(
+            cases.iter().any(|c| c.body == r#"{"path":"!/a"}"#),
+            "{cases:?}"
+        );
+        assert!(
+            !cases.iter().any(|c| c.kind == "patternTrailing"),
+            "{cases:?}"
+        );
+        for unbreakable in ["^.*", "^\\d.*", "^a+.*", "^!a.*", "^a.*$"] {
+            let problems = planted_in(&field(unbreakable), None, &example).unwrap_err();
+            assert_eq!(
+                problems,
+                [format!(
+                    "M/path: the corpus plants no case for `{unbreakable}`"
+                )]
+            );
+        }
     }
 
     #[test]

@@ -157,11 +157,8 @@ export function replaceAt(value: unknown, path: string, replacement: unknown): u
   return hit ? out : undefined;
 }
 
-const splitPath = (path: string) =>
-  path
-    .replaceAll("[]", ".[]")
-    .split(".")
-    .filter((s) => s !== "");
+/** A path's steps; a branch's step is whole, though the value it is told by holds a dot. */
+const splitPath = (path: string) => path.replaceAll("[]", ".[]").match(/\([^)]*\)|[^.]+/g) ?? [];
 
 /**
  * `value` with `field` set in every object whose shape the schema fixes, nested ones, array items

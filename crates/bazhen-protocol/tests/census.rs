@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
+use bazhen_protocol::events::event_kind;
 use serde_json::{Map, Value};
 
 /// The keywords that type or limit a value, compared at every field. An enum is compared in
@@ -41,6 +42,283 @@ const KEPT: [(&str, &str, &str); 2] = [
     ),
 ];
 
+const AGENT_EVENTS: &str = "the port of agent_events.rs";
+const MAIL_EVENTS: &str = "the port of mail_events.rs";
+const TASK_EVENTS: &str = "the port of task_events.rs";
+
+/// The differences the Rust schema keeps today, each with what owns its fix: an event payload
+/// whose field Rust takes as null or left out, or holds to no bound, where the protocol doesn't.
+/// The list only shrinks: an entry the census no longer finds fails.
+const KNOWN: &[(&str, &str)] = &[
+    (
+        "CompactedHook.sessionId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "RelaunchRejectedReason: enum is [\"not_resumable\",\"terminal_exists\",\"harness_refused\",\"unavailable\",\"daemon_restart\"] in the protocol, [\"not_resumable\",\"terminal_exists\",\"unavailable\",\"harness_refused\",\"daemon_restart\"] here",
+        AGENT_EVENTS,
+    ),
+    (
+        "RespawnRejectedReason: enum is [\"not_resumable\",\"no_terminal\",\"terminal_changed\",\"harness_refused\",\"unavailable\",\"daemon_restart\"] in the protocol, [\"not_resumable\",\"no_terminal\",\"terminal_changed\",\"unavailable\",\"harness_refused\",\"daemon_restart\"] here",
+        AGENT_EVENTS,
+    ),
+];
+
+/// Each entry of `KNOWN`, and of `KNOWN_PAYLOADS` under each name the census finds it by.
+fn known() -> Vec<(String, &'static str)> {
+    let mut known: Vec<(String, &str)> = KNOWN
+        .iter()
+        .map(|(at, owner)| ((*at).to_owned(), *owner))
+        .collect();
+    for (kind, difference, owner) in KNOWN_PAYLOADS {
+        let field = difference.split([':', '.']).next().unwrap_or(difference);
+        if event_kind(kind).is_some_and(|kind| kind.streamed.contains(&field)) {
+            known.push((format!("Event(type={kind}).payload.{difference}"), owner));
+        }
+        known.push((
+            format!("RecordedEvent(type={kind}).payload.{difference}"),
+            owner,
+        ));
+    }
+    known
+}
+
+/// The differences in an event type's payload the Rust schema keeps today, each as its type, the
+/// field and how it differs, and what owns its fix: found in the payload as the store records it,
+/// and in the event as well where the type streams the field. It only shrinks, as `KNOWN` does.
+const KNOWN_PAYLOADS: &[(&str, &str, &str)] = &[
+    (
+        "agent.compacted",
+        "before: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.compacted",
+        "hook: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.failed",
+        "detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "compactWindowTokens: maximum is 10000000 in the protocol, 4294967295 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "compactWindowTokens: minimum is 100000 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "compactWindowTokens: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "launchedBy: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "nameOrdinal: minimum is 1 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "nameOrdinal: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "name: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "role: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "runtime: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "runtime: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.launched",
+        "terminalId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunched",
+        "externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunched",
+        "harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunched",
+        "promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunched",
+        "theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunch_rejected",
+        "detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunch_requested",
+        "generation: minimum is 1 in the protocol, 0 here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunch_requested",
+        "runtime: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.relaunch_requested",
+        "runtime: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.respawned",
+        "externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.respawned",
+        "harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.respawned",
+        "promptHash: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.respawned",
+        "theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.respawn_rejected",
+        "detail: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.running",
+        "externalRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.running",
+        "harnessName: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.running",
+        "runtimeRef: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.running",
+        "theme: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.transcript_recorded",
+        "path: maxLength is 4096 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.transcript_recorded",
+        r#"path: pattern is "^\\/.*" in the protocol, absent here"#,
+        AGENT_EVENTS,
+    ),
+    (
+        "agent.transcript_recorded",
+        "sessionId: minLength is 1 in the protocol, absent here",
+        AGENT_EVENTS,
+    ),
+    (
+        "assignment.granted",
+        "parentAssignmentId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "attention.opened",
+        "kind: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "attention.opened",
+        "messageId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "attention.opened",
+        "taskId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "attention.opened",
+        "toolUseId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "mailbox.offered",
+        "promptId: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "mailbox.queued",
+        "from: (required, nullable) is (false, false) in the protocol, (false, true) here",
+        MAIL_EVENTS,
+    ),
+    (
+        "task.finished",
+        "note: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "task.noted",
+        "role: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "task.owner_changed",
+        "delegatedFrom: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+    (
+        "task.owner_changed",
+        "ownerAgentId: (required, nullable) is (true, true) in the protocol, (false, true) here",
+        TASK_EVENTS,
+    ),
+];
+
 /// A document's definitions, to follow its `$ref`s by.
 struct Side<'a> {
     definitions: &'a Map<String, Value>,
@@ -66,6 +344,40 @@ impl Side<'_> {
             }
         }
         (schema, name)
+    }
+
+    /// The name each of a union's `branches` goes by, after the union's: `(key=value)`, by the
+    /// property each pins to a constant of its own, as the fixtures name a branch. Without it, the
+    /// fields of every branch would go by one name.
+    fn branch_names(&self, branches: &[Value]) -> Option<Vec<String>> {
+        let resolved: Vec<&Value> = branches.iter().map(|b| self.resolved(b, None).0).collect();
+        let pinned = |branch: &Value, key: &str| -> Option<Value> {
+            branch.get("properties")?.get(key)?.get("const").cloned()
+        };
+        let key = resolved
+            .first()?
+            .get("properties")?
+            .as_object()?
+            .keys()
+            .find(|key| {
+                let constants: Option<Vec<Value>> =
+                    resolved.iter().map(|b| pinned(b, key)).collect();
+                constants.is_some_and(|c| {
+                    c.iter()
+                        .enumerate()
+                        .all(|(at, v)| !c.iter().take(at).any(|w| w == v))
+                })
+            })?;
+        resolved
+            .iter()
+            .map(|branch| {
+                let constant = pinned(branch, key)?;
+                let shown = constant
+                    .as_str()
+                    .map_or_else(|| constant.to_string(), str::to_owned);
+                Some(format!("({key}={shown})"))
+            })
+            .collect()
     }
 
     fn is_null(&self, schema: &Value) -> bool {
@@ -204,7 +516,10 @@ impl Census<'_> {
         };
         match (union(&protocol), union(&rust)) {
             (Some(p), Some(r)) if p.len() == r.len() => {
-                for (p, r) in p.iter().zip(&r) {
+                let names = self.rust.branch_names(&r);
+                for (at, (p, r)) in p.iter().zip(&r).enumerate() {
+                    let name = names.as_ref().and_then(|n| n.get(at));
+                    let owner = name.map_or_else(|| owner.clone(), |name| format!("{owner}{name}"));
                     self.compare(p, r, &owner);
                 }
                 return;
@@ -330,6 +645,13 @@ fn each_field_the_schema_emits_has_the_limits_the_protocol_gives_it() {
         compared += 1;
     }
     assert!(compared > 100, "only {compared} messages compared");
+    for (known, owner) in known() {
+        if !found.remove(&known) {
+            found.insert(format!(
+                "KNOWN lists `{known}`, owned by {owner}, which the census no longer finds"
+            ));
+        }
+    }
     assert!(
         found.is_empty(),
         "{} differences:\n{}",

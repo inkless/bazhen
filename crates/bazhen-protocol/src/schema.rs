@@ -17,7 +17,8 @@ use crate::daemon::{
     DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, ErrorResponse, HealthResponse,
     StopResponse,
 };
-use crate::events::EventFrame;
+use crate::events::typed::{TypedEventFrame, TypedRecordedEvent};
+use crate::events::{ClientEventFrame, EventFrame, EventStreamQuery};
 use crate::mail::{
     SendMessageRequest, SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
 };
@@ -106,6 +107,10 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<EscalateRequest>();
     generator.subschema_for::<EscalateResponse>();
     generator.subschema_for::<EventFrame>();
+    generator.subschema_for::<ClientEventFrame>();
+    generator.subschema_for::<EventStreamQuery>();
+    generator.subschema_for::<TypedEventFrame>();
+    generator.subschema_for::<TypedRecordedEvent>();
     generator.subschema_for::<FinishTaskRequest>();
     generator.subschema_for::<FleetAgent>();
     generator.subschema_for::<HealthResponse>();
@@ -204,6 +209,30 @@ impl JsonSchema for ShellName {
             "minLength": 1,
             "maxLength": crate::shells::SHELL_NAME_MAX_CHARS,
             "x-bazhen-check": "shellName",
+        })
+    }
+}
+
+/// The versions a holder speaks, as the holder protocol's `HolderVersions` bounds them: 1 to 16,
+/// each well formed and at most 32 bytes of UTF-8.
+#[derive(Debug)]
+pub struct HolderVersionList;
+
+impl JsonSchema for HolderVersionList {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "HolderVersionList".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        schemars::json_schema!({
+            "type": "array",
+            "items": { "type": "string", "x-bazhen-check": ["wellFormed", "utf8AtMost32Bytes"] },
+            "minItems": 1,
+            "maxItems": 16,
         })
     }
 }
