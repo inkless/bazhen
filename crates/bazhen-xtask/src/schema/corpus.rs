@@ -214,6 +214,20 @@ fn check_cases(check: &str) -> Option<Vec<(&'static str, String, bool)>> {
             ("zeroWidth", r#""a\u200bb""#, false),
             ("loneSurrogate", r#""a\ud800b""#, false),
         ]),
+        "wellFormed" => text(&[
+            ("plain", r#""row""#, true),
+            ("pair", r#""a\ud83d\ude00b""#, true),
+            ("loneSurrogate", r#""a\ud800b""#, false),
+        ]),
+        "screenText" => text(&[
+            ("rows", r#""one\ntwo\n""#, true),
+            ("tab", r#""a\tb""#, false),
+            ("return", r#""a\rb""#, false),
+            ("control", r#""a\u0007b""#, false),
+            ("delete", r#""a\u007fb""#, false),
+            ("nextLine", r#""a\u0085b""#, false),
+            ("bidi", r#""a\u202eb""#, true),
+        ]),
         "taskNoteBytes" => vec![
             (
                 "atMaxBytes",
