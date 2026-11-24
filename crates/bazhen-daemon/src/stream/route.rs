@@ -506,9 +506,10 @@ impl View<'_> {
 
 /// Serves one socket: sends on `sink` and hears from `heard` until it ends, leaving the view's
 /// attachment, if it joined, as it does. A close the route sends goes after what the hub queued
-/// before it, and the socket then waits, reading what the peer still sends, for the peer's close,
-/// as long as the close may take: dropped at once, unread input would reset the connection under
-/// its last frames. A close that answers the peer's ends it once sent.
+/// before it, and the view leaves its attachment once that close is sent, so a peer that never
+/// answers holds no lease. The socket then waits, reading what the peer still sends, for the
+/// peer's close, as long as the close may take: dropped at once, unread input would reset the
+/// connection under its last frames. A close that answers the peer's ends it once sent.
 pub(crate) async fn serve<E>(
     sink: impl Sink<Message> + Send,
     heard: impl Stream<Item = Result<Message, E>> + Send,
@@ -548,7 +549,10 @@ pub(crate) async fn serve<E>(
             biased;
             wrote = &mut writing, if !closed => match wrote {
                 Wrote::Closed if peer_closed => return,
-                Wrote::Closed => closed = true,
+                Wrote::Closed => {
+                    closed = true;
+                    view.leaving = None;
+                }
                 Wrote::Failed => return,
             },
             () = cancelled(view.closing.as_ref().map(|c| c.place.ended())) => return,
@@ -1149,6 +1153,89 @@ mod tests {
             assert_eq!(
                 (served.ended().await, served.ends()),
                 (true, ended(&attachment, "client_closed"))
+            );
+        });
+    }
+
+    /// A driver that never answers a close, opened as `how` says, and an observer of the same
+    /// terminal that joined once the driver held the lease.
+    async fn driven(served: &Served, how: How) -> (Client, AttachmentId, Client) {
+        let mut driver = served.open_answering(terminal().as_str(), how, false);
+        let attachment = driver.attached("interactive").await;
+        driver.say(r#"{"type":"engage"}"#);
+        driver
+            .until(|frame| {
+                matches!(frame, StreamServerFrame::Lease { driver: true, .. }).then_some(())
+            })
+            .await
+            .unwrap_or_else(|heard| panic!("never made the driver: {heard:?}"));
+        let mut observer = served.open(terminal().as_str(), quiet());
+        observer.attached("observe").await;
+        (driver, attachment, observer)
+    }
+
+    /// Whether `observer` heard the lease let go, what the hub recorded of views ending, and how
+    /// many sockets are still served, once the driver's socket has closed.
+    async fn let_go(served: &Served, observer: &mut Client) -> (bool, Vec<String>, usize) {
+        let released = observer
+            .until(|frame| {
+                matches!(
+                    frame,
+                    StreamServerFrame::Lease {
+                        driven: Some(false),
+                        ..
+                    }
+                )
+                .then_some(())
+            })
+            .await;
+        let ends = once(|| served.ends(), |ends| !ends.is_empty()).await;
+        (released.is_ok(), ends, served.streams.tasks.len())
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_the_terminal_once_a_revoked_device_s_close_is_sent_though_its_peer_never_answers() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let holds = crate::devices::Holds::default();
+            let stop = CancellationToken::new();
+            let hold = holds.hold("dev_1", &stop, true);
+            let how = How {
+                device: Some(hold.token().clone()),
+                device_name: Some("phone".to_owned()),
+                ..quiet()
+            };
+            let (mut driver, attachment, mut observer) = driven(&served, how).await;
+            holds.revoke("dev_1");
+            let (_, heard) = driver.until_closed().await;
+            assert_eq!(heard.code(), Some(close_code::POLICY), "{heard:?}");
+            assert_eq!(
+                let_go(&served, &mut observer).await,
+                (true, ended(&attachment, "client_closed"), 2)
+            );
+        });
+    }
+
+    // Sandbox-only by name alone: it serves a view through serve, whose closes of the socket the
+    // signal scan can't tell from a holder stream's close; over the fake runtime it signals nothing.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_the_terminal_once_its_refusal_of_a_joined_view_is_sent_though_its_peer_never_answers()
+    {
+        bazhen_test_signal::require_sandbox().unwrap();
+        runtime().block_on(async {
+            let served = Served::running();
+            let (mut driver, attachment, mut observer) = driven(&served, quiet()).await;
+            driver.say("not a frame");
+            let (_, heard) = driver.until_closed().await;
+            assert_eq!(heard, Heard::Closed(None));
+            assert_eq!(
+                let_go(&served, &mut observer).await,
+                (true, ended(&attachment, "client_closed"), 2)
             );
         });
     }
