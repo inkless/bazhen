@@ -4895,6 +4895,20 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("takes a Session that a type names, as an enum's variant, for none of the holder's", () => {
+    const bodies = [
+      "assert_eq!(k, Key::Session(s));",
+      "let k = harness :: Key :: Session(s);",
+      "let s = session::Session::led_by(pid);",
+      "let s = bazhen_holder::Session::led_by(pid);",
+    ];
+    const source = bodies.map((body, i) => `#[test]\nfn t${String(i)}() { ${body} }`).join("\n");
+    expect(unmarked({ "crates/h/src/t.rs": source })).toEqual([
+      "crates/h/src/t.rs:5",
+      "crates/h/src/t.rs:7",
+    ]);
+  });
+
   it("finds the crates that reach the holder through any dependency, however deep", () => {
     const reaching = holderReachingCrates(
       meta(

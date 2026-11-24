@@ -5539,9 +5539,15 @@ function closingBrace(code: string, from: number): number {
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
   /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
-/** Also the holder's `Session`: named, or as a leader's `session()` gives one to call. */
+/**
+ * Also the holder's `Session`: named, or as a leader's `session()` gives one to call. A `Session`
+ * that a type names, as `Key::Session`, is that type's variant or item: only a module holds the
+ * holder's struct. Two gaps are accepted, each written only to dodge the rule: the struct renamed
+ * as it is brought in (`use bazhen_holder::Session as Leader;`), and the crate renamed to a name
+ * that reads as a type's (`use bazhen_holder as Holder;`, then `Holder::Session::led_by`).
+ */
 const SIGNALLING_OR_SESSION = new RegExp(
-  `${SIGNALLING_CALL.source}|\\bSession\\b|\\bsession\\s*\\(\\s*\\)\\s*\\.`,
+  `${SIGNALLING_CALL.source}|(?<!\\b[A-Z]\\w*\\s*::\\s*)\\bSession\\b|\\bsession\\s*\\(\\s*\\)\\s*\\.`,
 );
 
 const HOLDER_CRATE = "crates/bazhen-holder";
