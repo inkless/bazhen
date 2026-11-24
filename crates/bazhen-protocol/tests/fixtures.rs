@@ -131,10 +131,7 @@ fn excuse(written: &mut Value, parsed: &Value, pointer: &str) -> bool {
 /// The examples this build writes back other than the protocol parses them, each named by its
 /// message, its branch and where they first differ, with what owns the difference. The list only
 /// shrinks: an entry no example shows fails.
-const KNOWN_REWRITES: &[(&str, &str)] = &[(
-    "RecordedEvent (type=task.created), /payload/delegatedFrom: written null, parsed nothing",
-    "the port of the task store",
-)];
+const KNOWN_REWRITES: &[(&str, &str)] = &[];
 
 /// What a message's examples showed.
 struct Report {

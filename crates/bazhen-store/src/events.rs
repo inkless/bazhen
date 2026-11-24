@@ -743,6 +743,7 @@ pub(crate) fn int(n: u64) -> rusqlite::Result<i64> {
 #[cfg(test)]
 mod tests {
     use bazhen_protocol::ids::TaskId;
+    use bazhen_protocol::nullable::Nullable;
 
     use super::*;
     use crate::testing::TempDir;
@@ -768,7 +769,7 @@ mod tests {
                 brief: "the brief".to_owned(),
                 owner_agent_id: None,
                 parent_task_id: parent,
-                delegated_from: None,
+                delegated_from: Nullable::Null,
             },
         }
     }
@@ -852,6 +853,50 @@ mod tests {
         let epoch = upgraded.reads().epoch().unwrap();
         assert_eq!(upgraded.reads().latest_event_id().unwrap(), newest);
         assert_eq!(upgraded.reads().cursor_fault(&epoch, newest).unwrap(), None);
+    }
+
+    #[test]
+    fn keeps_a_task_created_without_delegated_from_without_it_and_projects_it_as_null() {
+        let dir = TempDir::new("delegated-from");
+        let mut store = Store::open(&dir.db("bazhen.db")).unwrap();
+        let with = |n: u8, from: Nullable<AssignmentId>| {
+            let NewEvent::TaskCreated {
+                task,
+                actor,
+                mut payload,
+            } = created(task(n), None)
+            else {
+                panic!("created makes a task.created")
+            };
+            payload.delegated_from = from;
+            NewEvent::TaskCreated {
+                task,
+                actor,
+                payload,
+            }
+        };
+        append(&mut store, &with(1, Nullable::Absent));
+        append(&mut store, &with(2, Nullable::Null));
+        let kept: Vec<(String, Option<String>)> = store
+            .db
+            .prepare(
+                "SELECT e.payload, t.delegated_from FROM tasks t
+                 JOIN events e ON e.id = t.created_event_id ORDER BY e.id",
+            )
+            .unwrap()
+            .query_map((), |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let payload =
+            r#"{"title":"Ship","brief":"the brief","ownerAgentId":null,"parentTaskId":null"#;
+        assert_eq!(
+            kept,
+            [
+                (format!("{payload}}}"), None),
+                (format!(r#"{payload},"delegatedFrom":null}}"#), None),
+            ]
+        );
     }
 
     #[test]

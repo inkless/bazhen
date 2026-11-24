@@ -44,7 +44,7 @@ pub(crate) fn project(
                     &payload.brief,
                     payload.owner_agent_id.as_ref().map(Id::as_str),
                     payload.parent_task_id.as_ref().map(Id::as_str),
-                    payload.delegated_from.as_ref().map(Id::as_str),
+                    payload.delegated_from.value().map(Id::as_str),
                     int(id)?,
                     int(id)?,
                 ),

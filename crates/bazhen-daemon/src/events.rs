@@ -396,6 +396,7 @@ async fn follow<E>(
 mod tests {
     use bazhen_protocol::events::TaskCreated;
     use bazhen_protocol::ids::TaskId;
+    use bazhen_protocol::nullable::Nullable;
     use bazhen_store::{NewEvent, Store};
 
     use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
@@ -458,7 +459,7 @@ mod tests {
                 brief: "b".to_owned(),
                 owner_agent_id: None,
                 parent_task_id: None,
-                delegated_from: None,
+                delegated_from: Nullable::Null,
             },
         }
     }

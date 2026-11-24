@@ -3,6 +3,7 @@
 
 use bazhen_protocol::events::TaskCreated;
 use bazhen_protocol::ids::{AgentId, TaskId};
+use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::tasks::CreateTaskResponse;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
@@ -125,7 +126,7 @@ impl Store {
                     brief: task.brief.clone(),
                     owner_agent_id: task.caller.clone(),
                     parent_task_id: task.parent.clone(),
-                    delegated_from: None,
+                    delegated_from: Nullable::Null,
                 },
             })?;
             Ok(CreateTaskResponse {
