@@ -132,14 +132,18 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
   { name: "TaskTitle", owner: NAMED, why: NAMED_WHY },
 ];
 
-/** Each schema the protocol exports and `generated` doesn't, unlisted, and each entry it does. */
+/**
+ * Each schema the protocol exports and `generated` doesn't, unlisted; each entry it does; and each
+ * name listed more than once.
+ */
 function notYetInRust(generated: unknown) {
   const handOnly = Object.keys(protocol).filter(
     (name) => schemaIn(protocol, name) && !schemaIn(generated, name),
   );
-  const listed = new Set(NOT_YET_IN_RUST.map((entry) => entry.name));
+  const names = NOT_YET_IN_RUST.map((entry) => entry.name);
   return {
-    unlisted: handOnly.filter((name) => !listed.has(name)),
+    unlisted: handOnly.filter((name) => !names.includes(name)),
+    duplicated: names.filter((name, at) => names.indexOf(name) !== at),
     emitted: NOT_YET_IN_RUST.filter((entry) => !handOnly.includes(entry.name)).map(
       (entry) => `${entry.name}, owned by ${entry.owner}`,
     ),
@@ -228,6 +232,6 @@ describe("the protocol and the zod generated from the Rust protocol", async () =
   });
 
   it("differ in the schemas they export only by those NOT_YET_IN_RUST lists", () => {
-    expect(notYetInRust(generated)).toEqual({ unlisted: [], emitted: [] });
+    expect(notYetInRust(generated)).toEqual({ unlisted: [], duplicated: [], emitted: [] });
   });
 });
