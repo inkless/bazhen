@@ -1001,6 +1001,22 @@ const NOT_DECODERS: Record<string, string> = {
     "holds the hub's state, whose views hold output queued for them; ends a view with a frame, reading none of that output",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::end":
     "holds the hub's state, whose views hold output queued for them; drops a view, its queue with it, reading none of that output",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::make_room":
+    "weighs the sizes of the snapshots being sent against the cap and ends stalled views; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::admit":
+    "weighs the sizes of the snapshots being sent against the cap and picks the stalled views to end; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::end_stalled":
+    "ends the views picked for stalled snapshots that haven't moved on, by id and time; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::unload":
+    "takes a view out of those whose snapshots are being sent, by its id; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::park":
+    "keeps a stream whose last view has left and starts the timer that closes it; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::unpark":
+    "takes a stream out of its terminal's parked ones, by identity; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release":
+    "closes a parked stream; reads no bytes",
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release_all_but":
+    "closes a terminal's other parked streams; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::on":
     "runs a closure on a terminal's state, which holds output queued for its views; reads none of it itself",
   "crates/bazhen-daemon/src/stream/hub.rs::Shared::forget":
@@ -1009,7 +1025,6 @@ const NOT_DECODERS: Record<string, string> = {
     "removes a terminal's entry from the hub's map; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Joining::drop":
     "holds the hub's state, whose views hold output queued for them; ends a view whose join was dropped, reading none of that output",
-  "crates/bazhen-daemon/src/stream/hub.rs::let_go": "closes a terminal's stream; reads no bytes",
   "crates/bazhen-daemon/src/stream/hub.rs::Watched::lock":
     "locks a terminal's state, which holds output queued for its views; reads none of it",
   "crates/bazhen-daemon/src/stream/hub.rs::Watched::until":
@@ -5084,26 +5099,332 @@ const SIGNALLING_CALL =
 /** A Rust test file's test binary: `tests/<name>.rs`, or every file under `tests/<name>/`. */
 const testBinary = (file: string) => /^(crates\/[^/]+\/tests\/[^/.]+)/.exec(file)?.[1];
 
+/** Types whose `close()` only stops them giving out more, by their full paths. */
+const HARMLESS_CLOSERS = ["tokio::sync::Semaphore", "tokio_util::task::TaskTracker"];
+
+/** Each path a file's `use`s bring in, with the name it is brought in as. */
+function usedPaths(code: string): { path: string; as: string }[] {
+  return [...code.matchAll(/\buse\s+([^;]+);/g)].flatMap((m) => {
+    const text = (m[1] ?? "")
+      .replace(/\s+/g, " ")
+      .replace(/\s*::\s*/g, "::")
+      .trim();
+    const group = /^(.*?)::\{(.*)\}$/.exec(text);
+    const parts = group === null ? [text] : (group[2] ?? "").split(",").map((part) => part.trim());
+    return parts.flatMap((part) => {
+      if (part === "" || part === "self") return [];
+      const [path = "", alias] = part.split(/ as /);
+      const full = (group === null ? path : `${group[1] ?? ""}::${path}`).replace(/^::/, "");
+      return [{ path: full, as: alias ?? full.split("::").at(-1) ?? "" }];
+    });
+  });
+}
+
 /**
- * `code` with each `close()` of a tokio TaskTracker blanked out, to its length so positions hold:
- * it only stops the tracker taking tasks, and signals nothing. A tracker is a binding the file
- * types as `TaskTracker` or makes with `TaskTracker::new()`, named alone or as `self.<name>`, and
- * only a close with nothing in its parentheses is one; any other call on it still counts.
+ * Whether `type`, as `code` writes it, is one of HARMLESS_CLOSERS, alone, borrowed or in an `Arc`:
+ * its full path, or its last name where every `use` of that name in the file brings in that path,
+ * at least one does, and no item of the file takes the name. Any other type of that name, or a
+ * name a glob may bring in, isn't one.
  */
-export function withoutTrackerCloses(code: string): string {
-  const names = new Set([
-    ...[...code.matchAll(/\b(\w+)\s*:\s*&?\s*(?:mut\s+)?TaskTracker\b/g)].map((m) => m[1] ?? ""),
-    ...[...code.matchAll(/\blet\s+(?:mut\s+)?(\w+)\s*=\s*TaskTracker\s*::\s*new\s*\(\s*\)/g)].map(
-      (m) => m[1] ?? "",
-    ),
-  ]);
-  names.delete("");
-  if (names.size === 0) return code;
-  const close = new RegExp(
-    `(?<![\\w.]\\s*)(?:self\\s*\\.\\s*)?(?:${[...names].join("|")})\\s*\\.\\s*close\\s*\\(\\s*\\)`,
-    "g",
-  );
-  return code.replace(close, (call) => call.replace(/[^\n]/g, " "));
+function harmlessType(type: string, code: string): boolean {
+  const bare = type
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^&\s*(?:'\w+\s+)?(?:mut\s+)?/, "")
+    .replace(/^(?:(?:::\s*)?std\s*::\s*sync\s*::\s*)?Arc\s*<\s*(.*?)\s*>$/, "$1")
+    .replace(/\s*::\s*/g, "::")
+    .replace(/^::/, "");
+  return HARMLESS_CLOSERS.some((path) => {
+    if (bare === path) return true;
+    const name = path.split("::").at(-1) ?? "";
+    if (bare !== name) return false;
+    const uses = usedPaths(code);
+    const named = uses.filter((u) => u.as === name);
+    const globbed = uses.some((u) => u.as === "*" && !/^(?:super|self)\b/.test(u.path));
+    const item = new RegExp(`\\b(?:struct|enum|union|trait|type)\\s+${name}\\b`).test(code);
+    return named.length > 0 && named.every((u) => u.path === path) && !globbed && !item;
+  });
+}
+
+/** The text up to the first `,`, `;`, `=`, `|`, `{` or unopened bracket outside any brackets. */
+function toTopLevelEnd(text: string): string {
+  for (let i = 0, depth = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if ("<([".includes(c)) depth++;
+    else if (">)]".includes(c) && !(c === ">" && text[i - 1] === "-") && --depth < 0) {
+      return text.slice(0, i);
+    } else if (depth === 0 && ",;={|}".includes(c)) return text.slice(0, i);
+  }
+  return text;
+}
+
+/** Whether `value`, as `code` writes it, makes one of HARMLESS_CLOSERS: `T::new(`, or in `Arc::new(`. */
+function makesHarmless(value: string, code: string): boolean {
+  const made =
+    /^\s*(?:Arc\s*::\s*new\s*\(\s*)?((?:::\s*)?(?:(?:r#)?\w+\s*::\s*)*?\w+)\s*::\s*new\s*\(/.exec(
+      value,
+    );
+  return made !== null && harmlessType(made[1] ?? "", code);
+}
+
+/**
+ * Whether `value`, the rest of a `let` after its `=`, is a call of a function `code` defines once
+ * that is declared to return one of HARMLESS_CLOSERS, or a tuple holding one as its part `index`:
+ * `f(..)` or `f(..).await`, and nothing more, before its `;`.
+ */
+function returnsHarmless(value: string, index: number | undefined, code: string): boolean {
+  const call = /^\s*(?:r#)?(\w+)\s*\(/.exec(value);
+  if (call === null) return false;
+  const after = value.slice(matchingBracket(value, call[0].length - 1) + 1);
+  if (!/^\s*(?:\.\s*await\s*)?;/.test(after)) return false;
+  const defined = rustFunctions(code).fns.filter((f) => f.fn === call[1]);
+  const returns = /->([\s\S]*)$/.exec(defined.length === 1 ? (defined[0]?.sig ?? "") : "")?.[1];
+  const type = (returns ?? "").split(/\bwhere\b/)[0]?.trim() ?? "";
+  if (index === undefined) return type !== "" && harmlessType(type, code);
+  const parts = /^\(([\s\S]*)\)$/.exec(type)?.[1];
+  const part = parts === undefined ? undefined : topLevelParts(parts)[index];
+  return part !== undefined && harmlessType(part, code);
+}
+
+/** Where a `let`'s pattern ends, tried from the character before: at a lone `=`, or a `;`. */
+const LET_PATTERN_END = /^[\s\S](?:=(?![=>])|;)/;
+
+/**
+ * Where in `text` the pattern that starts it ends: at the first `stop` outside any brackets, or
+ * at a bracket closing one opened before it. `stop` is tried on each character with the one before
+ * it, a space at the start, so it can tell where a word starts.
+ */
+function patternEnd(text: string, stop: RegExp): number {
+  for (let i = 0, depth = 0; i < text.length; i++) {
+    const c = text[i] ?? "";
+    if (depth === 0 && stop.test((text[i - 1] ?? " ") + text.slice(i, i + 4))) return i;
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c) && --depth < 0) return i;
+  }
+  return text.length;
+}
+
+/**
+ * The spans of `text`, a function from its `fn` with its body from `body` on, where a pattern may
+ * bind a name, or a macro may, besides a `let`'s, which `bindingsOf` reads: its signature; each
+ * `for`'s pattern, to its `in`; a closure's parameters; each match arm's pattern and guard, to its
+ * `=>`; and a macro call's arguments.
+ */
+function patternRegions(text: string, body: number): [number, number][] {
+  const regions: [number, number][] = [[0, body]];
+  for (const m of text.matchAll(/\bfor\s+/g)) {
+    const at = m.index + m[0].length;
+    regions.push([at, at + patternEnd(text.slice(at), /^(?:\Win\b|[\s\S];)/)]);
+  }
+  // Any pipe may open a closure's parameters, whatever `||` or `|` came before it, so each span
+  // from one to the next counts, overlapping.
+  for (const m of text.matchAll(/\|(?=([^|]*)\|)/g)) {
+    regions.push([m.index, m.index + 1 + (m[1] ?? "").length + 1]);
+  }
+  for (const m of text.matchAll(/\b(?:r#)?\w+\s*!\s*[([{]/g)) {
+    const open = m.index + m[0].length - 1;
+    regions.push([open, matchingBracket(text, open)]);
+  }
+  for (const m of text.matchAll(/\bmatch\b/g)) {
+    const scrutinee = m.index + m[0].length;
+    const open = scrutinee + patternEnd(text.slice(scrutinee), /^[\s\S]\{/);
+    if (text[open] !== "{") continue;
+    regions.push(...armPatterns(text, open + 1, matchingBracket(text, open)));
+  }
+  return regions;
+}
+
+/**
+ * The spans of a match block's arms, from `start` to `end`, that hold each arm's pattern and guard:
+ * from the block's start, or the end of the arm before, to the arm's `=>`.
+ */
+function armPatterns(text: string, start: number, end: number): [number, number][] {
+  const arms: [number, number][] = [];
+  let from: number | undefined = start;
+  let blockBody = false;
+  for (let i = start, depth = 0; i < end; i++) {
+    const c = text[i] ?? "";
+    if (depth === 0 && from !== undefined && text.startsWith("=>", i)) {
+      arms.push([from, i]);
+      from = undefined;
+      i++;
+      blockBody = /^\s*\{/.test(text.slice(i + 1));
+    } else if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) {
+      depth--;
+      if (depth === 0 && from === undefined && blockBody && c === "}") from = i + 1;
+    } else if (depth === 0 && from === undefined && c === ",") {
+      from = i + 1;
+    }
+  }
+  return arms;
+}
+
+/**
+ * Where `text`, a function from its `fn`, binds `name`, each with whether that binding is surely
+ * one of HARMLESS_CLOSERS: `name: T`, as a parameter, a `let` or a closure's; `let name = T::new(`
+ * or that in an `Arc`; a tuple `let` whose part for `name` is that; either from a call whose
+ * function is declared to return one there (`returnsHarmless`). Any other `name:`, and every
+ * mention of the name not followed by a `.` or a `(` where a pattern may bind it
+ * (`patternRegions`), counts as a binding, unsure. `text` is the function from its `fn`, its body
+ * from `body` on.
+ */
+function bindingsOf(name: string, text: string, body: number, code: string): Map<number, boolean> {
+  const sites = new Map<number, boolean>();
+  const word = `(?<![\\w.]\\s*)(?:r#)?${name}\\b`;
+  for (const m of text.matchAll(new RegExp(`${word}\\s*:(?!:)`, "g"))) {
+    const after = text.slice(m.index + m[0].length);
+    sites.set(m.index, harmlessType(toTopLevelEnd(after), code));
+  }
+  for (const m of text.matchAll(/\blet\s+/g)) {
+    const rest = text.slice(m.index + m[0].length);
+    const pattern = rest.slice(0, patternEnd(rest, LET_PATTERN_END));
+    const at = m.index + m[0].length;
+    const single = new RegExp(`^(?:mut\\s+)?(?:r#)?${name}\\s*$`).exec(pattern);
+    if (single !== null) {
+      const offset = at + pattern.indexOf(name);
+      if (!sites.has(offset)) {
+        const value = rest.slice(pattern.length);
+        const made = value.slice(1);
+        sites.set(
+          offset,
+          value.startsWith("=") &&
+            (makesHarmless(made, code) || returnsHarmless(made, undefined, code)),
+        );
+      }
+      continue;
+    }
+    const tupled = /^\(([\s\S]*)\)\s*$/.exec(pattern)?.[1];
+    const names = tupled === undefined ? undefined : topLevelParts(tupled);
+    const value = rest.slice(pattern.length);
+    const tuple = /^=\s*\(/.exec(value);
+    for (const found of pattern.matchAll(new RegExp(word, "g"))) {
+      const offset = at + found.index;
+      if (sites.has(offset)) continue;
+      const index = names?.findIndex((n) => new RegExp(`^(?:mut\\s+)?(?:r#)?${name}$`).test(n));
+      let sure = false;
+      if (index !== undefined && index >= 0 && tuple !== null) {
+        const open = pattern.length + tuple[0].length - 1;
+        const inner = rest.slice(open + 1, matchingBracket(rest, open));
+        const part = topLevelParts(inner)[index];
+        sure = part !== undefined && makesHarmless(part, code);
+      } else if (index !== undefined && index >= 0 && value.startsWith("=")) {
+        sure = returnsHarmless(value.slice(1), index, code);
+      }
+      sites.set(offset, sure);
+    }
+  }
+  // Every other mention of it where a pattern may bind it, not followed by a `.` or a `(`, is a
+  // binding the scan can't be sure of. Out of those places it is a use.
+  const mention = new RegExp(`${word}(?!\\s*[.(])`, "g");
+  for (const [start, end] of patternRegions(text, body)) {
+    for (const found of text.slice(start, end).matchAll(mention)) {
+      if (!sites.has(start + found.index)) sites.set(start + found.index, false);
+    }
+  }
+  return sites;
+}
+
+/**
+ * `code` with each `close()` of a tokio Semaphore or TaskTracker blanked out, to its length so
+ * positions hold: a tracker's only stops it taking tasks, and a semaphore's only refuses more
+ * permits, waking those waiting with an error; neither signals anything. Only a close with nothing
+ * in its parentheses is one, and only on a binding that is surely one: a name the innermost
+ * function around it binds once, as one (`bindingsOf`), or `self.<name>`, where the type the
+ * function's impl is for is declared once in the file, with that field as one. Anything else, a
+ * name bound twice or a field of another type, still counts.
+ */
+export function withoutHarmlessCloses(code: string): string {
+  const { fns } = rustFunctions(code);
+  const close = /(?<![\w.]\s*)(self\s*\.\s*)?(?:r#)?(\w+)\s*\.\s*close\s*\(\s*\)/g;
+  return code.replace(close, (call, self: string | undefined, name: string, at: number) => {
+    const f = fns
+      .filter((g) => g.m.index < at && at < g.close)
+      .toSorted((a, b) => b.m.index - a.m.index)[0];
+    if (f === undefined) return call;
+    let harmless: boolean;
+    if (self === undefined) {
+      const text = code.slice(f.m.index, f.close);
+      const sites = [...bindingsOf(name, text, f.open - f.m.index, code).values()];
+      harmless = sites.length === 1 && sites[0] === true;
+    } else {
+      const type = f.block?.type;
+      const structs = [
+        ...code.matchAll(new RegExp(`\\bstruct\\s+(?:r#)?${type ?? "\\b"}\\b`, "g")),
+      ];
+      const item = structs.length === 1 && type !== undefined ? structs[0] : undefined;
+      const fields =
+        item === undefined
+          ? []
+          : (structFields(code.slice(item.index, itemEnd(code, item.index)))?.fields ?? []).filter(
+              (field) => field.name === name,
+            );
+      harmless = fields.length === 1 && harmlessType(fields[0]?.type ?? "", code);
+    }
+    return harmless ? call.replace(/[^\n]/g, " ") : call;
+  });
+}
+
+/**
+ * Closes the signal scan passes over, by the function they are in (`file::Type::fn`), each with
+ * why it signals nothing. The scan matches methods by name, so without this a close that only
+ * hangs up a connection reads as a holder's. Only a `close()` with nothing in its parentheses on a
+ * path ending in `stream` is passed over, and only in the listed function: any other call there
+ * still counts.
+ */
+const NON_SIGNALLING_CLOSES: Record<string, string> = {
+  "crates/bazhen-daemon/src/stream/hub.rs::Shared::release":
+    "closes a terminal stream, which hangs up its connections to the holder and never sends it " +
+    "`close` (HolderStream::close); a holder ends only on `close`",
+};
+
+/**
+ * `code` of `file` with the closes `listed` passes over blanked out, to their length. Each entry
+ * found in `file` goes in `seen`: 1 if its function closed a stream, 0 if it closed none.
+ */
+function withoutListedCloses(
+  file: string,
+  code: string,
+  listed: Record<string, string>,
+  seen: Map<string, number>,
+): string {
+  let out = code;
+  const { fns } = rustFunctions(code);
+  for (const key of Object.keys(listed).filter((k) => k.startsWith(`${file}::`))) {
+    const path = key.slice(file.length + 2).split("::");
+    const fn = path.at(-1);
+    const type = path.length > 1 ? path.at(-2) : undefined;
+    const found = fns.find((f) => f.fn === fn && f.block?.type === type);
+    if (found === undefined) continue;
+    const body = out.slice(found.open, found.close);
+    const closes = /(?<![\w.]\s*)(?:(?:r#)?\w+\s*\.\s*)*stream\s*\.\s*close\s*\(\s*\)/g;
+    const blanked = body.replace(closes, (call) => call.replace(/[^\n]/g, " "));
+    seen.set(key, blanked === body ? 0 : 1);
+    out = out.slice(0, found.open) + blanked + out.slice(found.close);
+  }
+  return out;
+}
+
+/** Why an entry of `listed` is stale or has no reason, given what the scan saw of each. */
+function listedCloseFailures(listed: Record<string, string>, seen: Map<string, number>): string[] {
+  return Object.entries(listed).flatMap(([key, reason]) => {
+    if (!seen.has(key)) {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES, but no such function exists.`,
+      ];
+    }
+    if (seen.get(key) === 0) {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES, but closes no stream.`,
+      ];
+    }
+    if (reason.trim() === "") {
+      return [
+        `scripts/check-standards.ts: ${key} is in NON_SIGNALLING_CLOSES with no reason it signals nothing.`,
+      ];
+    }
+    return [];
+  });
 }
 
 /**
@@ -5114,15 +5435,22 @@ export function withoutTrackerCloses(code: string): string {
 export function unmarkedSignallingTests(
   files: readonly string[],
   read: (file: string) => string,
+  nonSignallingCloses: Record<string, string> = {},
 ): string[] {
   const rust = files.filter((f) => /^crates\/.+\.rs$/.test(f) && !f.includes("/fuzz/"));
   const holderBinaries = new Set(
     rust.flatMap((f) => (read(f).includes(HOLDER_BINARY) ? [testBinary(f) ?? ""] : [])),
   );
   holderBinaries.delete("");
-  return rust.flatMap((file) => {
+  const seen = new Map<string, number>();
+  const unmarked = rust.flatMap((file) => {
     const strings: string[] = [];
-    const code = withoutTrackerCloses(rustCode(read(file), strings));
+    const code = withoutListedCloses(
+      file,
+      withoutHarmlessCloses(rustCode(read(file), strings)),
+      nonSignallingCloses,
+      seen,
+    );
     const wholeBinary = holderBinaries.has(testBinary(file) ?? "");
     // A helper in the same file that closes or sweeps makes each test calling it signal too, and
     // so does a const or static whose value names a session. A test's own helpers count however
@@ -5194,6 +5522,7 @@ export function unmarkedSignallingTests(
     }
     return out;
   });
+  return [...unmarked, ...listedCloseFailures(nonSignallingCloses, seen)];
 }
 
 /** The lines of Rust source that are test code: under `#[cfg(test)]`. */
@@ -5357,7 +5686,7 @@ function checkSignalChokepoints(): void {
   failures.push(...signalChokepointFailures(repoFiles(), readRepoFile));
   failures.push(...allowedSignalFileFailures(repoFiles()));
   failures.push(...productChokepointFailures(Object.keys(SIGNAL_CHOKEPOINTS), PRODUCT_CHOKEPOINTS));
-  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile));
+  failures.push(...unmarkedSignallingTests(repoFiles(), readRepoFile, NON_SIGNALLING_CLOSES));
   failures.push(...cargoManifestFailures(repoFiles(), readRepoFile));
 }
 
