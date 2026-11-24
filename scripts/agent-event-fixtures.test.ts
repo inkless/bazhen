@@ -34,8 +34,8 @@ describe("the agent event fixture", () => {
       headlines: snapshot.agents.filter((a) => a.headline !== null).length,
       actions: new Set(snapshot.attention.map((i) => i.actions.length)).size,
     }).toEqual({
-      agents: 10,
-      attention: 4,
+      agents: 12,
+      attention: 5,
       listening: true,
       resumable: new Set([true, false]),
       promptChanged: new Set([true, false]),

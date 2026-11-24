@@ -15,17 +15,17 @@ use crate::events::Reads;
 /// knows of harnesses (which themes, what can be resumed, what the human can do now). A database
 /// the TypeScript daemon used may hold its rows, and a snapshot that left them out or guessed would
 /// be wrong rather than incomplete.
-struct Unported {
+struct ViewedSection {
     section: &'static str,
     rows: &'static str,
 }
 
-const UNPORTED: [Unported; 2] = [
-    Unported {
+const NEEDS_AGENT_VIEW: [ViewedSection; 2] = [
+    ViewedSection {
         section: "agents",
         rows: "SELECT 1 FROM agent_sessions",
     },
-    Unported {
+    ViewedSection {
         section: "attention",
         rows: "SELECT 1 FROM attention_items",
     },
@@ -56,9 +56,10 @@ pub struct SnapshotView {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
-    /// The database holds rows of sections this build can't describe yet.
+    /// The database holds rows of sections only an [`AgentView`] describes, and the snapshot was
+    /// taken without one.
     #[error("this daemon can't describe {} yet", .0.join(", "))]
-    Unported(Vec<&'static str>),
+    NeedsAgentView(Vec<&'static str>),
     #[error("a stored row doesn't read as the protocol's: {0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
@@ -71,7 +72,7 @@ impl Reads<'_> {
     ///
     /// # Errors
     ///
-    /// [`SnapshotError::Unported`] when the database holds agents or items for the human.
+    /// [`SnapshotError::NeedsAgentView`] when the database holds agents or items for the human.
     pub fn snapshot(self, view: &SnapshotView) -> Result<StateSnapshot, SnapshotError> {
         self.compose(view, None)
     }
@@ -98,14 +99,14 @@ impl Reads<'_> {
         let tx = self.0.unchecked_transaction()?;
         let reads = Reads(&tx);
         if agents.is_none() {
-            let mut unported = Vec::new();
-            for section in &UNPORTED {
+            let mut needed = Vec::new();
+            for section in &NEEDS_AGENT_VIEW {
                 if tx.prepare(section.rows)?.exists(())? {
-                    unported.push(section.section);
+                    needed.push(section.section);
                 }
             }
-            if !unported.is_empty() {
-                return Err(SnapshotError::Unported(unported));
+            if !needed.is_empty() {
+                return Err(SnapshotError::NeedsAgentView(needed));
             }
         }
         let snapshot = StateSnapshot {

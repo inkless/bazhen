@@ -266,6 +266,21 @@ fn headline(text: &str) -> String {
         .collect()
 }
 
+/// An item's row, as one query reads it.
+struct AttentionRow {
+    id: String,
+    agent_id: String,
+    state: String,
+    close_reason: Option<String>,
+    summary: String,
+    kind: String,
+    task_id: Option<String>,
+    message_id: Option<String>,
+    tool_use_id: Option<String>,
+    main_agent: bool,
+    opened_at: String,
+}
+
 /// Every item for the human, oldest first, each open one with what the human can do about it.
 pub(crate) fn attention(
     db: &rusqlite::Connection,
@@ -279,63 +294,54 @@ pub(crate) fn attention(
     )?;
     let rows = statement
         .query_map((), |row| {
-            Ok((
-                (
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                ),
-                (
-                    row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, bool>(9)?,
-                    row.get::<_, String>(10)?,
-                ),
-            ))
+            Ok(AttentionRow {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                state: row.get(2)?,
+                close_reason: row.get(3)?,
+                summary: row.get(4)?,
+                kind: row.get(5)?,
+                task_id: row.get(6)?,
+                message_id: row.get(7)?,
+                tool_use_id: row.get(8)?,
+                main_agent: row.get(9)?,
+                opened_at: row.get(10)?,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter()
-        .map(
-            |(
-                (id, agent_id, state, close_reason, summary),
-                (kind, task_id, message_id, tool_use_id, main_agent, opened_at),
-            )| {
-                let id: AttentionId = word(id)?;
-                let agent_id: AgentId = word(agent_id)?;
-                let state: AttentionState = word(state)?;
-                let kind: AttentionKind = word(kind)?;
-                let actions = if state == AttentionState::Open {
-                    agents.attention_actions(&OpenAttention {
-                        id: &id,
-                        agent_id: &agent_id,
-                        kind: &kind,
-                        tool_use_id: tool_use_id.as_deref(),
-                        main_agent,
-                        message_id: message_id.as_deref(),
-                        task_id: task_id.as_deref(),
-                    })
-                } else {
-                    Vec::new()
-                };
-                Ok(Attention {
-                    close_reason: close_reason.map(word).transpose()?,
-                    message_id: message_id.map(word).transpose()?,
-                    id,
-                    agent_id,
-                    state,
-                    summary,
-                    kind,
-                    task_id,
-                    opened_at,
-                    actions,
-                })
-            },
-        )
-        .collect()
+    rows.into_iter().map(|row| item(row, agents)).collect()
+}
+
+fn item(row: AttentionRow, agents: &dyn AgentView) -> Result<Attention, SnapshotError> {
+    let id: AttentionId = word(row.id)?;
+    let agent_id: AgentId = word(row.agent_id)?;
+    let state: AttentionState = word(row.state)?;
+    let kind: AttentionKind = word(row.kind)?;
+    let actions = if state == AttentionState::Open {
+        agents.attention_actions(&OpenAttention {
+            id: &id,
+            agent_id: &agent_id,
+            kind: &kind,
+            tool_use_id: row.tool_use_id.as_deref(),
+            main_agent: row.main_agent,
+            message_id: row.message_id.as_deref(),
+            task_id: row.task_id.as_deref(),
+        })
+    } else {
+        Vec::new()
+    };
+    Ok(Attention {
+        close_reason: row.close_reason.map(word).transpose()?,
+        message_id: row.message_id.map(word).transpose()?,
+        id,
+        agent_id,
+        state,
+        summary: row.summary,
+        kind,
+        task_id: row.task_id,
+        opened_at: row.opened_at,
+        actions,
+    })
 }
 
 /// A stored word, such as a state or an id, read as the protocol's type for it.

@@ -27,12 +27,15 @@ const H = id("agent", 8);
 const J = id("agent", 9);
 const K = id("agent", 10);
 const L = id("agent", 11);
+const P = id("agent", 12);
+const Q = id("agent", 13);
 const [M1, M2, M3, M9] = [id("msg", 1), id("msg", 2), id("msg", 3), id("msg", 9)];
 const O1 = id("obs", 1);
 const O2 = id("obs", 2);
 const [N1, N2, N9] = [id("attn", 1), id("attn", 2), id("attn", 9)];
 const N3 = id("attn", 3);
 const N4 = id("attn", 4);
+const N5 = id("attn", 5);
 const [TK1, TK2, TK3, TK9] = [id("task", 1), id("task", 2), id("task", 3), id("task", 9)];
 const AS1 = id("asgn", 1);
 const AS2 = id("asgn", 2);
@@ -55,6 +58,8 @@ const T9 = id("term", 9);
 const T10 = id("term", 10);
 const T11 = id("term", 11);
 const T12 = id("term", 12);
+const T13 = id("term", 13);
+const T14 = id("term", 14);
 const HOST = id("host", 1);
 
 const ref = (generation: number) => ({
@@ -438,6 +443,34 @@ const STEPS: readonly NewEvent<EventType>[] = [
     toolUseId: null,
     mainAgent: false,
   }),
+  // A subagent's approval, which can't be replied to.
+  step("attention.opened", N5, J, {
+    agentId: J,
+    summary: "a subagent's edit?",
+    toolUseId: "tu5",
+    mainAgent: false,
+  }),
+  // A restart the holder serves, which leaves the terminal attachable; one it doesn't, which
+  // doesn't; and an agent that exited, which can still open a shell.
+  step("terminal.needs_restart", T10, "system", { protocol: ["1.4", "1.3"] }),
+  step("agent.launched", P, "user", {
+    environmentId: ENV,
+    harness: "claude-code",
+    project: "restart",
+    cwd: "/p",
+    terminalId: T13,
+  }),
+  step("agent.running", P, "system", { externalRef: session("s8"), runtimeRef: ref(0) }),
+  step("terminal.needs_restart", T13, "system", { protocol: ["9.0"] }),
+  step("agent.launched", Q, "user", {
+    environmentId: ENV,
+    harness: "codex",
+    project: "exit",
+    cwd: "/q",
+    terminalId: T14,
+  }),
+  step("agent.running", Q, "system", { externalRef: thread("t9"), runtimeRef: ref(0) }),
+  step("agent.exited", Q, "system", { exit: { type: "exited", code: 0 } }),
 ];
 
 /** Every event's time, set before the snapshot so its times are the same on every run. */

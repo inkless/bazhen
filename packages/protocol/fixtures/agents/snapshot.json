@@ -3,7 +3,7 @@
   "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "snapshot": {
     "epoch": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "eventId": 117,
+    "eventId": 125,
     "environments": [
       {
         "id": "env_01900000000070008000000000000001",
@@ -306,7 +306,10 @@
         "launchedBy": null,
         "listening": true,
         "headline": null,
-        "needsRestart": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": true
+        },
         "role": null,
         "promptChanged": false
       },
@@ -342,6 +345,80 @@
           "taskId": "task_01900000000070008000000000000001",
           "at": "2026-11-01T00:00:00.000Z"
         },
+        "needsRestart": null,
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000c",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "restart",
+        "cwd": "/p",
+        "state": "starting",
+        "terminalId": "term_0190000000007000800000000000000d",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s8"
+        },
+        "exit": null,
+        "theme": "dark",
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "attachCommand": null,
+        "commands": [
+          "close",
+          "signal"
+        ],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
+        "needsRestart": {
+          "holderPid": null,
+          "served": false
+        },
+        "role": null,
+        "promptChanged": false
+      },
+      {
+        "id": "agent_0190000000007000800000000000000d",
+        "name": "",
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "exit",
+        "cwd": "/q",
+        "state": "exited",
+        "terminalId": "term_0190000000007000800000000000000e",
+        "generation": 0,
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t9"
+        },
+        "exit": {
+          "type": "exited",
+          "code": 0
+        },
+        "theme": "dark",
+        "themes": [
+          "dark"
+        ],
+        "attachCommand": "bazhen terminals attach term_0190000000007000800000000000000e",
+        "commands": [
+          "close"
+        ],
+        "resumable": false,
+        "canOpenShell": true,
+        "launchedBy": null,
+        "listening": false,
+        "headline": null,
         "needsRestart": null,
         "role": null,
         "promptChanged": false
@@ -401,6 +478,21 @@
         "actions": [
           "resend",
           "dismiss"
+        ]
+      },
+      {
+        "id": "attn_01900000000070008000000000000005",
+        "agentId": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "closeReason": null,
+        "summary": "a subagent's edit?",
+        "kind": "approval",
+        "taskId": null,
+        "messageId": null,
+        "openedAt": "2026-11-01T00:00:00.000Z",
+        "actions": [
+          "allow",
+          "deny"
         ]
       }
     ],

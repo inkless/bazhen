@@ -20,8 +20,8 @@ use bazhen_protocol::shells::TuiTheme;
 
 use crate::testing::TempDir;
 use crate::{
-    AgentChange, AgentView, AppendError, AssignmentChange, AttentionChange, Evidence, Listener,
-    MailChange, NewEvent, OpenAttention, SnapshotView, Store, TaskChange,
+    Actor, AgentChange, AgentView, AppendError, AssignmentChange, AttentionChange, Evidence,
+    Listener, MailChange, NewEvent, OpenAttention, SnapshotView, Store, TaskChange, TerminalChange,
 };
 
 /// The fixture, each step's payload kept as its text: decoded through a `Value`, whose map sorts
@@ -202,6 +202,18 @@ fn event(step: &Step) -> NewEvent {
                 _ => AssignmentChange::Ended(decode(payload)),
             },
         },
+        "terminal" => NewEvent::Terminal {
+            terminal: decode(&entity),
+            actor: match actor.as_str() {
+                "user" => Actor::User,
+                "system" => Actor::System,
+                other => panic!("no terminal actor {other}"),
+            },
+            change: match step.kind.as_str() {
+                "terminal.needs_restart" => TerminalChange::NeedsRestart(decode(payload)),
+                _ => panic!("no event {}", step.kind),
+            },
+        },
         _ => panic!("no event {}", step.kind),
     }
 }
@@ -330,12 +342,12 @@ fn snapshots_agents_and_their_items_as_the_typescript_store_did_under_the_same_v
 #[test]
 fn still_refuses_a_snapshot_of_agents_to_a_daemon_that_can_t_describe_them() {
     let fixture = fixture();
-    let dir = TempDir::new("agent-snapshot-unported");
+    let dir = TempDir::new("agent-snapshot-needs-view");
     let mut store = store_of_host(&dir, &fixture.host);
     replay(&fixture, &mut store);
     let refused = store.reads().snapshot(&crate::testing::view());
     assert!(
-        matches!(&refused, Err(crate::SnapshotError::Unported(s)) if s == &["agents", "attention"]),
+        matches!(&refused, Err(crate::SnapshotError::NeedsAgentView(s)) if s == &["agents", "attention"]),
         "{refused:?}"
     );
 }

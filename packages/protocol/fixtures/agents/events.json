@@ -1446,6 +1446,111 @@
         "toolUseId": null,
         "mainAgent": false
       }
+    },
+    {
+      "type": "attention.opened",
+      "entityId": "attn_01900000000070008000000000000005",
+      "actor": "agent_01900000000070008000000000000009",
+      "payload": {
+        "agentId": "agent_01900000000070008000000000000009",
+        "summary": "a subagent's edit?",
+        "toolUseId": "tu5",
+        "mainAgent": false
+      }
+    },
+    {
+      "type": "terminal.needs_restart",
+      "entityId": "term_0190000000007000800000000000000a",
+      "actor": "system",
+      "payload": {
+        "protocol": [
+          "1.4",
+          "1.3"
+        ]
+      }
+    },
+    {
+      "type": "agent.launched",
+      "entityId": "agent_0190000000007000800000000000000c",
+      "actor": "user",
+      "payload": {
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "restart",
+        "cwd": "/p",
+        "terminalId": "term_0190000000007000800000000000000d"
+      }
+    },
+    {
+      "type": "agent.running",
+      "entityId": "agent_0190000000007000800000000000000c",
+      "actor": "system",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "claude-session",
+          "id": "s8"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "socket": "/run/bazhen/holder.sock",
+            "generation": "0"
+          }
+        }
+      }
+    },
+    {
+      "type": "terminal.needs_restart",
+      "entityId": "term_0190000000007000800000000000000d",
+      "actor": "system",
+      "payload": {
+        "protocol": [
+          "9.0"
+        ]
+      }
+    },
+    {
+      "type": "agent.launched",
+      "entityId": "agent_0190000000007000800000000000000d",
+      "actor": "user",
+      "payload": {
+        "environmentId": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "exit",
+        "cwd": "/q",
+        "terminalId": "term_0190000000007000800000000000000e"
+      }
+    },
+    {
+      "type": "agent.running",
+      "entityId": "agent_0190000000007000800000000000000d",
+      "actor": "system",
+      "payload": {
+        "externalRef": {
+          "environmentId": "env_01900000000070008000000000000001",
+          "kind": "codex-thread",
+          "id": "t9"
+        },
+        "runtimeRef": {
+          "runtime": "holder",
+          "locator": {
+            "socket": "/run/bazhen/holder.sock",
+            "generation": "0"
+          }
+        }
+      }
+    },
+    {
+      "type": "agent.exited",
+      "entityId": "agent_0190000000007000800000000000000d",
+      "actor": "system",
+      "payload": {
+        "exit": {
+          "type": "exited",
+          "code": 0
+        }
+      }
     }
   ],
   "tables": {
@@ -1659,6 +1764,50 @@
         "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s7\"}",
         "created_event_id": 62,
         "updated_event_id": 111,
+        "usage": null,
+        "transcript": null,
+        "launched_by": null,
+        "name": null,
+        "harness_name": null,
+        "token_hash": null,
+        "untokened": 0,
+        "role": null,
+        "prompt_hash": null,
+        "compact_window": null
+      },
+      {
+        "id": "agent_0190000000007000800000000000000c",
+        "environment_id": "env_01900000000070008000000000000001",
+        "harness": "claude-code",
+        "project": "restart",
+        "cwd": "/p",
+        "state": "starting",
+        "terminal_id": "term_0190000000007000800000000000000d",
+        "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s8\"}",
+        "created_event_id": 120,
+        "updated_event_id": 121,
+        "usage": null,
+        "transcript": null,
+        "launched_by": null,
+        "name": null,
+        "harness_name": null,
+        "token_hash": null,
+        "untokened": 0,
+        "role": null,
+        "prompt_hash": null,
+        "compact_window": null
+      },
+      {
+        "id": "agent_0190000000007000800000000000000d",
+        "environment_id": "env_01900000000070008000000000000001",
+        "harness": "codex",
+        "project": "exit",
+        "cwd": "/q",
+        "state": "exited",
+        "terminal_id": "term_0190000000007000800000000000000e",
+        "external_ref": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"codex-thread\",\"id\":\"t9\"}",
+        "created_event_id": 123,
+        "updated_event_id": 125,
         "usage": null,
         "transcript": null,
         "launched_by": null,
@@ -1908,7 +2057,7 @@
         "kind": "agent",
         "agent_session_id": "agent_01900000000070008000000000000009",
         "created_event_id": 60,
-        "updated_event_id": 61,
+        "updated_event_id": 119,
         "exit": null,
         "theme": null,
         "cwd": null,
@@ -1920,7 +2069,7 @@
         "last_command_seq": null,
         "report_token_hash": null,
         "runtime_kind": "tmux",
-        "restart_protocol": null
+        "restart_protocol": "[\"1.4\",\"1.3\"]"
       },
       {
         "id": "term_0190000000007000800000000000000c",
@@ -1935,6 +2084,56 @@
         "created_event_id": 62,
         "updated_event_id": 111,
         "exit": null,
+        "theme": null,
+        "cwd": null,
+        "linked_agent_id": null,
+        "name": null,
+        "foreground": null,
+        "current_cwd": null,
+        "last_command": null,
+        "last_command_seq": null,
+        "report_token_hash": null,
+        "runtime_kind": "tmux",
+        "restart_protocol": null
+      },
+      {
+        "id": "term_0190000000007000800000000000000d",
+        "host_id": "host_01900000000070008000000000000001",
+        "state": "running",
+        "generation": 0,
+        "runtime": "holder",
+        "locator": "{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}",
+        "environment_id": "env_01900000000070008000000000000001",
+        "kind": "agent",
+        "agent_session_id": "agent_0190000000007000800000000000000c",
+        "created_event_id": 120,
+        "updated_event_id": 122,
+        "exit": null,
+        "theme": null,
+        "cwd": null,
+        "linked_agent_id": null,
+        "name": null,
+        "foreground": null,
+        "current_cwd": null,
+        "last_command": null,
+        "last_command_seq": null,
+        "report_token_hash": null,
+        "runtime_kind": "tmux",
+        "restart_protocol": "[\"9.0\"]"
+      },
+      {
+        "id": "term_0190000000007000800000000000000e",
+        "host_id": "host_01900000000070008000000000000001",
+        "state": "exited",
+        "generation": 0,
+        "runtime": "holder",
+        "locator": "{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}",
+        "environment_id": "env_01900000000070008000000000000001",
+        "kind": "agent",
+        "agent_session_id": "agent_0190000000007000800000000000000d",
+        "created_event_id": 123,
+        "updated_event_id": 125,
+        "exit": "{\"type\":\"exited\",\"code\":0}",
         "theme": null,
         "cwd": null,
         "linked_agent_id": null,
@@ -2078,6 +2277,20 @@
         "kind": "undeliverable",
         "task_id": null,
         "message_id": "msg_01900000000070008000000000000002"
+      },
+      {
+        "id": "attn_01900000000070008000000000000005",
+        "agent_session_id": "agent_01900000000070008000000000000009",
+        "state": "open",
+        "close_reason": null,
+        "summary": "a subagent's edit?",
+        "tool_use_id": "tu5",
+        "main_agent": 0,
+        "created_event_id": 118,
+        "updated_event_id": 118,
+        "kind": "approval",
+        "task_id": null,
+        "message_id": null
       }
     ],
     "tasks": [
@@ -3529,6 +3742,94 @@
         "causation_id": null,
         "correlation_id": null,
         "payload": "{\"agentId\":\"agent_01900000000070008000000000000009\",\"summary\":\"not delivered\",\"kind\":\"undeliverable\",\"messageId\":\"msg_01900000000070008000000000000002\",\"toolUseId\":null,\"mainAgent\":false}"
+      },
+      {
+        "id": 118,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "attention.opened",
+        "entity_type": "attention",
+        "entity_id": "attn_01900000000070008000000000000005",
+        "actor": "agent_01900000000070008000000000000009",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"agentId\":\"agent_01900000000070008000000000000009\",\"summary\":\"a subagent's edit?\",\"toolUseId\":\"tu5\",\"mainAgent\":false}"
+      },
+      {
+        "id": 119,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "terminal.needs_restart",
+        "entity_type": "terminal",
+        "entity_id": "term_0190000000007000800000000000000a",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"protocol\":[\"1.4\",\"1.3\"]}"
+      },
+      {
+        "id": 120,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.launched",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000c",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"claude-code\",\"project\":\"restart\",\"cwd\":\"/p\",\"terminalId\":\"term_0190000000007000800000000000000d\"}"
+      },
+      {
+        "id": 121,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.running",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000c",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"externalRef\":{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"claude-session\",\"id\":\"s8\"},\"runtimeRef\":{\"runtime\":\"holder\",\"locator\":{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}}}"
+      },
+      {
+        "id": 122,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "terminal.needs_restart",
+        "entity_type": "terminal",
+        "entity_id": "term_0190000000007000800000000000000d",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"protocol\":[\"9.0\"]}"
+      },
+      {
+        "id": 123,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.launched",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000d",
+        "actor": "user",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"environmentId\":\"env_01900000000070008000000000000001\",\"harness\":\"codex\",\"project\":\"exit\",\"cwd\":\"/q\",\"terminalId\":\"term_0190000000007000800000000000000e\"}"
+      },
+      {
+        "id": 124,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.running",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000d",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"externalRef\":{\"environmentId\":\"env_01900000000070008000000000000001\",\"kind\":\"codex-thread\",\"id\":\"t9\"},\"runtimeRef\":{\"runtime\":\"holder\",\"locator\":{\"socket\":\"/run/bazhen/holder.sock\",\"generation\":\"0\"}}}"
+      },
+      {
+        "id": 125,
+        "host_id": "host_01900000000070008000000000000001",
+        "type": "agent.exited",
+        "entity_type": "agent",
+        "entity_id": "agent_0190000000007000800000000000000d",
+        "actor": "system",
+        "causation_id": null,
+        "correlation_id": null,
+        "payload": "{\"exit\":{\"type\":\"exited\",\"code\":0}}"
       }
     ]
   }
