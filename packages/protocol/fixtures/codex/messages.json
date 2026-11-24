@@ -1,0 +1,3935 @@
+[
+  {
+    "name": "idle",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "idle"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "idle",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "working",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active with no flags",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "working",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active waiting on approval",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": [
+          "waitingOnApproval"
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "needs_approval",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active waiting on input",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": [
+          "waitingOnUserInput"
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "waiting_input",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active waiting on both",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": [
+          "waitingOnUserInput",
+          "waitingOnApproval"
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "needs_approval",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active with an unknown flag",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": [
+          "thinking"
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "working",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active with flags not a list",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": "waitingOnApproval"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "active with a flag not a string",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "active",
+        "activeFlags": [
+          1
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "system error",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "systemError"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "failed",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "not loaded",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "notLoaded"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "unknown",
+        "notLoaded": true
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an unknown status",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "paused"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "unknown",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status with no type",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {}
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status not an object",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": "idle"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status with no thread",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "status": {
+        "type": "idle"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status for a numbered thread",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": 7,
+      "status": {
+        "type": "idle"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status with no status",
+    "bad": true,
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status with more fields",
+    "method": "thread/status/changed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "status": {
+        "type": "idle",
+        "since": 3
+      },
+      "extra": true
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "activity": "idle",
+        "notLoaded": false
+      },
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a status with no params",
+    "bad": true,
+    "method": "thread/status/changed",
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn started",
+    "method": "turn/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "inProgress"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": true,
+        "ended": null,
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn started with no turn",
+    "bad": true,
+    "method": "turn/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": true,
+        "ended": null,
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn started with no thread",
+    "bad": true,
+    "method": "turn/started",
+    "params": {
+      "turn": {}
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn completed",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "completed",
+        "error": null
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "completed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn interrupted",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "interrupted"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "interrupted",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn ended with no status",
+    "bad": true,
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": null,
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn ended with no turn",
+    "bad": true,
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": null,
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn ended in progress",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "inProgress"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "inProgress",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn ended with a status not a string",
+    "bad": true,
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": 3
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on the usage limit",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "limit",
+          "codexErrorInfo": "usageLimitExceeded"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "usageLimitExceeded",
+        "limit": "quota"
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on the rate limit",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "slow down",
+          "codexErrorInfo": "rateLimitExceeded"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "rateLimitExceeded",
+        "limit": "rate"
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on an overloaded server",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "busy",
+          "codexErrorInfo": "serverOverloaded"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "serverOverloaded",
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on a connection",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "no",
+          "codexErrorInfo": {
+            "httpConnectionFailed": {
+              "httpStatusCode": 502
+            }
+          }
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "httpConnectionFailed",
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on an error of two names",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": {
+            "a": {},
+            "b": {}
+          }
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on an error of no name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": {}
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on an empty error name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": ""
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on a long error name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": "exxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "exxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on a long astral error name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": "e😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": "e😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed on a numbered error",
+    "bad": true,
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": 7
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed with a null error name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?",
+          "codexErrorInfo": null
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed with no error name",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": {
+          "message": "?"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed with a null error",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": null
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a turn failed with an error not an object",
+    "bad": true,
+    "method": "turn/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turn": {
+        "id": "turn-1",
+        "items": [],
+        "status": "failed",
+        "error": "boom"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "started": false,
+        "ended": "failed",
+        "error": null,
+        "limit": null
+      },
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits in both windows",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "limitName": null,
+        "primary": {
+          "usedPercent": 12,
+          "windowDurationMins": 300,
+          "resetsAt": 1763003600
+        },
+        "secondary": {
+          "usedPercent": 40,
+          "windowDurationMins": 300,
+          "resetsAt": 1763600000
+        },
+        "planType": "pro"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 12,
+          "resetsAt": "2025-11-13T03:13:20.000Z"
+        },
+        {
+          "window": "codex.secondary",
+          "usedPercent": 40,
+          "resetsAt": "2025-11-20T00:53:20.000Z"
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with no limit id",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "primary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300,
+          "resetsAt": 1763003600
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "primary",
+          "usedPercent": 5,
+          "resetsAt": "2025-11-13T03:13:20.000Z"
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a null limit id",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": null,
+        "secondary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with an empty limit id",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "",
+        "primary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a limit id of 40",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "llllllllllllllllllllllllllllllllllllllll",
+        "primary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a limit id of 41",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "lllllllllllllllllllllllllllllllllllllllll",
+        "primary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a numbered limit id",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": 3,
+        "primary": {
+          "usedPercent": 5,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with null windows",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": null,
+        "secondary": null
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with no windows",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a negative use",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "primary": {
+          "usedPercent": -1,
+          "windowDurationMins": 300,
+          "resetsAt": 1763003600
+        },
+        "secondary": {
+          "usedPercent": 0,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a fractional use",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "primary": {
+          "usedPercent": 12.5,
+          "windowDurationMins": 300
+        },
+        "secondary": {
+          "usedPercent": 100.25,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a use not a number",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "primary": {
+          "usedPercent": "12",
+          "windowDurationMins": 300
+        },
+        "secondary": {
+          "usedPercent": 3,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a window not an object",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "primary": 12,
+        "secondary": {
+          "usedPercent": 3,
+          "windowDurationMins": 300
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a null reset",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": null
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a fractional reset",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": 1763003600.5
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a negative reset",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": -1
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a zero reset",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": 0
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with the last reset JS dates hold",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": 8640000000000
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1,
+          "resetsAt": "+275760-09-13T00:00:00.000Z"
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a reset past JS dates",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": 8640000000001
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a reset in the year 2370",
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": 12622780800
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1,
+          "resetsAt": "2370-01-01T00:00:00.000Z"
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a reset as a string",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": "1763003600"
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with a reset as an object",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {
+      "rateLimits": {
+        "limitId": "codex",
+        "primary": {
+          "usedPercent": 1,
+          "resetsAt": {
+            "s": 1
+          }
+        }
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": [
+        {
+          "window": "codex.primary",
+          "usedPercent": 1
+        }
+      ],
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "rate limits with none",
+    "bad": true,
+    "method": "account/rateLimits/updated",
+    "params": {},
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a message taken",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHello"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": "msg_0190000000007000800000000000001"
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a message taken with more",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHello"
+          },
+          {
+            "type": "text",
+            "text": "more"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": "msg_0190000000007000800000000000001"
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a label with no newline",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):Hello"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a quoted label",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen [quoted] (msg_0190000000007000800000000000001):\nHi"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a label naming no message id",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_x-y):\nHi"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a label after a space",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": " Message for you from Bazhen (msg_0190000000007000800000000000001):\nHello"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "the user's own input",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Fix the tests"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "input of no content",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": []
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an image first",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "image",
+            "url": "https://example.com/a.png"
+          },
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHi"
+          }
+        ]
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "messageId": null
+      },
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "input whose content isn't a list",
+    "bad": true,
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": "text"
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": true
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "input with no thread",
+    "bad": true,
+    "method": "item/started",
+    "params": {
+      "turnId": "turn-1",
+      "startedAtMs": 1,
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHi"
+          }
+        ]
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an agent message started",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "agentMessage",
+        "id": "item-2",
+        "text": "Done."
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": false
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a compaction started",
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "contextCompaction",
+        "id": "item-3"
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "userInput": false
+      },
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an item with no type",
+    "bad": true,
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "id": "item-4"
+      },
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an item not an object",
+    "bad": true,
+    "method": "item/started",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": "userMessage",
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a compaction completed",
+    "method": "item/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "contextCompaction",
+        "id": "item-3"
+      },
+      "completedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a compaction completed on a numbered thread",
+    "bad": true,
+    "method": "item/completed",
+    "params": {
+      "threadId": 9,
+      "turnId": "turn-1",
+      "item": {
+        "type": "contextCompaction",
+        "id": "item-3"
+      },
+      "completedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an agent message completed",
+    "method": "item/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "agentMessage",
+        "id": "item-2",
+        "text": "Done."
+      },
+      "completedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a message completed",
+    "method": "item/completed",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "item": {
+        "type": "userMessage",
+        "id": "item-1",
+        "content": [
+          {
+            "type": "text",
+            "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHello"
+          }
+        ]
+      },
+      "completedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a compaction, the deprecated way",
+    "method": "thread/compacted",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a thread started",
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    }
+  },
+  {
+    "name": "an ephemeral thread started",
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": true,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a thread started with a null ephemeral",
+    "bad": true,
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": null,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    }
+  },
+  {
+    "name": "a title thread started",
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": [],
+        "threadSource": "thread_title"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a subagent's thread started",
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": [],
+        "threadSource": "subagent"
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+    }
+  },
+  {
+    "name": "a thread started with a null source",
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": [],
+        "threadSource": null
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    }
+  },
+  {
+    "name": "a thread started with no id",
+    "bad": true,
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "ephemeral": false
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a thread started with ephemeral a string",
+    "bad": true,
+    "method": "thread/started",
+    "params": {
+      "thread": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": "no",
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a request resolved by number",
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "requestId": 4
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": 4,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a request resolved by string",
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "requestId": "req-4"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": "req-4",
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a request resolved by a fraction",
+    "bad": true,
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "requestId": 4.5
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": 4.5,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a request resolved by a bool",
+    "bad": true,
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "requestId": true
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a request resolved with no id",
+    "bad": true,
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "command": "rm -rf build",
+      "reason": "outside the sandbox",
+      "cwd": "/work"
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "summary": "Run rm -rf build (outside the sandbox)"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with no reason",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "command": "make"
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "summary": "Run make"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with an empty reason",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "command": "make",
+      "reason": ""
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "summary": "Run make"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with a null command",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "command": null,
+      "reason": null
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "summary": "Run a command"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with no command",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "summary": "Run a command"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with a numbered command",
+    "bad": true,
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "command": 3
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a command to approve with no item",
+    "bad": true,
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "command": "make"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a file change to approve",
+    "method": "item/fileChange/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "patch-1",
+      "startedAtMs": 1763000000000,
+      "reason": "writes outside the root",
+      "grantRoot": "/"
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "patch-1",
+        "summary": "Change files (writes outside the root)"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a file change to approve with no reason",
+    "method": "item/fileChange/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "patch-1",
+      "startedAtMs": 1763000000000
+    },
+    "read": {
+      "approval": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "patch-1",
+        "summary": "Change files"
+      },
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an old-style command approval",
+    "method": "execCommandApproval",
+    "params": {
+      "conversationId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "callId": "call-1",
+      "command": [
+        "ls"
+      ],
+      "cwd": "/work",
+      "parsedCmd": []
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a free-text question",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?"
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a choice",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "options": [
+            {
+              "label": "A",
+              "description": "a"
+            }
+          ]
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a choice with other",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "options": [
+            {
+              "label": "A",
+              "description": "a"
+            }
+          ],
+          "isOther": true
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a question with no options",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "options": []
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a question with null options",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "options": null
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a secret",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "isSecret": true
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a question not other",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?",
+          "isOther": false
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called?",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "two questions",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "What should it be called?"
+        },
+        {
+          "id": "q2",
+          "header": "Name",
+          "question": "And why?"
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "What should it be called? / And why?",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "no questions",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": []
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "The agent asks you a question",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an empty question",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": ""
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "The agent asks you a question",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a long question",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a question cut in a surrogate pair",
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "Name",
+          "question": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq😀"
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-2",
+        "key": "call-2",
+        "summary": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+        "answers": "q1"
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a question with a numbered id",
+    "bad": true,
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": [
+        {
+          "id": 3,
+          "header": "Name",
+          "question": "What should it be called?"
+        }
+      ]
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "questions not a list",
+    "bad": true,
+    "method": "item/tool/requestUserInput",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-2",
+      "isBlocking": true,
+      "questions": "what?"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation",
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "serverName": "github",
+      "mode": "form",
+      "message": "Which repository?",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": null,
+        "key": "[\"elicitation\",\"github\",\"Which repository?\"]",
+        "summary": "github asks: Which repository?",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation with no message",
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "serverName": "github",
+      "mode": "openai/userVerification",
+      "challenge": "c",
+      "description": "Confirm it's you",
+      "title": "Verify"
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": null,
+        "key": "[\"elicitation\",\"github\",null]",
+        "summary": "github asks: input in the terminal",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation by a link",
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "serverName": "github",
+      "mode": "url",
+      "elicitationId": "e1",
+      "message": "Sign in",
+      "url": "https://example.com"
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": null,
+        "key": "[\"elicitation\",\"github\",\"Sign in\"]",
+        "summary": "github asks: Sign in",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation with an empty message",
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "serverName": "github",
+      "mode": "form",
+      "message": "",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": null,
+        "key": "[\"elicitation\",\"github\",\"\"]",
+        "summary": "github asks: ",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation with a long message",
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "serverName": "github",
+      "mode": "form",
+      "message": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": null,
+        "key": "[\"elicitation\",\"github\",\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\"]",
+        "summary": "github asks: mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "an elicitation with no server",
+    "bad": true,
+    "method": "mcpServer/elicitation/request",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "message": "?"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "more permissions",
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "cwd": "/work",
+      "permissions": {},
+      "reason": "needs the network"
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "key": "call-1",
+        "summary": "Grant more permissions (needs the network)",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "more permissions with no reason",
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "turnId": "turn-1",
+      "itemId": "call-1",
+      "startedAtMs": 1763000000000,
+      "cwd": "/work",
+      "permissions": {}
+    },
+    "read": {
+      "approval": null,
+      "question": {
+        "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "itemId": "call-1",
+        "key": "call-1",
+        "summary": "Grant more permissions",
+        "answers": null
+      },
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "more permissions with no item",
+    "bad": true,
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "reason": "?"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "a method Codex doesn't send",
+    "bad": true,
+    "method": "thread/unknown",
+    "params": {
+      "threadId": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    },
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "params not an object",
+    "bad": true,
+    "method": "turn/started",
+    "params": [
+      "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    ],
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  },
+  {
+    "name": "null params",
+    "bad": true,
+    "method": "item/commandExecution/requestApproval",
+    "params": null,
+    "read": {
+      "approval": null,
+      "question": null,
+      "resolved": null,
+      "userMessage": null,
+      "threadStatus": null,
+      "turn": null,
+      "rateLimits": null,
+      "itemStarted": null,
+      "compaction": null,
+      "threadStarted": null
+    }
+  }
+]

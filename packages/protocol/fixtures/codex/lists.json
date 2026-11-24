@@ -1,0 +1,274 @@
+[
+  {
+    "name": "a page and a cursor",
+    "result": {
+      "data": [
+        {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": true,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        {
+          "id": "019a8f40-0000-7000-8000-000000000003",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": [],
+          "threadSource": "thread_title"
+        },
+        {
+          "id": "019a8f40-0000-7000-8000-000000000005",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": [],
+          "threadSource": "user"
+        },
+        {
+          "id": "019a8f40-0000-7000-8000-000000000004",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": [],
+          "threadSource": null
+        }
+      ],
+      "nextCursor": "c2",
+      "backwardsCursor": null
+    },
+    "threads": [
+      "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "019a8f40-0000-7000-8000-000000000005",
+      "019a8f40-0000-7000-8000-000000000004"
+    ],
+    "nextCursor": "c2"
+  },
+  {
+    "name": "the last page",
+    "result": {
+      "data": [
+        {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        }
+      ],
+      "nextCursor": null
+    },
+    "threads": [
+      "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a52"
+    ],
+    "nextCursor": null
+  },
+  {
+    "name": "a page with no cursor",
+    "result": {
+      "data": [
+        {
+          "id": "019a8f40-0000-7000-8000-000000000003",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        }
+      ]
+    },
+    "threads": [
+      "019a8f40-0000-7000-8000-000000000003"
+    ],
+    "nextCursor": null
+  },
+  {
+    "name": "an empty page",
+    "result": {
+      "data": [],
+      "nextCursor": "c3"
+    },
+    "threads": [],
+    "nextCursor": "c3"
+  },
+  {
+    "name": "a thread with no id",
+    "bad": true,
+    "result": {
+      "data": [
+        {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        },
+        {
+          "ephemeral": false
+        }
+      ],
+      "nextCursor": null
+    },
+    "threads": [
+      "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51"
+    ],
+    "nextCursor": null
+  },
+  {
+    "name": "data not a list",
+    "bad": true,
+    "result": {
+      "data": {
+        "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "ephemeral": false,
+        "cliVersion": "0.167.1",
+        "createdAt": 1763000000,
+        "updatedAt": 1763000000,
+        "cwd": "/work",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": null,
+        "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+        "source": "appServer",
+        "status": {
+          "type": "idle"
+        },
+        "turns": []
+      },
+      "nextCursor": "c2"
+    },
+    "threads": [],
+    "nextCursor": null
+  },
+  {
+    "name": "a cursor not a string",
+    "bad": true,
+    "result": {
+      "data": [
+        {
+          "id": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+          "ephemeral": false,
+          "cliVersion": "0.167.1",
+          "createdAt": 1763000000,
+          "updatedAt": 1763000000,
+          "cwd": "/work",
+          "modelProvider": "openai",
+          "preview": "",
+          "projectId": null,
+          "sessionId": "019a8f3c-0000-7000-8000-00000000aaaa",
+          "source": "appServer",
+          "status": {
+            "type": "idle"
+          },
+          "turns": []
+        }
+      ],
+      "nextCursor": 2
+    },
+    "threads": [],
+    "nextCursor": null
+  },
+  {
+    "name": "no data",
+    "bad": true,
+    "result": {
+      "nextCursor": "c2"
+    },
+    "threads": [],
+    "nextCursor": null
+  },
+  {
+    "name": "null",
+    "bad": true,
+    "result": null,
+    "threads": [],
+    "nextCursor": null
+  }
+]

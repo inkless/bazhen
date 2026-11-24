@@ -1,0 +1,168 @@
+{
+  "approvalResult": [
+    {
+      "decision": "allow",
+      "result": {
+        "decision": "accept"
+      }
+    },
+    {
+      "decision": "deny",
+      "result": {
+        "decision": "decline"
+      }
+    }
+  ],
+  "questionResult": [
+    {
+      "questionId": "q1",
+      "text": "Call it Bob",
+      "result": {
+        "answers": {
+          "q1": {
+            "answers": [
+              "Call it Bob"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "questionId": "q 2",
+      "text": "",
+      "result": {
+        "answers": {
+          "q 2": {
+            "answers": [
+              ""
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "messageText": [
+    {
+      "id": "msg_0190000000007000800000000000001",
+      "body": "Hello",
+      "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nHello"
+    },
+    {
+      "id": "msg_0190000000007000800000000000001",
+      "body": "Forwarded: Message for you from Bazhen (msg_0190000000007000800000000000001):\nold",
+      "text": "Message for you from Bazhen (msg_0190000000007000800000000000001):\nForwarded: Message for you from Bazhen [quoted] (msg_0190000000007000800000000000001):\nold"
+    }
+  ],
+  "queueArgs": [
+    {
+      "thread": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "text": "Hi",
+      "remote": "unix:///s",
+      "args": [
+        "queue",
+        "--thread",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "--remote",
+        "unix:///s",
+        "--message",
+        "Hi"
+      ]
+    },
+    {
+      "thread": "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+      "text": "-Hi",
+      "remote": null,
+      "args": [
+        "queue",
+        "--thread",
+        "019a8f3c-5b7e-7d21-9f4a-0c1e2d3b4a51",
+        "--message",
+        "-Hi"
+      ]
+    }
+  ],
+  "threadConfig": [
+    {
+      "socket": "/run/user/1000/bazhen/daemon \"a\".sock",
+      "config": {
+        "shell_environment_policy.set.BAZHEN_SOCKET": "/run/user/1000/bazhen/daemon \"a\".sock",
+        "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+        "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+      }
+    },
+    {
+      "socket": "",
+      "config": {
+        "shell_environment_policy.set.BAZHEN_SOCKET": "",
+        "shell_environment_policy.set.BAZHEN_AGENT_ID": "",
+        "shell_environment_policy.set.BAZHEN_AGENT_AUTH_FILE": ""
+      }
+    }
+  ],
+  "compactConfig": [
+    {
+      "tokens": 200000,
+      "config": {
+        "model_auto_compact_token_limit": 200000
+      }
+    },
+    {
+      "tokens": 0,
+      "config": {
+        "model_auto_compact_token_limit": 0
+      }
+    },
+    {
+      "tokens": 1.5,
+      "config": {
+        "model_auto_compact_token_limit": 1.5
+      }
+    },
+    {
+      "tokens": null,
+      "config": {}
+    }
+  ],
+  "tomlString": [
+    {
+      "value": "plain",
+      "toml": "\"plain\""
+    },
+    {
+      "value": "/home/u/my dir/sock",
+      "toml": "\"/home/u/my dir/sock\""
+    },
+    {
+      "value": "a \"quoted\" path",
+      "toml": "\"a \\\"quoted\\\" path\""
+    },
+    {
+      "value": "back\\slash",
+      "toml": "\"back\\\\slash\""
+    },
+    {
+      "value": "line\nbreak\ttab",
+      "toml": "\"line\\u000abreak\\u0009tab\""
+    },
+    {
+      "value": "\u0000\u001f",
+      "toml": "\"\\u0000\\u001f\\u007f\""
+    },
+    {
+      "value": " is not escaped",
+      "toml": "\" is not escaped\""
+    },
+    {
+      "value": "é and 😀",
+      "toml": "\"é and 😀\""
+    },
+    {
+      "value": " ",
+      "toml": "\" \""
+    },
+    {
+      "value": "",
+      "toml": "\"\""
+    }
+  ]
+}
