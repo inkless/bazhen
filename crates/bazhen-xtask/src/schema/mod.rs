@@ -246,11 +246,14 @@ mod tests {
     use super::*;
     use crate::gate::Status;
 
-    /// A host whose commands print what it was given, and which keeps what is written.
+    /// A host whose commands print what it was given, which reads `files`, and which keeps
+    /// what is written. With `judge`, the example's verdicts are `judge`'s on each case written.
     #[derive(Default)]
     struct Fake {
         printed: BTreeMap<String, Option<String>>,
         checks: Option<String>,
+        files: BTreeMap<PathBuf, String>,
+        judge: Option<fn(&serde_json::Value) -> serde_json::Value>,
         written: BTreeMap<PathBuf, String>,
         ran: Vec<String>,
     }
@@ -263,7 +266,7 @@ mod tests {
             if path == Path::new("/a/repo").join(CHECKS) {
                 return Ok(self.checks.clone());
             }
-            Ok(None)
+            Ok(self.files.get(path).cloned())
         }
         fn run(&mut self, _: &[&str], _: &Env, _: bool) -> std::io::Result<Status> {
             Ok(Some(1))
@@ -271,6 +274,13 @@ mod tests {
         fn output(&mut self, argv: &[&str], _: &Env) -> std::io::Result<Option<String>> {
             let line = argv.join(" ");
             self.ran.push(line.clone());
+            if let (Some(judge), true) = (self.judge, line == judged()) {
+                let cases = &self.written[&Path::new("/a/repo").join(SHADOW).join(CASES)];
+                let cases: Vec<serde_json::Value> = serde_json::from_str(cases).unwrap();
+                return Ok(Some(
+                    json!(cases.iter().map(judge).collect::<Vec<_>>()).to_string(),
+                ));
+            }
             Ok(self.printed.get(&line).cloned().flatten())
         }
         fn write(&mut self, path: &Path, text: &str) -> std::io::Result<()> {
@@ -333,6 +343,42 @@ mod tests {
                 .map(String::as_str),
             Some("[]\n")
         );
+    }
+
+    #[test]
+    fn fails_on_each_case_the_edge_judges_otherwise_and_writes_its_verdict_beside_it() {
+        let message = json!({
+            "type": "object",
+            "properties": { "n": { "type": "integer", "minimum": 0, "maximum": 9 } },
+            "required": ["n"],
+        });
+        let judged_by = |judge| {
+            let mut host = fake(&json!({ "M": message }));
+            let fixture = Path::new("/a/repo").join(FIXTURES).join("M.json");
+            let example = json!([{ "name": "one", "wire": { "n": 1 } }]);
+            host.files.insert(fixture, example.to_string());
+            host.judge = Some(judge);
+            let (exit, err) = ran(&mut host, true);
+            let corpus = &host.written[&Path::new("/a/repo").join(SHADOW).join("corpus.json")];
+            let corpus: Vec<serde_json::Value> = serde_json::from_str(corpus).unwrap();
+            (exit, err, corpus)
+        };
+        let (exit, err, corpus) = judged_by(|_| json!({ "taken": {} }));
+        assert_eq!(exit, Exit::Failed);
+        assert!(
+            err.contains(
+                r#"M/n (pastMaximum): the protocol refuses {"n":10}, and the edge takes it"#
+            ),
+            "{err}"
+        );
+        assert!(!err.contains("(atMaximum)"), "{err}");
+        let past = corpus.iter().find(|c| c["kind"] == "pastMaximum").unwrap();
+        assert_eq!(past["edge"], json!({ "taken": {} }));
+        let (exit, err, _) = judged_by(|case| match case["expect"].as_str() {
+            Some("accept") => json!({ "taken": {} }),
+            _ => json!({ "refused": "no" }),
+        });
+        assert_eq!((exit, err.as_str()), (Exit::Done, ""));
     }
 
     #[test]
