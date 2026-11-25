@@ -30,13 +30,14 @@ use bazhen_store::{AgentChange, AppendError, NewEvent, OnceError, Writer as Stor
 use serde::{Deserialize, Serialize};
 use tokio_util::task::TaskTracker;
 
+use self::lifecycle::{Doing, from_runtime};
 use self::prompts::{Composed, FLEET, Prompts, compose};
 use crate::budget::{Budget, Counts, TerminalLimit};
 use crate::failure::failure_detail;
 use crate::pairing::random_bytes;
 use crate::roles::Roles;
 use crate::shells::{RUNTIME, ShellError, resolve_directory};
-use crate::terminals::{Kind, NewTerminal, Terminals};
+use crate::terminals::{Kind, NewTerminal, TerminalError, Terminals};
 use crate::tokens::AgentTokens;
 use crate::turns::Turns;
 use crate::writer::Writer;
@@ -231,6 +232,15 @@ fn replayed(
         });
     }
     Ok(Some(prior.response))
+}
+
+/// Why a launch didn't start its agent.
+enum StartFailed {
+    /// Nothing started: the launch is recorded failed.
+    Refused(String),
+    /// Its terminal's create reached the runtime, which didn't say what came of it: the agent is
+    /// left launched, its token kept, for the daemon to settle once it can tell.
+    Unknown(String),
 }
 
 /// What an agent's launch needs.
@@ -475,7 +485,15 @@ impl Agents {
         let name = launching.name.clone();
         match self.start(launching).await {
             Ok(started) => self.running(key, asked, launched, &name, started).await,
-            Err(cause) => {
+            Err(StartFailed::Unknown(cause)) => {
+                tracing::warn!("bazhen: agent {agent}'s launch may have started it: {cause}");
+                Err(from_runtime(
+                    agent.as_str(),
+                    Doing::Start,
+                    TerminalError::Unknown(cause),
+                ))
+            }
+            Err(StartFailed::Refused(cause)) => {
                 tracing::error!("bazhen: agent {agent} failed to launch: {cause}");
                 self.deps.prompts.remove(&agent);
                 let detail = failure_detail(&cause);
@@ -560,7 +578,7 @@ impl Agents {
     /// Starts the agent's harness in its terminal, with a token of this start's own, which is
     /// kept if it starts and abandoned if not. A token that can't be written fails the launch as
     /// the runtime refusing it would. The error is the failure's own text.
-    async fn start(&self, launching: Launching<'_>) -> Result<Started, String> {
+    async fn start(&self, launching: Launching<'_>) -> Result<Started, StartFailed> {
         let Launching {
             harness,
             agent,
@@ -578,7 +596,7 @@ impl Agents {
             .tokens
             .mint(&agent)
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| StartFailed::Refused(err.to_string()))?;
         let request = LaunchRequest {
             cwd: cwd.clone(),
             theme,
@@ -593,7 +611,7 @@ impl Agents {
             Ok(spec) => spec,
             Err(err) => {
                 token.abandoned().await;
-                return Err(err.to_string());
+                return Err(StartFailed::Refused(err.to_string()));
             }
         };
         let LaunchSpec {
@@ -616,7 +634,7 @@ impl Agents {
             Ok(tag) => tag,
             Err(err) => {
                 token.abandoned().await;
-                return Err(err);
+                return Err(StartFailed::Refused(err));
             }
         };
         let (argv, env) = self.process_of(&agent, &token.file, argv, env);
@@ -643,8 +661,12 @@ impl Agents {
             }
             Err(err) => {
                 self.refused(terminal);
+                // A holder that may run started with the token's file, which it may still read.
+                if matches!(err, TerminalError::Unknown(_)) {
+                    return Err(StartFailed::Unknown(err.to_string()));
+                }
                 token.abandoned().await;
-                Err(err.to_string())
+                Err(StartFailed::Refused(err.to_string()))
             }
         }
     }
@@ -1398,7 +1420,8 @@ pub(crate) mod tests {
             max: 1,
             ..Setup::default()
         });
-        f.fake.set(|state| state.fail_creates = true);
+        f.fake
+            .set(|state| state.creates_refused = Some(crate::terminals::fake::refused()));
         let failed = runtime().block_on(f.launch(request("k-1")));
         assert!(
             matches!(failed, Err(AgentError::LaunchFailed { .. })),
@@ -1406,7 +1429,7 @@ pub(crate) mod tests {
         );
         assert_eq!(f.last("agent.failed")["reason"], "launch_rejected");
         assert_eq!(f.prompts(), Vec::<String>::new());
-        f.fake.set(|state| state.fail_creates = false);
+        f.fake.set(|state| state.creates_refused = None);
         assert!(runtime().block_on(f.launch(request("k-2"))).is_ok());
     }
 

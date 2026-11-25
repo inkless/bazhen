@@ -61,7 +61,9 @@ fn refusal(id: &str, err: &TerminalError) -> Response {
             ErrorCode::Unavailable,
             format!("terminal {id}: what runs it can't be reached"),
         ),
-        TerminalError::ProcessState(_) | TerminalError::Other(_) => return internal(err),
+        TerminalError::ProcessState(_) | TerminalError::Other(_) | TerminalError::Unknown(_) => {
+            return internal(err);
+        }
     };
     fail(status, code, &message)
 }

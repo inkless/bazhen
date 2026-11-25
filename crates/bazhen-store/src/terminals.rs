@@ -52,6 +52,17 @@ pub fn takes_exit(from: TerminalState) -> bool {
     advance(from, Step::ProcessExited).is_ok()
 }
 
+/// Whether an agent in `state` with its terminal in `terminal` waits on its start's answer: one
+/// requested, whose terminal is still being created or still holds the process it replaces.
+#[must_use]
+pub fn start_unsettled(state: AgentState, terminal: Option<TerminalState>) -> bool {
+    state == AgentState::Starting
+        && matches!(
+            terminal,
+            Some(TerminalState::Creating | TerminalState::Exited)
+        )
+}
+
 /// Where `step` takes a terminal in `from`, as packages/core's table has it, or why it can't.
 pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, String> {
     use Step::{

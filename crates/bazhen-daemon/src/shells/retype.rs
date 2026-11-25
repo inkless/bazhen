@@ -618,9 +618,10 @@ mod tests {
         let h = setup_with(100, Some(integration()));
         runtime().block_on(async {
             let (lost, _) = lost_shell(&h, Some(LINE)).await;
-            h.fake.set(|state| state.fail_creates = true);
+            h.fake
+                .set(|state| state.creates_refused = Some(crate::terminals::fake::refused()));
             let failed = h.shells.restart(&lost, &restarting("r", true), None).await;
-            h.fake.set(|state| state.fail_creates = false);
+            h.fake.set(|state| state.creates_refused = None);
             assert!(
                 matches!(failed, Err(ShellError::OpenFailed(_))),
                 "{failed:?}"

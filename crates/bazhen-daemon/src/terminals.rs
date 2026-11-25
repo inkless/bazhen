@@ -120,6 +120,10 @@ pub(crate) enum TerminalError {
     /// Its screen can't be read just now, as when its holder has lost it.
     #[error("its screen can't be read: {reason}")]
     Unreadable { reason: String },
+    /// The request reached the runtime, which didn't say what came of it: what was asked may
+    /// have happened, as a holder spawned that hasn't answered, or a respawn whose answer was lost.
+    #[error("{0}")]
+    Unknown(String),
     /// Anything else: the runtime could not act just now.
     #[error("{0}")]
     Other(String),
@@ -357,12 +361,21 @@ pub(crate) mod fake {
         pub(crate) generation: u64,
     }
 
+    /// A create's refusal, as the fake refuses one it is set to.
+    pub(crate) fn refused() -> TerminalError {
+        TerminalError::Other("the fake refused".to_owned())
+    }
+
     #[derive(Debug, Default)]
     pub(crate) struct State {
         pub(crate) running: BTreeMap<String, Running>,
         /// The terminals closed, in order, each with what the store said of it as its close came.
         pub(crate) closed: Vec<String>,
-        pub(crate) fail_creates: bool,
+        /// What each create fails with, creating nothing, where one does.
+        pub(crate) creates_refused: Option<TerminalError>,
+        /// Each create and respawn does what it was asked, then answers that what came of it is
+        /// unknown, as a holder whose answer was lost.
+        pub(crate) answers_unknown: bool,
         /// What each respawn fails with, where one does.
         pub(crate) respawns_refused: Option<TerminalError>,
         /// The terminals started again, in order, each with what it was started again as.
@@ -672,8 +685,8 @@ pub(crate) mod fake {
                 let generation = spec.generation;
                 let exits_as_created = {
                     let mut state = self.state.lock().unwrap();
-                    if state.fail_creates {
-                        return Err(TerminalError::Other("the fake refused".to_owned()));
+                    if let Some(refused) = &state.creates_refused {
+                        return Err(refused.clone());
                     }
                     state.running.insert(
                         id.clone(),
@@ -686,6 +699,9 @@ pub(crate) mod fake {
                             generation,
                         },
                     );
+                    if state.answers_unknown {
+                        return Err(TerminalError::Unknown("the fake didn't answer".to_owned()));
+                    }
                     state.exit_as_created
                 };
                 if exits_as_created {
@@ -974,6 +990,9 @@ pub(crate) mod fake {
                     }
                 }
                 state.respawned.push((id.clone(), restart));
+                if state.answers_unknown {
+                    return Err(TerminalError::Unknown("the fake didn't answer".to_owned()));
+                }
                 state.tell(&Event::Respawned(recorded_at(&id, generation)));
                 Ok(locator_at(&id, generation))
             })

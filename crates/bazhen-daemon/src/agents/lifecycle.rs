@@ -13,7 +13,7 @@ use bazhen_protocol::mail_events::{MailUndeliverable, UndeliverableReason};
 use bazhen_protocol::record::Record;
 use bazhen_store::{
     Actor, AgentChange, AgentTerminal, AppendError, MailChange, NewEvent, Writer as StoreWriter,
-    takes_exit,
+    start_unsettled, takes_exit,
 };
 use serde::Serialize;
 
@@ -224,6 +224,9 @@ pub(crate) fn from_runtime(id: &str, doing: Doing, cause: TerminalError) -> Agen
                 doing.done()
             ),
         }),
+        TerminalError::Unknown(_) => AgentError::Unavailable(format!(
+            "agent {id}'s start may have happened; the daemon settles it, and the agent's state says which"
+        )),
         other @ (TerminalError::Other(_)
         | TerminalError::Unreachable(_)
         | TerminalError::Predates { .. }
@@ -256,6 +259,13 @@ impl Agents {
             return Ok(Begun::Prior(prior));
         }
         let found = found.ok_or_else(|| AgentError::Unknown(id.to_owned()))?;
+        // Held by no command, as this one holds its turn: left so by a start whose outcome
+        // wasn't known, which the daemon settles.
+        if !accepts(&found) && start_unsettled(found.state, found.terminal_state) {
+            return Err(AgentError::Unavailable(format!(
+                "agent {id}'s start is still settling: try again once its state says how it went"
+            )));
+        }
         if !accepts(&found) {
             return Err(AgentError::Conflict(format!(
                 "agent {id} is {}",

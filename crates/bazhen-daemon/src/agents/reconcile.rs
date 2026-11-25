@@ -586,8 +586,8 @@ mod tests {
     use super::*;
     use crate::agents::restart::tests::{exited, lost};
     use crate::agents::tests::{Fixture, request, setup_with};
-    use crate::terminals::Event;
     use crate::terminals::fake::{Held, recorded_at};
+    use crate::terminals::{Event, TerminalError};
     use crate::testing::runtime;
     use crate::testing::stub_harness::{STUB_SESSION, StubHarness, pull};
 
@@ -864,6 +864,160 @@ mod tests {
             f.last_of("agent.relaunched")
                 .map(|relaunched| relaunched["externalRef"]["id"].clone()),
             Some(json!("moved-session"))
+        );
+    }
+
+    /// A `replaced` that answers at once.
+    fn replaced_now(_: AgentId) -> BoxFuture<'static, ()> {
+        Box::pin(std::future::ready(()))
+    }
+
+    /// The agent launched last, whatever became of it.
+    fn launched_last(f: &Fixture) -> AgentId {
+        let reader = f.store.reader().unwrap();
+        let events = reader.reads().events(0, 1000).unwrap();
+        let launched = events
+            .into_iter()
+            .rev()
+            .find(|e| e.kind == "agent.launched");
+        AgentId::parse(&launched.unwrap().entity_id).unwrap()
+    }
+
+    /// Whether `answer` says the start may have happened, as a start with no clear answer does.
+    fn may_have_started<T: std::fmt::Debug>(answer: &Result<T, AgentError>) -> bool {
+        matches!(answer, Err(AgentError::Unavailable(why)) if why.contains("may have happened"))
+    }
+
+    #[test]
+    fn leaves_a_launch_whose_create_had_no_answer_launched_then_settles_it_on_what_runs() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        f.fake().set(|state| state.answers_unknown = true);
+        let mut answer = None;
+        let events = recorded(&f, || {
+            answer = Some(runtime().block_on(f.launch(request("k-1"))));
+        });
+        let answer = answer.unwrap();
+        let agent = launched_last(&f);
+        let (files, retried) = (
+            f.token_files().len(),
+            runtime()
+                .block_on(f.launch(request("k-1")))
+                .map(|r| r.agent_id),
+        );
+        f.fake().set(|state| state.answers_unknown = false);
+        let settled = recorded(&f, || reconciled(&f.restarted()));
+        assert_eq!(
+            (
+                may_have_started(&answer),
+                events,
+                files,
+                retried,
+                settled,
+                state(&f, &agent)
+            ),
+            (
+                true,
+                vec![
+                    "environment.registered".to_owned(),
+                    "agent.launched".to_owned()
+                ],
+                1,
+                Ok(agent.clone()),
+                vec!["agent.running".to_owned()],
+                AgentState::Starting
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_a_respawn_with_no_answer_requested_still_settling_until_it_settles_on_what_runs() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = exited(&stub);
+        f.fake().set(|state| state.answers_unknown = true);
+        let req = RespawnAgentRequest {
+            idempotency_key: "s-1".to_owned(),
+            generation,
+            theme: None,
+        };
+        let id = agent.as_str();
+        let before = f.token_files().len();
+        let mut answer = None;
+        let events = recorded(&f, || {
+            answer = Some(runtime().block_on(f.agents.respawn(id, &req, replaced_now)));
+        });
+        // The new start's file is kept beside the last one's, which its close removes.
+        let (files, held) = (f.token_files().len() - before, token_hash(&f, &agent));
+        let retried = runtime().block_on(f.agents.respawn(id, &req, replaced_now));
+        f.fake().set(|state| state.answers_unknown = false);
+        let settled = recorded(&f, || reconciled(&f.restarted()));
+        let now = agent_of(&f, &agent);
+        assert_eq!(
+            (
+                may_have_started(&answer.unwrap()),
+                events,
+                files,
+                retried,
+                settled,
+                (now.state, now.generation),
+                held.is_some() && token_hash(&f, &agent) == held,
+            ),
+            (
+                true,
+                vec!["agent.respawn_requested".to_owned()],
+                1,
+                Err(AgentError::Unavailable(format!(
+                    "agent {id}'s start is still settling: try again once its state says how it went"
+                ))),
+                vec!["agent.respawned".to_owned()],
+                (AgentState::Starting, Some(generation + 1)),
+                true,
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_a_relaunch_whose_create_had_no_answer_requested_then_rejects_it_where_nothing_runs() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        f.fake().set(|state| {
+            state.creates_refused = Some(TerminalError::Unknown("no answer".to_owned()));
+        });
+        let req = RelaunchAgentRequest {
+            idempotency_key: "r-1".to_owned(),
+            generation,
+            theme: None,
+            fresh: None,
+        };
+        let id = agent.as_str();
+        let before = f.token_files().len();
+        let mut answer = None;
+        let events = recorded(&f, || {
+            answer = Some(runtime().block_on(f.agents.relaunch(id, &req, replaced_now)));
+        });
+        let files = f.token_files().len() - before;
+        f.fake().set(|state| state.creates_refused = None);
+        let settled = recorded(&f, || reconciled(&f.restarted()));
+        assert_eq!(
+            (
+                may_have_started(&answer.unwrap()),
+                events,
+                files,
+                settled,
+                state(&f, &agent),
+                f.token_files(),
+            ),
+            (
+                true,
+                vec!["agent.relaunch_requested".to_owned()],
+                1,
+                vec!["agent.relaunch_rejected".to_owned()],
+                AgentState::Lost,
+                Vec::<String>::new(),
+            )
         );
     }
 

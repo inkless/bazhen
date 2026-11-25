@@ -18,7 +18,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use crate::SnapshotView;
 use crate::agents::word;
 use crate::snapshot::SnapshotError;
-use crate::terminals::{attach_command, attachable, needs_restart};
+use crate::terminals::{attach_command, attachable, needs_restart, start_unsettled};
 
 /// How many graphemes of a note's first line a headline keeps: one line of a list.
 const HEADLINE_MAX: usize = 200;
@@ -235,13 +235,9 @@ fn agent(
         })
         .transpose()?;
     // A start not yet answered: the request is the last thing its terminal saw.
-    let start_requested_at = row.start_requested_at.filter(|_| {
-        state == AgentState::Starting
-            && matches!(
-                terminal_state,
-                Some(TerminalState::Creating | TerminalState::Exited)
-            )
-    });
+    let start_requested_at = row
+        .start_requested_at
+        .filter(|_| start_unsettled(state, terminal_state));
     Ok(Agent {
         name: row.name,
         environment_id: word(row.environment)?,

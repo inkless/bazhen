@@ -147,6 +147,7 @@ fn from_runtime(id: &str, cause: TerminalError) -> ShellError {
         )),
         // A screen read's own failures among them, which no command on a shell meets.
         other @ (TerminalError::Other(_)
+        | TerminalError::Unknown(_)
         | TerminalError::Unreachable(_)
         | TerminalError::Predates { .. }
         | TerminalError::Unreadable { .. }) => ShellError::Unavailable(format!(
@@ -2645,11 +2646,12 @@ pub(crate) mod tests {
         let h = setup(100);
         runtime().block_on(async {
             let lost = h.lost(TuiTheme::Light).await;
-            h.fake.set(|state| state.fail_creates = true);
+            h.fake
+                .set(|state| state.creates_refused = Some(crate::terminals::fake::refused()));
             let failed = h.shells.restart(&lost, &restarting("r"), None).await;
             let repeated = h.shells.restart(&lost, &restarting("r"), None).await;
             let between = h.state_of(&lost);
-            h.fake.set(|state| state.fail_creates = false);
+            h.fake.set(|state| state.creates_refused = None);
             let again = h
                 .shells
                 .restart(&lost, &restarting("r2"), None)
@@ -2832,9 +2834,10 @@ pub(crate) mod tests {
     fn gives_a_shells_slot_back_when_it_fails_to_open() {
         let h = setup(1);
         runtime().block_on(async {
-            h.fake.set(|state| state.fail_creates = true);
+            h.fake
+                .set(|state| state.creates_refused = Some(crate::terminals::fake::refused()));
             let failed = h.open("a").await;
-            h.fake.set(|state| state.fail_creates = false);
+            h.fake.set(|state| state.creates_refused = None);
             assert!(
                 matches!(failed, Err(ShellError::OpenFailed(_))),
                 "{failed:?}"

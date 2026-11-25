@@ -59,6 +59,11 @@ impl Failed {
         })
     }
 
+    /// Whether the start may have happened: the runtime was asked, and didn't say.
+    fn unknown(&self) -> bool {
+        matches!(self, Self::Terminal(TerminalError::Unknown(_)))
+    }
+
     /// Why the respawn was rejected, as `agent.respawn_rejected` records it (`rejection`).
     fn respawn_rejected(&self) -> AgentRespawnRejected {
         let reason = match self {
@@ -239,6 +244,8 @@ impl Agents {
         };
         let prompt_hash = again.prompt.hash.clone();
         match self.start_again(&agent, terminal, again).await {
+            // Left requested, for the daemon to settle once it can tell.
+            Err(failed) if failed.unknown() => Err(failed.answer(id, true)),
             Err(failed) => {
                 let rejecting = agent.clone();
                 let rejected = AgentChange::RespawnRejected(failed.respawn_rejected());
@@ -343,6 +350,8 @@ impl Agents {
             .start_new(&agent, recorded(&found), terminal, again)
             .await
         {
+            // Left requested, for the daemon to settle once it can tell.
+            Err(failed) if failed.unknown() => Err(failed.answer(id, session.is_some())),
             Err(failed) => {
                 let rejecting = agent.clone();
                 let rejected = AgentChange::RelaunchRejected(failed.relaunch_rejected());
@@ -502,6 +511,8 @@ impl Agents {
                     theme: command.theme,
                 })
             }
+            // The holder may have started it, with the token's file, which it may still read.
+            Err(err @ TerminalError::Unknown(_)) => Err(Failed::Terminal(err)),
             Err(err) => {
                 command.token.abandoned().await;
                 Err(Failed::Terminal(err))
@@ -551,7 +562,10 @@ impl Agents {
             }
             Err(err) => {
                 self.refused(terminal);
-                command.token.abandoned().await;
+                // A holder that may run started with the token's file, which it may still read.
+                if !matches!(err, TerminalError::Unknown(_)) {
+                    command.token.abandoned().await;
+                }
                 Err(Failed::Terminal(err))
             }
         }
@@ -1306,7 +1320,7 @@ pub(crate) mod tests {
             ))
         };
         f.fake().set(|state| {
-            state.fail_creates = true;
+            state.creates_refused = Some(crate::terminals::fake::refused());
             state.hello_margin = std::time::Duration::from_secs(3600);
         });
         let refused_create = relaunch("r-1");
@@ -1316,7 +1330,7 @@ pub(crate) mod tests {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
             .unwrap();
-        f.fake().set(|state| state.fail_creates = false);
+        f.fake().set(|state| state.creates_refused = None);
         let while_it_may_start = relaunch("r-2");
         f.fake()
             .set(|state| state.hello_margin = std::time::Duration::ZERO);
