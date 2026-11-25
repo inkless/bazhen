@@ -554,6 +554,24 @@ impl Reads<'_> {
             })
     }
 
+    /// The id of the newest event of `kind` about `entity`, if it has one (`lastEventId`).
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn last_event_id(self, entity: &str, kind: &str) -> rusqlite::Result<Option<u64>> {
+        self.0
+            .query_row(
+                "SELECT max(id) FROM events WHERE entity_id = ? AND type = ?",
+                (entity, kind),
+                |row| row.get::<_, Option<i64>>(0),
+            )?
+            .map(|id| {
+                u64::try_from(id).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, id))
+            })
+            .transpose()
+    }
+
     /// Up to `limit` events after `after`, oldest first.
     ///
     /// # Errors
@@ -813,6 +831,31 @@ mod tests {
 
     fn append(store: &mut Store, event: &NewEvent) -> u64 {
         store.write(|w| w.append(event)).unwrap()
+    }
+
+    #[test]
+    fn gives_the_newest_event_of_a_kind_about_an_entity_and_none_when_it_has_none() {
+        let dir = TempDir::new("last-event");
+        let store = Store::open(&dir.db("last.db")).unwrap();
+        let rows =
+            [("a", "x"), ("b", "x"), ("a", "x"), ("a", "y"), ("b", "y")].map(|(entity, kind)| {
+                format!(
+                    "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                     SELECT id, '{OLD}', '{kind}', 'agent', '{entity}', 'system', '{{}}' FROM host;"
+                )
+            });
+        store.db.execute_batch(&rows.concat()).unwrap();
+        let last = |entity: &str, kind: &str| store.reads().last_event_id(entity, kind).unwrap();
+        assert_eq!(
+            [
+                last("a", "x"),
+                last("b", "x"),
+                last("a", "y"),
+                last("a", "z"),
+                last("c", "x")
+            ],
+            [Some(3), Some(2), Some(4), None, None]
+        );
     }
 
     /// An event of a type this build doesn't append, which no projection points at.
