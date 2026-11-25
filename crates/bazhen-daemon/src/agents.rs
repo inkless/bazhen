@@ -269,6 +269,8 @@ pub(crate) struct AgentsDeps {
     /// What the agents' hooks keep between requests, which the routes take as theirs: a closed
     /// agent's waiter is answered here, whatever closed it.
     pub(crate) hooks: Arc<crate::hooks::Hooks>,
+    /// Where a write that queued mail hands it for delivery once it commits.
+    pub(crate) handing: crate::mail::Handing,
 }
 
 /// What a launch records of itself before anything starts.
@@ -374,6 +376,16 @@ impl Agents {
 
     pub(crate) fn harnesses(&self) -> &Harnesses {
         &self.deps.harnesses
+    }
+
+    /// Hands what a write queued for delivery, once it has committed. With the daemon stopping
+    /// and nothing left to deliver it, the mail stays queued for the agent's next read of it.
+    pub(crate) fn hand(&self, queued: Vec<crate::mail::Queued>) {
+        for queued in queued {
+            if self.deps.handing.send(queued).is_err() {
+                return;
+            }
+        }
     }
 
     /// Launches one agent. A repeat of the key while the launch is in flight gets the answer so
@@ -882,6 +894,7 @@ pub(crate) mod tests {
             login_shell: setup.login_shell,
             turns: Arc::default(),
             hooks: Arc::clone(&hooks),
+            handing: tokio::sync::mpsc::unbounded_channel().0,
         });
         Fixture {
             agents: Arc::new(agents),
@@ -983,6 +996,7 @@ pub(crate) mod tests {
                 login_shell: None,
                 turns: Arc::default(),
                 hooks: Arc::clone(&deps.hooks),
+                handing: deps.handing.clone(),
             }))
         }
 

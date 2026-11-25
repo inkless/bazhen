@@ -7,7 +7,6 @@
 //! answer committed, in the one job on the store's writer that claims it: that job runs to its end
 //! whether or not the route's caller stays, so an answer recorded is an answer sent.
 
-use std::cell::Cell;
 use std::sync::Arc;
 
 use axum::Extension;
@@ -15,7 +14,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use bazhen_harness::{Answer, HarnessId, Pending, Resolution};
+use bazhen_harness::{Answer, HarnessId, Harnesses, Pending, Resolution};
 use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
@@ -30,10 +29,9 @@ use bazhen_store::{
     AppendError, AttentionItem, AttentionView, OnceError, OpenAttention, Writer as StoreWriter,
 };
 
-use crate::agents::Agents;
 use crate::callers::{Caller, caller_of};
 use crate::hooks::approvals::{Approvals, Responder};
-use crate::mail::{Sending, deliver, queue, refusal};
+use crate::mail::{Queued, Sending, deliver, queue, refusal};
 use crate::routes::{Shared, fail, internal};
 
 /// Agents gone for good: mail can't reach them, so a reply can't either.
@@ -277,17 +275,17 @@ pub(crate) async fn reply(
         let (response, queued) = shared
             .store
             .run(move |store| {
-                let queued = Queued::default();
+                let mut queued = Vec::new();
                 let kept = kept(&id, "reply", &req.body.clone().into());
                 let response = store.once(&req.idempotency_key, &kept, |w| {
                     let item = offering(w, &approvals, &id, AttentionAction::Reply)?;
                     let (message_id, event_ids) = mail(
                         w,
-                        &run,
+                        run.harnesses(),
                         &item,
                         &req.body,
                         AttentionClosedReason::Replied,
-                        &queued,
+                        &mut queued,
                     )?;
                     Ok::<_, Refusal>(ReplyAttentionResponse {
                         message_id: Some(message_id),
@@ -298,9 +296,9 @@ pub(crate) async fn reply(
             })
             .await
             .map_err(|err| Refusal::Internal(err.to_string()))??;
-        queued
-            .deliver(&shared, &agents, response.message_id.clone())
-            .await;
+        for queued in queued {
+            deliver(&shared, &agents, queued).await;
+        }
         Ok(response)
     };
     respond(replied.await)
@@ -322,7 +320,7 @@ pub(crate) async fn resend(
         let (response, queued) = shared
             .store
             .run(move |store| {
-                let queued = Queued::default();
+                let mut queued = Vec::new();
                 let kept = kept(&id, "resend", &true.into());
                 let response = store.once(&req.idempotency_key, &kept, |w| {
                     let item = offering(w, &approvals, &id, AttentionAction::Resend)?;
@@ -339,11 +337,11 @@ pub(crate) async fn resend(
                         .body;
                     let (message_id, event_ids) = mail(
                         w,
-                        &run,
+                        run.harnesses(),
                         &item,
                         &text,
                         AttentionClosedReason::Resent,
-                        &queued,
+                        &mut queued,
                     )?;
                     Ok::<_, Refusal>(ResendAttentionResponse {
                         message_id,
@@ -354,9 +352,9 @@ pub(crate) async fn resend(
             })
             .await
             .map_err(|err| Refusal::Internal(err.to_string()))??;
-        queued
-            .deliver(&shared, &agents, Some(response.message_id.clone()))
-            .await;
+        for queued in queued {
+            deliver(&shared, &agents, queued).await;
+        }
         Ok(response)
     };
     respond(resent.await)
@@ -391,39 +389,17 @@ pub(crate) async fn dismiss(
     respond(dismissed.await)
 }
 
-/// How a message a verb queued is to be delivered once its transaction commits; nothing for a
-/// repeat of a request, which queued nothing.
-#[derive(Default)]
-struct Queued {
-    delivery: Cell<Option<bazhen_harness::Delivery>>,
-    agent: Cell<Option<AgentId>>,
-}
-
-impl Queued {
-    async fn deliver(
-        self,
-        shared: &Shared,
-        agents: &Arc<Agents>,
-        message: Option<bazhen_protocol::ids::MessageId>,
-    ) {
-        if let (Some(agent), Some(message)) = (self.agent.into_inner(), message) {
-            deliver(shared, agents, self.delivery.get(), message, agent).await;
-        }
-    }
-}
-
 /// Queues `body` for the item's agent as the human's mail and closes the item for `reason`,
 /// answering the message's id and the events'.
 fn mail(
     w: &StoreWriter<'_>,
-    agents: &Agents,
+    harnesses: &Harnesses,
     item: &AttentionItem,
     body: &str,
     reason: AttentionClosedReason,
-    queued: &Queued,
+    queued: &mut Vec<Queued>,
 ) -> Result<(bazhen_protocol::ids::MessageId, Vec<u64>), Refusal> {
-    let sent = queue(w, agents, &item.agent, body, None, &queued.delivery)?;
-    queued.agent.set(Some(item.agent.clone()));
+    let sent = queue(w, harnesses, &item.agent, body, None, queued)?;
     let closed = w.close_attention(&item.id, reason, "user")?;
     let mut events = sent.event_ids;
     events.push(closed);

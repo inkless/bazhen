@@ -341,7 +341,8 @@ impl Mailbox {
             let Some(binding) = binding.filter(|b| !GONE.contains(&b.state.as_str())) else {
                 return Ok(None);
             };
-            let Some(harness) = crate::mail::harness_of(&agents, &binding.harness) else {
+            let Some(harness) = crate::mail::harness_of(agents.harnesses(), &binding.harness)
+            else {
                 return Ok(None);
             };
             let queued = reads.mail(id.as_str(), &[MailboxState::Queued])?;

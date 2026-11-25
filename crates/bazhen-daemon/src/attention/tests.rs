@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use bazhen_harness::Pushed;
-use bazhen_protocol::ids::AttentionId;
+use bazhen_protocol::ids::{AgentId, AttentionId};
 use serde_json::{Value, json};
 
 use super::*;

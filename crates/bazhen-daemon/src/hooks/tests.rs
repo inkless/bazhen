@@ -66,6 +66,7 @@ fn fixture() -> Fixture {
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
         hooks: Arc::clone(&hooks),
+        handing: tokio::sync::mpsc::unbounded_channel().0,
     }));
     let launched = runtime()
         .block_on(agents.launch(&LaunchAgentRequest {

@@ -91,6 +91,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
         hooks: Arc::clone(&hooks),
+        handing: tokio::sync::mpsc::unbounded_channel().0,
     }));
     let runtime = runtime();
     let launched = runtime

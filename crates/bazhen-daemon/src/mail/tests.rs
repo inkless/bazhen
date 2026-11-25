@@ -43,7 +43,7 @@ impl PushPort for Port {
     }
 }
 
-fn taking(delivery: Delivery) -> Capabilities {
+pub(crate) fn taking(delivery: Delivery) -> Capabilities {
     Capabilities {
         delivery,
         approvals: true,
@@ -59,6 +59,8 @@ pub(crate) struct Fixture {
     pub(crate) to: AgentId,
     pub(crate) peer: AgentId,
     pub(crate) runtime: tokio::runtime::Runtime,
+    /// What the agents' writes handed over, which `hand_over` delivers.
+    handed: StdMutex<tokio::sync::mpsc::UnboundedReceiver<Queued>>,
     _dir: TempDir,
     thread: Option<Thread>,
 }
@@ -86,6 +88,7 @@ pub(crate) fn fixture(stub: StubHarness) -> Fixture {
         Box::new(|_| {}),
     );
     let tracker = TaskTracker::new();
+    let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
     let agents = Arc::new(Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::new(Fake::default()),
@@ -101,6 +104,7 @@ pub(crate) fn fixture(stub: StubHarness) -> Fixture {
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
         hooks: Arc::default(),
+        handing,
     }));
     let runtime = paused();
     let launch = |key: &str| {
@@ -128,6 +132,7 @@ pub(crate) fn fixture(stub: StubHarness) -> Fixture {
         to,
         peer,
         runtime,
+        handed: StdMutex::new(handed),
         _dir: dir,
         thread: Some(thread),
     };
@@ -148,6 +153,23 @@ impl Fixture {
         let sent = self.send_to(caller, to.as_str(), key, body);
         self.settle();
         sent
+    }
+
+    /// Delivers what the agents' writes have handed over so far, and waits for the pushes that
+    /// starts; answers what it delivered.
+    pub(crate) fn hand_over(&self) -> Vec<Queued> {
+        let mut handed = Vec::new();
+        while let Ok(queued) = self.handed.lock().unwrap().try_recv() {
+            handed.push(queued);
+        }
+        let agents = Arc::clone(self.shared.agents.as_ref().unwrap());
+        self.runtime.block_on(async {
+            for queued in handed.clone() {
+                deliver(&self.shared, &agents, queued).await;
+            }
+        });
+        self.settle();
+        handed
     }
 
     /// Waits for every push under way.
@@ -430,4 +452,51 @@ fn leaves_pushed_mail_queued_for_an_agent_that_starts_again_while_its_push_is_un
         (f.stub.pushes.lock().unwrap().len(), f.mail()),
         (1, vec![f.queued("hello")])
     );
+}
+
+#[test]
+fn delivers_what_a_write_hands_over_in_the_order_handed_until_the_daemon_stops() {
+    let accepted = Pushed::Accepted { offline: false };
+    let f = fixture(push([accepted.clone(), accepted]));
+    let (to, agents) = (f.to.clone(), Arc::clone(f.shared.agents.as_ref().unwrap()));
+    let run = Arc::clone(&agents);
+    let queued = f
+        .runtime
+        .block_on(f.shared.store.run(move |store| {
+            store.write(|w| {
+                let mut fresh = Vec::new();
+                for body in ["one", "two"] {
+                    queue(w, run.harnesses(), &to, body, None, &mut fresh)?;
+                }
+                Ok::<_, Sending>(fresh)
+            })
+        }))
+        .unwrap()
+        .unwrap();
+    let (handing, handed) = mpsc::unbounded_channel();
+    let stop = CancellationToken::new();
+    let drain = f
+        .runtime
+        .spawn(hand_over(f.shared.clone(), agents, handed, stop.clone()));
+    for queued in queued {
+        handing.send(queued).unwrap();
+    }
+    let pushed = || f.stub.pushes.lock().unwrap().len();
+    f.runtime.block_on(async {
+        let waited = tokio::time::Instant::now();
+        while pushed() < 2 && waited.elapsed() < DEADLINE {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        stop.cancel();
+        drain.await.unwrap();
+    });
+    let bodies: Vec<String> = f
+        .stub
+        .pushes
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|p| p.body.clone())
+        .collect();
+    assert_eq!(bodies, ["one", "two"]);
 }

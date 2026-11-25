@@ -279,6 +279,7 @@ async fn shells(
     let budget = Arc::clone(&runner.budget);
     let run = Path::new(&startup.paths.run);
     let turns = Arc::<crate::turns::Turns>::default();
+    let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
     let agents = Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::clone(&runner.terminals),
@@ -294,6 +295,7 @@ async fn shells(
         login_shell: startup.settings.config.login_shell.clone(),
         turns: Arc::clone(&turns),
         hooks: Arc::clone(&shared.hooks),
+        handing,
     });
     let shells = Shells::new(ShellsDeps {
         turns,
@@ -339,6 +341,7 @@ async fn shells(
             ..runner.doctor
         },
         commands: runner.commands,
+        handed,
     })
 }
 
@@ -348,6 +351,8 @@ struct Running {
     doctor: Settled,
     /// What runs the harnesses' own commands.
     commands: Arc<Commands>,
+    /// What the agents' writes hand over for delivery, which the daemon drains once it serves.
+    handed: tokio::sync::mpsc::UnboundedReceiver<crate::mail::Queued>,
 }
 
 /// How often the running shells' foregrounds, and what their holders speak, are read again: the
@@ -487,7 +492,9 @@ fn say_whom_it_serves(startup: &Startup, web: Option<(&Path, &State)>) {
 }
 
 /// `shared`, serving the shells and agents on `runner`'s terminals and their views' streams, all on
-/// `tracker` until `stop`; what is watched of them; and what runs their harnesses' commands.
+/// `tracker` until `stop`; what is watched of them; and what runs their harnesses' commands. The
+/// mail the agents' writes hand over is drained from here, before the listeners bind; mail a write
+/// queued before the drain started waits on the channel.
 async fn run_on(
     startup: &Startup,
     store: &Writer,
@@ -501,6 +508,7 @@ async fn run_on(
         watched,
         doctor,
         commands,
+        handed,
     } = shells(startup, store, runner, tracker, stop, &shared).await?;
     let bundle = doctor.bundle.clone();
     let mut shared = shared
@@ -508,6 +516,12 @@ async fn run_on(
         .with_agents(Arc::clone(&watched.agents))
         .with_web(bundle);
     shared.streams = crate::stream::on_holders(store, streaming, &watched.shells, tracker, stop);
+    tracker.spawn(crate::mail::hand_over(
+        shared.clone(),
+        Arc::clone(&watched.agents),
+        handed,
+        stop.clone(),
+    ));
     Ok((shared, watched, commands))
 }
 
