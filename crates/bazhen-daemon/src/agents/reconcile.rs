@@ -1040,7 +1040,6 @@ mod tests {
         let closing = [&by_reconcile, &by_watch].map(|agent| state(&f, agent));
         f.fake().gone(&at_reconcile);
         f.fake().gone(&at_watch);
-        reconciled(&f.restarted());
         let generation = agent_of(&f, &by_watch).generation.unwrap();
         runtime()
             .block_on(
@@ -1048,6 +1047,7 @@ mod tests {
                     .observed(Event::Lost(recorded_at(&at_watch, generation))),
             )
             .unwrap();
+        reconciled(&f.restarted());
         assert_eq!(
             (
                 closing,
