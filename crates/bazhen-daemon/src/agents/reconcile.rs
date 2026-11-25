@@ -624,8 +624,7 @@ impl Agents {
             (None, _) => true,
             // A close of one whose create had no answer leaves it closing, as unrecorded.
             (Some(terminal), Some(TerminalState::Creating | TerminalState::Closing)) => {
-                let since = self.unstartable_since(terminal);
-                self.deps.terminals.unstarted(terminal, since).await
+                self.unstarted(terminal).await
             }
             (Some(_), _) => false,
         }

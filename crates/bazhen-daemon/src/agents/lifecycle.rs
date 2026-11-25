@@ -394,12 +394,7 @@ impl Agents {
                 }
                 if read.unreadable.contains(&terminal) {
                     "its holder's socket can't be read".to_owned()
-                } else if self
-                    .deps
-                    .terminals
-                    .unstarted(&terminal, self.unstartable_since(&terminal))
-                    .await
-                {
+                } else if self.unstarted(&terminal).await {
                     return Ok(());
                 } else {
                     "nothing yet proves no holder started it".to_owned()

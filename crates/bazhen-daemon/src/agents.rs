@@ -685,15 +685,22 @@ impl Agents {
             .insert(terminal, std::time::Instant::now());
     }
 
-    /// A moment after which nothing could start `terminal`: when its create returned refused, or
-    /// else when this daemon started, for one a daemon before it asked for.
-    fn unstartable_since(&self, terminal: &TerminalId) -> std::time::Instant {
-        self.refused
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(terminal)
-            .copied()
-            .unwrap_or(self.started)
+    /// Whether nothing answers for `terminal`, whose start recorded nothing to prove it gone by,
+    /// and nothing will, by the runtime's rule from a moment after which nothing could start it:
+    /// when its create returned refused, or else when this daemon started, for one a daemon
+    /// before it asked for. Once proved, that moment is forgotten, never needed again.
+    async fn unstarted(&self, terminal: &TerminalId) -> bool {
+        let refused = || {
+            self.refused
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        let since = refused().get(terminal).copied().unwrap_or(self.started);
+        let unstarted = self.deps.terminals.unstarted(terminal, since).await;
+        if unstarted {
+            refused().remove(terminal);
+        }
+        unstarted
     }
 
     /// The argv and variables an agent's process starts with, each start: its harness's, with
@@ -1660,5 +1667,31 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(runs[0].2, STUB_ARGV.map(str::to_owned).to_vec());
         assert!(runs.iter().all(|run| *run == runs[0]), "{runs:#?}");
+    }
+
+    #[test]
+    fn forgets_when_a_refused_create_returned_once_its_terminal_is_proved_unstarted() {
+        let f = setup_with(Setup::default());
+        f.fake().set(|state| {
+            state.creates_refused = Some(crate::terminals::fake::refused());
+            state.hello_margin = std::time::Duration::from_secs(3600);
+        });
+        assert!(runtime().block_on(f.launch(request("k-1"))).is_err());
+        let terminal = {
+            let refused = f.agents.refused.lock().unwrap();
+            refused.keys().next().unwrap().clone()
+        };
+        let anchored = |f: &Fixture| f.agents.refused.lock().unwrap().contains_key(&terminal);
+        let early = (
+            runtime().block_on(f.agents.unstarted(&terminal)),
+            anchored(&f),
+        );
+        f.fake()
+            .set(|state| state.hello_margin = std::time::Duration::ZERO);
+        let late = (
+            runtime().block_on(f.agents.unstarted(&terminal)),
+            anchored(&f),
+        );
+        assert_eq!((early, late), ((false, true), (true, false)));
     }
 }
