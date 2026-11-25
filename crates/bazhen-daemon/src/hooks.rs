@@ -88,15 +88,12 @@ fn framed(reply: &HookReply) -> Response {
         .into_response()
 }
 
-/// Whether a hook client of `version` speaks this daemon's hook protocol: the same major.
+/// Whether a hook client of `version` speaks this daemon's hook protocol: the same major, as
+/// text, as `isCompatible` compares them, so `01.0` is another major than `1.0`. The edge has
+/// already held `version` to the protocol's shape.
 fn compatible(version: &str) -> bool {
-    let major = |version: &str| {
-        version
-            .split('.')
-            .next()
-            .and_then(|m| m.parse::<u64>().ok())
-    };
-    major(version).is_some() && major(version) == major(HOOK_PROTOCOL_VERSION)
+    let major = |version: &str| version.split('.').next().map(str::to_owned);
+    major(version) == major(HOOK_PROTOCOL_VERSION)
 }
 
 /// `text`, cut to `CLIP_CHARS` characters.

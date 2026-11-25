@@ -281,9 +281,9 @@ fn frames_a_reply_as_the_hook_client_reads_it() {
 }
 
 #[test]
-fn takes_only_a_version_of_this_major_written_as_the_protocol_writes_one() {
+fn takes_only_a_version_whose_major_is_this_ones_as_text() {
     assert_eq!(
         ["1.0", "1.7", "01.0", "2.0", "0.9", "99999999999999999999.0"].map(compatible),
-        [true, true, true, false, false, false]
+        [true, true, false, false, false, false]
     );
 }
