@@ -439,6 +439,11 @@ impl Harness for Codex {
         true
     }
 
+    /// A thread's turns go to whichever TUI the server last saw on it.
+    fn session_held_alone(&self) -> bool {
+        true
+    }
+
     /// The thread a notification or a request names.
     fn route(&self, report: &Report<'_>) -> Option<SessionKey> {
         let (Report::Notification { params, .. } | Report::ServerRequest { params, .. }) = report

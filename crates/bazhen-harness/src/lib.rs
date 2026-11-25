@@ -62,6 +62,9 @@ pub trait Harness: Send + Sync {
     /// harness whose `resume` gives none answers `false`: this is all a client is told of whether
     /// starting the agent again resumes it.
     fn can_resume(&self, evidence: &Evidence<'_>) -> bool;
+    /// Whether a session of it is one agent's at a time, so starting an agent again on one
+    /// another agent holds is refused: two TUIs on it would each take the other's turns.
+    fn session_held_alone(&self) -> bool;
     /// The session a report over its server's channel is from, none for a harness with no server.
     /// The daemon calls it before [`Harness::ingest`], and hands `ingest` the agent bound to that
     /// session and the session. It reads the report alone, so routing never waits on the

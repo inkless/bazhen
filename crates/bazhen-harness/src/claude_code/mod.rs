@@ -401,6 +401,11 @@ impl Harness for ClaudeCode {
     /// after a turn ended can have only the metadata Claude Code writes ahead of the turn. A "no"
     /// is never kept: nothing tells a client to read the agent again when the turn lands, so the
     /// next read must see it.
+    /// Each resume of a session goes on in a TUI of its own.
+    fn session_held_alone(&self) -> bool {
+        false
+    }
+
     fn can_resume(&self, evidence: &Evidence<'_>) -> bool {
         let Some(transcript) = evidence.transcript else {
             return false;
