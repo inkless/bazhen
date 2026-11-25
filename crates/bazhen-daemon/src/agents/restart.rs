@@ -43,6 +43,9 @@ enum Failed {
     /// What ran the terminal the agent was lost on isn't proved gone, and may still run it, as a
     /// holder whose socket has gone may: the agent has one terminal at a time.
     Exists(TerminalId),
+    /// A terminal an earlier start asked for, which recorded nothing to prove it gone by, may
+    /// still be starting: once nothing could, it is proved so.
+    Starting(TerminalId),
     /// No runtime confirmed where the terminal the agent was lost on ran, so nothing can prove
     /// it gone.
     Unlocated,
@@ -55,8 +58,14 @@ impl Failed {
             | Self::Token(why) => why.clone(),
             Self::Terminal(err) => err.to_string(),
             Self::Exists(terminal) => format!("terminal {terminal} isn't proved gone"),
+            Self::Starting(terminal) => format!("terminal {terminal} may still be starting"),
             Self::Unlocated => "no runtime confirmed where its last terminal ran".to_owned(),
         })
+    }
+
+    /// Whether the start may have happened: the runtime was asked, and didn't say.
+    fn unknown(&self) -> bool {
+        matches!(self, Self::Terminal(TerminalError::Unknown(_)))
     }
 
     /// Why the respawn was rejected, as `agent.respawn_rejected` records it (`rejection`).
@@ -70,6 +79,7 @@ impl Failed {
             | Self::Terminal(_)
             | Self::Token(_)
             | Self::Exists(_)
+            | Self::Starting(_)
             | Self::Unlocated => RespawnRejectedReason::Unavailable,
         };
         AgentRespawnRejected {
@@ -83,7 +93,7 @@ impl Failed {
     fn relaunch_rejected(&self) -> AgentRelaunchRejected {
         let reason = match self {
             Self::Harness(LaunchError::Refused(_)) => RelaunchRejectedReason::HarnessRefused,
-            Self::Exists(_) => RelaunchRejectedReason::TerminalExists,
+            Self::Exists(_) | Self::Starting(_) => RelaunchRejectedReason::TerminalExists,
             Self::Harness(LaunchError::Unavailable(_))
             | Self::Terminal(_)
             | Self::Token(_)
@@ -105,6 +115,10 @@ impl Failed {
             }
             Self::Exists(terminal) => AgentError::Conflict(format!(
                 "agent {id} already has a terminal: {terminal} isn't proved gone"
+            )),
+            Self::Starting(terminal) => AgentError::Conflict(format!(
+                "agent {id} already has a terminal: {terminal} may still be starting; try again \
+                 shortly"
             )),
             Self::Harness(LaunchError::Unavailable(why)) | Self::Token(why) => {
                 AgentError::Unavailable(format!("agent {id} could not be started again: {why}"))
@@ -239,6 +253,8 @@ impl Agents {
         };
         let prompt_hash = again.prompt.hash.clone();
         match self.start_again(&agent, terminal, again).await {
+            // Left requested, for the daemon to settle once it can tell.
+            Err(failed) if failed.unknown() => Err(failed.answer(id, true)),
             Err(failed) => {
                 let rejecting = agent.clone();
                 let rejected = AgentChange::RespawnRejected(failed.respawn_rejected());
@@ -343,6 +359,8 @@ impl Agents {
             .start_new(&agent, recorded(&found), terminal, again)
             .await
         {
+            // Left requested, for the daemon to settle once it can tell.
+            Err(failed) if failed.unknown() => Err(failed.answer(id, session.is_some())),
             Err(failed) => {
                 let rejecting = agent.clone();
                 let rejected = AgentChange::RelaunchRejected(failed.relaunch_rejected());
@@ -502,6 +520,8 @@ impl Agents {
                     theme: command.theme,
                 })
             }
+            // The holder may have started it, with the token's file, which it may still read.
+            Err(err @ TerminalError::Unknown(_)) => Err(Failed::Terminal(err)),
             Err(err) => {
                 command.token.abandoned().await;
                 Err(Failed::Terminal(err))
@@ -551,7 +571,10 @@ impl Agents {
             }
             Err(err) => {
                 self.refused(terminal);
-                command.token.abandoned().await;
+                // A holder that may run started with the token's file, which it may still read.
+                if !matches!(err, TerminalError::Unknown(_)) {
+                    command.token.abandoned().await;
+                }
                 Err(Failed::Terminal(err))
             }
         }
@@ -585,14 +608,12 @@ impl Agents {
             if &id == terminal || id == lost.terminal_id {
                 continue;
             }
-            let gone = if let Some(at) = recorded(&row) {
-                self.deps.terminals.gone(&at).await
-            } else {
-                let since = self.unstartable_since(&id);
-                self.deps.terminals.unstarted(&id, since).await
-            };
-            if !gone {
-                return Err(Failed::Exists(id));
+            if let Some(at) = recorded(&row) {
+                if !self.deps.terminals.gone(&at).await {
+                    return Err(Failed::Exists(id));
+                }
+            } else if !self.unstarted(&id).await {
+                return Err(Failed::Starting(id));
             }
         }
         Ok(())
@@ -1306,7 +1327,7 @@ pub(crate) mod tests {
             ))
         };
         f.fake().set(|state| {
-            state.fail_creates = true;
+            state.creates_refused = Some(crate::terminals::fake::refused());
             state.hello_margin = std::time::Duration::from_secs(3600);
         });
         let refused_create = relaunch("r-1");
@@ -1316,7 +1337,7 @@ pub(crate) mod tests {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
             .unwrap();
-        f.fake().set(|state| state.fail_creates = false);
+        f.fake().set(|state| state.creates_refused = None);
         let while_it_may_start = relaunch("r-2");
         f.fake()
             .set(|state| state.hello_margin = std::time::Duration::ZERO);
@@ -1326,7 +1347,8 @@ pub(crate) mod tests {
             (
                 true,
                 Err(AgentError::Conflict(format!(
-                    "agent {agent} already has a terminal: {asked} isn't proved gone"
+                    "agent {agent} already has a terminal: {asked} may still be starting; try \
+                     again shortly"
                 ))),
                 Ok(())
             )

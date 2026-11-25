@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use bazhen_holder_proto::body::{Cols, Count, Generation, HistoryLines, Rows, Size, Theme};
-use bazhen_host_guard::holder::{HolderProcess, is_vouchable};
+use bazhen_host_guard::holder::{HolderProcess, HolderStartFailed, StartError, is_vouchable};
 use bazhen_host_guard::scope::{self, CapsRefused, MIN_SYSTEMD, TERMINALS_SLICE};
 use bazhen_protocol::daemon::{
     Containment, Holder as HolderReport, HolderStats, MemoryCap, RunningHolder,
@@ -264,6 +264,29 @@ fn terminal_error(err: &RuntimeError) -> TerminalError {
     }
 }
 
+/// Why `create` failed. A holder spawned that didn't answer, or that may run though it never said
+/// `ready`, leaves the create's outcome unknown; any other failure came before a holder ran.
+fn created_error(err: &RuntimeError) -> TerminalError {
+    match err {
+        RuntimeError::Unstarted { .. }
+        | RuntimeError::Start {
+            source: StartError::Failed(HolderStartFailed { running: true, .. }),
+            ..
+        } => TerminalError::Unknown(detail(err)),
+        _ => terminal_error(err),
+    }
+}
+
+/// Why `respawn` failed. One asked of its holder with no answer, or answered with no new process
+/// named, may have started it; any other failure came before it was asked, or is the holder's
+/// refusal.
+fn respawned_error(err: &RuntimeError) -> TerminalError {
+    match err {
+        RuntimeError::Unanswered { .. } => TerminalError::Unknown(detail(err)),
+        _ => terminal_error(err),
+    }
+}
+
 /// The terminal a store's record names, as the runtime acts on it.
 fn holder_ref(terminal: &Recorded) -> Result<HolderRef, TerminalError> {
     let locator = HolderLocator::decode(&terminal.locator)
@@ -502,7 +525,7 @@ impl Terminals for Holder {
             let spec = self.spec(spec)?;
             let created = self.runtime.create(spec).await;
             self.tell_containment();
-            let created = created.map_err(|e| terminal_error(&e))?;
+            let created = created.map_err(|e| created_error(&e))?;
             let text = created
                 .locator
                 .encode()
@@ -737,7 +760,7 @@ impl Terminals for Holder {
                 .runtime
                 .respawn(&terminal, &launch)
                 .await
-                .map_err(|e| terminal_error(&e))?;
+                .map_err(|e| respawned_error(&e))?;
             let text = next
                 .locator
                 .encode()
@@ -1238,6 +1261,61 @@ mod tests {
 
     /// Shells on the real `bazhen-holder`: each test starts a holder and closes it, so each runs
     /// only in the sandbox.
+    /// A create is unknown only once a holder was spawned that may run, and a respawn only once
+    /// it was asked of its holder with no answer; any other failure is refused.
+    #[test]
+    fn takes_a_start_as_unknown_only_once_a_holder_may_have_acted_on_it() {
+        let terminal_id = TerminalId::parse("term_01900000000070008000000000000001").unwrap();
+        let start = |running| RuntimeError::Start {
+            terminal_id: terminal_id.clone(),
+            source: StartError::Failed(HolderStartFailed {
+                ending: bazhen_host_guard::holder::Ending::Silent,
+                stderr: String::new(),
+                detail: String::new(),
+                running,
+                cause: None,
+            }),
+        };
+        let unstarted = RuntimeError::Unstarted {
+            terminal_id: terminal_id.clone(),
+            why: "it said nothing".to_owned(),
+        };
+        let unanswered = || RuntimeError::Unanswered {
+            terminal_id: terminal_id.clone(),
+            source: None,
+        };
+        let no_binary = RuntimeError::NoBinary {
+            terminal_id: terminal_id.clone(),
+            why: "none".to_owned(),
+        };
+        let running = RuntimeError::ProcessState {
+            terminal_id: terminal_id.clone(),
+            needs: bazhen_runtime_holder::Needs::Exited,
+        };
+        let unknown = |err: TerminalError| matches!(err, TerminalError::Unknown(_));
+        assert_eq!(
+            [
+                created_error(&unstarted),
+                created_error(&start(true)),
+                created_error(&start(false)),
+                created_error(&no_binary),
+                created_error(&unanswered()),
+                respawned_error(&unanswered()),
+                respawned_error(&running),
+            ]
+            .map(unknown),
+            [true, true, false, false, false, true, false]
+        );
+    }
+
+    #[test]
+    fn holds_a_start_overdue_once_twice_the_time_a_holder_has_to_answer_has_passed() {
+        assert_eq!(
+            std::time::Duration::from_millis(bazhen_protocol::agents::START_OVERDUE_AFTER_MS),
+            2 * bazhen_runtime_holder::HELLO
+        );
+    }
+
     mod real {
         use std::os::unix::fs::PermissionsExt as _;
         use std::sync::Arc;

@@ -460,6 +460,7 @@ const fullAgent = {
   needsRestart: { holderPid: 4242, served: true },
   role: "reviewer",
   promptChanged: true,
+  startRequestedAt: AT,
 };
 
 /** An agent from an older daemon: every defaulted field missing, every nullable null. */
@@ -487,6 +488,7 @@ const nullAgent = {
   needsRestart: { holderPid: null },
   role: null,
   promptChanged: false,
+  startRequestedAt: null,
 };
 
 const fullShell = {

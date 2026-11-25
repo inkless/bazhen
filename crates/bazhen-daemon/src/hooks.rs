@@ -634,6 +634,14 @@ impl Hooks {
         self.release(agent, turn);
     }
 
+    /// Answers, as `closed` does, the waiter of each agent that holds one and reads closed or
+    /// has no binding: what a close missed, as one a dead daemon recorded, is caught up on here.
+    pub(crate) async fn release_closed(&self, store: &Writer) {
+        for agent in self.waiters.agents() {
+            self.closed(store, &agent).await;
+        }
+    }
+
     /// A waiter for `agent`, as a hook that holds one registers it.
     #[cfg(test)]
     pub(crate) fn waiter(&self, agent: &AgentId) -> Waiting {

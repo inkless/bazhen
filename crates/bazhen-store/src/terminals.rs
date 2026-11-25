@@ -52,6 +52,17 @@ pub fn takes_exit(from: TerminalState) -> bool {
     advance(from, Step::ProcessExited).is_ok()
 }
 
+/// Whether an agent in `state` with its terminal in `terminal` waits on its start's answer: one
+/// requested, whose terminal is still being created or still holds the process it replaces.
+#[must_use]
+pub fn start_unsettled(state: AgentState, terminal: Option<TerminalState>) -> bool {
+    state == AgentState::Starting
+        && matches!(
+            terminal,
+            Some(TerminalState::Creating | TerminalState::Exited)
+        )
+}
+
 /// Where `step` takes a terminal in `from`, as packages/core's table has it, or why it can't.
 pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, String> {
     use Step::{
@@ -66,7 +77,9 @@ pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, 
         (Running | Unknown, ProcessExited) => Ok(Exited),
         (Creating, RuntimeRejected) => Ok(Failed),
         (Running | Unknown | Exited, Step::TargetAbsent) => Ok(Lost),
-        (Running | Unknown | Exited | Lost, CloseRequested) => Ok(Closing),
+        // A creating one too, as packages/core's doesn't: its create may have had no answer,
+        // and the close finds its holder or proves none started.
+        (Creating | Running | Unknown | Exited | Lost, CloseRequested) => Ok(Closing),
         (Closing, CloseCompleted) => Ok(Closed),
         _ => Err(format!(
             "terminal cannot handle {} while {}",
@@ -646,6 +659,26 @@ impl Reads<'_> {
             .collect()
     }
 
+    /// The agents closed or failed that shells not yet closed or failed are still linked to
+    /// (`agentsWithOrphanedShells`): what a close left, as one a daemon died in or whose shells
+    /// failed to close.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agents_with_orphaned_shells(self) -> rusqlite::Result<Vec<String>> {
+        self.0
+            .prepare(
+                "SELECT DISTINCT t.linked_agent_id FROM terminals t
+                 JOIN agent_sessions a ON a.id = t.linked_agent_id
+                 WHERE t.kind = 'shell' AND t.state NOT IN ('closed', 'failed')
+                   AND a.state IN ('closed', 'failed')
+                 ORDER BY t.linked_agent_id",
+            )?
+            .query_map((), |row| row.get(0))?
+            .collect()
+    }
+
     /// The shells of this machine's environment a restarted daemon may still find running, as
     /// any but lost, closed or failed ones may be, oldest first.
     ///
@@ -1138,6 +1171,60 @@ mod tests {
     }
 
     #[test]
+    fn names_the_agents_closed_or_failed_with_shells_still_open_linked_to_them() {
+        let dir = TempDir::new("orphaned");
+        let mut store = Store::open(&dir.db("orphaned.db")).unwrap();
+        let environment = environment(&mut store);
+        let agents = [
+            ("agent_0190a1b2c3d47abc8def0123456789a1", "closed"),
+            ("agent_0190a1b2c3d47abc8def0123456789a2", "failed"),
+            ("agent_0190a1b2c3d47abc8def0123456789a3", "running"),
+            ("agent_0190a1b2c3d47abc8def0123456789a4", "closed"),
+        ];
+        let sessions = agents.map(|(id, state)| {
+            format!(
+                "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   created_event_id, updated_event_id)
+                 VALUES ('{id}', '{}', 'claude-code', 'p', '/repo/{id}', '{state}', 1, 1);",
+                environment.as_str()
+            )
+        });
+        store.db.execute_batch(&sessions.concat()).unwrap();
+        for (n, (agent, _)) in agents.iter().enumerate() {
+            let terminal = TerminalId::mint(1, [u8::try_from(n).unwrap() + 10; 16]);
+            change(
+                &mut store,
+                &terminal,
+                TerminalChange::Opened(TerminalOpened {
+                    environment_id: environment.clone(),
+                    cwd: "/w".to_owned(),
+                    linked_agent_id: Some(AgentId::parse(agent).unwrap()),
+                    theme: None,
+                    restart_of: None,
+                    runtime: Some("holder".to_owned()),
+                }),
+            )
+            .unwrap();
+            // The last agent's shell closed with it.
+            if n == 3 {
+                change(&mut store, &terminal, TerminalChange::Closing).unwrap();
+                change(
+                    &mut store,
+                    &terminal,
+                    TerminalChange::Closed(TerminalClosed {
+                        reason: TerminalClosedReason::AgentClosed,
+                    }),
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(
+            store.reads().agents_with_orphaned_shells().unwrap(),
+            [agents[0].0, agents[1].0]
+        );
+    }
+
+    #[test]
     fn gives_an_agents_linked_shells_oldest_first_until_each_closes_or_is_unlinked() {
         let dir = TempDir::new("linked");
         let mut store = Store::open(&dir.db("linked.db")).unwrap();
@@ -1243,6 +1330,18 @@ mod tests {
         );
         assert!(advance(Closed, Step::CloseRequested).is_err());
         assert!(advance(Lost, Step::Adopted).is_err());
+    }
+
+    #[test]
+    fn closes_a_terminal_still_being_created_whose_holder_may_have_started() {
+        use TerminalState::{Closed, Closing, Creating};
+        assert_eq!(
+            [
+                advance(Creating, Step::CloseRequested),
+                advance(Closing, Step::CloseCompleted)
+            ],
+            [Ok(Closing), Ok(Closed)]
+        );
     }
 
     #[test]

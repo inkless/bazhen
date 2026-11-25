@@ -342,7 +342,20 @@ pub struct Agent {
     /// Whether the prompt it would start with now differs from the one its last start gave it.
     #[serde(default)]
     pub prompt_changed: bool,
+    /// When the start it waits on was requested, while it is starting with its terminal being
+    /// created or exited: a launch, respawn or relaunch whose outcome isn't recorded yet. Null
+    /// otherwise. One requested over `START_OVERDUE_AFTER_MS` ago is one the daemon is settling.
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "Option<crate::schema::Timestamp>")
+    )]
+    pub start_requested_at: Option<String>,
 }
+
+/// How long after its request a start is overdue, in milliseconds: twice the time a holder has
+/// to answer, after which one that started has answered, and the daemon settles one that didn't.
+pub const START_OVERDUE_AFTER_MS: u64 = 4000;
 
 /// Everything the daemon holds, consistent as of `event_id` in store `epoch`. A list is missing
 /// from a daemon older than it.

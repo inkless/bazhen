@@ -61,6 +61,11 @@ impl Waiters {
         }
     }
 
+    /// The agents that hold a waiter now.
+    pub(crate) fn agents(&self) -> Vec<AgentId> {
+        self.held().keys().cloned().collect()
+    }
+
     /// Whether `agent` holds a waiter, which mail sent to it would wake.
     pub(crate) fn holds(&self, agent: &AgentId) -> bool {
         self.held().contains_key(agent)

@@ -128,6 +128,38 @@ impl Shells {
         Ok(())
     }
 
+    /// Closes the shells still linked to agents that closed or failed (`settleOrphans`): those
+    /// a close left, as one a daemon died in, one whose shells couldn't all be closed, or one the
+    /// daemon recorded closed itself. An agent a command holds is left for the next try. The
+    /// start runs it, and each tick.
+    pub(crate) async fn settle_orphans(&self) {
+        let read = self
+            .deps
+            .store
+            .run(|store| store.reads().agents_with_orphaned_shells())
+            .await;
+        let agents = match read {
+            Ok(Ok(agents)) => agents,
+            Ok(Err(err)) => {
+                tracing::warn!("bazhen: shells: could not read the closed agents' shells: {err}");
+                return;
+            }
+            Err(err) => {
+                tracing::warn!("bazhen: shells: could not read the closed agents' shells: {err}");
+                return;
+            }
+        };
+        for agent in agents {
+            let Some(_turn) = self.deps.turns.try_take(&agent) else {
+                continue;
+            };
+            // Each shell it couldn't close was said as it failed.
+            if let Err(err) = self.settle_with_agent(&agent).await {
+                tracing::debug!("bazhen: shells: {err}; tried again next tick");
+            }
+        }
+    }
+
     /// Closes each shell still linked to `agent`, each in its own turn, reporting those it
     /// couldn't.
     async fn settle_with_agent(&self, agent: &str) -> Result<(), ShellError> {
@@ -220,6 +252,49 @@ mod tests {
         let at = reads.last_event_id(id, "terminal.closed").unwrap()?;
         let event = reads.events(at - 1, 1).unwrap().pop()?;
         Some((event.actor, event.payload))
+    }
+
+    #[test]
+    fn closes_the_shells_left_linked_to_an_agent_that_failed_unless_a_command_holds_it() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let (ended, held, live) = (agent(1), agent(2), agent(3));
+            for (agent, cwd) in [(&ended, "/repo/a"), (&held, "/repo/b"), (&live, "/repo/c")] {
+                h.launched(agent, cwd).await;
+            }
+            let shells = [
+                opened_beside(&h, "a", &ended).await,
+                opened_beside(&h, "b", &held).await,
+                opened_beside(&h, "c", &live).await,
+            ];
+            h.failed(&ended).await;
+            h.failed(&held).await;
+            let turns = std::sync::Arc::clone(h.shells.turns());
+            let holding = turns.try_take(held.as_str()).unwrap();
+            h.shells.settle_orphans().await;
+            let while_held = shells.each_ref().map(|id| h.state_of(id));
+            drop(holding);
+            h.shells.settle_orphans().await;
+            assert_eq!(
+                (
+                    while_held,
+                    h.state_of(&shells[1]),
+                    closed_for(&h, &shells[0])
+                ),
+                (
+                    [
+                        Some(TerminalState::Closed),
+                        Some(TerminalState::Running),
+                        Some(TerminalState::Running),
+                    ],
+                    Some(TerminalState::Closed),
+                    Some((
+                        "system".to_owned(),
+                        r#"{"reason":"agent_closed"}"#.to_owned()
+                    )),
+                )
+            );
+        });
     }
 
     #[test]

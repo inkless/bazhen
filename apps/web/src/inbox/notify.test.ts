@@ -35,6 +35,7 @@ const reviewer: Agent = {
   needsRestart: null,
   role: null,
   promptChanged: false,
+  startRequestedAt: null,
 };
 
 const open = (n: number): Attention => ({

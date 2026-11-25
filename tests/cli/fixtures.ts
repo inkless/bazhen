@@ -85,6 +85,7 @@ export const agent = (id: string, name: string, over: Partial<Agent> = {}): Agen
   needsRestart: null,
   role: null,
   promptChanged: false,
+  startRequestedAt: null,
   ...over,
 });
 

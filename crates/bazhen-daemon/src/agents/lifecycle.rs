@@ -13,7 +13,7 @@ use bazhen_protocol::mail_events::{MailUndeliverable, UndeliverableReason};
 use bazhen_protocol::record::Record;
 use bazhen_store::{
     Actor, AgentChange, AgentTerminal, AppendError, MailChange, NewEvent, Writer as StoreWriter,
-    takes_exit,
+    start_unsettled, takes_exit,
 };
 use serde::Serialize;
 
@@ -224,6 +224,9 @@ pub(crate) fn from_runtime(id: &str, doing: Doing, cause: TerminalError) -> Agen
                 doing.done()
             ),
         }),
+        TerminalError::Unknown(_) => AgentError::Unavailable(format!(
+            "agent {id}'s start may have happened; the daemon settles it, and the agent's state says which"
+        )),
         other @ (TerminalError::Other(_)
         | TerminalError::Unreachable(_)
         | TerminalError::Predates { .. }
@@ -256,6 +259,13 @@ impl Agents {
             return Ok(Begun::Prior(prior));
         }
         let found = found.ok_or_else(|| AgentError::Unknown(id.to_owned()))?;
+        // Held by no command, as this one holds its turn: left so by a start whose outcome
+        // wasn't known, which the daemon settles.
+        if !accepts(&found) && start_unsettled(found.state, found.terminal_state) {
+            return Err(AgentError::Unavailable(format!(
+                "agent {id}'s start is still settling: try again once its state says how it went"
+            )));
+        }
         if !accepts(&found) {
             return Err(AgentError::Conflict(format!(
                 "agent {id} is {}",
@@ -362,9 +372,56 @@ impl Agents {
     /// never skips a close that would work.
     async fn end(&self, found: &AgentTerminal, force: bool) -> Result<(), AgentError> {
         let Some(terminal) = recorded(found) else {
+            return self.end_unrecorded(found, force).await;
+        };
+        self.close_at(found, &terminal, force).await
+    }
+
+    /// Closes a terminal whose start recorded nowhere it runs, as one whose create had no
+    /// answer: the holder the runtime lists for it, or nothing once nothing could start it. What
+    /// can't be proved either way is left for force, as an unreachable runtime is.
+    async fn end_unrecorded(&self, found: &AgentTerminal, force: bool) -> Result<(), AgentError> {
+        let Some(terminal) = found.terminal_id.clone() else {
             return Ok(());
         };
-        match self.deps.terminals.close(&terminal).await {
+        let why = match self.deps.terminals.agents().await {
+            Ok(read) => {
+                let listed = read.found.into_iter().find(|listed| {
+                    listed.terminal.terminal_id == terminal && listed.agent_id == found.agent_id
+                });
+                if let Some(listed) = listed {
+                    return self.close_at(found, &listed.terminal, force).await;
+                }
+                if read.unreadable.contains(&terminal) {
+                    "its holder's socket can't be read".to_owned()
+                } else if self.unstarted(&terminal).await {
+                    return Ok(());
+                } else {
+                    "nothing yet proves no holder started it".to_owned()
+                }
+            }
+            Err(err) => format!("its runtime's agents can't be read: {err}"),
+        };
+        let id = found.agent_id.as_str();
+        if force {
+            tracing::warn!(
+                "bazhen: agent {id} closed by force; terminal {terminal} may run, as {why}"
+            );
+            return Ok(());
+        }
+        Err(AgentError::ServerUnconfirmed(format!(
+            "agent {id}'s terminal {terminal} may have started, and {why}; close it again shortly, or with force to record it closed anyway"
+        )))
+    }
+
+    /// Closes the agent's terminal where `terminal` says it runs.
+    async fn close_at(
+        &self,
+        found: &AgentTerminal,
+        terminal: &Recorded,
+        force: bool,
+    ) -> Result<(), AgentError> {
+        match self.deps.terminals.close(terminal).await {
             Ok(()) => Ok(()),
             Err(cause) if force && cause.forceable() => {
                 tracing::warn!(
