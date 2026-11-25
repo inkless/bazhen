@@ -221,6 +221,14 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
     /// Makes a shell standalone where it runs: its terminal no longer names an agent.
     fn unlink<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, Result<(), TerminalError>>;
 
+    /// Sends `signal` to the terminal's running process, through what runs it: the daemon sends
+    /// no signal itself. A process that has exited refuses it as [`TerminalError::ProcessState`].
+    fn signal<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        signal: bazhen_protocol::agents::Signal,
+    ) -> Answer<'a, Result<(), TerminalError>>;
+
     /// What each terminal's runtime speaks, as this build serves it.
     fn compatibility(&self) -> Answer<'_, Result<Compatibility, TerminalError>>;
 
@@ -297,6 +305,8 @@ pub(crate) mod fake {
         pub(crate) unproven: BTreeSet<String>,
         /// The shells unlinked from their agent, in order.
         pub(crate) unlinked: Vec<String>,
+        /// The signals sent, in order, each with the terminal it was sent to.
+        pub(crate) signalled: Vec<(String, bazhen_protocol::agents::Signal)>,
         /// How many reads of the foregrounds reached the runtime.
         pub(crate) foreground_reads: usize,
         /// How many reads of the foregrounds the runtime answered.
@@ -732,6 +742,27 @@ pub(crate) mod fake {
                     };
                 }
                 state.unlinked.push(id);
+                Ok(())
+            })
+        }
+
+        fn signal<'a>(
+            &'a self,
+            terminal: &'a Recorded,
+            signal: bazhen_protocol::agents::Signal,
+        ) -> Answer<'a, Result<(), TerminalError>> {
+            Box::pin(async move {
+                let mut state = self.state.lock().unwrap();
+                let id = terminal.terminal_id.as_str().to_owned();
+                match state.running.get(&id) {
+                    Some(running) if !running.exited && !running.gone => {}
+                    _ => {
+                        return Err(TerminalError::ProcessState(format!(
+                            "terminal {id}'s process has exited"
+                        )));
+                    }
+                }
+                state.signalled.push((id, signal));
                 Ok(())
             })
         }
