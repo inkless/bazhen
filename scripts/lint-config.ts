@@ -56,6 +56,9 @@ const PACKAGE_DIR: Record<string, string> = {
 
 const RUNTIME_LIBS = ["node-pty", "hono", "@hono/*", "ws", "@xterm/*"];
 const WIDGET_LIBS = ["react-aria-components", "react-aria-components/*"];
+// The protocol's subpaths the web may import: the zod generated from the Rust protocol, with the
+// helpers beside it, and the id its build speaks.
+const WEB_PROTOCOL = ["web", "id"];
 
 // tech-stack-and-scaffold.md §3. The single source of the import matrix: docs/standards/code.md
 // explains it, and scripts/lint-config.medium.test.ts checks each package.json against it.
@@ -220,6 +223,7 @@ export const MATRIX: Area[] = [
   {
     dir: "apps/web",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
+    onlySubpaths: { "@bazhen/protocol": WEB_PROTOCOL },
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
     onlyThrough: { packages: WIDGET_LIBS, via: "apps/web/src/ui" },
@@ -228,6 +232,7 @@ export const MATRIX: Area[] = [
   {
     dir: "apps/web/src/ui",
     banned: ["@bazhen/core", "@bazhen/runtime-tmux", "@bazhen/runtime-holder", "@bazhen/daemon"],
+    onlySubpaths: { "@bazhen/protocol": WEB_PROTOCOL },
     platformFree: true,
     thirdParty: ["node-pty", "hono", "@hono/*", "ws"],
   },
