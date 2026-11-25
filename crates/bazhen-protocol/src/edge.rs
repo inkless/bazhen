@@ -9,6 +9,7 @@
 
 use serde::de::DeserializeOwned;
 
+use crate::agents::{CloseAgentRequest, SignalAgentRequest};
 use crate::ids::TaskId;
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
@@ -194,6 +195,29 @@ impl EdgeCheck for CloseShellRequest {
     }
 }
 
+impl EdgeCheck for CloseAgentRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        holds(
+            self.confirmed_busy
+                .iter()
+                .flatten()
+                .all(|busy| chars(&busy.program) <= CONFIRMED_PROGRAM_MAX_CHARS),
+            "each program confirmedBusy names is at most 200 characters",
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for SignalAgentRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        Ok(self)
+    }
+}
+
 impl EdgeCheck for RestartShellRequest {
     fn checked(self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
@@ -335,6 +359,38 @@ mod tests {
         ] {
             assert!(refused::<OpenShellRequest>(&broken), "{broken}");
         }
+    }
+
+    #[test]
+    fn an_agents_close_and_signal_hold_their_generation_and_options_to_the_protocol() {
+        let safe = MAX_SAFE_INTEGER;
+        let term = "term_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+        let with = |extra: Value| {
+            let mut body = json!({ "idempotencyKey": KEY, "generation": safe, "signal": "SIGINT" });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        let busy = |program: String| json!({ "confirmedBusy": [{ "terminalId": term, "program": program }] });
+        assert_eq!(
+            [
+                refused::<CloseAgentRequest>(&with(busy("p".repeat(200)))),
+                refused::<CloseAgentRequest>(&with(json!({ "keepShells": [term], "force": true }))),
+                refused::<SignalAgentRequest>(&with(json!({ "generation": 2.0 }))),
+                refused::<CloseAgentRequest>(&with(busy("p".repeat(201)))),
+                refused::<CloseAgentRequest>(&with(json!({ "generation": safe + 1 }))),
+                refused::<CloseAgentRequest>(&with(json!({ "force": null }))),
+                refused::<CloseAgentRequest>(&with(json!({ "keepShells": ["x"] }))),
+                refused::<SignalAgentRequest>(&with(json!({ "generation": safe + 1 }))),
+                refused::<SignalAgentRequest>(&with(json!({ "generation": 2.5 }))),
+                refused::<SignalAgentRequest>(&with(json!({ "idempotencyKey": "" }))),
+                refused::<SignalAgentRequest>(&with(json!({ "signal": "SIGSTOP" }))),
+            ],
+            [
+                false, false, false, true, true, true, true, true, true, true, true
+            ]
+        );
     }
 
     #[test]
