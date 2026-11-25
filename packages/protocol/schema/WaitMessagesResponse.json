@@ -1,23 +1,19 @@
 {
   "$id": "WaitMessagesResponse",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "messages": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
           "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
           "state": {
-            "type": "string",
             "enum": [
               "queued",
               "offered",
@@ -26,18 +22,22 @@
               "queued_in_codex",
               "delivered",
               "undeliverable"
-            ]
+            ],
+            "type": "string"
           }
         },
         "required": [
           "id",
           "agentId",
           "state"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
   "required": [
     "messages"
-  ]
+  ],
+  "type": "object"
 }

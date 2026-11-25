@@ -1,0 +1,46 @@
+{
+  "$id": "Codex",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cli": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "daemon": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toolCalls": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "const": "marked",
+              "type": "string"
+            },
+            {
+              "const": "unmarked",
+              "type": "string"
+            },
+            {
+              "const": "unread",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "daemon",
+    "cli"
+  ],
+  "type": "object"
+}

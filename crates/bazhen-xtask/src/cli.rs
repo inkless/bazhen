@@ -164,6 +164,9 @@ mod tests {
         fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
             Err(std::io::ErrorKind::Unsupported.into())
         }
+        fn remove(&mut self, _: &Path) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
     }
 
     fn call(args: &[&str]) -> (Exit, String, String) {
@@ -203,6 +206,9 @@ mod tests {
             Ok(None)
         }
         fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
+        fn remove(&mut self, _: &Path) -> std::io::Result<()> {
             Err(std::io::ErrorKind::Unsupported.into())
         }
     }

@@ -1,0 +1,19 @@
+{
+  "$id": "Resumes",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "attachmentId": {
+      "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "token": {
+      "maxLength": 64,
+      "type": "string"
+    }
+  },
+  "required": [
+    "attachmentId",
+    "token"
+  ],
+  "type": "object"
+}

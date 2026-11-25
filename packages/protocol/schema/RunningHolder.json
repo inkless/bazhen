@@ -1,0 +1,96 @@
+{
+  "$id": "RunningHolder",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "build": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contained": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "holderPid": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "protocol": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "socket": {
+      "type": "string"
+    },
+    "stats": {
+      "anyOf": [
+        {
+          "properties": {
+            "engineBytes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "engineResets": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "historyLines": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ringBytes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rss": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "engineBytes",
+            "rss",
+            "ringBytes",
+            "historyLines"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "terminalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "terminalId",
+    "build",
+    "protocol"
+  ],
+  "type": "object"
+}

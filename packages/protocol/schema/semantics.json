@@ -1,9 +1,9 @@
 {
-  "revision": 2,
-  "reason": "A holder view gets no screen frame: its own bytes carry the switch, and a page that read the frame alone would route the wheel as if on the main screen.",
   "constants": {
+    "EVENT_FRAME_MAX_BYTES": 1024,
     "HISTORY_LINES": 10000,
-    "STREAM_FRAME_MAX_BYTES": 1048576,
-    "EVENT_FRAME_MAX_BYTES": 1024
-  }
+    "STREAM_FRAME_MAX_BYTES": 1048576
+  },
+  "reason": "A holder view gets no screen frame: its own bytes carry the switch, and a page that read the frame alone would route the wheel as if on the main screen.",
+  "revision": 2
 }

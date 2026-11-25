@@ -1,0 +1,15 @@
+{
+  "$id": "AttentionClosedReason",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "answered_in_tui",
+    "timed_out",
+    "superseded",
+    "agent_closed",
+    "stale",
+    "replied",
+    "dismissed",
+    "resent"
+  ],
+  "type": "string"
+}

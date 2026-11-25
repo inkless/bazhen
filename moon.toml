@@ -32,9 +32,15 @@ options = { cache = false, internal = true }
 command = "node scripts/protocol-schema.ts --check"
 options = { cache = false, internal = true }
 
+# The Rust protocol's published schema, its id and the web's zod first, then the fixtures.
 [tasks.schema]
 command = "node scripts/protocol-schema.ts"
+deps = ["rust-schema"]
 options = { cache = false }
+
+[tasks.rust-schema]
+command = "scripts/xtask.sh schema"
+options = { cache = false, internal = true }
 
 [tasks.rust-schema-check]
 command = "scripts/xtask.sh schema --check"

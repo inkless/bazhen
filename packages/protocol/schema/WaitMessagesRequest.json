@@ -1,25 +1,26 @@
 {
   "$id": "WaitMessagesRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "messageIds": {
-      "minItems": 1,
-      "maxItems": 100,
-      "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-      }
+        "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "type": "array"
     },
     "timeoutMs": {
-      "type": "integer",
+      "format": "uint64",
+      "maximum": 600000,
       "minimum": 0,
-      "maximum": 600000
+      "type": "integer"
     }
   },
   "required": [
     "messageIds",
     "timeoutMs"
-  ]
+  ],
+  "type": "object"
 }

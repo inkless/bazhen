@@ -1,0 +1,25 @@
+{
+  "$id": "FleetHeadline",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "ageSeconds": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "taskId": {
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "text",
+    "taskId",
+    "ageSeconds"
+  ],
+  "type": "object"
+}

@@ -3,127 +3,111 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     {
-      "type": "object",
       "properties": {
-        "on": {
-          "type": "string",
-          "const": "agent"
-        },
         "agentId": {
-          "type": "string",
-          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "on": {
+          "const": "agent",
+          "type": "string"
         },
         "until": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "starting",
-                "running",
-                "exited",
-                "unknown",
-                "lost",
-                "closing",
-                "closed",
-                "failed"
-              ]
-            },
-            {
-              "type": "string",
-              "enum": [
-                "ended",
-                "ready",
-                "idle"
-              ]
-            }
-          ]
+          "enum": [
+            "starting",
+            "running",
+            "exited",
+            "unknown",
+            "lost",
+            "closing",
+            "closed",
+            "failed",
+            "ended",
+            "ready",
+            "idle"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "on",
         "agentId",
         "until"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
         "on": {
-          "type": "string",
-          "const": "shell"
+          "const": "shell",
+          "type": "string"
         },
         "shellId": {
-          "type": "string",
-          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
         },
         "until": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "creating",
-                "running",
-                "exited",
-                "unknown",
-                "lost",
-                "closing",
-                "closed",
-                "failed"
-              ]
-            },
-            {
-              "type": "string",
-              "enum": [
-                "ended"
-              ]
-            }
-          ]
+          "enum": [
+            "creating",
+            "running",
+            "exited",
+            "unknown",
+            "lost",
+            "closing",
+            "closed",
+            "failed",
+            "ended"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "on",
         "shellId",
         "until"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
         "on": {
-          "type": "string",
-          "const": "task"
+          "const": "task",
+          "type": "string"
         },
         "taskId": {
-          "type": "string",
-          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
         },
         "until": {
-          "type": "string",
-          "const": "done"
+          "enum": [
+            "done"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "on",
         "taskId",
         "until"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "on": {
-          "type": "string",
-          "const": "reply"
-        },
         "messageId": {
-          "type": "string",
-          "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+          "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "on": {
+          "const": "reply",
+          "type": "string"
         }
       },
       "required": [
         "on",
         "messageId"
-      ]
+      ],
+      "type": "object"
     }
   ]
 }

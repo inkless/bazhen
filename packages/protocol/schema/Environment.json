@@ -1,26 +1,26 @@
 {
   "$id": "Environment",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
+    "host": {
+      "default": "",
+      "type": "string"
+    },
     "id": {
-      "type": "string",
-      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     },
     "kind": {
-      "type": "string",
       "enum": [
         "local",
         "opencode-server"
-      ]
-    },
-    "host": {
-      "default": "",
+      ],
       "type": "string"
     }
   },
   "required": [
     "id",
     "kind"
-  ]
+  ],
+  "type": "object"
 }

@@ -1,5 +1,6 @@
 //! Prints the protocol's JSON Schema: every API message and holder body, with each type they
-//! name, under `$defs`, and each event type's entity and payloads under `x-bazhen-events`. `cargo xtask schema` writes the TypeScript protocol from it.
+//! name, under `$defs`, each event type's entity and payloads under `x-bazhen-events`, and what no
+//! schema says under `x-bazhen-semantics`. `cargo xtask schema` publishes the protocol from it.
 //!
 //! `emit_schema verdicts <cases>` instead prints the edge's verdict on each case the file lists,
 //! as `{ "schema", "body" }`, in order: `{ "taken": <value> }`, `{ "refused": <rule> }`, or null
@@ -19,6 +20,15 @@ fn schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$defs": generator.take_definitions(true),
         "x-bazhen-events": events,
+        "x-bazhen-semantics": {
+            "revision": bazhen_protocol::semantics::REVISION,
+            "reason": bazhen_protocol::semantics::REASON,
+            "constants": {
+                "HISTORY_LINES": bazhen_protocol::stream::HISTORY_LINES,
+                "STREAM_FRAME_MAX_BYTES": bazhen_protocol::stream::STREAM_FRAME_MAX_BYTES,
+                "EVENT_FRAME_MAX_BYTES": bazhen_protocol::events::EVENT_FRAME_MAX_BYTES,
+            },
+        },
     })
 }
 

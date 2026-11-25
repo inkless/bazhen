@@ -1,32 +1,33 @@
 {
   "$id": "RestartShellRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
     "generation": {
-      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
+    },
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "retype": {
+      "const": true,
+      "type": "boolean"
     },
     "theme": {
-      "type": "string",
       "enum": [
         "light",
         "dark"
-      ]
-    },
-    "retype": {
-      "type": "boolean",
-      "const": true
+      ],
+      "type": "string"
     }
   },
   "required": [
     "idempotencyKey",
     "generation"
-  ]
+  ],
+  "type": "object"
 }

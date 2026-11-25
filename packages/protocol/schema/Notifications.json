@@ -1,0 +1,20 @@
+{
+  "$id": "Notifications",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "desktop": {
+      "type": "boolean"
+    },
+    "notifier": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "desktop",
+    "notifier"
+  ],
+  "type": "object"
+}

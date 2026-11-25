@@ -1,97 +1,114 @@
 {
   "$id": "HolderSpawnSpec",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "argv": {
-      "minItems": 1,
-      "type": "array",
       "items": {
-        "type": "string"
-      }
+        "type": "string",
+        "x-bazhen-check": "wellFormed"
+      },
+      "minItems": 1,
+      "type": "array"
     },
     "cwd": {
+      "minLength": 1,
       "type": "string",
-      "minLength": 1
-    },
-    "env": {
-      "description": "Environment names __proto__ are refused.",
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
-      "additionalProperties": {
-        "type": "string"
-      }
-    },
-    "generation": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "theme": {
-      "type": "string",
-      "enum": [
-        "light",
-        "dark"
+      "x-bazhen-check": [
+        "wellFormed"
       ]
     },
-    "protocol": {
-      "minItems": 1,
-      "maxItems": 16,
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 0,
-        "description": "At most 32 UTF-8 bytes."
-      }
-    },
-    "terminalId": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,64}$"
-    },
-    "socket": {
-      "type": "string",
-      "minLength": 1
-    },
-    "tags": {
-      "description": "Tag names __proto__, constructor, prototype are refused.",
-      "type": "object",
-      "propertyNames": {
-        "type": "string",
-        "minLength": 1,
-        "description": "At most 64 UTF-8 bytes."
-      },
+    "env": {
       "additionalProperties": {
         "type": "string",
-        "minLength": 0,
-        "description": "At most 1024 UTF-8 bytes."
-      }
+        "x-bazhen-check": "wellFormed"
+      },
+      "propertyNames": {
+        "pattern": "^(?!(?:__proto__)$)",
+        "type": "string",
+        "x-bazhen-check": "wellFormed"
+      },
+      "type": "object",
+      "x-bazhen-transform": "refusingOwnProto"
+    },
+    "generation": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "historyLines": {
+      "default": 10000,
+      "maximum": 100000,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protocol": {
+      "items": {
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost32Bytes"
+        ]
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "type": "array"
     },
     "size": {
-      "type": "object",
       "properties": {
         "cols": {
-          "type": "integer",
+          "maximum": 1000,
           "minimum": 0,
-          "maximum": 1000
+          "type": "integer"
         },
         "rows": {
-          "type": "integer",
+          "maximum": 1000,
           "minimum": 0,
-          "maximum": 1000
+          "type": "integer"
         }
       },
       "required": [
         "cols",
         "rows"
+      ],
+      "type": "object"
+    },
+    "socket": {
+      "minLength": 1,
+      "type": "string",
+      "x-bazhen-check": [
+        "wellFormed"
       ]
     },
-    "historyLines": {
-      "default": 10000,
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 100000
+    "tags": {
+      "additionalProperties": {
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost1024Bytes"
+        ]
+      },
+      "propertyNames": {
+        "minLength": 1,
+        "pattern": "^(?!(?:__proto__|constructor|prototype)$)",
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost64Bytes"
+        ]
+      },
+      "type": "object",
+      "x-bazhen-transform": "refusingOwnProto"
+    },
+    "terminalId": {
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "type": "string"
+    },
+    "theme": {
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
     }
   },
   "required": [
@@ -104,5 +121,6 @@
     "socket",
     "tags",
     "size"
-  ]
+  ],
+  "type": "object"
 }

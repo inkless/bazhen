@@ -13,6 +13,7 @@ mod sizes;
 mod fixture;
 
 use bazhen_client::paths::{self, Inputs, Paths};
+use bazhen_protocol::stream::HISTORY_LINES;
 use bazhen_protocol::text::{is_origin, is_plain_remote};
 
 /// Everything the daemon starts from: where it lives, how it is configured, and which file said so.
@@ -194,8 +195,6 @@ const DEFAULT_TERMINAL_SWAP: &str = "0";
 const DEFAULT_MAX_LAUNCHED: u64 = 5;
 const DEFAULT_MAX_LAUNCH_DEPTH: u64 = 3;
 const DEFAULT_START_DEADLINE_SECONDS: u64 = 60;
-/// The history each new terminal keeps by default, as `HISTORY_LINES` in packages/protocol.
-const HISTORY_LINES: u32 = 10_000;
 /// The most history a holder keeps, as `HOLDER_MAX_HISTORY_LINES` in packages/protocol.
 const HOLDER_MAX_HISTORY_LINES: u32 = 100_000;
 const CONFIG_FILE: &str = "config.toml";

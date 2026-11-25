@@ -1,40 +1,46 @@
 {
   "$id": "HolderProcessSpec",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "argv": {
-      "minItems": 1,
-      "type": "array",
       "items": {
-        "type": "string"
-      }
+        "type": "string",
+        "x-bazhen-check": "wellFormed"
+      },
+      "minItems": 1,
+      "type": "array"
     },
     "cwd": {
+      "minLength": 1,
       "type": "string",
-      "minLength": 1
+      "x-bazhen-check": [
+        "wellFormed"
+      ]
     },
     "env": {
-      "description": "Environment names __proto__ are refused.",
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
       "additionalProperties": {
-        "type": "string"
-      }
+        "type": "string",
+        "x-bazhen-check": "wellFormed"
+      },
+      "propertyNames": {
+        "pattern": "^(?!(?:__proto__)$)",
+        "type": "string",
+        "x-bazhen-check": "wellFormed"
+      },
+      "type": "object",
+      "x-bazhen-transform": "refusingOwnProto"
     },
     "generation": {
-      "type": "integer",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
     },
     "theme": {
-      "type": "string",
       "enum": [
         "light",
         "dark"
-      ]
+      ],
+      "type": "string"
     }
   },
   "required": [
@@ -42,5 +48,6 @@
     "cwd",
     "env",
     "generation"
-  ]
+  ],
+  "type": "object"
 }

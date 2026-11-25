@@ -1,19 +1,16 @@
 {
   "$id": "EnvRefreshRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "env": {
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
       "additionalProperties": {
         "type": "string"
-      }
+      },
+      "type": "object"
     }
   },
   "required": [
     "env"
-  ]
+  ],
+  "type": "object"
 }

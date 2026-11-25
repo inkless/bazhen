@@ -1,0 +1,142 @@
+{
+  "$id": "Web",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "allowInsecureOrigins": {
+      "type": "boolean"
+    },
+    "app": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "appRefused": {
+      "type": "string"
+    },
+    "externalOrigins": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "from": {
+      "anyOf": [
+        {
+          "enum": [
+            "BAZHEN_EXTERNAL_ORIGINS",
+            "config"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lan": {
+      "anyOf": [
+        {
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "certificate": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "expiresAt": {
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "fingerprint": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fingerprint",
+                    "path",
+                    "expiresAt"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subnets": {
+              "items": {
+                "properties": {
+                  "cidr": {
+                    "type": "string"
+                  },
+                  "interface": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "interface",
+                  "cidr"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "allow",
+            "certificate",
+            "error",
+            "subnets"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pairing": {
+      "properties": {
+        "mode": {
+          "enum": [
+            "auto",
+            "always"
+          ],
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "required"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "externalOrigins",
+    "from",
+    "allowInsecureOrigins"
+  ],
+  "type": "object"
+}

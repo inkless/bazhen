@@ -1,0 +1,1868 @@
+{
+  "agent.activity": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "detail": {
+          "maxLength": 200,
+          "type": "string"
+        },
+        "observedAt": {
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "type": "string"
+        },
+        "resetsAt": {
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "native",
+            "heuristic"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "enum": [
+            "working",
+            "waiting_input",
+            "needs_approval",
+            "idle",
+            "done",
+            "failed",
+            "limited",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "confidence",
+        "observedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.closed": {
+    "entity": "agent",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "agent.closing": {
+    "entity": "agent",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "agent.compacted": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "before": {
+          "properties": {
+            "contextUsedPercent": {
+              "format": "double",
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            "contextWindowTokens": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "limits": {
+              "items": {
+                "properties": {
+                  "resetsAt": {
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  },
+                  "usedPercent": {
+                    "format": "double",
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "window": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "window",
+                  "usedPercent"
+                ],
+                "type": "object"
+              },
+              "maxItems": 20,
+              "type": "array"
+            },
+            "model": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "hook": {
+          "properties": {
+            "pid": {
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "sessionId",
+            "pid"
+          ],
+          "type": "object"
+        },
+        "sign": {
+          "enum": [
+            "claude_hook",
+            "codex_item"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "sign"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.exited": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "exit": {
+          "oneOf": [
+            {
+              "properties": {
+                "code": {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "exited",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "code"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "signal": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "signalled",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "signal"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "unknown",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "exit"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.external_ref_updated": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "externalRef": {
+          "properties": {
+            "environmentId": {
+              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
+            },
+            "id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "claude-session",
+                "codex-thread"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "environmentId",
+            "kind",
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "externalRef"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.failed": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "enum": [
+                "launch_rejected"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "daemon_restart",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.launched": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "compactWindowTokens": {
+          "format": "uint32",
+          "maximum": 10000000,
+          "minimum": 100000,
+          "type": "integer"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "environmentId": {
+          "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "harness": {
+          "enum": [
+            "claude-code",
+            "codex"
+          ],
+          "type": "string"
+        },
+        "launchedBy": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nameOrdinal": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "project": {
+          "type": "string"
+        },
+        "promptHash": {
+          "type": "string"
+        },
+        "role": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
+          "type": "string"
+        },
+        "runtime": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "terminalId": {
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "environmentId",
+        "harness",
+        "project",
+        "cwd",
+        "terminalId"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.lost": {
+    "entity": "agent",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "agent.process_adopted": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "runtimeRef": {
+          "properties": {
+            "locator": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "runtime": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "locator"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.ready": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "sign": {
+          "enum": [
+            "claude_hook",
+            "codex_title"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "sign"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.relaunch_rejected": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "const": "not_resumable",
+              "type": "string"
+            },
+            {
+              "const": "terminal_exists",
+              "type": "string"
+            },
+            {
+              "const": "harness_refused",
+              "type": "string"
+            },
+            {
+              "const": "unavailable",
+              "type": "string"
+            },
+            {
+              "const": "daemon_restart",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.relaunch_requested": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "fresh": {
+          "type": "boolean"
+        },
+        "generation": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "runtime": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "terminalId": {
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId",
+        "generation",
+        "fresh"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.relaunched": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "externalRef": {
+          "anyOf": [
+            {
+              "properties": {
+                "environmentId": {
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "claude-session",
+                    "codex-thread"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "environmentId",
+                "kind",
+                "id"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "harnessName": {
+          "type": "string"
+        },
+        "promptHash": {
+          "type": "string"
+        },
+        "runtimeRef": {
+          "properties": {
+            "locator": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "runtime": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "locator"
+          ],
+          "type": "object"
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "externalRef",
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.renamed": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "previous": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "previous"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.respawn_rejected": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "const": "not_resumable",
+              "type": "string"
+            },
+            {
+              "const": "no_terminal",
+              "type": "string"
+            },
+            {
+              "const": "terminal_changed",
+              "type": "string"
+            },
+            {
+              "const": "harness_refused",
+              "type": "string"
+            },
+            {
+              "const": "unavailable",
+              "type": "string"
+            },
+            {
+              "const": "daemon_restart",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.respawn_requested": {
+    "entity": "agent",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "agent.respawned": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "externalRef": {
+          "anyOf": [
+            {
+              "properties": {
+                "environmentId": {
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "claude-session",
+                    "codex-thread"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "environmentId",
+                "kind",
+                "id"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "harnessName": {
+          "type": "string"
+        },
+        "promptHash": {
+          "type": "string"
+        },
+        "runtimeRef": {
+          "properties": {
+            "locator": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "runtime": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "locator"
+          ],
+          "type": "object"
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "externalRef",
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.running": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "externalRef": {
+          "anyOf": [
+            {
+              "properties": {
+                "environmentId": {
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "claude-session",
+                    "codex-thread"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "environmentId",
+                "kind",
+                "id"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "harnessName": {
+          "type": "string"
+        },
+        "runtimeRef": {
+          "anyOf": [
+            {
+              "properties": {
+                "locator": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "externalRef",
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.signalled": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "signal": {
+          "enum": [
+            "SIGINT",
+            "SIGTERM",
+            "SIGHUP",
+            "SIGKILL"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "signal"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.transcript_recorded": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "path": {
+          "maxLength": 4096,
+          "pattern": "^\\/.*",
+          "type": "string"
+        },
+        "sessionId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "path"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `agent.transcript_recorded`; the stream leaves the path out.",
+      "properties": {
+        "sessionId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    }
+  },
+  "agent.usage": {
+    "entity": "agent",
+    "payload": {
+      "properties": {
+        "contextUsedPercent": {
+          "format": "double",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "contextWindowTokens": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limits": {
+          "items": {
+            "properties": {
+              "resetsAt": {
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              "usedPercent": {
+                "format": "double",
+                "minimum": 0,
+                "type": "number"
+              },
+              "window": {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "window",
+              "usedPercent"
+            ],
+            "type": "object"
+          },
+          "maxItems": 20,
+          "type": "array"
+        },
+        "model": {
+          "maxLength": 200,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "assignment.ended": {
+    "entity": "assignment",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "unassigned",
+            "completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "assignment.granted": {
+    "entity": "assignment",
+    "payload": {
+      "properties": {
+        "agentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "parentAssignmentId": {
+          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
+          "type": "string"
+        },
+        "taskId": {
+          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "taskId",
+        "agentId",
+        "role",
+        "parentAssignmentId"
+      ],
+      "type": "object"
+    }
+  },
+  "attachment.ended": {
+    "entity": "attachment",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "client_closed",
+            "terminal_closed",
+            "attach_failed",
+            "daemon_restart",
+            "disconnected",
+            "evicted_slow",
+            "timed_out",
+            "replaced"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "attachment.started": {
+    "entity": "attachment",
+    "payload": {
+      "properties": {
+        "mode": {
+          "enum": [
+            "observe",
+            "interactive"
+          ],
+          "type": "string"
+        },
+        "terminalId": {
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId",
+        "mode"
+      ],
+      "type": "object"
+    }
+  },
+  "attention.answered": {
+    "entity": "attention",
+    "payload": {
+      "properties": {
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "type": "object"
+    }
+  },
+  "attention.closed": {
+    "entity": "attention",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "answered_in_tui",
+            "timed_out",
+            "superseded",
+            "agent_closed",
+            "stale",
+            "replied",
+            "dismissed",
+            "resent"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "attention.opened": {
+    "entity": "attention",
+    "payload": {
+      "properties": {
+        "agentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "question",
+            "failed",
+            "undeliverable",
+            "escalation",
+            "task_done",
+            "stuck_starting"
+          ],
+          "type": "string"
+        },
+        "mainAgent": {
+          "type": "boolean"
+        },
+        "messageId": {
+          "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "toolUseId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentId",
+        "summary",
+        "toolUseId",
+        "mainAgent"
+      ],
+      "type": "object"
+    }
+  },
+  "device.paired": {
+    "entity": "device",
+    "payload": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "device.revoked": {
+    "entity": "device",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "environment.harness_version": {
+    "entity": "environment",
+    "payload": {
+      "properties": {
+        "harness": {
+          "enum": [
+            "claude-code",
+            "codex"
+          ],
+          "type": "string"
+        },
+        "previous": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "harness",
+        "version",
+        "previous"
+      ],
+      "type": "object"
+    }
+  },
+  "environment.registered": {
+    "entity": "environment",
+    "payload": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "local",
+            "opencode-server"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "lease.granted": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "attachmentId": {
+          "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "epoch": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attachmentId",
+        "epoch"
+      ],
+      "type": "object"
+    }
+  },
+  "mailbox.accepted": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "offline": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "offline"
+      ],
+      "type": "object"
+    }
+  },
+  "mailbox.delivered": {
+    "entity": "message",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "mailbox.emitted": {
+    "entity": "message",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "mailbox.offered": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "promptId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "mailbox.queued": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "agentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "from": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "body"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `mailbox.queued`: a message for an agent, delivered at least once through its\nharness.",
+      "properties": {
+        "agentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "from": {
+          "description": "The agent whose own words the body is, after a line naming it that the body starts with;\nabsent for the human's mail and for mail Bazhen composes.",
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId"
+      ],
+      "type": "object"
+    }
+  },
+  "mailbox.requeued": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "reason": {
+          "oneOf": [
+            {
+              "enum": [
+                "not_written",
+                "daemon_restart"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "session_started",
+              "type": "string"
+            },
+            {
+              "const": "stop_failed",
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "type": "string"
+            },
+            {
+              "const": "not_seen",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "mailbox.seen": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "promptId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "promptId"
+      ],
+      "type": "object"
+    }
+  },
+  "mailbox.undeliverable": {
+    "entity": "message",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "agent_closed",
+            "gave_up"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "message.observed": {
+    "entity": "observed_message",
+    "payload": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "from": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "toolUseId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "summary",
+        "text",
+        "accepted",
+        "toolUseId"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `message.observed`: the agent sent another Bazhen agent a message through its\nharness's own channel, which Bazhen sees sent but can't follow to delivery.",
+      "properties": {
+        "accepted": {
+          "description": "Whether the harness said it was sent; nothing says it was read.",
+          "type": "boolean"
+        },
+        "from": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "summary": {
+          "description": "The harness's own label for it, else its first line, at most 120 characters.",
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "toolUseId": {
+          "description": "The tool call that sent it, which records it once.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "summary",
+        "accepted",
+        "toolUseId"
+      ],
+      "type": "object"
+    }
+  },
+  "notice.closed": {
+    "entity": "notice",
+    "payload": {
+      "properties": {
+        "by": {
+          "enum": [
+            "owner-socket",
+            "owner-loopback",
+            "revoke"
+          ],
+          "type": "string"
+        },
+        "fromDevice": {
+          "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "dismissed",
+            "revoked"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "by"
+      ],
+      "type": "object"
+    }
+  },
+  "notice.opened": {
+    "entity": "notice",
+    "payload": {
+      "properties": {
+        "device": {
+          "anyOf": [
+            {
+              "properties": {
+                "address": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "origin",
+                "address"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "summary",
+        "device"
+      ],
+      "type": "object"
+    }
+  },
+  "task.created": {
+    "entity": "task",
+    "payload": {
+      "properties": {
+        "brief": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "delegatedFrom": {
+          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerAgentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentTaskId": {
+          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+          "x-bazhen-transform": "trim"
+        }
+      },
+      "required": [
+        "title",
+        "brief",
+        "ownerAgentId",
+        "parentTaskId"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `task.created`, in the order the TypeScript daemon writes it.",
+      "properties": {
+        "delegatedFrom": {
+          "description": "The assignment an agent delegated it under; null when delegated as the parent's owner, and\nabsent from a daemon from before the field.",
+          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerAgentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentTaskId": {
+          "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/TaskTitle"
+        }
+      },
+      "required": [
+        "title",
+        "ownerAgentId",
+        "parentTaskId"
+      ],
+      "type": "object"
+    }
+  },
+  "task.finished": {
+    "entity": "task",
+    "payload": {
+      "properties": {
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "done",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "note"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `task.finished`, which ends every active assignment on the task.",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/TaskOutcome"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    }
+  },
+  "task.noted": {
+    "entity": "task",
+    "payload": {
+      "properties": {
+        "handoff": {
+          "type": "boolean"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9-]{0,31}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "handoff",
+        "role"
+      ],
+      "type": "object"
+    },
+    "streamed": {
+      "description": "The payload of `task.noted`: a note on the task from its actor, the human or an agent.",
+      "properties": {
+        "handoff": {
+          "type": "boolean"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The role its agent held on the task then; null for the human, and for an owner on none."
+        }
+      },
+      "required": [
+        "handoff",
+        "role"
+      ],
+      "type": "object"
+    }
+  },
+  "task.owner_changed": {
+    "entity": "task",
+    "payload": {
+      "properties": {
+        "delegatedFrom": {
+          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerAgentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ownerAgentId",
+        "delegatedFrom"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.closed": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "user",
+            "exited",
+            "agent_closed",
+            "restarted"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.closing": {
+    "entity": "terminal",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "terminal.failed": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "reason": {
+          "enum": [
+            "open_rejected",
+            "daemon_restart"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.foreground_changed": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "command": {
+          "maxLength": 200,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.lost": {
+    "entity": "terminal",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "terminal.needs_restart": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "protocol": {
+          "items": {
+            "type": "string",
+            "x-bazhen-check": [
+              "wellFormed",
+              "utf8AtMost32Bytes"
+            ]
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "protocol"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.opened": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "environmentId": {
+          "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "linkedAgentId": {
+          "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restartOf": {
+          "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "runtime": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "theme": {
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "environmentId",
+        "cwd",
+        "linkedAgentId"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.process_adopted": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "runtimeRef": {
+          "properties": {
+            "locator": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "runtime": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "locator"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.renamed": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.restart_cleared": {
+    "entity": "terminal",
+    "payload": {
+      "type": "object"
+    }
+  },
+  "terminal.running": {
+    "entity": "terminal",
+    "payload": {
+      "properties": {
+        "runtimeRef": {
+          "properties": {
+            "locator": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "runtime": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "locator"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtimeRef"
+      ],
+      "type": "object"
+    }
+  },
+  "terminal.unlinked": {
+    "entity": "terminal",
+    "payload": {
+      "type": "object"
+    }
+  }
+}

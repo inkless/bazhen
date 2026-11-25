@@ -1,19 +1,20 @@
 {
   "$id": "RenameShellRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "idempotencyKey": {
-      "type": "string",
+      "maxLength": 200,
       "minLength": 1,
-      "maxLength": 200
+      "type": "string"
     },
     "name": {
       "anyOf": [
         {
-          "type": "string",
+          "maxLength": 80,
           "minLength": 1,
-          "maxLength": 80
+          "type": "string",
+          "x-bazhen-check": "shellName",
+          "x-bazhen-transform": "trim"
         },
         {
           "type": "null"
@@ -24,5 +25,6 @@
   "required": [
     "idempotencyKey",
     "name"
-  ]
+  ],
+  "type": "object"
 }

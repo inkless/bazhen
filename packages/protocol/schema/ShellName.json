@@ -1,7 +1,9 @@
 {
   "$id": "ShellName",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "string",
+  "maxLength": 80,
   "minLength": 1,
-  "maxLength": 80
+  "type": "string",
+  "x-bazhen-check": "shellName",
+  "x-bazhen-transform": "trim"
 }

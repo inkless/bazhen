@@ -1,13 +1,14 @@
 {
   "$id": "HolderOk",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "request": {
-      "type": "string"
+      "type": "string",
+      "x-bazhen-check": "wellFormed"
     }
   },
   "required": [
     "request"
-  ]
+  ],
+  "type": "object"
 }

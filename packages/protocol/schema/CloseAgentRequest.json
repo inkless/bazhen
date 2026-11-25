@@ -1,54 +1,55 @@
 {
   "$id": "CloseAgentRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "generation": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "force": {
-      "type": "boolean"
-    },
-    "keepShells": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-      }
-    },
     "confirmBusy": {
       "type": "boolean"
     },
     "confirmedBusy": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "terminalId": {
-            "type": "string",
-            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
           "program": {
-            "type": "string",
-            "maxLength": 200
+            "maxLength": 200,
+            "type": "string"
+          },
+          "terminalId": {
+            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           }
         },
         "required": [
           "terminalId",
           "program"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "force": {
+      "type": "boolean"
+    },
+    "generation": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "keepShells": {
+      "items": {
+        "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
     "idempotencyKey",
     "generation"
-  ]
+  ],
+  "type": "object"
 }

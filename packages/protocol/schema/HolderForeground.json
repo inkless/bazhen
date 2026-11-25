@@ -1,27 +1,26 @@
 {
   "$id": "HolderForeground",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "childPid": {
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
     },
     "childStart": {
-      "type": "integer",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
     },
     "pgid": {
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
     },
     "pgidStart": {
-      "type": "integer",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
     }
   },
   "required": [
@@ -29,5 +28,6 @@
     "childStart",
     "pgid",
     "pgidStart"
-  ]
+  ],
+  "type": "object"
 }

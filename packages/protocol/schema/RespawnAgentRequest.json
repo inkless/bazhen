@@ -1,28 +1,29 @@
 {
   "$id": "RespawnAgentRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
     "generation": {
-      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
+    },
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
     },
     "theme": {
-      "type": "string",
       "enum": [
         "light",
         "dark"
-      ]
+      ],
+      "type": "string"
     }
   },
   "required": [
     "idempotencyKey",
     "generation"
-  ]
+  ],
+  "type": "object"
 }

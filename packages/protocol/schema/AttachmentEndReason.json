@@ -1,0 +1,15 @@
+{
+  "$id": "AttachmentEndReason",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "client_closed",
+    "terminal_closed",
+    "attach_failed",
+    "daemon_restart",
+    "disconnected",
+    "evicted_slow",
+    "timed_out",
+    "replaced"
+  ],
+  "type": "string"
+}

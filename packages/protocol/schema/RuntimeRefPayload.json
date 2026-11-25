@@ -1,0 +1,20 @@
+{
+  "$id": "RuntimeRefPayload",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "locator": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "runtime": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtime",
+    "locator"
+  ],
+  "type": "object"
+}

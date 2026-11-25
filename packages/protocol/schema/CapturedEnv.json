@@ -1,0 +1,38 @@
+{
+  "$id": "CapturedEnv",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "capturedAt": {
+      "type": "string"
+    },
+    "kept": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "removed": {
+      "additionalProperties": {
+        "format": "uint64",
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "object"
+    },
+    "source": {
+      "enum": [
+        "start",
+        "refresh"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "capturedAt",
+    "source",
+    "kept",
+    "removed"
+  ],
+  "type": "object"
+}

@@ -1,6 +1,12 @@
 {
   "$id": "ShellCommandLine",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "minLength": 1,
   "type": "string",
-  "minLength": 1
+  "x-bazhen-check": [
+    "commandLineInHistory",
+    "commandLineShowable",
+    "commandLineVisible",
+    "commandLineBytes"
+  ]
 }

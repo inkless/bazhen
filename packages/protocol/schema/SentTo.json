@@ -1,0 +1,19 @@
+{
+  "$id": "SentTo",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "agentId": {
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "messageId": {
+      "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agentId",
+    "messageId"
+  ],
+  "type": "object"
+}

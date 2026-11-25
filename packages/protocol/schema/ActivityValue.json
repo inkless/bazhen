@@ -1,0 +1,15 @@
+{
+  "$id": "ActivityValue",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "working",
+    "waiting_input",
+    "needs_approval",
+    "idle",
+    "done",
+    "failed",
+    "limited",
+    "unknown"
+  ],
+  "type": "string"
+}
