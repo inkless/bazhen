@@ -11,7 +11,7 @@ import {
   withoutEventReports,
   type StreamClientFrame,
   type TuiTheme,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { Heartbeat, PING_EVERY_MS } from "./heartbeat.ts";
 import { barBytes, keyBar, withCtrl, type BarTarget } from "./bar-keys.ts";
 import { guardClose } from "./close-guard.ts";

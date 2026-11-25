@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ShellName, type Shell } from "@bazhen/protocol";
+import { ShellName, type Shell } from "@bazhen/protocol/web";
 import { closeShell, Refused, renameShell, restartShell, unlinkShell } from "../api.ts";
 import { TerminalView } from "../terminal/TerminalView.tsx";
 import { Button } from "../ui/Button.tsx";

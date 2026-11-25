@@ -1,4 +1,4 @@
-import type { Attention, StateSnapshot } from "@bazhen/protocol";
+import type { Attention, StateSnapshot } from "@bazhen/protocol/web";
 import { KINDS } from "./model.ts";
 import { agentLabelOf } from "../fleet/model.ts";
 import { deviceStorage } from "../storage.ts";

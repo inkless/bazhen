@@ -1,4 +1,4 @@
-import { HealthResponse } from "@bazhen/protocol";
+import { HealthResponse } from "@bazhen/protocol/web";
 
 const Spoken = HealthResponse.pick({ protocolId: true });
 

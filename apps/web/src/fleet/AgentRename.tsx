@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
-import { AGENT_NAME_MAX, AgentName, type Agent } from "@bazhen/protocol";
+import { AGENT_NAME_MAX, AgentName, type Agent } from "@bazhen/protocol/web";
 import { Refused, renameAgent } from "../api.ts";
 import { Button } from "../ui/Button.tsx";
 import { useAction } from "../shells/action.ts";

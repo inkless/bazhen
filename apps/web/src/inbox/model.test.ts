@@ -6,7 +6,7 @@ import type {
   AttentionKind,
   Notice,
   StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import {
   closedNotices,
   closedRows,

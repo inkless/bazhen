@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Terminal } from "@xterm/headless";
-import { HISTORY_LINES, HOLDER_MAX_HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol";
+import { HISTORY_LINES, HOLDER_MAX_HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol/web";
 import {
   onAlternateScreen,
   scrollbackFor,

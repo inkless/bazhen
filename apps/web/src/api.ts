@@ -25,7 +25,7 @@ import {
   type HarnessId,
   type Signal,
   type TuiTheme,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import pageProtocol from "virtual:bazhen/protocol-id";
 import { isAnotherBuild } from "./build.ts";
 

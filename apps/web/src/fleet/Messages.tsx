@@ -1,4 +1,4 @@
-import type { StateSnapshot } from "@bazhen/protocol";
+import type { StateSnapshot } from "@bazhen/protocol/web";
 import { observedRows } from "./model.ts";
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });

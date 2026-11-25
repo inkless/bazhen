@@ -1,4 +1,4 @@
-import type { Shell } from "@bazhen/protocol";
+import type { Shell } from "@bazhen/protocol/web";
 import { shellCount } from "../shells/model.ts";
 import { agentLabel, exitText, type Fleet } from "./model.ts";
 

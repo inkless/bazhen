@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from "react";
-import type { Agent, AgentState, Shell } from "@bazhen/protocol";
+import type { Agent, AgentState, Shell } from "@bazhen/protocol/web";
 import {
   closeAgent,
   forceCloseAgent,

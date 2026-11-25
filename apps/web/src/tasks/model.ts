@@ -5,7 +5,7 @@ import {
   type Role,
   type StateSnapshot,
   type Task,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { agentLabelOf, isEnded } from "../fleet/model.ts";
 
 /** Who holds a role on a task, as a row names them. */

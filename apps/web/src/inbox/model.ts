@@ -4,7 +4,7 @@ import type {
   Notice,
   NoticeDevice,
   StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { agentLabelOf } from "../fleet/model.ts";
 
 export interface InboxRow {

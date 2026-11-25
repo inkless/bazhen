@@ -4,7 +4,7 @@ import {
   type ApprovalDecision,
   type Notice,
   type StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { answer, dismiss, dismissNotice, reply, resend } from "../api.ts";
 import { Button } from "../ui/Button.tsx";
 import {

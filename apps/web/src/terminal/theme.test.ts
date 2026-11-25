@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { TERMINAL_COLOURS } from "@bazhen/protocol";
+import { TERMINAL_COLOURS } from "@bazhen/protocol/web";
 import { toHex } from "../ui/token-sheet.ts";
 import { inOtherTheme, terminalTheme } from "./theme.ts";
 

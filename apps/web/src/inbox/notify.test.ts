@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Attention, StateSnapshot } from "@bazhen/protocol";
+import type { Agent, Attention, StateSnapshot } from "@bazhen/protocol/web";
 import {
   freshItems,
   notificationsOn,
