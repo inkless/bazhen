@@ -734,6 +734,24 @@ mod tests {
         assert_eq!(f.left(&sub, &worker), f.left_by_close(&sub, &lead));
     }
 
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn tells_those_under_a_lost_agent_it_closes_and_lifts_what_the_close_strands() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, lead, generation) = launched();
+        let worker = runtime()
+            .block_on(f.launch(request("k-2")))
+            .unwrap()
+            .agent_id;
+        let sub = f.leading(&lead, &worker);
+        mark(&f, &lead, AgentChange::Lost);
+        f.fake().set(|state| state.fail_closes = true);
+        runtime()
+            .block_on(f.agents.close(lead.as_str(), &closing("c-1", generation)))
+            .unwrap();
+        assert_eq!(f.left(&sub, &worker), f.left_by_close(&sub, &lead));
+    }
+
     fn closed_terminals(f: &Fixture) -> Vec<String> {
         let mut closed = Vec::new();
         f.fake().set(|state| closed.clone_from(&state.closed));
