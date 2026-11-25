@@ -955,6 +955,8 @@ const NOT_DECODERS: Record<string, string> = {
     "Harness::route's default, which reads nothing and returns None: each adapter's own is listed with its own fuzz target",
   "crates/bazhen-daemon/src/devices.rs::token_of":
     "encodes random bytes the daemon read itself as base64url; parses nothing",
+  "crates/bazhen-daemon/src/failure.rs::replace":
+    "matches failure_detail's patterns over the byte-per-UTF-16-unit copy of a &str it is handed, and is reached only through failure_detail, which the failure_detail target fuzzes",
   "crates/bazhen-daemon/src/paired.rs::dismiss":
     "reads its body only as serde_json's derive for DismissNoticeRequest, one string field, refusing anything else whole",
   "crates/bazhen-daemon/src/pairing.rs::code_from":

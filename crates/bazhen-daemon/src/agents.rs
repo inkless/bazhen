@@ -29,7 +29,7 @@ use tokio_util::task::TaskTracker;
 
 use self::prompts::{Composed, FLEET, Prompts, compose};
 use crate::budget::{Budget, Counts, TerminalLimit};
-use crate::holder::cut_detail;
+use crate::failure::failure_detail;
 use crate::pairing::random_bytes;
 use crate::roles::Roles;
 use crate::shells::{RUNTIME, ShellError, resolve_directory};
@@ -439,7 +439,7 @@ impl Agents {
             Err(cause) => {
                 tracing::error!("bazhen: agent {agent} failed to launch: {cause}");
                 self.deps.prompts.remove(&agent);
-                let detail = cut_detail(cause);
+                let detail = failure_detail(&cause);
                 self.failed(key, asked, launched, &detail).await?;
                 Err(AgentError::LaunchFailed {
                     agent: agent.as_str().to_owned(),
@@ -1229,8 +1229,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn records_a_refused_launch_as_failed_saying_why_and_answers_a_repeat_with_the_same_failure() {
-        let stub = StubHarness::refusing(LaunchError::Refused("no such model".to_owned()));
+    fn records_a_refused_launch_as_failed_saying_why_secrets_taken_out_and_the_same_to_a_repeat() {
+        let stub = StubHarness::refusing(LaunchError::Refused(
+            "no such model; api_key = s3cr3t".to_owned(),
+        ));
         let f = stubbed(&stub);
         let (first, again, agent) = runtime().block_on(async {
             let first = f.launch(request("k-1")).await;
@@ -1243,12 +1245,12 @@ pub(crate) mod tests {
         let Err(AgentError::LaunchFailed { agent: failed, why }) = first else {
             panic!("launched: {first:?}");
         };
-        assert_eq!(why, "no such model");
+        assert_eq!(why, "no such model; api_key = [redacted]");
         assert_eq!(
             again,
             Err(AgentError::LaunchFailed {
                 agent: failed.clone(),
-                why: "an earlier attempt failed: no such model".to_owned(),
+                why: "an earlier attempt failed: no such model; api_key = [redacted]".to_owned(),
             })
         );
         assert_eq!(
@@ -1257,7 +1259,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             f.last("agent.failed"),
-            serde_json::json!({"reason": "launch_rejected", "detail": "no such model"})
+            serde_json::json!({"reason": "launch_rejected", "detail": "no such model; api_key = [redacted]"})
         );
         assert!(agent["terminalId"].is_string());
         assert_eq!(stub.launches.lock().unwrap().len(), 1);

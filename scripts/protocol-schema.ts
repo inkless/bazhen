@@ -21,6 +21,7 @@ import { holderFixtures } from "../packages/protocol/src/holder-fixtures.ts";
 import { agentEventFixture } from "./agent-event-fixtures.ts";
 import { codexFixture } from "./codex-fixtures.ts";
 import { coreFixture } from "./core-fixtures.ts";
+import { detailFixture } from "./detail-fixtures.ts";
 import { numberFixture } from "./number-fixtures.ts";
 import { roleFixture } from "./role-fixtures.ts";
 import { filesHash, protocolFiles, protocolId } from "../packages/protocol/src/id.ts";
@@ -91,6 +92,7 @@ const outputs = async (): Promise<Record<string, Record<string, string>>> => ({
   "fixtures/roles/": roleFixture(),
   "fixtures/agents/": agentEventFixture(),
   "fixtures/numbers/": numberFixture(),
+  "fixtures/details/": detailFixture(),
   "fixtures/codex/": await codexFixture(),
 });
 

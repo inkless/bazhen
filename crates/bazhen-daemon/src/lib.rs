@@ -15,6 +15,7 @@ mod devices;
 mod doctor;
 mod env;
 mod events;
+pub mod failure;
 mod guard;
 mod harnesses;
 mod heartbeat;
