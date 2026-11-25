@@ -297,4 +297,47 @@ mod tests {
             [true, false]
         );
     }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// What reading `bytes` with these limits hands on and answers, worked out whole: each
+        /// line ended within the first `limit` bytes, and, once the limit is reached, whether
+        /// the line still open there is half as long.
+        fn expected(bytes: &[u8], limit: usize) -> (Vec<String>, bool) {
+            let read = bytes.get(..limit.min(bytes.len())).unwrap();
+            let mut parts: Vec<&[u8]> = read.split(|&b| b == b'\n').collect();
+            let open = parts.pop().unwrap_or_default();
+            let lines = parts
+                .iter()
+                .map(|l| String::from_utf8_lossy(l).into_owned())
+                .collect();
+            (lines, bytes.len() >= limit && open.len() >= limit / 2)
+        }
+
+        proptest! {
+            #[test]
+            fn hands_on_each_line_ended_within_its_limit_whatever_its_reads_cut(
+                bytes in proptest::collection::vec(
+                    prop_oneof![Just(b'\n'), Just(b'a'), Just(0xff_u8), any::<u8>()],
+                    0..600,
+                ),
+                chunk in 1_usize..64,
+                limit in 1_usize..512,
+            ) {
+                let dir = TempDir::new("transcript-property");
+                let path = dir.path().join("t.jsonl");
+                std::fs::write(&path, &bytes).unwrap();
+                let reader = TranscriptReader::with_limits(Box::new(|_| {}), chunk, limit);
+                let mut handed = Vec::new();
+                let holds = reader.scan(path.to_str().unwrap(), &mut |line| {
+                    handed.push(line.to_owned());
+                    false
+                });
+                prop_assert_eq!((handed, holds), expected(&bytes, limit));
+            }
+        }
+    }
 }
