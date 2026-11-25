@@ -1085,6 +1085,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn refuses_to_relaunch_an_agent_with_no_session_recording_nothing() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        let unbound = agent.as_str().to_owned();
+        runtime()
+            .block_on(f.store.run(move |store| {
+                store.write(|w| {
+                    w.connection().execute(
+                        "UPDATE agent_sessions SET external_ref = NULL WHERE id = ?",
+                        [unbound],
+                    )?;
+                    Ok::<_, rusqlite::Error>(())
+                })
+            }))
+            .unwrap()
+            .unwrap();
+        let before = f.types().len();
+        let id = agent.as_str();
+        let refused = runtime().block_on(f.agents.relaunch(
+            id,
+            &relaunching("r-1", generation, None),
+            recording(&f, &Calls::default()),
+        ));
+        assert_eq!(
+            (refused, f.types().len(), found(&f, &agent).state),
+            (
+                Err(AgentError::NotResumable(format!(
+                    "agent {id} has no session to resume; relaunch it fresh to start it on a new session"
+                ))),
+                before,
+                AgentState::Lost
+            )
+        );
+    }
+
+    #[test]
     fn refuses_to_relaunch_an_agent_whose_session_cant_resume_recording_nothing() {
         let stub = StubHarness::new(pull());
         let (f, agent, generation) = lost(&stub);
