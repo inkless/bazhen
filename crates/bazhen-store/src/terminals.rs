@@ -168,7 +168,8 @@ pub(crate) fn project(
         TerminalChange::ForegroundChanged(_)
         | TerminalChange::Renamed(_)
         | TerminalChange::NeedsRestart(_)
-        | TerminalChange::RestartCleared => describe(tx, at, id, change)?,
+        | TerminalChange::RestartCleared
+        | TerminalChange::Unlinked => describe(tx, at, id, change)?,
     }
     Ok(())
 }
@@ -201,6 +202,13 @@ fn describe(
             let protocol = serde_json::to_string(&payload.protocol)?;
             set_terminal(tx, at, change, id, &[("restart_protocol", &protocol)])?;
         }
+        TerminalChange::Unlinked => set_shell(
+            tx,
+            at,
+            change,
+            id,
+            &[("linked_agent_id", &rusqlite::types::Null)],
+        )?,
         TerminalChange::RestartCleared => set_terminal(
             tx,
             at,
@@ -510,6 +518,22 @@ impl Reads<'_> {
         self.0
             .query_row(&format!("{SHELL_ROW} AND id = ?"), [id], shell_row)
             .optional()
+    }
+
+    /// The shells linked to `agent` not yet closed or failed, oldest first (`linkedShells`):
+    /// those that close with it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn linked_shells(self, agent: &str) -> rusqlite::Result<Vec<ShellRow>> {
+        self.0
+            .prepare(&format!(
+                "{SHELL_ROW} AND linked_agent_id = ? AND state NOT IN ('closed', 'failed')
+                 ORDER BY created_event_id"
+            ))?
+            .query_map([agent], shell_row)?
+            .collect()
     }
 
     /// The shells of this machine's environment a restarted daemon may still find running, as
@@ -1001,6 +1025,97 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn gives_an_agents_linked_shells_oldest_first_until_each_closes_or_is_unlinked() {
+        let dir = TempDir::new("linked");
+        let mut store = Store::open(&dir.db("linked.db")).unwrap();
+        let environment = environment(&mut store);
+        let [agent, other] = [
+            "agent_0190a1b2c3d47abc8def0123456789a1",
+            "agent_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        let sessions = [agent, other].map(|id| {
+            format!(
+                "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   created_event_id, updated_event_id)
+                 VALUES ('{id}', '{}', 'claude-code', 'p', '/repo/{id}', 'running', 1, 1);",
+                environment.as_str()
+            )
+        });
+        store.db.execute_batch(&sessions.concat()).unwrap();
+        let shells: Vec<TerminalId> = [Some(agent), Some(other), None, Some(agent), Some(agent)]
+            .into_iter()
+            .enumerate()
+            .map(|(n, linked)| {
+                let terminal = TerminalId::mint(1, [u8::try_from(n).unwrap() + 10; 16]);
+                change(
+                    &mut store,
+                    &terminal,
+                    TerminalChange::Opened(TerminalOpened {
+                        environment_id: environment.clone(),
+                        cwd: "/w".to_owned(),
+                        linked_agent_id: linked.map(|id| AgentId::parse(id).unwrap()),
+                        theme: None,
+                        restart_of: None,
+                        runtime: Some("holder".to_owned()),
+                    }),
+                )
+                .unwrap();
+                terminal
+            })
+            .collect();
+        change(&mut store, &shells[3], TerminalChange::Unlinked).unwrap();
+        change(
+            &mut store,
+            &shells[4],
+            TerminalChange::Running(incarnation("1")),
+        )
+        .unwrap();
+        change(&mut store, &shells[4], TerminalChange::Closing).unwrap();
+        let linked = |store: &Store| -> Vec<TerminalId> {
+            store
+                .reads()
+                .linked_shells(agent)
+                .unwrap()
+                .into_iter()
+                .map(|shell| shell.id)
+                .collect()
+        };
+        let closing = linked(&store);
+        change(
+            &mut store,
+            &shells[4],
+            TerminalChange::Closed(TerminalClosed {
+                reason: TerminalClosedReason::AgentClosed,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                closing,
+                linked(&store),
+                store
+                    .reads()
+                    .shell(shells[3].as_str())
+                    .unwrap()
+                    .unwrap()
+                    .linked_agent_id,
+                store.reads().agent_cwd(agent).unwrap(),
+                store
+                    .reads()
+                    .agent_cwd("agent_0190a1b2c3d47abc8def0123456789a3")
+                    .unwrap(),
+            ),
+            (
+                vec![shells[0].clone(), shells[4].clone()],
+                vec![shells[0].clone()],
+                None,
+                Some(format!("/repo/{agent}")),
+                None,
+            )
+        );
     }
 
     #[test]

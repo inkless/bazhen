@@ -83,6 +83,15 @@ impl Reads<'_> {
         self.first("SELECT state FROM agent_sessions WHERE id = ?", agent_id)
     }
 
+    /// The directory the agent was launched in, as resolved: where a shell linked to it opens.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_cwd(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        self.first("SELECT cwd FROM agent_sessions WHERE id = ?", agent_id)
+    }
+
     /// The agent `reference` names: by its id, any agent the store knows; by its name, the one
     /// not ended that holds it. `None` for one it names no agent by.
     ///

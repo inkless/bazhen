@@ -146,6 +146,8 @@ pub enum TerminalChange {
     ForegroundChanged(TerminalForegroundChanged),
     NeedsRestart(TerminalNeedsRestart),
     RestartCleared,
+    /// A linked shell made standalone: it no longer closes with its agent.
+    Unlinked,
 }
 
 impl TerminalChange {
@@ -162,6 +164,7 @@ impl TerminalChange {
             Self::ForegroundChanged(_) => "terminal.foreground_changed",
             Self::NeedsRestart(_) => "terminal.needs_restart",
             Self::RestartCleared => "terminal.restart_cleared",
+            Self::Unlinked => "terminal.unlinked",
         }
     }
 
@@ -176,7 +179,7 @@ impl TerminalChange {
             Self::Renamed(payload) => serde_json::to_string(payload),
             Self::ForegroundChanged(payload) => serde_json::to_string(payload),
             Self::NeedsRestart(payload) => serde_json::to_string(payload),
-            Self::Lost | Self::Closing | Self::RestartCleared => {
+            Self::Lost | Self::Closing | Self::RestartCleared | Self::Unlinked => {
                 serde_json::to_string(&TerminalNoted {})
             }
         }
