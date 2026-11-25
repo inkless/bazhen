@@ -304,6 +304,7 @@ async fn shells(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
         );
     }
+    shells.settle_orphans().await;
     let open = store
         .run(|store| store.reads().open_terminals())
         .await
@@ -394,8 +395,8 @@ async fn agents_tick(agents: Arc<Agents>, every: Duration, stop: CancellationTok
     }
 }
 
-/// Tries again the shells the start's reconcile couldn't settle, then reads the running shells'
-/// foregrounds, and which terminals need a restart, `every` so often, until `stop`, which ends a
+/// Tries again the shells the start's reconcile couldn't settle, closes those left linked to an
+/// agent that ended, then reads the running shells' foregrounds, and which terminals need a restart, `every` so often, until `stop`, which ends a
 /// tick midway: each of its writes to the store is whole on its own. A stop amid a retry's close
 /// or unlink may leave the shell closing, or still naming its agent where it runs; the next
 /// start's reconcile settles it. A restart read that fails is said once until one reads again.
@@ -409,6 +410,7 @@ async fn every_tick(shells: Arc<Shells>, every: Duration, stop: CancellationToke
         let swept = stop
             .run_until_cancelled(async {
                 shells.reconcile_again().await;
+                shells.settle_orphans().await;
                 shells.refresh_foregrounds().await;
                 shells.sweep_restarts().await
             })
