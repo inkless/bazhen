@@ -213,6 +213,9 @@ export type HookEvent = z.infer<typeof HookEvent>;
 export const HostPtys = z.object({ exact: z.boolean(), max: z.number().int().min(1).max(9007199254740991), used: z.number().int().min(0).max(9007199254740991) });
 export type HostPtys = z.infer<typeof HostPtys>;
 
+export const HttpCallers = z.discriminatedUnion("state", [z.object({ state: z.literal("identified") }), z.object({ state: z.literal("unidentified"), why: z.string() })]);
+export type HttpCallers = z.infer<typeof HttpCallers>;
+
 export const IdempotencyKey = z.string().min(1).max(200);
 export type IdempotencyKey = z.infer<typeof IdempotencyKey>;
 
@@ -714,7 +717,7 @@ export type RecordedEvent = z.infer<typeof RecordedEvent>;
 export const Web = z.object({ allowInsecureOrigins: z.boolean(), app: z.string().nullable().optional(), appRefused: z.string().optional(), externalOrigins: z.array(z.string()), from: OriginsFrom.nullable(), lan: Lan.nullable().optional(), pairing: Pairing.optional() });
 export type Web = z.infer<typeof Web>;
 
-export const DoctorResponse = z.object({ agentCli: AgentCli.optional(), agents: AgentsSettings, appVersion: z.string(), codex: Codex.optional(), config: ConfigFile, containment: Containment.optional(), env: CapturedEnv, holder: Holder.optional(), hookClient: HookClient, notifications: Notifications.optional(), peerReader: PeerReader.nullable().optional(), protocolId: z.string(), runtimes: z.array(RuntimeHealthReport), terminals: Terminals.optional(), web: Web.optional() });
+export const DoctorResponse = z.object({ agentCli: AgentCli.optional(), agents: AgentsSettings, appVersion: z.string(), codex: Codex.optional(), config: ConfigFile, containment: Containment.optional(), env: CapturedEnv, holder: Holder.optional(), hookClient: HookClient, httpCallers: HttpCallers.optional(), notifications: Notifications.optional(), peerReader: PeerReader.nullable().optional(), protocolId: z.string(), runtimes: z.array(RuntimeHealthReport), terminals: Terminals.optional(), web: Web.optional() });
 export type DoctorResponse = z.infer<typeof DoctorResponse>;
 
 export const EventFrame = z.discriminatedUnion("type", [z.object({ event: Event, type: z.literal("event") }), z.object({ reason: ResetReason, type: z.literal("reset") })]);

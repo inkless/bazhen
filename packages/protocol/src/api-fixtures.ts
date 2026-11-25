@@ -704,6 +704,7 @@ const fullDoctor = {
     total: { asked: "infinity", bytes: null },
     swap: { asked: "0", bytes: 0 },
   },
+  httpCallers: { state: "identified" },
   env: { capturedAt: AT, source: "refresh", kept: 40, removed: { secrets: 2, session: 1 } },
 };
 
@@ -759,6 +760,7 @@ const nullDoctor = {
     ],
   },
   containment: { state: "uncontained", why: "no systemd user manager" },
+  httpCallers: { state: "unidentified", why: "/proc/net/tcp can't be read" },
 };
 
 const certless = {

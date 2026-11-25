@@ -135,6 +135,9 @@
           "bytes": 0
         }
       },
+      "httpCallers": {
+        "state": "identified"
+      },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
         "source": "refresh",
@@ -278,6 +281,9 @@
           "asked": "0",
           "bytes": 0
         }
+      },
+      "httpCallers": {
+        "state": "identified"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -450,6 +456,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       }
     },
     "parsed": {
@@ -543,6 +553,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -1282,6 +1296,9 @@
           "bytes": 0
         }
       },
+      "httpCallers": {
+        "state": "identified"
+      },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
         "source": "refresh",
@@ -1425,6 +1442,9 @@
           "asked": "0",
           "bytes": 0
         }
+      },
+      "httpCallers": {
+        "state": "identified"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -1573,6 +1593,9 @@
           "bytes": 0
         }
       },
+      "httpCallers": {
+        "state": "identified"
+      },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
         "source": "refresh",
@@ -1716,6 +1739,9 @@
           "asked": "0",
           "bytes": 0
         }
+      },
+      "httpCallers": {
+        "state": "identified"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -1864,6 +1890,9 @@
           "bytes": 0
         }
       },
+      "httpCallers": {
+        "state": "identified"
+      },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
         "source": "refresh",
@@ -2007,6 +2036,9 @@
           "asked": "0",
           "bytes": 0
         }
+      },
+      "httpCallers": {
+        "state": "identified"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -2404,6 +2436,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       }
     },
     "parsed": {
@@ -2497,6 +2533,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -2605,6 +2645,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       }
     },
     "parsed": {
@@ -2698,6 +2742,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -3371,6 +3419,14 @@
           ]
         }
       },
+      "httpCallers": {
+        "state": "identified",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
         "source": "refresh",
@@ -3524,6 +3580,9 @@
           "asked": "0",
           "bytes": 0
         }
+      },
+      "httpCallers": {
+        "state": "identified"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",
@@ -3807,6 +3866,15 @@
           ]
         }
       },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read",
+        "fieldFromANewerDaemon": {
+          "any": [
+            1
+          ]
+        }
+      },
       "fieldFromANewerDaemon": {
         "any": [
           1
@@ -3904,6 +3972,10 @@
       "containment": {
         "state": "uncontained",
         "why": "no systemd user manager"
+      },
+      "httpCallers": {
+        "state": "unidentified",
+        "why": "/proc/net/tcp can't be read"
       },
       "env": {
         "capturedAt": "2026-11-16T12:00:00.000Z",

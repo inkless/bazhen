@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bazhen_peer::tcp::{self, ProcView, Scan};
 use bazhen_peer::{Peer, Refused};
+use bazhen_protocol::daemon::HttpCallers;
 use bazhen_protocol::ids::AgentId;
 use bazhen_store::LiveTerminal;
 use rustix::process::Pid;
@@ -29,6 +30,61 @@ pub(crate) const MAX_READING: usize = 8;
 /// Why a loopback TCP caller isn't read where `/proc` doesn't say who holds a socket.
 pub(crate) const UNIDENTIFIABLE: &str =
     "the caller of a loopback HTTP request can't be identified on this platform";
+
+/// Whether `peers` tell which process calls over loopback HTTP, as the daemon checks once it starts:
+/// a call of its own, to a listener of its own, must read as its process alone. Where `/proc` is
+/// hidden, or the daemon runs outside its callers' PID namespace, it doesn't, and every HTTP caller
+/// will be refused.
+pub(crate) async fn calling_itself(peers: &Peers) -> HttpCallers {
+    let called = async {
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let caller = tokio::net::TcpStream::connect(listener.local_addr()?).await?;
+        let (accepted, _) = listener.accept().await?;
+        Ok::<_, io::Error>((caller, accepted))
+    };
+    match called.await {
+        Ok((_caller, accepted)) => {
+            let socket = PeerSocket::tcp_accepted_now(accepted.peer_addr(), accepted.local_addr());
+            found_itself(peers.read(&socket).await, std::process::id())
+        }
+        Err(err) => HttpCallers::Unidentified {
+            why: format!("it can't call itself over loopback: {err}"),
+        },
+    }
+}
+
+/// What a call of the daemon's own, `read`, says of how it reads HTTP callers: only `itself`
+/// may hold the call's socket.
+fn found_itself(read: PeerRead, itself: u32) -> HttpCallers {
+    let why = match read {
+        PeerRead::Held(holders)
+            if holders
+                .iter()
+                .map(|holder| u32::try_from(holder.pid.as_raw_pid()).ok())
+                .eq([Some(itself)]) =>
+        {
+            return HttpCallers::Identified;
+        }
+        PeerRead::Held(holders) => {
+            let pids = holders
+                .iter()
+                .map(|holder| holder.pid.as_raw_pid().to_string())
+                .collect::<Vec<_>>();
+            format!(
+                "calling itself, pid {itself}, it found its socket held by {}",
+                if pids.is_empty() {
+                    "none".to_owned()
+                } else {
+                    pids.join(", ")
+                }
+            )
+        }
+        PeerRead::Unread(why) | PeerRead::Retry(why) => why,
+        PeerRead::Late => "its own call wasn't read in time".to_owned(),
+        PeerRead::Read(_) => "its own call read as a Unix socket's".to_owned(),
+    };
+    HttpCallers::Unidentified { why }
+}
 
 /// A connection, as every request on it carries it: its end of a Unix socket, a dup of its
 /// descriptor or why there is none, or a loopback TCP connection's two addresses; and the epoch
@@ -1162,6 +1218,65 @@ mod tests {
             Ok(SocketAddr::from(([127, 0, 0, 1], port))),
             Ok(SocketAddr::from(([127, 0, 0, 1], 7900))),
         )
+    }
+
+    #[test]
+    fn finds_it_reads_http_callers_only_where_its_own_call_is_held_by_it_alone() {
+        let held =
+            |pids: &[i32]| PeerRead::Held(pids.iter().map(|&at| chain(at, at, &[1])).collect());
+        let unidentified = |why: &str| HttpCallers::Unidentified {
+            why: why.to_owned(),
+        };
+        assert_eq!(
+            [
+                found_itself(held(&[900]), 900),
+                found_itself(held(&[900, 901]), 900),
+                found_itself(held(&[901]), 900),
+                found_itself(held(&[]), 900),
+                found_itself(PeerRead::Unread("hidden".to_owned()), 900),
+                found_itself(PeerRead::Retry("moved".to_owned()), 900),
+                found_itself(PeerRead::Late, 900),
+            ],
+            [
+                HttpCallers::Identified,
+                unidentified("calling itself, pid 900, it found its socket held by 900, 901"),
+                unidentified("calling itself, pid 900, it found its socket held by 901"),
+                unidentified("calling itself, pid 900, it found its socket held by none"),
+                unidentified("hidden"),
+                unidentified("moved"),
+                unidentified("its own call wasn't read in time"),
+            ]
+        );
+    }
+
+    /// The daemon's own call is read through `/proc` as any HTTP caller's: on this host, as its own
+    /// process; where the tables don't show it or nothing reads TCP callers, not at all.
+    #[test]
+    fn calls_itself_to_find_whether_it_can_tell_who_calls_it_over_http() {
+        let (hidden, _) = tcp_readers(View::of(0));
+        let unreadable = Peers::default().with_tcp(None);
+        let found = runtime().block_on(async {
+            [
+                calling_itself(&hidden).await,
+                calling_itself(&unreadable).await,
+            ]
+        });
+        assert_eq!(
+            found,
+            [
+                HttpCallers::Unidentified {
+                    why: "no socket on this host is the caller's end of the connection".to_owned()
+                },
+                HttpCallers::Unidentified {
+                    why: UNIDENTIFIABLE.to_owned()
+                },
+            ]
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            runtime().block_on(calling_itself(&Peers::default())),
+            HttpCallers::Identified
+        );
     }
 
     #[test]

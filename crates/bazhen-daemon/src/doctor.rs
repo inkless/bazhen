@@ -31,6 +31,8 @@ pub(crate) struct Settled {
     pub(crate) env: CapturedEnv,
     /// Where doctor finds the `bazhen` the agents run, read as it is asked.
     pub(crate) agent_cli: crate::agent_cli::Lookup,
+    /// Whether the daemon tells who calls it over loopback HTTP, as it found once it started.
+    pub(crate) http_callers: Option<bazhen_protocol::daemon::HttpCallers>,
 }
 
 /// What the start-up settings say, for [`Settled`].
@@ -111,6 +113,8 @@ impl Settled {
                 removed: Record::new(capture.removed.clone()),
             },
             agent_cli: crate::agent_cli::Lookup::of(&capture.env, settings.exe),
+            // Found once the daemon calls itself, after its settings are read.
+            http_callers: None,
         }
     }
 }
@@ -178,6 +182,7 @@ pub(crate) async fn doctor(State(shared): State<Shared>) -> Response {
         terminals: Some(shells.budget().report(counts)),
         holder: Some(holder_doctor(&settled.install, holders)),
         containment: Some(terminals.containment()),
+        http_callers: settled.http_callers,
         env: settled.env,
     };
     axum::Json(answer).into_response()
