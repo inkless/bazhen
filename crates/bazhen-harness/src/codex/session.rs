@@ -10,7 +10,7 @@ use super::{AUTO_CONTINUED, INTERRUPTED, Threads, lock, on};
 use crate::js::Js;
 use crate::{
     AgentId, Bound, BoxFuture, ChannelError, ChannelErrorKind, ChannelPort, Endpoint, Followed,
-    Keyed, Lookup, Observed, Reloaded, Report, Session, SessionKey,
+    Keyed, Lookup, Observed, Reloaded, Session, SessionKey,
 };
 use bazhen_protocol::agents::{ActivityValue, ExternalRef, ExternalRefKind};
 use serde_json::{Value, json};
@@ -172,16 +172,6 @@ impl Session for CodexSession {
                 .map(str::to_owned)
                 .to_vec(),
         }
-    }
-
-    /// The thread a notification or a request names.
-    fn route(&self, report: &Report<'_>) -> Option<SessionKey> {
-        let (Report::Notification { params, .. } | Report::ServerRequest { params, .. }) = report
-        else {
-            return None;
-        };
-        let params = Js::parse(params)?;
-        string(&params, "threadId").map(|thread| SessionKey(thread.to_owned()))
     }
 
     /// `initialize`, failing on a server for any Codex home but the agents', which the daemon backs

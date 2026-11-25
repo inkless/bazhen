@@ -439,6 +439,15 @@ impl Harness for Codex {
         true
     }
 
+    /// The thread a notification or a request names.
+    fn route(&self, report: &Report<'_>) -> Option<SessionKey> {
+        let (Report::Notification { params, .. } | Report::ServerRequest { params, .. }) = report
+        else {
+            return None;
+        };
+        thread_of(&Js::parse(params)?).map(SessionKey)
+    }
+
     fn ingest(&self, report: Report<'_>, context: &IngestContext<'_>) -> Ingested {
         let bound = context.agent.is_some();
         match report {

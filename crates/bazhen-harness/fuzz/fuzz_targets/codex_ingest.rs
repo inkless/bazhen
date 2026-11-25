@@ -2,14 +2,14 @@
 
 use bazhen_harness::{
     AgentId, Gate, HarnessDeps, HarnessId, Held, IngestContext, Ingested, Key, Observed, Reply,
-    Report, Session, compiled,
+    Report, compiled,
 };
 use libfuzzer_sys::fuzz_target;
 
 // One notification, request or terminal title from Codex's app-server, as a server could send
 // it: no report may panic the adapter, text that isn't JSON says nothing, every fact is about a
 // thread, the account or the agent a title is for, nothing is gated, and only a request is held,
-// with no deadline, since the TUI asks the same request. The session routes a notification or a
+// with no deadline, since the TUI asks the same request. The harness routes a notification or a
 // request to the thread each of its facts is about, and nothing else anywhere.
 fuzz_target!(|input: (u8, &str, &[u8], &str)| {
     let (kind, method, params, text) = input;
@@ -47,8 +47,7 @@ fuzz_target!(|input: (u8, &str, &[u8], &str)| {
             payload: params,
         },
     };
-    let session: Box<dyn Session> = codex.session().expect("Codex keeps a connection");
-    let routed = session.route(&report);
+    let routed = codex.route(&report);
     if kind % 4 >= 2 {
         assert_eq!(routed, None);
     }

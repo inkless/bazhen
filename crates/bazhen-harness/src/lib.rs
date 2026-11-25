@@ -60,6 +60,13 @@ pub trait Harness: Send + Sync {
     ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>>;
     /// Whether [`Harness::resume`] would find the session, by what its reports said of it.
     fn can_resume(&self, evidence: &Evidence<'_>) -> bool;
+    /// The session a report over its server's channel is from, none for a harness with no server.
+    /// The daemon calls it before [`Harness::ingest`], and hands `ingest` the agent bound to that
+    /// session and the session. It reads the report alone, so routing never waits on the
+    /// connection, which may be picking up every bound session ([`Session::connected`]).
+    fn route(&self, _report: &Report<'_>) -> Option<SessionKey> {
+        None
+    }
     /// One report in, the facts it gives and how to answer it out.
     fn ingest(&self, report: Report<'_>, context: &IngestContext<'_>) -> Ingested;
     /// Whether mail sent to a running agent now reaches it with nothing else happening.
@@ -224,9 +231,6 @@ pub trait PushPort: RunPort {
 pub trait Session: Send {
     /// Where its server listens, and how to start it.
     fn endpoint(&self) -> Endpoint;
-    /// The session a report over the channel is from. The daemon calls it before
-    /// [`Harness::ingest`], and hands `ingest` the agent bound to that session and the session.
-    fn route(&self, report: &Report<'_>) -> Option<SessionKey>;
     /// What the daemon says first on each connection, before anything else is sent: the server's
     /// version, none when the server names none, or why the server can't be used.
     ///

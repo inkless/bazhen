@@ -2,4 +2,5 @@
 //! a WebSocket on the server's Unix socket. The adapter says what to send; the daemon owns the
 //! socket.
 
+pub mod reconnect;
 pub mod rpc;

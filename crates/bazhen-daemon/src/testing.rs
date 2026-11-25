@@ -1,6 +1,13 @@
 //! What the daemon's tests share.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use futures_util::{SinkExt as _, StreamExt as _};
+use serde_json::Value;
+use tokio::net::{UnixListener, UnixStream};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 /// A directory of the test's own, removed when the test ends, whether or not it passed.
 pub(crate) struct TempDir(PathBuf);
@@ -62,4 +69,36 @@ impl FullBacklog {
             _queued: std::os::unix::net::UnixStream::connect(socket).unwrap(),
         }
     }
+}
+
+/// `test` within `limit`, so a test that would wait forever on a reply fails instead.
+pub(crate) async fn within<T>(limit: Duration, test: impl Future<Output = T>) -> T {
+    tokio::time::timeout(limit, test)
+        .await
+        .unwrap_or_else(|_| panic!("the test still waits after {limit:?}"))
+}
+
+pub(crate) async fn bounded<T>(test: impl Future<Output = T>) -> T {
+    within(Duration::from_secs(5), test).await
+}
+
+/// A server's side of one connection: a WebSocket it accepted.
+pub(crate) type Server = WebSocketStream<UnixStream>;
+
+pub(crate) async fn accepted(listener: &UnixListener) -> Server {
+    let (stream, _) = listener.accept().await.unwrap();
+    tokio_tungstenite::accept_async(stream).await.unwrap()
+}
+
+/// The next message the client sent.
+pub(crate) async fn heard(server: &mut Server) -> Value {
+    loop {
+        if let Message::Text(text) = server.next().await.unwrap().unwrap() {
+            return serde_json::from_str(text.as_str()).unwrap();
+        }
+    }
+}
+
+pub(crate) async fn say(server: &mut Server, value: Value) {
+    server.send(Message::text(value.to_string())).await.unwrap();
 }

@@ -4895,6 +4895,20 @@ describe("tests that signal processes they didn't start", () => {
     ]);
   });
 
+  it("takes a Session that a type names, as an enum's variant, for none of the holder's", () => {
+    const bodies = [
+      "assert_eq!(k, Key::Session(s));",
+      "let k = harness :: Key :: Session(s);",
+      "let s = session::Session::led_by(pid);",
+      "let s = bazhen_holder::Session::led_by(pid);",
+    ];
+    const source = bodies.map((body, i) => `#[test]\nfn t${String(i)}() { ${body} }`).join("\n");
+    expect(unmarked({ "crates/h/src/t.rs": source })).toEqual([
+      "crates/h/src/t.rs:5",
+      "crates/h/src/t.rs:7",
+    ]);
+  });
+
   it("finds the crates that reach the holder through any dependency, however deep", () => {
     const reaching = holderReachingCrates(
       meta(
@@ -5005,6 +5019,25 @@ describe("tests that signal processes they didn't start", () => {
       "crates/h/src/serve.rs:28",
       "crates/h/src/x.rs:1",
     ]);
+  });
+
+  it("needn't be marked for a close of a field that is surely one, on a binding of a struct", () => {
+    for (const { type, use } of CLOSERS) {
+      const source = [
+        use,
+        `struct Rig { tasks: ${type}, child: Child }`,
+        "struct Other { tasks: Child }",
+        "fn rig() -> Rig { todo!() }",
+        "#[test]\nfn a() { let rig = rig(); rig.tasks.close(); }",
+        "#[test]\nfn b(r: &Rig) { r.tasks.close(); }",
+        "#[test]\nfn c() { let rig = other(); rig.tasks.close(); }",
+        "#[test]\nfn d() { let rig = rig(); rig.child.close(); }",
+        "#[test]\nfn e(rig: &Other) { rig.tasks.close(); }",
+        "#[test]\nfn f() { let rig = rig(); let rig = other(); rig.tasks.close(); }",
+        "#[test]\nfn g() { let rig = rig(); rig.tasks.close(now); }",
+      ].join("\n");
+      expect(flagged(source)).toEqual(["9", "11", "13", "15", "17"]);
+    }
   });
 
   it("needn't be marked for a semaphore's own close(), and must be for any other call", () => {
