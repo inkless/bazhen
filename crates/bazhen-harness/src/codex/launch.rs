@@ -17,9 +17,24 @@ use std::time::Duration;
 /// How long one `codex queue` may run.
 const QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Where Codex's app-server listens for the Codex home `home`, as `--remote` takes it.
+/// The socket Codex's app-server listens on for the Codex home `codex_home`.
+pub(super) fn control_socket(codex_home: &str) -> String {
+    format!("{codex_home}/app-server-control/app-server-control.sock")
+}
+
+/// Where Codex's app-server listens for the Codex home `codex_home`, as `--remote` takes it.
 pub(super) fn app_server_address(codex_home: &str) -> String {
-    format!("unix://{codex_home}/app-server-control/app-server-control.sock")
+    format!("unix://{}", control_socket(codex_home))
+}
+
+/// What a resume of `thread` asks for, with the config the agent was started with: the server
+/// keeps a thread's config from the client that loaded it.
+pub(super) fn resume_params(socket: Option<&str>, thread: &str, request: &LaunchRequest) -> Value {
+    let mut params = Map::new();
+    params.insert("threadId".to_owned(), json!(thread));
+    params.insert("excludeTurns".to_owned(), json!(true));
+    config_field(&config(socket, request), &mut params);
+    Value::Object(params)
 }
 
 /// The first item of every agent's thread. A thread with no history can't be resumed, and a
@@ -149,13 +164,8 @@ impl Starts {
         channel: &dyn ChannelPort,
     ) -> Result<LaunchSpec, LaunchError> {
         let config = config(self.socket.as_deref(), request);
-        let mut params = Map::new();
-        params.insert("threadId".to_owned(), json!(session));
-        params.insert("excludeTurns".to_owned(), json!(true));
-        config_field(&config, &mut params);
-        let resumed = channel
-            .request("thread/resume", Value::Object(params))
-            .await?;
+        let params = resume_params(self.socket.as_deref(), session, request);
+        let resumed = channel.request("thread/resume", params).await?;
         // The agent stays on its own thread; a server that answered with another would rebind it.
         // The server took the request, so this is no refusal of it, as the TypeScript daemon read it.
         let thread = thread_of(&resumed)?;

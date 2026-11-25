@@ -32,6 +32,7 @@ use serde_json::Value;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A future an adapter's async method returns, boxed so a `dyn Harness` can be held.
@@ -227,7 +228,7 @@ pub trait Session: Send {
     /// [`Harness::ingest`], and hands `ingest` the agent bound to that session and the session.
     fn route(&self, report: &Report<'_>) -> Option<SessionKey>;
     /// What the daemon says first on each connection, before anything else is sent: the server's
-    /// version, or why the server can't be used.
+    /// version, none when the server names none, or why the server can't be used.
     ///
     /// # Errors
     ///
@@ -235,9 +236,9 @@ pub trait Session: Send {
     fn handshake<'a>(
         &'a mut self,
         channel: &'a dyn ChannelPort,
-    ) -> BoxFuture<'a, Result<String, ChannelError>>;
+    ) -> BoxFuture<'a, Result<Option<String>, ChannelError>>;
     /// The connection is up, after [`Session::handshake`]: picks up each bound session again, so
-    /// its facts come back.
+    /// its facts come back, and says [`Observed::Resumed`] of each it picked up.
     fn connected<'a>(
         &'a mut self,
         channel: &'a dyn ChannelPort,
@@ -336,7 +337,7 @@ pub struct HarnessDeps {
     pub daemon_socket: String,
     /// A path with every link in it resolved, as `realpath` gives it, or none for one that
     /// doesn't exist: a harness's server may name the same directory by another path.
-    pub real_path: Box<Lookup>,
+    pub real_path: Arc<Lookup>,
 }
 
 impl fmt::Debug for HarnessDeps {

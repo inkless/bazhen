@@ -32,6 +32,29 @@ pub(super) fn is_not_loaded(status: Option<&Js>) -> bool {
     activity_of(status).is_some() && status.and_then(|s| string(s, "type")) == Some("notLoaded")
 }
 
+/// The status a `thread/start` or `thread/resume` result gives its thread.
+fn status_in(result: &Js) -> Option<&Js> {
+    field(result, "thread").and_then(object)?.field("status")
+}
+
+/// The activity of a thread as `thread/start` or `thread/resume` answers with it.
+pub(super) fn result_activity(result: &Js) -> Option<ActivityValue> {
+    activity_of(status_in(result))
+}
+
+/// Whether a `thread/resume` answered that the thread is still not loaded.
+pub(super) fn result_not_loaded(result: &Js) -> bool {
+    is_not_loaded(status_in(result))
+}
+
+/// Whether a thread doing this was mid-turn, so a connection that ends cuts the turn off.
+pub(super) fn busy(activity: ActivityValue) -> bool {
+    matches!(
+        activity,
+        ActivityValue::Working | ActivityValue::NeedsApproval | ActivityValue::WaitingInput
+    )
+}
+
 /// A thread's new activity, from `thread/status/changed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ThreadStatus {

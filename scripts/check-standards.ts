@@ -879,6 +879,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-daemon/src/channel/rpc.rs::decode": "rpc_frame",
   "crates/bazhen-harness/src/claude_code/mod.rs::ClaudeCode::ingest": "ingest",
   "crates/bazhen-harness/src/codex/mod.rs::Codex::ingest": "codex_ingest",
+  "crates/bazhen-harness/src/codex/session.rs::CodexSession::route": "codex_ingest",
   "crates/bazhen-hook/src/lib.rs::parse_reply": "parse_reply",
   "crates/bazhen-hook/src/lib.rs::is_late": "parse_reply",
   "crates/bazhen/src/reply.rs::decode": "reply",
@@ -3745,12 +3746,22 @@ export function decoderFailures(
     const code = paths.includes(file) ? rustCode(read(file)) : "";
     // A call may name its type parameters, as `edge::<T>(body)` does, within one expression.
     const turbofish = String.raw`(?:\s*::\s*<[^(){};]*>)?`;
+    // A private type is reached through a trait it implements, as a `dyn Trait` or `impl Trait`:
+    // the trait named so, not merely named, as `Key::Session` names a variant.
+    const source = key.slice(0, key.indexOf(".rs::") + 3);
+    const implemented = new RegExp(`\\bimpl\\s+(\\w+)\\s+for\\s+${owner ?? ""}\\b`, "g");
+    const traits =
+      owner === undefined || !paths.includes(source)
+        ? []
+        : [...rustCode(read(source)).matchAll(implemented)].map((m) => m[1] ?? "");
+    const named =
+      new RegExp(`\\b${owner ?? ""}\\b`).test(code) ||
+      traits.some((name) => new RegExp(`\\b(?:dyn|impl)\\s+${name}\\b`).test(code));
     const calls =
       owner === undefined
         ? new RegExp(`\\b${fn}${turbofish}\\s*\\(`).test(code)
         : new RegExp(`\\b${owner}::${fn}${turbofish}\\s*\\(`).test(code) ||
-          (new RegExp(`\\b${owner}\\b`).test(code) &&
-            new RegExp(`\\.${fn}${turbofish}\\s*\\(`).test(code));
+          (named && new RegExp(`\\.${fn}${turbofish}\\s*\\(`).test(code));
     if (!paths.includes(file)) {
       out.push(`${key}: its fuzz target ${file} doesn't exist.`);
     } else if (!calls) {
@@ -5528,8 +5539,11 @@ function closingBrace(code: string, from: number): number {
 // such as a key's variant, signals nothing.
 const HOLDER_BINARY = "CARGO_BIN_EXE_bazhen-holder";
 const SIGNALLING_CALL =
-  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\bsession\s*\(\s*\)\s*\.|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
-const SIGNALLING_OR_SESSION = new RegExp(`${SIGNALLING_CALL.source}|\\bSession\\b`);
+  /\.\s*(?:close(?:_step)?|signal|respawn)\s*\(|\bsweep\s*\(|\b(?:pass_among|retire)\s*\(|\bEnding\s*::\s*start\b/;
+/** Also the holder's `Session`: named, or as a leader's `session()` gives one to call. */
+const SIGNALLING_OR_SESSION = new RegExp(
+  `${SIGNALLING_CALL.source}|\\bSession\\b|\\bsession\\s*\\(\\s*\\)\\s*\\.`,
+);
 
 const HOLDER_CRATE = "crates/bazhen-holder";
 
@@ -5899,8 +5913,8 @@ function listedCloseFailures(listed: Record<string, string>, seen: Map<string, n
  * Each Rust test that signals processes it didn't start but isn't ignored as doing so: every
  * test of a binary that runs the holder, and any whose own body closes a child or sweeps the
  * ledger. Such a test runs only on a disposable host (docs/standards/testing.md § Hermeticity).
- * A mention of `Session` counts only in the crates `holderCrates` names, by directory; with none
- * given, it counts in every crate.
+ * A mention of `Session`, or a call on what a `session()` gives, counts only in the crates
+ * `holderCrates` names, by directory; with none given, it counts in every crate.
  */
 export function unmarkedSignallingTests(
   files: readonly string[],

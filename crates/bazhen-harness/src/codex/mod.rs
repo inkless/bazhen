@@ -5,6 +5,7 @@
 mod approvals;
 mod launch;
 mod mail;
+mod session;
 mod signals;
 #[cfg(test)]
 mod tests;
@@ -22,9 +23,11 @@ use crate::{
 use bazhen_protocol::agent_events::{CompactedSign, ReadySign};
 use bazhen_protocol::agents::{ActivityValue, ExternalRef};
 use bazhen_protocol::shells::TuiTheme;
+use session::{CodexSession, Home};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 const THEMES: [TuiTheme; 2] = [TuiTheme::Light, TuiTheme::Dark];
 
@@ -32,6 +35,8 @@ const THEMES: [TuiTheme; 2] = [TuiTheme::Light, TuiTheme::Dark];
 pub(crate) const AUTO_CONTINUED: &str = "auto-continued after a Codex restart";
 /// The detail of a thread whose turn a server's restart ended, until a turn starts on it.
 pub(crate) const INTERRUPTED: &str = "interrupted by a Codex restart";
+/// How long `bazhen doctor` waits on `codex --version`.
+const CLI_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// What Bazhen holds of each thread with an agent on it, on the current connection and across one
 /// that ends. A thread no running agent is bound to any more is forgotten, so it stays bounded.
@@ -41,6 +46,8 @@ struct Threads {
     activity: HashMap<String, ActivityValue>,
     /// Threads whose last turn failed on this connection, so the idle after it doesn't hide it.
     failed: HashSet<String>,
+    /// Threads busy when the last connection ended, until they are resumed.
+    cut_off: HashSet<String>,
     /// Interrupted threads whose new turn hasn't shown its first item yet. Codex announces a turn
     /// before its items, so whether it is the new server's own waits for the first one.
     first_item: HashSet<String>,
@@ -50,12 +57,15 @@ struct Threads {
     requests: HashMap<String, (String, ToolKey)>,
     /// The question a text answer to a request goes to, by the request's key, and its thread.
     questions: HashMap<String, (String, String)>,
+    /// The version the last handshake named, or none, which stands across a connection that ends.
+    version: Option<String>,
 }
 
 impl Threads {
     fn forget(&mut self, thread: &str) {
         self.activity.remove(thread);
         self.failed.remove(thread);
+        self.cut_off.remove(thread);
         self.first_item.remove(thread);
         self.labels.remove(thread);
         self.requests.retain(|_, (on, _)| on != thread);
@@ -110,10 +120,17 @@ fn facts(observed: Vec<Keyed>) -> Ingested {
     }
 }
 
+/// The state, never held across an await. A panic while it was held left it as it was.
+fn lock(threads: &Mutex<Threads>) -> MutexGuard<'_, Threads> {
+    threads.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Codex's adapter.
 pub(crate) struct Codex {
     starts: launch::Starts,
-    threads: Mutex<Threads>,
+    home: Home,
+    /// Shared with its session, which picks each thread up again on every connection.
+    threads: Arc<Mutex<Threads>>,
 }
 
 impl fmt::Debug for Codex {
@@ -129,22 +146,23 @@ impl Codex {
         // An empty `CODEX_HOME` is taken as it is, as the CLI the agents run takes it.
         let codex_home =
             (deps.user_env)("CODEX_HOME").unwrap_or_else(|| format!("{}/.codex", deps.home));
-        Self::on(launch::Starts {
+        let starts = launch::Starts {
             remote: launch::app_server_address(&codex_home),
             socket: Some(deps.daemon_socket.clone()),
-        })
+        };
+        Self::on(starts, Home::new(codex_home, Arc::clone(&deps.real_path)))
     }
 
-    fn on(starts: launch::Starts) -> Self {
+    fn on(starts: launch::Starts, home: Home) -> Self {
         Self {
             starts,
-            threads: Mutex::default(),
+            home,
+            threads: Arc::default(),
         }
     }
 
-    /// The state, never held across an await. A panic while it was held left it as it was.
     fn threads(&self) -> MutexGuard<'_, Threads> {
-        self.threads.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.threads)
     }
 
     fn notification(&self, method: &str, params: &Js, bound: bool) -> Vec<Keyed> {
@@ -363,11 +381,6 @@ fn connected(channel: Option<&dyn ChannelPort>) -> Result<&dyn ChannelPort, Laun
     channel.ok_or_else(|| LaunchError::Unavailable("Codex's app-server isn't connected".to_owned()))
 }
 
-/// Not yet: the next change reports Codex in `bazhen doctor`.
-fn not_yet<T: Send + 'static>(value: T) -> BoxFuture<'static, T> {
-    Box::pin(std::future::ready(value))
-}
-
 impl Harness for Codex {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
@@ -475,14 +488,31 @@ impl Harness for Codex {
     }
 
     fn session(&self) -> Option<Box<dyn Session>> {
-        None
+        Some(Box::new(CodexSession::new(
+            self.home.clone(),
+            self.starts.socket.clone(),
+            Arc::clone(&self.threads),
+        )))
     }
 
+    /// The version the last handshake named, and the CLI's on the agents' `PATH`, if it answers
+    /// within a second, as `bazhen doctor` waits on it. The daemon reads its own peer reader.
     fn doctor<'a>(
         &'a self,
         _channel: Option<&'a dyn ChannelPort>,
-        _run: &'a dyn RunPort,
+        run: &'a dyn RunPort,
     ) -> BoxFuture<'a, Option<HarnessDoctor>> {
-        not_yet(None)
+        Box::pin(async move {
+            let argv = ["codex", "--version"].map(str::to_owned);
+            let cli = match run.run(&argv, CLI_TIMEOUT).await {
+                Ok(output) if output.code == Some(0) => session::cli_version(&output.stdout),
+                Ok(_) | Err(_) => None,
+            };
+            Some(HarnessDoctor {
+                server: self.threads().version.clone(),
+                cli,
+                tool_calls: None,
+            })
+        })
     }
 }

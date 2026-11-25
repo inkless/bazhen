@@ -47,7 +47,7 @@ fn deps(files: &[(&str, &str)], mode: Option<&str>) -> HarnessDeps {
         scan_transcript: Box::new(|_, _| false),
         now_ms: Box::new(|| 0),
         daemon_socket: "/run/bazhen.sock".to_owned(),
-        real_path: Box::new(|_| None),
+        real_path: std::sync::Arc::new(|_| None),
     }
 }
 

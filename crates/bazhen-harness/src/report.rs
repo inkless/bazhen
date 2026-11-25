@@ -174,6 +174,10 @@ pub enum Observed {
     /// The server unloaded the session, so its facts stop until [`crate::Session::reload`] picks
     /// it up again.
     Unloaded,
+    /// The new connection picked the session up again ([`crate::Session::connected`]), and never
+    /// one it failed to: the requests the server sends for it come again, so one asked on an
+    /// earlier connection that doesn't was lost with the server that held it.
+    Resumed,
     /// The server started a session, under [`Key::Account`]: each follow that is pending, or gave
     /// up, and [`crate::Session::may_follow_to`] it, is tried again.
     SessionAnnounced {
@@ -245,7 +249,9 @@ pub enum Observed {
     /// Hold the agent's mail: its TUI is moving between sessions.
     Hold,
     Release,
-    /// The terminal's title names another session than the agent's.
+    /// The terminal's title isn't the agent's session: it names another, or perhaps none at all.
+    /// [`Session::follow`](crate::Session::follow) reads the candidate, and leaves the agent
+    /// untracked when it names no session.
     TitleNames {
         candidate: String,
     },

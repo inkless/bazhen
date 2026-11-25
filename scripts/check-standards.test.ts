@@ -4267,6 +4267,36 @@ describe("decoderFailures", () => {
     ]);
   });
 
+  it("takes a private type's method called through a trait it implements", () => {
+    const port = {
+      ...repo,
+      "crates/p/src/conn.rs":
+        "struct Conn;\nimpl Port for Conn {\n    fn route(&self, b: &[u8]) {}\n}\n",
+      "crates/p/fuzz/fuzz_targets/route.rs":
+        "fuzz_target!(|b: &[u8]| { let c: Box<dyn Port> = p::port(); c.route(b); });",
+    };
+    const listed = { ...fuzzed, "crates/p/src/conn.rs::Conn::route": "route" };
+    const unnamed = {
+      ...port,
+      "crates/p/fuzz/fuzz_targets/route.rs": "fuzz_target!(|b: &[u8]| { p::port().route(b); });",
+    };
+    // The trait's name alone, as a variant or a path, isn't the trait.
+    const mentioned = {
+      ...port,
+      "crates/p/fuzz/fuzz_targets/route.rs":
+        "fuzz_target!(|b: &[u8]| { let _ = Key::Port; p::port().route(b); });",
+    };
+    expect([
+      failures(listed, exempt, port),
+      failures(listed, exempt, unnamed),
+      failures(listed, exempt, mentioned),
+    ]).toEqual([
+      [],
+      [expect.stringContaining("doesn't call Conn::route")],
+      [expect.stringContaining("doesn't call Conn::route")],
+    ]);
+  });
+
   it("names a stale entry, a missing target, and a target that doesn't call its decoder", () => {
     expect([
       failures(fuzzed, { ...exempt, "crates/p/src/lib.rs::other": "x" }),
@@ -4854,11 +4884,13 @@ describe("tests that signal processes they didn't start", () => {
   it("names the holder's Session only in a crate that can reach the holder", () => {
     const sources = {
       ...testIn("holder", "let s = Session::led_by(pid);"),
-      ...testIn("harness", "assert_eq!(k, Key::Session(s));"),
+      ...testIn("leader", "leader.session().count();"),
+      ...testIn("harness", 'assert_eq!(k, Key::Session(s)); codex.session().expect("one");'),
       ...testIn("core", "child.close();"),
     };
-    expect(unmarked(sources, new Set(["crates/holder"]))).toEqual([
+    expect(unmarked(sources, new Set(["crates/holder", "crates/leader"]))).toEqual([
       "crates/holder/src/t.rs:1",
+      "crates/leader/src/t.rs:1",
       "crates/core/src/t.rs:1",
     ]);
   });
