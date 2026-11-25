@@ -30,7 +30,7 @@ use crate::notices::{
 use crate::roles::RolesResponse;
 use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use crate::stream::{StreamClientFrame, StreamServerFrame};
 use crate::tasks::{
@@ -146,6 +146,7 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<TaskCommandResponse>();
     generator.subschema_for::<TaskDetail>();
     generator.subschema_for::<UnassignTaskRequest>();
+    generator.subschema_for::<UnlinkShellRequest>();
     generator.subschema_for::<WaitMessagesRequest>();
     generator.subschema_for::<WaitMessagesResponse>();
     generator.subschema_for::<WaitRequest>();
@@ -561,6 +562,7 @@ pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, Stri
         "ShellDecline" => given(edge::<ShellDecline>(body)),
         "ShellPrompt" => given(edge::<ShellPrompt>(body)),
         "ShellReport" => given(edge::<ShellReport>(body)),
+        "UnlinkShellRequest" => given(edge::<UnlinkShellRequest>(body)),
         _ => return None,
     })
 }

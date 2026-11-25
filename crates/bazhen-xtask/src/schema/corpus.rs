@@ -173,6 +173,13 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
         OWNER_STRINGS,
         LONE,
     ),
+    (
+        "UnlinkShellRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
 ];
 
 /// Who owns a lone surrogate in a request's text.

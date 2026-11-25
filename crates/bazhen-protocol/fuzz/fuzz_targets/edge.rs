@@ -5,7 +5,7 @@ use bazhen_protocol::edge::{EdgeCheck, edge, is_object, object};
 use bazhen_protocol::notices::{DismissNoticeRequest, PairRequest};
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest, ShellDecline,
-    ShellPrompt, ShellReport,
+    ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use bazhen_protocol::tasks::CreateTaskRequest;
 use libfuzzer_sys::fuzz_target;
@@ -45,6 +45,7 @@ fuzz_target!(|body: &[u8]| {
     settled::<CloseShellRequest>(body);
     settled::<RestartShellRequest>(body);
     settled::<RenameShellRequest>(body);
+    settled::<UnlinkShellRequest>(body);
     settled::<CloseAgentRequest>(body);
     settled::<SignalAgentRequest>(body);
     settled::<DismissNoticeRequest>(body);

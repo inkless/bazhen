@@ -37,7 +37,7 @@ use bazhen_protocol::notices::{
 use bazhen_protocol::roles::RolesResponse;
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use bazhen_protocol::stream::{STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame};
 use bazhen_protocol::tasks::{
@@ -371,6 +371,10 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("TaskCommandResponse", round_trips::<TaskCommandResponse>),
     ("TaskDetail", round_trips::<TaskDetail>),
     ("UnassignTaskRequest", round_trips::<UnassignTaskRequest>),
+    (
+        "UnlinkShellRequest",
+        round_trips_at_edge::<UnlinkShellRequest>,
+    ),
     ("WaitMessagesRequest", round_trips::<WaitMessagesRequest>),
     ("WaitMessagesResponse", round_trips::<WaitMessagesResponse>),
     ("WaitRequest", round_trips::<WaitRequest>),

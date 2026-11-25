@@ -14,7 +14,7 @@ use crate::ids::TaskId;
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    SHELL_NAME_MAX_CHARS, ShellDecline, ShellPrompt, ShellReport,
+    SHELL_NAME_MAX_CHARS, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use crate::tasks::CreateTaskRequest;
 use crate::text::{TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, showable, title_safe, trim};
@@ -227,6 +227,14 @@ impl EdgeCheck for RestartShellRequest {
     }
 }
 
+impl EdgeCheck for UnlinkShellRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        generation(self.generation)?;
+        Ok(self)
+    }
+}
+
 impl EdgeCheck for RenameShellRequest {
     fn checked(mut self) -> Result<Self, Refused> {
         keyed(&self.idempotency_key)?;
@@ -390,6 +398,28 @@ mod tests {
             [
                 false, false, false, true, true, true, true, true, true, true, true
             ]
+        );
+    }
+
+    #[test]
+    fn an_unlink_holds_its_key_and_generation_to_the_protocol() {
+        let safe = MAX_SAFE_INTEGER;
+        let unlink = |key: &str, generation: Value| {
+            refused::<UnlinkShellRequest>(
+                &json!({ "idempotencyKey": key, "generation": generation }),
+            )
+        };
+        assert_eq!(
+            [
+                unlink(KEY, json!(safe)),
+                unlink(KEY, json!(2.0)),
+                unlink(KEY, json!(safe + 1)),
+                unlink(KEY, json!(2.5)),
+                unlink(KEY, json!(-1)),
+                unlink("", json!(0)),
+                refused::<UnlinkShellRequest>(&json!({ "idempotencyKey": KEY })),
+            ],
+            [false, false, true, true, true, true, true]
         );
     }
 

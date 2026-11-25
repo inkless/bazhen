@@ -67,11 +67,6 @@ const NOT_YET_IN_RUST: readonly NotYet[] = [
     why: "the Rust daemon serves no mailbox route yet",
   },
   {
-    name: "UnlinkShellRequest",
-    owner: "the linked shells' port",
-    why: "the Rust daemon serves no linked shell's route yet",
-  },
-  {
     name: "PaneTitleChanged",
     owner: "the tmux runtime",
     why: "/v1/codex/pane-title goes with tmux at the cutover, and is removed at the flip, not ported",
