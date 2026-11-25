@@ -1263,17 +1263,136 @@ export function relatedReverts(
   return [...related];
 }
 
+// The words after which a `/` starts a regular expression, not a division.
+const BEFORE_REGEX = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
+]);
+
+/**
+ * `source` as a lexer reads it: each string literal by its opening quote's offset, with its text
+ * when it is whole (a template with a `${}` has none), and the spans that aren't code: literals,
+ * a template's text, comments and regular expressions. Undefined where the scan loses its place:
+ * a quote still open at the end of its line or of the file, or a comment, template or `${` still
+ * open at the end.
+ */
+function literalsOf(
+  source: string,
+): { literals: { at: number; text: string | undefined }[]; inert: [number, number][] } | undefined {
+  const literals: { at: number; text: string | undefined }[] = [];
+  const inert: [number, number][] = [];
+  // For each template whose `${` is open, how many `{` are open inside it.
+  const depths: number[] = [];
+  // The last token: a word, or a punctuator's character; "" before the first.
+  let last = "";
+  // A template's text from `from`, the start of the template (`opens`) or a `}` closing its `${`,
+  // to its closing backtick or next `${`: where code resumes, or -1 at the end of the file.
+  const template = (from: number, opens: boolean): number => {
+    for (let j = from; j < source.length; j++) {
+      const c = source.charAt(j);
+      if (c === "\\") j++;
+      else if (c === "`" || (c === "$" && source.charAt(j + 1) === "{")) {
+        const closes = c === "`";
+        const end = closes ? j + 1 : j + 2;
+        inert.push([opens ? from - 1 : from, end]);
+        if (opens)
+          literals.push({ at: from - 1, text: closes ? source.slice(from, j) : undefined });
+        if (!closes) depths.push(0);
+        return end;
+      }
+    }
+    return -1;
+  };
+  for (let i = 0; i < source.length;) {
+    const c = source.charAt(i);
+    const next = source.charAt(i + 1);
+    let end = i + 1;
+    if (c === "/" && next === "/") {
+      end = source.indexOf("\n", i);
+      if (end === -1) end = source.length;
+      inert.push([i, end]);
+    } else if (c === "/" && next === "*") {
+      end = source.indexOf("*/", i + 2) + 2;
+      if (end === 1) return undefined;
+      inert.push([i, end]);
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      for (; j < source.length && source.charAt(j) !== c; j++) {
+        if (source.charAt(j) === "\n") return undefined;
+        if (source.charAt(j) === "\\") j++;
+      }
+      if (j >= source.length) return undefined;
+      end = j + 1;
+      literals.push({ at: i, text: source.slice(i + 1, j) });
+      inert.push([i, end]);
+      last = c;
+    } else if (c === "`" || (c === "}" && depths.at(-1) === 0)) {
+      if (c === "}") depths.pop();
+      end = template(i + 1, c === "`");
+      if (end === -1) return undefined;
+      last = source.charAt(end - 1);
+    } else if (
+      c === "/" &&
+      (last === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(last) || BEFORE_REGEX.has(last))
+    ) {
+      let j = i + 1;
+      for (let inClass = false; j < source.length; j++) {
+        const d = source.charAt(j);
+        if (d === "\n") return undefined;
+        if (d === "\\") j++;
+        else if (d === "[") inClass = true;
+        else if (d === "]") inClass = false;
+        else if (d === "/" && !inClass) break;
+      }
+      if (j >= source.length) return undefined;
+      end = j + 1;
+      inert.push([i, end]);
+      last = "/regex/";
+    } else if (/[\w$]/.test(c)) {
+      while (end < source.length && /[\w$]/.test(source.charAt(end))) end++;
+      last = source.slice(i, end);
+    } else if (!/\s/.test(c)) {
+      const depth = depths.pop();
+      if (depth !== undefined) depths.push(depth + (c === "{" ? 1 : c === "}" ? -1 : 0));
+      last = c;
+    }
+    i = end;
+  }
+  return depths.length === 0 ? { literals, inert } : undefined;
+}
+
 /**
  * The binaries in the repository's target/ the file at `path` names, as `<profile>/<name>`: a
- * string `target/<profile>/<name>`, or a `new URL` resolving there. An absolute path, as a
- * fixture's `/repo/target/release/bazhen-hook`, isn't the repository's.
+ * string literal that is all `target/<profile>/<name>`, or a `new URL` in its code resolving
+ * there. A path quoted inside a longer literal, as a test's source fixture, or in a comment, is
+ * data, not a name. A file the scan of its literals loses its place in counts every quoted path,
+ * so a scan's mistake never takes a binary off a test. An absolute path, as a fixture's
+ * `/repo/target/release/bazhen-hook`, isn't the repository's.
  */
 export function namedBinaries(path: string, source: string): string[] {
+  const lexed = literalsOf(source);
   const named = new Set<string>();
-  for (const [, string = ""] of source.matchAll(TARGET_STRING)) {
-    named.add(string.slice("target/".length));
-  }
-  for (const [, url = ""] of source.matchAll(FILE_URL)) {
+  const strings =
+    lexed === undefined
+      ? [...source.matchAll(TARGET_STRING)].map(([, string = ""]) => string)
+      : lexed.literals.flatMap(({ text }) =>
+          text !== undefined && IN_TARGET.test(text) ? [text] : [],
+        );
+  for (const string of strings) named.add(string.slice("target/".length));
+  for (const { 1: url = "", index } of source.matchAll(FILE_URL)) {
+    if (lexed?.inert.some(([start, end]) => index >= start && index < end) === true) continue;
     const binary = IN_TARGET.exec(posix.join(posix.dirname(path), url))?.[1];
     if (binary !== undefined) named.add(binary);
   }

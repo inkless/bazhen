@@ -761,6 +761,35 @@ describe("namedBinaries", () => {
     ].join("\n");
     expect(namedBinaries("tests/cli/x.test.ts", source)).toEqual([]);
   });
+
+  it("takes a path quoted inside a longer literal, or in a comment, for data, not a name", () => {
+    const source = [
+      `const fixture = 'const CLI = join(repo, "target/release/bazhen");';`,
+      "const url = \"new URL('../../target/release/bazhen-hook', import.meta.url)\";",
+      '// const H = join(repo, "target/debug/bazhen-holder");',
+      'const T = `${repo}/x/"target/release/bazhen-peer"`;',
+    ].join("\n");
+    expect(namedBinaries("tests/cli/x.test.ts", source)).toEqual([]);
+  });
+
+  it("keeps its place past a quote in a comment or a regular expression", () => {
+    const source = [
+      "// don't read this quote as one",
+      '/* nor this " one */',
+      "const quote = /['\"`]/g;",
+      `const fixture = 'join(repo, "target/release/bazhen")';`,
+      'const CLI = "target/debug/bazhen-holder-replay";',
+    ].join("\n");
+    expect(namedBinaries("tests/cli/x.test.ts", source)).toEqual(["debug/bazhen-holder-replay"]);
+  });
+
+  it("counts every quoted path in a file its scan loses its place in", () => {
+    const source = [
+      "const view = <p>don't stop</p>;",
+      `const fixture = 'join(repo, "target/release/bazhen")';`,
+    ].join("\n");
+    expect(namedBinaries("web/x.test.tsx", source)).toEqual(["release/bazhen"]);
+  });
 });
 
 describe("projectsOf", () => {

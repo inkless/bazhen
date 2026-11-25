@@ -2610,7 +2610,6 @@ const MENTIONS_TARGET = [
   "tests/cli/daemon.test.ts",
   "tests/cli/fixtures.ts",
 ];
-const FALSIFY_TESTS = ["scripts/falsify.medium.test.ts", "scripts/falsify.test.ts"];
 // A string with target as a path segment, that more path follows or a relative or interpolated
 // root precedes. An absolute path ending at target, as a CARGO_TARGET_DIR, isn't the repository's.
 const TARGET_SEGMENT = /["'`/]target\/|(?:\.\.?|\})\/target["'`]/;
@@ -2677,9 +2676,8 @@ function namesProperty(text: string, at: number, end: number): boolean {
 const mentionsTarget = (text: string) =>
   TARGET_SEGMENT.test(text) ||
   [...text.matchAll(BARE_TARGET)].some((m) => !namesProperty(text, m.index, m.index + m[0].length));
-/** The binaries a file names, except the fixtures of falsify's own tests. */
-const named = (path: string, text: string) =>
-  FALSIFY_TESTS.includes(path) ? [] : namedBinaries(path, text).toSorted();
+/** The binaries a file names. falsify's own tests name none: their paths are fixtures' text. */
+const named = (path: string, text: string) => namedBinaries(path, text).toSorted();
 
 describe("the repository's tests that run a binary", () => {
   const top = fileURLToPath(new URL("..", import.meta.url));
