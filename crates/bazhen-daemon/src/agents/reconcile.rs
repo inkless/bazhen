@@ -867,6 +867,59 @@ mod tests {
         );
     }
 
+    /// When the state says `agent`'s start was requested, and when its last event of `kind` was.
+    fn requested(f: &Fixture, agent: &AgentId, kind: &str) -> (Option<String>, Option<String>) {
+        let reader = f.store.reader().unwrap();
+        let view = bazhen_store::SnapshotView {
+            host: "host".to_owned(),
+            restart_holders: std::collections::HashMap::new(),
+            shells_report: false,
+        };
+        let snapshot = reader
+            .reads()
+            .snapshot_with_agents(&view, &f.agents.view(), None)
+            .unwrap();
+        let said = snapshot
+            .agents
+            .into_iter()
+            .find(|found| found.id == *agent)
+            .and_then(|found| found.start_requested_at);
+        let at = reader
+            .reads()
+            .events(0, 1000)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|event| event.kind == kind && event.entity_id == agent.as_str())
+            .map(|event| event.ts);
+        (said, at)
+    }
+
+    #[test]
+    fn dates_a_start_from_its_request_only_while_it_waits_on_its_answer() {
+        let f = held_creates();
+        let launching = mid_launch(&f, "k-1");
+        let while_launching = requested(&f, &launching, "agent.launched");
+        let stub = StubHarness::new(pull()).resuming();
+        let (g, lost, generation) = lost(&stub);
+        let once_lost = requested(&g, &lost, "agent.relaunch_requested").0;
+        mid_relaunch(&g, &lost, generation);
+        let while_relaunching = requested(&g, &lost, "agent.relaunch_requested");
+        let new = g.terminal_of(lost.as_str());
+        g.fake().start_unseen(&new, &lost, generation + 1);
+        reconciled(&g.restarted());
+        let once_started = requested(&g, &lost, "agent.relaunch_requested").0;
+        assert_eq!(
+            (
+                while_launching.0.is_some() && while_launching.0 == while_launching.1,
+                once_lost,
+                while_relaunching.0.is_some() && while_relaunching.0 == while_relaunching.1,
+                once_started,
+            ),
+            (true, None, true, None)
+        );
+    }
+
     fn agent_of(f: &Fixture, id: &AgentId) -> AgentTerminal {
         agent(f, id)
     }

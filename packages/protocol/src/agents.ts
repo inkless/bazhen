@@ -198,6 +198,12 @@ export const Agent = z.object({
    * after an edit to its role's file. It takes the new one at its next start.
    */
   promptChanged: z.boolean().default(false),
+  /**
+   * When the start it waits on was requested, while it is starting with its terminal being
+   * created or exited: a launch, respawn or relaunch whose outcome isn't recorded yet. Null
+   * otherwise. One requested over `START_OVERDUE_AFTER_MS` ago is one the daemon is settling.
+   */
+  startRequestedAt: z.iso.datetime().nullable().default(null),
 });
 export type Agent = z.infer<typeof Agent>;
 

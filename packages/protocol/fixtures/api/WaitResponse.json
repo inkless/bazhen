@@ -73,7 +73,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -148,7 +149,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -204,7 +206,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -238,7 +241,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -279,7 +283,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -334,7 +339,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -624,7 +630,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
     }
@@ -735,7 +742,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -790,7 +798,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -845,7 +854,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -900,7 +910,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -955,7 +966,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1010,7 +1022,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1065,7 +1078,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1120,7 +1134,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1175,7 +1190,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1230,7 +1246,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -1308,7 +1325,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -1383,7 +1401,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -1461,7 +1480,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -1536,7 +1556,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -1614,7 +1635,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -1689,7 +1711,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -1767,7 +1790,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -1842,7 +1866,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -1920,7 +1945,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -1995,7 +2021,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -2073,7 +2100,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -2148,7 +2176,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -2182,7 +2211,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2223,7 +2253,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2257,7 +2288,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2298,7 +2330,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2332,7 +2365,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2373,7 +2407,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2407,7 +2442,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2448,7 +2484,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2482,7 +2519,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2523,7 +2561,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2557,7 +2596,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2598,7 +2638,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2632,7 +2673,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2673,7 +2715,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2707,7 +2750,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2748,7 +2792,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2782,7 +2827,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2823,7 +2869,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2857,7 +2904,8 @@
           "holderPid": null
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     },
     "parsed": {
@@ -2898,7 +2946,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -2976,7 +3025,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -3051,7 +3101,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -3129,7 +3180,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -3204,7 +3256,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -3282,7 +3335,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -3357,7 +3411,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -3435,7 +3490,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     },
     "parsed": {
@@ -3510,7 +3566,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -4326,6 +4383,7 @@
         },
         "role": "reviewer",
         "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z",
         "fieldFromANewerDaemon": {
           "any": [
             1
@@ -4410,7 +4468,8 @@
           "served": true
         },
         "role": "reviewer",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": "2026-11-16T12:00:00.000Z"
       }
     }
   },
@@ -4481,7 +4540,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -4532,6 +4592,7 @@
         },
         "role": null,
         "promptChanged": false,
+        "startRequestedAt": null,
         "fieldFromANewerDaemon": {
           "any": [
             1
@@ -4582,7 +4643,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -4652,7 +4714,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     }
   },
@@ -5032,7 +5095,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       "replyId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d"
     }

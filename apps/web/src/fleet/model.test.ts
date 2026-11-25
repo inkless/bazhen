@@ -42,6 +42,7 @@ const agentIn = (project: string, state: AgentState = "running", over: Partial<A
   needsRestart: null,
   role: null,
   promptChanged: false,
+  startRequestedAt: null,
   ...over,
 });
 

@@ -99,6 +99,7 @@ struct AgentRow {
     transcript: Option<String>,
     restart_protocol: Option<String>,
     note: Option<(String, String, String)>,
+    start_requested_at: Option<String>,
 }
 
 /// Every agent, oldest first.
@@ -111,7 +112,11 @@ pub(crate) fn agents(
         "SELECT a.id, coalesce(a.name, ''), a.environment_id, a.harness, a.project, a.cwd, a.state,
            a.launched_by, a.role, a.prompt_hash, a.terminal_id, t.generation, a.external_ref,
            t.exit, coalesce(t.theme, 'dark'), s.activity, a.usage, t.state, t.runtime,
-           a.transcript, t.restart_protocol, n.text, n.task_id, ne.ts
+           a.transcript, t.restart_protocol, n.text, n.task_id, ne.ts,
+           (SELECT ts FROM events WHERE id = (
+              SELECT max(id) FROM events WHERE entity_type = 'agent' AND entity_id = a.id
+                AND type IN ('agent.launched', 'agent.respawn_requested',
+                             'agent.relaunch_requested')))
          FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
          LEFT JOIN activity_latest s ON s.agent_session_id = a.id
          LEFT JOIN task_notes n ON n.event_id = (
@@ -159,6 +164,7 @@ pub(crate) fn agents(
                 transcript: row.get(19)?,
                 restart_protocol: row.get(20)?,
                 note,
+                start_requested_at: row.get(24)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -228,6 +234,14 @@ fn agent(
             })
         })
         .transpose()?;
+    // A start not yet answered: the request is the last thing its terminal saw.
+    let start_requested_at = row.start_requested_at.filter(|_| {
+        state == AgentState::Starting
+            && matches!(
+                terminal_state,
+                Some(TerminalState::Creating | TerminalState::Exited)
+            )
+    });
     Ok(Agent {
         name: row.name,
         environment_id: word(row.environment)?,
@@ -257,6 +271,7 @@ fn agent(
         needs_restart: restart,
         role,
         prompt_changed,
+        start_requested_at,
         external_ref,
         id,
     })

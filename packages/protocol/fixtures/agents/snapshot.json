@@ -42,7 +42,8 @@
         "headline": null,
         "needsRestart": null,
         "role": "worker",
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000002",
@@ -70,7 +71,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000003",
@@ -98,7 +100,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000004",
@@ -131,7 +134,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000005",
@@ -172,7 +176,8 @@
         },
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_0190000000007000800000000000000a",
@@ -200,7 +205,8 @@
         "headline": null,
         "needsRestart": null,
         "role": "reviewer",
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000007",
@@ -228,7 +234,8 @@
         "headline": null,
         "needsRestart": null,
         "role": "worker",
-        "promptChanged": true
+        "promptChanged": true,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000008",
@@ -263,7 +270,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_01900000000070008000000000000009",
@@ -311,7 +319,8 @@
           "served": true
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_0190000000007000800000000000000b",
@@ -347,7 +356,8 @@
         },
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_0190000000007000800000000000000c",
@@ -385,7 +395,8 @@
           "served": false
         },
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       },
       {
         "id": "agent_0190000000007000800000000000000d",
@@ -421,7 +432,8 @@
         "headline": null,
         "needsRestart": null,
         "role": null,
-        "promptChanged": false
+        "promptChanged": false,
+        "startRequestedAt": null
       }
     ],
     "attention": [

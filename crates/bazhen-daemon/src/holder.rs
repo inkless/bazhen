@@ -1238,6 +1238,14 @@ mod tests {
 
     /// Shells on the real `bazhen-holder`: each test starts a holder and closes it, so each runs
     /// only in the sandbox.
+    #[test]
+    fn holds_a_start_overdue_once_twice_the_time_a_holder_has_to_answer_has_passed() {
+        assert_eq!(
+            std::time::Duration::from_millis(bazhen_protocol::agents::START_OVERDUE_AFTER_MS),
+            2 * bazhen_runtime_holder::HELLO
+        );
+    }
+
     mod real {
         use std::os::unix::fs::PermissionsExt as _;
         use std::sync::Arc;
