@@ -3,7 +3,7 @@ import { z } from "zod";
 import * as fromRust from "./gen/protocol.ts";
 import * as protocol from "./index.ts";
 
-/** Where `cargo xtask schema` writes the zod it generates from the Rust protocol, and its corpus. */
+/** Where `cargo xtask schema` writes the planted corpus. */
 const SHADOW = new URL("../../../target/protocol-shadow/", import.meta.url);
 
 /** A planted case: a message's body, and whether the protocol takes it. */

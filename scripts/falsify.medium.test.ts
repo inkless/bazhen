@@ -2596,14 +2596,11 @@ const RUNS_BINARIES: Record<string, string[]> = {
 // fixtures, absolute paths in doctor's fixtures, a store test's scratch folder named target, the
 // scratch build tree of the test of where agents find the CLI, the corpus the gate writes into
 // its test's scratch repository, the text of scripts/xtask.sh that the standards check pins, and
-// the zod `cargo xtask schema` generates, which a test loads as source and the medium project
-// resolves the imports of.
+// the corpus `cargo xtask schema` writes, which the Dual reads.
 const MENTIONS_TARGET = [
   "apps/daemon/src/env/agent-cli.medium.test.ts",
   "apps/daemon/src/store/store.medium.test.ts",
-  "packages/protocol/dual/types.ts",
   "packages/protocol/src/api-fixtures.ts",
-  "packages/protocol/src/checks.medium.test.ts",
   "packages/protocol/src/dual.medium.test.ts",
   "scripts/check-standards.ts",
   "scripts/falsify.medium.test.ts",
@@ -2612,7 +2609,6 @@ const MENTIONS_TARGET = [
   "scripts/xtask-gate.medium.test.ts",
   "tests/cli/daemon.test.ts",
   "tests/cli/fixtures.ts",
-  "vitest.config.ts",
 ];
 const FALSIFY_TESTS = ["scripts/falsify.medium.test.ts", "scripts/falsify.test.ts"];
 // A string with target as a path segment, that more path follows or a relative or interpolated
