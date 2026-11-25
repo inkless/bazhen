@@ -271,7 +271,7 @@ pub(crate) fn react(w: &Writer<'_>, event: &NewEvent) -> Result<(), AppendError>
                 }),
             ..
         } => {
-            // Mail for an agent that closed goes with it; the close already says so.
+            // A message the store doesn't hold, or whose agent's id it can't read, opens nothing.
             let Some(agent) = w.reads().message(message.as_str())?.map(|m| m.agent) else {
                 return Ok(());
             };
@@ -535,7 +535,6 @@ mod tests {
             )
         );
     }
-
     #[test]
     fn counts_only_the_abandoned_items_it_closed() {
         let dir = TempDir::new("abandoned-unreadable");
