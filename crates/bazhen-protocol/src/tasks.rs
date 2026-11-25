@@ -274,10 +274,18 @@ pub struct FinishTaskRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
     pub outcome: TaskOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::FinishNoteText"))]
     pub note: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub cascade: Option<bool>,
 }
@@ -291,7 +299,11 @@ pub struct AddTaskNoteRequest {
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::TaskNoteText"))]
     pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub handoff: Option<bool>,
 }
@@ -309,10 +321,18 @@ pub struct TaskCommandResponse {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Launch {
     pub harness: HarnessId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "String", length(min = 1)))]
     pub cwd: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "AgentName"))]
     pub name: Option<AgentName>,
 }
@@ -325,13 +345,25 @@ pub struct Launch {
 pub struct DelegateTaskRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "crate::ids::TaskId"))]
     pub from_task_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "AgentRef"))]
     pub agent_id: Option<AgentRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "Launch"))]
     pub launch: Option<Launch>,
     #[serde(default)]
@@ -351,7 +383,11 @@ pub struct EscalateRequest {
     pub idempotency_key: String,
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 2000), extend("x-bazhen-transform" = "trim")))]
     pub summary: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "crate::ids::TaskId"))]
     pub task_id: Option<String>,
 }

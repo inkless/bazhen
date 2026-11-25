@@ -13,7 +13,10 @@ use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest, ShellDecline,
     ShellPrompt, ShellReport, UnlinkShellRequest,
 };
-use bazhen_protocol::tasks::CreateTaskRequest;
+use bazhen_protocol::tasks::{
+    AddTaskNoteRequest, AssignTaskRequest, CreateTaskRequest, DelegateTaskRequest, EscalateRequest,
+    FinishTaskRequest, UnassignTaskRequest,
+};
 use libfuzzer_sys::fuzz_target;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -67,6 +70,12 @@ fuzz_target!(|body: &[u8]| {
     settled::<ReplyAttentionRequest>(body);
     settled::<DismissAttentionRequest>(body);
     settled::<ResendAttentionRequest>(body);
+    settled::<AssignTaskRequest>(body);
+    settled::<UnassignTaskRequest>(body);
+    settled::<FinishTaskRequest>(body);
+    settled::<AddTaskNoteRequest>(body);
+    settled::<DelegateTaskRequest>(body);
+    settled::<EscalateRequest>(body);
     // A hook's payload is any JSON, kept as its text, so a hook taken is held to its bounds rather
     // than compared once written out again.
     if let Ok(hook) = edge::<HookRequest>(body) {

@@ -562,12 +562,17 @@ fn given<T: serde::Serialize>(
 pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, String>> {
     use crate::edge::edge;
     Some(match name {
+        "AddTaskNoteRequest" => given(edge::<AddTaskNoteRequest>(body)),
         "AnswerAttentionRequest" => given(edge::<AnswerAttentionRequest>(body)),
+        "AssignTaskRequest" => given(edge::<AssignTaskRequest>(body)),
         "CloseAgentRequest" => given(edge::<CloseAgentRequest>(body)),
         "CloseShellRequest" => given(edge::<CloseShellRequest>(body)),
         "CreateTaskRequest" => given(edge::<CreateTaskRequest>(body)),
+        "DelegateTaskRequest" => given(edge::<DelegateTaskRequest>(body)),
         "DismissAttentionRequest" => given(edge::<DismissAttentionRequest>(body)),
         "DismissNoticeRequest" => given(edge::<DismissNoticeRequest>(body)),
+        "EscalateRequest" => given(edge::<EscalateRequest>(body)),
+        "FinishTaskRequest" => given(edge::<FinishTaskRequest>(body)),
         "OpenShellRequest" => given(edge::<OpenShellRequest>(body)),
         "PairRequest" => given(edge::<PairRequest>(body)),
         "RelaunchAgentRequest" => given(edge::<RelaunchAgentRequest>(body)),
@@ -581,6 +586,7 @@ pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, Stri
         "ShellPrompt" => given(edge::<ShellPrompt>(body)),
         "ShellReport" => given(edge::<ShellReport>(body)),
         "SignalAgentRequest" => given(edge::<SignalAgentRequest>(body)),
+        "UnassignTaskRequest" => given(edge::<UnassignTaskRequest>(body)),
         "UnlinkShellRequest" => given(edge::<UnlinkShellRequest>(body)),
         _ => return None,
     })

@@ -74,6 +74,13 @@ pub(crate) type Known<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 
 pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     (
+        "AddTaskNoteRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "AnswerAttentionRequest",
         "/idempotencyKey",
         "loneSurrogate",
@@ -81,7 +88,56 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
         LONE,
     ),
     (
+        "AssignTaskRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "DelegateTaskRequest",
+        "/brief",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "DelegateTaskRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "DelegateTaskRequest",
+        "/launch/cwd",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "DismissAttentionRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "EscalateRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "EscalateRequest",
+        "/summary",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "FinishTaskRequest",
         "/idempotencyKey",
         "loneSurrogate",
         OWNER_STRINGS,
@@ -252,6 +308,13 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     ),
     (
         "SignalAgentRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "UnassignTaskRequest",
         "/idempotencyKey",
         "loneSurrogate",
         OWNER_STRINGS,
