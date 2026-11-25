@@ -379,21 +379,16 @@ async fn follow(
     }
 }
 
-/// Tries again the agents the start's reconcile couldn't settle, `every` so often, until `stop`,
-/// on a task of its own, so a slow holder of the shells' doesn't hold up the agents', nor theirs
-/// the shells'. Each agent's settle is whole on its own: one a stop cuts short is tried again by
-/// the next start.
+/// Runs the agents' watch every `every`, until `stop`, on a task of its own, so a slow holder of
+/// the shells' doesn't hold up the agents', nor theirs the shells'. Each agent's settle is whole
+/// on its own: one a stop cuts short is tried again by the next start.
 async fn agents_tick(agents: Arc<Agents>, every: Duration, stop: CancellationToken) {
     while stop
         .run_until_cancelled(tokio::time::sleep(every))
         .await
         .is_some()
     {
-        if stop
-            .run_until_cancelled(agents.reconcile_again())
-            .await
-            .is_none()
-        {
+        if stop.run_until_cancelled(agents.tick()).await.is_none() {
             return;
         }
     }

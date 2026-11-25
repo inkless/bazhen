@@ -389,6 +389,8 @@ pub(crate) mod fake {
         pub(crate) reads_refused: Option<TerminalError>,
         /// Whether the runtime answers a read of its health at all.
         pub(crate) reach: Reach,
+        /// How many reads of whether the runtime is reachable it was asked for.
+        pub(crate) reach_reads: usize,
         /// Terminals the fake doesn't list, and can't prove gone.
         pub(crate) unproven: BTreeSet<String>,
         /// Terminals whose holders are there but can't be read: listed as unreadable.
@@ -842,7 +844,11 @@ pub(crate) mod fake {
         }
 
         fn reachable<'a>(&'a self, _recorded: &'a [Recorded]) -> Answer<'a, bool> {
-            Box::pin(async { self.state.lock().unwrap().reach == Reach::Answers })
+            Box::pin(async {
+                let mut state = self.state.lock().unwrap();
+                state.reach_reads += 1;
+                state.reach == Reach::Answers
+            })
         }
 
         fn shells(&self) -> Answer<'_, Result<Vec<FoundShell>, TerminalError>> {

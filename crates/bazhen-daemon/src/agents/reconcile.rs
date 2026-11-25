@@ -4,9 +4,9 @@
 //! agent is concluded on only by what was read of its own terminal: one whose holder can't be
 //! read is left, and the rest settle all the same. One the runtime doesn't list is ended only
 //! once what ran it is provably gone, or, its start having recorded nothing to prove that by,
-//! once nothing has answered for it long after anything could start it. What a start couldn't
-//! settle is tried again each tick, and only that, each in its agent's turn if no command holds
-//! it.
+//! once nothing has answered for it long after anything could start it. The watch (`tick`)
+//! settles the same way each tick what a start couldn't, and any agent the daemon lost track of
+//! since, each in its agent's turn if no command holds it.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::PoisonError;
@@ -27,12 +27,16 @@ use crate::shells::{RUNTIME, generation_of, locator_of};
 use crate::terminals::{AgentsFound, FoundAgent, Recorded};
 use crate::tokens::unheld;
 
+mod tick;
+
 /// The agents a start read and couldn't settle yet, and what the last try of them said, so a
 /// failure that lasts is said once.
 #[derive(Debug, Default)]
 pub(crate) struct Unreconciled {
     kept: BTreeSet<String>,
     said: Vec<String>,
+    /// What the watch carries from one tick to the next.
+    watch: tick::Ticking,
 }
 
 /// Why an agent wasn't settled this time. Each is tried again.
@@ -48,6 +52,22 @@ enum Unsettled {
     Unproven,
     /// The store or the runtime failed.
     Failed(AgentError),
+}
+
+impl Unsettled {
+    /// What to say of agent `id` left so, if anything: what holds it now is no failure.
+    fn said(&self, id: &str) -> Option<String> {
+        match self {
+            Self::Busy | Self::Moved => None,
+            Self::Unread => Some(format!(
+                "agent {id}'s terminal can't be read just now; trying again each tick"
+            )),
+            Self::Unproven => Some(format!(
+                "agent {id}'s terminal may still run on its old holder; trying again each tick"
+            )),
+            Self::Failed(err) => Some(format!("could not settle agent {id}: {err}")),
+        }
+    }
 }
 
 impl From<AgentError> for Unsettled {
@@ -203,6 +223,59 @@ enum After {
     Closed,
 }
 
+/// Why a start nothing answers for is settled as one that didn't go ahead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Cause {
+    /// The daemon that asked for it died first.
+    Restart,
+    /// Its answer was unclear, or never recorded, and nothing it started was found.
+    Unconfirmed,
+}
+
+/// The detail a start settled as unconfirmed is rejected with.
+const UNCONFIRMED: &str = "start unconfirmed; proved not started";
+
+impl Cause {
+    fn detail(self) -> Option<String> {
+        match self {
+            Self::Restart => None,
+            Self::Unconfirmed => Some(UNCONFIRMED.to_owned()),
+        }
+    }
+
+    /// A launch's failure. `agent.failed` has no reason for an unclear answer: a launch is
+    /// rejected, and the detail says why.
+    fn failed(self) -> AgentFailed {
+        AgentFailed {
+            reason: match self {
+                Self::Restart => AgentFailedReason::DaemonRestart,
+                Self::Unconfirmed => AgentFailedReason::LaunchRejected,
+            },
+            detail: self.detail(),
+        }
+    }
+
+    fn relaunch_rejected(self) -> AgentRelaunchRejected {
+        AgentRelaunchRejected {
+            reason: match self {
+                Self::Restart => RelaunchRejectedReason::DaemonRestart,
+                Self::Unconfirmed => RelaunchRejectedReason::Unavailable,
+            },
+            detail: self.detail(),
+        }
+    }
+
+    fn respawn_rejected(self) -> AgentRespawnRejected {
+        AgentRespawnRejected {
+            reason: match self {
+                Self::Restart => RespawnRejectedReason::DaemonRestart,
+                Self::Unconfirmed => RespawnRejectedReason::Unavailable,
+            },
+            detail: self.detail(),
+        }
+    }
+}
+
 /// A start the runtime shows went ahead, on the token its start was given: the agent's bare id
 /// no longer names it. The files of earlier starts' tokens are left for its close: none names
 /// it now.
@@ -215,12 +288,13 @@ fn started(w: &StoreWriter<'_>, agent: &AgentId, change: AgentChange) -> Result<
 /// One agent's events, from what the store says of it and what its terminal shows, in the
 /// caller's transaction (`settle`), and what follows them. `unheld` is the hash of a token no
 /// one holds, which a relaunch that never started leaves the agent with: its process may yet
-/// start, and must not speak for it.
+/// start, and must not speak for it. A start that didn't go ahead is rejected for `cause`.
 fn settle(
     w: &StoreWriter<'_>,
     agent: &AgentTerminal,
     found: Option<&FoundAgent>,
     unheld: &str,
+    cause: Cause,
 ) -> Result<After, AgentError> {
     let id = &agent.agent_id;
     let system = |change| append(w, id, Actor::System, change).map(drop);
@@ -230,13 +304,11 @@ fn settle(
                 .last_event_id(id.as_str(), "agent.relaunch_requested")?
                 .is_some() =>
         {
-            // The daemon died mid-relaunch: the new terminal runs it, or the agent is lost
-            // again, never failed, as a relaunch that can't start leaves it.
+            // A relaunch that didn't finish, as a daemon that died mid-way leaves one: the new
+            // terminal runs it, or the agent is lost again, never failed, as a relaunch that
+            // can't start leaves it.
             let Some(found) = found else {
-                system(AgentChange::RelaunchRejected(AgentRelaunchRejected {
-                    reason: RelaunchRejectedReason::DaemonRestart,
-                    detail: None,
-                }))?;
+                system(AgentChange::RelaunchRejected(cause.relaunch_rejected()))?;
                 w.note_agent_token(id.as_str(), unheld)?;
                 return Ok(After::Unstarted);
             };
@@ -249,12 +321,9 @@ fn settle(
             Ok(after)
         }
         (AgentState::Starting, Some(TerminalState::Creating)) => {
-            // The daemon died mid-launch: its terminal runs it, or there is none.
+            // A launch that didn't finish: its terminal runs it, or there is none.
             let Some(found) = found else {
-                system(AgentChange::Failed(AgentFailed {
-                    reason: AgentFailedReason::DaemonRestart,
-                    detail: None,
-                }))?;
+                system(AgentChange::Failed(cause.failed()))?;
                 return Ok(After::Unstarted);
             };
             let running = AgentChange::Running(AgentRunning {
@@ -268,7 +337,7 @@ fn settle(
             Ok(after)
         }
         (AgentState::Starting, Some(TerminalState::Exited)) if agent.generation.is_some() => {
-            // The daemon died mid-respawn. The generation is written before the new process
+            // A respawn that didn't finish. The generation is written before the new process
             // starts, so the next one means it started. It resumed the bound session in the same
             // terminal, whose tag still names the session it was created on.
             let next = agent.generation.map(|generation| generation + 1);
@@ -283,10 +352,7 @@ fn settle(
             }
             // Its token is kept: a process that starts late in the same terminal is its own,
             // and is adopted.
-            system(AgentChange::RespawnRejected(AgentRespawnRejected {
-                reason: RespawnRejectedReason::DaemonRestart,
-                detail: None,
-            }))?;
+            system(AgentChange::RespawnRejected(cause.respawn_rejected()))?;
             let Some(found) = found else {
                 system(AgentChange::Lost)?;
                 return Ok(After::Nothing);
@@ -319,7 +385,7 @@ fn settle(
 impl Agents {
     /// Matches the runtime's agents against the store's, before anything else acts on them: run
     /// it before the runtime's events are followed, mail is requeued, and commands are taken.
-    /// What it can't settle, `reconcile_again` tries again.
+    /// What it can't settle, the watch tries again.
     ///
     /// # Errors
     ///
@@ -358,13 +424,16 @@ impl Agents {
     /// start that recorded its terminal meanwhile keeps it. One whose agent is busy, or whose
     /// close fails, is left for the next try.
     async fn close_orphans(&self) {
-        let found = match self.deps.terminals.agents().await {
-            Ok(read) => read.found,
+        match self.deps.terminals.agents().await {
+            Ok(read) => self.close_orphans_among(read.found).await,
             Err(err) => {
                 tracing::warn!("bazhen: reconcile: could not read the {RUNTIME} agents: {err}");
-                return;
             }
-        };
+        }
+    }
+
+    /// Closes each of `found` that no agent runs in, as `close_orphans` does.
+    async fn close_orphans_among(&self, found: Vec<FoundAgent>) {
         for found in found {
             let Some(_turn) = self.deps.turns.try_take(found.agent_id.as_str()) else {
                 continue;
@@ -403,17 +472,6 @@ impl Agents {
                     found.agent_id
                 ),
             }
-        }
-    }
-
-    /// Tries again each agent the start's reconcile couldn't settle, saying once when the last
-    /// of them is.
-    pub(crate) async fn reconcile_again(&self) {
-        if self.unreconciled_ids().is_empty() {
-            return;
-        }
-        if self.settle_kept().await {
-            tracing::info!("bazhen: reconcile: settled the agents it couldn't at start");
         }
     }
 
@@ -488,26 +546,26 @@ impl Agents {
         let mut tried = Tried::default();
         for agent in &agents {
             let id = agent.agent_id.as_str();
-            let said = match self.settle_now(&agent.agent_id, &listed).await {
-                Ok(()) => continue,
-                Err(Unsettled::Busy | Unsettled::Moved) => None,
-                Err(Unsettled::Unread) => Some(format!(
-                    "agent {id}'s terminal can't be read just now; trying again each tick"
-                )),
-                Err(Unsettled::Unproven) => Some(format!(
-                    "agent {id}'s terminal may still run on its old holder; trying again each tick"
-                )),
-                Err(Unsettled::Failed(err)) => Some(format!("could not settle agent {id}: {err}")),
+            let Err(unsettled) = self
+                .settle_now(&agent.agent_id, &listed, Cause::Restart)
+                .await
+            else {
+                continue;
             };
             tried.kept.insert(id.to_owned());
-            tried.said.extend(said);
+            tried.said.extend(unsettled.said(id));
         }
         tried
     }
 
     /// Settles agent `id` as it is now, in its turn if no command holds it: one a command or an
     /// event moved meanwhile is left for the next try, and one it ended is left as it is.
-    async fn settle_now(&self, id: &AgentId, listed: &Listed) -> Result<(), Unsettled> {
+    async fn settle_now(
+        &self,
+        id: &AgentId,
+        listed: &Listed,
+        cause: Cause,
+    ) -> Result<(), Unsettled> {
         let Some(_turn) = self.deps.turns.try_take(id.as_str()) else {
             return Err(Unsettled::Busy);
         };
@@ -539,7 +597,9 @@ impl Agents {
         let after = self
             .write(
                 move |w| match w.reads().agent_terminal(was.agent_id.as_str())? {
-                    Some(now) if now == was => settle(w, &now, found.as_ref(), &unheld).map(Some),
+                    Some(now) if now == was => {
+                        settle(w, &now, found.as_ref(), &unheld, cause).map(Some)
+                    }
                     Some(now) if recoverable(now.state) => Ok(None),
                     _ => Ok(Some(After::Nothing)),
                 },
@@ -1344,7 +1404,7 @@ mod tests {
             state.unreadable.clear();
         });
         f.fake().gone(&at_wedged);
-        let then = recorded(&f, || runtime().block_on(agents.reconcile_again()));
+        let then = recorded(&f, || runtime().block_on(agents.tick()));
         assert_eq!(
             (
                 first,
@@ -1376,7 +1436,7 @@ mod tests {
         f.fake().set(|state| {
             state.unproven.clear();
         });
-        let then = recorded(&f, || runtime().block_on(agents.reconcile_again()));
+        let then = recorded(&f, || runtime().block_on(agents.tick()));
         assert_eq!(
             (first, then, state(&f, &agent)),
             (
@@ -1397,7 +1457,7 @@ mod tests {
         let early = recorded(&f, || reconciled(&agents));
         f.fake()
             .start_unseen(&f.terminal_of(agent.as_str()), &agent, 0);
-        let then = recorded(&f, || runtime().block_on(agents.reconcile_again()));
+        let then = recorded(&f, || runtime().block_on(agents.tick()));
         assert_eq!(
             (early, then, state(&f, &agent)),
             (
@@ -1552,5 +1612,161 @@ mod tests {
                 Vec::<String>::new(),
             )
         );
+    }
+
+    /// One tick of the agents' watch.
+    fn ticked(f: &Fixture) {
+        runtime().block_on(f.agents.tick());
+    }
+
+    /// Records `change` of `agent` as `actor` made it, as a command would, with nothing more.
+    fn recorded_as(f: &Fixture, agent: &AgentId, change: AgentChange) {
+        let agent = agent.clone();
+        runtime()
+            .block_on(
+                f.agents
+                    .write(move |w| append(w, &agent, Actor::User, change)),
+            )
+            .unwrap();
+    }
+
+    /// Records `agent` closed, as a close by force that left its holder running does.
+    fn closed_by_force(f: &Fixture, agent: &AgentId) {
+        recorded_as(f, agent, AgentChange::Closing);
+        let agent = agent.clone();
+        runtime()
+            .block_on(
+                f.agents
+                    .write(move |w| record_closed(w, &agent, Actor::User)),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn rejects_on_the_next_tick_a_launch_with_no_clear_answer_once_nothing_could_have_started_it() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, _) = unanswered_launch(&f, |state| {
+            state.creates_refused = Some(TerminalError::Unknown("no answer".to_owned()));
+        });
+        let events = recorded(&f, || ticked(&f));
+        assert_eq!(
+            (events, state(&f, &agent), f.last("agent.failed")),
+            (
+                vec!["agent.failed".to_owned()],
+                AgentState::Failed,
+                json!({"reason": "launch_rejected", "detail": UNCONFIRMED})
+            )
+        );
+    }
+
+    #[test]
+    fn records_on_the_next_tick_a_launch_whose_finish_was_never_recorded_running_where_it_runs() {
+        let f = held_creates();
+        let agent = mid_launch(&f, "k-1");
+        f.fake()
+            .start_unseen(&f.terminal_of(agent.as_str()), &agent, 0);
+        let events = recorded(&f, || ticked(&f));
+        assert_eq!(events, vec!["agent.running".to_owned()]);
+    }
+
+    #[test]
+    fn leaves_an_agent_a_command_holds_for_the_tick_after_it_lets_go() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, terminal) = launched(&f, "k-1");
+        f.fake().gone(&terminal);
+        let turns = Arc::clone(&f.agents.deps.turns);
+        let held = turns.try_take(agent.as_str()).unwrap();
+        let while_held = recorded(&f, || ticked(&f));
+        drop(held);
+        let then = recorded(&f, || ticked(&f));
+        assert_eq!(
+            (while_held, then, state(&f, &agent)),
+            (
+                Vec::<String>::new(),
+                vec!["agent.lost".to_owned()],
+                AgentState::Lost
+            )
+        );
+    }
+
+    #[test]
+    fn closes_on_the_tick_the_holder_an_agent_left_closing_runs_on_and_records_it_closed() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, terminal) = launched(&f, "k-1");
+        recorded_as(&f, &agent, AgentChange::Closing);
+        let events = recorded(&f, || ticked(&f));
+        assert_eq!(
+            (events, state(&f, &agent), closed(&f)),
+            (
+                vec!["agent.closed".to_owned()],
+                AgentState::Closed,
+                vec![terminal]
+            )
+        );
+    }
+
+    #[test]
+    fn closes_on_the_tick_a_holder_still_running_for_an_agent_closed_by_force() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, terminal) = launched(&f, "k-1");
+        closed_by_force(&f, &agent);
+        let events = recorded(&f, || ticked(&f));
+        assert_eq!((events, closed(&f)), (Vec::<String>::new(), vec![terminal]));
+    }
+
+    #[test]
+    fn answers_on_the_tick_the_waiter_of_an_agent_whose_close_answered_none() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, _) = launched(&f, "k-1");
+        let hooks = Arc::clone(&f.agents.deps.hooks);
+        let _waiting = hooks.waiter(&agent);
+        closed_by_force(&f, &agent);
+        let before = hooks.holds_waiter(&agent);
+        ticked(&f);
+        assert_eq!((before, hooks.holds_waiter(&agent)), (true, false));
+    }
+
+    #[test]
+    fn reads_whether_the_runtime_is_reachable_ever_less_often_while_it_isnt_up_to_five_minutes() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        launched(&f, "k-1");
+        f.fake()
+            .set(|state| state.reach = crate::terminals::fake::Reach::Unreachable);
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        let mut read_at = Vec::new();
+        for tick in 1..=200 {
+            let before = reach_reads(&f);
+            ticked(&f);
+            if reach_reads(&f) > before {
+                read_at.push(tick);
+            }
+        }
+        assert_eq!(
+            (read_at, said.times("isn't reachable")),
+            (vec![1, 2, 4, 8, 16, 32, 64, 124, 184], 1)
+        );
+    }
+
+    fn reach_reads(f: &Fixture) -> usize {
+        let mut reads = 0;
+        f.fake().set(|state| reads = state.reach_reads);
+        reads
+    }
+
+    #[test]
+    fn says_once_while_it_lasts_what_leaves_an_agent_unsettled() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (_, terminal) = launched(&f, "k-1");
+        f.fake().gone(&terminal);
+        f.fake().set(|state| {
+            state.unproven.insert(terminal.clone());
+        });
+        let said = crate::shells::tests::Said::default();
+        let _logging = said.logging();
+        for _ in 0..3 {
+            ticked(&f);
+        }
+        assert_eq!(said.times("may still run on its old holder"), 1);
     }
 }
