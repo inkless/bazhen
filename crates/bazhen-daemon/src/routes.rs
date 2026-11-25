@@ -404,8 +404,16 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/rename", post(agent_routes::rename))
         .route("/v1/agents/{id}/close", post(agent_routes::close))
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
-        .route("/v1/hooks", post(crate::hooks::hook))
-        .route("/v1/hooks/ack", post(crate::hooks::ack))
+        // A hook carries what its harness sent, such as a whole file an edit wrote, and the
+        // TypeScript daemon bounds neither body.
+        .route(
+            "/v1/hooks",
+            post(crate::hooks::hook).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/v1/hooks/ack",
+            post(crate::hooks::ack).layer(DefaultBodyLimit::disable()),
+        )
         .route("/v1/shells", post(shell_routes::open))
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))

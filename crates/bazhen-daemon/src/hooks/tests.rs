@@ -287,3 +287,28 @@ fn takes_only_a_version_whose_major_is_this_ones_as_text() {
         [true, true, false, false, false, false]
     );
 }
+
+#[test]
+fn takes_a_hook_past_axums_default_body_limit_as_the_typescript_daemon_does() {
+    use tower::ServiceExt as _;
+    let f = fixture();
+    // A `PostToolUse` for an edit carries the whole file it wrote.
+    let file = "x".repeat(3 << 20);
+    let payload = json!({ "hook_event_name": "PostToolUse", "session_id": "session-1",
+                          "tool_input": { "content": file } });
+    let hook = |path: &str, body: &Value| {
+        let request = axum::http::Request::post(path)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let router = crate::routes::socket_router(f.shared.clone());
+        runtime().block_on(router.oneshot(request)).unwrap()
+    };
+    let body = json!({
+        "protocolVersion": HOOK_PROTOCOL_VERSION, "agentId": f.agent.as_str(),
+        "event": "PostToolUse", "pid": 77, "ppid": ROOT, "payload": payload,
+    });
+    let ack = json!({ "agentId": f.agent.as_str(), "offered": [], "pad": file });
+    let (hooked, acked) = (hook("/v1/hooks", &body), hook("/v1/hooks/ack", &ack));
+    assert_eq!((reply_of(hooked).0, acked.status().as_u16()), (200, 200));
+}
