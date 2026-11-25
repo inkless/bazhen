@@ -50,8 +50,9 @@ fn command() -> Command {
         .subcommand(
             Command::new("schema")
                 .about(
-                    "Write the protocol's JSON Schema and zod into target/protocol-shadow; \
-                     with --check, also hold schemars to the protocol crates' tests",
+                    "Write the protocol's JSON Schema and corpus into target/protocol-shadow, \
+                     and its zod into packages/protocol/src/gen; with --check, write no zod: \
+                     hold the committed zod to it, and schemars to the protocol crates' tests",
                 )
                 .disable_help_flag(true)
                 .arg(Arg::new("check").long("check").action(ArgAction::SetTrue)),

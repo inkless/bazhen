@@ -3870,6 +3870,17 @@
               },
               {
                 "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
+              },
+              {
+                "group": [
                   "**/host-guard/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
@@ -3941,6 +3952,17 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
               },
               {
                 "group": [
@@ -4047,6 +4069,17 @@
               },
               {
                 "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
+              },
+              {
+                "group": [
                   "**/host-guard/src/**"
                 ],
                 "message": "apps/web (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
@@ -4121,6 +4154,17 @@
               },
               {
                 "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
+              },
+              {
+                "group": [
                   "**/host-guard/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) imports host-guard only as @bazhen/host-guard: its modules export forms with seams that can vouch for any pid."
@@ -4185,6 +4229,17 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
               },
               {
                 "group": [
@@ -4281,6 +4336,17 @@
                   "**/daemon/src/**"
                 ],
                 "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) must not import @bazhen/daemon."
+              },
+              {
+                "group": [
+                  "@bazhen/protocol",
+                  "@bazhen/protocol/**",
+                  "**/packages/protocol/**",
+                  "**/protocol/src/**",
+                  "!@bazhen/protocol/web",
+                  "!@bazhen/protocol/id"
+                ],
+                "message": "apps/web/src/ui (tech-stack-and-scaffold.md §3, docs/standards/code.md) may import from @bazhen/protocol only @bazhen/protocol/web, @bazhen/protocol/id."
               },
               {
                 "group": [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Shell } from "@bazhen/protocol";
+import type { Shell } from "@bazhen/protocol/web";
 import { age, shellCount, shellLabel, standaloneGroups } from "./model.ts";
 
 const agentId = "agent_0190000000007000800000000000aaaa";

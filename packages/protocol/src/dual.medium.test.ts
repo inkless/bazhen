@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import * as fromRust from "./gen/protocol.ts";
 import * as protocol from "./index.ts";
 
-/** Where `cargo xtask schema` writes the zod it generates from the Rust protocol, and its corpus. */
+/** Where `cargo xtask schema` writes the planted corpus. */
 const SHADOW = new URL("../../../target/protocol-shadow/", import.meta.url);
 
 /** A planted case: a message's body, and whether the protocol takes it. */
@@ -91,11 +92,11 @@ function notYetInRust(generated: unknown) {
   };
 }
 
-/** The module at `file` under the shadow, or why it won't load. */
-async function shadowed(file: string, json = false): Promise<unknown> {
+/** The JSON at `file` under the shadow, or why it won't load. */
+async function shadowed(file: string): Promise<unknown> {
   const url = new URL(file, SHADOW);
   try {
-    return await (json ? import(url.href, { with: { type: "json" } }) : import(url.href));
+    return await import(url.href, { with: { type: "json" } });
   } catch (error) {
     throw new Error(`${url.pathname} won't load: run \`scripts/xtask.sh schema\``, {
       cause: error,
@@ -186,9 +187,8 @@ const judgedLines = (module: unknown) =>
   }));
 
 describe("the protocol and the zod generated from the Rust protocol", async () => {
-  const corpus = Corpus.parse(await shadowed("corpus.json", true)).default;
-  const generated = await shadowed("gen/protocol.ts");
-  const { found, parsed } = judge(corpus, generated);
+  const corpus = Corpus.parse(await shadowed("corpus.json")).default;
+  const { found, parsed } = judge(corpus, fromRust);
 
   it("judge each planted case as the corpus expects", () => {
     expect(found).toEqual([]);
@@ -203,10 +203,10 @@ describe("the protocol and the zod generated from the Rust protocol", async () =
     const takes = judgedLines(protocol).map((judged) => judged.takes);
     expect(takes).toContain(true);
     expect(takes).toContain(false);
-    expect(judgedLines(generated)).toEqual(judgedLines(protocol));
+    expect(judgedLines(fromRust)).toEqual(judgedLines(protocol));
   });
 
   it("differ in the schemas they export only by those NOT_YET_IN_RUST lists", () => {
-    expect(notYetInRust(generated)).toEqual({ unlisted: [], duplicated: [], emitted: [] });
+    expect(notYetInRust(fromRust)).toEqual({ unlisted: [], duplicated: [], emitted: [] });
   });
 });

@@ -393,6 +393,7 @@ struct Walk<'a> {
 /// The keywords that describe a value without holding it to anything: the walk plants no case for
 /// them, and a schema of them alone takes any value.
 const ANNOTATIONS: &[&str] = &[
+    "x-bazhen-message",
     "description",
     "title",
     "examples",

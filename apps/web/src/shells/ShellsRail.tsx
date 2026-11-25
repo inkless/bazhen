@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Shell } from "@bazhen/protocol";
+import type { Shell } from "@bazhen/protocol/web";
 import { openShell } from "../api.ts";
 import { pageTheme } from "../ui/theme.ts";
 import { Button } from "../ui/Button.tsx";

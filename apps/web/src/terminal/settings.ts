@@ -1,4 +1,4 @@
-import { parseJson } from "@bazhen/protocol";
+import { parseJson } from "@bazhen/protocol/web";
 import type { DeviceStorage } from "../storage.ts";
 import { APPLE_KEY_MAP, DEFAULT_KEY_MAP, parseKeyMap, type KeyMap } from "./keymap.ts";
 

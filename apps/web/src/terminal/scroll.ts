@@ -3,7 +3,7 @@ import {
   HOLDER_MAX_HISTORY_LINES,
   MAX_ROWS,
   type StreamServerFrame,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 
 export type TerminalKind = "agent" | "shell";
 

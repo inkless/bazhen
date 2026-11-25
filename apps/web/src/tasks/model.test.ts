@@ -5,7 +5,7 @@ import {
   type Role,
   type StateSnapshot,
   type Task,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import {
   agentTasks,
   assignableAgents,

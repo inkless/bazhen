@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, AgentState, StateSnapshot } from "@bazhen/protocol";
+import type { Agent, AgentState, StateSnapshot } from "@bazhen/protocol/web";
 import {
   agentActions,
   agentLabel,

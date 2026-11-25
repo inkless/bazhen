@@ -1,5 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
-import type { Agent, TuiTheme } from "@bazhen/protocol";
+import type { Agent, TuiTheme } from "@bazhen/protocol/web";
 import paletteCss from "../ui/palette.css?raw";
 import { paletteOf, themeOf, toHex, type Scheme } from "../ui/token-sheet.ts";
 import tokensCss from "../ui/tokens.css?raw";

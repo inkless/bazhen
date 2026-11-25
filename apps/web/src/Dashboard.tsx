@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AGENT_NAME_MAX, AgentName, type HarnessId, type StateSnapshot } from "@bazhen/protocol";
+import {
+  AGENT_NAME_MAX,
+  AgentName,
+  type HarnessId,
+  type StateSnapshot,
+} from "@bazhen/protocol/web";
 import { launchAgent, watchState } from "./api.ts";
 import { AgentAttention, Inbox } from "./inbox/Inbox.tsx";
 import { openNotices } from "./inbox/model.ts";

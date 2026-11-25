@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { Agent, Shell } from "@bazhen/protocol";
+import type { Agent, Shell } from "@bazhen/protocol/web";
 import { closeShell, openShell } from "../api.ts";
 import { pageTheme } from "../ui/theme.ts";
 import { Button } from "../ui/Button.tsx";

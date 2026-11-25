@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Agent, TuiTheme } from "@bazhen/protocol";
+import type { Agent, TuiTheme } from "@bazhen/protocol/web";
 import { respawnAgent, signalAgent } from "../api.ts";
 import { inOtherTheme } from "../terminal/theme.ts";
 import { Button } from "../ui/Button.tsx";

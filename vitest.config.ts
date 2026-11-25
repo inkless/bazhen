@@ -1,5 +1,4 @@
-import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 // First in every project: the tests start only inside a capped run.
 const CAPPED = "tests/support/capped-setup.ts";
@@ -7,19 +6,6 @@ const CAPPED = "tests/support/capped-setup.ts";
 const CONTAINMENT = "tests/holder/containment.test.ts";
 // In every project: any test may be a property test.
 const SEEDED = "tests/support/fast-check-setup.ts";
-
-// The zod `cargo xtask schema` writes sits in target/protocol-shadow, outside every package, so
-// no node_modules holds its `zod`: it is resolved as packages/protocol, which it stands in for,
-// resolves it.
-const PROTOCOL = fileURLToPath(new URL("packages/protocol/src/index.ts", import.meta.url));
-const shadowZod: Plugin = {
-  name: "protocol-shadow-zod",
-  enforce: "pre",
-  resolveId(source, importer) {
-    if (source !== "zod" || !importer?.includes("/target/protocol-shadow/")) return null;
-    return this.resolve(source, PROTOCOL, { skipSelf: true });
-  },
-};
 
 export default defineConfig({
   test: {
@@ -58,7 +44,6 @@ export default defineConfig({
           globalSetup: [CAPPED, "tests/support/medium-setup.ts"],
           setupFiles: [SEEDED],
         },
-        plugins: [shadowZod],
       },
       {
         // The CLI as a process: a case may wait out the CLI's own deadlines, and RUN_MS in

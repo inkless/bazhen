@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { HealthResponse } from "@bazhen/protocol";
+import { HealthResponse } from "@bazhen/protocol/web";
 import { PAGE_PROTOCOL, noticeUnpaired, onAnotherBuild, onUnpaired } from "./api.ts";
 import { isAnotherBuild } from "./build.ts";
 import { Dashboard } from "./Dashboard.tsx";

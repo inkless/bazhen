@@ -7,7 +7,7 @@ import {
   type StateSnapshot,
   type TaskDetail,
   type TaskOutcome,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { Refused, assignTask, createTask, fetchTask, finishTask, unassignTask } from "../api.ts";
 import { agentLabel, agentLabelOf, shortId } from "../fleet/model.ts";
 import { Button } from "../ui/Button.tsx";

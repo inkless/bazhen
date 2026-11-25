@@ -41,6 +41,7 @@ const failures: string[] = [];
 // Source files whose behaviour is covered by a test somewhere other than a sibling file. Each
 // entry names that test, and the check fails if it disappears.
 const COVERED_ELSEWHERE: Record<string, string> = {
+  "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/dual.medium.test.ts",
   "packages/runtime-tmux/src/index.ts": "tests/integration/tmux-runtime.test.ts",
   "scripts/child-process.ts": "scripts/signal-paths.test.ts",
   "packages/runtime-holder/src/runtime-stream.ts":
@@ -1263,13 +1264,13 @@ const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-xtask/src/gate.rs::run":
     "hands cargo configs' text to config_failures; parses nothing itself",
   "crates/bazhen-xtask/src/schema/mod.rs::run":
-    "hands cargo configs' text to config_failures, and what the protocol crates' own emit_schema example prints to write_shadow; parses nothing itself",
+    "hands cargo configs' text to config_failures, and what the protocol crates' own emit_schema example prints to write_schema; parses nothing itself",
   "crates/bazhen-protocol/src/schema.rs::verdict":
     "hands its bytes to edge, which the edge target fuzzes, and writes back what edge took; built only under the schema feature, for the corpus",
   "crates/bazhen-xtask/src/schema/mod.rs::write_corpus":
     "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, and the protocol's schemas and fixtures under packages/protocol; reads nothing from outside the repository",
-  "crates/bazhen-xtask/src/schema/mod.rs::write_shadow":
-    "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, and the names the repository's checks.ts exports; reads nothing from outside the repository",
+  "crates/bazhen-xtask/src/schema/mod.rs::write_schema":
+    "reads the JSON the protocol crates' own emit_schema example prints, through serde_json, the names the repository's checks.ts exports, and with --check the committed zod, compared as text; reads nothing from outside the repository",
   "crates/bazhen-xtask/src/main.rs::Real::read":
     "reads a cargo config's text for config_failures; parses nothing",
   "crates/bazhen-holder/src/process.rs::procargs2_split":

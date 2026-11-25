@@ -1,11 +1,9 @@
 // The Dual test's type leg, which tsc judges in `moon run :check` (the `protocol-dual-types`
 // task): each schema the zod generated from the Rust protocol shares a name with is the protocol's
 // own type, as it parses and as it is written. Its runtime leg is src/dual.medium.test.ts.
-// tsconfig.json maps the generated file's `zod` to this package's, which no node_modules under
-// target/ holds.
 
 import type { z } from "zod";
-import type * as Generated from "../../../target/protocol-shadow/gen/protocol.ts";
+import type * as Generated from "../src/gen/protocol.ts";
 import type * as Protocol from "../src/index.ts";
 
 type Equal<A, B> =

@@ -5,7 +5,7 @@ import {
   type ExitStatus,
   type NeedsRestart,
   type StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 
 /**
  * What to tell the user of a terminal on a holder this Bazhen can't fully serve, or null for one

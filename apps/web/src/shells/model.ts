@@ -1,4 +1,4 @@
-import type { Shell } from "@bazhen/protocol";
+import type { Shell } from "@bazhen/protocol/web";
 
 /** The last part of a path, or the path itself at its root. */
 const basename = (path: string) => path.replace(/\/+$/, "").split("/").at(-1) || path;
