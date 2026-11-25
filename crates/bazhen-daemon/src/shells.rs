@@ -1,7 +1,6 @@
 //! Shell terminals (`shells/lifecycle.ts`): opening, closing, restarting and renaming them, and
 //! closing one at once when its shell exits. Commands on one shell run one at a time. A shell
-//! beside an agent needs the agents this daemon doesn't run yet, so it opens none, and a restart
-//! opens its new shell standalone.
+//! beside an agent opens in its directory, in the agent's turn, so the agent's close sees it.
 //!
 //! - `reconcile`: what a restarted daemon makes of the shells it finds, and those it doesn't;
 //! - `foreground`: what each running shell's foreground holds, kept current from process facts;
@@ -21,11 +20,12 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::events::{
     RuntimeRefPayload, TerminalClosed, TerminalClosedReason, TerminalFailed, TerminalFailedReason,
     TerminalIncarnation, TerminalOpened, TerminalRenamed,
 };
-use bazhen_protocol::ids::{DeviceId, TerminalId};
+use bazhen_protocol::ids::{AgentId, DeviceId, TerminalId};
 use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::{
     BusyShell, CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
@@ -57,15 +57,14 @@ pub(crate) enum ShellError {
     /// The request breaks a rule, or names a directory that isn't one.
     #[error("{0}")]
     Invalid(String),
-    /// It is valid, but needs what this daemon doesn't do yet.
-    #[error("{0}")]
-    Unsupported(String),
     #[error(transparent)]
     Limit(#[from] TerminalLimit),
     #[error("idempotency key {0} was first used for a different request")]
     Idempotency(String),
     #[error("no shell {0}")]
     Unknown(String),
+    #[error("no agent {0}")]
+    UnknownAgent(String),
     /// Its state doesn't allow the command, or its terminal isn't the one recorded.
     #[error("{0}")]
     Conflict(String),
@@ -310,6 +309,8 @@ pub(crate) struct Shells {
 #[derive(Debug)]
 struct Opening {
     cwd: String,
+    /// The agent it closes with.
+    linked_agent_id: Option<AgentId>,
     theme: Option<TuiTheme>,
     restart_of: Option<TerminalId>,
     /// The paired device that asked for it, which its environment names.
@@ -362,6 +363,13 @@ fn still_running(found: &ShellRow) -> String {
 fn offers(command: ShellCommand) -> impl Fn(&ShellRow) -> bool {
     move |found| shell_commands(found.state, found.linked_agent_id.is_some()).contains(&command)
 }
+
+/// The states of an agent a shell may be opened beside (`LINKABLE`): those before its close.
+const LINKABLE: [AgentState; 3] = [
+    AgentState::Starting,
+    AgentState::Running,
+    AgentState::Exited,
+];
 
 /// The keys of a locator that name the process in a terminal, which a later one changes; every
 /// other key names what runs it, the same for each of its processes.
@@ -561,31 +569,78 @@ impl Shells {
         }
     }
 
-    /// Opens a standalone shell. The terminal is recorded before the runtime starts it, and the
-    /// key's answer with it, so a retry opens nothing new.
+    /// Opens a shell, linked to a live agent in its directory or standalone. The terminal is
+    /// recorded before the runtime starts it, and the key's answer with it, so a retry opens
+    /// nothing new.
     pub(crate) async fn open(
         &self,
         req: &OpenShellRequest,
         opened_by: Option<DeviceId>,
     ) -> Result<ShellCommandResponse, ShellError> {
         let request = asked("open", None, req)?;
+        // In the agent's turn, so a linked shell is opened wholly before or after its agent's
+        // close, and that close always sees it.
+        let _turn = match &req.linked_agent_id {
+            Some(agent) => Some(self.deps.turns.take(agent.as_str()).await),
+            None => None,
+        };
         if let Some(prior) = self.replayed(&req.idempotency_key, &request).await? {
             return Ok(prior);
         }
-        if req.linked_agent_id.is_some() {
-            return Err(ShellError::Unsupported(
-                "this daemon can't open a shell beside an agent yet".to_owned(),
-            ));
-        }
-        let cwd = resolve_directory(req.cwd.as_deref().unwrap_or("~"), &self.deps.home)?;
+        let (cwd, linked_agent_id) = match &req.linked_agent_id {
+            Some(agent) => (self.linkable(agent).await?, Some(agent.clone())),
+            None => (
+                resolve_directory(req.cwd.as_deref().unwrap_or("~"), &self.deps.home)?,
+                None,
+            ),
+        };
         let opening = Opening {
             cwd,
+            linked_agent_id,
             theme: req.theme,
             restart_of: None,
             opened_by,
             retype: None,
         };
         self.start(opening, &req.idempotency_key, &request).await
+    }
+
+    /// The directory a shell linked to `agent` opens in, the agent's own: refused for an agent the
+    /// store doesn't know, or one closing or gone.
+    async fn linkable(&self, agent: &AgentId) -> Result<String, ShellError> {
+        let id = agent.as_str().to_owned();
+        let (found, cwd) = self
+            .deps
+            .store
+            .run(move |store| {
+                let reads = store.reads();
+                Ok::<_, rusqlite::Error>((reads.agent_terminal(&id)?, reads.agent_cwd(&id)?))
+            })
+            .await??;
+        let (Some(found), Some(cwd)) = (found, cwd) else {
+            return Err(ShellError::UnknownAgent(agent.as_str().to_owned()));
+        };
+        if !LINKABLE.contains(&found.state) {
+            return Err(ShellError::Conflict(format!(
+                "agent {agent} is {}",
+                found.state.as_str()
+            )));
+        }
+        Ok(cwd)
+    }
+
+    /// `agent`, while a shell may still be opened beside it, for a restart to link its new shell
+    /// to; `None` once it is closing or gone.
+    async fn still_linkable(&self, agent: AgentId) -> Result<Option<AgentId>, ShellError> {
+        let id = agent.as_str().to_owned();
+        let found = self
+            .deps
+            .store
+            .run(move |store| store.reads().agent_terminal(&id))
+            .await??;
+        Ok(found
+            .filter(|found| LINKABLE.contains(&found.state))
+            .map(|_| agent))
     }
 
     /// Records a new shell, admitted by the budget and answered under `key` in the one
@@ -598,8 +653,9 @@ impl Shells {
     ) -> Result<ShellCommandResponse, ShellError> {
         let budget = Arc::clone(&self.deps.budget);
         let (key, request) = (key.to_owned(), request.to_owned());
-        let (cwd, theme, restart_of) = (
+        let (cwd, linked_agent_id, theme, restart_of) = (
             opening.cwd.clone(),
+            opening.linked_agent_id.clone(),
             opening.theme,
             opening.restart_of.clone(),
         );
@@ -625,7 +681,7 @@ impl Shells {
                 let payload = TerminalOpened {
                     environment_id: w.local_environment()?,
                     cwd,
-                    linked_agent_id: None,
+                    linked_agent_id,
                     theme,
                     restart_of,
                     runtime: Some(RUNTIME.to_owned()),
@@ -741,7 +797,7 @@ impl Shells {
         NewTerminal {
             terminal_id: terminal.clone(),
             kind: Kind::Shell {
-                linked_agent_id: None,
+                linked_agent_id: opening.linked_agent_id,
             },
             argv: vec![self.deps.shell.clone(), "-l".to_owned(), "-i".to_owned()],
             cwd: opening.cwd,
@@ -953,8 +1009,19 @@ impl Shells {
         } else {
             None
         };
+        // As a linked open: in the agent's turn, so it can't link to an agent mid-close.
+        let linked = found.linked_agent_id.as_deref().and_then(AgentId::parse);
+        let _agent_turn = match &linked {
+            Some(agent) => Some(self.deps.turns.take(agent.as_str()).await),
+            None => None,
+        };
+        let linked_agent_id = match linked {
+            Some(agent) => self.still_linkable(agent).await?,
+            None => None,
+        };
         let opening = Opening {
             cwd: self.restart_cwd(&found)?,
+            linked_agent_id,
             theme: req.theme.or(found.theme),
             restart_of: Some(found.id.clone()),
             opened_by,
@@ -1434,6 +1501,12 @@ pub(crate) mod tests {
             self.shell(id).map(|found| found.state)
         }
 
+        /// How many shells the store holds that aren't lost, closed or failed.
+        pub(crate) fn recoverable(&self) -> usize {
+            let reader = self.store.reader().unwrap();
+            reader.reads().recoverable_shells().unwrap().len()
+        }
+
         /// The shells the state lists.
         pub(crate) fn listed(&self) -> Vec<Shell> {
             let view = SnapshotView {
@@ -1459,6 +1532,76 @@ pub(crate) mod tests {
                 .record(&id, Actor::System, TerminalChange::Lost)
                 .await
                 .unwrap();
+            id.as_str().to_owned()
+        }
+
+        /// Records `agent` launched in `cwd`, starting.
+        pub(crate) async fn launched(&self, agent: &bazhen_protocol::ids::AgentId, cwd: &str) {
+            use bazhen_protocol::agent_events::AgentLaunched;
+            use bazhen_protocol::agents::HarnessId;
+            let (agent, cwd) = (agent.clone(), cwd.to_owned());
+            self.shells
+                .write(move |w| {
+                    let environment_id = w.local_environment()?;
+                    w.append(&NewEvent::Agent {
+                        agent,
+                        actor: "system".to_owned(),
+                        change: bazhen_store::AgentChange::Launched(AgentLaunched {
+                            environment_id,
+                            harness: HarnessId::ClaudeCode,
+                            project: "p".to_owned(),
+                            cwd,
+                            terminal_id: None,
+                            launched_by: None,
+                            name: None,
+                            name_ordinal: None,
+                            runtime: None,
+                            role: None,
+                            prompt_hash: None,
+                            compact_window_tokens: None,
+                        }),
+                    })?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+
+        /// Records `agent` failed, so no shell may be opened beside it.
+        pub(crate) async fn failed(&self, agent: &bazhen_protocol::ids::AgentId) {
+            use bazhen_protocol::agent_events::{AgentFailed, AgentFailedReason};
+            let agent = agent.clone();
+            self.shells
+                .write(move |w| {
+                    w.append(&NewEvent::Agent {
+                        agent,
+                        actor: "system".to_owned(),
+                        change: bazhen_store::AgentChange::Failed(AgentFailed {
+                            reason: AgentFailedReason::LaunchRejected,
+                            detail: None,
+                        }),
+                    })?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+
+        /// A shell opened beside `agent` under `key`, then lost.
+        pub(crate) async fn lost_beside(
+            &self,
+            key: &str,
+            agent: &bazhen_protocol::ids::AgentId,
+        ) -> String {
+            let req = OpenShellRequest {
+                linked_agent_id: Some(agent.clone()),
+                ..opening(key)
+            };
+            let id = self.shells.open(&req, None).await.unwrap().terminal_id;
+            self.fake.set(|state| {
+                state.running.remove(id.as_str());
+            });
+            self.mark(id.as_str(), TerminalChange::Lost).await;
             id.as_str().to_owned()
         }
 
@@ -1553,22 +1696,152 @@ pub(crate) mod tests {
         });
     }
 
+    /// The agent `n` names.
+    fn agent(n: u8) -> bazhen_protocol::ids::AgentId {
+        bazhen_protocol::ids::AgentId::parse(&format!("agent_0190a1b2c3d47abc8def01234567{n:04x}"))
+            .unwrap()
+    }
+
+    fn beside(key: &str, agent: &bazhen_protocol::ids::AgentId) -> OpenShellRequest {
+        OpenShellRequest {
+            linked_agent_id: Some(agent.clone()),
+            ..opening(key)
+        }
+    }
+
     #[test]
-    fn refuses_a_shell_beside_an_agent_which_this_daemon_runs_none_of_yet() {
+    fn opens_a_shell_beside_a_live_agent_in_its_directory_and_none_beside_one_gone_or_unknown() {
         let h = setup(100);
         runtime().block_on(async {
-            let req = OpenShellRequest {
-                linked_agent_id: bazhen_protocol::ids::AgentId::parse(
-                    "agent_0190a1b2c3d47abc8def0123456789ad",
-                ),
-                ..opening("o")
-            };
-            let refused = h.shells.open(&req, None).await;
-            assert!(
-                matches!(refused, Err(ShellError::Unsupported(_))),
-                "{refused:?}"
+            let (live, failed) = (agent(1), agent(2));
+            h.launched(&live, "/repo/live").await;
+            h.launched(&failed, "/repo/failed").await;
+            h.failed(&failed).await;
+            let id = h.shells.open(&beside("o", &live), None).await.unwrap().terminal_id;
+            let spec = h.fake.spec_of(id.as_str());
+            assert_eq!(
+                (spec.cwd, spec.kind, h.shell(id.as_str()).unwrap().linked_agent_id),
+                (
+                    "/repo/live".to_owned(),
+                    Kind::Shell {
+                        linked_agent_id: Some(live.clone())
+                    },
+                    Some(live.as_str().to_owned())
+                )
             );
-            assert_eq!(h.listed(), []);
+            let gone = h.shells.open(&beside("f", &failed), None).await;
+            assert!(
+                matches!(&gone, Err(ShellError::Conflict(m)) if *m == format!("agent {failed} is failed")),
+                "{gone:?}"
+            );
+            let unknown = h.shells.open(&beside("u", &agent(3)), None).await;
+            assert!(
+                matches!(&unknown, Err(ShellError::UnknownAgent(a)) if *a == agent(3).as_str()),
+                "{unknown:?}"
+            );
+            assert_eq!(h.recoverable(), 1);
+        });
+    }
+
+    #[test]
+    fn opens_a_shell_beside_an_agent_only_in_the_agents_turn() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let live = agent(1);
+            h.launched(&live, "/repo/live").await;
+            let turn = h.shells.deps.turns.take(live.as_str()).await;
+            let req = beside("o", &live);
+            let held = async {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !h.shells.deps.turns.waiting(live.as_str()) {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the open never waited for the agent's turn"
+                    );
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let listed = h.recoverable();
+                drop(turn);
+                listed
+            };
+            let (opened, listed_while_held) = tokio::join!(h.shells.open(&req, None), held);
+            opened.unwrap();
+            assert_eq!(listed_while_held, 0);
+            assert_eq!(h.recoverable(), 1);
+        });
+    }
+
+    #[test]
+    fn restarts_a_shell_beside_an_agent_only_in_the_agents_turn() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let live = agent(1);
+            h.launched(&live, "/repo/live").await;
+            let lost = h.lost_beside("l", &live).await;
+            let turn = h.shells.deps.turns.take(live.as_str()).await;
+            let held = async {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !h.shells.deps.turns.waiting(live.as_str()) {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the restart never waited for the agent's turn"
+                    );
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let state = h.state_of(&lost);
+                drop(turn);
+                state
+            };
+            let req = restarting("r");
+            let (restarted, while_held) = tokio::join!(h.shells.restart(&lost, &req, None), held);
+            restarted.unwrap();
+            assert_eq!(
+                (while_held, h.state_of(&lost)),
+                (Some(TerminalState::Lost), Some(TerminalState::Closed))
+            );
+        });
+    }
+
+    #[test]
+    fn restarts_a_shell_beside_its_agent_while_it_is_live_and_standalone_once_it_is_gone() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let (live, failed) = (agent(1), agent(2));
+            h.launched(&live, "/repo/live").await;
+            h.launched(&failed, "/repo/failed").await;
+            let beside_live = h.lost_beside("l", &live).await;
+            let beside_failed = h.lost_beside("f", &failed).await;
+            h.failed(&failed).await;
+            let mut linked = Vec::new();
+            for (key, lost) in [("rl", &beside_live), ("rf", &beside_failed)] {
+                let new = h
+                    .shells
+                    .restart(lost, &restarting(key), None)
+                    .await
+                    .unwrap();
+                let new = new.terminal_id.as_str();
+                linked.push((
+                    h.fake.spec_of(new).kind,
+                    h.shell(new).unwrap().linked_agent_id,
+                ));
+            }
+            assert_eq!(
+                linked,
+                [
+                    (
+                        Kind::Shell {
+                            linked_agent_id: Some(live.clone())
+                        },
+                        Some(live.as_str().to_owned())
+                    ),
+                    (
+                        Kind::Shell {
+                            linked_agent_id: None
+                        },
+                        None
+                    ),
+                ]
+            );
         });
     }
 

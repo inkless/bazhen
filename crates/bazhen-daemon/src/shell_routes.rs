@@ -29,12 +29,13 @@ use crate::shells::{ShellError, Shells};
 pub(crate) fn refusal(err: &ShellError) -> Response {
     let (status, code) = match err {
         ShellError::Invalid(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
-        ShellError::Unsupported(_) => (StatusCode::BAD_REQUEST, ErrorCode::Unsupported),
         ShellError::Limit(_) => (StatusCode::CONFLICT, ErrorCode::TerminalLimit),
         ShellError::Idempotency(_) | ShellError::Conflict(_) => {
             (StatusCode::CONFLICT, ErrorCode::Conflict)
         }
-        ShellError::Unknown(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        ShellError::Unknown(_) | ShellError::UnknownAgent(_) => {
+            (StatusCode::NOT_FOUND, ErrorCode::NotFound)
+        }
         ShellError::Stale { .. } => (StatusCode::CONFLICT, ErrorCode::StaleGeneration),
         ShellError::Busy { message, busy } => {
             let body = ErrorResponse {
