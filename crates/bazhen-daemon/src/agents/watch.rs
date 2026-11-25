@@ -163,27 +163,29 @@ impl Agents {
             );
             return Ok(());
         }
+        let deps = self.closing();
         let closed = self
             .write(move |w| {
                 let Some(now) = w.reads().agent_of_terminal(at.terminal_id.as_str())? else {
-                    return Ok(false);
+                    return Ok(None);
                 };
                 if recorded(&now).as_ref() != Some(&at) {
-                    return Ok(false);
+                    return Ok(None);
                 }
                 if losable(&now) {
                     append(w, &now.agent_id, Actor::System, AgentChange::Lost)?;
-                    return Ok(false);
+                    return Ok(None);
                 }
                 if now.state == AgentState::Closing {
-                    record_closed(w, &now.agent_id, Actor::System)?;
-                    return Ok(true);
+                    return Ok(Some(
+                        record_closed(w, &deps, &now.agent_id, Actor::System)?.mail,
+                    ));
                 }
-                Ok(false)
+                Ok(None)
             })
             .await?;
-        if closed {
-            self.after_closed(&found.agent_id).await;
+        if let Some(mail) = closed {
+            self.after_closed(&found.agent_id, mail).await;
         }
         Ok(())
     }

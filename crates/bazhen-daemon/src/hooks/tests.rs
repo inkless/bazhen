@@ -59,7 +59,7 @@ fn fixture() -> Fixture {
         socket: "/run/b.sock".to_owned(),
         tracker: TaskTracker::new(),
         roles: Arc::new(Roles::new(None)),
-        harnesses: production_for_test(),
+        harnesses: Arc::new(production_for_test()),
         hook_built: true,
         turns: Arc::default(),
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),

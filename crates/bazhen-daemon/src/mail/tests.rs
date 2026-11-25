@@ -97,7 +97,7 @@ pub(crate) fn fixture(stub: StubHarness) -> Fixture {
         socket: "/run/b.sock".to_owned(),
         tracker: tracker.clone(),
         roles: Arc::new(Roles::new(None)),
-        harnesses: stub.served_as(HarnessId::ClaudeCode),
+        harnesses: Arc::new(stub.served_as(HarnessId::ClaudeCode)),
         hook_built: true,
         turns: Arc::default(),
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),

@@ -20,7 +20,7 @@ use bazhen_protocol::ids::{AgentId, TerminalId};
 use bazhen_protocol::shells::TerminalState;
 use bazhen_store::{Actor, AgentChange, AgentTerminal, Writer as StoreWriter};
 
-use super::lifecycle::{append, exited_at, record_closed, recorded};
+use super::lifecycle::{ClosedMail, Closing, append, exited_at, record_closed, recorded};
 use super::watch::{adopt, losable, runtime_ref};
 use super::{AgentError, Agents};
 use crate::shells::{RUNTIME, generation_of, locator_of};
@@ -214,13 +214,13 @@ fn orphaned(
 }
 
 /// What follows a settle once it commits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 enum After {
     Nothing,
     /// No start went ahead, nor will: no file of its token is read again.
     Unstarted,
-    /// It closed.
-    Closed,
+    /// It closed, queuing this mail.
+    Closed(ClosedMail),
 }
 
 /// Why a start nothing answers for is settled as one that didn't go ahead.
@@ -298,6 +298,7 @@ fn started(w: &StoreWriter<'_>, agent: &AgentId, change: AgentChange) -> Result<
 /// start, and must not speak for it. A start that didn't go ahead is rejected for `cause`.
 fn settle(
     w: &StoreWriter<'_>,
+    closing: &Closing,
     agent: &AgentTerminal,
     found: Option<&FoundAgent>,
     unheld: &str,
@@ -380,10 +381,9 @@ fn settle(
                 system(AgentChange::Lost)?;
                 Ok(After::Nothing)
             }
-            None if agent.state == AgentState::Closing => {
-                record_closed(w, id, Actor::System)?;
-                Ok(After::Closed)
-            }
+            None if agent.state == AgentState::Closing => Ok(After::Closed(
+                record_closed(w, closing, id, Actor::System)?.mail,
+            )),
             None => Ok(After::Nothing),
         },
     }
@@ -601,11 +601,12 @@ impl Agents {
         let unheld = unheld().map_err(|err| {
             AgentError::Internal(format!("no token can be made that no one holds: {err}"))
         })?;
+        let closing = self.closing();
         let after = self
             .write(
                 move |w| match w.reads().agent_terminal(was.agent_id.as_str())? {
                     Some(now) if now == was => {
-                        settle(w, &now, found.as_ref(), &unheld, cause).map(Some)
+                        settle(w, &closing, &now, found.as_ref(), &unheld, cause).map(Some)
                     }
                     Some(now) if recoverable(now.state) => Ok(None),
                     _ => Ok(Some(After::Nothing)),
@@ -615,7 +616,7 @@ impl Agents {
         match after.ok_or(Unsettled::Moved)? {
             After::Nothing => {}
             After::Unstarted => self.deps.tokens.forget(id),
-            After::Closed => self.after_closed(id).await,
+            After::Closed(mail) => self.after_closed(id, mail).await,
         }
         Ok(())
     }
@@ -1691,11 +1692,11 @@ mod tests {
     /// Records `agent` closed, as a close by force that left its holder running does.
     fn closed_by_force(f: &Fixture, agent: &AgentId) {
         recorded_as(f, agent, AgentChange::Closing);
-        let agent = agent.clone();
+        let (agent, deps) = (agent.clone(), f.agents.closing());
         runtime()
             .block_on(
                 f.agents
-                    .write(move |w| record_closed(w, &agent, Actor::User)),
+                    .write(move |w| record_closed(w, &deps, &agent, Actor::User).map(drop)),
             )
             .unwrap();
     }
@@ -1789,6 +1790,53 @@ mod tests {
                 AgentState::Closed,
                 vec![terminal]
             )
+        );
+    }
+
+    #[test]
+    fn tells_on_the_tick_those_under_an_agent_it_closes_and_lifts_what_the_close_strands() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, _) = launched(&f, "k-1");
+        let (worker, _) = launched(&f, "k-2");
+        let sub = f.leading(&lead, &worker);
+        recorded_as(&f, &lead, AgentChange::Closing);
+        ticked(&f);
+        assert_eq!(f.left(&sub, &worker), f.left_by_close(&sub, &lead));
+    }
+
+    #[test]
+    fn tells_at_start_those_under_an_agent_it_closes_and_lifts_what_the_close_strands() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, terminal) = launched(&f, "k-1");
+        let (worker, _) = launched(&f, "k-2");
+        let sub = f.leading(&lead, &worker);
+        recorded_as(&f, &lead, AgentChange::Closing);
+        f.fake().gone(&terminal);
+        reconciled(&f.restarted());
+        assert_eq!(
+            (state(&f, &lead), f.left(&sub, &worker)),
+            (AgentState::Closed, f.left_by_close(&sub, &lead))
+        );
+    }
+
+    #[test]
+    fn tells_on_a_lost_holder_those_under_the_agent_it_closes_and_lifts_what_the_close_strands() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, terminal) = launched(&f, "k-1");
+        let (worker, _) = launched(&f, "k-2");
+        let sub = f.leading(&lead, &worker);
+        recorded_as(&f, &lead, AgentChange::Closing);
+        f.fake().gone(&terminal);
+        let generation = agent_of(&f, &lead).generation.unwrap();
+        runtime()
+            .block_on(
+                f.agents
+                    .observed(Event::Lost(recorded_at(&terminal, generation))),
+            )
+            .unwrap();
+        assert_eq!(
+            (state(&f, &lead), f.left(&sub, &worker)),
+            (AgentState::Closed, f.left_by_close(&sub, &lead))
         );
     }
 
