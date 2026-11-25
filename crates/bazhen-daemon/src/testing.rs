@@ -11,6 +11,36 @@ use tokio_tungstenite::tungstenite::Message;
 
 pub(crate) mod stub_harness;
 
+/// What `router` makes of a writer on an empty store of its own, for routes that read the store
+/// but need nothing in it, as the guard does to read a caller over `connected`. The router keeps
+/// the store's directory until it is dropped.
+pub(crate) fn on_an_empty_store(
+    router: impl FnOnce(crate::writer::Writer) -> axum::Router,
+) -> axum::Router {
+    let dir = TempDir::new("empty-store");
+    let path = dir.path().join("bazhen.db");
+    let (writer, _thread) =
+        crate::writer::start(bazhen_store::Store::open(&path).unwrap(), &path).unwrap();
+    router(writer).layer(axum::Extension(std::sync::Arc::new(dir)))
+}
+
+/// `router` as the loopback listener serves it: each request carries its connection's socket, as
+/// `accept` gives it. Here that is one end of a pair this test holds both ends of, so the caller
+/// reads as the test's own process, outside every terminal: the human.
+pub(crate) fn connected(router: axum::Router) -> axum::Router {
+    let ends = std::sync::Arc::new(std::os::unix::net::UnixStream::pair().unwrap());
+    router.layer(axum::middleware::from_fn(
+        move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+            request
+                .extensions_mut()
+                .insert(crate::peer::PeerSocket::accepted_now(
+                    std::os::fd::AsFd::as_fd(&ends.0),
+                ));
+            next.run(request)
+        },
+    ))
+}
+
 /// A directory of the test's own, removed when the test ends, whether or not it passed.
 pub(crate) struct TempDir(PathBuf);
 

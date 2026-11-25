@@ -282,7 +282,7 @@ impl Peers {
                 rustix::process::geteuid().as_raw(),
                 bazhen_peer::of_pid,
             ))),
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(target_os = "macos")]
             tcp: None,
         }
     }
@@ -421,12 +421,52 @@ pub(crate) enum Via {
 /// with its environment unread, so only the thread the call presents can say it is Codex's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reading {
-    Agent(AgentId),
+    Agent(AgentId, How),
     Codex(Via),
     Outside,
     Withheld,
     Refused(String),
     Late,
+}
+
+/// How a caller reads as an agent's: the process read, the caller's own or one holding its socket,
+/// and whether the agent's root process is it or an ancestor, or leads its session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct How {
+    pub(crate) pid: i32,
+    pub(crate) by: By,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum By {
+    Ancestry,
+    Session,
+}
+
+impl How {
+    /// Why `agent` is the caller, for a refusal to name the cause, such as a browser first started
+    /// from an agent's terminal.
+    pub(crate) fn of(&self, agent: &AgentId) -> String {
+        let (pid, agent) = (self.pid, agent.as_str());
+        match self.by {
+            By::Ancestry => {
+                format!("the caller, pid {pid}, was started from {agent}'s terminal")
+            }
+            By::Session => {
+                format!("the caller, pid {pid}, is in {agent}'s terminal's session")
+            }
+        }
+    }
+}
+
+impl Reading {
+    /// Whether `self` and `other` are one caller, however each came to be it.
+    fn is_as(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Agent(one, _), Self::Agent(another, _)) => one == another,
+            _ => self == other,
+        }
+    }
 }
 
 /// Whose process `peer` is: an agent's, when the agent's root process is it or an ancestor, or
@@ -444,9 +484,11 @@ pub(crate) fn reading_of(peer: &Peer, terminals: &TerminalPids) -> Reading {
     let agent = agent_at
         .and_then(|at| line.get(at))
         .and_then(|pid| terminals.agents.get(pid))
+        .map(|agent| (agent, By::Ancestry))
         .or_else(|| {
             peer.session
                 .and_then(|session| terminals.agents.get(&session.as_raw_pid()))
+                .map(|agent| (agent, By::Session))
         });
     let marked_only = peer.codex_server == Some(peer.pid);
     let server_at = peer
@@ -458,8 +500,9 @@ pub(crate) fn reading_of(peer: &Peer, terminals: &TerminalPids) -> Reading {
     {
         return Reading::Codex(Via::Server);
     }
-    if let Some(agent) = agent {
-        return Reading::Agent(agent.clone());
+    if let Some((agent, by)) = agent {
+        let pid = peer.pid.as_raw_pid();
+        return Reading::Agent(agent.clone(), How { pid, by });
     }
     if marked_only {
         return Reading::Codex(Via::Environment);
@@ -519,7 +562,7 @@ fn held(peers: &[Peer], terminals: &TerminalPids) -> Reading {
     };
     match readings.next() {
         None => refused("no process holds the caller's socket"),
-        Some(first) if readings.all(|other| other == first) => first,
+        Some(first) if readings.all(|other| other.is_as(&first)) => first,
         Some(_) => refused("the processes holding the caller's socket read as different callers"),
     }
 }
@@ -588,8 +631,9 @@ mod tests {
     const SERVER: Reading = Reading::Codex(Via::Server);
     const ENVIRONMENT: Reading = Reading::Codex(Via::Environment);
 
-    fn agent() -> Reading {
-        Reading::Agent(id(AGENT))
+    /// Agent `AGENT`'s caller, read at `pid`.
+    fn agent(pid: i32, by: By) -> Reading {
+        Reading::Agent(id(AGENT), How { pid, by })
     }
 
     #[test]
@@ -600,13 +644,23 @@ mod tests {
                 chain(150, 150, &[140, 100, 10, 1]),
                 chain(250, 250, &[200, 100, 10, 1]),
             ]),
-            [agent(), agent(), Reading::Agent(id(OTHER))]
+            [
+                agent(100, By::Ancestry),
+                agent(150, By::Ancestry),
+                Reading::Agent(
+                    id(OTHER),
+                    How {
+                        pid: 250,
+                        by: By::Ancestry
+                    }
+                )
+            ]
         );
     }
 
     #[test]
     fn names_the_agent_whose_pane_leads_the_session_of_a_caller_orphaned_away_from_it() {
-        assert_eq!(of(&[chain(150, 100, &[1])]), [agent()]);
+        assert_eq!(of(&[chain(150, 100, &[1])]), [agent(150, By::Session)]);
     }
 
     #[test]
@@ -642,7 +696,7 @@ mod tests {
                 via(900, chain(950, 950, &[900, 100, 10, 1])),
                 via(900, chain(150, 150, &[100, 10, 900, 1])),
             ]),
-            [SERVER, agent()]
+            [SERVER, agent(150, By::Ancestry)]
         );
     }
 
@@ -655,7 +709,12 @@ mod tests {
                 via(950, chain(950, 950, &[1])),
                 via(350, chain(350, 300, &[300, 10, 1])),
             ]),
-            [agent(), agent(), ENVIRONMENT, ENVIRONMENT]
+            [
+                agent(150, By::Ancestry),
+                agent(150, By::Session),
+                ENVIRONMENT,
+                ENVIRONMENT
+            ]
         );
     }
 
@@ -686,8 +745,8 @@ mod tests {
             [
                 Reading::Withheld,
                 Reading::Withheld,
-                agent(),
-                agent(),
+                agent(150, By::Ancestry),
+                agent(150, By::Session),
                 SERVER,
                 refused
             ]
@@ -803,7 +862,7 @@ mod tests {
             [
                 Reading::Refused("the caller's process can't be read for sure: why".into()),
                 Reading::Late,
-                agent(),
+                agent(100, By::Ancestry),
             ]
         );
         assert_eq!(
@@ -1206,7 +1265,7 @@ mod tests {
                 held(vec![]),
             ],
             [
-                Ok(agent()),
+                Ok(agent(150, By::Ancestry)),
                 Ok(Reading::Refused(
                     "the processes holding the caller's socket read as different callers"
                         .to_owned()

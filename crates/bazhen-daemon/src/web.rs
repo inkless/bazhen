@@ -329,7 +329,6 @@ mod tests {
     use crate::guard;
     use crate::routes::{Gate, Shared, Stop, http_router};
     use crate::testing::TempDir;
-    use crate::writer::Writer;
 
     const HOST: &str = "127.0.0.1:7900";
     const INDEX: &str = "<!doctype html><title>Bazhen</title>";
@@ -396,13 +395,15 @@ mod tests {
     }
 
     fn serving(bundle: Bundle, pairing_required: bool) -> Router {
-        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), Writer::closed())
-            .with_web(bundle);
         let gate = Gate {
             allow: guard::allowlists(7900, None, &[]),
             pairing_required,
         };
-        http_router(shared, gate)
+        crate::testing::on_an_empty_store(|writer| {
+            let shared =
+                Shared::new("f".repeat(64).as_str(), Stop::default(), writer).with_web(bundle);
+            crate::testing::connected(http_router(shared, gate))
+        })
     }
 
     /// An answer's status, the headers asked for, and its body as text.

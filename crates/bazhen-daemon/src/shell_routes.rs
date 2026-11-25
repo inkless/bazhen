@@ -678,7 +678,7 @@ mod tests {
             allow: crate::guard::allowlists(7900, None, &[]),
             pairing_required: false,
         };
-        let http = crate::routes::http_router(shared.clone(), gate);
+        let http = crate::testing::connected(crate::routes::http_router(shared.clone(), gate));
         let over_http = ["report", "prompt", "decline"]
             .map(|verb| posted(&runtime, http.clone(), &at(verb), own.clone()).0);
         assert_eq!(over_http, [404; 3]);

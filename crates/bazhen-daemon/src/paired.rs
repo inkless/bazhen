@@ -498,7 +498,7 @@ mod tests {
         };
         Daemon {
             socket: socket_router(shared.clone()),
-            http: http_router(shared.clone(), gate),
+            http: crate::testing::connected(http_router(shared.clone(), gate)),
             shared,
             path,
             thread: Some(thread),
@@ -531,6 +531,7 @@ mod tests {
         let body = body.map_or_else(Body::empty, |b| Body::from(serde_json::to_vec(&b).unwrap()));
         let request = request.body(body).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap();
         runtime.block_on(async {
@@ -1006,7 +1007,7 @@ mod tests {
         let stop = CancellationToken::new();
         runtime.spawn(crate::accept::serve_on(
             listener,
-            http_router(daemon.shared.clone(), gate),
+            crate::testing::connected(http_router(daemon.shared.clone(), gate)),
             crate::accept::HTTP,
             stop.clone(),
             tokio_util::task::TaskTracker::new(),

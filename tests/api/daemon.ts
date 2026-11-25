@@ -144,8 +144,18 @@ export function overSocket(
  * from exec'ing the child in its place.
  */
 export function overSocketUnderCodex(socket: string, path: string): unknown {
+  return underCodex({ socketPath: socket, path });
+}
+
+/** `overSocketUnderCodex`, over the daemon's loopback HTTP at `url`, to the host it serves. */
+export function overHttpUnderCodex(url: string, path: string): unknown {
+  const served = new URL(url);
+  return underCodex({ host: served.hostname, port: Number(served.port), path });
+}
+
+function underCodex(to: Record<string, string | number>): unknown {
   const ask = `import { request } from "node:http";
-const req = request({ socketPath: ${JSON.stringify(socket)}, method: "GET", path: ${JSON.stringify(path)} }, (res) => {
+const req = request({ ...${JSON.stringify(to)}, method: "GET" }, (res) => {
   let text = "";
   res.on("data", (d) => (text += d));
   res.on("end", () => console.log(JSON.stringify({ status: res.statusCode, body: JSON.parse(text) })));
