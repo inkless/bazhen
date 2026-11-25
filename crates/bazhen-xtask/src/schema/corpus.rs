@@ -74,6 +74,41 @@ pub(crate) type Known<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 
 pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     (
+        "AnswerAttentionRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "DismissAttentionRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "ReplyAttentionRequest",
+        "/body",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "ReplyAttentionRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "ResendAttentionRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "CloseAgentRequest",
         "/confirmedBusy/0/program",
         "loneSurrogate",

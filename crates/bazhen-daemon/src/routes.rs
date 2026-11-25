@@ -240,7 +240,10 @@ pub(crate) fn internal(err: &dyn std::fmt::Display) -> Response {
 }
 
 /// Every read model a client draws, with the cursor its event stream resumes from.
-async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) -> Response {
+pub(crate) async fn state(
+    State(shared): State<Shared>,
+    viewer: Option<Extension<Viewer>>,
+) -> Response {
     let store = shared.store.clone();
     let view = SnapshotView {
         host: shared.host.to_string(),
@@ -258,7 +261,9 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
         let reader = store.reader()?;
         let reads = reader.reads();
         match &agents {
-            Some(agents) => reads.snapshot_with_agents(&view, agents, None),
+            Some(agents) => {
+                reads.snapshot_with_agents(&view, agents, Some(&crate::attention::Inbox))
+            }
             None => reads.snapshot(&view),
         }
     })
@@ -419,6 +424,13 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/v1/agents/{id}/relaunch", post(agent_routes::relaunch))
         .route("/v1/agents/{id}/messages", post(crate::mail::send))
+        .route("/v1/attention/{id}/answer", post(crate::attention::answer))
+        .route("/v1/attention/{id}/reply", post(crate::attention::reply))
+        .route(
+            "/v1/attention/{id}/dismiss",
+            post(crate::attention::dismiss),
+        )
+        .route("/v1/attention/{id}/resend", post(crate::attention::resend))
         // A hook carries what its harness sent, such as a whole file an edit wrote, and the
         // TypeScript daemon bounds neither body.
         .route(
@@ -485,6 +497,10 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/agents/{id}/relaunch", post(agent_routes::relaunch))
         .route("/agents/{id}/messages", post(crate::mail::send))
+        .route("/attention/{id}/answer", post(crate::attention::answer))
+        .route("/attention/{id}/reply", post(crate::attention::reply))
+        .route("/attention/{id}/dismiss", post(crate::attention::dismiss))
+        .route("/attention/{id}/resend", post(crate::attention::resend))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))

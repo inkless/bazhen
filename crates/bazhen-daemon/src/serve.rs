@@ -500,7 +500,7 @@ async fn listen(
             crate::stream::on_holders(&store, streaming, &watched.shells, &tracker, stop.token());
         watching = Some(watched);
     }
-    crate::hooks::mailbox::requeue_in_flight(&store).await;
+    let_go(&store).await;
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -573,6 +573,12 @@ async fn listen(
     drain(&tracker, serving.drain, &hurry).await;
     end_terminals(streams, ending, serving.drain, &hurry).await;
     Ok(stop.reason().unwrap_or(Reason::Requested))
+}
+
+/// Lets go of what the daemon before this one held: it went with its sockets.
+async fn let_go(store: &Writer) {
+    crate::hooks::mailbox::requeue_in_flight(store).await;
+    crate::attention::close_abandoned(store).await;
 }
 
 /// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's

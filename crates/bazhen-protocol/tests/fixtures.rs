@@ -24,9 +24,12 @@ use bazhen_protocol::events::{
 use bazhen_protocol::ids::{MessageId, TaskId, is_id};
 use bazhen_protocol::input::{has_keystrokes, without_replies};
 use bazhen_protocol::mail::{
-    AttentionKind, HOOK_PROTOCOL_VERSION, HOOK_REPLY_MAX_BYTES, HOOK_REPLY_TYPE, HookAck,
-    HookReply, HookRequest, MESSAGE_WAIT_MAX_MS, MailboxState, OfferToken, ProtocolVersion,
-    SendMessageRequest, SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
+    AnswerAttentionRequest, AnswerAttentionResponse, AttentionKind, DismissAttentionRequest,
+    DismissAttentionResponse, HOOK_PROTOCOL_VERSION, HOOK_REPLY_MAX_BYTES, HOOK_REPLY_TYPE,
+    HookAck, HookReply, HookRequest, MESSAGE_WAIT_MAX_MS, MailboxState, OfferToken,
+    ProtocolVersion, ReplyAttentionRequest, ReplyAttentionResponse, ResendAttentionRequest,
+    ResendAttentionResponse, SendMessageRequest, SendMessageResponse, WaitMessagesRequest,
+    WaitMessagesResponse,
 };
 use bazhen_protocol::names::{AGENT_NAME_MAX, AgentName, AgentRef, Role};
 use bazhen_protocol::notices::{
@@ -299,6 +302,14 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
         "BroadcastMessageResponse",
         round_trips::<BroadcastMessageResponse>,
     ),
+    (
+        "AnswerAttentionRequest",
+        round_trips_at_edge::<AnswerAttentionRequest>,
+    ),
+    (
+        "AnswerAttentionResponse",
+        round_trips::<AnswerAttentionResponse>,
+    ),
     ("CallerResponse", round_trips::<CallerResponse>),
     ("ClientEventFrame", round_trips::<ClientEventFrame>),
     ("CloseAgentRequest", round_trips::<CloseAgentRequest>),
@@ -313,6 +324,14 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     ("CreateTaskResponse", round_trips::<CreateTaskResponse>),
     ("DelegateTaskRequest", round_trips::<DelegateTaskRequest>),
     ("DevicesResponse", round_trips::<DevicesResponse>),
+    (
+        "DismissAttentionRequest",
+        round_trips_at_edge::<DismissAttentionRequest>,
+    ),
+    (
+        "DismissAttentionResponse",
+        round_trips::<DismissAttentionResponse>,
+    ),
     (
         "DismissNoticeRequest",
         round_trips_at_edge::<DismissNoticeRequest>,
@@ -352,6 +371,22 @@ const MESSAGES: &[(&str, RoundTrip)] = &[
     (
         "RestartShellRequest",
         round_trips_at_edge::<RestartShellRequest>,
+    ),
+    (
+        "ReplyAttentionRequest",
+        round_trips_at_edge::<ReplyAttentionRequest>,
+    ),
+    (
+        "ReplyAttentionResponse",
+        round_trips::<ReplyAttentionResponse>,
+    ),
+    (
+        "ResendAttentionRequest",
+        round_trips_at_edge::<ResendAttentionRequest>,
+    ),
+    (
+        "ResendAttentionResponse",
+        round_trips::<ResendAttentionResponse>,
     ),
     ("RespawnAgentRequest", round_trips::<RespawnAgentRequest>),
     ("RevokeDeviceResponse", round_trips::<RevokeDeviceResponse>),

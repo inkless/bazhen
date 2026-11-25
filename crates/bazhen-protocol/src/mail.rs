@@ -5,6 +5,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{AgentId, AttentionId, MessageId, ObservedId};
+use crate::mail_events::ApprovalDecision;
 use crate::names::Refused;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -452,6 +453,89 @@ pub struct SendMessageRequest {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageResponse {
+    pub message_id: MessageId,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
+    pub event_ids: Vec<u64>,
+}
+
+/// `POST /v1/attention/:id/answer`: the decision on an approval, whoever makes it. It names no
+/// harness, so anything outside a session can answer as the human does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerAttentionRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
+    pub idempotency_key: String,
+    pub decision: ApprovalDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerAttentionResponse {
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
+    pub event_ids: Vec<u64>,
+}
+
+/// `POST /v1/attention/:id/reply`, to an item that offers `reply`: the answer to its question, or
+/// else mail to the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyAttentionRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
+    pub idempotency_key: String,
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 20_000)))]
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyAttentionResponse {
+    /// The message carrying the reply, whose delivery the mailbox reports; null when the reply
+    /// went to the harness as the answer to the question it asked.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(with = "crate::schema::Required<MessageId>")
+    )]
+    pub message_id: Option<MessageId>,
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
+    pub event_ids: Vec<u64>,
+}
+
+/// `POST /v1/attention/:id/dismiss`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DismissAttentionRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DismissAttentionResponse {
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
+    pub event_ids: Vec<u64>,
+}
+
+/// `POST /v1/attention/:id/resend`: sends an undelivered message's text again, as a new message
+/// with attempts of its own. The one given up on stays undeliverable, as every final state does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ResendAttentionRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ResendAttentionResponse {
+    /// The new message carrying the text again.
     pub message_id: MessageId,
     #[cfg_attr(feature = "schema", schemars(with = "Vec<crate::schema::EventId>"))]
     pub event_ids: Vec<u64>,

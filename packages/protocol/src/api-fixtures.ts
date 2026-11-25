@@ -39,6 +39,10 @@ import {
 import { DoctorResponse, EnvRefreshRequest, EnvRefreshResponse, HealthResponse } from "./index.ts";
 import { AgentCondition, ShellCondition, WaitRequest, WaitResponse } from "./waits.ts";
 import {
+  AnswerAttentionRequest,
+  AnswerAttentionResponse,
+  DismissAttentionRequest,
+  DismissAttentionResponse,
   HOOK_PROTOCOL_VERSION,
   HOOK_REPLY_MAX_BYTES,
   HOOK_REPLY_TYPE,
@@ -47,6 +51,10 @@ import {
   HookRequest,
   MESSAGE_WAIT_MAX_MS,
   OfferToken,
+  ReplyAttentionRequest,
+  ReplyAttentionResponse,
+  ResendAttentionRequest,
+  ResendAttentionResponse,
   SETTLED,
   SendMessageRequest,
   SendMessageResponse,
@@ -821,6 +829,14 @@ const MESSAGES: Readonly<Record<string, Example>> = {
     schema: AgentCommandResponse,
     wire: [{ agentId: AGENT, eventIds: [1, 2] }],
   },
+  AnswerAttentionRequest: {
+    schema: AnswerAttentionRequest,
+    wire: [
+      { idempotencyKey: KEY, decision: "allow" },
+      { idempotencyKey: KEY, decision: "deny" },
+    ],
+  },
+  AnswerAttentionResponse: { schema: AnswerAttentionResponse, wire: [{ eventIds: [4] }] },
   AssignTaskRequest: {
     schema: AssignTaskRequest,
     wire: [{ idempotencyKey: KEY, agentId: "BZ-127", role: "reviewer" }],
@@ -920,6 +936,8 @@ const MESSAGES: Readonly<Record<string, Example>> = {
       },
     ],
   },
+  DismissAttentionRequest: { schema: DismissAttentionRequest, wire: [{ idempotencyKey: KEY }] },
+  DismissAttentionResponse: { schema: DismissAttentionResponse, wire: [{ eventIds: [4] }] },
   DismissNoticeRequest: { schema: DismissNoticeRequest, wire: [{ idempotencyKey: KEY }] },
   DismissNoticeResponse: { schema: DismissNoticeResponse, wire: [{ eventIds: [4] }] },
   DoctorResponse: {
@@ -1194,6 +1212,22 @@ const MESSAGES: Readonly<Record<string, Example>> = {
         problems: [{ file: "/r/x.md", problem: "no prompt" }],
       },
     ],
+  },
+  ReplyAttentionRequest: {
+    schema: ReplyAttentionRequest,
+    wire: [{ idempotencyKey: KEY, body: "yes, go on" }],
+  },
+  ReplyAttentionResponse: {
+    schema: ReplyAttentionResponse,
+    wire: [
+      { messageId: MSG, eventIds: [5, 6] },
+      { messageId: null, eventIds: [5] },
+    ],
+  },
+  ResendAttentionRequest: { schema: ResendAttentionRequest, wire: [{ idempotencyKey: KEY }] },
+  ResendAttentionResponse: {
+    schema: ResendAttentionResponse,
+    wire: [{ messageId: MSG, eventIds: [7, 8] }],
   },
   SendMessageRequest: { schema: SendMessageRequest, wire: [{ idempotencyKey: KEY, body: "hi" }] },
   SendMessageResponse: { schema: SendMessageResponse, wire: [{ messageId: MSG, eventIds: [1] }] },

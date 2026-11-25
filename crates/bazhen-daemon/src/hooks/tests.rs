@@ -658,3 +658,38 @@ fn records_no_send_by_a_tool_call_id_too_long_to_keep() {
         .collect();
     assert_eq!(ids, [json!(longest)]);
 }
+
+fn failure(session: &str, error: &str) -> Value {
+    json!({ "hook_event_name": "StopFailure", "session_id": session, "error": error })
+}
+
+#[test]
+fn opens_one_item_while_the_agents_own_turns_fail_and_closes_it_when_it_starts_another() {
+    let f = fixture();
+    f.hook("StopFailure", &failure("other", "overloaded"), its_tui());
+    f.hook(
+        "StopFailure",
+        &failure("session-1", "rate_limit"),
+        its_tui(),
+    );
+    f.hook(
+        "StopFailure",
+        &failure("session-1", "rate_limit"),
+        its_tui(),
+    );
+    let failing = f.of("attention.closed").len();
+    f.hook("UserPromptSubmit", &prompt("session-1"), its_tui());
+    let opened: Vec<Value> = f
+        .of("attention.opened")
+        .into_iter()
+        .map(|o| json!([o["kind"], o["summary"]]))
+        .collect();
+    assert_eq!(
+        (opened, failing, f.of("attention.closed")),
+        (
+            vec![json!(["failed", "rate_limit"])],
+            0,
+            vec![json!({ "reason": "superseded" })]
+        )
+    );
+}

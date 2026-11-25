@@ -6,6 +6,7 @@ mod agent_cli;
 pub mod agent_requests;
 mod agent_routes;
 mod agents;
+mod attention;
 mod budget;
 mod callers;
 mod channel;

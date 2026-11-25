@@ -68,6 +68,22 @@ const ROUTES: &[(&str, &str, bool)] = &[
         "/v1/agents/agent_01900000000070008000000000000001/messages",
         false,
     ),
+    (
+        "AnswerAttentionRequest",
+        "/v1/attention/attn_1/answer",
+        false,
+    ),
+    ("ReplyAttentionRequest", "/v1/attention/attn_1/reply", false),
+    (
+        "DismissAttentionRequest",
+        "/v1/attention/attn_1/dismiss",
+        false,
+    ),
+    (
+        "ResendAttentionRequest",
+        "/v1/attention/attn_1/resend",
+        false,
+    ),
     ("PairRequest", "/v1/pairing", true),
 ];
 

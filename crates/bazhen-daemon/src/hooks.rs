@@ -525,9 +525,19 @@ impl Hooks {
                         .await?;
                     continue;
                 }
-                Observed::TurnFailed { prompt_id, .. } => {
+                Observed::TurnStarted => {
+                    let agent = agent.clone();
+                    write(&shared.store, move |w| w.turn_started(&agent)).await?;
+                    continue;
+                }
+                Observed::TurnFailed { prompt_id, error } => {
                     let prompt = prompt_id.as_deref();
                     self.mailbox.turn_ended(shared, agent, prompt, true).await?;
+                    let (agent, error) = (agent.clone(), error.clone());
+                    write(&shared.store, move |w| {
+                        w.turn_failed(&agent, error.as_deref())
+                    })
+                    .await?;
                     continue;
                 }
                 Observed::MessageObserved { use_id, sent } => {

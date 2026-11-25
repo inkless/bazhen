@@ -1,0 +1,76 @@
+[
+  {
+    "name": "example 1",
+    "wire": {
+      "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        5,
+        6
+      ]
+    },
+    "parsed": {
+      "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        5,
+        6
+      ]
+    }
+  },
+  {
+    "name": "example 2",
+    "wire": {
+      "messageId": null,
+      "eventIds": [
+        5
+      ]
+    },
+    "parsed": {
+      "messageId": null,
+      "eventIds": [
+        5
+      ]
+    }
+  },
+  {
+    "name": "example 1, with a field no version defines in each of its objects",
+    "wire": {
+      "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        5,
+        6
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "messageId": "msg_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d",
+      "eventIds": [
+        5,
+        6
+      ]
+    }
+  },
+  {
+    "name": "example 2, with a field no version defines in each of its objects",
+    "wire": {
+      "messageId": null,
+      "eventIds": [
+        5
+      ],
+      "fieldFromANewerDaemon": {
+        "any": [
+          1
+        ]
+      }
+    },
+    "parsed": {
+      "messageId": null,
+      "eventIds": [
+        5
+      ]
+    }
+  }
+]

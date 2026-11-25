@@ -20,8 +20,10 @@ use crate::daemon::{
 use crate::events::typed::{TypedEventFrame, TypedRecordedEvent};
 use crate::events::{ClientEventFrame, EventFrame, EventStreamQuery};
 use crate::mail::{
-    HookAck, HookReply, HookRequest, SendMessageRequest, SendMessageResponse, WaitMessagesRequest,
-    WaitMessagesResponse,
+    AnswerAttentionRequest, AnswerAttentionResponse, DismissAttentionRequest,
+    DismissAttentionResponse, HookAck, HookReply, HookRequest, ReplyAttentionRequest,
+    ReplyAttentionResponse, ResendAttentionRequest, ResendAttentionResponse, SendMessageRequest,
+    SendMessageResponse, WaitMessagesRequest, WaitMessagesResponse,
 };
 use crate::notices::{
     DevicesResponse, DismissNoticeRequest, DismissNoticeResponse, PairRequest, PairResponse,
@@ -97,7 +99,11 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<CloseShellRequest>();
     generator.subschema_for::<CreateTaskRequest>();
     generator.subschema_for::<CreateTaskResponse>();
+    generator.subschema_for::<AnswerAttentionRequest>();
+    generator.subschema_for::<AnswerAttentionResponse>();
     generator.subschema_for::<DelegateTaskRequest>();
+    generator.subschema_for::<DismissAttentionRequest>();
+    generator.subschema_for::<DismissAttentionResponse>();
     generator.subschema_for::<DevicesResponse>();
     generator.subschema_for::<DismissNoticeRequest>();
     generator.subschema_for::<DismissNoticeResponse>();
@@ -126,6 +132,10 @@ pub fn add_messages(generator: &mut SchemaGenerator) {
     generator.subschema_for::<PairingCodeResponse>();
     generator.subschema_for::<RelaunchAgentRequest>();
     generator.subschema_for::<RenameAgentRequest>();
+    generator.subschema_for::<ReplyAttentionRequest>();
+    generator.subschema_for::<ReplyAttentionResponse>();
+    generator.subschema_for::<ResendAttentionRequest>();
+    generator.subschema_for::<ResendAttentionResponse>();
     generator.subschema_for::<RenameShellRequest>();
     generator.subschema_for::<RestartShellRequest>();
     generator.subschema_for::<RespawnAgentRequest>();
@@ -552,14 +562,18 @@ fn given<T: serde::Serialize>(
 pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, String>> {
     use crate::edge::edge;
     Some(match name {
+        "AnswerAttentionRequest" => given(edge::<AnswerAttentionRequest>(body)),
         "CloseAgentRequest" => given(edge::<CloseAgentRequest>(body)),
         "CloseShellRequest" => given(edge::<CloseShellRequest>(body)),
         "CreateTaskRequest" => given(edge::<CreateTaskRequest>(body)),
+        "DismissAttentionRequest" => given(edge::<DismissAttentionRequest>(body)),
         "DismissNoticeRequest" => given(edge::<DismissNoticeRequest>(body)),
         "OpenShellRequest" => given(edge::<OpenShellRequest>(body)),
         "PairRequest" => given(edge::<PairRequest>(body)),
         "RelaunchAgentRequest" => given(edge::<RelaunchAgentRequest>(body)),
         "RenameShellRequest" => given(edge::<RenameShellRequest>(body)),
+        "ReplyAttentionRequest" => given(edge::<ReplyAttentionRequest>(body)),
+        "ResendAttentionRequest" => given(edge::<ResendAttentionRequest>(body)),
         "RespawnAgentRequest" => given(edge::<RespawnAgentRequest>(body)),
         "RestartShellRequest" => given(edge::<RestartShellRequest>(body)),
         "SendMessageRequest" => given(edge::<SendMessageRequest>(body)),
