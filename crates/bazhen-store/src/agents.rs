@@ -1,8 +1,20 @@
 //! What the daemon reads of agents to tell who called it: an agent by its token's hash, one known
 //! by its id alone, a Codex agent by its thread, and the terminals whose processes a caller may
-//! run under.
+//! run under. And what a launch reads and writes beside its events: the names agents hold, and
+//! each start's token. And a rename, once per key.
 
-use crate::events::Reads;
+use bazhen_protocol::agent_events::AgentRenamed;
+use bazhen_protocol::agents::AgentCommandResponse;
+use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::names::name_base;
+use serde::Serialize;
+
+use crate::Store;
+use crate::agent_events::AgentChange;
+use crate::events::{AppendError, NewEvent, OnceError, Reads, Writer};
+
+/// The states an agent has ended in, which no rename changes.
+const ENDED: [&str; 2] = ["closed", "failed"];
 
 /// A terminal not yet ended that a runtime holds, as its row records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +83,101 @@ impl Reads<'_> {
         self.first("SELECT state FROM agent_sessions WHERE id = ?", agent_id)
     }
 
+    /// The agent `reference` names: by its id, any agent the store knows; by its name, the one
+    /// not ended that holds it. `None` for one it names no agent by.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn resolve_agent(self, reference: &str) -> rusqlite::Result<Option<String>> {
+        if AgentId::parse(reference).is_some() {
+            return Ok(self.agent_state(reference)?.map(|_| reference.to_owned()));
+        }
+        self.live_agent_named(reference)
+    }
+
+    /// The agent's name, if it has one, and its state; `None` for an agent the store doesn't know.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_name_and_state(
+        self,
+        agent_id: &str,
+    ) -> rusqlite::Result<Option<(Option<String>, String)>> {
+        let mut rows = self
+            .0
+            .prepare("SELECT name, state FROM agent_sessions WHERE id = ?")?;
+        let mut found = rows.query([agent_id])?;
+        found
+            .next()?
+            .map(|row| Ok((row.get(0)?, row.get(1)?)))
+            .transpose()
+    }
+
+    /// The agent not ended that holds `name`, ignoring case.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn live_agent_named(self, name: &str) -> rusqlite::Result<Option<String>> {
+        self.first(
+            "SELECT id FROM agent_sessions
+             WHERE name = ? COLLATE NOCASE AND state NOT IN ('closed', 'failed')",
+            name,
+        )
+    }
+
+    /// The default name a new agent in `project` takes, and its number: the first after the last
+    /// one given under its base that no agent not ended holds. Read and recorded in one
+    /// transaction, by the launch that records it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn next_default_name(self, project: &str) -> rusqlite::Result<(String, u64)> {
+        let base = name_base(project);
+        let last: Option<i64> =
+            self.first("SELECT last FROM agent_name_counters WHERE base = ?", &base)?;
+        let mut ordinal = last.map_or(0, |last| u64::try_from(last).unwrap_or(0));
+        loop {
+            ordinal = ordinal.saturating_add(1);
+            let name = format!("{base}-{ordinal}");
+            if self.live_agent_named(&name)?.is_none() {
+                return Ok((name, ordinal));
+            }
+        }
+    }
+
+    /// The hash of the agent's current token, or `None` for one that has none.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_token_hash(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        let hash: Option<Option<String>> = self.first(
+            "SELECT token_hash FROM agent_sessions WHERE id = ?",
+            agent_id,
+        )?;
+        Ok(hash.flatten())
+    }
+
+    /// Why the agent's last failure says it failed, when its event is kept and says why.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_failure_detail(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        let payload: Option<String> = self.first(
+            "SELECT payload FROM events WHERE entity_id = ? AND type = 'agent.failed'
+             ORDER BY id DESC LIMIT 1",
+            agent_id,
+        )?;
+        Ok(payload
+            .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
+            .and_then(|payload| payload.get("detail")?.as_str().map(str::to_owned)))
+    }
+
     /// Every terminal not yet ended that a runtime holds.
     ///
     /// # Errors
@@ -99,6 +206,146 @@ impl Reads<'_> {
         let mut rows = self.0.prepare(sql)?;
         let mut found = rows.query([key])?;
         found.next()?.map(|row| row.get(0)).transpose()
+    }
+}
+
+impl Writer<'_> {
+    /// Makes `hash` the agent's token's, which takes the place of the last at once: the start it
+    /// was minted for may call before that start returns.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn note_agent_token(&self, agent_id: &str, hash: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE agent_sessions SET token_hash = ? WHERE id = ?",
+            (hash, agent_id),
+        )?;
+        Ok(())
+    }
+
+    /// A start of the agent's own went ahead on a token: its bare id no longer names it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn kept_agent_token(&self, agent_id: &str) -> rusqlite::Result<()> {
+        self.connection().execute(
+            "UPDATE agent_sessions SET untokened = 0 WHERE id = ?",
+            [agent_id],
+        )?;
+        Ok(())
+    }
+}
+
+/// A rename of an agent, as `POST /v1/agents/:id/rename` asks for it, its agent already resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rename {
+    pub key: String,
+    /// The agent asking, or `None` for the human.
+    pub caller: Option<String>,
+    pub agent: AgentId,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeptRename<'a> {
+    caller: Option<&'a str>,
+    agent_id: &'a str,
+    name: &'a str,
+}
+
+impl Rename {
+    /// The text a repeat of this request must match, as the TypeScript daemon writes it.
+    ///
+    /// # Errors
+    ///
+    /// `serde_json`'s, which a struct of strings never meets.
+    pub fn request_text(&self) -> serde_json::Result<String> {
+        serde_json::to_string(&KeptRename {
+            caller: self.caller.as_deref(),
+            agent_id: self.agent.as_str(),
+            name: &self.name,
+        })
+    }
+}
+
+/// Why an agent wasn't renamed.
+#[derive(Debug, thiserror::Error)]
+pub enum RenameError {
+    /// Another agent asked: an agent renames only itself.
+    #[error("an agent can rename only itself")]
+    Forbidden,
+    #[error("no agent {0}")]
+    Unknown(String),
+    #[error("agent {agent} is {state}; only an agent not ended can be renamed")]
+    Ended { agent: String, state: String },
+    #[error("another agent is named {0}; close it or pick another name")]
+    NameTaken(String),
+    #[error(transparent)]
+    Once(#[from] OnceError),
+    #[error(transparent)]
+    Append(#[from] AppendError),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+impl Store {
+    /// Renames an agent, or answers what its key was first answered (`names.ts` `renameAgent`).
+    /// The human renames any agent, an agent only itself; a name another agent not ended holds,
+    /// in any case, is refused, and the name it already has is no change.
+    ///
+    /// # Errors
+    ///
+    /// [`RenameError`]; nothing is recorded then.
+    pub fn rename_agent(&mut self, rename: &Rename) -> Result<AgentCommandResponse, RenameError> {
+        self.once(&rename.key, &rename.request_text()?, |w| {
+            let agent = rename.agent.as_str();
+            if rename
+                .caller
+                .as_deref()
+                .is_some_and(|caller| caller != agent)
+            {
+                return Err(RenameError::Forbidden);
+            }
+            let reads = w.reads();
+            let Some((previous, state)) = reads.agent_name_and_state(agent)? else {
+                return Err(RenameError::Unknown(agent.to_owned()));
+            };
+            if ENDED.contains(&state.as_str()) {
+                return Err(RenameError::Ended {
+                    agent: agent.to_owned(),
+                    state,
+                });
+            }
+            let answer = |event_ids| AgentCommandResponse {
+                agent_id: rename.agent.clone(),
+                event_ids,
+            };
+            if previous.as_deref() == Some(rename.name.as_str()) {
+                return Ok(answer(Vec::new()));
+            }
+            if reads
+                .live_agent_named(&rename.name)?
+                .is_some_and(|holder| holder != agent)
+            {
+                return Err(RenameError::NameTaken(rename.name.clone()));
+            }
+            let id = w.append(&NewEvent::Agent {
+                agent: rename.agent.clone(),
+                actor: rename.caller.clone().unwrap_or_else(|| "user".to_owned()),
+                change: AgentChange::Renamed(AgentRenamed {
+                    name: rename.name.clone(),
+                    // An agent from before agents had names has none, which store.ts reads
+                    // with String(), as "null".
+                    previous: previous.unwrap_or_else(|| "null".to_owned()),
+                }),
+            })?;
+            Ok(answer(vec![id]))
+        })
     }
 }
 
@@ -405,6 +652,373 @@ mod tests {
                     agent_id: None,
                     locator: r#"{"childPid":11}"#.into()
                 }
+            ]
+        );
+    }
+
+    /// An agent `id` in `state` holding `name`.
+    fn named(store: &Store, id: &str, name: &str, state: &str) {
+        seed(store, &Agent { id, state, ..AGENT });
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET name = ? WHERE id = ?",
+                (name, id),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn gives_a_default_name_no_live_agent_holds_and_never_a_number_given_before() {
+        let dir = TempDir::new("default-name");
+        let store = store(&dir);
+        named(&store, "agent_01", "p-1", "failed");
+        store
+            .db
+            .execute(
+                "INSERT INTO agent_name_counters (base, last) VALUES ('p', 1)",
+                (),
+            )
+            .unwrap();
+        named(&store, "agent_02", "P-2", "running");
+        assert_eq!(
+            [
+                store.reads().next_default_name("p").unwrap(),
+                store.reads().next_default_name("other project").unwrap(),
+            ],
+            [("p-3".to_owned(), 3), ("other-project-1".to_owned(), 1)]
+        );
+    }
+
+    #[test]
+    fn finds_the_agent_not_ended_that_holds_a_name_in_any_case() {
+        let dir = TempDir::new("live-name");
+        let store = store(&dir);
+        named(&store, "agent_01", "lead", "closed");
+        named(&store, "agent_02", "Lead", "running");
+        named(&store, "agent_03", "gone", "failed");
+        let reads = store.reads();
+        assert_eq!(
+            [
+                reads.live_agent_named("LEAD").unwrap(),
+                reads.live_agent_named("gone").unwrap(),
+                reads.live_agent_named("lea").unwrap(),
+            ],
+            [Some("agent_02".to_owned()), None, None]
+        );
+    }
+
+    #[test]
+    fn takes_a_new_tokens_hash_in_place_of_the_last_and_keeps_the_start_that_went_ahead_on_it() {
+        let dir = TempDir::new("token-hash");
+        let mut store = store(&dir);
+        seed(
+            &store,
+            &Agent {
+                token_hash: Some("old"),
+                untokened: true,
+                ..AGENT
+            },
+        );
+        seed(
+            &store,
+            &Agent {
+                id: "agent_02",
+                ..AGENT
+            },
+        );
+        let before = store.reads().agent_untokened("agent_01").unwrap();
+        store
+            .write(|w| {
+                w.note_agent_token("agent_01", "new")?;
+                w.kept_agent_token("agent_01")
+            })
+            .unwrap();
+        let reads = store.reads();
+        assert_eq!(
+            [
+                reads.agent_token_hash("agent_01").unwrap(),
+                reads.agent_token_hash("agent_02").unwrap(),
+                reads.agent_token_hash("agent_09").unwrap(),
+            ],
+            [Some("new".to_owned()), None, None]
+        );
+        assert_eq!(
+            (before, reads.agent_untokened("agent_01").unwrap()),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn says_why_the_agents_last_failure_said_it_failed_when_it_said() {
+        let dir = TempDir::new("failure-detail");
+        let store = store(&dir);
+        store
+            .db
+            .execute_batch(
+                "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_01',
+                     'system', '{\"reason\":\"launch_rejected\",\"detail\":\"first\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_01',
+                     'system', '{\"reason\":\"launch_rejected\",\"detail\":\"last\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.failed', 'agent', 'agent_02',
+                     'system', '{\"reason\":\"launch_rejected\"}' FROM host;
+                 INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'agent.running', 'agent', 'agent_03',
+                     'system', '{\"detail\":\"not a failure\"}' FROM host;",
+            )
+            .unwrap();
+        let reads = store.reads();
+        assert_eq!(
+            ["agent_01", "agent_02", "agent_03"].map(|id| reads.agent_failure_detail(id).unwrap()),
+            [Some("last".to_owned()), None, None]
+        );
+    }
+
+    #[test]
+    fn recalls_what_a_key_recorded_as_it_was_recorded_and_nothing_for_a_key_never_used() {
+        let dir = TempDir::new("recall");
+        let mut store = store(&dir);
+        let record = serde_json::json!({"request": {"cwd": "/w"}, "response": {}, "failed": true});
+        let recalled = store
+            .write(|w| -> Result<_, crate::OnceError> {
+                w.remember("launch", &serde_json::json!({"failed": false}))?;
+                w.remember("launch", &record)?;
+                Ok([w.recall("launch")?, w.recall("never")?])
+            })
+            .unwrap();
+        assert_eq!(recalled, [Some(record), None]);
+    }
+
+    /// Two agents, `lead` and `peer`, named as such, with ids a rename can name.
+    struct Named {
+        _dir: TempDir,
+        store: Store,
+        lead: bazhen_protocol::ids::AgentId,
+        peer: bazhen_protocol::ids::AgentId,
+    }
+
+    fn two_named() -> Named {
+        let dir = TempDir::new("rename");
+        let store = store(&dir);
+        let [lead, peer] =
+            [1_u8, 2].map(|n| bazhen_protocol::ids::AgentId::mint(u64::from(n), [n; 16]));
+        for (agent, name) in [(&lead, "lead"), (&peer, "peer")] {
+            seed(
+                &store,
+                &Agent {
+                    id: agent.as_str(),
+                    ..AGENT
+                },
+            );
+            store
+                .db
+                .execute(
+                    "UPDATE agent_sessions SET name = ? WHERE id = ?",
+                    (name, agent.as_str()),
+                )
+                .unwrap();
+        }
+        Named {
+            _dir: dir,
+            store,
+            lead,
+            peer,
+        }
+    }
+
+    impl Named {
+        fn rename(
+            &mut self,
+            key: &str,
+            caller: Option<&bazhen_protocol::ids::AgentId>,
+            name: &str,
+        ) -> Result<bazhen_protocol::agents::AgentCommandResponse, crate::RenameError> {
+            self.store.rename_agent(&crate::Rename {
+                key: key.to_owned(),
+                caller: caller.map(|c| c.as_str().to_owned()),
+                agent: self.lead.clone(),
+                name: name.to_owned(),
+            })
+        }
+
+        fn name(&self) -> Option<String> {
+            self.store
+                .reads()
+                .agent_name_and_state(self.lead.as_str())
+                .unwrap()
+                .and_then(|(name, _)| name)
+        }
+
+        fn renamed(&self) -> Vec<(String, serde_json::Value)> {
+            self.store
+                .reads()
+                .events(0, 100)
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.kind == "agent.renamed")
+                .map(|e| (e.actor, serde_json::from_str(&e.payload).unwrap()))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn renames_an_agent_for_the_human_recording_the_name_it_had() {
+        let mut n = two_named();
+        let answer = n.rename("r", None, "reviewer").unwrap();
+        assert_eq!(
+            (n.name(), n.renamed(), answer.event_ids.len()),
+            (
+                Some("reviewer".to_owned()),
+                vec![(
+                    "user".to_owned(),
+                    serde_json::json!({"name": "reviewer", "previous": "lead"})
+                )],
+                1
+            )
+        );
+    }
+
+    #[test]
+    fn lets_an_agent_rename_itself_and_no_other_agent() {
+        let mut n = two_named();
+        let (lead, peer) = (n.lead.clone(), n.peer.clone());
+        n.rename("self", Some(&lead), "me").unwrap();
+        let other = n.rename("o", Some(&peer), "you");
+        assert!(
+            matches!(other, Err(crate::RenameError::Forbidden)),
+            "{other:?}"
+        );
+        assert_eq!(n.name(), Some("me".to_owned()));
+        assert_eq!(n.renamed()[0].0, lead.as_str());
+    }
+
+    #[test]
+    fn refuses_a_name_another_live_agent_holds_in_any_case() {
+        let mut n = two_named();
+        let taken = n.rename("r", None, "PEER");
+        assert!(
+            matches!(&taken, Err(crate::RenameError::NameTaken(name)) if name == "PEER"),
+            "{taken:?}"
+        );
+        assert_eq!(n.renamed(), Vec::new());
+    }
+
+    #[test]
+    fn takes_a_name_only_an_ended_agent_held() {
+        let mut n = two_named();
+        n.store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET state = 'closed' WHERE id = ?",
+                [n.peer.as_str()],
+            )
+            .unwrap();
+        n.rename("r", None, "peer").unwrap();
+        assert_eq!(n.name(), Some("peer".to_owned()));
+    }
+
+    #[test]
+    fn changes_only_the_case_of_its_own_name() {
+        let mut n = two_named();
+        n.rename("b", None, "Lead").unwrap();
+        assert_eq!(n.name(), Some("Lead".to_owned()));
+    }
+
+    #[test]
+    fn records_nothing_for_the_name_it_already_has() {
+        let mut n = two_named();
+        let again = n.rename("b", None, "lead").unwrap();
+        assert_eq!((again.event_ids, n.renamed()), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn answers_a_repeat_with_the_first_answer_and_the_key_reused_for_another_name_as_a_conflict() {
+        let mut n = two_named();
+        let first = n.rename("r", None, "reviewer").unwrap();
+        // The repeat would be no change now, but answers what the first did.
+        let repeat = n.rename("r", None, "reviewer").unwrap();
+        let other = n.rename("r", None, "x");
+        assert_eq!(repeat, first);
+        assert!(
+            matches!(
+                other,
+                Err(crate::RenameError::Once(crate::OnceError::Conflict(_)))
+            ),
+            "{other:?}"
+        );
+    }
+
+    #[test]
+    fn refuses_to_rename_an_agent_that_has_ended_or_whose_launch_failed() {
+        let refused = |state: &str| {
+            let mut n = two_named();
+            n.store
+                .db
+                .execute(
+                    "UPDATE agent_sessions SET state = ? WHERE id = ?",
+                    (state, n.lead.as_str()),
+                )
+                .unwrap();
+            n.rename("r", None, "x").map_err(|e| e.to_string())
+        };
+        let lead = bazhen_protocol::ids::AgentId::mint(1, [1; 16]);
+        assert_eq!(
+            [refused("closed"), refused("failed")],
+            ["closed", "failed"].map(|state| Err(format!(
+                "agent {} is {state}; only an agent not ended can be renamed",
+                lead.as_str()
+            )))
+        );
+    }
+
+    #[test]
+    fn keeps_each_rename_as_the_typescript_daemon_does_for_its_key() {
+        let lead = bazhen_protocol::ids::AgentId::mint(1, [1; 16]);
+        let rename = |caller: Option<&str>| crate::Rename {
+            key: "r".to_owned(),
+            caller: caller.map(str::to_owned),
+            agent: lead.clone(),
+            name: "x".to_owned(),
+        };
+        assert_eq!(
+            [rename(None), rename(Some("agent_y"))].map(|r| r.request_text().unwrap()),
+            [
+                format!(
+                    r#"{{"caller":null,"agentId":"{}","name":"x"}}"#,
+                    lead.as_str()
+                ),
+                format!(
+                    r#"{{"caller":"agent_y","agentId":"{}","name":"x"}}"#,
+                    lead.as_str()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolves_an_agent_by_its_id_whatever_its_state_and_by_its_name_only_while_it_is_live() {
+        let n = two_named();
+        n.store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET state = 'closed' WHERE id = ?",
+                [n.peer.as_str()],
+            )
+            .unwrap();
+        let unknown = bazhen_protocol::ids::AgentId::mint(9, [9; 16]);
+        let reads = n.store.reads();
+        assert_eq!(
+            ["LEAD", "peer", n.peer.as_str(), unknown.as_str(), "nobody"]
+                .map(|r| reads.resolve_agent(r).unwrap()),
+            [
+                Some(n.lead.as_str().to_owned()),
+                None,
+                Some(n.peer.as_str().to_owned()),
+                None,
+                None
             ]
         );
     }

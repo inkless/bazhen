@@ -367,6 +367,43 @@ impl Writer<'_> {
         answered(&self.tx, key, request, response)
     }
 
+    /// What `key` was first answered with, as it was recorded, for a command that records more
+    /// than its answer under its key, as a launch records its request and whether it failed.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a record that isn't JSON.
+    pub fn recall(&self, key: &str) -> Result<Option<serde_json::Value>, OnceError> {
+        let kept: Option<String> = self
+            .tx
+            .query_row(
+                "SELECT response FROM idempotency_keys WHERE key = ?",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        kept.map(|kept| {
+            serde_json::from_str(&kept).map_err(|source| OnceError::Unreadable {
+                key: key.to_owned(),
+                source,
+            })
+        })
+        .transpose()
+    }
+
+    /// Records `record` under `key`, in place of whatever was, for [`Writer::recall`].
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or `serde_json`'s writing it.
+    pub fn remember<R: Serialize>(&self, key: &str, record: &R) -> Result<(), OnceError> {
+        self.tx.execute(
+            "INSERT OR REPLACE INTO idempotency_keys (key, response) VALUES (?, ?)",
+            (key, serde_json::to_string(record)?),
+        )?;
+        Ok(())
+    }
+
     /// The read models as this transaction sees them.
     pub fn reads(&self) -> Reads<'_> {
         Reads(&self.tx)

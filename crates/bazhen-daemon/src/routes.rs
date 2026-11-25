@@ -24,6 +24,7 @@ use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotV
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
+use crate::agent_routes;
 use crate::callers::{self, Caller};
 use crate::events::{self, Streaming};
 use crate::guard::{self, Allowlists, Arrival, Refusal};
@@ -91,6 +92,8 @@ pub(crate) struct Shared {
     pub(crate) pairing: Pairing,
     /// The shells, where this daemon runs terminals.
     pub(crate) shells: Option<Arc<Shells>>,
+    /// The agents, where this daemon runs terminals.
+    pub(crate) agents: Option<Arc<crate::agents::Agents>>,
     /// What doctor says that was settled at start.
     pub(crate) doctor: Option<Arc<crate::doctor::Settled>>,
     /// This machine's name, as the state names its environment's host.
@@ -119,6 +122,7 @@ impl Shared {
             peers: Peers::default(),
             pairing: Pairing::default(),
             shells: None,
+            agents: None,
             doctor: None,
             host: Arc::from(hostname()),
             web: None,
@@ -141,6 +145,12 @@ impl Shared {
     ) -> Self {
         self.shells = Some(shells);
         self.doctor = Some(Arc::new(doctor));
+        self
+    }
+
+    /// The same, launching agents as `agents` does.
+    pub(crate) fn with_agents(mut self, agents: Arc<crate::agents::Agents>) -> Self {
+        self.agents = Some(agents);
         self
     }
 
@@ -381,6 +391,8 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/devices", get(paired::list))
         .route("/v1/devices/{id}/revoke", post(paired::revoke))
         .route("/v1/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/v1/agents", post(agent_routes::launch))
+        .route("/v1/agents/{id}/rename", post(agent_routes::rename))
         .route("/v1/shells", post(shell_routes::open))
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
@@ -429,6 +441,8 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/tasks", post(create_task))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))
+        .route("/agents", post(agent_routes::launch))
+        .route("/agents/{id}/rename", post(agent_routes::rename))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
@@ -1080,6 +1094,140 @@ mod tests {
     }
 
     const LOCAL: [(&str, &str); 2] = [("host", HOST), ("origin", "http://127.0.0.1:7900")];
+
+    const LEAD: &str = "agent_01900000000070008000000000000001";
+    const PEER: &str = "agent_01900000000070008000000000000002";
+
+    /// Both listeners over a store holding two live agents, `lead` and `peer`.
+    fn over_two_agents() -> (Router, Router, std::path::PathBuf, Finish) {
+        let (socket, http, path, finish) = over_a_store();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+                   SELECT id, '2026-11-20T00:00:00.000Z', 'x', 'x', 'x', 'system', '{{}}' FROM host;
+                 INSERT INTO environments (id, kind, created_event_id) VALUES ('env_local', 'local', 1);
+                 INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state, name,
+                   created_event_id, updated_event_id) VALUES
+                   ('{LEAD}', 'env_local', 'claude-code', 'p', '/', 'running', 'lead', 1, 1),
+                   ('{PEER}', 'env_local', 'claude-code', 'p', '/', 'running', 'peer', 1, 1);"
+            ))
+            .unwrap();
+        (socket, http, path, finish)
+    }
+
+    /// Each `agent.renamed`, as its actor and payload.
+    fn renamed(path: &std::path::Path) -> Vec<(String, Value)> {
+        let store = bazhen_store::Store::open(path).unwrap();
+        store
+            .reads()
+            .events(0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "agent.renamed")
+            .map(|e| (e.actor, serde_json::from_str(&e.payload).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn renames_an_agent_for_the_human_on_either_listener_by_its_id_or_its_name() {
+        let (socket, http, path, _finish) = over_two_agents();
+        let by_id = send(
+            socket,
+            post(
+                &format!("/v1/agents/{LEAD}/rename"),
+                &[],
+                &json!({ "idempotencyKey": "a", "name": "reviewer" }),
+            ),
+        );
+        // An agent's id in a header over HTTP is no caller: the human asks there.
+        let by_name = send(
+            http,
+            post(
+                "/v1/agents/REVIEWER/rename",
+                &[LOCAL[0], LOCAL[1], ("bazhen-agent-id", PEER)],
+                &json!({ "idempotencyKey": "b", "name": "lead" }),
+            ),
+        );
+        assert_eq!(
+            [by_id.0, by_name.0],
+            [200, 200],
+            "{} {}",
+            by_id.1,
+            by_name.1
+        );
+        assert_eq!(by_id.1["agentId"], LEAD);
+        assert_eq!(
+            renamed(&path),
+            [
+                (
+                    "user".to_owned(),
+                    json!({ "name": "reviewer", "previous": "lead" })
+                ),
+                (
+                    "user".to_owned(),
+                    json!({ "name": "lead", "previous": "reviewer" })
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn answers_a_rename_with_the_protocols_error_for_each_way_it_fails() {
+        let (socket, _http, path, _finish) = over_two_agents();
+        let rename = |agent: &str, key: &str, name: &str| {
+            let (status, body) = send(
+                socket.clone(),
+                post(
+                    &format!("/v1/agents/{agent}/rename"),
+                    &[],
+                    &json!({ "idempotencyKey": key, "name": name }),
+                ),
+            );
+            (status, body["error"].clone(), body["message"].clone())
+        };
+        let gone = "agent_01900000000070008000000000000009";
+        let first = rename(LEAD, "k", "first");
+        let answered = [
+            rename(LEAD, "t", "PEER"),
+            rename(LEAD, "x", "-x"),
+            rename(gone, "u", "x"),
+            rename("nobody", "v", "x"),
+            rename(LEAD, "k", "other"),
+        ];
+        assert_eq!(first.0, 200);
+        assert_eq!(
+            answered,
+            [
+                (
+                    409,
+                    json!("conflict"),
+                    json!("another agent is named PEER; close it or pick another name")
+                ),
+                (400, json!("invalid_request"), answered[1].2.clone()),
+                (404, json!("not_found"), json!(format!("no agent {gone}"))),
+                (
+                    404,
+                    json!("not_found"),
+                    json!("no agent nobody by that name")
+                ),
+                (
+                    409,
+                    json!("conflict"),
+                    json!("idempotency key k was first used for a different request")
+                ),
+            ]
+        );
+        assert!(
+            answered[1]
+                .2
+                .as_str()
+                .is_some_and(|m| m.starts_with("the body is not a rename")),
+            "{:?}",
+            answered[1]
+        );
+        assert_eq!(renamed(&path).len(), 1);
+    }
 
     #[test]
     fn makes_a_task_for_the_human_once_per_key_on_either_listener() {

@@ -15,7 +15,7 @@ pub(crate) mod reconcile;
 pub(crate) mod reports;
 pub(crate) mod retype;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -42,7 +42,10 @@ use self::integration::Integration;
 use self::reports::new_shell_token;
 use self::retype::{PendingRetypes, Typing};
 use crate::budget::{Budget, Counts, TerminalLimit};
-use crate::terminals::{Event, Events, Exit, Recorded, ShellSpec, TerminalError, Terminals};
+use crate::terminals::{
+    Event, Events, Exit, Kind, NewTerminal, Recorded, TerminalError, Terminals,
+};
+use crate::turns::Turns;
 use crate::writer::Writer;
 
 /// The runtime every shell this daemon opens is created on.
@@ -230,46 +233,6 @@ pub(crate) fn resolve_directory(requested: &str, home: &str) -> Result<String, S
             Err(ShellError::Invalid(format!("{path} does not exist")))
         }
         Err(err) => Err(ShellError::Internal(format!("{path} can't be read: {err}"))),
-    }
-}
-
-/// Commands on one shell, one at a time, each waiting its turn by the shell's id.
-#[derive(Debug, Default)]
-struct Turns(Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>);
-
-/// A shell's turn, given back as it drops.
-#[derive(Debug)]
-struct Turn<'a> {
-    turns: &'a Turns,
-    id: String,
-    held: Option<tokio::sync::OwnedMutexGuard<()>>,
-}
-
-impl Turns {
-    async fn take(&self, id: &str) -> Turn<'_> {
-        let lock = {
-            let mut turns = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            Arc::clone(turns.entry(id.to_owned()).or_default())
-        };
-        Turn {
-            turns: self,
-            id: id.to_owned(),
-            held: Some(lock.lock_owned().await),
-        }
-    }
-}
-
-impl Drop for Turn<'_> {
-    fn drop(&mut self) {
-        drop(self.held.take());
-        let mut turns = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
-        // Forgotten once no other command holds or waits for it.
-        if turns
-            .get(&self.id)
-            .is_some_and(|lock| Arc::strong_count(lock) == 1)
-        {
-            turns.remove(&self.id);
-        }
     }
 }
 
@@ -755,7 +718,7 @@ impl Shells {
 
     /// The user's shell as a login shell, told its terminal and the daemon's socket, the paired
     /// device that opened it, and, with `token`, what its integration reports with and where.
-    fn spec(&self, terminal: &TerminalId, opening: Opening, token: Option<String>) -> ShellSpec {
+    fn spec(&self, terminal: &TerminalId, opening: Opening, token: Option<String>) -> NewTerminal {
         let mut env = BTreeMap::from([
             (
                 "BAZHEN_TERMINAL_ID".to_owned(),
@@ -774,9 +737,11 @@ impl Shells {
                 integration.dir.clone(),
             );
         }
-        ShellSpec {
+        NewTerminal {
             terminal_id: terminal.clone(),
-            linked_agent_id: None,
+            kind: Kind::Shell {
+                linked_agent_id: None,
+            },
             argv: vec![self.deps.shell.clone(), "-l".to_owned(), "-i".to_owned()],
             cwd: opening.cwd,
             env,
@@ -1307,6 +1272,7 @@ fn gone_from(state: TerminalState) -> TerminalChange {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::HashMap;
     use std::sync::Mutex as StdMutex;
     use std::time::{Duration, Instant};
 
@@ -1563,11 +1529,13 @@ pub(crate) mod tests {
             let id = h.shells.open(&req, None).await.unwrap().terminal_id;
             let spec = h.fake.spec_of(id.as_str());
             assert_eq!(
-                (spec.argv, spec.cwd, spec.linked_agent_id, spec.theme),
+                (spec.argv, spec.cwd, spec.kind, spec.theme),
                 (
                     vec!["/bin/zsh".to_owned(), "-l".to_owned(), "-i".to_owned()],
                     h.home.clone(),
-                    None,
+                    Kind::Shell {
+                        linked_agent_id: None
+                    },
                     Some(TuiTheme::Light)
                 )
             );
@@ -2214,8 +2182,14 @@ pub(crate) mod tests {
                 (Some(TerminalState::Closed), Some(TerminalState::Running))
             );
             assert_eq!(
-                (spec.cwd, spec.linked_agent_id, spec.theme),
-                (h.home.clone(), None, Some(TuiTheme::Light))
+                (spec.cwd, spec.kind, spec.theme),
+                (
+                    h.home.clone(),
+                    Kind::Shell {
+                        linked_agent_id: None
+                    },
+                    Some(TuiTheme::Light)
+                )
             );
             assert_eq!(h.listed().len(), 1);
         });

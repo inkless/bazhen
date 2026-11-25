@@ -19,18 +19,21 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::accept::{self, Limits, serve_on};
+use crate::agents::prompts::daemon_prompts;
+use crate::agents::{Agents, AgentsDeps};
 use crate::config::Settings;
 use crate::doctor::Settled;
 use crate::guard;
 use crate::lock::{Claim, Lock, claim};
 use crate::private_dir::ensure_private_dir;
 use crate::probe::{probe, silence};
+use crate::roles::Roles;
 use crate::routes::{self, Gate, Reason, Shared, Stop};
 use crate::runner::{self, Runner};
 use crate::shells::integration::{Integration, install_shell_integration};
 use crate::shells::{ShellError, Shells, ShellsDeps};
 use crate::terminals::Events;
-use crate::tokens;
+use crate::tokens::{self, AgentTokens};
 use crate::web::State;
 
 /// How the daemon serves: each listener's limits, how long its connections get to finish once
@@ -246,7 +249,8 @@ async fn shells(
     runner: Runner,
     tracker: &TaskTracker,
     stop: &CancellationToken,
-) -> Result<(Arc<Shells>, Box<dyn Events>, Settled), Refused> {
+    roles: Arc<Roles>,
+) -> Result<Running, Refused> {
     let events = runner.terminals.events();
     store
         .run(|store| {
@@ -257,6 +261,20 @@ async fn shells(
         .map_err(|err| Refused::Said(format!("bazhen can't register this machine: {err}")))?;
     let integration = shell_integration(startup, store, runner.hook.as_deref()).await?;
     let budget = Arc::clone(&runner.budget);
+    let run = Path::new(&startup.paths.run);
+    let agents = Agents::new(AgentsDeps {
+        store: store.clone(),
+        terminals: Arc::clone(&runner.terminals),
+        budget: Arc::clone(&runner.budget),
+        home: startup.home.clone(),
+        socket: startup.paths.socket.clone(),
+        tracker: tracker.clone(),
+        roles,
+        harnesses: runner.harnesses,
+        tokens: AgentTokens::new(run.join("agents"), startup.uid, store.clone()),
+        prompts: daemon_prompts(run, startup.uid),
+        login_shell: startup.settings.config.login_shell.clone(),
+    });
     let shells = Shells::new(ShellsDeps {
         store: store.clone(),
         terminals: runner.terminals,
@@ -284,7 +302,20 @@ async fn shells(
     for warning in budget.startup_warnings(open) {
         tracing::warn!("bazhen: {warning}");
     }
-    Ok((Arc::new(shells), events, runner.doctor))
+    Ok(Running {
+        shells: Arc::new(shells),
+        agents: Arc::new(agents),
+        events,
+        doctor: runner.doctor,
+    })
+}
+
+/// What runs on the daemon's terminals, as its start sets it up.
+struct Running {
+    shells: Arc<Shells>,
+    agents: Arc<Agents>,
+    events: Box<dyn Events>,
+    doctor: Settled,
 }
 
 /// How often the running shells' foregrounds, and what their holders speak, are read again: the
@@ -403,15 +434,16 @@ async fn listen(
     let mut watching = None;
     if let Some(runner) = runner {
         let streaming = runner.streams.clone();
-        let (running, events, doctor) =
-            shells(startup, &store, runner, &tracker, stop.token()).await?;
-        let bundle = doctor.bundle.clone();
+        let roles = Arc::clone(&shared.roles);
+        let running = shells(startup, &store, runner, &tracker, stop.token(), roles).await?;
+        let bundle = running.doctor.bundle.clone();
         shared = shared
-            .with_shells(Arc::clone(&running), doctor)
+            .with_shells(Arc::clone(&running.shells), running.doctor)
+            .with_agents(running.agents)
             .with_web(bundle);
         shared.streams =
-            crate::stream::on_holders(&store, streaming, &running, &tracker, stop.token());
-        watching = Some((running, events));
+            crate::stream::on_holders(&store, streaming, &running.shells, &tracker, stop.token());
+        watching = Some((running.shells, running.events));
     }
     let gate = Gate {
         allow: guard::allowlists(
@@ -674,6 +706,10 @@ mod tests {
     }
 
     /// Terminals on a fake runtime, three at most, with no holder installed.
+    fn roles() -> Arc<Roles> {
+        Arc::new(Roles::new(None))
+    }
+
     fn faked(startup: &Startup) -> Runner {
         use crate::budget::tests::{Machine, roomy};
         let captured = crate::env::capture(
@@ -700,6 +736,7 @@ mod tests {
             shell: "/bin/sh".to_owned(),
             streams: None,
             hook: None,
+            harnesses: None,
         }
     }
 
@@ -750,7 +787,16 @@ mod tests {
                 ..faked(&startup)
             };
             let stop = CancellationToken::new();
-            let Ok(_) = shells(&startup, &store, runner, &TaskTracker::new(), &stop).await else {
+            let Ok(_) = shells(
+                &startup,
+                &store,
+                runner,
+                &TaskTracker::new(),
+                &stop,
+                roles(),
+            )
+            .await
+            else {
                 panic!("refused to start");
             };
             (opened[0].clone(), opened[1].clone())
@@ -873,6 +919,7 @@ mod tests {
                 runner,
                 &TaskTracker::new(),
                 &CancellationToken::new(),
+                roles(),
             )
             .await
             {
