@@ -7,6 +7,7 @@ use bazhen_protocol::agent_events::AgentRenamed;
 use bazhen_protocol::agents::{AgentCommandResponse, ExternalRef, HarnessId};
 use bazhen_protocol::ids::AgentId;
 use bazhen_protocol::names::{Role, name_base};
+use bazhen_protocol::shells::TuiTheme;
 use rusqlite::OptionalExtension as _;
 use serde::Serialize;
 
@@ -37,6 +38,8 @@ pub struct AgentLaunch {
     pub external_ref: Option<ExternalRef>,
     /// Where that session keeps its conversation, as one of its hooks reported it.
     pub transcript: Option<String>,
+    /// The theme its terminal was last drawn for, once it has a terminal that was.
+    pub theme: Option<TuiTheme>,
 }
 
 /// A stored word, such as a state or an id, read as the protocol's type for it.
@@ -120,9 +123,10 @@ impl Reads<'_> {
     pub fn agent_launch(self, agent_id: &str) -> rusqlite::Result<Option<AgentLaunch>> {
         self.0
             .query_row(
-                "SELECT harness, project, cwd, name, role, prompt_hash, compact_window,
-                   external_ref, transcript
-                 FROM agent_sessions WHERE id = ?",
+                "SELECT a.harness, a.project, a.cwd, a.name, a.role, a.prompt_hash,
+                   a.compact_window, a.external_ref, a.transcript, t.theme
+                 FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
+                 WHERE a.id = ?",
                 [agent_id],
                 |row| {
                     use rusqlite::types::Type;
@@ -161,6 +165,14 @@ impl Reads<'_> {
                             })
                             .transpose()?,
                         transcript: row.get(8)?,
+                        theme: row
+                            .get::<_, Option<String>>(9)?
+                            .map(|text| {
+                                TuiTheme::parse(&text).ok_or_else(|| {
+                                    unreadable(9, Type::Text, "its terminal's theme")
+                                })
+                            })
+                            .transpose()?,
                     })
                 },
             )
@@ -525,6 +537,7 @@ mod tests {
     fn reads_what_an_agent_was_launched_with_and_the_session_its_on_and_none_for_an_unknown_one() {
         use bazhen_protocol::agents::{ExternalRef, HarnessId};
         use bazhen_protocol::names::Role;
+        use bazhen_protocol::shells::TuiTheme;
         let dir = TempDir::new("agents");
         let store = store(&dir);
         let session = r#"{"environmentId":"env_01900000000070008000000000000001","kind":"claude-session","id":"s-1"}"#;
@@ -557,6 +570,14 @@ mod tests {
                  UPDATE agent_sessions SET harness = 'emacs' WHERE id = 'agent_02';",
             )
             .unwrap();
+        terminal(&store, "term_1", "agent", "exited", Some("agent_01"), None);
+        store
+            .db
+            .execute_batch(
+                "UPDATE terminals SET theme = 'light' WHERE id = 'term_1';
+                 UPDATE agent_sessions SET terminal_id = 'term_1' WHERE id = 'agent_01';",
+            )
+            .unwrap();
         let reads = store.reads();
         assert_eq!(
             (
@@ -576,6 +597,7 @@ mod tests {
                     compact_window_tokens: Some(120_000),
                     external_ref: Some(serde_json::from_str::<ExternalRef>(session).unwrap()),
                     transcript: Some("/c/s-1.jsonl".to_owned()),
+                    theme: Some(TuiTheme::Light),
                 })),
                 true,
                 Some(None),
@@ -589,6 +611,7 @@ mod tests {
                     compact_window_tokens: None,
                     external_ref: None,
                     transcript: None,
+                    theme: None,
                 })),
             )
         );
