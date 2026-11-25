@@ -19,7 +19,8 @@ use bazhen_harness::{
 };
 use futures_util::FutureExt as _;
 use serde_json::Value;
-use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, watch};
+use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, oneshot, watch};
+use tokio::task::coop::unconstrained;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -376,11 +377,34 @@ impl Driver {
     /// Until the connection ends: forwards what the server sends while the bound sessions are
     /// picked up, then tells of the end. When they were picked up, from which the connection
     /// counts as held, as the TypeScript daemon counted it.
+    ///
+    /// `Connected` comes after everything the server sent before its last reply to the pickup, a
+    /// resumed session's requests asked again among them: the reader queues each message in the
+    /// order it came, and a reply skips the queue, so what came before the reply is already queued
+    /// once the pickup has it.
     async fn serve(&self, on: Rpc, mut inbox: rpc::Inbox, ending: CancellationToken) -> Instant {
+        let (picked, mut connected) = oneshot::channel();
         let forward = async {
-            while let Some(message) = inbox.next().await {
-                let on = on.clone();
-                if !self.tell(Event::Inbound { message, on }).await {
+            let mut waiting = true;
+            loop {
+                let told = tokio::select! {
+                    // The pickup first, which comes once, so where Connected falls among what
+                    // the server sends after it is fixed by what arrived, not by a random pick.
+                    biased;
+                    facts = &mut connected, if waiting => {
+                        waiting = false;
+                        match facts {
+                            Ok(facts) => self.tell_connected(&on, &mut inbox, facts).await,
+                            // The connection ended while they were picked up.
+                            Err(_) => true,
+                        }
+                    }
+                    message = inbox.next() => match message {
+                        Some(message) => self.tell(Event::Inbound { message, on: on.clone() }).await,
+                        None => break,
+                    },
+                };
+                if !told {
                     // Nobody reads what the server says any more, or the channel stopped.
                     ending.cancel();
                 }
@@ -400,7 +424,7 @@ impl Driver {
             // A request that asked for a connection while this one was made has it.
             let _ = self.shared.wanted.notified().now_or_never();
             drop(session);
-            self.tell(Event::Connected(facts)).await;
+            let _ = picked.send(facts);
             picked_up
         };
         let ((), picked_up) = tokio::join!(forward, resume);
@@ -411,6 +435,20 @@ impl Driver {
         };
         self.tell(Event::Disconnected(facts)).await;
         picked_up
+    }
+
+    /// Tells what the server sent that is still queued, then that the connection is up with
+    /// `facts`; false when one of the server's messages couldn't be told.
+    async fn tell_connected(&self, on: &Rpc, inbox: &mut rpc::Inbox, facts: Vec<Keyed>) -> bool {
+        // Out of the task's coop budget, a receive would say there is nothing though there is.
+        while let Some(Some(message)) = unconstrained(inbox.next()).now_or_never() {
+            let on = on.clone();
+            if !self.tell(Event::Inbound { message, on }).await {
+                return false;
+            }
+        }
+        self.tell(Event::Connected(facts)).await;
+        true
     }
 }
 
@@ -868,6 +906,84 @@ mod tests {
             say(&mut server, json!({ "id": resume["id"], "result": {} })).await;
             answer(&mut server, "resume", json!({})).await;
             assert_eq!(rig.told().await, Told::Connected(both));
+        }));
+    }
+
+    #[test]
+    fn tells_what_the_server_sent_before_the_pickup_ended_ahead_of_connected() {
+        let dir = TempDir::new("channel-order");
+        paused().block_on(within(LIMIT, async {
+            let listener = listen(&dir);
+            // Room for one event, which the version holds until it is read, so each event after
+            // it waits its turn, in the order the channel told it.
+            let mut rig = rig_with(&dir, vec![bound("s1")], never_started(), 1);
+            let mut server = accepted(&listener).await;
+            handshake(&mut server, None).await;
+            let resume = heard(&mut server).await;
+            // A resumed session's requests, asked again before its resume is answered.
+            for id in [9, 10] {
+                let asked = json!({ "id": id, "method": "approve", "params": { "session": "s1" } });
+                say(&mut server, asked).await;
+            }
+            say(&mut server, json!({ "id": resume["id"], "result": {} })).await;
+            // Everything the channel can do before the daemon reads anything is done.
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            let mut told = Vec::new();
+            for _ in 0..4 {
+                let next = tokio::time::timeout(PROMPTLY, rig.told()).await;
+                told.push(next.expect("the channel told fewer than four events"));
+            }
+            let asked = |id: u64| {
+                Told::Inbound(Inbound::Request {
+                    id: RequestId::Number(id.into()),
+                    method: "approve".to_owned(),
+                    params: Some(json!({ "session": "s1" })),
+                })
+            };
+            assert_eq!(
+                told,
+                [
+                    Told::Version(None),
+                    asked(9),
+                    asked(10),
+                    Told::Connected(vec![resumed("s1")]),
+                ]
+            );
+        }));
+    }
+
+    #[test]
+    fn tells_every_request_asked_again_ahead_of_connected_however_many() {
+        const ASKED: u64 = 300;
+        let dir = TempDir::new("channel-many");
+        paused().block_on(within(LIMIT, async {
+            let listener = listen(&dir);
+            // Room for every event, so no tell waits: the task's coop budget, which a tell that
+            // waits would renew, runs out partway through what is queued.
+            let room = usize::try_from(ASKED).unwrap() + 2;
+            let mut rig = rig_with(&dir, vec![bound("s1")], never_started(), room);
+            let mut server = accepted(&listener).await;
+            handshake(&mut server, None).await;
+            let resume = heard(&mut server).await;
+            for id in 0..ASKED {
+                let asked = json!({ "id": id, "method": "approve", "params": { "session": "s1" } });
+                say(&mut server, asked).await;
+            }
+            say(&mut server, json!({ "id": resume["id"], "result": {} })).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            let mut told = Vec::new();
+            for _ in 0..ASKED + 2 {
+                let next = tokio::time::timeout(PROMPTLY, rig.told()).await;
+                told.push(next.expect("the channel told fewer events than the server sent"));
+            }
+            let at = told
+                .iter()
+                .position(|event| matches!(event, Told::Connected(_)));
+            assert_eq!(
+                at,
+                Some(told.len() - 1),
+                "Connected told before the last request"
+            );
         }));
     }
 
