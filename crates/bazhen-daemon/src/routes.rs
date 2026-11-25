@@ -9,7 +9,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
-use axum::extract::{Query, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -20,7 +20,10 @@ use bazhen_protocol::daemon::{
     ErrorCode, ErrorResponse, HealthResponse, HealthStatus, StopResponse,
 };
 use bazhen_protocol::events::EVENT_FRAME_MAX_BYTES;
-use bazhen_store::{CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotView};
+use bazhen_protocol::ids::TaskId;
+use bazhen_store::{
+    CreateTaskError, NewTask, OnceError, SnapshotError, SnapshotView, TaskReadError,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::accept::Held;
@@ -378,6 +381,32 @@ async fn create_task(
     }
 }
 
+/// Task `id` in full, to any caller: its brief and note, every assignment it has had, its
+/// subtasks and its notes.
+async fn show_task(State(shared): State<Shared>, Path(id): Path<String>) -> Response {
+    let unknown = |id: &str| {
+        fail(
+            StatusCode::NOT_FOUND,
+            ErrorCode::NotFound,
+            &format!("no task {id}"),
+        )
+    };
+    let Some(task) = TaskId::parse(&id) else {
+        return unknown(&id);
+    };
+    let store = shared.store.clone();
+    let read = tokio::task::spawn_blocking(move || -> Result<_, TaskReadError> {
+        store.reader()?.reads().task_detail(&task)
+    })
+    .await;
+    match read {
+        Ok(Ok(Some(detail))) => axum::Json(detail).into_response(),
+        Ok(Ok(None)) => unknown(&id),
+        Ok(Err(err)) => internal(&err),
+        Err(err) => internal(&err),
+    }
+}
+
 pub(crate) fn not_found() -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
@@ -413,6 +442,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
             get(crate::stream::route::stream),
         )
         .route("/v1/tasks", post(create_task))
+        .route("/v1/tasks/{id}", get(show_task))
         .route("/v1/pairing/codes", post(paired::issue))
         .route("/v1/devices", get(paired::list))
         .route("/v1/devices/{id}/revoke", post(paired::revoke))
@@ -488,6 +518,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/events", get(stream))
         .route("/terminals/{id}/stream", get(crate::stream::route::stream))
         .route("/tasks", post(create_task))
+        .route("/tasks/{id}", get(show_task))
         .route("/pairing", post(paired::pair))
         .route("/notices/{id}/dismiss", post(paired::dismiss))
         .route("/agents", post(agent_routes::launch))
