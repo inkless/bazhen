@@ -57,11 +57,11 @@ pub(crate) async fn recorded(
 ) -> Result<Option<(String, String)>, String> {
     let id = terminal.clone();
     let row = store
-        .run(move |store| store.reads().shell(id.as_str()))
+        .run(move |store| store.reads().runtime_row(id.as_str()))
         .await
         .map_err(|err| err.to_string())?
         .map_err(|err| err.to_string())?;
-    Ok(row.and_then(|row| Some((row.runtime?, row.locator?))))
+    Ok(row.and_then(|row| Some((row.runtime, row.locator?))))
 }
 
 impl Runtime for HolderStreams {
@@ -164,5 +164,38 @@ fn told(event: holder::StreamEvent) -> StreamEvent {
         holder::StreamEvent::Closed(holder::StreamEnd::Behind) => {
             StreamEvent::Closed(StreamEnd::Behind)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::tests::{request, stubbed};
+    use crate::testing::runtime;
+    use crate::testing::stub_harness::{StubHarness, pull};
+
+    #[test]
+    fn finds_an_agents_terminal_where_its_runtime_keeps_it_as_it_does_a_shells() {
+        let f = stubbed(&StubHarness::new(pull()));
+        let launched = runtime().block_on(f.launch(request("k-1"))).unwrap();
+        let terminal = launched.terminal_id.clone().unwrap();
+        let row = f
+            .store
+            .reader()
+            .unwrap()
+            .reads()
+            .runtime_row(terminal.as_str())
+            .unwrap()
+            .unwrap();
+        let missing = TerminalId::parse("term_0190a1b2c3d47abc8def0123456789a1").unwrap();
+        assert_eq!(
+            runtime().block_on(async {
+                (
+                    recorded(&f.store, &terminal).await.unwrap(),
+                    recorded(&f.store, &missing).await.unwrap(),
+                )
+            }),
+            (Some((row.runtime, row.locator.unwrap())), None)
+        );
     }
 }
