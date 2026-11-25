@@ -124,12 +124,10 @@ impl AttachmentLog for StoreLog {
         let id = terminal.clone();
         let read = self
             .store
-            .run(move |store| store.reads().shell(id.as_str()))
+            .run(move |store| store.reads().terminal_state(id.as_str()))
             .await;
         match read {
-            Ok(Ok(row)) => row.is_some_and(|row| {
-                matches!(row.state, TerminalState::Closing | TerminalState::Closed)
-            }),
+            Ok(Ok(state)) => matches!(state, Some(TerminalState::Closing | TerminalState::Closed)),
             Ok(Err(err)) => {
                 tracing::warn!("bazhen: can't read whether terminal {terminal} is closing: {err}");
                 false
@@ -146,5 +144,50 @@ impl AttachmentLog for StoreLog {
         _: &Exited,
     ) -> impl Future<Output = Result<(), LogError>> + Send {
         std::future::ready(Ok(()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_util::sync::CancellationToken;
+    use tokio_util::task::TaskTracker;
+
+    use super::*;
+    use crate::shells::tests::setup;
+    use crate::testing::runtime;
+
+    #[test]
+    fn reads_an_agent_s_terminal_closing_as_it_reads_a_shell_s() {
+        let h = setup(100);
+        runtime().block_on(async {
+            let closing = h.open("a").await.unwrap();
+            let running = h.open("b").await.unwrap();
+            let agent = |id: &str, state: &str| {
+                format!("UPDATE terminals SET kind = 'agent', state = '{state}' WHERE id = '{id}';")
+            };
+            let sql = agent(&closing, "closing") + &agent(&running, "running");
+            h.store
+                .run(move |store| {
+                    store.write(|w| -> rusqlite::Result<()> { w.connection().execute_batch(&sql) })
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let log = StoreLog::new(
+                h.store.clone(),
+                Arc::clone(&h.shells),
+                TaskTracker::new(),
+                CancellationToken::new(),
+            );
+            let read = |id: &str| TerminalId::parse(id).unwrap();
+            assert_eq!(
+                [
+                    log.closing(&read(&closing)).await,
+                    log.closing(&read(&running)).await,
+                    log.closing(&TerminalId::mint(1, [9; 16])).await,
+                ],
+                [true, false, false]
+            );
+        });
     }
 }

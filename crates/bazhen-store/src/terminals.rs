@@ -509,6 +509,32 @@ impl Reads<'_> {
             .optional()
     }
 
+    /// The state of the terminal `id` names, an agent's or a shell's, or `None` for none
+    /// (`terminalState`).
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a state no terminal could have recorded.
+    pub fn terminal_state(self, id: &str) -> rusqlite::Result<Option<TerminalState>> {
+        let state: Option<String> = self
+            .0
+            .query_row("SELECT state FROM terminals WHERE id = ?", [id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        state
+            .map(|state| {
+                TerminalState::parse(&state).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        format!("{state} isn't a terminal's state").into(),
+                    )
+                })
+            })
+            .transpose()
+    }
+
     /// The shell `id` names, or `None` for none, or a terminal that isn't a shell.
     ///
     /// # Errors
@@ -1211,6 +1237,36 @@ mod tests {
                     runtime: "holder".to_owned(),
                     locator: Some(serde_json::to_string(&locator("0")).unwrap()),
                 }),
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn reads_the_state_of_an_agent_s_terminal_as_of_a_shell_s_and_none_for_one_unknown() {
+        let dir = TempDir::new("terminal-state");
+        let (mut store, terminal) = opened(&dir);
+        let shell = store.reads().terminal_state(terminal.as_str()).unwrap();
+        change(
+            &mut store,
+            &terminal,
+            TerminalChange::Running(incarnation("0")),
+        )
+        .unwrap();
+        store
+            .db
+            .execute("UPDATE terminals SET kind = 'agent'", ())
+            .unwrap();
+        let agent = store.reads().terminal_state(terminal.as_str()).unwrap();
+        let unknown = store
+            .reads()
+            .terminal_state(TerminalId::mint(1, [9; 16]).as_str())
+            .unwrap();
+        assert_eq!(
+            (shell, agent, unknown),
+            (
+                Some(TerminalState::Creating),
+                Some(TerminalState::Running),
                 None
             )
         );
