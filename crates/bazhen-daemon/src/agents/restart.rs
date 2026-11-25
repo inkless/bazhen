@@ -1,7 +1,8 @@
 //! Starting an agent again (`Lifecycle.respawn` in `agents/lifecycle.ts`): its exited process
 //! is started again in the same terminal, resuming its harness session, at the next generation.
-//! `respawn_requested` is recorded first, so a daemon that dies meanwhile finds a respawn to
-//! settle; one rejected returns the agent to exited, its terminal kept and still closable.
+//! `respawn_requested` is recorded first, so a daemon that dies meanwhile leaves a record of the
+//! respawn under way, for an agent reconcile to settle; none runs yet. One rejected returns the
+//! agent to exited, its terminal kept and still closable.
 
 use bazhen_harness::{BoxFuture, LaunchError, LaunchRequest, LaunchSpec};
 use bazhen_protocol::agent_events::{AgentRespawnRejected, AgentRestarted, RespawnRejectedReason};
