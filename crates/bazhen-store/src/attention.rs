@@ -218,12 +218,12 @@ impl Writer<'_> {
                 |row| row.get(0),
             )?
             .collect::<rusqlite::Result<_>>()?;
-        for id in &abandoned {
-            if let Some(id) = AttentionId::parse(id) {
-                self.close_attention(&id, AttentionClosedReason::Stale, "system")?;
-            }
+        let mut closed = 0;
+        for id in abandoned.iter().filter_map(|id| AttentionId::parse(id)) {
+            self.close_attention(&id, AttentionClosedReason::Stale, "system")?;
+            closed += 1;
         }
-        Ok(abandoned.len())
+        Ok(closed)
     }
 
     /// The ids of `agent`'s open items of `kind`.
@@ -534,5 +534,28 @@ mod tests {
                 })
             )
         );
+    }
+
+    #[test]
+    fn counts_only_the_abandoned_items_it_closed() {
+        let dir = TempDir::new("abandoned-unreadable");
+        let mut store = store(&dir, "running");
+        open(&mut store, AttentionKind::Approval);
+        store
+            .db
+            .execute(
+                "INSERT INTO attention_items (id, agent_session_id, state, summary, main_agent,
+                   created_event_id, updated_event_id, kind)
+                   VALUES ('not-an-id', ?, 'open', 's', 1, 1, 1, 'question')",
+                [AGENT],
+            )
+            .unwrap();
+        let closed = store
+            .write(|w| {
+                let closed = w.close_abandoned()?;
+                Ok::<_, crate::AppendError>(closed)
+            })
+            .unwrap();
+        assert_eq!(closed, 1);
     }
 }
