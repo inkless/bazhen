@@ -1667,6 +1667,8 @@ const NOT_DECODERS: Record<string, string> = {
     "queries the store through StoreSource::read for the events after an id, which the store wrote; reads no bytes",
   "crates/bazhen-daemon/src/peer.rs::Tcp::read":
     "finds the caller's end and its holders through bazhen_peer::tcp, whose row and link decoders the proc_net_tcp target fuzzes, and reads each holder by bazhen_peer::of_pid; parses no bytes itself",
+  "crates/bazhen-daemon/src/peer.rs::calling_itself":
+    "calls the daemon's own loopback listener and reads that call through Peers::read, whose row and link decoders the proc_net_tcp target fuzzes; parses no bytes",
   "crates/bazhen-daemon/src/peer.rs::blocking":
     "runs a reader closure on a blocking thread while it holds the caller's turn; reads no bytes",
   "crates/bazhen-peer/src/tcp.rs::Proc::tables":
