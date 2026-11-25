@@ -20,6 +20,7 @@ use bazhen_harness::{
 use futures_util::FutureExt as _;
 use serde_json::Value;
 use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, oneshot, watch};
+use tokio::task::coop::unconstrained;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -387,7 +388,8 @@ impl Driver {
             let mut waiting = true;
             loop {
                 let told = tokio::select! {
-                    // The pickup first, which comes once: what it waited on is all queued.
+                    // The pickup first, which comes once, so where Connected falls among what
+                    // the server sends after it is fixed by what arrived, not by a random pick.
                     biased;
                     facts = &mut connected, if waiting => {
                         waiting = false;
@@ -438,7 +440,8 @@ impl Driver {
     /// Tells what the server sent that is still queued, then that the connection is up with
     /// `facts`; false when one of the server's messages couldn't be told.
     async fn tell_connected(&self, on: &Rpc, inbox: &mut rpc::Inbox, facts: Vec<Keyed>) -> bool {
-        while let Some(Some(message)) = inbox.next().now_or_never() {
+        // Out of the task's coop budget, a receive would say there is nothing though there is.
+        while let Some(Some(message)) = unconstrained(inbox.next()).now_or_never() {
             let on = on.clone();
             if !self.tell(Event::Inbound { message, on }).await {
                 return false;
@@ -945,6 +948,41 @@ mod tests {
                     asked(10),
                     Told::Connected(vec![resumed("s1")]),
                 ]
+            );
+        }));
+    }
+
+    #[test]
+    fn tells_every_request_asked_again_ahead_of_connected_however_many() {
+        const ASKED: u64 = 300;
+        let dir = TempDir::new("channel-many");
+        paused().block_on(within(LIMIT, async {
+            let listener = listen(&dir);
+            // Room for every event, so no tell waits: the task's coop budget, which a tell that
+            // waits would renew, runs out partway through what is queued.
+            let room = usize::try_from(ASKED).unwrap() + 2;
+            let mut rig = rig_with(&dir, vec![bound("s1")], never_started(), room);
+            let mut server = accepted(&listener).await;
+            handshake(&mut server, None).await;
+            let resume = heard(&mut server).await;
+            for id in 0..ASKED {
+                let asked = json!({ "id": id, "method": "approve", "params": { "session": "s1" } });
+                say(&mut server, asked).await;
+            }
+            say(&mut server, json!({ "id": resume["id"], "result": {} })).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            let mut told = Vec::new();
+            for _ in 0..ASKED + 2 {
+                let next = tokio::time::timeout(PROMPTLY, rig.told()).await;
+                told.push(next.expect("the channel told fewer events than the server sent"));
+            }
+            let at = told
+                .iter()
+                .position(|event| matches!(event, Told::Connected(_)));
+            assert_eq!(
+                at,
+                Some(told.len() - 1),
+                "Connected told before the last request"
             );
         }));
     }
