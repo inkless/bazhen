@@ -42,6 +42,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -117,12 +123,23 @@ name = "bazhen-client"
 version = "0.1.0"
 
 [[package]]
+name = "bazhen-core"
+version = "0.1.0"
+dependencies = [
+ "bazhen-protocol",
+ "saphyr-parser",
+ "thiserror",
+]
+
+[[package]]
 name = "bazhen-daemon"
 version = "0.1.0"
 dependencies = [
  "axum",
  "bazhen-client",
+ "bazhen-core",
  "bazhen-fs-trust",
+ "bazhen-harness",
  "bazhen-holder-proto",
  "bazhen-host-guard",
  "bazhen-peer",
@@ -140,6 +157,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "toml",
  "tower",
@@ -161,6 +179,17 @@ name = "bazhen-fs-trust"
 version = "0.1.0"
 dependencies = [
  "thiserror",
+]
+
+[[package]]
+name = "bazhen-harness"
+version = "0.1.0"
+dependencies = [
+ "bazhen-core",
+ "bazhen-protocol",
+ "jiff",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -234,6 +263,7 @@ dependencies = [
 name = "bazhen-protocol"
 version = "0.1.0"
 dependencies = [
+ "ryu-js",
  "serde",
  "serde_json",
 ]
@@ -261,6 +291,7 @@ dependencies = [
 name = "bazhen-store"
 version = "0.1.0"
 dependencies = [
+ "bazhen-core",
  "bazhen-holder-proto",
  "bazhen-protocol",
  "jiff",
@@ -271,6 +302,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -978,6 +1010,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f232fd0249f55adbe7f15bee58bbbd3d40708000b84e6482066d2ba599e08a9"
+
+[[package]]
+name = "saphyr-parser"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a425f8285f1321dd220c4d781a7f757eccd6639359f72bdeceec3cdaac8b3a7"
+dependencies = [
+ "arraydeque",
+ "thiserror",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1370,6 +1418,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-width"
