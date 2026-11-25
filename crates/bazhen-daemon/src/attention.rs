@@ -2,18 +2,24 @@
 //! the routes that do it. A reply reaches the agent as mail; a resend sends an undelivered message
 //! again; a dismissal closes the item. Each closes its item in the transaction that queues the mail,
 //! so no crash leaves a reply sent and its item open, or the item closed with nothing sent.
+//!
+//! An answer to an approval goes to the hook its harness holds, once the item is claimed and the
+//! answer committed, in the one job on the store's writer that claims it: that job runs to its end
+//! whether or not the route's caller stays, so an answer recorded is an answer sent.
 
 use std::cell::Cell;
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use bazhen_harness::{Answer, HarnessId, Pending, Resolution};
 use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, AttentionId};
 use bazhen_protocol::mail::{
     AnswerAttentionRequest, AnswerAttentionResponse, AttentionAction, AttentionKind,
     DismissAttentionRequest, DismissAttentionResponse, MailboxState, ReplyAttentionRequest,
@@ -25,27 +31,33 @@ use bazhen_store::{
 };
 
 use crate::agents::Agents;
+use crate::callers::Caller;
+use crate::hooks::approvals::{Approvals, Responder};
 use crate::mail::{Sending, deliver, queue, refusal};
+use crate::paired::Viewer;
 use crate::routes::{Shared, fail, internal};
 
 /// Agents gone for good: mail can't reach them, so a reply can't either.
 const GONE: [&str; 3] = ["closing", "closed", "failed"];
 
-/// What `/v1/state` asks of the daemon about each open item.
-pub(crate) struct Inbox;
+/// What `/v1/state` asks of the daemon about each open item, from the requests the hooks hold.
+/// An approval read as held may be claimed by the time an answer comes, which is then refused.
+pub(crate) struct Inbox(pub(crate) Arc<Approvals>);
 
 impl AttentionView for Inbox {
     fn attention_actions(&self, item: &OpenAttention<'_>) -> Vec<AttentionAction> {
-        actions(item.kind, item.agent_state)
+        actions(item.kind, item.agent_state, self.0.held(item.id))
     }
 }
 
 /// What the human can do about an open item of `kind`, whose agent is in `state` (`Inbox.actions`).
-/// An approval or a question is settled only through the harness request it stands behind, which
-/// no route here answers yet, or in the agent's terminal.
-fn actions(kind: &AttentionKind, state: Option<&str>) -> Vec<AttentionAction> {
-    use AttentionAction::{Dismiss, Reply, Resend};
+/// An approval or a question is settled only through the harness request it stands behind, or in
+/// the agent's terminal: an approval whose request is `held` takes allow or deny, and a question
+/// only the TUI.
+fn actions(kind: &AttentionKind, state: Option<&str>, held: bool) -> Vec<AttentionAction> {
+    use AttentionAction::{Allow, Deny, Dismiss, Reply, Resend};
     match kind {
+        AttentionKind::Approval if held => vec![Allow, Deny],
         AttentionKind::Approval | AttentionKind::Question => Vec::new(),
         // Only its terminal answers it; mail would wait behind the very dialog it is about.
         AttentionKind::StuckStarting | AttentionKind::Unknown(_) => vec![Dismiss],
@@ -59,6 +71,12 @@ fn actions(kind: &AttentionKind, state: Option<&str>) -> Vec<AttentionAction> {
 #[derive(Debug)]
 enum Refusal {
     Invalid(String),
+    /// No item could be by that id.
+    NotFound(String),
+    /// The caller may not answer.
+    Forbidden(String),
+    /// The harness can't take the answer now: the request's server has gone.
+    Gone,
     /// No item by that id is open.
     Closed(String),
     /// The item doesn't offer the action now.
@@ -95,9 +113,10 @@ impl From<AppendError> for Refusal {
     }
 }
 
-/// The open item `id`, if it offers `action` now.
+/// The open item `id`, if it offers `action` now, with what the hooks hold in `approvals`.
 fn offering(
     w: &StoreWriter<'_>,
+    approvals: &Approvals,
     id: &str,
     action: AttentionAction,
 ) -> Result<AttentionItem, Refusal> {
@@ -107,7 +126,7 @@ fn offering(
         .filter(|item| item.open)
         .ok_or_else(|| Refusal::Closed(id.to_owned()))?;
     let state = item.agent_state.map(AgentState::as_str);
-    if !actions(&item.kind, state).contains(&action) {
+    if !actions(&item.kind, state, approvals.held(&item.id)).contains(&action) {
         return Err(Refusal::Refused {
             id: id.to_owned(),
             action,
@@ -121,40 +140,141 @@ fn kept(id: &str, verb: &str, value: &serde_json::Value) -> String {
     serde_json::json!({ "attention": id, verb: value }).to_string()
 }
 
+/// Who answers an approval, as the transport it came on says: on the socket, the caller the
+/// guard identified; over HTTP, the viewer the pairing gate let in, or none where it let in all.
+#[derive(Debug)]
+pub(crate) enum Answerer {
+    Socket(Caller),
+    Http(Option<Viewer>),
+}
+
+/// The actor `answerer`'s answer is recorded by, where it may answer at all. The human may, on
+/// the socket or over HTTP; an agent may not answer what it asks. A process on this machine
+/// reaching the loopback port is taken for the owner, as every human route takes it.
+fn may_answer(answerer: &Answerer) -> Result<&'static str, Refusal> {
+    match answerer {
+        Answerer::Socket(Caller(None))
+        | Answerer::Http(None | Some(Viewer::OwnerLoopback | Viewer::Device { .. })) => Ok("user"),
+        Answerer::Socket(Caller(Some(agent))) => Err(Refusal::Forbidden(format!(
+            "agent {agent} can't answer an approval"
+        ))),
+    }
+}
+
 /// `POST /v1/attention/:id/answer`: the human's decision on an approval its harness waits on.
+/// The reply is built before the item is claimed, from the agent's harness, and sent once the
+/// answer commits; a repeat of the request answers what the first did and sends nothing.
 pub(crate) async fn answer(
     State(shared): State<Shared>,
     Path(id): Path<String>,
+    caller: Option<Extension<Caller>>,
+    viewer: Option<Extension<Viewer>>,
     body: Bytes,
 ) -> Response {
-    let answered = async {
-        let req =
-            edge::<AnswerAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
-        let action = match req.decision {
-            ApprovalDecision::Allow => AttentionAction::Allow,
-            ApprovalDecision::Deny => AttentionAction::Deny,
-        };
-        let kept = kept(
-            &id,
-            "decision",
-            &serde_json::to_value(req.decision).unwrap_or_default(),
-        );
-        shared
-            .store
-            .run(move |store| {
-                store.once(&req.idempotency_key, &kept, |w| {
-                    offering(w, &id, action)?;
-                    // Only an approval offers a decision, once a harness request stands behind it.
-                    Err::<AnswerAttentionResponse, _>(Refusal::Refused {
-                        id: id.clone(),
-                        action,
-                    })
-                })
-            })
-            .await
-            .map_err(|err| Refusal::Internal(err.to_string()))?
+    let answerer = match caller {
+        Some(Extension(caller)) => Answerer::Socket(caller),
+        None => Answerer::Http(viewer.map(|Extension(viewer)| viewer)),
     };
-    respond(answered.await)
+    let answer = match edge::<AnswerAttentionRequest>(&body) {
+        Ok(req) => answered(&shared, id, &answerer, req).await,
+        Err(refused) => Err(Refusal::Invalid(refused.0)),
+    };
+    respond(answer)
+}
+
+async fn answered(
+    shared: &Shared,
+    id: String,
+    answerer: &Answerer,
+    req: AnswerAttentionRequest,
+) -> Result<AnswerAttentionResponse, Refusal> {
+    let attention = AttentionId::parse(&id).ok_or_else(|| Refusal::NotFound(id.clone()))?;
+    let actor = may_answer(answerer)?;
+    let action = match req.decision {
+        ApprovalDecision::Allow => AttentionAction::Allow,
+        ApprovalDecision::Deny => AttentionAction::Deny,
+    };
+    let approvals = Arc::clone(&shared.hooks.approvals);
+    let reply = built(shared, &approvals, &attention, req.decision).await?;
+    let kept = kept(
+        &id,
+        "decision",
+        &serde_json::to_value(req.decision).unwrap_or_default(),
+    );
+    let decision = req.decision;
+    shared
+        .store
+        .run(move |store| {
+            let mut claimed = None;
+            let outcome = store.once(&req.idempotency_key, &kept, |w| {
+                offering(w, &approvals, &id, action)?;
+                let refused = || Refusal::Refused {
+                    id: id.clone(),
+                    action,
+                };
+                // Only a request whose reply was built before the claim is answered.
+                reply.as_ref().ok_or_else(refused)?;
+                let entry = approvals.claim(&attention).ok_or_else(refused)?;
+                let entry = claimed.insert(entry);
+                if entry.responder.is_none() {
+                    return Err(refused());
+                }
+                let event = w.answer_attention(&attention, decision, actor)?;
+                Ok::<_, Refusal>(AnswerAttentionResponse {
+                    event_ids: vec![event],
+                })
+            });
+            match (claimed, &outcome) {
+                (Some(entry), Ok(_)) => {
+                    if let (Some(Responder::Hook(hook)), Some(reply)) = (entry.responder, reply) {
+                        // Its client may have gone already, as the human answered in the TUI.
+                        let _ = hook.send(reply);
+                    }
+                }
+                (Some(entry), Err(_)) => approvals.put_back(attention, entry),
+                (None, _) => {}
+            }
+            outcome
+        })
+        .await
+        .map_err(|err| Refusal::Internal(err.to_string()))?
+}
+
+/// The reply the hook held for the item `id` gives for `decision`, from its agent's harness; none
+/// when no hook holds it, as for an item answered, settled, or never held.
+async fn built(
+    shared: &Shared,
+    approvals: &Approvals,
+    id: &AttentionId,
+    decision: ApprovalDecision,
+) -> Result<Option<bazhen_protocol::mail::HookReply>, Refusal> {
+    let Some(agent) = approvals.agent_of(id).filter(|_| approvals.held(id)) else {
+        return Ok(None);
+    };
+    let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
+    let binding = shared
+        .store
+        .run(move |store| store.reads().agent_binding(agent.as_str()))
+        .await
+        .map_err(|err| Refusal::Internal(err.to_string()))??;
+    let harness = binding
+        .and_then(|binding| HarnessId::parse(&binding.harness))
+        .and_then(|harness| agents.harnesses().get(harness));
+    let Some(harness) = harness else {
+        return Ok(None);
+    };
+    match harness.answer(&Pending::Approval, Resolution::Decision(decision)) {
+        Answer::Hook(output) => Ok(Some(bazhen_protocol::mail::HookReply {
+            exit_code: output.exit_code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+            offered: Vec::new(),
+        })),
+        Answer::Unavailable => Err(Refusal::Gone),
+        Answer::Rpc(_) => Err(Refusal::Internal(
+            "the harness answered a held hook with a server's result".to_owned(),
+        )),
+    }
 }
 
 /// `POST /v1/attention/:id/reply`: mail to the item's agent, which closes it.
@@ -168,13 +288,14 @@ pub(crate) async fn reply(
             edge::<ReplyAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
         let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
         let run = Arc::clone(&agents);
+        let approvals = Arc::clone(&shared.hooks.approvals);
         let (response, queued) = shared
             .store
             .run(move |store| {
                 let queued = Queued::default();
                 let kept = kept(&id, "reply", &req.body.clone().into());
                 let response = store.once(&req.idempotency_key, &kept, |w| {
-                    let item = offering(w, &id, AttentionAction::Reply)?;
+                    let item = offering(w, &approvals, &id, AttentionAction::Reply)?;
                     let (message_id, event_ids) = mail(
                         w,
                         &run,
@@ -212,13 +333,14 @@ pub(crate) async fn resend(
             edge::<ResendAttentionRequest>(&body).map_err(|refused| Refusal::Invalid(refused.0))?;
         let agents = shared.agents.clone().ok_or(Refusal::Unavailable)?;
         let run = Arc::clone(&agents);
+        let approvals = Arc::clone(&shared.hooks.approvals);
         let (response, queued) = shared
             .store
             .run(move |store| {
                 let queued = Queued::default();
                 let kept = kept(&id, "resend", &true.into());
                 let response = store.once(&req.idempotency_key, &kept, |w| {
-                    let item = offering(w, &id, AttentionAction::Resend)?;
+                    let item = offering(w, &approvals, &id, AttentionAction::Resend)?;
                     let refused = || Refusal::Refused {
                         id: id.clone(),
                         action: AttentionAction::Resend,
@@ -264,12 +386,13 @@ pub(crate) async fn dismiss(
     let dismissed = async {
         let req = edge::<DismissAttentionRequest>(&body)
             .map_err(|refused| Refusal::Invalid(refused.0))?;
+        let approvals = Arc::clone(&shared.hooks.approvals);
         shared
             .store
             .run(move |store| {
                 let kept = kept(&id, "dismiss", &true.into());
                 store.once(&req.idempotency_key, &kept, |w| {
-                    let item = offering(w, &id, AttentionAction::Dismiss)?;
+                    let item = offering(w, &approvals, &id, AttentionAction::Dismiss)?;
                     let closed =
                         w.close_attention(&item.id, AttentionClosedReason::Dismissed, "user")?;
                     Ok::<_, Refusal>(DismissAttentionResponse {
@@ -348,6 +471,19 @@ fn respond<T: serde::Serialize>(answer: Result<T, Refusal>) -> Response {
         Err(Refusal::Invalid(message)) => {
             fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message)
         }
+        Err(Refusal::NotFound(id)) => fail(
+            StatusCode::NOT_FOUND,
+            ErrorCode::NotFound,
+            &format!("no attention item can be {id}"),
+        ),
+        Err(Refusal::Forbidden(message)) => {
+            fail(StatusCode::FORBIDDEN, ErrorCode::Forbidden, &message)
+        }
+        Err(Refusal::Gone) => fail(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::Unavailable,
+            "the request's server has gone",
+        ),
         Err(Refusal::Closed(id)) => fail(
             StatusCode::CONFLICT,
             ErrorCode::Conflict,

@@ -260,13 +260,12 @@ pub(crate) async fn state(
             .is_some_and(|shells| shells.reports()),
     };
     let agents = shared.agents.as_ref().map(crate::agents::Agents::view);
+    let inbox = crate::attention::Inbox(Arc::clone(&shared.hooks.approvals));
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
         let reader = store.reader()?;
         let reads = reader.reads();
         match &agents {
-            Some(agents) => {
-                reads.snapshot_with_agents(&view, agents, Some(&crate::attention::Inbox))
-            }
+            Some(agents) => reads.snapshot_with_agents(&view, agents, Some(&inbox)),
             None => reads.snapshot(&view),
         }
     })
