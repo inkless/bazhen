@@ -167,6 +167,26 @@ async fn flushed(f: &Fixture) {
     f.shared.store.run(|_| ()).await.unwrap();
 }
 
+/// A job queued on the writer now, after all queued before it, that holds the writer until it is
+/// let go: what says the writer has reached it, and what lets it go, sent to or dropped.
+fn writer_held(
+    f: &Fixture,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+) {
+    let (reached, at) = tokio::sync::oneshot::channel();
+    let (go, waits) = std::sync::mpsc::channel::<()>();
+    f.shared
+        .store
+        .queue(move |_| {
+            let _ = reached.send(());
+            let _ = waits.recv();
+        })
+        .unwrap();
+    (at, go)
+}
+
 #[test]
 fn answers_a_held_approval_with_the_humans_decision_once_per_key() {
     let f = fixture();
@@ -366,14 +386,24 @@ fn hands_over_an_answer_committed_after_the_route_that_made_it_went() {
     let (early, allowed) = runtime().block_on(async {
         let (held, id) = asked(&f, event(call("ls", None), "PermissionRequest", None)).await;
         let mut route = Box::pin(answered(&f, id.as_str(), "k", "allow"));
-        let mut early = false;
-        // The route reads the agent's harness, then queues its claim; then its caller goes.
-        for _ in 0..2 {
-            let polled = route.as_mut().poll(&mut Context::from_waker(Waker::noop()));
-            early |= polled.is_ready();
-            flushed(&f).await;
-        }
+        let mut poll = || {
+            route
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_ready()
+        };
+        // The writer is held at each step, so neither of the route's jobs can be done by the
+        // time it is polled for it: the writer runs on a thread of its own.
+        let (_, first) = writer_held(&f);
+        // The route queues its read of the agent's harness behind the first hold.
+        let mut early = poll();
+        let (read, second) = writer_held(&f);
+        drop(first);
+        read.await.unwrap();
+        // The read done, the route queues its claim behind the second hold; then its caller goes.
+        early |= poll();
         drop(route);
+        drop(second);
         flushed(&f).await;
         (early, behavior(reply(held).await))
     });
