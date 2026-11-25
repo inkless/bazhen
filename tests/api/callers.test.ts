@@ -1,6 +1,7 @@
 // Who the daemon takes a socket caller for when no agent vouches for it, as only the process it
-// runs in tells: the human, or a refusal. Both daemons pass it, but for the loopback HTTP caller
-// the Rust daemon reads as it reads the socket's, which the TypeScript one takes for the human.
+// runs in tells: the human, or a refusal. Both daemons pass it. The loopback HTTP caller's refusal
+// is the Rust daemon's alone: it reads that caller as it reads the socket's, where the TypeScript
+// one takes it for the human, as every api test that calls it over HTTP has it.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDaemonBin } from "../support/test-daemon.ts";
@@ -39,10 +40,6 @@ describe("a loopback HTTP caller no agent vouches for", () => {
   });
   afterAll(async () => {
     await daemon?.stop();
-  });
-
-  it("is answered as the human on /v1/caller from a process outside every terminal", async () => {
-    expect(await daemon.request("/v1/caller")).toEqual({ status: 200, body: { agentId: null } });
   });
 
   it.runIf(testDaemonBin() !== undefined)(
