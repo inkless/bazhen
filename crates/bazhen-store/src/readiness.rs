@@ -106,9 +106,9 @@ impl Reads<'_> {
 
 impl Writer<'_> {
     /// Tells the human that `agent`'s start `start_id` hasn't come up, saying `summary`: once per
-    /// start, and only while the agent still waits on its harness. Answers the item opened; none
-    /// when the agent no longer waits, or an item about this start, or one still open, says so
-    /// already.
+    /// start, and only while the agent still waits on its harness from that start. Answers the
+    /// item opened; none when the agent no longer waits, a later start replaced this one, or an
+    /// item about this start, or one still open, says so already.
     ///
     /// # Errors
     ///
@@ -122,17 +122,27 @@ impl Writer<'_> {
         if !self.reads().waiting(agent.as_str())? {
             return Ok(None);
         }
-        let told: bool = self.connection().query_row(
+        let [running, respawned, relaunched, adopted] = STARTS;
+        let (agent_id, start) = (agent.as_str(), int(start_id)?);
+        let told_or_replaced: bool = self.connection().query_row(
             "SELECT EXISTS (SELECT 1 FROM attention_items WHERE agent_session_id = ? AND kind = ?
-               AND (state = 'open' OR created_event_id > ?))",
+               AND (state = 'open' OR created_event_id > ?))
+             OR EXISTS (SELECT 1 FROM events WHERE entity_type = 'agent' AND entity_id = ?
+               AND type IN (?, ?, ?, ?) AND id > ?)",
             (
-                agent.as_str(),
+                agent_id,
                 AttentionKind::StuckStarting.as_str(),
-                int(start_id)?,
+                start,
+                agent_id,
+                running,
+                respawned,
+                relaunched,
+                adopted,
+                start,
             ),
             |row| row.get(0),
         )?;
-        if told {
+        if told_or_replaced {
             return Ok(None);
         }
         let opened = raised(agent, AttentionKind::StuckStarting, summary, None);
@@ -143,11 +153,12 @@ impl Writer<'_> {
 #[cfg(test)]
 mod tests {
     use bazhen_protocol::agent_events::{
-        AgentExited, AgentFailed, AgentFailedReason, AgentReady, AgentRespawnRejected, ReadySign,
+        AgentExited, AgentFailed, AgentFailedReason, AgentReady, AgentRelaunchRejected,
+        AgentRelaunchRequested, AgentRespawnRejected, ReadySign, RelaunchRejectedReason,
         RespawnRejectedReason,
     };
     use bazhen_protocol::agents::ExitStatus;
-    use bazhen_protocol::ids::AgentId;
+    use bazhen_protocol::ids::{AgentId, TerminalId};
     use bazhen_protocol::mail::AttentionKind;
 
     use super::Waiting;
@@ -157,6 +168,7 @@ mod tests {
     const ENV: &str = "env_01900000000070008000000000000009";
     const AGENT: &str = "agent_01900000000070008000000000000001";
     const OTHER: &str = "agent_01900000000070008000000000000002";
+    const NEXT_TERMINAL: &str = "term_01900000000070008000000000000003";
 
     fn agent() -> AgentId {
         AgentId::parse(AGENT).unwrap()
@@ -248,8 +260,8 @@ mod tests {
         store
             .db
             .execute(
-                "UPDATE terminals SET state = ? WHERE id = 'term_1'",
-                [state],
+                "UPDATE terminals SET state = ?, agent_session_id = ? WHERE id = 'term_1'",
+                (state, AGENT),
             )
             .unwrap();
     }
@@ -345,6 +357,17 @@ mod tests {
     }
 
     #[test]
+    fn tells_nothing_of_a_start_a_later_one_replaced() {
+        let dir = TempDir::new("replaced");
+        let mut store = store(&dir);
+        let first = raw(&store, AGENT, "agent.running", "2026-11-20T00:00:01.000Z");
+        let second = raw(&store, AGENT, "agent.respawned", "2026-11-20T00:00:02.000Z");
+        let replaced = stuck(&mut store, first);
+        let latest = stuck(&mut store, second);
+        assert_eq!((replaced, latest), (false, true));
+    }
+
+    #[test]
     fn closes_a_stuck_start_as_answered_once_it_is_up_and_as_stale_once_it_is_over() {
         let exited = AgentChange::Exited(AgentExited {
             exit: ExitStatus::Unknown,
@@ -368,6 +391,22 @@ mod tests {
                 }),
             ),
             ("exited", AgentChange::RespawnRequested),
+            (
+                "lost",
+                AgentChange::RelaunchRequested(AgentRelaunchRequested {
+                    terminal_id: TerminalId::parse(NEXT_TERMINAL).unwrap(),
+                    generation: 1,
+                    fresh: false,
+                    runtime: None,
+                }),
+            ),
+            (
+                "starting",
+                AgentChange::RelaunchRejected(AgentRelaunchRejected {
+                    reason: RelaunchRejectedReason::HarnessRefused,
+                    detail: None,
+                }),
+            ),
         ];
         for (state, change) in overs {
             let dir = TempDir::new("over");
@@ -379,6 +418,20 @@ mod tests {
             if name == "agent.failed" {
                 // A launch is refused before its terminal runs.
                 set_terminal(&store, "creating");
+            }
+            if name == "agent.relaunch_rejected" {
+                // A relaunch is refused while its new terminal is created, back to the one its
+                // agent was lost on.
+                set_terminal(&store, "creating");
+                store
+                    .db
+                    .execute(
+                        "INSERT INTO terminals (id, host_id, state, generation, locator, kind,
+                           agent_session_id, created_event_id, updated_event_id)
+                           SELECT 'term_0', id, 'lost', 0, '{}', 'agent', ?, 1, 1 FROM host",
+                        [AGENT],
+                    )
+                    .unwrap();
             }
             append(&mut store, change);
             assert_eq!(items(&store), [closed("stale")], "{name}");
