@@ -98,6 +98,10 @@ const QUIRKS = [
   'api_key=\u0085"s3cr3t" tail',
   "Bearer\u{feff}s3cr3tTOKEN1 sent",
   "Bearer\u0085s3cr3tTOKEN1 sent",
+  // U+2028 is white space too, and the check that a value is a plain word reads the same `\s`.
+  "Bearer\u{2028}ABCDEFGH12 sent",
+  "token: expired\u0085x",
+  "token: expired\u{feff}x",
   // `.` stops at `\r`, U+2028 and U+2029, not only at `\n`.
   'api_key = "s3\\\rcr3t" tail',
   'api_key = "s3\\\u{2028}cr3t" tail',

@@ -360,7 +360,21 @@ mod tests {
 
     #[test]
     fn builds_every_pattern() {
-        Patterns::new().map(|_| ()).unwrap();
+        let built = Patterns::new();
+        assert!(built.is_ok(), "{:?}", built.err());
+    }
+
+    /// The one difference from TypeScript the module names. A value's 512 units end between the
+    /// halves of 😀: JavaScript answers `api_key=[redacted]\u{de00} tail`, a lone surrogate, and
+    /// this takes the whole character out.
+    #[test]
+    fn takes_the_whole_character_out_where_a_value_s_limit_falls_inside_it() {
+        let value = format!("{}x", "x ".repeat(255));
+        assert_eq!(value.encode_utf16().count(), 511);
+        assert_eq!(
+            failure_detail(&format!("api_key={value}😀 tail")),
+            "api_key=[redacted] tail"
+        );
     }
 
     #[test]

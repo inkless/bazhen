@@ -272,6 +272,18 @@
     "detail": "Bearers3cr3tTOKEN1 sent"
   },
   {
+    "text": "Bearer ABCDEFGH12 sent",
+    "detail": "Bearer [redacted] sent"
+  },
+  {
+    "text": "token: expiredx",
+    "detail": "token: [redacted]"
+  },
+  {
+    "text": "token: expired﻿x",
+    "detail": "token: expired﻿x"
+  },
+  {
     "text": "api_key = \"s3\\\rcr3t\" tail",
     "detail": "api_key = [redacted]\\\rcr3t\" tail"
   },
