@@ -271,6 +271,7 @@ async fn shells(
         tracker: tracker.clone(),
         roles,
         harnesses: runner.harnesses,
+        hook_built: runner.hook.is_some(),
         tokens: AgentTokens::new(run.join("agents"), startup.uid, store.clone()),
         prompts: daemon_prompts(run, startup.uid),
         login_shell: startup.settings.config.login_shell.clone(),
@@ -736,7 +737,7 @@ mod tests {
             shell: "/bin/sh".to_owned(),
             streams: None,
             hook: None,
-            harnesses: None,
+            harnesses: bazhen_harness::Harnesses::new(Vec::new()),
         }
     }
 
