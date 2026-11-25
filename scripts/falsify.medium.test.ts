@@ -2855,16 +2855,17 @@ function guardVerdict(extra: Record<string, string> = {}, test = TEST) {
 }
 
 /**
- * One falsify run over a new test file for each path `breaks` names, `head` and a test `caps`,
- * each guarded by a commit of its own that holds that file's break. By file, the line falsify
- * printed beside its `caps`, and the line that refuses its guard for `why`, given that guard's
- * commit.
+ * One falsify run over a test `caps` in each file `breaks` names, each guarded by a commit of its
+ * own that holds that file's break. A file the branch lacks is written as `head` and `caps`; one
+ * it has, such as `TEST`, is kept as it is. By file, the line falsify printed beside its `caps`,
+ * and the line that refuses its guard for `why`, given that guard's commit. More than
+ * `MAX_BREAKS` files is more breaks than falsify runs, which it refuses whole.
  */
 function refusedEach(
   head: string,
   breaks: Record<string, [block: string, why: (commit: string) => string]>,
 ) {
-  const files = Object.keys(breaks);
+  const files = Object.keys(breaks).filter((file) => !existsSync(join(fx.linked, file)));
   amendBranch(Object.fromEntries(files.map((file) => [file, `${head}it("caps", () => {});\n`])));
   const guards = Object.entries(breaks).map(([file, [block, why]]) => ({
     file,
@@ -3042,6 +3043,7 @@ describe("falsify on a branch that guards a test of behaviour the base already h
           notImported(unloaded),
         ],
         [own]: [breakOf({ file: own, from: IMPORTS.trimEnd() }), notImported(own)],
+        [TEST]: [breakOf({ file: TEST, from: IMPORTS.trimEnd() }), notImported(TEST)],
       },
     );
     expect({ printed, underBreaks: sourcesUnderBreaks() }).toEqual({
