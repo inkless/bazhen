@@ -8,6 +8,7 @@
     ".oxlintrc.json",
     "packages/protocol/schema/**",
     "packages/protocol/src/gen/protocol.ts",
+    "packages/protocol/src/gen/constants.ts",
     "packages/protocol/fixtures/**",
     "apps/daemon/src/store/migrations/**"
   ]

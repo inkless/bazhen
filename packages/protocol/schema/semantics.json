@@ -1,8 +1,27 @@
 {
   "constants": {
+    "AGENT_NAME_MAX": 40,
+    "BUILTIN_ROLES": [
+      "coordinator",
+      "lead",
+      "worker",
+      "reviewer"
+    ],
     "EVENT_FRAME_MAX_BYTES": 1024,
     "HISTORY_LINES": 10000,
-    "STREAM_FRAME_MAX_BYTES": 1048576
+    "HOLDER_MAX_HISTORY_LINES": 100000,
+    "MAX_ROWS": 1000,
+    "STREAM_FRAME_MAX_BYTES": 1048576,
+    "TERMINAL_COLOURS": {
+      "dark": {
+        "background": "#0f0f10",
+        "text": "#eaebee"
+      },
+      "light": {
+        "background": "#fdfdfd",
+        "text": "#202225"
+      }
+    }
   },
   "reason": "A holder view gets no screen frame: its own bytes carry the switch, and a page that read the frame alone would route the wheel as if on the main screen.",
   "revision": 2

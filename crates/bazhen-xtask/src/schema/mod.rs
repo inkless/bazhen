@@ -1,8 +1,8 @@
 //! `cargo xtask schema`: the protocol's JSON Schema, as the Rust crates emit it, published one file
 //! a message into `packages/protocol/schema/` (`files`), with the protocol id those files hash to;
-//! the zod written from it into `packages/protocol/src/gen/`, where the web reads it; and the
-//! schema itself, with the planted corpus (`corpus`) and the daemon edge's verdict on each case,
-//! into `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where a
+//! the zod and the constants written from it into `packages/protocol/src/gen/`, where the web
+//! reads them; and the schema itself, with the planted corpus (`corpus`) and the daemon edge's
+//! verdict on each case, into `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where a
 //! committed file isn't what it would write, and where the edge's verdict isn't the protocol's, and
 //! it holds schemars to the crates' own tests (`leaks`).
 
@@ -65,13 +65,16 @@ const CHECKS: &str = "packages/protocol/src/checks.ts";
 /// The zod written from the schema, committed.
 const GENERATED: &str = "packages/protocol/src/gen/protocol.ts";
 
+/// The protocol's constants, as a TypeScript build reads them, committed.
+const CONSTANTS: &str = "packages/protocol/src/gen/constants.ts";
+
 /// `CHECKS` as `GENERATED` imports it.
 const CHECKS_FROM_GENERATED: &str = "../checks.ts";
 
-/// Publishes the schema into `PROTOCOL_SCHEMAS` with its id, writes the zod into `GENERATED`, and
-/// the schema and the corpus into `SHADOW`. With `check` it holds the committed files to what it
-/// would write instead, the corpus to the edge's verdicts but for `known`, and schemars to the
-/// crates' tests.
+/// Publishes the schema into `PROTOCOL_SCHEMAS` with its id, writes the zod into `GENERATED`, the
+/// constants into `CONSTANTS`, and the schema and the corpus into `SHADOW`. With `check` it holds
+/// the committed files to what it would write instead, the corpus to the edge's verdicts but for
+/// `known`, and schemars to the crates' tests.
 pub(crate) fn run(
     check: bool,
     known: corpus::Known<'_>,
@@ -116,8 +119,8 @@ pub(crate) fn run(
     Exit::Failed
 }
 
-/// Writes the schema `printed` holds, the files it publishes with their id, and the zod written
-/// from it; with `check`, holds the committed files to them in place of writing them.
+/// Writes the schema `printed` holds, the files it publishes with their id, and the zod and the
+/// constants written from it; with `check`, holds the committed files to them in place of writing them.
 fn write_schema(
     printed: &str,
     check: bool,
@@ -135,6 +138,10 @@ fn write_schema(
     };
     let published = match files::published(&document) {
         Ok(published) => published,
+        Err(problems) => return problems,
+    };
+    let constants = match files::typescript_constants(&document) {
+        Ok(constants) => constants,
         Err(problems) => return problems,
     };
     let tracked: BTreeSet<String> = match host.output(TRACKED, env) {
@@ -158,6 +165,7 @@ fn write_schema(
     outputs.push((RUST_ID.to_owned(), files::rust_id(&id)));
     outputs.push((TYPESCRIPT_ID.to_owned(), files::typescript_id(&id)));
     outputs.push((GENERATED.to_owned(), source.text));
+    outputs.push((CONSTANTS.to_owned(), constants));
     if check {
         for (path, text) in &outputs {
             let untracked = path.starts_with(PROTOCOL_SCHEMAS) && !tracked.contains(path);
@@ -414,6 +422,8 @@ mod tests {
             .collect();
         tree.insert(RUST_ID.to_owned(), files::rust_id(&id));
         tree.insert(TYPESCRIPT_ID.to_owned(), files::typescript_id(&id));
+        let constants = files::typescript_constants(&document(defs)).unwrap();
+        tree.insert(CONSTANTS.to_owned(), constants);
         if let Ok(source) = zod::generate(&document(defs), CHECKS_FROM_GENERATED) {
             tree.insert(GENERATED.to_owned(), source.text);
         }
