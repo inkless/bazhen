@@ -615,8 +615,10 @@ impl Mailbox {
     /// marked, so that a step coming after (from a deadline firing, a send committed before the
     /// close, or a hook let in before its token went) finds it and does nothing, rather than
     /// start the agent's mail afresh beside a step still under way. A closed agent never runs
-    /// again, so the mark is never lifted. The agents' `after_closed` calls it, once the hooks
-    /// have answered the agent's waiter, holding neither its turn nor its mail.
+    /// again, so the mark is never lifted, and the entry stays for the daemon's life: an empty
+    /// entry for each agent closed while it runs, which is few and small. The agents'
+    /// `after_closed` calls it, once the hooks have answered the agent's waiter, holding neither
+    /// the hooks' turn of the agent nor its mail; the agent's command turn may be held.
     pub(crate) async fn forget(
         self: &Arc<Self>,
         agents: &Agents,

@@ -618,11 +618,11 @@ fn leaves_a_forgotten_agents_mail_alone_for_a_step_that_comes_after() {
 }
 
 /// Closing an agent forgets its mail: the store has settled it as undeliverable, and what the
-/// mailbox held of it, an offer awaiting its ack with that ack's deadline, goes, and the agent is
-/// marked so that no step touches its mail again.
+/// mailbox held of it, an offer awaiting its ack, goes, and the agent is marked so that no step
+/// touches its mail again.
 #[test]
 #[ignore = "signals processes; runs in moon run :test-real -- rust"]
-fn forgets_a_closed_agents_mail_and_the_deadlines_it_held() {
+fn forgets_a_closed_agents_mail_and_the_offers_it_held() {
     bazhen_test_signal::require_sandbox().unwrap();
     let f = fixture(long());
     f.send("hello");
