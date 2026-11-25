@@ -212,7 +212,7 @@ pub(crate) fn from_runtime(id: &str, doing: Doing, cause: TerminalError) -> Agen
                 "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it; close it with force to record it closed anyway"
             ),
             Doing::Signal | Doing::Start => format!(
-                "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it, so it can't be {}; close it with force to record it closed",
+                "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it, so it can't be {}; close it, and if its close is refused the same way, close it with force to record it closed",
                 doing.done()
             ),
         }),
@@ -742,7 +742,7 @@ mod tests {
         };
         let unconfirmed = |done: &str| {
             format!(
-                "agent agent_x's terminal is no longer where it ran, but what ran it may still be running it, so it can't be {done}; close it with force to record it closed"
+                "agent agent_x's terminal is no longer where it ran, but what ran it may still be running it, so it can't be {done}; close it, and if its close is refused the same way, close it with force to record it closed"
             )
         };
         assert_eq!(
