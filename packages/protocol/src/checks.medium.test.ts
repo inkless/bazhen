@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import * as generated from "./gen/protocol.ts";
 import * as protocol from "./index.ts";
-
-/** Where `cargo xtask schema` writes the zod it generates from the Rust protocol. */
-const GENERATED = new URL("../../../target/protocol-shadow/gen/protocol.ts", import.meta.url);
 
 /** Text each rule should judge: plain, each kind of control and invisible, and at the budgets. */
 const TEXTS = [
@@ -34,17 +32,6 @@ const TEXTS = [
 ];
 
 const AGENT = "agent_01900000000070008000000000000000";
-
-/** The generated module, or why it won't load. */
-async function generated(): Promise<unknown> {
-  try {
-    return await import(GENERATED.href);
-  } catch (error) {
-    throw new Error(`${GENERATED.pathname} won't load: run \`scripts/xtask.sh schema\``, {
-      cause: error,
-    });
-  }
-}
 
 /** The schema `module` exports as `name`. */
 function schemaIn(module: unknown, name: string, what: string): z.ZodType {
@@ -95,7 +82,7 @@ describe("the zod the Rust schema is written as", () => {
   it.each(CASES)(
     "judges a %s as the protocol does, with the protocol's messages",
     async (name, values) => {
-      const theirs = schemaIn(await generated(), name, "the Rust schema's zod");
+      const theirs = schemaIn(generated, name, "the Rust schema's zod");
       const ours = schemaIn(protocol, name, "the protocol");
       for (const value of values) {
         expect({ value, ...verdict(theirs, value) }).toEqual({ value, ...verdict(ours, value) });

@@ -1,9 +1,9 @@
-//! `cargo xtask schema`: the protocol's JSON Schema, as the Rust crates emit it, and the zod
-//! written from it, into `target/protocol-shadow/`. Nothing there is committed yet: the
-//! TypeScript protocol in packages/protocol is still the one the daemon and clients run. With
-//! `--check` it also holds schemars to the crates' own tests (`leaks`). Beside them it writes the
-//! planted corpus (`corpus`), with the daemon edge's verdict on each case, and with `--check` fails
-//! where the edge's verdict isn't the protocol's.
+//! `cargo xtask schema`: the zod written from the protocol's JSON Schema, as the Rust crates emit
+//! it, into `packages/protocol/src/gen/`, where the web reads it; and the schema itself, with the
+//! planted corpus (`corpus`) and the daemon edge's verdict on each case, into
+//! `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where the
+//! committed zod isn't what it would write, and where the edge's verdict isn't the protocol's, and
+//! it holds schemars to the crates' own tests (`leaks`).
 
 mod corpus;
 mod leaks;
@@ -45,11 +45,15 @@ const SHADOW: &str = "target/protocol-shadow";
 /// The checks the schema names, written by hand.
 const CHECKS: &str = "packages/protocol/src/checks.ts";
 
-/// `CHECKS` as the generated module, in `SHADOW/gen/`, imports it.
-const CHECKS_FROM_SHADOW: &str = "../../../packages/protocol/src/checks.ts";
+/// The zod written from the schema, committed.
+const GENERATED: &str = "packages/protocol/src/gen/protocol.ts";
 
-/// Writes the schema, its zod and the corpus into `SHADOW`, and with `check` holds the corpus to
-/// the edge's verdicts but for `known`, and schemars to the crates' tests.
+/// `CHECKS` as `GENERATED` imports it.
+const CHECKS_FROM_GENERATED: &str = "../checks.ts";
+
+/// Writes the zod into `GENERATED`, and the schema and the corpus into `SHADOW`. With `check` it
+/// holds the committed zod to the zod it would write instead, the corpus to the edge's verdicts but
+/// for `known`, and schemars to the crates' tests.
 pub(crate) fn run(
     check: bool,
     known: corpus::Known<'_>,
@@ -69,7 +73,7 @@ pub(crate) fn run(
     }
     match host.output(EMIT, &env) {
         Ok(Some(printed)) => {
-            problems.extend(write_shadow(&printed, places, host));
+            problems.extend(write_schema(&printed, check, places, host));
             if problems.is_empty() {
                 problems.extend(write_corpus(
                     &printed,
@@ -94,13 +98,14 @@ pub(crate) fn run(
     Exit::Failed
 }
 
-/// Writes the schema `printed` holds and the zod written from it.
-fn write_shadow(printed: &str, places: &Places, host: &mut impl Host) -> Vec<String> {
+/// Writes the schema `printed` holds, and the zod written from it; with `check`, holds the
+/// committed zod to it in place of writing it.
+fn write_schema(printed: &str, check: bool, places: &Places, host: &mut impl Host) -> Vec<String> {
     let document: serde_json::Value = match serde_json::from_str(printed) {
         Ok(document) => document,
         Err(error) => return vec![format!("the schema's example printed no JSON: {error}")],
     };
-    let source = match zod::generate(&document, CHECKS_FROM_SHADOW) {
+    let source = match zod::generate(&document, CHECKS_FROM_GENERATED) {
         Ok(source) => source,
         Err(problems) => return problems,
     };
@@ -108,11 +113,21 @@ fn write_shadow(printed: &str, places: &Places, host: &mut impl Host) -> Vec<Str
         Ok(text) => unmatched_checks(&source.checks, text.as_deref()),
         Err(error) => vec![format!("{CHECKS}: {error}")],
     };
-    let shadow = places.root.join(SHADOW);
-    for (path, text) in [
-        (shadow.join("schema.json"), printed),
-        (shadow.join("gen/protocol.ts"), source.text.as_str()),
-    ] {
+    let mut writes = vec![(places.root.join(SHADOW).join("schema.json"), printed)];
+    let generated = places.root.join(GENERATED);
+    if check {
+        match host.read(&generated) {
+            Ok(Some(committed)) if committed == source.text => {}
+            Ok(_) => problems.push(format!(
+                "{GENERATED} isn't the zod the Rust protocol writes: run `cargo xtask schema`, \
+                 and commit what it writes"
+            )),
+            Err(error) => problems.push(format!("{GENERATED}: {error}")),
+        }
+    } else {
+        writes.push((generated, source.text.as_str()));
+    }
+    for (path, text) in writes {
         if let Err(error) = host.write(&path, text) {
             problems.push(format!("{}: {error}", path.display()));
         }
@@ -312,9 +327,14 @@ mod tests {
         json!({ "packages": packages }).to_string()
     }
 
+    /// A host whose example prints `defs`, and whose tree holds the zod written from them.
     fn fake(defs: &serde_json::Value) -> Fake {
         let mut host = Fake::default();
         host.printed.insert(EMIT.join(" "), Some(schema(defs)));
+        if let Ok(source) = zod::generate(&json!({ "$defs": defs }), CHECKS_FROM_GENERATED) {
+            host.files
+                .insert(Path::new("/a/repo").join(GENERATED), source.text);
+        }
         host.printed.insert(
             leaks::TREE.join(" "),
             Some("bazhen v0.1.0\nserde v1.0.229\n".to_owned()),
@@ -340,17 +360,24 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_schema_and_its_zod_into_the_shadow_folder() {
-        let mut host = fake(&json!({ "Role": { "type": "string" } }));
-        assert_eq!(ran(&mut host, false), (Exit::Done, String::new()));
+    fn writes_the_zod_into_the_tree_and_the_schema_into_the_shadow_folder() {
+        let defs = json!({ "Role": { "type": "string" } });
         let shadow = Path::new("/a/repo").join(SHADOW);
-        let zod = host.written.get(&shadow.join("gen/protocol.ts")).unwrap();
+        let generated = Path::new("/a/repo").join(GENERATED);
+        let mut host = fake(&defs);
+        host.files.remove(&generated);
+        assert_eq!(ran(&mut host, false), (Exit::Done, String::new()));
+        let zod = host.written.get(&generated).unwrap();
         assert!(zod.contains("export const Role = z.string();"), "{zod}");
         assert_eq!(
             host.written.get(&shadow.join("schema.json")),
-            Some(&schema(&json!({ "Role": { "type": "string" } })))
+            Some(&schema(&defs))
         );
-        assert!(host.written.keys().all(|p| p.starts_with(&shadow)));
+        assert!(
+            host.written
+                .keys()
+                .all(|p| p.starts_with(&shadow) || *p == generated)
+        );
         assert_eq!(host.ran, vec![EMIT.join(" "), judged()]);
         assert_eq!(
             host.written
@@ -358,6 +385,33 @@ mod tests {
                 .map(String::as_str),
             Some("[]\n")
         );
+    }
+
+    #[test]
+    fn with_check_holds_the_committed_zod_to_the_zod_it_writes_and_writes_none() {
+        let defs = json!({ "Role": { "type": "string" } });
+        let generated = Path::new("/a/repo").join(GENERATED);
+        let mut host = fake(&defs);
+        assert_eq!(ran(&mut host, true), (Exit::Done, String::new()));
+        assert!(!host.written.contains_key(&generated));
+        let stale = "export const Role = z.number();\n".to_owned();
+        for committed in [Some(stale.clone()), None] {
+            let mut host = fake(&defs);
+            match &committed {
+                Some(text) => host.files.insert(generated.clone(), text.clone()),
+                None => host.files.remove(&generated),
+            };
+            let (exit, err) = ran(&mut host, true);
+            assert_eq!(exit, Exit::Failed);
+            assert!(
+                err.contains(
+                    "packages/protocol/src/gen/protocol.ts isn't the zod the Rust protocol writes"
+                ),
+                "{err}"
+            );
+            assert_eq!(host.files.get(&generated), committed.as_ref());
+            assert!(!host.written.contains_key(&generated));
+        }
     }
 
     #[test]

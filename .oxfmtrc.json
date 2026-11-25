@@ -7,6 +7,7 @@
     "pnpm-lock.yaml",
     ".oxlintrc.json",
     "packages/protocol/schema/**",
+    "packages/protocol/src/gen/**",
     "packages/protocol/fixtures/**",
     "apps/daemon/src/store/migrations/**"
   ]
