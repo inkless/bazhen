@@ -646,8 +646,8 @@ impl Agents {
         }
     }
 
-    /// What the agents' hooks keep between requests, which the routes serve the hooks from: a
-    /// closed agent's waiter is answered there.
+    /// What the agents' hooks keep between requests: a closed agent's waiter is answered there.
+    #[cfg(test)]
     pub(crate) fn hooks(&self) -> &Arc<crate::hooks::Hooks> {
         &self.deps.hooks
     }

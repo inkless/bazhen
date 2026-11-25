@@ -155,10 +155,17 @@ impl Shared {
         self
     }
 
-    /// The same, launching agents as `agents` does, and serving their hooks from what they keep.
+    /// The same, launching agents as `agents` does. They answer a closed agent's waiter in
+    /// the hooks they were built on, which are to be these.
     pub(crate) fn with_agents(mut self, agents: Arc<crate::agents::Agents>) -> Self {
-        self.hooks = Arc::clone(agents.hooks());
         self.agents = Some(agents);
+        self
+    }
+
+    /// The same, serving the hooks from `hooks`, as agents built before these were built on.
+    #[cfg(test)]
+    pub(crate) fn with_hooks(mut self, hooks: Arc<crate::hooks::Hooks>) -> Self {
+        self.hooks = hooks;
         self
     }
 
@@ -650,6 +657,7 @@ mod tests {
             .block_on(f.launch(crate::agents::tests::request("k-1")))
             .unwrap();
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let (status, body) = send(socket_router(shared), request("GET", "/v1/state", &[]));
         assert_eq!(
@@ -690,6 +698,7 @@ mod tests {
             .and_then(|found| found.generation)
             .unwrap();
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let signal = |reference: &str, key: &str| {
             let body =
@@ -757,6 +766,7 @@ mod tests {
             (agent, generation, taken, kept)
         });
         let mut shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         shared.shells = Some(shells);
         let body = json!({
@@ -823,6 +833,7 @@ mod tests {
             (agent, generation)
         });
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let mut waiting = shared.hooks.waiter(&agent);
         let body = json!({ "idempotencyKey": "c-1", "generation": generation + ahead });
@@ -873,6 +884,7 @@ mod tests {
         let (f, agent, generation) =
             crate::agents::restart::tests::exited(&StubHarness::new(pull()).resuming());
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let before = f.types().len() as u64;
         let id = agent.as_str();
@@ -906,6 +918,7 @@ mod tests {
         use crate::testing::stub_harness::{StubHarness, pull};
         let (f, agent, generation) = crate::agents::restart::tests::lost(&StubHarness::new(pull()));
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let before = f.types().len() as u64;
         let id = agent.as_str();
@@ -930,6 +943,7 @@ mod tests {
         let (f, agent, generation) =
             crate::agents::restart::tests::exited(&StubHarness::new(pull()));
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let id = agent.as_str();
         assert_eq!(
@@ -986,6 +1000,7 @@ mod tests {
     fn refuses_to_start_again_an_agent_on_a_session_another_agent_holds_alone() {
         let (f, agent, other, generation) = sharing_a_session(true);
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         let before = f.types().len();
         let id = agent.as_str();
@@ -1008,6 +1023,7 @@ mod tests {
     fn starts_an_agent_again_on_a_session_another_holds_where_its_harness_shares_sessions() {
         let (f, agent, _other, generation) = sharing_a_session(false);
         let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_hooks(Arc::clone(f.agents.hooks()))
             .with_agents(Arc::clone(&f.agents));
         assert_eq!(respawn(&shared, agent.as_str(), "r-1", generation).0, 200);
     }

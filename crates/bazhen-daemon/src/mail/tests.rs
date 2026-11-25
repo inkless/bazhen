@@ -114,7 +114,9 @@ fn fixture(stub: StubHarness) -> Fixture {
         runtime.block_on(agents.launch(&request)).unwrap().agent_id
     };
     let (to, peer) = (launch("launch-1"), launch("launch-2"));
-    let mut shared = Shared::new(&"f".repeat(64), Stop::default(), store).with_agents(agents);
+    let mut shared = Shared::new(&"f".repeat(64), Stop::default(), store)
+        .with_hooks(Arc::clone(agents.hooks()))
+        .with_agents(agents);
     shared.push = Some(PushTo(Arc::new(Port)));
     let f = Fixture {
         shared,

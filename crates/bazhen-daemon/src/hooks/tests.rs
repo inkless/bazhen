@@ -79,8 +79,9 @@ fn fixture() -> Fixture {
             compact_window_tokens: None,
         }))
         .unwrap();
-    let shared = Shared::new(&"f".repeat(64), Stop::default(), store).with_agents(agents);
-    assert!(Arc::ptr_eq(&shared.hooks, &hooks));
+    let shared = Shared::new(&"f".repeat(64), Stop::default(), store)
+        .with_hooks(hooks)
+        .with_agents(agents);
     Fixture {
         shared,
         agent: launched.agent_id,
