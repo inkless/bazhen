@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { StateSnapshot } from "@bazhen/protocol";
+import { StateSnapshot } from "@bazhen/protocol/web";
 import { attachInScript, Daemon } from "./daemon.ts";
 import { closeWhileAttached } from "./attach-close.ts";
 

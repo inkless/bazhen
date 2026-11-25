@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
+import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon } from "./daemon.ts";
 
 let daemon: Daemon;

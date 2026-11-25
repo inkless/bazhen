@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { attachInScript, Daemon, DETACH } from "./daemon.ts";
 
 const state = async (daemon: Daemon) =>

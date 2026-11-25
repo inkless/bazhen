@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HISTORY_LINES } from "@bazhen/protocol";
+import { HISTORY_LINES } from "@bazhen/protocol/web";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
 import { captured, replay } from "./fixtures/browser.ts";
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ErrorResponse, ShellCommandResponse } from "@bazhen/protocol";
+import { ErrorResponse, ShellCommandResponse } from "@bazhen/protocol/web";
 import { Daemon, waitUntil, type View } from "./daemon.ts";
 import { closeHoldersUnder } from "../support/holder-close.ts";
 import { close, open, shellOf } from "./shell-calls.ts";

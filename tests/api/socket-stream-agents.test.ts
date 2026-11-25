@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
-import { SendMessageResponse, StateSnapshot } from "@bazhen/protocol";
+import { SendMessageResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 import { outcome } from "./upgrade-outcome.ts";

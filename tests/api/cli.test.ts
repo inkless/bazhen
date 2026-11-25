@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signalOwnChild } from "@bazhen/host-guard";
-import { StateSnapshot } from "@bazhen/protocol";
+import { StateSnapshot } from "@bazhen/protocol/web";
 import {
   Daemon,
   LOGIN_SHELL,

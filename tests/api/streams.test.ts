@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { EVENTS, StateSnapshot } from "@bazhen/protocol";
+import { EVENTS, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, waitUntil, type EventClient, type View } from "./daemon.ts";
 
 let daemon: Daemon;

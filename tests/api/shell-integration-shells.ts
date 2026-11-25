@@ -1,5 +1,5 @@
 import { expect } from "vitest";
-import { ShellCommandResponse } from "@bazhen/protocol";
+import { ShellCommandResponse } from "@bazhen/protocol/web";
 import type { Daemon, IntegratedShell } from "./daemon.ts";
 import { closeHoldersUnder } from "../support/holder-close.ts";
 

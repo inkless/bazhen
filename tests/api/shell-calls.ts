@@ -1,4 +1,4 @@
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import type { Daemon } from "./daemon.ts";
 
 let keys = 0;

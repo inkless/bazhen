@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { StateSnapshot } from "@bazhen/protocol";
+import { StateSnapshot } from "@bazhen/protocol/web";
 import { bazhen, Daemon } from "./daemon.ts";
 
 const external = "https://bazhen.example.com";

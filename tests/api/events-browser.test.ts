@@ -2,7 +2,7 @@
 // runs on the TypeScript daemon only until the Rust one pairs browsers.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { StateSnapshot } from "@bazhen/protocol";
+import { StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon } from "./daemon.ts";
 
 let daemon: Daemon;

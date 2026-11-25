@@ -4,7 +4,7 @@ import {
   HealthResponse,
   ShellCommandResponse,
   StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 

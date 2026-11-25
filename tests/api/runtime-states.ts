@@ -1,4 +1,4 @@
-import { HealthResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { HealthResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import type { Daemon } from "./daemon.ts";
 
 export const snapshot = async (daemon: Daemon) =>
