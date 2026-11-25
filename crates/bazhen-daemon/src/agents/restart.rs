@@ -23,7 +23,7 @@ use bazhen_protocol::record::Record;
 use bazhen_protocol::shells::TuiTheme;
 use bazhen_store::{Actor, AgentChange, AgentLaunch, AgentTerminal, Writer as StoreWriter};
 
-use super::lifecycle::{Begun, append, asked, from_runtime, offers, recorded};
+use super::lifecycle::{Begun, Doing, append, asked, from_runtime, offers, recorded};
 use super::prompts::{Composed, FLEET, compose};
 use super::{AgentError, Agents, minted, session_tag};
 use crate::budget::Counts;
@@ -98,7 +98,7 @@ impl Failed {
     /// The failure as the command's answer, for a start that was `resuming` a session or not.
     fn answer(self, id: &str, resuming: bool) -> AgentError {
         match self {
-            Self::Terminal(err) => from_runtime(id, err),
+            Self::Terminal(err) => from_runtime(id, Doing::Start, err),
             Self::Harness(LaunchError::Refused(why)) => {
                 let verb = if resuming { "resume" } else { "start" };
                 AgentError::Conflict(format!("agent {id}'s harness won't {verb} it: {why}"))
@@ -219,7 +219,7 @@ impl Agents {
             return Err(no_terminal(id));
         };
         // Known before anything happens, so it is refused with nothing recorded.
-        let session = self.resumable(id, &launch)?;
+        let session = self.resumable(id, &launch, "")?;
         self.refuse_taken(&agent, &launch, session).await?;
         let (prompt, prompt_file) = self.prompt_for(&agent, &launch)?;
         let requesting = agent.clone();
@@ -295,7 +295,11 @@ impl Agents {
         let session = if fresh {
             None
         } else {
-            let session = self.resumable(id, &launch)?;
+            let session = self.resumable(
+                id,
+                &launch,
+                "; relaunch it fresh to start it on a new session",
+            )?;
             self.refuse_taken(&agent, &launch, session).await?;
             Some(session)
         };
@@ -391,17 +395,20 @@ impl Agents {
         Ok(Ok(Found { found, launch }))
     }
 
-    /// The session the agent is on, where its harness says it resumes.
+    /// The session the agent is on, where its harness says it resumes; else why not, then
+    /// `instead`.
     fn resumable<'l>(
         &self,
         id: &str,
         launch: &'l AgentLaunch,
+        instead: &str,
     ) -> Result<&'l ExternalRef, AgentError> {
-        launch
-            .external_ref
-            .as_ref()
-            .filter(|_| self.resumes(launch))
-            .ok_or_else(|| AgentError::NotResumable(id.to_owned()))
+        let why = match &launch.external_ref {
+            Some(session) if self.resumes(launch) => return Ok(session),
+            Some(_) => format!("agent {id}'s harness can't resume its session"),
+            None => format!("agent {id} has no session to resume"),
+        };
+        Err(AgentError::NotResumable(format!("{why}{instead}")))
     }
 
     /// The prompt the agent's role gives now, written to the file its start reads.
@@ -832,7 +839,9 @@ pub(crate) mod tests {
                 stub.resumes_asked.lock().unwrap().len(),
             ),
             (
-                Err(AgentError::NotResumable(id.to_owned())),
+                Err(AgentError::NotResumable(format!(
+                    "agent {id}'s harness can't resume its session"
+                ))),
                 Vec::<String>::new(),
                 0,
                 0,
@@ -1095,7 +1104,9 @@ pub(crate) mod tests {
                 found(&f, &agent).state
             ),
             (
-                Err(AgentError::NotResumable(id.to_owned())),
+                Err(AgentError::NotResumable(format!(
+                    "agent {id}'s harness can't resume its session; relaunch it fresh to start it on a new session"
+                ))),
                 before,
                 0,
                 AgentState::Lost

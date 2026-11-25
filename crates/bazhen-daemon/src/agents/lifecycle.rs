@@ -156,9 +156,37 @@ pub(crate) fn record_closed(
     Ok(ids)
 }
 
+/// What a command was doing to an agent when its runtime failed, for the words its answer uses.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Doing {
+    Close,
+    Signal,
+    /// A respawn or a relaunch.
+    Start,
+}
+
+impl Doing {
+    /// The agent, as the command would have left it: "closed".
+    const fn done(self) -> &'static str {
+        match self {
+            Self::Close => "closed",
+            Self::Signal => "signalled",
+            Self::Start => "started again",
+        }
+    }
+
+    /// What may be done once its holder's process has ended.
+    const fn after(self) -> &'static str {
+        match self {
+            Self::Close => "close it again, or relaunch it",
+            Self::Signal | Self::Start => "relaunch it",
+        }
+    }
+}
+
 /// The runtime's failure as a command on agent `id`'s (`fromEnvironment`): typed where the
 /// caller can act on it, else the environment out of reach.
-pub(crate) fn from_runtime(id: &str, cause: TerminalError) -> AgentError {
+pub(crate) fn from_runtime(id: &str, doing: Doing, cause: TerminalError) -> AgentError {
     match cause {
         TerminalError::Stale(_) | TerminalError::Gone(_) => AgentError::Conflict(format!(
             "agent {id}'s terminal is not the one recorded; its server or pane has changed"
@@ -173,13 +201,21 @@ pub(crate) fn from_runtime(id: &str, cause: TerminalError) -> AgentError {
                 |pid| format!("its holder, pid {pid},"),
             );
             AgentError::NeedsRestart(format!(
-                "agent {id}'s terminal runs on a holder that speaks only {}, which this version of Bazhen doesn't, so it can't be closed from here: {holder} keeps running until its process is ended. Once it has, close it again, or relaunch it.",
-                protocol.join(", ")
+                "agent {id}'s terminal runs on a holder that speaks only {}, which this version of Bazhen doesn't, so it can't be {} from here: {holder} keeps running until its process is ended. Once it has, {}.",
+                protocol.join(", "),
+                doing.done(),
+                doing.after(),
             ))
         }
-        TerminalError::Unconfirmed(_) => AgentError::ServerUnconfirmed(format!(
-            "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it; close it with force to record it closed anyway"
-        )),
+        TerminalError::Unconfirmed(_) => AgentError::ServerUnconfirmed(match doing {
+            Doing::Close => format!(
+                "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it; close it with force to record it closed anyway"
+            ),
+            Doing::Signal | Doing::Start => format!(
+                "agent {id}'s terminal is no longer where it ran, but what ran it may still be running it, so it can't be {}; close it with force to record it closed",
+                doing.done()
+            ),
+        }),
         other @ (TerminalError::Other(_)
         | TerminalError::Unreachable(_)
         | TerminalError::Predates { .. }
@@ -323,7 +359,7 @@ impl Agents {
                 );
                 Ok(())
             }
-            Err(cause) => Err(from_runtime(found.agent_id.as_str(), cause)),
+            Err(cause) => Err(from_runtime(found.agent_id.as_str(), Doing::Close, cause)),
         }
     }
 
@@ -356,7 +392,7 @@ impl Agents {
             .terminals
             .signal(&terminal, req.signal)
             .await
-            .map_err(|cause| from_runtime(id, cause))?;
+            .map_err(|cause| from_runtime(id, Doing::Signal, cause))?;
         let (agent, signal) = (found.agent_id.clone(), req.signal);
         self.finish(&found.agent_id, key, &request, move |w| {
             let change = AgentChange::Signalled(AgentSignalled { signal });
@@ -686,6 +722,39 @@ mod tests {
                 Err(AgentError::Conflict(format!("agent {id} is exited"))),
                 vec![]
             )
+        );
+    }
+
+    #[test]
+    fn words_a_runtime_failure_for_the_command_it_failed() {
+        let worded = [Doing::Close, Doing::Signal, Doing::Start].map(|doing| {
+            let unservable = TerminalError::Unservable {
+                protocol: vec!["holder/2.0".to_owned()],
+                holder_pid: Some(42),
+            };
+            let unconfirmed = TerminalError::Unconfirmed("gone".to_owned());
+            [unservable, unconfirmed].map(|cause| from_runtime("agent_x", doing, cause).to_string())
+        });
+        let unservable = |done: &str, after: &str| {
+            format!(
+                "agent agent_x's terminal runs on a holder that speaks only holder/2.0, which this version of Bazhen doesn't, so it can't be {done} from here: its holder, pid 42, keeps running until its process is ended. Once it has, {after}."
+            )
+        };
+        let unconfirmed = |done: &str| {
+            format!(
+                "agent agent_x's terminal is no longer where it ran, but what ran it may still be running it, so it can't be {done}; close it with force to record it closed"
+            )
+        };
+        assert_eq!(
+            worded,
+            [
+                [
+                    unservable("closed", "close it again, or relaunch it"),
+                    "agent agent_x's terminal is no longer where it ran, but what ran it may still be running it; close it with force to record it closed anyway".to_owned(),
+                ],
+                [unservable("signalled", "relaunch it"), unconfirmed("signalled")],
+                [unservable("started again", "relaunch it"), unconfirmed("started again")],
+            ]
         );
     }
 }

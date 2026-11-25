@@ -937,7 +937,7 @@ mod tests {
                 409,
                 refused(
                     "not_resumable",
-                    &format!("agent {id} has no session to resume")
+                    &format!("agent {id}'s harness can't resume its session")
                 )
             )
         );

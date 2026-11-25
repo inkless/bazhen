@@ -65,8 +65,9 @@ pub(crate) enum AgentError {
     Conflict(String),
     #[error("agent {id} is at generation {}", generation.map_or_else(|| "null".to_owned(), |g| g.to_string()))]
     Stale { id: String, generation: Option<u64> },
-    /// The agent has no harness session that starting it again could resume.
-    #[error("agent {0} has no session to resume")]
+    /// The agent has no harness session that starting it again could resume, or its harness
+    /// can't resume the one it has.
+    #[error("{0}")]
     NotResumable(String),
     /// The session it would resume is another agent's too, for a harness whose sessions are one
     /// agent's at a time; answered as not resumable.
