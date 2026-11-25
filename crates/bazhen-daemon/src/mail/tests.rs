@@ -52,13 +52,13 @@ fn taking(delivery: Delivery) -> Capabilities {
 }
 
 /// Two agents launched on the fake runtime, the stub serving their harness, running.
-struct Fixture {
-    shared: Shared,
+pub(crate) struct Fixture {
+    pub(crate) shared: Shared,
     tracker: TaskTracker,
-    stub: StubHarness,
-    to: AgentId,
-    peer: AgentId,
-    runtime: tokio::runtime::Runtime,
+    pub(crate) stub: StubHarness,
+    pub(crate) to: AgentId,
+    pub(crate) peer: AgentId,
+    pub(crate) runtime: tokio::runtime::Runtime,
     _dir: TempDir,
     thread: Option<Thread>,
 }
@@ -71,7 +71,7 @@ impl Drop for Fixture {
     }
 }
 
-fn fixture(stub: StubHarness) -> Fixture {
+pub(crate) fn fixture(stub: StubHarness) -> Fixture {
     let dir = TempDir::new("mail");
     let path = dir.path().join("bazhen.db");
     let (store, thread) =
@@ -138,14 +138,20 @@ fn fixture(stub: StubHarness) -> Fixture {
 
 impl Fixture {
     /// Sends `body` to `to` under `key`, as `caller`, and waits for any push it starts.
-    fn send(&self, caller: Option<&AgentId>, to: &AgentId, key: &str, body: &str) -> (u16, Value) {
+    pub(crate) fn send(
+        &self,
+        caller: Option<&AgentId>,
+        to: &AgentId,
+        key: &str,
+        body: &str,
+    ) -> (u16, Value) {
         let sent = self.send_to(caller, to.as_str(), key, body);
         self.settle();
         sent
     }
 
     /// Waits for every push under way.
-    fn settle(&self) {
+    pub(crate) fn settle(&self) {
         self.runtime.block_on(async {
             self.tracker.close();
             self.tracker.wait().await;
@@ -175,7 +181,7 @@ impl Fixture {
     }
 
     /// Sets an agent's state as its row records it.
-    fn set_state(&self, agent: &AgentId, state: &'static str) {
+    pub(crate) fn set_state(&self, agent: &AgentId, state: &'static str) {
         let agent = agent.clone();
         self.runtime
             .block_on(self.shared.store.run(move |store| {
@@ -192,7 +198,7 @@ impl Fixture {
     }
 
     /// Each mail event's type and payload, in order.
-    fn mail(&self) -> Vec<(String, Value)> {
+    pub(crate) fn mail(&self) -> Vec<(String, Value)> {
         let reader = self.shared.store.reader().unwrap();
         reader
             .reads()
@@ -204,7 +210,7 @@ impl Fixture {
             .collect()
     }
 
-    fn queued(&self, body: &str) -> (String, Value) {
+    pub(crate) fn queued(&self, body: &str) -> (String, Value) {
         (
             "mailbox.queued".to_owned(),
             json!({ "agentId": self.to.as_str(), "body": body }),
@@ -212,7 +218,7 @@ impl Fixture {
     }
 }
 
-fn pull() -> StubHarness {
+pub(crate) fn pull() -> StubHarness {
     StubHarness::new(taking(Delivery::Pull))
 }
 
@@ -312,7 +318,7 @@ fn refuses_mail_for_an_agent_gone_or_whose_harness_takes_none_for_it_with_its_re
     );
 }
 
-fn push(answers: impl IntoIterator<Item = Pushed>) -> StubHarness {
+pub(crate) fn push(answers: impl IntoIterator<Item = Pushed>) -> StubHarness {
     StubHarness::new(taking(Delivery::Push)).pushing(answers)
 }
 

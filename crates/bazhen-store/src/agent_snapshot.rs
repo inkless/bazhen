@@ -73,6 +73,8 @@ pub struct OpenAttention<'a> {
     pub message_id: Option<&'a str>,
     /// The task it is about, for an escalation or a task done.
     pub task_id: Option<&'a str>,
+    /// Its agent's state; none for an agent the store no longer has.
+    pub agent_state: Option<&'a str>,
 }
 
 /// An agent's row and its terminal's, as one query reads them.
@@ -285,6 +287,7 @@ struct AttentionRow {
     tool_use_id: Option<String>,
     main_agent: bool,
     opened_at: String,
+    agent_state: Option<String>,
 }
 
 /// Every item for the human, oldest first, each open one with what the human can do about it.
@@ -294,8 +297,9 @@ pub(crate) fn attention(
 ) -> Result<Vec<Attention>, SnapshotError> {
     let mut statement = db.prepare(
         "SELECT i.id, i.agent_session_id, i.state, i.close_reason, i.summary, i.kind, i.task_id,
-           i.message_id, i.tool_use_id, i.main_agent = 1, e.ts
+           i.message_id, i.tool_use_id, i.main_agent = 1, e.ts, a.state
          FROM attention_items i JOIN events e ON e.id = i.created_event_id
+           LEFT JOIN agent_sessions a ON a.id = i.agent_session_id
          ORDER BY i.created_event_id",
     )?;
     let rows = statement
@@ -312,6 +316,7 @@ pub(crate) fn attention(
                 tool_use_id: row.get(8)?,
                 main_agent: row.get(9)?,
                 opened_at: row.get(10)?,
+                agent_state: row.get(11)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -332,6 +337,7 @@ fn item(row: AttentionRow, view: &dyn AttentionView) -> Result<Attention, Snapsh
             main_agent: row.main_agent,
             message_id: row.message_id.as_deref(),
             task_id: row.task_id.as_deref(),
+            agent_state: row.agent_state.as_deref(),
         })
     } else {
         Vec::new()

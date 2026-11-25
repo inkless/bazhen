@@ -54,7 +54,7 @@ impl std::fmt::Debug for PushTo {
 
 /// Why a send queued nothing.
 #[derive(Debug)]
-enum Sending {
+pub(crate) enum Sending {
     Invalid(String),
     /// The path names no agent: by its id, none the store knows; by its name, none live.
     Unnamed(String),
@@ -144,23 +144,34 @@ pub(crate) async fn send(
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        match sent.queued {
-            Some(Delivery::Push) => {
-                pushing(&shared, &agents, sent.response.message_id.clone(), agent);
-            }
-            Some(Delivery::Pull) => {
-                // Queued, the message waits for the next waiter or tool call when this fails.
-                if let Err(err) = shared.hooks.mailbox.offer(&shared, &agent).await {
-                    tracing::warn!("bazhen: couldn't offer mail to {agent}: {err}");
-                }
-            }
-            Some(Delivery::None) | None => {}
-        }
+        let message = sent.response.message_id.clone();
+        deliver(&shared, &agents, sent.queued, message, agent).await;
         Ok(sent.response)
     };
     match sent.await {
         Ok(response) => axum::Json(response).into_response(),
         Err(err) => refusal(err),
+    }
+}
+
+/// Hands a message just queued over as `queued` says: pushed, or offered to the agent's waiter.
+/// None, for a repeat of a request, hands nothing over again.
+pub(crate) async fn deliver(
+    shared: &Shared,
+    agents: &Arc<Agents>,
+    queued: Option<Delivery>,
+    message: MessageId,
+    agent: AgentId,
+) {
+    match queued {
+        Some(Delivery::Push) => pushing(shared, agents, message, agent),
+        Some(Delivery::Pull) => {
+            // Queued, the message waits for the next waiter or tool call when this fails.
+            if let Err(err) = shared.hooks.mailbox.offer(shared, &agent).await {
+                tracing::warn!("bazhen: couldn't offer mail to {agent}: {err}");
+            }
+        }
+        Some(Delivery::None) | None => {}
     }
 }
 
@@ -233,7 +244,7 @@ fn kept(agent: &AgentId, body: &str, from: Option<&AgentId>) -> Result<String, O
 
 /// Queues `body` for `agent`, if its harness takes mail for it now, noting in `fresh` how it is
 /// to be delivered.
-fn queue(
+pub(crate) fn queue(
     w: &StoreWriter<'_>,
     agents: &Agents,
     agent: &AgentId,
@@ -406,7 +417,7 @@ async fn pushable(
 
 /// The protocol's error for a send that queued nothing, with `Tasks.send`'s and
 /// `Mailbox.send`'s words.
-fn refusal(err: Sending) -> Response {
+pub(crate) fn refusal(err: Sending) -> Response {
     match err {
         Sending::Invalid(message) => {
             fail(StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest, &message)
@@ -454,4 +465,4 @@ fn refusal(err: Sending) -> Response {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
