@@ -15,6 +15,10 @@ use crate::routes::Shared;
 /// The most grapheme clusters of a message a client is shown; the rest stays in the event log.
 const SUMMARY_MAX: usize = 120;
 
+/// The most UTF-16 units a summary keeps, as the mail limit counts them: a cluster can carry any
+/// number of combining marks, so a count of clusters alone bounds no size.
+const SUMMARY_UNITS: usize = 4 * SUMMARY_MAX;
+
 /// Records `from`'s send by the tool call `use_id`, where it names exactly one other agent.
 pub(super) async fn observe(
     shared: &Shared,
@@ -51,7 +55,8 @@ fn summary_of(sent: &SentMessage) -> String {
     } else {
         line
     };
-    line.graphemes(true).take(SUMMARY_MAX).collect()
+    let line: String = line.graphemes(true).take(SUMMARY_MAX).collect();
+    within_units(&line, SUMMARY_UNITS).to_owned()
 }
 
 /// The first line with anything on it, without its controls or the space around it.
@@ -96,7 +101,7 @@ fn without_controls(text: &str) -> String {
 mod tests {
     use bazhen_harness::SentMessage;
 
-    use super::{SUMMARY_MAX, summary_of, within_units, without_controls};
+    use super::{SUMMARY_MAX, SUMMARY_UNITS, summary_of, within_units, without_controls};
 
     fn sent(summary: Option<&str>, text: &str) -> SentMessage {
         SentMessage {
@@ -121,6 +126,17 @@ mod tests {
                 "hi[31m there".to_owned(),
                 "e\u{301}".repeat(SUMMARY_MAX),
             ]
+        );
+    }
+
+    #[test]
+    fn cuts_a_summary_of_clusters_heavy_with_marks_by_its_units_too() {
+        // Each cluster is a letter and 200 combining marks: 201 UTF-16 units.
+        let heavy = format!("a{}", "\u{301}".repeat(200));
+        let summary = summary_of(&sent(None, &heavy.repeat(3)));
+        assert_eq!(
+            (summary.encode_utf16().count() <= SUMMARY_UNITS, summary),
+            (true, heavy.repeat(2))
         );
     }
 
