@@ -3,8 +3,9 @@
 
 use bazhen_protocol::ids::{AgentId, MessageId};
 use bazhen_protocol::mail::MailboxState;
-use bazhen_protocol::mail_events::MailQueued;
+use bazhen_protocol::mail_events::{MailQueued, MailRequeued, RequeueReason};
 use rusqlite::OptionalExtension;
+use rusqlite::types::Type;
 
 use crate::events::{AppendError, NewEvent};
 use crate::{MailChange, Reads, Writer};
@@ -15,6 +16,19 @@ pub struct Message {
     pub agent: String,
     pub body: String,
     pub state: MailboxState,
+}
+
+/// One of an agent's messages as the mailbox hands it over and settles it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mail {
+    pub id: String,
+    pub body: String,
+    /// The turn it was seen in, or folded into.
+    pub prompt_id: Option<String>,
+    /// When it was first offered, for one offered before.
+    pub first_offered: Option<String>,
+    /// How often the agent's side has failed it.
+    pub failures: u32,
 }
 
 /// What an agent's message to another names it by: the reader is told which peer wrote it.
@@ -31,7 +45,7 @@ impl Reads<'_> {
     ///
     /// # Errors
     ///
-    /// `SQLite`'s, or a state the protocol doesn't name.
+    /// `SQLite`'s, or a stored state the protocol doesn't name, as a failure to read its column.
     pub fn message(self, id: &str) -> rusqlite::Result<Option<Message>> {
         let row: Option<(String, String, String)> = self
             .0
@@ -42,11 +56,39 @@ impl Reads<'_> {
             )
             .optional()?;
         row.map(|(agent, body, state)| {
-            let state = serde_json::from_value(serde_json::Value::String(state))
-                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+            let state =
+                serde_json::from_value(serde_json::Value::String(state)).map_err(|err| {
+                    rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(err))
+                })?;
             Ok(Message { agent, body, state })
         })
         .transpose()
+    }
+
+    /// `agent_id`'s messages in any of `states`, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn mail(self, agent_id: &str, states: &[MailboxState]) -> rusqlite::Result<Vec<Mail>> {
+        let marks = vec!["?"; states.len()].join(", ");
+        let mut rows = self.0.prepare(&format!(
+            "SELECT m.id, m.body, m.prompt_id, e.ts, m.failures FROM mailbox m
+               LEFT JOIN events e ON e.id = m.first_offered_event_id
+             WHERE m.agent_session_id = ? AND m.state IN ({marks})
+             ORDER BY m.created_event_id"
+        ))?;
+        let params = std::iter::once(agent_id).chain(states.iter().map(|s| s.as_str()));
+        rows.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok(Mail {
+                id: row.get(0)?,
+                body: row.get(1)?,
+                prompt_id: row.get(2)?,
+                first_offered: row.get(3)?,
+                failures: row.get(4)?,
+            })
+        })?
+        .collect()
     }
 
     /// What `agent_id`'s message to another names it by; `None` for an agent the store doesn't
@@ -78,17 +120,14 @@ impl Writer<'_> {
     ///
     /// # Errors
     ///
-    /// The append's, or no random bytes for the id.
+    /// The append's, or [`AppendError::NoId`] for no random bytes to mint the id with.
     pub fn queue_mail(
         &self,
         agent: &AgentId,
         body: &str,
         from: Option<&AgentId>,
     ) -> Result<(MessageId, u64), AppendError> {
-        let urandom = crate::urandom().map_err(|e| AppendError::Refused {
-            event: "mailbox.queued",
-            reason: format!("no id can be made: {e}"),
-        })?;
+        let urandom = crate::urandom().map_err(AppendError::NoId)?;
         let message = MessageId::mint(crate::now_ms(), urandom);
         let id = self.append(&NewEvent::Mail {
             message: message.clone(),
@@ -100,6 +139,33 @@ impl Writer<'_> {
             }),
         })?;
         Ok((message, id))
+    }
+
+    /// Requeues every message a hook held, as a daemon that stopped leaves them: the hooks went
+    /// with its socket. Answers how many.
+    ///
+    /// # Errors
+    ///
+    /// The appends'.
+    pub fn requeue_in_flight(&self) -> Result<usize, AppendError> {
+        let held: Vec<String> = self
+            .connection()
+            .prepare(
+                "SELECT id FROM mailbox WHERE state IN ('offered', 'emitted', 'seen')
+                 ORDER BY created_event_id",
+            )?
+            .query_map((), |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let held: Vec<MessageId> = held.iter().filter_map(|id| MessageId::parse(id)).collect();
+        for message in &held {
+            self.mail_step(
+                message,
+                MailChange::Requeued(MailRequeued {
+                    reason: RequeueReason::DaemonRestart,
+                }),
+            )?;
+        }
+        Ok(held.len())
     }
 
     /// Records Bazhen's step of `message` towards delivery.
@@ -120,9 +186,13 @@ impl Writer<'_> {
 mod tests {
     use bazhen_protocol::ids::{AgentId, MessageId};
     use bazhen_protocol::mail::MailboxState;
-    use bazhen_protocol::mail_events::{MailAccepted, MailUndeliverable, UndeliverableReason};
+    use bazhen_protocol::mail_events::{
+        MailAccepted, MailOffered, MailRequeued, MailSeen, MailUndeliverable, RequeueReason,
+        UndeliverableReason,
+    };
+    use rusqlite::types::Type;
 
-    use super::{Message, Sender};
+    use super::{Mail, Message, Sender};
     use crate::testing::TempDir;
     use crate::{MailChange, Store};
 
@@ -229,6 +299,135 @@ mod tests {
         assert_eq!(
             (accepted, given_up, state),
             (true, false, Some(MailboxState::QueuedInCodex))
+        );
+    }
+
+    fn step(store: &mut Store, message: &MessageId, change: MailChange) {
+        store.write(|w| w.mail_step(message, change)).unwrap();
+    }
+
+    fn offered(prompt: Option<&str>) -> MailChange {
+        MailChange::Offered(MailOffered {
+            prompt_id: prompt.map(str::to_owned),
+        })
+    }
+
+    #[test]
+    fn reads_an_agents_mail_in_the_states_asked_oldest_first_with_its_first_offer() {
+        let dir = TempDir::new("mail");
+        let mut store = store(&dir);
+        let (first, second) = (queued(&mut store, None), queued(&mut store, None));
+        step(&mut store, &first, offered(Some("p-1")));
+        step(&mut store, &first, MailChange::Emitted);
+        step(&mut store, &second, offered(None));
+        step(
+            &mut store,
+            &second,
+            MailChange::Requeued(MailRequeued {
+                reason: RequeueReason::NotSeen,
+            }),
+        );
+        let offered_at: String = store
+            .db
+            .query_row(
+                "SELECT ts FROM events WHERE type = 'mailbox.offered' AND entity_id = ?",
+                [second.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let reads = store.reads();
+        let ids = |states: &[MailboxState]| {
+            let mail = reads.mail(AGENT, states).unwrap();
+            mail.into_iter().map(|m| m.id).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            (
+                ids(&[MailboxState::Queued, MailboxState::Emitted]),
+                ids(&[MailboxState::Queued]),
+                reads.mail(PEER, &[MailboxState::Queued]).unwrap(),
+                reads.mail(AGENT, &[MailboxState::Queued]).unwrap(),
+            ),
+            (
+                vec![first.as_str().to_owned(), second.as_str().to_owned()],
+                vec![second.as_str().to_owned()],
+                vec![],
+                vec![Mail {
+                    id: second.as_str().to_owned(),
+                    body: "hi".to_owned(),
+                    prompt_id: None,
+                    first_offered: Some(offered_at),
+                    failures: 1,
+                }],
+            )
+        );
+    }
+
+    #[test]
+    fn requeues_what_a_hook_held_when_the_daemon_stopped_and_nothing_else() {
+        let dir = TempDir::new("restart");
+        let mut store = store(&dir);
+        let [waiting, handed, written, seen, done] =
+            std::array::from_fn(|_| queued(&mut store, None));
+        for message in [&handed, &written, &seen, &done] {
+            step(&mut store, message, offered(None));
+        }
+        step(&mut store, &written, MailChange::Emitted);
+        let seen_in = || {
+            MailChange::Seen(MailSeen {
+                prompt_id: "p-1".to_owned(),
+            })
+        };
+        step(&mut store, &seen, seen_in());
+        step(&mut store, &done, seen_in());
+        step(&mut store, &done, MailChange::Delivered);
+        let requeued = store
+            .write(|w| {
+                let requeued = w.requeue_in_flight()?;
+                Ok::<_, crate::AppendError>(requeued)
+            })
+            .unwrap();
+        let reads = store.reads();
+        let state = |m: &MessageId| reads.message(m.as_str()).unwrap().unwrap().state;
+        let failures = reads.mail(AGENT, &[MailboxState::Queued]).unwrap();
+        assert_eq!(
+            (
+                requeued,
+                [&waiting, &handed, &written, &seen, &done].map(state),
+                failures.iter().map(|m| m.failures).sum::<u32>(),
+            ),
+            (
+                3,
+                [
+                    MailboxState::Queued,
+                    MailboxState::Queued,
+                    MailboxState::Queued,
+                    MailboxState::Queued,
+                    MailboxState::Delivered,
+                ],
+                0,
+            )
+        );
+    }
+
+    #[test]
+    fn reads_a_stored_state_the_protocol_doesnt_name_as_a_column_it_cant_read() {
+        let dir = TempDir::new("state");
+        let mut store = store(&dir);
+        let message = queued(&mut store, None);
+        store
+            .db
+            .execute(
+                "UPDATE mailbox SET state = 'lost' WHERE id = ?",
+                [message.as_str()],
+            )
+            .unwrap();
+        let read = store.reads().message(message.as_str());
+        assert!(
+            matches!(
+                read,
+                Err(rusqlite::Error::FromSqlConversionFailure(2, Type::Text, _))
+            ),
+            "{read:?}"
         );
     }
 

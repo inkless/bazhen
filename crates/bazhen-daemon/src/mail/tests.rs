@@ -19,6 +19,9 @@ use crate::testing::{TempDir, paused};
 use crate::tokens::AgentTokens;
 use crate::writer::Thread;
 
+/// How long a test waits for what it waits on before it fails.
+const DEADLINE: Duration = Duration::from_secs(10);
+
 /// A port nothing runs through: the stub's pushes never use it.
 struct Port;
 
@@ -133,21 +136,30 @@ fn fixture(stub: StubHarness) -> Fixture {
 impl Fixture {
     /// Sends `body` to `to` under `key`, as `caller`, and waits for any push it starts.
     fn send(&self, caller: Option<&AgentId>, to: &AgentId, key: &str, body: &str) -> (u16, Value) {
-        let request = json!({ "idempotencyKey": key, "body": body }).to_string();
-        let caller = axum::Extension(Caller(caller.cloned()));
-        let response = self.runtime.block_on(async {
-            let response = send(
-                State(self.shared.clone()),
-                Path(to.as_str().to_owned()),
-                Some(caller),
-                Bytes::from(request),
-            )
-            .await;
+        let sent = self.send_to(caller, to.as_str(), key, body);
+        self.settle();
+        sent
+    }
+
+    /// Waits for every push under way.
+    fn settle(&self) {
+        self.runtime.block_on(async {
             self.tracker.close();
             self.tracker.wait().await;
             self.tracker.reopen();
-            response
         });
+    }
+
+    /// Sends `body` to the agent the path `to` names, under `key`, as `caller`.
+    fn send_to(&self, caller: Option<&AgentId>, to: &str, key: &str, body: &str) -> (u16, Value) {
+        let request = json!({ "idempotencyKey": key, "body": body }).to_string();
+        let caller = axum::Extension(Caller(caller.cloned()));
+        let response = self.runtime.block_on(send(
+            State(self.shared.clone()),
+            Path(to.to_owned()),
+            Some(caller),
+            Bytes::from(request),
+        ));
         let status = response.status().as_u16();
         let bytes = self
             .runtime
@@ -361,5 +373,52 @@ fn leaves_pushed_mail_queued_when_the_harness_says_not_now_or_the_agent_still_st
     assert_eq!(
         (f.stub.pushes.lock().unwrap().len(), f.mail()),
         (1, vec![f.queued("now"), f.queued("later")])
+    );
+}
+
+#[test]
+fn sends_to_an_agent_its_path_names_by_id_or_live_name_and_refuses_one_it_names_none() {
+    let f = fixture(pull());
+    let reader = f.shared.store.reader().unwrap();
+    let name = reader.reads().sender(f.to.as_str()).unwrap().unwrap().name;
+    let answer = |to: &str, key: &str| {
+        let (status, body) = f.send_to(None, to, key, "hi");
+        (status, body["message"].clone())
+    };
+    let unknown = "agent_01900000000070008000000000000009";
+    assert_eq!(
+        [
+            answer(&name, "k-1"),
+            answer(unknown, "k-2"),
+            answer("nobody", "k-3"),
+        ],
+        [
+            (200, Value::Null),
+            (404, json!(format!("no agent {unknown}"))),
+            (404, json!("no agent nobody by that name")),
+        ]
+    );
+}
+
+#[test]
+fn leaves_pushed_mail_queued_for_an_agent_that_starts_again_while_its_push_is_under_way() {
+    let f = fixture(push([Pushed::Accepted { offline: false }]));
+    let open = f.stub.holding_push();
+    f.send_to(None, f.to.as_str(), "k", "hello");
+    // The paused clock stands still while this yields, so the deadline is the wall clock's.
+    let since = std::time::Instant::now();
+    let started = || !f.stub.pushes.lock().unwrap().is_empty();
+    f.runtime.block_on(async {
+        while !started() && since.elapsed() < DEADLINE {
+            tokio::task::yield_now().await;
+        }
+    });
+    assert!(started(), "the push never started");
+    f.set_state(&f.to.clone(), "starting");
+    open.send(()).unwrap();
+    f.settle();
+    assert_eq!(
+        (f.stub.pushes.lock().unwrap().len(), f.mail()),
+        (1, vec![f.queued("hello")])
     );
 }

@@ -144,8 +144,17 @@ pub(crate) async fn send(
             })
             .await
             .map_err(|err| Sending::Internal(err.to_string()))??;
-        if sent.queued == Some(Delivery::Push) {
-            pushing(&shared, &agents, sent.response.message_id.clone(), agent);
+        match sent.queued {
+            Some(Delivery::Push) => {
+                pushing(&shared, &agents, sent.response.message_id.clone(), agent);
+            }
+            Some(Delivery::Pull) => {
+                // Queued, the message waits for the next waiter or tool call when this fails.
+                if let Err(err) = shared.hooks.mailbox.offer(&shared, &agent).await {
+                    tracing::warn!("bazhen: couldn't offer mail to {agent}: {err}");
+                }
+            }
+            Some(Delivery::None) | None => {}
         }
         Ok(sent.response)
     };
@@ -265,7 +274,7 @@ fn queue(
     })
 }
 
-fn harness_of<'a>(agents: &'a Agents, harness: &str) -> Option<&'a dyn Harness> {
+pub(crate) fn harness_of<'a>(agents: &'a Agents, harness: &str) -> Option<&'a dyn Harness> {
     agents.harnesses().get(HarnessId::parse(harness)?)
 }
 

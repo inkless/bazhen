@@ -280,6 +280,9 @@ pub enum AppendError {
     /// The projection refused the event, and nothing of it was recorded.
     #[error("{event} refused: {reason}")]
     Refused { event: &'static str, reason: String },
+    /// No random bytes could be read to mint a new entity's id.
+    #[error("no id can be minted: {0}")]
+    NoId(#[source] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]

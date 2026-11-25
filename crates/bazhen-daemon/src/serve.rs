@@ -449,6 +449,7 @@ async fn listen(
             crate::stream::on_holders(&store, streaming, &running.shells, &tracker, stop.token());
         watching = Some((running.shells, running.events));
     }
+    crate::hooks::mailbox::requeue_in_flight(&store).await;
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,

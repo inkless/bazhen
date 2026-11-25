@@ -320,8 +320,11 @@ impl Agents {
     }
 
     /// Runs `work` on the agents' tracker, which the daemon drains before it stops.
-    pub(crate) fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) {
-        self.deps.tracker.spawn(work);
+    pub(crate) fn spawn(
+        &self,
+        work: impl Future<Output = ()> + Send + 'static,
+    ) -> tokio::task::JoinHandle<()> {
+        self.deps.tracker.spawn(work)
     }
 
     async fn write<T: Send + 'static>(
