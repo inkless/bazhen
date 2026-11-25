@@ -241,7 +241,7 @@ fn records_no_assignment_when_its_agent_takes_no_mail() {
 fn hands_an_assignments_mail_over_only_once_its_write_commits() {
     let f = fixture(pull());
     let task = made(&f, "c", "b");
-    // The answer the key keeps is the write's last step: refusing it fails the write after the
+    // The first answer the write keeps is its last step: refusing it fails the write after the
     // grant has queued its mail.
     f.runtime
         .block_on(f.shared.store.run(|store| {
