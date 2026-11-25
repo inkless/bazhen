@@ -7,9 +7,9 @@ use crate::codex::tests::{
 };
 use crate::codex::{Codex, launch};
 use crate::{
-    Answer, Harness, HarnessActivity, HarnessDoctor, Output, Pending, Resolution, RunError, RunPort,
+    Answer, Harness, HarnessActivity, HarnessDoctor, IngestContext, Output, Pending, Resolution,
+    RunError, RunPort, SessionRef,
 };
-use bazhen_protocol::agents::{ExternalRef, ExternalRefKind};
 use bazhen_protocol::ids::EnvironmentId;
 use std::time::Duration;
 
@@ -564,18 +564,254 @@ fn a_request_asked_on_a_connection_that_ended_is_settled_by_nothing_said_after_i
 }
 
 #[test]
-fn a_title_is_not_followed_yet_and_asks_the_server_nothing() {
+fn a_title_naming_no_thread_leaves_the_agent_where_it_was_asking_nothing() {
     let codex = served(&[]);
     let mut s = session(&codex);
     let wire = resumes(&[]);
     assert_eq!(
-        ready(s.follow(&bound_to(THREAD), OTHER_TITLE, &wire)),
+        ready(s.follow(&bound_to(THREAD), "my project", &wire)),
         Followed::Untracked {
             detail: "thread switches are not being tracked".to_owned()
         }
     );
     assert_eq!(wire.sent(), Vec::<Value>::new());
-    assert!(!s.may_follow_to(THREAD, &SessionKey(THREAD.to_owned())));
+}
+
+#[test]
+fn a_title_naming_the_agents_own_thread_keeps_it_there() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let wire = resumes(&[]);
+    let agent = bound_to(THREAD);
+    assert_eq!(
+        ready(s.follow(&agent, "019a8f3c-5b7e-7d21-9f4a-0c1e2", &wire)),
+        Followed::Bound(thread_ref(THREAD))
+    );
+    assert_eq!(wire.sent(), Vec::<Value>::new());
+}
+
+#[test]
+fn a_title_naming_a_thread_the_server_announced_moves_the_agent_once_it_is_resumed() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let started = json!({ "thread": { "id": OTHER, "ephemeral": false } });
+    notify(&codex, None, "thread/started", &started);
+    let wire = resumes(&[(OTHER, Some("idle"))]);
+    assert_eq!(
+        ready(s.follow(&bound_to(THREAD), OTHER_TITLE, &wire)),
+        Followed::Bound(thread_ref(OTHER))
+    );
+    assert_eq!(wire.sent(), vec![resume_of(OTHER)]);
+}
+
+/// A server that lists `pages`, each its threads and the next one's cursor, from the cursor each
+/// was asked for, and resumes the threads `resumable` names.
+fn lists(
+    pages: &'static [(
+        Option<&'static str>,
+        &'static [&'static str],
+        Option<&'static str>,
+    )],
+    resumable: &'static [&'static str],
+) -> Wire {
+    Wire::new(move |method, params| match method {
+        "thread/list" => {
+            let cursor = params.get("cursor").and_then(Value::as_str);
+            let page = pages.iter().find(|(at, _, _)| *at == cursor);
+            let (_, threads, next) = page.ok_or_else(|| refused("no page"))?;
+            let data: Vec<Value> = threads.iter().map(|id| json!({ "id": id })).collect();
+            Ok(json!({ "data": data, "nextCursor": next }))
+        }
+        "thread/resume" if resumable.contains(&params["threadId"].as_str().unwrap()) => {
+            Ok(result("idle"))
+        }
+        _ => Err(refused(method)),
+    })
+}
+
+fn listed_at(wire: &Wire) -> Vec<Value> {
+    wire.sent()
+        .into_iter()
+        .filter(|s| s["method"] == "thread/list")
+        .map(|s| s["params"].clone())
+        .collect()
+}
+
+#[test]
+fn a_title_naming_a_thread_the_server_lists_moves_the_agent_once_it_is_resumed() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let wire = lists(
+        &[
+            (None, &[THREAD], Some("c2")),
+            (
+                Some("c2"),
+                &[OTHER, "019a8f41-0000-7000-8000-000000000001"],
+                None,
+            ),
+        ],
+        &[OTHER],
+    );
+    assert_eq!(
+        ready(s.follow(&bound_to(THREAD), OTHER_TITLE, &wire)),
+        Followed::Bound(thread_ref(OTHER))
+    );
+    assert_eq!(
+        listed_at(&wire),
+        [
+            json!({ "limit": 50 }),
+            json!({ "limit": 50, "cursor": "c2" })
+        ]
+    );
+    assert_eq!(wire.sent().last(), Some(&resume_of(OTHER)));
+}
+
+#[test]
+fn a_titles_thread_is_looked_for_far_back_first_and_then_only_on_the_first_page() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let agent = bound_to(THREAD);
+    let endless = || lists(&[(None, &[], Some("c")), (Some("c"), &[], Some("c"))], &[]);
+    let wire = endless();
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    assert_eq!(listed_at(&wire).len(), 40);
+    let wire = endless();
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    assert_eq!(listed_at(&wire), [json!({ "limit": 50 })]);
+    // Another title is a move of its own.
+    let wire = endless();
+    let another = "019a8f41-0000-7000-8000-00000...";
+    assert_eq!(ready(s.follow(&agent, another, &wire)), Followed::Pending);
+    assert_eq!(listed_at(&wire).len(), 40);
+    // A list that fails, or ends, ends the looking.
+    let wire = lists(&[(None, &[], Some("c"))], &[]);
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    assert_eq!(listed_at(&wire).len(), 2);
+    let wire = lists(&[(None, &[], None)], &[]);
+    let last = "019a8f42-0000-7000-8000-00000...";
+    assert_eq!(ready(s.follow(&agent, last, &wire)), Followed::Pending);
+    assert_eq!(listed_at(&wire).len(), 1);
+}
+
+/// How many pages a second try at [`OTHER_TITLE`] lists, after a first that found nothing and
+/// `between`.
+fn next_try_lists(between: impl FnOnce(&Codex, &mut dyn Session)) -> usize {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let agent = bound_to(THREAD);
+    let endless = || lists(&[(None, &[], Some("c")), (Some("c"), &[], Some("c"))], &[]);
+    let wire = endless();
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    between(&codex, s.as_mut());
+    let wire = endless();
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    listed_at(&wire).len()
+}
+
+/// The agent's terminal titled `title`, as the daemon reports it.
+fn retitled(codex: &Codex, title: &str) {
+    let own = SessionRef {
+        kind: ExternalRefKind::CodexThread,
+        id: THREAD.to_owned(),
+    };
+    codex.ingest(
+        Report::TerminalTitle { title },
+        &IngestContext {
+            agent: Some(&agent()),
+            session: Some(&own),
+            ..IngestContext::default()
+        },
+    );
+}
+
+#[test]
+fn a_move_given_up_or_left_behind_is_looked_for_far_back_again() {
+    assert_eq!(next_try_lists(|_, _| {}), 1, "still waiting");
+    assert_eq!(next_try_lists(|_, s| s.settled(&agent())), 40, "settled");
+    let gone = |_: &Codex, s: &mut dyn Session| drop(ready(s.connected(&resumes(&[]), &[])));
+    assert_eq!(next_try_lists(gone), 40, "the agent gone");
+    let still = |_: &Codex, s: &mut dyn Session| {
+        let wire = resumes(&[(THREAD, Some("idle"))]);
+        drop(ready(s.connected(&wire, &[bound_to(THREAD)])));
+    };
+    assert_eq!(next_try_lists(still), 1, "the agent still bound");
+    let blank = |codex: &Codex, _: &mut dyn Session| retitled(codex, "");
+    assert_eq!(next_try_lists(blank), 40, "a blank title");
+    let back = |codex: &Codex, _: &mut dyn Session| {
+        retitled(codex, "019a8f3c-5b7e-7d21-9f4a-0c1e2...");
+    };
+    assert_eq!(next_try_lists(back), 40, "back on its own thread");
+    let again = |codex: &Codex, _: &mut dyn Session| retitled(codex, OTHER_TITLE);
+    assert_eq!(next_try_lists(again), 1, "the same title again");
+}
+
+#[test]
+fn a_title_more_than_one_thread_matches_is_not_followed() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let wire = lists(
+        &[(None, &[OTHER, "019a8f40-0000-7000-8000-000000000004"], None)],
+        &[OTHER],
+    );
+    assert_eq!(
+        ready(s.follow(&bound_to(THREAD), OTHER_TITLE, &wire)),
+        Followed::Untracked {
+            detail: UNTRACKED.to_owned()
+        }
+    );
+    assert_eq!(wire.asked(), ["thread/list"]);
+}
+
+#[test]
+fn a_thread_that_cant_be_resumed_yet_is_tried_again_without_looking_again() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let agent = bound_to(THREAD);
+    let wire = lists(&[(None, &[OTHER], None)], &[]);
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    assert_eq!(wire.asked(), ["thread/list", "thread/resume"]);
+    let wire = lists(&[], &[OTHER]);
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Bound(thread_ref(OTHER))
+    );
+    assert_eq!(wire.sent(), vec![resume_of(OTHER)]);
+    // Bound, so the move is over: the same title is looked for again from the start.
+    let wire = lists(&[(None, &[], None)], &[]);
+    assert_eq!(
+        ready(s.follow(&agent, OTHER_TITLE, &wire)),
+        Followed::Pending
+    );
+    assert_eq!(wire.asked(), ["thread/list"]);
+}
+
+#[test]
+fn a_follow_may_find_a_thread_the_server_announced_only_if_its_title_names_it() {
+    let s = session(&served(&[]));
+    let announced = SessionKey(THREAD.to_owned());
+    assert!(s.may_follow_to("019a8f3c-5b7e-7d21-9f4a-0c1e2", &announced));
+    assert!(s.may_follow_to(THREAD, &announced));
+    assert!(s.may_follow_to(" 019a8f3c-5b7e-7d21-9f4a-0c1e2…", &announced));
+    assert!(!s.may_follow_to(OTHER_TITLE, &announced));
+    assert!(!s.may_follow_to("my project", &announced));
 }
 
 #[test]
@@ -590,6 +826,57 @@ fn reads_what_a_resume_answers_as_the_typescript_daemon_did() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn reads_a_list_and_matches_a_title_to_its_threads_as_the_typescript_daemon_did() {
+    for case in fixture("lists.json").as_array().unwrap() {
+        let page = read_thread_list(&Js::parse(case["result"].to_string().as_bytes()).unwrap());
+        let name = &case["name"];
+        assert_eq!(json!(page.threads), case["threads"], "{name}");
+        assert_eq!(json!(page.next_cursor), case["nextCursor"], "{name}");
+    }
+    for case in fixture("titles.json")["matching"].as_array().unwrap() {
+        let ids = case["ids"].as_array().unwrap();
+        let found = matching(
+            case["prefix"].as_str().unwrap(),
+            ids.iter().map(|id| id.as_str().unwrap()),
+        );
+        assert_eq!(json!(found), case["matches"]);
+    }
+}
+
+#[test]
+fn only_the_newest_threads_the_server_announced_are_kept_to_follow_a_title_to() {
+    let codex = served(&[]);
+    let mut s = session(&codex);
+    let announce = |thread: &str| {
+        let started = json!({ "thread": { "id": thread, "ephemeral": false } });
+        notify(&codex, None, "thread/started", &started);
+    };
+    let agent = bound_to(THREAD);
+    let mut follow = || {
+        let wire = lists(&[(None, &[], None)], &[OTHER]);
+        let followed = ready(s.follow(&agent, OTHER_TITLE, &wire));
+        (followed, wire.asked())
+    };
+    let found = (
+        Followed::Bound(thread_ref(OTHER)),
+        vec!["thread/resume".to_owned()],
+    );
+    announce(OTHER);
+    // A thread announced again is kept once.
+    for _ in 0..2000 {
+        announce("019a9000-0000-7000-8000-000000000000");
+    }
+    assert_eq!(follow(), found);
+    for n in 0..1998 {
+        announce(&format!("019a9001-0000-7000-8000-{n:012}"));
+    }
+    assert_eq!(follow(), found);
+    announce("019a9002-0000-7000-8000-000000000000");
+    let lost = (Followed::Pending, vec!["thread/list".to_owned()]);
+    assert_eq!(follow(), lost);
 }
 
 #[test]

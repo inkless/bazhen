@@ -268,6 +268,10 @@ pub trait Session: Send {
     /// trying the old candidate. A follow with no candidate, its title unread, is never asked
     /// about.
     fn may_follow_to(&self, candidate: &str, announced: &SessionKey) -> bool;
+    /// The daemon gave up on moving `agent`, or no TUI is starting in its terminal any more, its
+    /// respawn refused or the terminal closing: what its follows waited on is dropped, so the
+    /// next follow is a first try.
+    fn settled(&mut self, _agent: &AgentId) {}
 }
 
 /// Where a harness's server listens, and the command that starts it.
@@ -298,7 +302,9 @@ pub enum Reloaded {
 /// What one try at following a title did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Followed {
-    /// The agent is on that session now.
+    /// The agent is on that session now. The daemon refuses a session another agent is on as
+    /// [`Followed::Untracked`], as one session holds one agent; the harness doesn't know who is on
+    /// which.
     Bound(ExternalRef),
     /// The session can't be found yet: try again.
     Pending,
