@@ -558,6 +558,7 @@ pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, Stri
         "DismissNoticeRequest" => given(edge::<DismissNoticeRequest>(body)),
         "OpenShellRequest" => given(edge::<OpenShellRequest>(body)),
         "PairRequest" => given(edge::<PairRequest>(body)),
+        "RelaunchAgentRequest" => given(edge::<RelaunchAgentRequest>(body)),
         "RenameShellRequest" => given(edge::<RenameShellRequest>(body)),
         "RespawnAgentRequest" => given(edge::<RespawnAgentRequest>(body)),
         "RestartShellRequest" => given(edge::<RestartShellRequest>(body)),
