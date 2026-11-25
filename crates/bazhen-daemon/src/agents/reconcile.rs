@@ -102,11 +102,7 @@ fn session_of(
     agent: &AgentId,
     found: &FoundAgent,
 ) -> Result<Option<ExternalRef>, AgentError> {
-    let bound = w
-        .reads()
-        .agent_launch(agent.as_str())?
-        .and_then(|launch| launch.external_ref);
-    Ok(bound.or_else(|| {
+    Ok(bound(w, agent)?.or_else(|| {
         found
             .harness_session
             .as_deref()
@@ -114,22 +110,26 @@ fn session_of(
     }))
 }
 
-/// The harness session a start again found running is on, as `Done::recorded` takes it: the one
-/// the agent is bound to, if its binding moved since `requested`, as a quick /clear moves it;
-/// else the one its terminal was started with, if any, which a fresh relaunch's isn't bound to
+/// The harness session `agent` is bound to.
+fn bound(w: &StoreWriter<'_>, agent: &AgentId) -> Result<Option<ExternalRef>, AgentError> {
+    Ok(w.reads()
+        .agent_launch(agent.as_str())?
+        .and_then(|launch| launch.external_ref))
+}
+
+/// The harness session a relaunch found running is on, as `Done::recorded` takes it: the one the
+/// agent is bound to, if its binding moved since the request, as a quick /clear moves it; else
+/// the one its new terminal was started with, if any, which a fresh relaunch's isn't bound to
 /// yet.
-fn restarted_on(
+fn relaunched_on(
     w: &StoreWriter<'_>,
     agent: &AgentId,
     found: &FoundAgent,
-    requested: &str,
 ) -> Result<Option<ExternalRef>, AgentError> {
     let reads = w.reads();
-    let asked = reads.last_event_id(agent.as_str(), requested)?;
+    let asked = reads.last_event_id(agent.as_str(), "agent.relaunch_requested")?;
     let moved = reads.last_event_id(agent.as_str(), "agent.external_ref_updated")?;
-    let bound = reads
-        .agent_launch(agent.as_str())?
-        .and_then(|launch| launch.external_ref);
+    let bound = bound(w, agent)?;
     let tagged = found
         .harness_session
         .as_deref()
@@ -140,16 +140,14 @@ fn restarted_on(
     })
 }
 
-/// A start the runtime shows went ahead, as `respawned` or `relaunched` records it, after the
-/// request of kind `requested`.
+/// A start again the runtime shows went ahead on `session`, as `respawned` or `relaunched`
+/// records it.
 fn restarted(
-    w: &StoreWriter<'_>,
-    agent: &AgentId,
     found: &FoundAgent,
-    requested: &str,
+    session: Option<ExternalRef>,
 ) -> Result<AgentRestarted, AgentError> {
     Ok(AgentRestarted {
-        external_ref: restarted_on(w, agent, found, requested)?,
+        external_ref: session,
         runtime_ref: runtime_ref(&found.terminal)?,
         theme: None,
         harness_name: None,
@@ -245,7 +243,7 @@ fn settle(
             let after = started(
                 w,
                 id,
-                AgentChange::Relaunched(restarted(w, id, found, "agent.relaunch_requested")?),
+                AgentChange::Relaunched(restarted(found, relaunched_on(w, id, found)?)?),
             )?;
             exited_if_dead(w, found)?;
             Ok(after)
@@ -271,13 +269,14 @@ fn settle(
         }
         (AgentState::Starting, Some(TerminalState::Exited)) if agent.generation.is_some() => {
             // The daemon died mid-respawn. The generation is written before the new process
-            // starts, so the next one means it started.
+            // starts, so the next one means it started. It resumed the bound session in the same
+            // terminal, whose tag still names the session it was created on.
             let next = agent.generation.map(|generation| generation + 1);
             if let Some(found) = found.filter(|found| generation_at(&found.terminal) == next) {
                 let after = started(
                     w,
                     id,
-                    AgentChange::Respawned(restarted(w, id, found, "agent.respawn_requested")?),
+                    AgentChange::Respawned(restarted(found, bound(w, id)?)?),
                 )?;
                 exited_if_dead(w, found)?;
                 return Ok(after);
@@ -927,6 +926,33 @@ mod tests {
                 vec!["agent.respawned".to_owned()],
                 generation + 1,
                 (AgentState::Starting, Some(generation + 1))
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn records_a_respawn_a_dead_daemon_left_on_the_session_it_resumed_not_its_terminals_first() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = exited(&stub);
+        let moved = ExternalRef {
+            id: "moved-session".to_owned(),
+            ..bound(&f, &agent).unwrap()
+        };
+        rebound(&f, &agent, &moved);
+        mid_respawn(&f, &agent, generation);
+        f.fake().respawn_unseen(&f.terminal_of(agent.as_str()));
+        reconciled(&f.restarted());
+        assert_eq!(
+            (
+                f.last_of("agent.respawned")
+                    .map(|respawned| respawned["externalRef"]["id"].clone()),
+                bound(&f, &agent).map(|now| now.id),
+            ),
+            (
+                Some(json!("moved-session")),
+                Some("moved-session".to_owned())
             )
         );
     }
