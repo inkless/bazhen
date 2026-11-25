@@ -80,7 +80,14 @@ fn grant(
     key: &str,
     held: u64,
 ) -> &'static str {
-    refusal(check_grant(view, caller, agent, &role(key), &roles(), held))
+    refusal(check_grant(
+        view,
+        caller,
+        agent,
+        &role(key),
+        &roles(),
+        TasksHeld(held),
+    ))
 }
 
 #[test]
@@ -89,7 +96,7 @@ fn lets_a_coordinator_grant_a_lead_a_worker_and_a_reviewer_but_never_another_coo
     let coord = asgn(&a, "coordinator", None);
     let view = open(vec![coord.clone()], None);
     let granted = ["lead", "worker", "reviewer"]
-        .map(|key| check_grant(&view, Some(&a), &b, &role(key), &roles(), 0));
+        .map(|key| check_grant(&view, Some(&a), &b, &role(key), &roles(), TasksHeld(0)));
     assert_eq!(granted, [0, 1, 2].map(|_| Ok(Some(coord.id.clone()))));
     assert_eq!(grant(&view, Some(&a), &b, "coordinator", 0), "forbidden");
 }
@@ -113,7 +120,7 @@ fn lets_the_agent_that_created_a_task_grant_as_its_coordinator_would_from_no_ass
     let [a, b, ..] = agents();
     let view = open(Vec::new(), Some(&a));
     assert_eq!(
-        check_grant(&view, Some(&a), &b, &role("lead"), &roles(), 0),
+        check_grant(&view, Some(&a), &b, &role("lead"), &roles(), TasksHeld(0)),
         Ok(None)
     );
     assert_eq!(grant(&view, Some(&a), &b, "coordinator", 0), "forbidden");
@@ -133,7 +140,7 @@ fn gives_an_owner_that_no_longer_holds_its_subtasks_authority_no_say_over_it() {
                 &view,
                 Some(&a),
                 TaskOutcome::Cancelled,
-                false,
+                Subtasks::Refuse,
                 &roles()
             )),
         ],
@@ -165,7 +172,7 @@ fn refuses_to_assign_anyone_to_a_finished_task() {
 }
 
 #[test]
-fn refuses_an_agent_already_on_the_task_another_role() {
+fn refuses_an_agent_already_on_the_task_in_another_role() {
     let [a, ..] = agents();
     let view = open(vec![asgn(&a, "reviewer", None)], None);
     assert_eq!(grant(&view, None, &a, "worker", 0), "conflict");
@@ -198,7 +205,14 @@ fn hands_on_what_the_holders_definition_grants_not_what_the_builtin_would() {
         None,
     );
     let flat_grant = |caller: &AgentId, key: &str| {
-        refusal(check_grant(&view, Some(caller), &c, &role(key), &flat, 0))
+        refusal(check_grant(
+            &view,
+            Some(caller),
+            &c,
+            &role(key),
+            &flat,
+            TasksHeld(0),
+        ))
     };
     assert_eq!(
         [
@@ -226,7 +240,13 @@ fn leaves_an_assignment_whose_role_is_no_longer_defined_able_to_finish_only_its_
     let view = open(vec![orphan.clone()], None);
     assert_eq!(grant(&view, Some(&a), &b, "worker", 0), "forbidden");
     assert_eq!(
-        check_finish(&view, Some(&a), TaskOutcome::Done, false, &roles()),
+        check_finish(
+            &view,
+            Some(&a),
+            TaskOutcome::Done,
+            Subtasks::Refuse,
+            &roles()
+        ),
         Ok(Finish::Assignment(&orphan))
     );
 }
@@ -237,7 +257,13 @@ fn makes_a_reviewers_done_complete_only_its_own_part_as_a_workers_does() {
     let reviewer = asgn(&b, "reviewer", None);
     let view = open(vec![asgn(&a, "lead", None), reviewer.clone()], None);
     assert_eq!(
-        check_finish(&view, Some(&b), TaskOutcome::Done, false, &roles()),
+        check_finish(
+            &view,
+            Some(&b),
+            TaskOutcome::Done,
+            Subtasks::Refuse,
+            &roles()
+        ),
         Ok(Finish::Assignment(&reviewer))
     );
 }
@@ -301,8 +327,20 @@ fn lets_a_lead_finish_the_task_but_makes_a_workers_done_complete_only_its_own_pa
     let view = open(vec![asgn(&a, "lead", None), worker.clone()], None);
     assert_eq!(
         [
-            check_finish(&view, Some(&a), TaskOutcome::Done, false, &roles()),
-            check_finish(&view, Some(&b), TaskOutcome::Done, false, &roles()),
+            check_finish(
+                &view,
+                Some(&a),
+                TaskOutcome::Done,
+                Subtasks::Refuse,
+                &roles()
+            ),
+            check_finish(
+                &view,
+                Some(&b),
+                TaskOutcome::Done,
+                Subtasks::Refuse,
+                &roles()
+            ),
         ],
         [Ok(Finish::Task), Ok(Finish::Assignment(&worker))]
     );
@@ -318,21 +356,21 @@ fn refuses_a_worker_that_cancels_and_an_agent_with_no_part_in_the_task() {
                 &view,
                 Some(&b),
                 TaskOutcome::Cancelled,
-                false,
+                Subtasks::Refuse,
                 &roles()
             )),
             refusal(check_finish(
                 &view,
                 Some(&c),
                 TaskOutcome::Done,
-                false,
+                Subtasks::Refuse,
                 &roles()
             )),
             refusal(check_finish(
                 &view,
                 Some(&a),
                 TaskOutcome::Cancelled,
-                false,
+                Subtasks::Refuse,
                 &roles()
             )),
         ],
@@ -345,7 +383,13 @@ fn lets_a_coordinator_mark_the_humans_task_done_but_not_cancel_it() {
     let [a, ..] = agents();
     let view = open(vec![asgn(&a, "coordinator", None)], None);
     let finish = |caller: Caller<'_>, outcome| {
-        refusal(check_finish(&view, caller, outcome, false, &roles()))
+        refusal(check_finish(
+            &view,
+            caller,
+            outcome,
+            Subtasks::Refuse,
+            &roles(),
+        ))
     };
     assert_eq!(
         [
@@ -369,13 +413,19 @@ fn refuses_to_finish_over_open_subtasks_unless_they_are_cancelled_with_it() {
             &view,
             Some(&a),
             TaskOutcome::Done,
-            false,
+            Subtasks::Refuse,
             &roles()
         )),
         "conflict"
     );
     assert_eq!(
-        check_finish(&view, Some(&a), TaskOutcome::Done, true, &roles()),
+        check_finish(
+            &view,
+            Some(&a),
+            TaskOutcome::Done,
+            Subtasks::CancelWithIt,
+            &roles()
+        ),
         Ok(Finish::Task)
     );
 }
@@ -387,7 +437,13 @@ fn refuses_to_finish_a_task_twice() {
         ..open(Vec::new(), None)
     };
     assert_eq!(
-        refusal(check_finish(&view, None, TaskOutcome::Done, true, &roles())),
+        refusal(check_finish(
+            &view,
+            None,
+            TaskOutcome::Done,
+            Subtasks::CancelWithIt,
+            &roles()
+        )),
         "conflict"
     );
 }
@@ -437,18 +493,58 @@ fn words_each_refusal_as_the_typescript_daemon_does() {
         ..open(Vec::new(), None)
     };
     let said = [
-        message(check_grant(&view, Some(&c), &c, &role("worker"), &roles(), 0).map(drop)),
-        message(check_grant(&view, Some(&a), &c, &role("lead"), &roles(), 0).map(drop)),
-        message(check_grant(&view, None, &c, &role("auditor"), &roles(), 0).map(drop)),
-        message(check_grant(&view, None, &b, &role("reviewer"), &roles(), 0).map(drop)),
-        message(check_grant(&view, None, &c, &role("lead"), &roles(), 0).map(drop)),
-        message(check_grant(&view, None, &c, &role("worker"), &roles(), 1).map(drop)),
-        message(check_grant(&finished, None, &c, &role("worker"), &roles(), 0).map(drop)),
+        message(
+            check_grant(&view, Some(&c), &c, &role("worker"), &roles(), TasksHeld(0)).map(drop),
+        ),
+        message(check_grant(&view, Some(&a), &c, &role("lead"), &roles(), TasksHeld(0)).map(drop)),
+        message(check_grant(&view, None, &c, &role("auditor"), &roles(), TasksHeld(0)).map(drop)),
+        message(check_grant(&view, None, &b, &role("reviewer"), &roles(), TasksHeld(0)).map(drop)),
+        message(check_grant(&view, None, &c, &role("lead"), &roles(), TasksHeld(0)).map(drop)),
+        message(check_grant(&view, None, &c, &role("worker"), &roles(), TasksHeld(1)).map(drop)),
+        message(
+            check_grant(&finished, None, &c, &role("worker"), &roles(), TasksHeld(0)).map(drop),
+        ),
         message(check_unassign(&view, Some(&c), &worker.id, &[])),
-        message(check_finish(&view, Some(&c), TaskOutcome::Done, false, &roles()).map(drop)),
-        message(check_finish(&view, Some(&a), TaskOutcome::Cancelled, false, &roles()).map(drop)),
-        message(check_finish(&finished, None, TaskOutcome::Done, false, &roles()).map(drop)),
-        message(check_finish(&with_sub, None, TaskOutcome::Done, false, &roles()).map(drop)),
+        message(
+            check_finish(
+                &view,
+                Some(&c),
+                TaskOutcome::Done,
+                Subtasks::Refuse,
+                &roles(),
+            )
+            .map(drop),
+        ),
+        message(
+            check_finish(
+                &view,
+                Some(&a),
+                TaskOutcome::Cancelled,
+                Subtasks::Refuse,
+                &roles(),
+            )
+            .map(drop),
+        ),
+        message(
+            check_finish(
+                &finished,
+                None,
+                TaskOutcome::Done,
+                Subtasks::Refuse,
+                &roles(),
+            )
+            .map(drop),
+        ),
+        message(
+            check_finish(
+                &with_sub,
+                None,
+                TaskOutcome::Done,
+                Subtasks::Refuse,
+                &roles(),
+            )
+            .map(drop),
+        ),
         message(check_note(&view, Some(&c))),
     ];
     assert_eq!(
@@ -552,9 +648,14 @@ fn run(owner: Option<&AgentId>, list: &[Command]) -> Vec<Vec<Granted>> {
                 role: key,
             } => {
                 let agent = &agents[*agent];
-                if let Ok(parent) =
-                    check_grant(&view, pick(*caller), agent, &role(key), &roles(), 0)
-                {
+                if let Ok(parent) = check_grant(
+                    &view,
+                    pick(*caller),
+                    agent,
+                    &role(key),
+                    &roles(),
+                    TasksHeld(0),
+                ) {
                     active.push(Granted {
                         active: asgn(agent, key, parent.as_ref()),
                         by: pick(*caller).cloned(),

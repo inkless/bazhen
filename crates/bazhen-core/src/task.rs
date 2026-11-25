@@ -10,9 +10,6 @@ use bazhen_protocol::tasks::{AssignmentEndReason, AssignmentState, TaskOutcome, 
 use crate::machine::InvalidTransition;
 use crate::roles::RoleBook;
 
-#[cfg(test)]
-mod tests;
-
 /// The state finishing a task in `from` with `outcome` leads to.
 ///
 /// # Errors
@@ -202,9 +199,13 @@ pub fn check_delegate(
     Ok(check_hand_on(parent, Some(caller), role, roles)?.map(|from| from.id.clone()))
 }
 
+/// How many tasks an agent already holds a role on, which the role may limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TasksHeld(pub u64);
+
 /// Checks that `caller` may give `agent` the role on the task, and returns the assignment the new
 /// one is delegated from: `None` when the human or the task's owner grants it. `held` is how many
-/// tasks the agent already holds that role on, which the role may limit.
+/// tasks the agent already holds that role on.
 ///
 /// # Errors
 ///
@@ -217,21 +218,21 @@ pub fn check_grant(
     agent: &AgentId,
     role: &Role,
     roles: &RoleBook,
-    held: u64,
+    TasksHeld(held): TasksHeld,
 ) -> Result<Option<AssignmentId>, TaskRefused> {
     let from = check_hand_on(view, caller, role, roles)?;
     if view.active.iter().any(|a| a.agent_id == *agent) {
         return Err(conflict(format!("{agent} is already assigned to the task")));
     }
     let limits = roles.rules(role);
-    let role = role.as_str();
+    let key = role.as_str();
     if let Some(holder) = view
         .active
         .iter()
-        .find(|a| limits.single_per_task && a.role.as_str() == role)
+        .find(|a| limits.single_per_task && a.role.as_str() == key)
     {
         return Err(conflict(format!(
-            "{} is already the task's {role}",
+            "{} is already the task's {key}",
             holder.agent_id
         )));
     }
@@ -240,7 +241,7 @@ pub fn check_grant(
     {
         let tasks = if held == 1 { "task" } else { "tasks" };
         return Err(conflict(format!(
-            "{agent} already works on {held} {tasks} as a {role}, the most a {role} may at once: \
+            "{agent} already works on {held} {tasks} as a {key}, the most a {key} may at once: \
              finish or unassign one first"
         )));
     }
@@ -272,6 +273,14 @@ pub fn check_unassign(
     }
 }
 
+/// What finishing a task does to its open subtasks: refuses to finish over them, or cancels them
+/// with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subtasks {
+    Refuse,
+    CancelWithIt,
+}
+
 /// Finishing ends the task, or, for a worker, only the worker's own part in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Finish<'v> {
@@ -282,18 +291,19 @@ pub enum Finish<'v> {
 /// What `caller` finishing the task does. The human, its owner, its coordinator or its lead
 /// finishes the task, except that only the human cancels a task the human owns; a worker's
 /// `done` completes only its own assignment, since others may still be working on the task. A
-/// task with open subtasks finishes only when told to cancel them with it (`cascade`), so no
+/// task with open subtasks finishes only when told to cancel them with it
+/// ([`Subtasks::CancelWithIt`]), so no
 /// subtask outlives the work it was part of.
 ///
 /// # Errors
 ///
-/// Conflict when the task is finished, or has open subtasks and no `cascade`; forbidden when an
+/// Conflict when the task is finished, or has open subtasks it would refuse; forbidden when an
 /// agent cancels the human's task, or the caller neither runs the task nor finishes its own part.
 pub fn check_finish<'v>(
     view: &'v TaskView,
     caller: Caller<'_>,
     outcome: TaskOutcome,
-    cascade: bool,
+    subtasks: Subtasks,
     roles: &RoleBook,
 ) -> Result<Finish<'v>, TaskRefused> {
     if view.state != TaskState::Open {
@@ -322,7 +332,7 @@ pub fn check_finish<'v>(
             ))),
         };
     }
-    if !view.open_subtasks.is_empty() && !cascade {
+    if !view.open_subtasks.is_empty() && subtasks == Subtasks::Refuse {
         let open: Vec<&str> = view.open_subtasks.iter().map(TaskId::as_str).collect();
         return Err(conflict(format!(
             "the task has open subtasks ({}): finish them first, or cancel them with it",
@@ -353,3 +363,6 @@ pub fn check_note(view: &TaskView, caller: Caller<'_>) -> Result<(), TaskRefused
 fn caller_name(caller: Caller<'_>) -> String {
     caller.map_or_else(|| "the human".to_owned(), |agent| format!("agent {agent}"))
 }
+
+#[cfg(test)]
+mod tests;
