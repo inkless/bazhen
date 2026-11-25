@@ -4,9 +4,15 @@
 
 use bazhen_core::agent::agent_commands;
 use bazhen_protocol::agent_events::AgentSignalled;
-use bazhen_protocol::agents::{AgentCommand, AgentCommandResponse, SignalAgentRequest};
+use bazhen_protocol::agents::{
+    AgentCommand, AgentCommandResponse, AgentState, CloseAgentRequest, SignalAgentRequest,
+};
 use bazhen_protocol::ids::AgentId;
-use bazhen_store::{Actor, AgentChange, AgentTerminal, NewEvent};
+use bazhen_protocol::mail_events::{MailUndeliverable, UndeliverableReason};
+use bazhen_protocol::record::Record;
+use bazhen_store::{
+    Actor, AgentChange, AgentTerminal, MailChange, NewEvent, Writer as StoreWriter,
+};
 use serde::Serialize;
 
 use super::{AgentError, Agents};
@@ -50,6 +56,70 @@ fn recorded(found: &AgentTerminal) -> Option<Recorded> {
         terminal_id: found.terminal_id.clone()?,
         locator: found.locator.clone()?,
     })
+}
+
+/// What a forced close leaves running, as its log line says it (`stillRunning`).
+fn still_running(found: &AgentTerminal) -> String {
+    let field = |name: &str| {
+        found
+            .locator
+            .as_deref()
+            .and_then(|text| serde_json::from_str::<Record<String>>(text).ok())
+            .and_then(|locator| {
+                locator
+                    .entries()
+                    .iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.clone())
+            })
+            .unwrap_or_else(|| "unknown".to_owned())
+    };
+    if found.runtime.as_deref() == Some("holder") {
+        format!(
+            "its holder (pid {}) may still be running it",
+            field("holderPid")
+        )
+    } else {
+        format!(
+            "its terminal's tmux server (pid {}) may still be running it",
+            field("serverPid")
+        )
+    }
+}
+
+/// Appends one change to `agent`, as `actor` made it.
+fn append(
+    w: &StoreWriter<'_>,
+    agent: &AgentId,
+    actor: Actor,
+    change: AgentChange,
+) -> Result<u64, AgentError> {
+    Ok(w.append(&NewEvent::Agent {
+        agent: agent.clone(),
+        actor: actor.as_str().to_owned(),
+        change,
+    })?)
+}
+
+/// Records `agent` closed, and the mail still on its way to it undeliverable, as `actor` closed
+/// it (`recordClosed`): in the caller's transaction, so no mail is left on its way to an agent
+/// recorded closed.
+pub(crate) fn record_closed(
+    w: &StoreWriter<'_>,
+    agent: &AgentId,
+    actor: Actor,
+) -> Result<Vec<u64>, AgentError> {
+    let mut ids = vec![append(w, agent, actor, AgentChange::Closed)?];
+    for message in w.reads().in_flight_mail(agent.as_str())? {
+        ids.push(w.append(&NewEvent::Mail {
+            message,
+            actor: Actor::System.as_str().to_owned(),
+            change: MailChange::Undeliverable(MailUndeliverable {
+                reason: UndeliverableReason::AgentClosed,
+            }),
+        })?);
+    }
+    Ok(ids)
 }
 
 /// The runtime's failure as a command on agent `id`'s (`fromEnvironment`): typed where the
@@ -123,32 +193,104 @@ impl Agents {
         Ok(Begun::Found(found))
     }
 
-    /// Records a command's last steps with the key's answer, in one transaction.
+    /// Records a command's last steps, as `last` appends them, with the key's answer, in one
+    /// transaction.
     async fn finish(
         &self,
         agent: &AgentId,
         key: &str,
         request: &str,
-        last: Vec<AgentChange>,
+        last: impl FnOnce(&StoreWriter<'_>) -> Result<Vec<u64>, AgentError> + Send + 'static,
     ) -> Result<AgentCommandResponse, AgentError> {
         let (agent, key, request) = (agent.clone(), key.to_owned(), request.to_owned());
         self.write(move |w| {
-            let mut event_ids = Vec::new();
-            for change in last {
-                event_ids.push(w.append(&NewEvent::Agent {
-                    agent: agent.clone(),
-                    actor: Actor::User.as_str().to_owned(),
-                    change,
-                })?);
-            }
             let response = AgentCommandResponse {
+                event_ids: last(w)?,
                 agent_id: agent,
-                event_ids,
             };
             w.answered(&key, &request, &response)?;
             Ok(response)
         })
         .await
+    }
+
+    /// Ends an agent and its terminal. `closing` is recorded before the terminal is touched; if
+    /// the runtime can't be reached the agent stays closing, and the same command finishes it
+    /// later. A lost agent's terminal is already gone, so it closes without the runtime.
+    pub(crate) async fn close(
+        &self,
+        id: &str,
+        req: &CloseAgentRequest,
+    ) -> Result<AgentCommandResponse, AgentError> {
+        let request = asked("close", id, req)?;
+        let key = &req.idempotency_key;
+        let force = req.force == Some(true);
+        // Force only finishes a close already refused: anything else still ends its terminal.
+        let accepts = |found: &AgentTerminal| {
+            if force {
+                found.state == AgentState::Closing
+            } else {
+                found.state == AgentState::Closed || offers(AgentCommand::Close)(found)
+            }
+        };
+        let _turn = self.turns.take(id).await;
+        let found = match self
+            .begin(id, key, &request, req.generation, accepts)
+            .await?
+        {
+            Begun::Prior(prior) => return Ok(prior),
+            Begun::Found(found) => found,
+        };
+        let agent = found.agent_id.clone();
+        if found.state == AgentState::Closed {
+            return self.finish(&agent, key, &request, |_| Ok(Vec::new())).await;
+        }
+        let closing = if found.state == AgentState::Closing {
+            let agent = id.to_owned();
+            self.write(move |w| Ok(w.reads().last_event_id(&agent, "agent.closing")?))
+                .await?
+        } else {
+            let agent = agent.clone();
+            Some(
+                self.write(move |w| append(w, &agent, Actor::User, AgentChange::Closing))
+                    .await?,
+            )
+        };
+        if found.state != AgentState::Lost {
+            self.end(&found, force).await?;
+        }
+        self.deps.tokens.forget(&agent);
+        let closed = agent.clone();
+        let response = self
+            .finish(&agent, key, &request, move |w| {
+                let mut ids: Vec<u64> = closing.into_iter().collect();
+                ids.extend(record_closed(w, &closed, Actor::User)?);
+                Ok(ids)
+            })
+            .await?;
+        self.deps.prompts.remove(&agent);
+        Ok(response)
+    }
+
+    /// Closes the agent's terminal. Force records closed only what a close could not end: a
+    /// terminal its old server may still run, or one a runtime that can't be reached holds. It
+    /// never skips a close that would work.
+    async fn end(&self, found: &AgentTerminal, force: bool) -> Result<(), AgentError> {
+        let Some(terminal) = recorded(found) else {
+            return Ok(());
+        };
+        match self.deps.terminals.close(&terminal).await {
+            Ok(()) => Ok(()),
+            Err(cause) if force && cause.forceable() => {
+                tracing::warn!(
+                    "bazhen: agent {} closed by force; {}",
+                    found.agent_id,
+                    still_running(found)
+                );
+                Ok(())
+            }
+            Err(cause) => Err(from_runtime(found.agent_id.as_str(), cause)),
+        }
     }
 
     /// Signals a running agent's process; an exit it causes is recorded when the runtime tells
@@ -181,14 +323,11 @@ impl Agents {
             .signal(&terminal, req.signal)
             .await
             .map_err(|cause| from_runtime(id, cause))?;
-        self.finish(
-            &found.agent_id,
-            key,
-            &request,
-            vec![AgentChange::Signalled(AgentSignalled {
-                signal: req.signal,
-            })],
-        )
+        let (agent, signal) = (found.agent_id.clone(), req.signal);
+        self.finish(&found.agent_id, key, &request, move |w| {
+            let change = AgentChange::Signalled(AgentSignalled { signal });
+            Ok(vec![append(w, &agent, Actor::User, change)?])
+        })
         .await
     }
 }
@@ -199,6 +338,7 @@ mod tests {
 
     use super::*;
     use crate::agents::tests::{Fixture, Setup, request, setup_with};
+    use crate::terminals::TerminalError;
     use crate::testing::runtime;
 
     fn launched() -> (Fixture, AgentId, u64) {
@@ -215,6 +355,195 @@ mod tests {
             .generation
             .unwrap();
         (f, launched.agent_id, generation)
+    }
+
+    fn closing(key: &str, generation: u64) -> CloseAgentRequest {
+        CloseAgentRequest {
+            idempotency_key: key.to_owned(),
+            generation,
+            force: None,
+            keep_shells: None,
+            confirm_busy: None,
+            confirmed_busy: None,
+        }
+    }
+
+    fn forcing(key: &str, generation: u64) -> CloseAgentRequest {
+        CloseAgentRequest {
+            force: Some(true),
+            ..closing(key, generation)
+        }
+    }
+
+    /// Records `change` to the agent, as the system made it.
+    fn mark(f: &Fixture, agent: &AgentId, change: AgentChange) {
+        let agent = agent.clone();
+        runtime()
+            .block_on(
+                f.store
+                    .run(move |store| store.write(|w| append(w, &agent, Actor::System, change))),
+            )
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Mail queued for the agent, still on its way to it.
+    fn queue_mail(f: &Fixture, agent: &AgentId) {
+        let agent = agent.clone();
+        runtime()
+            .block_on(f.store.run(move |store| {
+                store.write(|w| {
+                    w.append(&NewEvent::Mail {
+                        message: bazhen_protocol::ids::MessageId::parse(
+                            "msg_0190a1b2c3d47abc8def0123456789a1",
+                        )
+                        .unwrap(),
+                        actor: "user".to_owned(),
+                        change: MailChange::Queued(bazhen_protocol::mail_events::MailQueued {
+                            agent_id: agent,
+                            body: "b".to_owned(),
+                            from: None,
+                        }),
+                    })
+                })
+            }))
+            .unwrap()
+            .unwrap();
+    }
+
+    /// The types of the events recorded after the first `from`.
+    fn since(f: &Fixture, from: usize) -> Vec<String> {
+        f.types().split_off(from)
+    }
+
+    fn closed_terminals(f: &Fixture) -> Vec<String> {
+        let mut closed = Vec::new();
+        f.fake().set(|state| closed.clone_from(&state.closed));
+        closed
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_running_agent_ending_its_terminal_and_making_its_mail_on_the_way_undeliverable() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, agent, generation) = launched();
+        queue_mail(&f, &agent);
+        let before = f.types().len();
+        let id = agent.as_str();
+        let [first, again] = [(); 2].map(|()| {
+            runtime()
+                .block_on(f.agents.close(id, &closing("c-1", generation)))
+                .unwrap()
+        });
+        let ids: Vec<u64> = (before + 1..=before + 3).map(|n| n as u64).collect();
+        assert_eq!(
+            (
+                since(&f, before),
+                first.event_ids.clone(),
+                first == again,
+                closed_terminals(&f),
+                f.token_files(),
+                f.prompts(),
+            ),
+            (
+                vec![
+                    "agent.closing".to_owned(),
+                    "agent.closed".to_owned(),
+                    "mailbox.undeliverable".to_owned()
+                ],
+                ids,
+                true,
+                vec![f.terminal_of(id)],
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_an_agent_closing_when_its_runtime_cant_be_reached_and_a_later_close_finishes_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, agent, generation) = launched();
+        let before = f.types().len();
+        let id = agent.as_str();
+        f.fake().set(|state| state.fail_closes = true);
+        let refused = runtime().block_on(f.agents.close(id, &closing("c-1", generation)));
+        let left = since(&f, before);
+        f.fake().set(|state| state.fail_closes = false);
+        let finished = runtime()
+            .block_on(f.agents.close(id, &closing("c-2", generation)))
+            .unwrap();
+        let first_closing = before as u64 + 1;
+        assert!(
+            matches!(&refused, Err(AgentError::Unavailable(m)) if m.starts_with(&format!("could not reach the environment running agent {id}"))),
+            "{refused:?}"
+        );
+        assert_eq!(
+            (left, finished.event_ids, closed_terminals(&f)),
+            (
+                vec!["agent.closing".to_owned()],
+                vec![first_closing, first_closing + 1],
+                vec![f.terminal_of(id)]
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn forces_only_a_close_already_refused_and_only_past_a_failure_force_may_record_past() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, agent, generation) = launched();
+        let id = agent.as_str();
+        let early = runtime().block_on(f.agents.close(id, &forcing("c-1", generation)));
+        f.fake().set(|state| state.fail_closes = true);
+        let _ = runtime().block_on(f.agents.close(id, &closing("c-2", generation)));
+        f.fake().set(|state| {
+            state.fail_closes = false;
+            state.closes_refused = Some(TerminalError::Stale("replaced".to_owned()));
+        });
+        let stale = runtime().block_on(f.agents.close(id, &forcing("c-3", generation)));
+        f.fake().set(|state| {
+            state.closes_refused = None;
+            state.fail_closes = true;
+        });
+        let forced = runtime().block_on(f.agents.close(id, &forcing("c-4", generation)));
+        assert_eq!(
+            (
+                early,
+                stale.map(|_| ()),
+                forced.map(|_| ()),
+                f.types().last().cloned()
+            ),
+            (
+                Err(AgentError::Conflict(format!("agent {id} is starting"))),
+                Err(AgentError::Conflict(format!(
+                    "agent {id}'s terminal is not the one recorded; its server or pane has changed"
+                ))),
+                Ok(()),
+                Some("agent.closed".to_owned())
+            )
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_lost_agent_without_asking_its_runtime() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let (f, agent, generation) = launched();
+        mark(&f, &agent, AgentChange::Lost);
+        f.fake().set(|state| state.fail_closes = true);
+        let before = f.types().len();
+        let closed =
+            runtime().block_on(f.agents.close(agent.as_str(), &closing("c-1", generation)));
+        assert_eq!(
+            (closed.map(|_| ()), since(&f, before), closed_terminals(&f)),
+            (
+                Ok(()),
+                vec!["agent.closing".to_owned(), "agent.closed".to_owned()],
+                Vec::<String>::new()
+            )
+        );
     }
 
     fn signalling(key: &str, generation: u64) -> SignalAgentRequest {

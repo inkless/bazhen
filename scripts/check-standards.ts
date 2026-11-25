@@ -969,6 +969,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to agent_requests::rename_request, which its agent_requests target fuzzes; reads the path only as the agent's id or live name, for the store to resolve",
   "crates/bazhen-daemon/src/agent_routes.rs::command":
     "hands its body to bazhen_protocol::edge::edge, which the edge target fuzzes for each request it reads; reads the path only as the agent's id or live name, for the store to resolve",
+  "crates/bazhen-daemon/src/agent_routes.rs::close":
+    "hands its body to command; decodes nothing itself",
   "crates/bazhen-daemon/src/agent_routes.rs::signal":
     "hands its body to command; decodes nothing itself",
   "crates/bazhen-daemon/src/agents/transcript.rs::TranscriptReader::holds":

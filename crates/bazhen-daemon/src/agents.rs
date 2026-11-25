@@ -835,6 +835,22 @@ pub(crate) mod tests {
                 .to_owned()
         }
 
+        /// The fake runtime the agents run on.
+        pub(crate) fn fake(&self) -> &Fake {
+            &self.fake
+        }
+
+        /// The token files the agents' starts left.
+        pub(crate) fn token_files(&self) -> Vec<String> {
+            std::fs::read_dir(self.run.join("agents")).map_or_else(
+                |_| Vec::new(),
+                |dir| {
+                    dir.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                        .collect()
+                },
+            )
+        }
+
         /// The signals the runtime was asked to send, in order.
         pub(crate) fn fake_signalled(&self) -> Vec<(String, bazhen_protocol::agents::Signal)> {
             let mut signalled = Vec::new();
@@ -882,7 +898,7 @@ pub(crate) mod tests {
                 .spec_of(answer.terminal_id.as_ref().unwrap().as_str())
         }
 
-        fn prompts(&self) -> Vec<String> {
+        pub(crate) fn prompts(&self) -> Vec<String> {
             std::fs::read_dir(self.run.join("prompts")).map_or_else(
                 |_| Vec::new(),
                 |dir| {

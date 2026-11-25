@@ -105,6 +105,12 @@ impl AgentTokens {
         Self { dir, uid, store }
     }
 
+    /// Removes the agent's token files, once nothing will run on them again; one a mint has yet
+    /// to finish writing is the mint's.
+    pub(crate) fn forget(&self, agent: &AgentId) {
+        remove_others(&self.dir, agent, None);
+    }
+
     /// A new token for `agent`'s next start, in a file of the start's own, which takes the place
     /// of the last at once: the new process may call before its start returns.
     ///
@@ -151,7 +157,7 @@ impl Minted {
                 self.agent
             );
         }
-        remove_others(&self.tokens.dir, &self.agent, &self.file);
+        remove_others(&self.tokens.dir, &self.agent, Some(&self.file));
     }
 
     /// The start was refused: the agent's running process, if it has one, has its token back. An
@@ -226,7 +232,7 @@ fn write_token(dir: &Path, uid: u32, agent: &AgentId) -> Result<(PathBuf, String
 
 /// Removes `agent`'s token files in `dir` but `kept`, once a start went ahead on `kept`: no
 /// process of an earlier start runs any more, so none reads its own.
-pub(crate) fn remove_others(dir: &Path, agent: &AgentId, kept: &Path) {
+pub(crate) fn remove_others(dir: &Path, agent: &AgentId, kept: Option<&Path>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -237,7 +243,7 @@ pub(crate) fn remove_others(dir: &Path, agent: &AgentId, kept: &Path) {
             .and_then(token_file)
             .is_some_and(|(of, half_written)| of == agent.as_str() && !half_written);
         let path = dir.join(&name);
-        if theirs && path != kept {
+        if theirs && Some(path.as_path()) != kept {
             remove(&path);
         }
     }

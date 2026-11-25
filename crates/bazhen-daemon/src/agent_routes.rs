@@ -7,7 +7,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use bazhen_protocol::agents::{AgentCommandResponse, SignalAgentRequest};
+use bazhen_protocol::agents::{AgentCommandResponse, CloseAgentRequest, SignalAgentRequest};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::{EdgeCheck, Refused, edge};
 use bazhen_protocol::ids::AgentId;
@@ -111,6 +111,21 @@ where
         Ok(response) => axum::Json(response).into_response(),
         Err(err) => refusal(&err),
     }
+}
+
+/// `POST /v1/agents/:id/close`, over either listener.
+pub(crate) async fn close(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    body: Bytes,
+) -> Response {
+    command(
+        &shared,
+        reference,
+        &body,
+        |agents, id, req: CloseAgentRequest| async move { agents.close(&id, &req).await },
+    )
+    .await
 }
 
 /// `POST /v1/agents/:id/signal`, over either listener.
