@@ -74,6 +74,20 @@ pub(crate) type Known<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 
 pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     (
+        "CloseAgentRequest",
+        "/confirmedBusy/0/program",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "CloseAgentRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "CloseShellRequest",
         "/confirmedProgram",
         "loneSurrogate",
@@ -169,6 +183,13 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
     (
         "ShellReport",
         "/token",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
+        "SignalAgentRequest",
+        "/idempotencyKey",
         "loneSurrogate",
         OWNER_STRINGS,
         LONE,

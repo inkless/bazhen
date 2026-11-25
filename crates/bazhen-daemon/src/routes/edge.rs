@@ -56,6 +56,8 @@ const ROUTES: &[(&str, &str, bool)] = &[
     ("CloseShellRequest", "/v1/shells/term_1/close", false),
     ("RestartShellRequest", "/v1/shells/term_1/restart", false),
     ("RenameShellRequest", "/v1/shells/term_1/rename", false),
+    ("CloseAgentRequest", "/v1/agents/agent_1/close", false),
+    ("SignalAgentRequest", "/v1/agents/agent_1/signal", false),
     ("ShellReport", "/v1/shells/term_1/report", false),
     ("ShellPrompt", "/v1/shells/term_1/prompt", false),
     ("ShellDecline", "/v1/shells/term_1/decline", false),
