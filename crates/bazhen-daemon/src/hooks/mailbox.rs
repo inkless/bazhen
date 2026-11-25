@@ -22,7 +22,7 @@ use bazhen_protocol::mail_events::{
     MailOffered, MailRequeued, MailSeen, MailUndeliverable, RequeueReason, UndeliverableReason,
 };
 use bazhen_store::{AppendError, MailChange, Writer as StoreWriter};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::task::AbortHandle;
 
 use super::waiters::Waiters;
@@ -96,6 +96,8 @@ struct AgentMail {
     unacked: HashMap<String, Unacked>,
     /// Each written wake not yet seen, by id, and the deadline that requeues it.
     unseen: HashMap<String, Deadline>,
+    /// Whether the agent closed, which no step touches again.
+    forgotten: bool,
 }
 
 #[derive(Debug)]
@@ -166,6 +168,13 @@ impl Mailbox {
     fn of(&self, agent: &AgentId) -> Arc<AsyncMutex<AgentMail>> {
         let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
         Arc::clone(agents.entry(agent.clone()).or_default())
+    }
+
+    /// `agent`'s mail, held for a step; `None` once the agent is forgotten, whose mail no step
+    /// touches again.
+    async fn held(&self, agent: &AgentId) -> Option<OwnedMutexGuard<AgentMail>> {
+        let mail = self.of(agent).lock_owned().await;
+        (!mail.forgotten).then_some(mail)
     }
 
     fn next(&self) -> u64 {
@@ -271,8 +280,9 @@ impl Mailbox {
     }
 
     async fn offer_step(&self, shared: &Shared, agent: &AgentId) -> Result<(), String> {
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         self.offer_held(shared, agent, &mut mail).await
     }
 
@@ -300,8 +310,9 @@ impl Mailbox {
         agent: &AgentId,
         prompt: &str,
     ) -> Result<HookReply, String> {
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(quiet());
+        };
         let Some(reply) = self.hand(shared, agent, &mut mail, Some(prompt)).await? else {
             return Ok(quiet());
         };
@@ -399,8 +410,9 @@ impl Mailbox {
         agent: &AgentId,
         offered: &[OfferToken],
     ) -> Result<(), String> {
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         let written: Vec<(String, bool)> = mail
             .unacked
             .iter()
@@ -441,8 +453,9 @@ impl Mailbox {
         let Some(prompt) = prompt else {
             return Ok(());
         };
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         if let Some(current) = mail.turn.clone().filter(|turn| turn != prompt) {
             let took = took_in(shared, agent, &current).await?;
             for message in took {
@@ -490,8 +503,9 @@ impl Mailbox {
         prompt: Option<&str>,
         failed: bool,
     ) -> Result<(), String> {
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         if let Some(prompt) = prompt {
             // The end of a turn a newer prompt cut short, reported late: that prompt took back
             // what the turn took, and the turn under way is the newer one.
@@ -564,8 +578,9 @@ impl Mailbox {
         compacted: bool,
     ) -> Result<(), String> {
         self.waiters.answer(agent, quiet());
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         let lost: Vec<String> = if compacted {
             let held = [MailboxState::Offered, MailboxState::Emitted];
             let held = mail_of(shared, agent, &held).await?;
@@ -595,11 +610,27 @@ impl Mailbox {
     }
 
     /// Forgets `agent` as it closes, which gives its mail up: nothing held for that mail, or for
-    /// its turns, is wanted again, and each of its deadlines is called off.
+    /// its turns, is wanted again, and each of its deadlines is called off. Its entry stays,
+    /// marked, so that a step coming after (from a deadline firing, a send committed before the
+    /// close, or a hook let in before its token went) finds it and does nothing, rather than
+    /// start the agent's mail afresh beside a step still under way. A closed agent never runs
+    /// again, so the mark is never lifted.
     #[cfg(test)]
-    pub(crate) fn forget(&self, agent: &AgentId) {
-        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
-        agents.remove(agent);
+    pub(crate) async fn forget(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+    ) -> Result<(), String> {
+        let (mailbox, agent) = (Arc::clone(self), agent.clone());
+        whole(shared, async move {
+            let mail = mailbox.of(&agent);
+            *mail.lock().await = AgentMail {
+                forgotten: true,
+                ..AgentMail::default()
+            };
+            Ok(())
+        })
+        .await
     }
 
     /// Back to the queue, and on to the waiter if one is held; given up instead once the agent's
@@ -695,8 +726,9 @@ impl Mailbox {
         id: u64,
         due: Due,
     ) -> Result<(), String> {
-        let mail = self.of(agent);
-        let mut mail = mail.lock().await;
+        let Some(mut mail) = self.held(agent).await else {
+            return Ok(());
+        };
         match due {
             Due::Ack => {
                 if mail

@@ -590,7 +590,7 @@ fn offers_no_mail_to_an_agent_closing_and_calls_a_forgotten_agents_deadlines_off
     let offered_closing = held.is_finished() || f.steps().len() > 1;
     f.set_state("running");
     let reply = f.answered(f.hold(&idle()));
-    f.shared.hooks.mailbox.forget(&f.agent);
+    f.forget();
     f.sleep(SHORT * 4);
     assert_eq!(
         (offered_closing, reply.map(|r| r.offered.len()), f.steps()),
@@ -600,6 +600,29 @@ fn offers_no_mail_to_an_agent_closing_and_calls_a_forgotten_agents_deadlines_off
             vec!["queued".to_owned(), "offered".to_owned()]
         )
     );
+}
+
+#[test]
+fn leaves_a_forgotten_agents_mail_alone_for_a_step_that_comes_after() {
+    let f = fixture(long());
+    f.forget();
+    f.send("hello");
+    let held = f.hold(&idle());
+    f.sleep(SHORT);
+    assert_eq!(
+        (held.is_finished(), f.steps()),
+        (false, vec!["queued".to_owned()])
+    );
+}
+
+impl Fixture {
+    fn forget(&self) {
+        let forgotten = self.shared.hooks.mailbox.forget(&self.shared, &self.agent);
+        let forgotten = self
+            .runtime
+            .block_on(async { tokio::time::timeout(DEADLINE, forgotten).await });
+        assert_eq!(forgotten, Ok(Ok(())));
+    }
 }
 
 #[test]
