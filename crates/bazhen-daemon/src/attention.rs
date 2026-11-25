@@ -459,7 +459,7 @@ fn respond<T: serde::Serialize>(answer: Result<T, Refusal>) -> Response {
                 &format!("attention item {id} can't be answered with {action}"),
             )
         }
-        Err(Refusal::Mail(err)) => refusal(err),
+        Err(Refusal::Mail(err)) => refusal(&err),
         Err(Refusal::Unavailable) => fail(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::Unavailable,

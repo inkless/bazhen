@@ -4,7 +4,7 @@
 use bazhen_protocol::ids::AgentId;
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
-use bazhen_protocol::tasks::TaskDetail;
+use bazhen_protocol::tasks::{Task, TaskDetail};
 use bazhen_protocol::text::quote_note;
 
 use crate::mail::MAIL_LIMIT;
@@ -188,6 +188,43 @@ pub(crate) fn role_mail(task: &TaskDetail, role: &RoleDefinition) -> String {
     format!(
         "## Your role on task {}: {}\n\n{}",
         task.id, role.title, role.prompt
+    )
+}
+
+/// To an agent taken off a task.
+pub(crate) fn unassigned_mail(task: &Task, from: Who<'_>) -> String {
+    format!(
+        "You are no longer assigned to task {} ({}); {} took it away. Stop working on it.",
+        task.id,
+        task.title,
+        by(from)
+    )
+}
+
+/// To an agent whose assignment ended because the one it was granted under did.
+pub(crate) fn line_ended_mail(task: &Task) -> String {
+    format!(
+        "Your assignment on task {} ({}) has ended: whoever gave it to you no longer holds the \
+         work. Stop working on it.",
+        task.id, task.title
+    )
+}
+
+/// To the agent a subtask moved up to, when the one it was delegated by lost the work.
+pub(crate) fn owned_mail(task: &Task) -> String {
+    format!(
+        "Task {} ({}) is now yours: whoever it was delegated by no longer holds the work it is \
+         part of. Assign it, finish it or cancel it.",
+        task.id, task.title
+    )
+}
+
+/// The escalation raised on the agent a subtask was delegated by, when it falls to the human.
+pub(crate) fn fell_to_the_human(task: &Task, previous: &AgentId) -> String {
+    format!(
+        "Task {} ({}) is yours now: {previous}, who delegated it, no longer holds the work it is \
+         part of.",
+        task.id, task.title
     )
 }
 

@@ -280,7 +280,7 @@ async fn shells(
     let run = Path::new(&startup.paths.run);
     let turns = Arc::<crate::turns::Turns>::default();
     let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
-    let agents = Agents::new(AgentsDeps {
+    let agents = Arc::new(Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::clone(&runner.terminals),
         budget: Arc::clone(&runner.budget),
@@ -296,7 +296,7 @@ async fn shells(
         turns: Arc::clone(&turns),
         hooks: Arc::clone(&shared.hooks),
         handing,
-    });
+    }));
     let shells = Shells::new(ShellsDeps {
         turns,
         store: store.clone(),
@@ -316,6 +316,7 @@ async fn shells(
         .reconcile()
         .await
         .map_err(|err| Refused::Said(format!("bazhen can't read its agents: {err}")))?;
+    crate::task_lift::at_start(store, &agents).await;
     if let Err(err) = shells.sweep_restarts().await {
         tracing::warn!(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -333,7 +334,7 @@ async fn shells(
     Ok(Running {
         watched: Watched {
             shells: Arc::new(shells),
-            agents: Arc::new(agents),
+            agents,
             events,
         },
         doctor: Settled {
@@ -1043,6 +1044,86 @@ mod tests {
             (serving, agents.handing_closed())
         });
         assert_eq!(closed, (false, true));
+        writer.finish();
+    }
+
+    #[test]
+    fn lifts_a_subtask_the_store_was_left_holding_stranded_before_it_serves() {
+        let home = TempDir::new("lift");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let (agent, top, sub, lead) = (
+            "agent_0190a1b2c3d47abc8def0123456789a1",
+            "task_0190a1b2c3d47abc8def0123456789b1",
+            "task_0190a1b2c3d47abc8def0123456789b2",
+            "asgn_0190a1b2c3d47abc8def0123456789c1",
+        );
+        // A lead's delegation, ended by a daemon that didn't move its subtask up in that write.
+        let seed = format!(
+            "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
+               SELECT id, '2026-11-20T00:00:00.000Z', 'x', 'x', 'x', 'system', '{{}}' FROM host;
+             INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+               created_event_id, updated_event_id)
+               VALUES ('{agent}', 'ENV', 'claude-code', 'p', '/', 'closed', 1, 1);
+             INSERT INTO tasks (id, title, brief, state, created_event_id, updated_event_id)
+               VALUES ('{top}', 'T', 'b', 'open', 1, 1);
+             INSERT INTO assignments (id, task_id, agent_session_id, role, state, end_reason,
+               created_event_id, updated_event_id)
+               VALUES ('{lead}', '{top}', '{agent}', 'lead', 'ended', 'unassigned', 1, 1);
+             INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+               delegated_from, created_event_id, updated_event_id)
+               VALUES ('{sub}', 'S', 'b', 'open', '{agent}', '{top}', '{lead}', 1, 1);"
+        );
+        let owner = |store: &Writer| {
+            let store = store.clone();
+            async move {
+                store
+                    .run(move |s| {
+                        s.write(|w| {
+                            w.connection().query_row(
+                                "SELECT owner_agent_id FROM tasks WHERE id = ?",
+                                [sub],
+                                |row| row.get::<_, Option<String>>(0),
+                            )
+                        })
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+        let owners = runtime().block_on(async {
+            store
+                .run(move |s| {
+                    s.write(|w| {
+                        let local = w.local_environment()?;
+                        w.connection()
+                            .execute_batch(&seed.replace("ENV", local.as_str()))?;
+                        Ok::<_, AppendError>(())
+                    })
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let before = owner(&store).await;
+            let served = served(&store);
+            let started = shells(
+                &startup,
+                &store,
+                faked(&startup),
+                &TaskTracker::new(),
+                &CancellationToken::new(),
+                &served,
+            )
+            .await;
+            (
+                before,
+                started.err().map(|e| format!("{e:?}")),
+                owner(&store).await,
+            )
+        });
+        assert_eq!(owners, (Some(agent.to_owned()), None, None));
         writer.finish();
     }
 
