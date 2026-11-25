@@ -609,6 +609,18 @@ pub(crate) mod fake {
             );
         }
 
+        /// Its holder is tagged with the harness session `session` its process was started on.
+        pub(crate) fn tag_session(&self, terminal_id: &str, session: &str) {
+            self.change(terminal_id, |running| {
+                if let Kind::Agent {
+                    harness_session, ..
+                } = &mut running.spec.kind
+                {
+                    *harness_session = Some(session.to_owned());
+                }
+            });
+        }
+
         /// Its process ends, told to no one, as one that ended before anything watched it.
         pub(crate) fn exit_unseen(&self, terminal_id: &str) {
             self.change(terminal_id, |running| running.exited = true);

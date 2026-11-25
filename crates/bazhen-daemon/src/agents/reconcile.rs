@@ -114,14 +114,42 @@ fn session_of(
     }))
 }
 
-/// A start the runtime shows went ahead, as `respawned` or `relaunched` records it.
+/// The harness session a start again found running is on, as `Done::recorded` takes it: the one
+/// the agent is bound to, if its binding moved since `requested`, as a quick /clear moves it;
+/// else the one its terminal was started with, if any, which a fresh relaunch's isn't bound to
+/// yet.
+fn restarted_on(
+    w: &StoreWriter<'_>,
+    agent: &AgentId,
+    found: &FoundAgent,
+    requested: &str,
+) -> Result<Option<ExternalRef>, AgentError> {
+    let reads = w.reads();
+    let asked = reads.last_event_id(agent.as_str(), requested)?;
+    let moved = reads.last_event_id(agent.as_str(), "agent.external_ref_updated")?;
+    let bound = reads
+        .agent_launch(agent.as_str())?
+        .and_then(|launch| launch.external_ref);
+    let tagged = found
+        .harness_session
+        .as_deref()
+        .and_then(|tag| serde_json::from_str(tag).ok());
+    Ok(match (moved, asked) {
+        (Some(moved), Some(asked)) if moved > asked => bound,
+        _ => tagged,
+    })
+}
+
+/// A start the runtime shows went ahead, as `respawned` or `relaunched` records it, after the
+/// request of kind `requested`.
 fn restarted(
     w: &StoreWriter<'_>,
     agent: &AgentId,
     found: &FoundAgent,
+    requested: &str,
 ) -> Result<AgentRestarted, AgentError> {
     Ok(AgentRestarted {
-        external_ref: session_of(w, agent, found)?,
+        external_ref: restarted_on(w, agent, found, requested)?,
         runtime_ref: runtime_ref(&found.terminal)?,
         theme: None,
         harness_name: None,
@@ -214,7 +242,11 @@ fn settle(
                 w.note_agent_token(id.as_str(), unheld)?;
                 return Ok(After::Unstarted);
             };
-            let after = started(w, id, AgentChange::Relaunched(restarted(w, id, found)?))?;
+            let after = started(
+                w,
+                id,
+                AgentChange::Relaunched(restarted(w, id, found, "agent.relaunch_requested")?),
+            )?;
             exited_if_dead(w, found)?;
             Ok(after)
         }
@@ -242,7 +274,11 @@ fn settle(
             // starts, so the next one means it started.
             let next = agent.generation.map(|generation| generation + 1);
             if let Some(found) = found.filter(|found| generation_at(&found.terminal) == next) {
-                let after = started(w, id, AgentChange::Respawned(restarted(w, id, found)?))?;
+                let after = started(
+                    w,
+                    id,
+                    AgentChange::Respawned(restarted(w, id, found, "agent.respawn_requested")?),
+                )?;
                 exited_if_dead(w, found)?;
                 return Ok(after);
             }
@@ -554,7 +590,7 @@ mod tests {
     use crate::terminals::Event;
     use crate::terminals::fake::{Held, recorded_at};
     use crate::testing::runtime;
-    use crate::testing::stub_harness::{StubHarness, pull};
+    use crate::testing::stub_harness::{STUB_SESSION, StubHarness, pull};
 
     /// A terminal no agent was made for.
     const STRAY: &str = "term_0190a1b2c3d47abc8def0123456789ff";
@@ -607,12 +643,17 @@ mod tests {
 
     /// A relaunch of lost `agent` that a daemon died in once it was requested.
     fn mid_relaunch(f: &Fixture, agent: &AgentId, generation: u64) {
+        mid_relaunch_as(f, agent, generation, None);
+    }
+
+    /// The same, `fresh` as asked.
+    fn mid_relaunch_as(f: &Fixture, agent: &AgentId, generation: u64, fresh: Option<bool>) {
         let (agents, id) = (Arc::clone(&f.agents), agent.as_str().to_owned());
         let req = RelaunchAgentRequest {
             idempotency_key: "r-1".to_owned(),
             generation,
             theme: None,
-            fresh: None,
+            fresh,
         };
         stopped_at(f, "agent.relaunch_requested", async move {
             agents.relaunch(&id, &req, never).await
@@ -737,6 +778,93 @@ mod tests {
                 true,
                 1,
             )
+        );
+    }
+
+    /// The session `agent` is bound to.
+    fn bound(f: &Fixture, agent: &AgentId) -> Option<ExternalRef> {
+        let reader = f.store.reader().unwrap();
+        let launch = reader.reads().agent_launch(agent.as_str()).unwrap();
+        launch.and_then(|launch| launch.external_ref)
+    }
+
+    /// The tag of a terminal started on session `id`, in `like`'s environment.
+    fn session_tag(like: &ExternalRef, id: &str) -> String {
+        serde_json::to_string(&ExternalRef {
+            id: id.to_owned(),
+            ..like.clone()
+        })
+        .unwrap()
+    }
+
+    /// `agent`'s binding moved to `session`, as a quick /clear moves it.
+    fn rebound(f: &Fixture, agent: &AgentId, session: &ExternalRef) {
+        let (agent, session) = (agent.clone(), session.clone());
+        runtime()
+            .block_on(f.store.run(move |store| {
+                store.write(|w| {
+                    w.append(&bazhen_store::NewEvent::Agent {
+                        agent,
+                        actor: Actor::System.as_str().to_owned(),
+                        change: AgentChange::ExternalRefUpdated(
+                            bazhen_protocol::agent_events::AgentExternalRefUpdated {
+                                external_ref: session,
+                            },
+                        ),
+                    })
+                })
+            }))
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn records_a_fresh_relaunch_a_dead_daemon_left_on_the_session_its_new_terminal_started_on() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        let was = bound(&f, &agent);
+        mid_relaunch_as(&f, &agent, generation, Some(true));
+        let new = f.terminal_of(agent.as_str());
+        f.fake().start_unseen(&new, &agent, generation + 1);
+        f.fake()
+            .tag_session(&new, &session_tag(was.as_ref().unwrap(), "fresh-session"));
+        reconciled(&f.restarted());
+        assert_eq!(
+            (
+                was.map(|was| was.id),
+                f.last_of("agent.relaunched")
+                    .map(|relaunched| relaunched["externalRef"]["id"].clone()),
+                bound(&f, &agent).map(|now| now.id),
+            ),
+            (
+                Some(STUB_SESSION.to_owned()),
+                Some(json!("fresh-session")),
+                Some("fresh-session".to_owned()),
+            )
+        );
+    }
+
+    #[test]
+    fn records_a_relaunch_a_dead_daemon_left_on_the_session_its_binding_moved_to_since() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        mid_relaunch_as(&f, &agent, generation, Some(true));
+        let new = f.terminal_of(agent.as_str());
+        f.fake().start_unseen(&new, &agent, generation + 1);
+        f.fake().tag_session(
+            &new,
+            &session_tag(&bound(&f, &agent).unwrap(), "fresh-session"),
+        );
+        let moved = ExternalRef {
+            id: "moved-session".to_owned(),
+            ..bound(&f, &agent).unwrap()
+        };
+        rebound(&f, &agent, &moved);
+        reconciled(&f.restarted());
+        assert_eq!(
+            f.last_of("agent.relaunched")
+                .map(|relaunched| relaunched["externalRef"]["id"].clone()),
+            Some(json!("moved-session"))
         );
     }
 
