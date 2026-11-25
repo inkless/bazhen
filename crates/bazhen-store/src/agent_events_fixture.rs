@@ -20,8 +20,9 @@ use bazhen_protocol::shells::TuiTheme;
 
 use crate::testing::TempDir;
 use crate::{
-    Actor, AgentChange, AgentView, AppendError, AssignmentChange, AttentionChange, Evidence,
-    Listener, MailChange, NewEvent, OpenAttention, SnapshotView, Store, TaskChange, TerminalChange,
+    Actor, AgentChange, AgentView, AppendError, AssignmentChange, AttentionChange, AttentionView,
+    Evidence, Listener, MailChange, NewEvent, OpenAttention, SnapshotView, Store, TaskChange,
+    TerminalChange,
 };
 
 /// The fixture, each step's payload kept as its text: decoded through a `Value`, whose map sorts
@@ -86,7 +87,9 @@ impl AgentView for FixtureView {
     fn prompt_hash(&self, role: Option<&Role>) -> String {
         format!("hash-{}", role.map_or("none", Role::as_str))
     }
+}
 
+impl AttentionView for FixtureView {
     fn attention_actions(&self, item: &OpenAttention<'_>) -> Vec<AttentionAction> {
         use AttentionAction::{Allow, Deny, Dismiss, Reply, Resend};
         match (item.kind, item.main_agent, item.message_id) {
@@ -324,7 +327,7 @@ fn snapshots_agents_and_their_items_as_the_typescript_store_did_under_the_same_v
     };
     let mut got = store
         .reads()
-        .snapshot_with_agents(&view, &FixtureView)
+        .snapshot_with_agents(&view, &FixtureView, Some(&FixtureView))
         .unwrap();
     got.epoch = want.epoch;
     let got = serde_json::to_value(got).unwrap();
@@ -347,7 +350,22 @@ fn still_refuses_a_snapshot_of_agents_to_a_daemon_that_can_t_describe_them() {
     replay(&fixture, &mut store);
     let refused = store.reads().snapshot(&crate::testing::view());
     assert!(
-        matches!(&refused, Err(crate::SnapshotError::NeedsAgentView(s)) if s == &["agents", "attention"]),
+        matches!(&refused, Err(crate::SnapshotError::NeedsView(s)) if s == &["agents", "attention"]),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn describes_the_agents_but_still_refuses_their_items_to_a_daemon_that_can_t_describe_those() {
+    let fixture = fixture();
+    let dir = TempDir::new("agent-snapshot-needs-attention");
+    let mut store = store_of_host(&dir, &fixture.host);
+    replay(&fixture, &mut store);
+    let refused = store
+        .reads()
+        .snapshot_with_agents(&crate::testing::view(), &FixtureView, None);
+    assert!(
+        matches!(&refused, Err(crate::SnapshotError::NeedsView(s)) if s == &["attention"]),
         "{refused:?}"
     );
 }

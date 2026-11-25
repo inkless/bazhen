@@ -36,7 +36,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use agent_events::AgentChange;
-pub use agent_snapshot::{AgentView, Evidence, Listener, OpenAttention};
+pub use agent_snapshot::{AgentView, AttentionView, Evidence, Listener, OpenAttention};
 pub use agents::{LiveTerminal, Rename, RenameError};
 /// Every event type, with the payload keys a frame of it keeps.
 pub use bazhen_protocol::events::EVENT_KINDS;

@@ -252,7 +252,7 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
             }
             axum::Json(snapshot).into_response()
         }
-        Ok(Err(needs @ SnapshotError::NeedsAgentView(_))) => fail(
+        Ok(Err(needs @ SnapshotError::NeedsView(_))) => fail(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::Unavailable,
             &needs.to_string(),

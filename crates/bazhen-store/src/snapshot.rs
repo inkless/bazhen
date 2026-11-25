@@ -8,28 +8,29 @@ use bazhen_protocol::notices::Notice;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::agent_snapshot::AgentView;
+use crate::agent_snapshot::{AgentView, AttentionView};
 use crate::events::Reads;
 
-/// A section of the snapshot a daemon can describe only with an [`AgentView`]: each needs what it
-/// knows of harnesses (which themes, what can be resumed, what the human can do now). A database
-/// the TypeScript daemon used may hold its rows, and a snapshot that left them out or guessed would
-/// be wrong rather than incomplete.
+/// A section of the snapshot a daemon can describe only with a view of its own: each needs what
+/// it knows of harnesses (which themes, what can be resumed, what the human can do now). A
+/// database the TypeScript daemon used may hold its rows, and a snapshot that left them out or
+/// guessed would be wrong rather than incomplete.
 struct ViewedSection {
     section: &'static str,
     rows: &'static str,
 }
 
-const NEEDS_AGENT_VIEW: [ViewedSection; 2] = [
-    ViewedSection {
-        section: "agents",
-        rows: "SELECT 1 FROM agent_sessions",
-    },
-    ViewedSection {
-        section: "attention",
-        rows: "SELECT 1 FROM attention_items",
-    },
-];
+/// The agents, which an [`AgentView`] describes.
+const AGENTS: ViewedSection = ViewedSection {
+    section: "agents",
+    rows: "SELECT 1 FROM agent_sessions",
+};
+
+/// The items for the human, which an [`AttentionView`] describes.
+const ATTENTION: ViewedSection = ViewedSection {
+    section: "attention",
+    rows: "SELECT 1 FROM attention_items",
+};
 
 /// How many observed messages a snapshot carries: the latest.
 const OBSERVED_KEPT: u32 = 200;
@@ -56,10 +57,10 @@ pub struct SnapshotView {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
-    /// The database holds rows of sections only an [`AgentView`] describes, and the snapshot was
-    /// taken without one.
+    /// The database holds rows of sections only a view describes, and the snapshot was taken
+    /// without it.
     #[error("this daemon can't describe {} yet", .0.join(", "))]
-    NeedsAgentView(Vec<&'static str>),
+    NeedsView(Vec<&'static str>),
     #[error("a stored row doesn't read as the protocol's: {0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
@@ -72,42 +73,43 @@ impl Reads<'_> {
     ///
     /// # Errors
     ///
-    /// [`SnapshotError::NeedsAgentView`] when the database holds agents or items for the human.
+    /// [`SnapshotError::NeedsView`] when the database holds agents or items for the human.
     pub fn snapshot(self, view: &SnapshotView) -> Result<StateSnapshot, SnapshotError> {
-        self.read(view, None)
+        self.read(view, None, None)
     }
 
-    /// The snapshot, and the cursor after its newest event, its agents and items for the human
-    /// described as `agents` says.
+    /// The snapshot, and the cursor after its newest event, its agents described as `agents`
+    /// says, and its items for the human as `attention` does.
     ///
     /// # Errors
     ///
-    /// A stored row that doesn't read as the protocol's.
+    /// [`SnapshotError::NeedsView`] when the database holds items for the human and `attention`
+    /// is none; a stored row that doesn't read as the protocol's.
     pub fn snapshot_with_agents(
         self,
         view: &SnapshotView,
         agents: &dyn AgentView,
+        attention: Option<&dyn AttentionView>,
     ) -> Result<StateSnapshot, SnapshotError> {
-        self.read(view, Some(agents))
+        self.read(view, Some(agents), attention)
     }
 
     fn read(
         self,
         view: &SnapshotView,
         agents: Option<&dyn AgentView>,
+        attention: Option<&dyn AttentionView>,
     ) -> Result<StateSnapshot, SnapshotError> {
         let tx = self.0.unchecked_transaction()?;
         let reads = Reads(&tx);
-        if agents.is_none() {
-            let mut needed = Vec::new();
-            for section in &NEEDS_AGENT_VIEW {
-                if tx.prepare(section.rows)?.exists(())? {
-                    needed.push(section.section);
-                }
+        let mut needed = Vec::new();
+        for (section, given) in [(AGENTS, agents.is_some()), (ATTENTION, attention.is_some())] {
+            if !given && tx.prepare(section.rows)?.exists(())? {
+                needed.push(section.section);
             }
-            if !needed.is_empty() {
-                return Err(SnapshotError::NeedsAgentView(needed));
-            }
+        }
+        if !needed.is_empty() {
+            return Err(SnapshotError::NeedsView(needed));
         }
         let snapshot = StateSnapshot {
             epoch: reads.epoch()?,
@@ -117,8 +119,8 @@ impl Reads<'_> {
                 Some(agents) => crate::agent_snapshot::agents(&tx, view, agents)?,
                 None => Vec::new(),
             },
-            attention: match agents {
-                Some(agents) => crate::agent_snapshot::attention(&tx, agents)?,
+            attention: match attention {
+                Some(attention) => crate::agent_snapshot::attention(&tx, attention)?,
                 None => Vec::new(),
             },
             messages: rows(
