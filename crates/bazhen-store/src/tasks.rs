@@ -8,7 +8,7 @@ use bazhen_protocol::tasks::CreateTaskResponse;
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 
-use crate::{AppendError, NewEvent, OnceError, Store};
+use crate::{AppendError, NewEvent, OnceError, Store, Writer};
 
 /// A task the caller asks for, each field already held to the protocol's rules, its title
 /// trimmed: the human's, or an agent's, which owns it.
@@ -82,21 +82,10 @@ impl Store {
     /// [`CreateTaskError`]; nothing is recorded then.
     pub fn create_task(&mut self, task: &NewTask) -> Result<CreateTaskResponse, CreateTaskError> {
         self.once(&task.key, &task.request_text()?, |w| {
-            if let Some(caller) = &task.caller {
-                let state: Option<String> = w
-                    .connection()
-                    .query_row(
-                        "SELECT state FROM agent_sessions WHERE id = ?",
-                        [caller.as_str()],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                if state
-                    .as_deref()
-                    .is_none_or(|s| matches!(s, "closing" | "closed" | "failed" | "lost"))
-                {
-                    return Err(CreateTaskError::NoCaller(caller.as_str().to_owned()));
-                }
+            if let Some(caller) = &task.caller
+                && !open(w, caller)?
+            {
+                return Err(CreateTaskError::NoCaller(caller.as_str().to_owned()));
             }
             if let Some(parent) = &task.parent {
                 let state: Option<String> = w
@@ -136,6 +125,21 @@ impl Store {
             })
         })
     }
+}
+
+/// Whether `agent` can act: it is known, and not closing or gone, as `checkCaller` has it.
+pub(crate) fn open(w: &Writer<'_>, agent: &AgentId) -> rusqlite::Result<bool> {
+    let state: Option<String> = w
+        .connection()
+        .query_row(
+            "SELECT state FROM agent_sessions WHERE id = ?",
+            [agent.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(state
+        .as_deref()
+        .is_some_and(|s| !matches!(s, "closing" | "closed" | "failed" | "lost")))
 }
 
 #[cfg(test)]

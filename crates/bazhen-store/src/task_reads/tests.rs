@@ -7,15 +7,15 @@ use super::*;
 use crate::Store;
 use crate::testing::TempDir;
 
-fn agent(n: u8) -> AgentId {
+pub(crate) fn agent(n: u8) -> AgentId {
     AgentId::parse(&format!("agent_0190a1b2c3d47abc8def0123456789a{n}")).unwrap()
 }
 
-fn task(n: u8) -> TaskId {
+pub(crate) fn task(n: u8) -> TaskId {
     TaskId::parse(&format!("task_0190a1b2c3d47abc8def0123456789b{n}")).unwrap()
 }
 
-fn asgn(n: u8) -> AssignmentId {
+pub(crate) fn asgn(n: u8) -> AssignmentId {
     AssignmentId::parse(&format!("asgn_0190a1b2c3d47abc8def0123456789c{n}")).unwrap()
 }
 
@@ -24,7 +24,7 @@ fn text(id: Option<String>) -> String {
 }
 
 /// A row to lay down, as a projection would leave it.
-enum Row {
+pub(crate) enum Row {
     /// A task: its number, state, owner, parent and the assignment it was delegated under, made
     /// at the event its number names.
     Task(u8, &'static str, Option<u8>, Option<u8>, Option<u8>, u8),
@@ -79,7 +79,7 @@ fn sql(row: &Row) -> String {
 }
 
 /// A store holding agents 1 to 4, twenty events, and `rows` in their order.
-fn holding(rows: &[Row]) -> (TempDir, Store) {
+pub(crate) fn holding(rows: &[Row]) -> (TempDir, Store) {
     let dir = TempDir::new("task-reads");
     let store = Store::open(&dir.db("tasks.db")).unwrap();
     let event = "INSERT INTO events (host_id, ts, type, entity_type, entity_id, actor, payload)
@@ -104,7 +104,7 @@ fn holding(rows: &[Row]) -> (TempDir, Store) {
     (dir, store)
 }
 
-fn role(key: &str) -> Role {
+pub(crate) fn role(key: &str) -> Role {
     Role::parse(key).unwrap()
 }
 
