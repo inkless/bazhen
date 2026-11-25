@@ -913,6 +913,8 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-store/src/events.rs::StoredEvent::frame": "frame",
   "crates/bazhen-daemon/src/stream/said.rs::read": "stream_frame",
   "crates/bazhen-daemon/src/tasks.rs::asked": "tasks",
+  "crates/bazhen-daemon/src/agent_requests.rs::launch_request": "agent_requests",
+  "crates/bazhen-daemon/src/agent_requests.rs::rename_request": "agent_requests",
   "crates/bazhen-hook/src/shell_report.rs::report_body": "shell_report",
   "crates/bazhen-hook/src/shell_report.rs::micros": "shell_report",
   "crates/bazhen-holder-proto/src/frame.rs::FrameDecoder::push": "frame",
@@ -961,6 +963,12 @@ const NOT_DECODERS: Record<string, string> = {
     "reads a fixed count of bytes from /dev/urandom and hands them back; parses nothing",
   "crates/bazhen-daemon/src/pairing.rs::PairingCodes::issue_from":
     "hands random bytes the daemon read itself to code_from; parses nothing",
+  "crates/bazhen-daemon/src/agent_routes.rs::launch":
+    "hands its body to agent_requests::launch_request, which its agent_requests target fuzzes; decodes nothing itself",
+  "crates/bazhen-daemon/src/agent_routes.rs::rename":
+    "hands its body to agent_requests::rename_request, which its agent_requests target fuzzes; reads the path only as the agent's id or live name, for the store to resolve",
+  "crates/bazhen-daemon/src/harnesses.rs::served":
+    "hands the environment the daemon captured to production as lookups by name; parses nothing",
   "crates/bazhen-daemon/src/events.rs::stream":
     "splits the socket for over; decodes nothing itself. follow reads a client's frames only once tungstenite has bounded them to 1 KiB, and only as serde's derive for a tag and a bool, dropping each either way",
   "crates/bazhen-daemon/src/routes.rs::create_task":
@@ -5117,6 +5125,10 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
   "crates/bazhen-hook/src/pane_title.rs": {
     names: ['"codex'],
     why: "the pane-title hook, which posts a Codex TUI's title to its route",
+  },
+  "crates/bazhen-daemon/src/agents/prompts.rs": {
+    names: ['"claude-code', '"codex'],
+    why: "the fleet prompt, verbatim as the TypeScript daemon gives it: its delegate line names the harnesses --launch takes",
   },
   "crates/bazhen-daemon/src/callers.rs": {
     names: [
