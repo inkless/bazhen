@@ -189,7 +189,8 @@ pub(crate) async fn deliver(shared: &Shared, agents: &Arc<Agents>, queued: Queue
 }
 
 /// Delivers each message handed over on the channel, in the order handed, until the daemon stops
-/// or nothing is left to hand any.
+/// or nothing is left to hand any. A stop still delivers what was handed before it: each was
+/// committed, and is owed its push or offer.
 pub(crate) async fn hand_over(
     shared: Shared,
     agents: Arc<Agents>,
@@ -198,12 +199,16 @@ pub(crate) async fn hand_over(
 ) {
     loop {
         let queued = tokio::select! {
-            () = stop.cancelled() => return,
+            biased;
+            () = stop.cancelled() => break,
             queued = handed.recv() => queued,
         };
         let Some(queued) = queued else {
             return;
         };
+        deliver(&shared, &agents, queued).await;
+    }
+    while let Ok(queued) = handed.try_recv() {
         deliver(&shared, &agents, queued).await;
     }
 }

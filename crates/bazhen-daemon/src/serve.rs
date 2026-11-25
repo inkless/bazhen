@@ -1021,6 +1021,32 @@ mod tests {
     }
 
     #[test]
+    fn drains_the_mail_the_agents_hand_over_from_its_start_until_it_stops() {
+        let home = TempDir::new("drain");
+        let startup = startup(home.path());
+        std::fs::create_dir_all(&startup.home).unwrap();
+        let (_lock, (store, writer)) = prepare(&startup, QUICK.drain).unwrap();
+        let tracker = TaskTracker::new();
+        let stop = CancellationToken::new();
+        let closed = runtime().block_on(async {
+            let served = served(&store);
+            let ran = run_on(&startup, &store, faked(&startup), &tracker, &stop, served)
+                .await
+                .ok()
+                .unwrap();
+            let agents = Arc::clone(&ran.1.agents);
+            let serving = agents.handing_closed();
+            stop.cancel();
+            tracker.close();
+            tracker.wait().await;
+            drop(ran);
+            (serving, agents.handing_closed())
+        });
+        assert_eq!(closed, (false, true));
+        writer.finish();
+    }
+
+    #[test]
     fn builds_the_agents_on_the_hooks_the_routes_serve() {
         let home = TempDir::new("hooks");
         let startup = startup(home.path());

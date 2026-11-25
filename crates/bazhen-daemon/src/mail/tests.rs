@@ -474,13 +474,13 @@ fn delivers_what_a_write_hands_over_in_the_order_handed_until_the_daemon_stops()
         .unwrap()
         .unwrap();
     let (handing, handed) = mpsc::unbounded_channel();
+    for queued in queued {
+        handing.send(queued).unwrap();
+    }
     let stop = CancellationToken::new();
     let drain = f
         .runtime
         .spawn(hand_over(f.shared.clone(), agents, handed, stop.clone()));
-    for queued in queued {
-        handing.send(queued).unwrap();
-    }
     let pushed = || f.stub.pushes.lock().unwrap().len();
     f.runtime.block_on(async {
         let waited = tokio::time::Instant::now();
@@ -489,6 +489,50 @@ fn delivers_what_a_write_hands_over_in_the_order_handed_until_the_daemon_stops()
         }
         stop.cancel();
         drain.await.unwrap();
+    });
+    let bodies: Vec<String> = f
+        .stub
+        .pushes
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|p| p.body.clone())
+        .collect();
+    assert_eq!(bodies, ["one", "two"]);
+}
+
+#[test]
+fn delivers_what_was_handed_over_before_the_daemon_stopped() {
+    let accepted = Pushed::Accepted { offline: false };
+    let f = fixture(push([accepted.clone(), accepted]));
+    let (to, agents) = (f.to.clone(), Arc::clone(f.shared.agents.as_ref().unwrap()));
+    let run = Arc::clone(&agents);
+    let queued = f
+        .runtime
+        .block_on(f.shared.store.run(move |store| {
+            store.write(|w| {
+                let mut fresh = Vec::new();
+                for body in ["one", "two"] {
+                    queue(w, run.harnesses(), &to, body, None, &mut fresh)?;
+                }
+                Ok::<_, Sending>(fresh)
+            })
+        }))
+        .unwrap()
+        .unwrap();
+    let (handing, handed) = mpsc::unbounded_channel();
+    for queued in queued {
+        handing.send(queued).unwrap();
+    }
+    let stop = CancellationToken::new();
+    stop.cancel();
+    let pushed = || f.stub.pushes.lock().unwrap().len();
+    f.runtime.block_on(async {
+        hand_over(f.shared.clone(), agents, handed, stop).await;
+        let waited = tokio::time::Instant::now();
+        while pushed() < 2 && waited.elapsed() < DEADLINE {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     });
     let bodies: Vec<String> = f
         .stub

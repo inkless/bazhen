@@ -388,6 +388,13 @@ impl Agents {
         }
     }
 
+    /// Whether nothing is left to take what [`Agents::hand`] hands over: the daemon's drain has
+    /// stopped, or never started.
+    #[cfg(test)]
+    pub(crate) fn handing_closed(&self) -> bool {
+        self.deps.handing.is_closed()
+    }
+
     /// Launches one agent. A repeat of the key while the launch is in flight gets the answer so
     /// far.
     pub(crate) async fn launch(
