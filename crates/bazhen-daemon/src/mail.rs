@@ -27,7 +27,7 @@ use crate::routes::{Shared, fail, internal};
 
 /// A message's limit in the mailbox, once composed, in UTF-16 code units as `body.length` counts
 /// them (`MAIL_LIMIT`).
-const MAIL_LIMIT: usize = 20_000;
+pub(crate) const MAIL_LIMIT: usize = 20_000;
 
 /// The agent states that take no more mail: one closing or closed gives its mail up, and one that
 /// failed never started, with nothing to give it up (`GONE`).

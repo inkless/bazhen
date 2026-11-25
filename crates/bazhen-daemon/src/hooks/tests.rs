@@ -585,3 +585,76 @@ fn answers_the_waiter_a_hook_registers_after_the_close_it_read_the_agent_open_be
     });
     assert_eq!(answered, Some(quiet()));
 }
+
+/// The agent's own `SendMessage` to `to`, by the tool call `use_id`.
+fn sent_to(to: &str, use_id: &str) -> Value {
+    json!({
+        "hook_event_name": "PostToolUse", "session_id": "session-1", "tool_use_id": use_id,
+        "tool_name": "SendMessage", "tool_response": { "success": true },
+        "tool_input": { "to": to, "message": "\u{202e}lunch?\nat noon\u{7}", "summary": "" },
+    })
+}
+
+/// Launches Bob beside the fixture's agent, as the hooks' caller's alone.
+fn with_bob(f: &Fixture) -> AgentId {
+    let agents = f.shared.agents.clone().unwrap();
+    let bob = runtime()
+        .block_on(agents.launch(&LaunchAgentRequest {
+            idempotency_key: "k-2".to_owned(),
+            harness: HarnessId::ClaudeCode,
+            cwd: "~/repo".to_owned(),
+            project: None,
+            theme: None,
+            name: Some(bazhen_protocol::names::AgentName::parse("Bob").unwrap()),
+            role: None,
+            compact_window_tokens: None,
+        }))
+        .unwrap()
+        .agent_id;
+    // The fake starts every terminal's process as the same pid: Bob's moves, so that the hooks'
+    // caller is the first agent's alone.
+    rusqlite::Connection::open(f.dir.path().join("bazhen.db"))
+        .unwrap()
+        .execute(
+            "UPDATE terminals SET locator = json_set(locator, '$.childPid', '6000')
+             WHERE id = (SELECT terminal_id FROM agent_sessions WHERE id = ?)",
+            [bob.as_str()],
+        )
+        .unwrap();
+    bob
+}
+
+#[test]
+fn records_the_agents_send_once_to_the_agent_its_harness_started_as_the_name_it_sent_to() {
+    let f = fixture();
+    let bob = with_bob(&f);
+    f.hook("PostToolUse", &sent_to("bob", "toolu_1"), its_tui());
+    f.hook("PostToolUse", &sent_to("bob", "toolu_1"), its_tui());
+    f.hook("PostToolUse", &sent_to("carol", "toolu_2"), its_tui());
+    assert_eq!(
+        f.of("message.observed"),
+        [json!({
+            "from": f.agent.as_str(), "to": bob.as_str(), "summary": "lunch?",
+            "text": "lunch?\nat noon", "accepted": true, "toolUseId": "toolu_1",
+        })]
+    );
+}
+
+#[test]
+fn records_no_send_by_a_tool_call_id_too_long_to_keep() {
+    let f = fixture();
+    with_bob(&f);
+    let longest = "t".repeat(super::observed::USE_ID_MAX);
+    f.hook(
+        "PostToolUse",
+        &sent_to("bob", &format!("{longest}t")),
+        its_tui(),
+    );
+    f.hook("PostToolUse", &sent_to("bob", &longest), its_tui());
+    let ids: Vec<Value> = f
+        .of("message.observed")
+        .iter()
+        .map(|e| e["toolUseId"].clone())
+        .collect();
+    assert_eq!(ids, [json!(longest)]);
+}

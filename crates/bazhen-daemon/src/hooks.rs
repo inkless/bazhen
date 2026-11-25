@@ -9,6 +9,7 @@
 mod activity;
 mod binding;
 pub(crate) mod mailbox;
+mod observed;
 mod waiters;
 
 use std::collections::HashMap;
@@ -527,6 +528,10 @@ impl Hooks {
                 Observed::TurnFailed { prompt_id, .. } => {
                     let prompt = prompt_id.as_deref();
                     self.mailbox.turn_ended(shared, agent, prompt, true).await?;
+                    continue;
+                }
+                Observed::MessageObserved { use_id, sent } => {
+                    observed::observe(shared, agent, use_id, sent).await?;
                     continue;
                 }
                 Observed::Compacted { sign } => {
