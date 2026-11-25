@@ -4,7 +4,7 @@ use bazhen_protocol::agents::{
     CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest, SignalAgentRequest,
 };
 use bazhen_protocol::edge::{EdgeCheck, MAX_SAFE_INTEGER, edge, is_object, object};
-use bazhen_protocol::mail::{HookAck, HookRequest};
+use bazhen_protocol::mail::{HookAck, HookRequest, SendMessageRequest};
 use bazhen_protocol::notices::{DismissNoticeRequest, PairRequest};
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest, ShellDecline,
@@ -59,6 +59,7 @@ fuzz_target!(|body: &[u8]| {
     settled::<ShellPrompt>(body);
     settled::<ShellDecline>(body);
     settled::<HookAck>(body);
+    settled::<SendMessageRequest>(body);
     // A hook's payload is any JSON, kept as its text, so a hook taken is held to its bounds rather
     // than compared once written out again.
     if let Ok(hook) = edge::<HookRequest>(body) {

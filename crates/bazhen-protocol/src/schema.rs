@@ -562,6 +562,7 @@ pub fn verdict(name: &str, body: &[u8]) -> Option<Result<serde_json::Value, Stri
         "RenameShellRequest" => given(edge::<RenameShellRequest>(body)),
         "RespawnAgentRequest" => given(edge::<RespawnAgentRequest>(body)),
         "RestartShellRequest" => given(edge::<RestartShellRequest>(body)),
+        "SendMessageRequest" => given(edge::<SendMessageRequest>(body)),
         "ShellDecline" => given(edge::<ShellDecline>(body)),
         "ShellPrompt" => given(edge::<ShellPrompt>(body)),
         "ShellReport" => given(edge::<ShellReport>(body)),
