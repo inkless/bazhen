@@ -128,24 +128,29 @@ impl Fixture {
         runtime().block_on(taken(&self.shared, &hook, None, Some(peer), None))
     }
 
-    /// Posts a waiter's hook, and says whether it is held; once it is, its client goes.
+    /// Posts a waiter's hook, and says whether it is held; once it is, its client goes. A hook
+    /// neither answered nor held by the deadline fails the test rather than hang it.
     fn wait(&self, payload: &Value, peer: PeerRead) -> bool {
         let hook = self.request(HOOK_PROTOCOL_VERSION, "wait", payload);
-        runtime().block_on(async {
-            let answered = taken(&self.shared, &hook, None, Some(peer), None);
-            let mut answered = std::pin::pin!(answered);
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = &mut answered => return false,
-                    () = tokio::task::yield_now() => {
-                        if self.shared.hooks.waiters.holds(&self.agent) {
-                            return true;
+        let held = runtime().block_on(async {
+            tokio::time::timeout(DEADLINE, async {
+                let answered = taken(&self.shared, &hook, None, Some(peer), None);
+                let mut answered = std::pin::pin!(answered);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut answered => return false,
+                        () = tokio::task::yield_now() => {
+                            if self.shared.hooks.waiters.holds(&self.agent) {
+                                return true;
+                            }
                         }
                     }
                 }
-            }
-        })
+            })
+            .await
+        });
+        held.expect("the waiter's hook was neither answered nor held by the deadline")
     }
 
     fn hook(&self, event: &str, payload: &Value, peer: PeerRead) -> Response {

@@ -599,11 +599,12 @@ mod tests {
                 ))
                 .unwrap();
         };
+        // A refusal is an answer of its own, so a guard the state machine backs fails the assert.
         let ready = |store: &mut Store| {
             store
                 .write(|w| w.record_ready(&agent(), ReadySign::ClaudeHook))
-                .unwrap()
-                .is_some()
+                .map(|recorded| recorded.is_some())
+                .map_err(|err| err.to_string())
         };
         set(&store, "starting", "starting");
         let before_terminal = ready(&mut store);
@@ -616,7 +617,7 @@ mod tests {
                 again,
                 binding(&store).map(|b| b.state)
             ),
-            (false, true, false, Some("running".to_owned()))
+            (Ok(false), Ok(true), Ok(false), Some("running".to_owned()))
         );
         assert_eq!(
             events(&store),
