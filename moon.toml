@@ -11,7 +11,6 @@ deps = [
   "standards",
   "schema-check",
   "rust-schema-check",
-  "protocol-dual-types",
   "lint",
   "format-check",
   "typecheck",
@@ -45,11 +44,6 @@ options = { cache = false, internal = true }
 [tasks.rust-schema-check]
 command = "scripts/xtask.sh schema --check"
 options = { cache = false, internal = true }
-
-[tasks.protocol-dual-types]
-command = "node_modules/.bin/tsc -p packages/protocol/dual/tsconfig.json"
-deps = ["rust-schema-check"]
-options = { cache = false, internal = true, runDepsInParallel = false }
 
 [tasks.dev]
 deps = ["daemon:dev", "web:dev"]
