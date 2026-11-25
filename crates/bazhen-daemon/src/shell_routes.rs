@@ -15,7 +15,7 @@ use bazhen_protocol::ids::DeviceId;
 use bazhen_protocol::nullable::Nullable;
 use bazhen_protocol::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
-    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport,
+    ShellCommandResponse, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -29,12 +29,13 @@ use crate::shells::{ShellError, Shells};
 pub(crate) fn refusal(err: &ShellError) -> Response {
     let (status, code) = match err {
         ShellError::Invalid(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
-        ShellError::Unsupported(_) => (StatusCode::BAD_REQUEST, ErrorCode::Unsupported),
         ShellError::Limit(_) => (StatusCode::CONFLICT, ErrorCode::TerminalLimit),
         ShellError::Idempotency(_) | ShellError::Conflict(_) => {
             (StatusCode::CONFLICT, ErrorCode::Conflict)
         }
-        ShellError::Unknown(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        ShellError::Unknown(_) | ShellError::UnknownAgent(_) => {
+            (StatusCode::NOT_FOUND, ErrorCode::NotFound)
+        }
         ShellError::Stale { .. } => (StatusCode::CONFLICT, ErrorCode::StaleGeneration),
         ShellError::Busy { message, busy } => {
             let body = ErrorResponse {
@@ -78,6 +79,10 @@ fn close_request(body: &[u8]) -> Result<CloseShellRequest, ShellError> {
 
 fn restart_request(body: &[u8]) -> Result<RestartShellRequest, ShellError> {
     checked(parsed::<RestartShellRequest>(body, "shell's restart")?)
+}
+
+fn unlink_request(body: &[u8]) -> Result<UnlinkShellRequest, ShellError> {
+    checked(parsed::<UnlinkShellRequest>(body, "shell's unlink")?)
 }
 
 /// A rename as sent: its name may be null, but must be there.
@@ -174,6 +179,20 @@ pub(crate) async fn restart(
             .await
     };
     answer(restarted.await)
+}
+
+pub(crate) async fn unlink(
+    State(shared): State<Shared>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let unlinked = async {
+        let req = unlink_request(&body)?;
+        shells_of(&shared)?
+            .completing(move |shells| async move { shells.unlink(&id, &req).await })
+            .await
+    };
+    answer(unlinked.await)
 }
 
 pub(crate) async fn rename(

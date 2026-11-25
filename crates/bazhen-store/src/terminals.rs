@@ -3,9 +3,9 @@
 //! reads back of a shell, as `store.ts` keeps them.
 
 use bazhen_holder_proto::{PROTOCOL_VERSION, negotiate};
-use bazhen_protocol::agents::{Environment, EnvironmentKind};
+use bazhen_protocol::agents::{AgentState, Environment, EnvironmentKind};
 use bazhen_protocol::events::{EnvironmentRegistered, RuntimeRefPayload};
-use bazhen_protocol::ids::{EnvironmentId, Id, TerminalId};
+use bazhen_protocol::ids::{AgentId, EnvironmentId, Id, TerminalId};
 use bazhen_protocol::shells::{
     Foreground, NeedsRestart, Shell, TerminalState, TuiTheme, shell_command_line, shell_commands,
 };
@@ -43,6 +43,13 @@ impl Step {
             Self::CloseCompleted => "close.completed",
         }
     }
+}
+
+/// Whether a terminal in `from` may record its process exited (`accepts(from,
+/// "process.exited")`): one running, or one whose process wasn't known.
+#[must_use]
+pub fn takes_exit(from: TerminalState) -> bool {
+    advance(from, Step::ProcessExited).is_ok()
 }
 
 /// Where `step` takes a terminal in `from`, as packages/core's table has it, or why it can't.
@@ -168,7 +175,8 @@ pub(crate) fn project(
         TerminalChange::ForegroundChanged(_)
         | TerminalChange::Renamed(_)
         | TerminalChange::NeedsRestart(_)
-        | TerminalChange::RestartCleared => describe(tx, at, id, change)?,
+        | TerminalChange::RestartCleared
+        | TerminalChange::Unlinked => describe(tx, at, id, change)?,
     }
     Ok(())
 }
@@ -201,6 +209,13 @@ fn describe(
             let protocol = serde_json::to_string(&payload.protocol)?;
             set_terminal(tx, at, change, id, &[("restart_protocol", &protocol)])?;
         }
+        TerminalChange::Unlinked => set_shell(
+            tx,
+            at,
+            change,
+            id,
+            &[("linked_agent_id", &rusqlite::types::Null)],
+        )?,
         TerminalChange::RestartCleared => set_terminal(
             tx,
             at,
@@ -413,6 +428,91 @@ fn shell_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShellRow> {
     })
 }
 
+/// An agent with its current terminal, as each command on it reads them (`agentTerminal`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTerminal {
+    pub agent_id: AgentId,
+    pub state: AgentState,
+    /// Its current terminal, once it has one.
+    pub terminal_id: Option<TerminalId>,
+    pub terminal_state: Option<TerminalState>,
+    pub generation: Option<u64>,
+    /// The runtime its incarnation is on, once one confirmed it.
+    pub runtime: Option<String>,
+    /// Where that runtime keeps it, as the JSON text the runtime recorded.
+    pub locator: Option<String>,
+    /// The runtime its terminal was created on, whether or not it runs there yet.
+    pub runtime_kind: Option<String>,
+}
+
+const AGENT_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE a.id = ?";
+
+/// The agent a terminal is the current terminal of, through the terminal's own agent column:
+/// one its agent has left behind, as a relaunch leaves one, finds none (`AGENT_BY_TERMINAL`).
+const AGENT_BY_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM terminals t JOIN agent_sessions a ON a.id = t.agent_session_id AND a.terminal_id = t.id
+     WHERE t.id = ?";
+
+fn agent_terminal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTerminal> {
+    let unreadable = |i: usize, what: &str| {
+        rusqlite::Error::FromSqlConversionFailure(
+            i,
+            rusqlite::types::Type::Text,
+            format!("{what} isn't one an agent has").into(),
+        )
+    };
+    let id: String = row.get(0)?;
+    let state: String = row.get(1)?;
+    let terminal: Option<String> = row.get(2)?;
+    let terminal_state: Option<String> = row.get(3)?;
+    let generation: Option<i64> = row.get(4)?;
+    Ok(AgentTerminal {
+        agent_id: AgentId::parse(&id).ok_or_else(|| unreadable(0, "its id"))?,
+        state: serde_json::from_value(serde_json::Value::String(state))
+            .map_err(|_| unreadable(1, "its state"))?,
+        terminal_id: terminal
+            .map(|t| TerminalId::parse(&t).ok_or_else(|| unreadable(2, "its terminal's id")))
+            .transpose()?,
+        terminal_state: terminal_state
+            .map(|t| TerminalState::parse(&t).ok_or_else(|| unreadable(3, "its terminal's state")))
+            .transpose()?,
+        generation: generation
+            .map(|g| u64::try_from(g).map_err(|_| unreadable(4, "its generation")))
+            .transpose()?,
+        runtime: row.get(5)?,
+        locator: row.get(6)?,
+        runtime_kind: row.get(7)?,
+    })
+}
+
+impl Reads<'_> {
+    /// The agent `id` names, with its current terminal, or `None` for one the store doesn't know.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_terminal(self, id: &str) -> rusqlite::Result<Option<AgentTerminal>> {
+        self.0
+            .query_row(AGENT_TERMINAL, [id], agent_terminal_row)
+            .optional()
+    }
+
+    /// The agent whose current terminal `terminal` is, with it, or `None` for a terminal no
+    /// agent runs in now.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_of_terminal(self, terminal: &str) -> rusqlite::Result<Option<AgentTerminal>> {
+        self.0
+            .query_row(AGENT_BY_TERMINAL, [terminal], agent_terminal_row)
+            .optional()
+    }
+}
+
 impl Reads<'_> {
     /// The incarnation terminal `id` runs in, an agent's or a shell's, or `None` for no terminal,
     /// or one no runtime has confirmed (`runtimeRef`).
@@ -435,6 +535,32 @@ impl Reads<'_> {
             .optional()
     }
 
+    /// The state of the terminal `id` names, an agent's or a shell's, or `None` for none
+    /// (`terminalState`).
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a state no terminal could have recorded.
+    pub fn terminal_state(self, id: &str) -> rusqlite::Result<Option<TerminalState>> {
+        let state: Option<String> = self
+            .0
+            .query_row("SELECT state FROM terminals WHERE id = ?", [id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        state
+            .map(|state| {
+                TerminalState::parse(&state).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        format!("{state} isn't a terminal's state").into(),
+                    )
+                })
+            })
+            .transpose()
+    }
+
     /// The shell `id` names, or `None` for none, or a terminal that isn't a shell.
     ///
     /// # Errors
@@ -444,6 +570,22 @@ impl Reads<'_> {
         self.0
             .query_row(&format!("{SHELL_ROW} AND id = ?"), [id], shell_row)
             .optional()
+    }
+
+    /// The shells linked to `agent` not yet closed or failed, oldest first (`linkedShells`):
+    /// those that close with it.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn linked_shells(self, agent: &str) -> rusqlite::Result<Vec<ShellRow>> {
+        self.0
+            .prepare(&format!(
+                "{SHELL_ROW} AND linked_agent_id = ? AND state NOT IN ('closed', 'failed')
+                 ORDER BY created_event_id"
+            ))?
+            .query_map([agent], shell_row)?
+            .collect()
     }
 
     /// The shells of this machine's environment a restarted daemon may still find running, as
@@ -938,6 +1080,97 @@ mod tests {
     }
 
     #[test]
+    fn gives_an_agents_linked_shells_oldest_first_until_each_closes_or_is_unlinked() {
+        let dir = TempDir::new("linked");
+        let mut store = Store::open(&dir.db("linked.db")).unwrap();
+        let environment = environment(&mut store);
+        let [agent, other] = [
+            "agent_0190a1b2c3d47abc8def0123456789a1",
+            "agent_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        let sessions = [agent, other].map(|id| {
+            format!(
+                "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                   created_event_id, updated_event_id)
+                 VALUES ('{id}', '{}', 'claude-code', 'p', '/repo/{id}', 'running', 1, 1);",
+                environment.as_str()
+            )
+        });
+        store.db.execute_batch(&sessions.concat()).unwrap();
+        let shells: Vec<TerminalId> = [Some(agent), Some(other), None, Some(agent), Some(agent)]
+            .into_iter()
+            .enumerate()
+            .map(|(n, linked)| {
+                let terminal = TerminalId::mint(1, [u8::try_from(n).unwrap() + 10; 16]);
+                change(
+                    &mut store,
+                    &terminal,
+                    TerminalChange::Opened(TerminalOpened {
+                        environment_id: environment.clone(),
+                        cwd: "/w".to_owned(),
+                        linked_agent_id: linked.map(|id| AgentId::parse(id).unwrap()),
+                        theme: None,
+                        restart_of: None,
+                        runtime: Some("holder".to_owned()),
+                    }),
+                )
+                .unwrap();
+                terminal
+            })
+            .collect();
+        change(&mut store, &shells[3], TerminalChange::Unlinked).unwrap();
+        change(
+            &mut store,
+            &shells[4],
+            TerminalChange::Running(incarnation("1")),
+        )
+        .unwrap();
+        change(&mut store, &shells[4], TerminalChange::Closing).unwrap();
+        let linked = |store: &Store| -> Vec<TerminalId> {
+            store
+                .reads()
+                .linked_shells(agent)
+                .unwrap()
+                .into_iter()
+                .map(|shell| shell.id)
+                .collect()
+        };
+        let closing = linked(&store);
+        change(
+            &mut store,
+            &shells[4],
+            TerminalChange::Closed(TerminalClosed {
+                reason: TerminalClosedReason::AgentClosed,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                closing,
+                linked(&store),
+                store
+                    .reads()
+                    .shell(shells[3].as_str())
+                    .unwrap()
+                    .unwrap()
+                    .linked_agent_id,
+                store.reads().agent_cwd(agent).unwrap(),
+                store
+                    .reads()
+                    .agent_cwd("agent_0190a1b2c3d47abc8def0123456789a3")
+                    .unwrap(),
+            ),
+            (
+                vec![shells[0].clone(), shells[4].clone()],
+                vec![shells[0].clone()],
+                None,
+                Some(format!("/repo/{agent}")),
+                None,
+            )
+        );
+    }
+
+    #[test]
     fn moves_a_terminal_only_as_the_core_machine_allows_and_names_what_it_refused() {
         use TerminalState::{Closed, Closing, Creating, Exited, Failed, Lost, Running, Unknown};
         assert_eq!(advance(Creating, Step::RuntimeConfirmed), Ok(Running));
@@ -1030,6 +1263,36 @@ mod tests {
                     runtime: "holder".to_owned(),
                     locator: Some(serde_json::to_string(&locator("0")).unwrap()),
                 }),
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn reads_the_state_of_an_agent_s_terminal_as_of_a_shell_s_and_none_for_one_unknown() {
+        let dir = TempDir::new("terminal-state");
+        let (mut store, terminal) = opened(&dir);
+        let shell = store.reads().terminal_state(terminal.as_str()).unwrap();
+        change(
+            &mut store,
+            &terminal,
+            TerminalChange::Running(incarnation("0")),
+        )
+        .unwrap();
+        store
+            .db
+            .execute("UPDATE terminals SET kind = 'agent'", ())
+            .unwrap();
+        let agent = store.reads().terminal_state(terminal.as_str()).unwrap();
+        let unknown = store
+            .reads()
+            .terminal_state(TerminalId::mint(1, [9; 16]).as_str())
+            .unwrap();
+        assert_eq!(
+            (shell, agent, unknown),
+            (
+                Some(TerminalState::Creating),
+                Some(TerminalState::Running),
                 None
             )
         );

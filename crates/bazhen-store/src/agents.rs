@@ -83,6 +83,15 @@ impl Reads<'_> {
         self.first("SELECT state FROM agent_sessions WHERE id = ?", agent_id)
     }
 
+    /// The directory the agent was launched in, as resolved: where a shell linked to it opens.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_cwd(self, agent_id: &str) -> rusqlite::Result<Option<String>> {
+        self.first("SELECT cwd FROM agent_sessions WHERE id = ?", agent_id)
+    }
+
     /// The agent `reference` names: by its id, any agent the store knows; by its name, the one
     /// not ended that holds it. `None` for one it names no agent by.
     ///
@@ -352,7 +361,11 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use crate::testing::TempDir;
-    use crate::{LiveTerminal, Store};
+    use bazhen_protocol::agents::AgentState;
+    use bazhen_protocol::ids::{AgentId, TerminalId};
+    use bazhen_protocol::shells::TerminalState;
+
+    use crate::{AgentTerminal, LiveTerminal, Store};
 
     /// A store with one environment and one event every row below can point at.
     fn store(dir: &TempDir) -> Store {
@@ -574,6 +587,119 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_an_agent_with_its_current_terminal_and_none_for_one_it_doesnt_know() {
+        let dir = TempDir::new("agent-terminal");
+        let store = store(&dir);
+        let [with, without] = [
+            "agent_0190a1b2c3d47abc8def0123456789a1",
+            "agent_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        let [current, left] = [
+            "term_0190a1b2c3d47abc8def0123456789a1",
+            "term_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        for id in [with, without] {
+            seed(&store, &Agent { id, ..AGENT });
+        }
+        terminal(&store, left, "agent", "closed", Some(with), Some("{}"));
+        terminal(
+            &store,
+            current,
+            "agent",
+            "running",
+            Some(with),
+            Some(r#"{"childPid":"7"}"#),
+        );
+        store
+            .db
+            .execute_batch(&format!(
+                "UPDATE terminals SET runtime = 'holder', runtime_kind = 'holder', generation = 3
+                   WHERE id = '{current}';
+                 UPDATE agent_sessions SET terminal_id = '{current}' WHERE id = '{with}';"
+            ))
+            .unwrap();
+        let reads = store.reads();
+        let found = |id: &str| reads.agent_terminal(id).unwrap();
+        assert_eq!(
+            [
+                found(with),
+                found(without),
+                found("agent_0190a1b2c3d47abc8def0123456789a3")
+            ],
+            [
+                Some(AgentTerminal {
+                    agent_id: AgentId::parse(with).unwrap(),
+                    state: AgentState::Running,
+                    terminal_id: TerminalId::parse(current),
+                    terminal_state: Some(TerminalState::Running),
+                    generation: Some(3),
+                    runtime: Some("holder".to_owned()),
+                    locator: Some(r#"{"childPid":"7"}"#.to_owned()),
+                    runtime_kind: Some("holder".to_owned()),
+                }),
+                Some(AgentTerminal {
+                    agent_id: AgentId::parse(without).unwrap(),
+                    state: AgentState::Running,
+                    terminal_id: None,
+                    terminal_state: None,
+                    generation: None,
+                    runtime: None,
+                    locator: None,
+                    runtime_kind: None,
+                }),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_the_agent_a_terminal_is_current_for_and_none_for_one_left_behind() {
+        let dir = TempDir::new("agent-of-terminal");
+        let store = store(&dir);
+        let agent = "agent_0190a1b2c3d47abc8def0123456789a1";
+        let [current, left] = [
+            "term_0190a1b2c3d47abc8def0123456789a1",
+            "term_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        seed(&store, &Agent { id: agent, ..AGENT });
+        terminal(&store, left, "agent", "exited", Some(agent), None);
+        terminal(&store, current, "agent", "running", Some(agent), None);
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET terminal_id = ? WHERE id = ?",
+                (current, agent),
+            )
+            .unwrap();
+        let reads = store.reads();
+        let found = |id: &str| {
+            reads.agent_of_terminal(id).unwrap().map(|t| {
+                (
+                    t.agent_id.as_str().to_owned(),
+                    t.terminal_id,
+                    t.terminal_state,
+                )
+            })
+        };
+        assert_eq!(
+            [
+                found(current),
+                found(left),
+                found("term_0190a1b2c3d47abc8def0123456789a3")
+            ],
+            [
+                Some((
+                    agent.to_owned(),
+                    TerminalId::parse(current),
+                    Some(TerminalState::Running)
+                )),
                 None,
                 None
             ]

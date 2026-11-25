@@ -399,10 +399,13 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/notices/{id}/dismiss", post(paired::dismiss))
         .route("/v1/agents", post(agent_routes::launch))
         .route("/v1/agents/{id}/rename", post(agent_routes::rename))
+        .route("/v1/agents/{id}/close", post(agent_routes::close))
+        .route("/v1/agents/{id}/signal", post(agent_routes::signal))
         .route("/v1/shells", post(shell_routes::open))
         .route("/v1/shells/{id}/close", post(shell_routes::close))
         .route("/v1/shells/{id}/restart", post(shell_routes::restart))
         .route("/v1/shells/{id}/rename", post(shell_routes::rename))
+        .route("/v1/shells/{id}/unlink", post(shell_routes::unlink))
         // A shell's integration reports over the socket only, never HTTP.
         .route(
             "/v1/shells/{id}/report",
@@ -449,10 +452,13 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/notices/{id}/dismiss", post(paired::dismiss))
         .route("/agents", post(agent_routes::launch))
         .route("/agents/{id}/rename", post(agent_routes::rename))
+        .route("/agents/{id}/close", post(agent_routes::close))
+        .route("/agents/{id}/signal", post(agent_routes::signal))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
         .route("/shells/{id}/rename", post(shell_routes::rename))
+        .route("/shells/{id}/unlink", post(shell_routes::unlink))
         .route("/terminals/{id}/screen", get(terminal_routes::screen))
         .fallback(unrouted)
         .method_not_allowed_fallback(unrouted)
@@ -636,6 +642,64 @@ mod tests {
                 &json!(false)
             ),
             "{body}"
+        );
+    }
+
+    #[test]
+    fn signals_an_agent_named_by_its_id_or_live_name_reading_its_body_before_the_agent() {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let f = crate::agents::tests::stubbed(&StubHarness::new(pull()));
+        let launched = crate::testing::runtime()
+            .block_on(f.launch(bazhen_protocol::agents::LaunchAgentRequest {
+                name: Some(bazhen_protocol::names::AgentName::parse("lead").unwrap()),
+                ..crate::agents::tests::request("k-1")
+            }))
+            .unwrap();
+        let agent = launched.agent_id.as_str();
+        let generation = f
+            .store
+            .reader()
+            .unwrap()
+            .reads()
+            .agent_terminal(agent)
+            .unwrap()
+            .and_then(|found| found.generation)
+            .unwrap();
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let signal = |reference: &str, key: &str| {
+            let body =
+                json!({ "idempotencyKey": key, "generation": generation, "signal": "SIGINT" });
+            send(
+                socket_router(shared.clone()),
+                post(&format!("/v1/agents/{reference}/signal"), &[], &body),
+            )
+        };
+        let unknown = "agent_0190a1b2c3d47abc8def0123456789a1";
+        assert_eq!(
+            [
+                signal("LEAD", "s-1"),
+                signal(agent, "s-1"),
+                signal("nobody", "s-2"),
+                signal(unknown, "s-2"),
+                signal("nobody", ""),
+            ],
+            [
+                (
+                    200,
+                    json!({ "agentId": agent, "eventIds": [f.types().len()] })
+                ),
+                (
+                    200,
+                    json!({ "agentId": agent, "eventIds": [f.types().len()] })
+                ),
+                (404, refused("not_found", "no agent nobody by that name")),
+                (404, refused("not_found", &format!("no agent {unknown}"))),
+                (
+                    400,
+                    refused("invalid_request", "idempotencyKey is 1 to 200 characters")
+                ),
+            ]
         );
     }
 

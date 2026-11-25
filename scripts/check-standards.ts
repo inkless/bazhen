@@ -967,6 +967,12 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to agent_requests::launch_request, which its agent_requests target fuzzes; decodes nothing itself",
   "crates/bazhen-daemon/src/agent_routes.rs::rename":
     "hands its body to agent_requests::rename_request, which its agent_requests target fuzzes; reads the path only as the agent's id or live name, for the store to resolve",
+  "crates/bazhen-daemon/src/agent_routes.rs::command":
+    "hands its body to bazhen_protocol::edge::edge, which the edge target fuzzes for each request it reads; reads the path only as the agent's id or live name, for the store to resolve",
+  "crates/bazhen-daemon/src/agent_routes.rs::close":
+    "hands its body to command; decodes nothing itself",
+  "crates/bazhen-daemon/src/agent_routes.rs::signal":
+    "hands its body to command; decodes nothing itself",
   "crates/bazhen-daemon/src/agents/transcript.rs::TranscriptReader::holds":
     "splits a file's bytes into lines at each newline, up to a fixed limit, and hands each as lossy UTF-8 to the harness's is_conversation_entry, whose Js::parse is listed; a proptest holds the lines it hands on to a whole split of the same bytes, for any chunk size and limit",
   "crates/bazhen-daemon/src/harnesses.rs::served":
@@ -983,6 +989,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::restart_request":
     "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::unlink_request":
+    "hands its body to parsed, then checks the fields serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::rename_request":
     "hands its body to parsed, then checks the name serde_json's derive gave it; reads no bytes itself",
   "crates/bazhen-daemon/src/shell_routes.rs::open":
@@ -991,6 +999,8 @@ const NOT_DECODERS: Record<string, string> = {
     "hands its body to close_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::restart":
     "hands its body to restart_request; decodes nothing itself",
+  "crates/bazhen-daemon/src/shell_routes.rs::unlink":
+    "hands its body to unlink_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::rename":
     "hands its body to rename_request; decodes nothing itself",
   "crates/bazhen-daemon/src/shell_routes.rs::reported":

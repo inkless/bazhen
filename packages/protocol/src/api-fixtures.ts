@@ -68,6 +68,7 @@ import {
   ShellDecline,
   ShellPrompt,
   ShellReport,
+  UnlinkShellRequest,
 } from "./shells.ts";
 import { STREAM_FRAME_MAX_BYTES, StreamClientFrame, StreamServerFrame } from "./stream.ts";
 import {
@@ -1285,6 +1286,10 @@ const MESSAGES: Readonly<Record<string, Example>> = {
   UnassignTaskRequest: {
     schema: UnassignTaskRequest,
     wire: [{ idempotencyKey: KEY, assignmentId: ASGN }],
+  },
+  UnlinkShellRequest: {
+    schema: UnlinkShellRequest,
+    wire: [{ idempotencyKey: KEY, generation: 2 }],
   },
   WaitRequest: {
     schema: WaitRequest,

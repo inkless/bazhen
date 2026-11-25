@@ -238,6 +238,20 @@ pub(crate) fn cut_detail(text: String) -> String {
     cut
 }
 
+/// The holder's name for the signal a client asked for: the same four, by the same names.
+const fn holder_signal(
+    signal: bazhen_protocol::agents::Signal,
+) -> bazhen_holder_proto::body::Signal {
+    use bazhen_holder_proto::body::Signal as Held;
+    use bazhen_protocol::agents::Signal as Asked;
+    match signal {
+        Asked::Sigint => Held::Sigint,
+        Asked::Sigterm => Held::Sigterm,
+        Asked::Sighup => Held::Sighup,
+        Asked::Sigkill => Held::Sigkill,
+    }
+}
+
 /// The runtime's failure in the kinds a command answers differently.
 fn terminal_error(err: &RuntimeError) -> TerminalError {
     match err {
@@ -666,6 +680,20 @@ impl Terminals for Holder {
             let terminal = holder_ref(terminal)?;
             self.runtime
                 .unlink(&terminal)
+                .await
+                .map_err(|e| terminal_error(&e))
+        })
+    }
+
+    fn signal<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        signal: bazhen_protocol::agents::Signal,
+    ) -> Answer<'a, Result<(), TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            self.runtime
+                .signal(&terminal, holder_signal(signal))
                 .await
                 .map_err(|e| terminal_error(&e))
         })
@@ -1227,6 +1255,7 @@ mod tests {
                 Box::new(|_| {}),
             );
             let shells = Shells::new(ShellsDeps {
+                turns: Arc::default(),
                 store: store.clone(),
                 terminals,
                 budget: Arc::new(budget),
@@ -1513,6 +1542,7 @@ mod tests {
                     let snippets = dir.join("state/shell-integration");
                     install_shell_integration(&snippets, uid).unwrap();
                     Arc::new(Shells::new(ShellsDeps {
+                        turns: Arc::default(),
                         store: store.clone(),
                         terminals,
                         budget: Arc::new(Budget::new(

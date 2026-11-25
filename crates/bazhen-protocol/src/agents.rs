@@ -551,17 +551,34 @@ pub struct LaunchAgentResponse {
 pub struct CloseAgentRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[serde(deserialize_with = "crate::js_number::whole")]
     pub generation: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub force: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "Vec<TerminalId>"))]
     pub keep_shells: Option<Vec<TerminalId>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "bool"))]
     pub confirm_busy: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::nullable::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "Vec<BusyShell>"))]
     pub confirmed_busy: Option<Vec<BusyShell>>,
 }
@@ -602,6 +619,7 @@ pub struct RelaunchAgentRequest {
 pub struct SignalAgentRequest {
     #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
     pub idempotency_key: String,
+    #[serde(deserialize_with = "crate::js_number::whole")]
     pub generation: u64,
     pub signal: Signal,
 }

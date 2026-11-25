@@ -288,6 +288,18 @@ pub struct RenameShellRequest {
     pub name: Option<String>,
 }
 
+/// `POST /v1/shells/:id/unlink`: makes a linked shell standalone, so its agent's close no longer
+/// takes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct UnlinkShellRequest {
+    #[cfg_attr(feature = "schema", schemars(with = "crate::schema::IdempotencyKey"))]
+    pub idempotency_key: String,
+    #[serde(deserialize_with = "crate::js_number::whole")]
+    pub generation: u64,
+}
+
 /// The most code points a shell's name has once trimmed, as zod's `.max(80)` counts them.
 pub const SHELL_NAME_MAX_CHARS: usize = 80;
 

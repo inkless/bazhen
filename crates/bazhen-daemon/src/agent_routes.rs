@@ -1,5 +1,5 @@
-//! The agents' routes (`POST /v1/agents` and `POST /v1/agents/:id/rename` in `http/app.ts`), and
-//! the agents' failures as the protocol's errors.
+//! The agents' routes (`POST /v1/agents`, and `POST /v1/agents/:id/` each command, in
+//! `http/app.ts`), and the agents' failures as the protocol's errors.
 
 use std::sync::Arc;
 
@@ -7,10 +7,12 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use bazhen_protocol::agents::AgentCommandResponse;
+use bazhen_protocol::agents::{AgentCommandResponse, CloseAgentRequest, SignalAgentRequest};
 use bazhen_protocol::daemon::ErrorCode;
+use bazhen_protocol::edge::{EdgeCheck, Refused, edge};
 use bazhen_protocol::ids::AgentId;
 use bazhen_store::{OnceError, Rename, RenameError};
+use serde::de::DeserializeOwned;
 
 use crate::agent_requests::{launch_request, rename_request};
 use crate::agents::{AgentError, Agents};
@@ -27,8 +29,14 @@ pub(crate) fn refusal(err: &AgentError) -> Response {
             (StatusCode::CONFLICT, ErrorCode::Conflict)
         }
         AgentError::LaunchFailed { .. } => (StatusCode::BAD_GATEWAY, ErrorCode::LaunchFailed),
+        AgentError::Unknown(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        AgentError::Conflict(_) => (StatusCode::CONFLICT, ErrorCode::Conflict),
+        AgentError::Stale { .. } => (StatusCode::CONFLICT, ErrorCode::StaleGeneration),
+        AgentError::ServerUnconfirmed(_) => (StatusCode::CONFLICT, ErrorCode::ServerUnconfirmed),
+        AgentError::NeedsRestart(_) => (StatusCode::CONFLICT, ErrorCode::NeedsRestart),
         AgentError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
         AgentError::Internal(_) => return internal(err),
+        AgentError::Shells(err) => return crate::shell_routes::refusal(err),
     };
     fail(status, code, &err.to_string())
 }
@@ -63,6 +71,83 @@ enum Renaming {
     Refused(RenameError),
     /// The store's writer has stopped.
     Closed(String),
+}
+
+/// The agent a path names by its id, in any state, or by its live name (`resolveAgent`).
+async fn resolved(shared: &Shared, reference: String) -> Result<String, AgentError> {
+    shared
+        .store
+        .run(move |store| {
+            store.reads().resolve_agent(&reference)?.ok_or_else(|| {
+                AgentError::Unknown(if AgentId::parse(&reference).is_some() {
+                    reference
+                } else {
+                    format!("{reference} by that name")
+                })
+            })
+        })
+        .await?
+}
+
+/// A command on the agent the path names: its body held to its schema, then the agent resolved,
+/// then the command, run to its end whether or not the caller waits for the answer.
+async fn command<R, F>(
+    shared: &Shared,
+    reference: String,
+    body: &[u8],
+    run: impl FnOnce(Arc<Agents>, String, R) -> F,
+) -> Response
+where
+    R: DeserializeOwned + EdgeCheck,
+    F: Future<Output = Result<AgentCommandResponse, AgentError>> + Send + 'static,
+{
+    let answered = async {
+        let req = edge::<R>(body).map_err(|Refused(why)| AgentError::Invalid(why))?;
+        let id = resolved(shared, reference).await?;
+        agents_of(shared)?
+            .completing(move |agents| run(agents, id, req))
+            .await
+    };
+    match answered.await {
+        Ok(response) => axum::Json(response).into_response(),
+        Err(err) => refusal(&err),
+    }
+}
+
+/// `POST /v1/agents/:id/close`, over either listener: the agent with its linked shells.
+pub(crate) async fn close(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    body: Bytes,
+) -> Response {
+    let shells = shared.shells.clone();
+    command(
+        &shared,
+        reference,
+        &body,
+        move |agents, id, req: CloseAgentRequest| async move {
+            match shells {
+                Some(shells) => shells.close_agent(&id, &req, agents.close(&id, &req)).await,
+                None => agents.close(&id, &req).await,
+            }
+        },
+    )
+    .await
+}
+
+/// `POST /v1/agents/:id/signal`, over either listener.
+pub(crate) async fn signal(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    body: Bytes,
+) -> Response {
+    command(
+        &shared,
+        reference,
+        &body,
+        |agents, id, req: SignalAgentRequest| async move { agents.signal(&id, &req).await },
+    )
+    .await
 }
 
 /// `POST /v1/agents/:id/rename`: the human renames any agent over either listener, an agent only
@@ -160,6 +245,20 @@ mod tests {
             },
             AgentError::Unavailable("x".to_owned()),
             AgentError::Internal("x".to_owned()),
+            AgentError::Unknown("x".to_owned()),
+            AgentError::Conflict("x".to_owned()),
+            AgentError::Stale {
+                id: "x".to_owned(),
+                generation: None,
+            },
+            AgentError::ServerUnconfirmed("x".to_owned()),
+            AgentError::NeedsRestart("x".to_owned()),
+            AgentError::Shells(crate::shells::ShellError::Busy {
+                message: "vim is running in agent x's shells".to_owned(),
+                busy: Vec::new(),
+            }),
+            AgentError::Shells(crate::shells::ShellError::Unavailable("x".to_owned())),
+            AgentError::Shells(crate::shells::ShellError::Conflict("x".to_owned())),
         ]
         .map(|err| {
             let response = refusal(&err);
@@ -184,6 +283,14 @@ mod tests {
                 (502, code("launch_failed")),
                 (503, code("unavailable")),
                 (500, None),
+                (404, code("not_found")),
+                (409, code("conflict")),
+                (409, code("stale_generation")),
+                (409, code("server_unconfirmed")),
+                (409, code("needs_restart")),
+                (409, code("busy")),
+                (503, code("unavailable")),
+                (409, code("conflict")),
             ]
         );
     }

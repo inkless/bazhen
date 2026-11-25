@@ -1442,18 +1442,21 @@ fn pass(outbox: &Outbox, item: &Held) -> Result<(), Behind> {
         Held::Exited(exit) => {
             outbox.notify(StreamServerFrame::Exited {
                 generation: exit.generation.get(),
-                exit: match &exit.status {
-                    body::ExitStatus::Exited { code } => {
-                        agents::ExitStatus::Exited { code: code.get() }
-                    }
-                    body::ExitStatus::Signalled { signal } => agents::ExitStatus::Signalled {
-                        signal: signal.clone(),
-                    },
-                    body::ExitStatus::Unknown => agents::ExitStatus::Unknown,
-                },
+                exit: exit_status(&exit.status),
             });
             Ok(())
         }
+    }
+}
+
+/// How a child ended, as the protocol tells it.
+pub(crate) fn exit_status(status: &body::ExitStatus) -> agents::ExitStatus {
+    match status {
+        body::ExitStatus::Exited { code } => agents::ExitStatus::Exited { code: code.get() },
+        body::ExitStatus::Signalled { signal } => agents::ExitStatus::Signalled {
+            signal: signal.clone(),
+        },
+        body::ExitStatus::Unknown => agents::ExitStatus::Unknown,
     }
 }
 
