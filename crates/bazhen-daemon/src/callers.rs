@@ -1049,6 +1049,59 @@ mod tests {
         }
 
         #[test]
+        fn shows_a_task_in_full_to_an_agent_and_the_human_and_no_task_for_an_unknown_id() {
+            let (_dir, store, thread) = daemon();
+            let token = [("bazhen-agent-token", TOKEN)];
+            let made = ask(
+                router(&store, None),
+                "POST",
+                "/v1/tasks",
+                &[token[0], ("content-type", "application/json")],
+                Some(json!({ "idempotencyKey": "k", "title": "T", "brief": "b" })),
+                false,
+            );
+            assert_eq!(made.0, 200, "{}", made.1);
+            let id = made.1["taskId"].as_str().unwrap().to_owned();
+            let show = |path: &str, headers: &[(&str, &str)]| {
+                ask(router(&store, None), "GET", path, headers, None, false)
+            };
+            let shown = json!({
+                "id": id,
+                "title": "T",
+                "state": "open",
+                "ownerAgentId": agent('1').as_str(),
+                "parentTaskId": null,
+                "brief": "b",
+                "note": null,
+                "assignments": [],
+                "subtasks": [],
+                "notes": [],
+            });
+            let unknown = "task_0190a1b2c3d47abc8def0123456789ff";
+            let none = |id: &str| {
+                (
+                    404,
+                    json!({ "error": "not_found", "message": format!("no task {id}") }),
+                )
+            };
+            assert_eq!(
+                [
+                    show(&format!("/v1/tasks/{id}"), &token),
+                    show(&format!("/v1/tasks/{id}"), &[]),
+                    show(&format!("/v1/tasks/{unknown}"), &token),
+                    show("/v1/tasks/nonsense", &[]),
+                ],
+                [
+                    (200, shown.clone()),
+                    (200, shown),
+                    none(unknown),
+                    none("nonsense")
+                ]
+            );
+            thread.finish();
+        }
+
+        #[test]
         fn takes_a_caller_under_an_agents_pane_as_that_agent_though_it_presents_nothing() {
             let (_dir, store, thread) = daemon();
             let under = |peer| {

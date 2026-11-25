@@ -100,7 +100,7 @@ pub fn is_js_space(c: char) -> bool {
 
 /// No control character but newline and tab, no bidirectional override, nothing that draws as
 /// nothing, and no tag character.
-fn note_safe(text: &str) -> bool {
+pub(crate) fn note_safe(text: &str) -> bool {
     !text
         .chars()
         .any(|c| (unshowable(c) && c != '\n' && c != '\t') || invisible(c) || tag(c))

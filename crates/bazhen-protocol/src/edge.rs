@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use crate::agents::{
     CloseAgentRequest, RelaunchAgentRequest, RespawnAgentRequest, SignalAgentRequest,
 };
-use crate::ids::TaskId;
+use crate::ids::{AssignmentId, TaskId};
 use crate::mail::{
     AnswerAttentionRequest, DismissAttentionRequest, HookAck, HookRequest, ReplyAttentionRequest,
     ResendAttentionRequest, SendMessageRequest,
@@ -22,9 +22,13 @@ use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
     SHELL_NAME_MAX_CHARS, ShellDecline, ShellPrompt, ShellReport, UnlinkShellRequest,
 };
-use crate::tasks::CreateTaskRequest;
+use crate::tasks::{
+    AddTaskNoteRequest, AssignTaskRequest, CreateTaskRequest, DelegateTaskRequest, EscalateRequest,
+    FinishTaskRequest, UnassignTaskRequest,
+};
 use crate::text::{
-    MESSAGE_BODY_MAX_CHARS, TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, showable, title_safe, trim,
+    MESSAGE_BODY_MAX_CHARS, TASK_BRIEF_MAX_CHARS, TASK_TITLE_MAX_CHARS, note_safe, showable,
+    task_note_text, title_safe, trim,
 };
 
 /// The most code points an idempotency key has.
@@ -121,6 +125,37 @@ pub const MESSAGE_BODY_RULE: &str = "body is 1 to 20000 characters";
 /// The rule a task's parent holds to, as a refusal names it.
 pub const PARENT_RULE: &str = "parentTaskId is a task id";
 
+/// The rule an assignment named in a request holds to, as a refusal names it.
+pub const ASSIGNMENT_RULE: &str = "assignmentId is an assignment id";
+
+/// The most code points a finished task's note has: a message's length, since it is mailed.
+pub const FINISH_NOTE_MAX_CHARS: usize = 20_000;
+
+/// The rule a finished task's note holds to for its length, as a refusal names it.
+pub const FINISH_NOTE_LENGTH_RULE: &str = "note is at most 20000 characters";
+
+/// The rule a note holds to for what it may hold, as zod's `noteSafe` refusal names it.
+pub const NOTE_SAFE_RULE: &str =
+    "a note can't hold control characters but newline and tab, or invisible characters";
+
+/// The rule a delegation's parent holds to, as a refusal names it.
+pub const FROM_TASK_RULE: &str = "fromTaskId is a task id";
+
+/// The rule a delegation's agent holds to, as zod's refinement names it.
+pub const AGENT_OR_LAUNCH_RULE: &str = "name the agent to delegate to, or one to launch, not both";
+
+/// The rule a launch's directory holds to, as a refusal names it.
+pub const LAUNCH_CWD_RULE: &str = "launch.cwd is a path";
+
+/// The most code points an escalation's summary has, once trimmed.
+pub const ESCALATION_SUMMARY_MAX_CHARS: usize = 2000;
+
+/// The rule an escalation's summary holds to, as a refusal names it.
+pub const ESCALATION_SUMMARY_RULE: &str = "summary is 1 to 2000 characters once trimmed";
+
+/// The rule the task an escalation names holds to, as a refusal names it.
+pub const ESCALATION_TASK_RULE: &str = "taskId is a task id";
+
 /// Whether `key` is an idempotency key: 1 to 200 code points.
 #[must_use]
 pub fn is_key(key: &str) -> bool {
@@ -175,6 +210,92 @@ impl EdgeCheck for CreateTaskRequest {
                 .as_deref()
                 .is_none_or(|id| TaskId::parse(id).is_some()),
             PARENT_RULE,
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for AssignTaskRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for UnassignTaskRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        holds(
+            AssignmentId::parse(&self.assignment_id).is_some(),
+            ASSIGNMENT_RULE,
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for FinishTaskRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        if let Some(note) = &self.note {
+            holds(
+                chars(note) <= FINISH_NOTE_MAX_CHARS,
+                FINISH_NOTE_LENGTH_RULE,
+            )?;
+            holds(note_safe(note), NOTE_SAFE_RULE)?;
+        }
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for AddTaskNoteRequest {
+    fn checked(mut self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        self.text = task_note_text(&self.text).map_err(|refused| Refused(refused.to_string()))?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for DelegateTaskRequest {
+    fn checked(mut self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        holds(
+            self.from_task_id
+                .as_deref()
+                .is_none_or(|id| TaskId::parse(id).is_some()),
+            FROM_TASK_RULE,
+        )?;
+        holds(
+            self.launch
+                .as_ref()
+                .is_none_or(|launch| launch.cwd.as_deref() != Some("")),
+            LAUNCH_CWD_RULE,
+        )?;
+        self.title = task_title(&self.title)
+            .ok_or_else(|| Refused(TITLE_RULE.to_owned()))?
+            .to_owned();
+        holds(is_task_brief(&self.brief), BRIEF_RULE)?;
+        holds(
+            self.agent_id.is_some() != self.launch.is_some(),
+            AGENT_OR_LAUNCH_RULE,
+        )?;
+        Ok(self)
+    }
+}
+
+impl EdgeCheck for EscalateRequest {
+    fn checked(mut self) -> Result<Self, Refused> {
+        keyed(&self.idempotency_key)?;
+        let summary = trim(&self.summary);
+        holds(
+            (1..=ESCALATION_SUMMARY_MAX_CHARS).contains(&chars(summary)),
+            ESCALATION_SUMMARY_RULE,
+        )?;
+        self.summary = summary.to_owned();
+        holds(
+            self.task_id
+                .as_deref()
+                .is_none_or(|id| TaskId::parse(id).is_some()),
+            ESCALATION_TASK_RULE,
         )?;
         Ok(self)
     }
@@ -539,6 +660,151 @@ mod tests {
             "brief": "\u{1f600}".repeat(20_000),
         });
         assert!(!refused::<CreateTaskRequest>(&at_bounds));
+    }
+
+    const TASK: &str = "task_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+
+    #[test]
+    fn a_grant_and_its_lift_hold_their_key_and_assignment_to_the_protocol() {
+        let grant =
+            |key: &str| json!({ "idempotencyKey": key, "agentId": "BZ-127", "role": "worker" });
+        let lift = |key: &str, id: &str| json!({ "idempotencyKey": key, "assignmentId": id });
+        let assignment = "asgn_0190c3b2a1d47a3b8c1d2e3f4a5b6c7d";
+        assert_eq!(
+            [
+                verdict::<AssignTaskRequest>(&grant(KEY)).is_ok(),
+                refused::<AssignTaskRequest>(&grant("")),
+                verdict::<UnassignTaskRequest>(&lift(KEY, assignment)).is_ok(),
+                refused::<UnassignTaskRequest>(&lift("", assignment)),
+                refused::<UnassignTaskRequest>(&lift(KEY, TASK)),
+            ],
+            [true; 5]
+        );
+        assert_eq!(
+            verdict::<UnassignTaskRequest>(&lift(KEY, TASK)),
+            Err(ASSIGNMENT_RULE.to_owned())
+        );
+    }
+
+    #[test]
+    fn a_finish_holds_its_note_to_a_message_s_length_and_to_what_a_note_may_hold() {
+        let finish = |note: &str| json!({ "idempotencyKey": KEY, "outcome": "done", "note": note });
+        let longest = "\u{1f600}".repeat(FINISH_NOTE_MAX_CHARS);
+        assert_eq!(
+            [
+                verdict::<FinishTaskRequest>(&json!({ "idempotencyKey": KEY, "outcome": "done" }))
+                    .is_ok(),
+                verdict::<FinishTaskRequest>(&finish(&longest)).is_ok(),
+                verdict::<FinishTaskRequest>(&finish("")).is_ok(),
+                verdict::<FinishTaskRequest>(&finish("line\n\tline")).is_ok(),
+            ],
+            [true; 4]
+        );
+        assert_eq!(
+            [
+                finish(&"n".repeat(FINISH_NOTE_MAX_CHARS + 1)),
+                finish("a\u{7}b"),
+                finish("a\u{200b}b"),
+            ]
+            .map(|body| verdict::<FinishTaskRequest>(&body).err()),
+            [
+                Some(FINISH_NOTE_LENGTH_RULE.to_owned()),
+                Some(NOTE_SAFE_RULE.to_owned()),
+                Some(NOTE_SAFE_RULE.to_owned()),
+            ]
+        );
+        assert!(refused::<FinishTaskRequest>(
+            &json!({ "idempotencyKey": "", "outcome": "done" })
+        ));
+    }
+
+    #[test]
+    fn a_note_is_taken_trimmed_and_refused_empty_past_4000_bytes_or_holding_the_invisible() {
+        let note = |text: &str| json!({ "idempotencyKey": KEY, "text": text });
+        assert_eq!(
+            verdict::<AddTaskNoteRequest>(&note(" \u{feff}tests pass\n "))
+                .map(|n| n["text"].clone()),
+            Ok(json!("tests pass"))
+        );
+        assert!(verdict::<AddTaskNoteRequest>(&note(&"\u{1f600}".repeat(1000))).is_ok());
+        for broken in [
+            note("  "),
+            note(&format!("{}a", "\u{1f600}".repeat(1000))),
+            note("a\u{202e}b"),
+            json!({ "idempotencyKey": "", "text": "t" }),
+        ] {
+            assert!(refused::<AddTaskNoteRequest>(&broken), "{broken}");
+        }
+    }
+
+    #[test]
+    fn a_delegation_names_an_agent_or_a_launch_and_holds_its_task_title_and_brief() {
+        let delegate = |extra: Value| {
+            let mut body = json!({ "idempotencyKey": KEY, "title": " t ", "brief": "b" });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        let launch = json!({ "harness": "codex", "cwd": "/w" });
+        let taken = verdict::<DelegateTaskRequest>(&delegate(json!({ "agentId": "BZ-127" })));
+        assert_eq!(taken.map(|d| d["title"].clone()), Ok(json!("t")));
+        assert!(verdict::<DelegateTaskRequest>(&delegate(json!({ "launch": launch }))).is_ok());
+        assert!(
+            verdict::<DelegateTaskRequest>(&delegate(
+                json!({ "agentId": "BZ-127", "fromTaskId": TASK })
+            ))
+            .is_ok()
+        );
+        assert_eq!(
+            [
+                delegate(json!({})),
+                delegate(json!({ "agentId": "BZ-127", "launch": launch })),
+                delegate(json!({ "agentId": "BZ-127", "fromTaskId": "x" })),
+                delegate(json!({ "launch": { "harness": "codex", "cwd": "" } })),
+                delegate(json!({ "agentId": "BZ-127", "title": "\u{7}" })),
+                delegate(json!({ "agentId": "BZ-127", "brief": "" })),
+                delegate(json!({ "agentId": "BZ-127", "idempotencyKey": "" })),
+            ]
+            .map(|body| verdict::<DelegateTaskRequest>(&body).err()),
+            [
+                Some(AGENT_OR_LAUNCH_RULE.to_owned()),
+                Some(AGENT_OR_LAUNCH_RULE.to_owned()),
+                Some(FROM_TASK_RULE.to_owned()),
+                Some(LAUNCH_CWD_RULE.to_owned()),
+                Some(TITLE_RULE.to_owned()),
+                Some(BRIEF_RULE.to_owned()),
+                Some(KEY_RULE.to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_escalation_is_taken_with_its_summary_trimmed_to_1_to_2000_code_points() {
+        let escalate = |summary: &str| json!({ "idempotencyKey": KEY, "summary": summary });
+        assert_eq!(
+            verdict::<EscalateRequest>(&escalate("  pin it? ")).map(|e| e["summary"].clone()),
+            Ok(json!("pin it?"))
+        );
+        let longest = format!(" {} ", "\u{1f600}".repeat(ESCALATION_SUMMARY_MAX_CHARS));
+        assert!(verdict::<EscalateRequest>(&escalate(&longest)).is_ok());
+        let named = json!({ "idempotencyKey": KEY, "summary": "?", "taskId": TASK });
+        assert!(verdict::<EscalateRequest>(&named).is_ok());
+        assert_eq!(
+            [
+                escalate("   "),
+                escalate(&"s".repeat(ESCALATION_SUMMARY_MAX_CHARS + 1)),
+                json!({ "idempotencyKey": KEY, "summary": "?", "taskId": "x" }),
+                json!({ "idempotencyKey": "", "summary": "?" }),
+            ]
+            .map(|body| verdict::<EscalateRequest>(&body).err()),
+            [
+                Some(ESCALATION_SUMMARY_RULE.to_owned()),
+                Some(ESCALATION_SUMMARY_RULE.to_owned()),
+                Some(ESCALATION_TASK_RULE.to_owned()),
+                Some(KEY_RULE.to_owned()),
+            ]
+        );
     }
 
     #[test]
