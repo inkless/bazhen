@@ -412,7 +412,10 @@ and ruff snapshot a CLI's output, those suites do it here.
 
 The daemon's API is defined by the Rust types in `crates/bazhen-protocol`, and `cargo xtask schema`
 (which `moon run :schema` runs) publishes their JSON Schema to `packages/protocol/schema/`, and
-writes the web's zod from it. While the TypeScript daemon runs, a Rust crate that
+writes the web's zod and constants from it into `packages/protocol/src/gen/`. The zod is held to
+the API fixtures by `packages/protocol/src/gen-protocol.medium.test.ts`, and the planted corpus
+holds the daemon's edge to the schema it emits, but for the cases `KNOWN_MISMATCHES` lists. While
+the TypeScript daemon runs, a Rust crate that
 speaks the API holds hand-written serde types for the messages it uses. They are held to the
 TypeScript by fixtures `moon run :schema` writes for each of those messages, as it writes the
 holder's for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and
@@ -425,11 +428,10 @@ only a strict one gets `#[serde(deny_unknown_fields)]`, and a field with a defau
 and a test in `crates/bazhen` hashes the schema itself, so neither side drifts. The CLI compares
 it with the daemon's `protocolId`, and calls one that differs another build.
 
-The types aren't generated from the JSON Schema. typify, tried on every schema, fails on the event
-and agent-reference unions, names each nested type by where it sits because the schemas inline
-them, and writes `#![allow]`s the scan refuses. Once the daemon is Rust, the direction turns: the
-Rust types are the source, and the schema and the web's types are generated from them, as Oxide's
-dropshot and progenitor do.
+The Rust types are the source, and the schema and the web's types are generated from them, as
+Oxide's dropshot and progenitor do. The other way was tried: typify, on every schema, fails on the
+event and agent-reference unions, names each nested type by where it sits because the schemas
+inline them, and writes `#![allow]`s the scan refuses.
 
 ## Async and the daemon
 
