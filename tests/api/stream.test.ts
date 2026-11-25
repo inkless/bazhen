@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse } from "@bazhen/protocol";
+import { LaunchAgentResponse } from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 
 let daemon: Daemon;

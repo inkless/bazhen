@@ -3,7 +3,7 @@
 // agent's launch records in events-agents.test.ts.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CreateTaskResponse, StateSnapshot } from "@bazhen/protocol";
+import { CreateTaskResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, overSocket, waitUntil } from "./daemon.ts";
 
 let daemon: Daemon;

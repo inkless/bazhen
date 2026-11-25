@@ -5,7 +5,7 @@ import {
   StateSnapshot,
   TaskDetail,
   type LaunchAgentResponse,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { BANNER, Daemon, bazhen, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 

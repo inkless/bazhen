@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, shellWithRc, typesBack, waitUntil, type IntegratedShell } from "./daemon.ts";
 import { closeHoldersUnder } from "../support/holder-close.ts";
 import {

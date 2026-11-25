@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DevicesResponse, PairResponse, StateSnapshot } from "@bazhen/protocol";
+import { DevicesResponse, PairResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, bazhen, overSocket, waitUntil } from "./daemon.ts";
 
 describe("pairing a browser through the CLI", () => {

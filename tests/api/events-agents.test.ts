@@ -2,7 +2,7 @@
 // it runs on the TypeScript daemon only until the Rust one launches them.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
+import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 
 let daemon: Daemon;

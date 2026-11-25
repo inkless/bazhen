@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AgentCommandResponse, ErrorResponse, StateSnapshot } from "@bazhen/protocol";
+import { AgentCommandResponse, ErrorResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { isAlive } from "@bazhen/host-guard";
 import { Daemon } from "./daemon.ts";
 

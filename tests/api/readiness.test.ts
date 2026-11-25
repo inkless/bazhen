@@ -2,7 +2,7 @@
 // only the human answers: Bazhen waits, says so past its deadline, and types nothing.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
+import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 

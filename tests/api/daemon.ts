@@ -32,12 +32,14 @@ import { WebSocket } from "ws";
 import { GENERATION_OPTION, signalOwnChild, signalPane, TmuxServer } from "@bazhen/host-guard";
 import {
   encodeHolderRequest,
-  EventFrame,
-  ExternalRef,
   HOLDER_PROTOCOL_VERSION,
   holderReplyDecoder,
   type HolderReply,
   type HolderRequest,
+} from "@bazhen/protocol";
+import {
+  EventFrame,
+  ExternalRef,
   type HolderSignal,
   LaunchAgentResponse,
   StreamServerFrame,
@@ -45,7 +47,7 @@ import {
   ShellCommandResponse,
   StateSnapshot,
   TerminalScreen,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { protocolId } from "@bazhen/protocol/id";
 import { agentHomes, codexDaemonStarted, loginEnv } from "../support/agent-env.ts";
 import { closeHolderAt, closeHoldersUnder, leftBehind } from "../support/holder-close.ts";

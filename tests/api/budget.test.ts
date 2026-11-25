@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { ErrorResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { ErrorResponse, ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { bazhen, Daemon, waitUntil } from "./daemon.ts";
 
 const daemons: Daemon[] = [];

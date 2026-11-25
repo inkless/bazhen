@@ -5,7 +5,7 @@ import {
   ErrorResponse,
   LaunchAgentResponse,
   StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { Daemon, HOST, overSocket } from "./daemon.ts";
 import { holderSockets } from "../support/holder-close.ts";
 

@@ -1,6 +1,6 @@
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import headless from "@xterm/headless";
-import { HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol";
+import { HISTORY_LINES, MAX_ROWS } from "@bazhen/protocol/web";
 
 /** A browser's view of a terminal: what xterm.js, as the web client sets it up, shows. */
 export interface BrowserScreen {

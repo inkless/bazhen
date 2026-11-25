@@ -1,4 +1,4 @@
-import { StateSnapshot } from "@bazhen/protocol";
+import { StateSnapshot } from "@bazhen/protocol/web";
 import { attachInScript, type Daemon } from "./daemon.ts";
 
 /**

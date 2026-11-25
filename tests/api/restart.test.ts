@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SendMessageResponse, StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol";
+import { SendMessageResponse, StateSnapshot, type LaunchAgentResponse } from "@bazhen/protocol/web";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 

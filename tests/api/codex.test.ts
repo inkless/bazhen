@@ -4,7 +4,7 @@ import {
   LaunchAgentResponse,
   SendMessageResponse,
   StateSnapshot,
-} from "@bazhen/protocol";
+} from "@bazhen/protocol/web";
 import { BANNER, Daemon, overSocket, showsThread, waitUntil } from "./daemon.ts";
 import { FAKE_CODEX_QUESTION, startFakeResponses } from "./fake-responses.ts";
 import type { FakeModel } from "./fake-model.ts";

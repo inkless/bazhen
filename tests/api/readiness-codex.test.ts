@@ -2,7 +2,7 @@
 // asks nothing and comes up, where Claude Code stops at its trust question (readiness.test.ts).
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol";
+import { LaunchAgentResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { BANNER, Daemon, waitUntil } from "./daemon.ts";
 import { type FakeModel } from "./fake-model.ts";
 import { startFakeResponses } from "./fake-responses.ts";

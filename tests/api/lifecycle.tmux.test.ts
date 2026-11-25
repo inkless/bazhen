@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ErrorResponse, StateSnapshot } from "@bazhen/protocol";
+import { ErrorResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon } from "./daemon.ts";
 
 let daemon: Daemon;

@@ -3,7 +3,7 @@
 // can't load; each test waits for the turn on disk before it kills the TUI.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AgentCommandResponse, ErrorResponse, StateSnapshot } from "@bazhen/protocol";
+import { AgentCommandResponse, ErrorResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, waitUntil } from "./daemon.ts";
 import { startFakeModel, type FakeModel } from "./fake-model.ts";
 

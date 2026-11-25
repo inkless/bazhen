@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { EVENTS, SendMessageResponse, StateSnapshot, type Event } from "@bazhen/protocol";
+import { EVENTS, SendMessageResponse, StateSnapshot, type Event } from "@bazhen/protocol/web";
 import { Daemon, waitUntil, type EventClient } from "./daemon.ts";
 import { FAKE_QUESTION, startFakeModel, type FakeModel } from "./fake-model.ts";
 

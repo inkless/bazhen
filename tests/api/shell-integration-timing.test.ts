@@ -4,7 +4,7 @@
 // file stays off tests/rust-daemon.txt.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol";
+import { ShellCommandResponse, StateSnapshot } from "@bazhen/protocol/web";
 import { Daemon, shellWithRc, typeOnHolder, typesBack, type IntegratedShell } from "./daemon.ts";
 import {
   DECLINED_WITHIN_MS,
