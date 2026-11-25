@@ -56,8 +56,8 @@ pub use install::{
 pub use locator::{HolderLocator, HolderRef, LocatorError};
 pub use runtime::{
     Compatibility, ForegroundProcess, HELLO, HealthState, HolderBuild, HolderRuntime,
-    InventoryEntry, Needs, ProcessLaunch, REQUEST, RuntimeError, RuntimeHealth, RuntimeOptions,
-    StaleReason, TerminalSpec,
+    InventoryEntry, Listing, Needs, ProcessLaunch, REQUEST, RuntimeError, RuntimeHealth,
+    RuntimeOptions, StaleReason, TerminalSpec,
 };
 pub use sockets::{HolderRoot, UnsafeHolderDir};
 pub use stream::{

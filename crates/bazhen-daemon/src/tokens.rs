@@ -38,6 +38,16 @@ pub(crate) fn hash_of(token: &str) -> String {
         })
 }
 
+/// The hash of a token no one holds: an agent's, once it is given one, takes the place of the
+/// token a start the daemon didn't see through may yet run on.
+///
+/// # Errors
+///
+/// When no random bytes can be read.
+pub(crate) fn unheld() -> std::io::Result<String> {
+    Ok(hash_of(&token_of(random_bytes()?)))
+}
+
 /// The live agent `token` is the current token of.
 ///
 /// # Errors

@@ -277,6 +277,7 @@ async fn shells(
         prompts: daemon_prompts(run, startup.uid),
         login_shell: startup.settings.config.login_shell.clone(),
         turns: Arc::clone(&turns),
+        hooks: Arc::default(),
     });
     let shells = Shells::new(ShellsDeps {
         turns,
@@ -293,6 +294,10 @@ async fn shells(
     if let Err(err) = shells.reconcile().await {
         return Err(unread_shells(startup, store, &err).await);
     }
+    agents
+        .reconcile()
+        .await
+        .map_err(|err| Refused::Said(format!("bazhen can't read its agents: {err}")))?;
     if let Err(err) = shells.sweep_restarts().await {
         tracing::warn!(
             "bazhen: terminals on holders this build can't fully serve weren't read: {err}"
@@ -366,9 +371,30 @@ async fn follow(
     stop: CancellationToken,
 ) {
     tracker.spawn(every_tick(Arc::clone(&shells), tick, stop.clone()));
+    tracker.spawn(agents_tick(Arc::clone(&agents), tick, stop.clone()));
     while let Some(Some(event)) = stop.run_until_cancelled(events.next()).await {
         agents.heard(event.clone(), &tracker);
         shells.heard(event, &tracker, &stop);
+    }
+}
+
+/// Tries again the agents the start's reconcile couldn't settle, `every` so often, until `stop`,
+/// on a task of its own, so a slow holder of the shells' doesn't hold up the agents', nor theirs
+/// the shells'. Each agent's settle is whole on its own: one a stop cuts short is tried again by
+/// the next start.
+async fn agents_tick(agents: Arc<Agents>, every: Duration, stop: CancellationToken) {
+    while stop
+        .run_until_cancelled(tokio::time::sleep(every))
+        .await
+        .is_some()
+    {
+        if stop
+            .run_until_cancelled(agents.reconcile_again())
+            .await
+            .is_none()
+        {
+            return;
+        }
     }
 }
 

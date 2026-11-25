@@ -121,31 +121,22 @@ where
     }
 }
 
-/// `POST /v1/agents/:id/close`, over either listener: the agent with its linked shells, then
-/// the waiter it held answered, where it closed.
+/// `POST /v1/agents/:id/close`, over either listener: the agent with its linked shells.
 pub(crate) async fn close(
     State(shared): State<Shared>,
     Path(reference): Path<String>,
     body: Bytes,
 ) -> Response {
-    let (shells, hooks, store) = (
-        shared.shells.clone(),
-        Arc::clone(&shared.hooks),
-        shared.store.clone(),
-    );
+    let shells = shared.shells.clone();
     command(
         &shared,
         reference,
         &body,
         move |agents, id, req: CloseAgentRequest| async move {
-            let closed = match shells {
+            match shells {
                 Some(shells) => shells.close_agent(&id, &req, agents.close(&id, &req)).await,
                 None => agents.close(&id, &req).await,
-            };
-            if let Some(agent) = AgentId::parse(&id) {
-                hooks.closed(&store, &agent).await;
             }
-            closed
         },
     )
     .await

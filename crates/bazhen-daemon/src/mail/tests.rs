@@ -97,6 +97,7 @@ fn fixture(stub: StubHarness) -> Fixture {
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
+        hooks: Arc::default(),
     }));
     let runtime = paused();
     let launch = |key: &str| {

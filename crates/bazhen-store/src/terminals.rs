@@ -449,6 +449,19 @@ const AGENT_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation,
        t.locator, t.runtime_kind
      FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE a.id = ?";
 
+/// The agents of this machine's environment not yet lost, closed or failed, oldest first.
+const RECOVERABLE_AGENTS: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
+     WHERE a.environment_id = (
+       SELECT id FROM environments WHERE kind = 'local' ORDER BY created_event_id LIMIT 1)
+     AND a.state NOT IN ('lost', 'closed', 'failed') ORDER BY a.created_event_id";
+
+/// Each terminal made for an agent, with the agent, current or not.
+const AGENT_ROWS: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM terminals t JOIN agent_sessions a ON a.id = t.agent_session_id";
+
 /// The agent a terminal is the current terminal of, through the terminal's own agent column:
 /// one its agent has left behind, as a relaunch leaves one, finds none (`AGENT_BY_TERMINAL`).
 const AGENT_BY_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
@@ -500,6 +513,20 @@ impl Reads<'_> {
             .optional()
     }
 
+    /// The agents of this machine's environment a restarted daemon may still find running, as
+    /// any not yet lost, closed or failed may be, each with its current terminal, oldest first
+    /// (`recoverable`).
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn recoverable_agents(self) -> rusqlite::Result<Vec<AgentTerminal>> {
+        self.0
+            .prepare(RECOVERABLE_AGENTS)?
+            .query_map((), agent_terminal_row)?
+            .collect()
+    }
+
     /// The agent whose current terminal `terminal` is, with it, or `None` for a terminal no
     /// agent runs in now.
     ///
@@ -510,6 +537,37 @@ impl Reads<'_> {
         self.0
             .query_row(AGENT_BY_TERMINAL, [terminal], agent_terminal_row)
             .optional()
+    }
+
+    /// The agent terminal `terminal` was made for, with that terminal, whether or not it is the
+    /// agent's current one, or `None` for a terminal no agent was made.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_with_terminal(self, terminal: &str) -> rusqlite::Result<Option<AgentTerminal>> {
+        self.0
+            .query_row(
+                &format!("{AGENT_ROWS} WHERE t.id = ?"),
+                [terminal],
+                agent_terminal_row,
+            )
+            .optional()
+    }
+
+    /// Each terminal made for agent `agent` that isn't closed, with the agent, oldest first: what
+    /// any of them ran may run still.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_terminals(self, agent: &str) -> rusqlite::Result<Vec<AgentTerminal>> {
+        self.0
+            .prepare(&format!(
+                "{AGENT_ROWS} WHERE a.id = ? AND t.state != 'closed' ORDER BY t.created_event_id"
+            ))?
+            .query_map([agent], agent_terminal_row)?
+            .collect()
     }
 }
 

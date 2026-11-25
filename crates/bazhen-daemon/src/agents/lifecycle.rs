@@ -337,7 +337,6 @@ impl Agents {
         if found.state != AgentState::Lost {
             self.end(&found, force).await?;
         }
-        self.deps.tokens.forget(&agent);
         let closed = agent.clone();
         let response = self
             .finish(&agent, key, &request, move |w| {
@@ -346,8 +345,16 @@ impl Agents {
                 Ok(ids)
             })
             .await?;
-        self.deps.prompts.remove(&agent);
+        self.after_closed(&agent).await;
         Ok(response)
+    }
+
+    /// What follows an agent's close once it is recorded, whatever recorded it: no process runs
+    /// on its token or reads its prompt again, and the waiter it held is answered.
+    pub(super) async fn after_closed(&self, agent: &AgentId) {
+        self.deps.tokens.forget(agent);
+        self.deps.prompts.remove(agent);
+        self.deps.hooks.closed(&self.deps.store, agent).await;
     }
 
     /// Closes the agent's terminal. Force records closed only what a close could not end: a

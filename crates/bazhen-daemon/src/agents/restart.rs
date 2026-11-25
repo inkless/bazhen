@@ -518,7 +518,7 @@ impl Agents {
         terminal: TerminalId,
         again: Again<'_>,
     ) -> Result<Resumed, Failed> {
-        self.refuse_unless_gone(lost).await?;
+        self.refuse_unless_gone(agent, lost, &terminal).await?;
         let (cwd, generation) = (again.launch.cwd.clone(), again.generation);
         let command = self.command_for(agent, again).await?;
         let harness_session = match command.session.as_ref().map(session_tag).transpose() {
@@ -529,7 +529,7 @@ impl Agents {
             }
         };
         let spec = NewTerminal {
-            terminal_id: terminal,
+            terminal_id: terminal.clone(),
             kind: Kind::Agent {
                 agent_id: agent.clone(),
                 harness_session,
@@ -550,6 +550,7 @@ impl Agents {
                 })
             }
             Err(err) => {
+                self.refused(terminal);
                 command.token.abandoned().await;
                 Err(Failed::Terminal(err))
             }
@@ -559,15 +560,42 @@ impl Agents {
     /// Refuses a new terminal for an agent until what ran its lost one is proved gone: no holder
     /// answers for it, and its process is no longer the one recorded. One whose holder can't be
     /// reached, or whose socket has gone while it runs, isn't proved gone, so two TUIs never run
-    /// one agent. Only the last terminal is asked of: any before it was proved gone when the
-    /// agent was last relaunched.
-    async fn refuse_unless_gone(&self, lost: Option<Recorded>) -> Result<(), Failed> {
+    /// one agent. Every other terminal made for it and not closed is asked of too, `terminal`,
+    /// the one it starts on, aside: a start before that a daemon never saw through may have
+    /// spawned a holder that answers late.
+    async fn refuse_unless_gone(
+        &self,
+        agent: &AgentId,
+        lost: Option<Recorded>,
+        terminal: &TerminalId,
+    ) -> Result<(), Failed> {
         let lost = lost.ok_or(Failed::Unlocated)?;
-        if self.deps.terminals.gone(&lost).await {
-            Ok(())
-        } else {
-            Err(Failed::Exists(lost.terminal_id))
+        if !self.deps.terminals.gone(&lost).await {
+            return Err(Failed::Exists(lost.terminal_id));
         }
+        let id = agent.as_str().to_owned();
+        let rows = self
+            .write(move |w| Ok(w.reads().agent_terminals(&id)?))
+            .await
+            .map_err(|err| Failed::Terminal(TerminalError::Other(err.to_string())))?;
+        for row in rows {
+            let Some(id) = row.terminal_id.clone() else {
+                continue;
+            };
+            if &id == terminal || id == lost.terminal_id {
+                continue;
+            }
+            let gone = if let Some(at) = recorded(&row) {
+                self.deps.terminals.gone(&at).await
+            } else {
+                let since = self.unstartable_since(&id);
+                self.deps.terminals.unstarted(&id, since).await
+            };
+            if !gone {
+                return Err(Failed::Exists(id));
+            }
+        }
+        Ok(())
     }
 
     /// The harness's command to start the agent on its session, or on a fresh one, and the new
@@ -1262,6 +1290,45 @@ pub(crate) mod tests {
                     "agent {id} already has a terminal: {was} isn't proved gone"
                 ))),
                 rejected()
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_relaunch_while_a_terminal_an_earlier_one_asked_for_may_yet_start() {
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = lost(&stub);
+        let relaunch = |key: &str| {
+            runtime().block_on(f.agents.relaunch(
+                agent.as_str(),
+                &relaunching(key, generation, None),
+                recording(&f, &Calls::default()),
+            ))
+        };
+        f.fake().set(|state| {
+            state.fail_creates = true;
+            state.hello_margin = std::time::Duration::from_secs(3600);
+        });
+        let refused_create = relaunch("r-1");
+        let asked = f
+            .last("agent.relaunch_requested")
+            .get("terminalId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .unwrap();
+        f.fake().set(|state| state.fail_creates = false);
+        let while_it_may_start = relaunch("r-2");
+        f.fake()
+            .set(|state| state.hello_margin = std::time::Duration::ZERO);
+        let once_it_cant = relaunch("r-3").map(|_| ());
+        assert_eq!(
+            (refused_create.is_err(), while_it_may_start, once_it_cant),
+            (
+                true,
+                Err(AgentError::Conflict(format!(
+                    "agent {agent} already has a terminal: {asked} isn't proved gone"
+                ))),
+                Ok(())
             )
         );
     }

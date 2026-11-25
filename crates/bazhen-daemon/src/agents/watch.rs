@@ -13,7 +13,7 @@ use bazhen_protocol::shells::TerminalState;
 use bazhen_store::{Actor, AgentChange, AgentTerminal, Writer as StoreWriter};
 use tokio_util::task::TaskTracker;
 
-use super::lifecycle::{append, exited_at, recorded};
+use super::lifecycle::{append, exited_at, record_closed, recorded};
 use super::{AgentError, Agents};
 use crate::shells::{RUNTIME, generation_of, later_generation, locator_of};
 use crate::terminals::{Event, Exit, Recorded};
@@ -36,7 +36,7 @@ pub(crate) fn adopts(found: &AgentTerminal, at: &Recorded) -> bool {
 
 /// Whether a holder proved gone leaves `found` lost: one whose terminal ran, as a start in
 /// flight's doesn't yet.
-fn losable(found: &AgentTerminal) -> bool {
+pub(super) fn losable(found: &AgentTerminal) -> bool {
     match found.state {
         AgentState::Running | AgentState::Unknown | AgentState::Exited => true,
         AgentState::Starting => found.terminal_state == Some(TerminalState::Running),
@@ -46,19 +46,28 @@ fn losable(found: &AgentTerminal) -> bool {
 
 /// `at` as an adoption records it.
 fn adopted(at: &Recorded) -> Result<AgentChange, AgentError> {
+    Ok(AgentChange::ProcessAdopted(AgentProcessAdopted {
+        runtime_ref: runtime_ref(at)?,
+    }))
+}
+
+/// Where `at` runs, as an event records it.
+pub(super) fn runtime_ref(at: &Recorded) -> Result<RuntimeRefPayload, AgentError> {
     let locator = serde_json::from_str(&at.locator)
         .map_err(|e| AgentError::Internal(format!("its locator isn't one: {e}")))?;
-    Ok(AgentChange::ProcessAdopted(AgentProcessAdopted {
-        runtime_ref: RuntimeRefPayload {
-            runtime: RUNTIME.to_owned(),
-            locator,
-        },
-    }))
+    Ok(RuntimeRefPayload {
+        runtime: RUNTIME.to_owned(),
+        locator,
+    })
 }
 
 /// Takes `at` as `found`'s process where it adopts it, in the caller's transaction; whether it
 /// did.
-fn adopt(w: &StoreWriter<'_>, found: &AgentTerminal, at: &Recorded) -> Result<bool, AgentError> {
+pub(super) fn adopt(
+    w: &StoreWriter<'_>,
+    found: &AgentTerminal,
+    at: &Recorded,
+) -> Result<bool, AgentError> {
     if !adopts(found, at) {
         return Ok(false);
     }
@@ -137,13 +146,14 @@ impl Agents {
     }
 
     /// The holder of an agent's terminal is lost, as the runtime tells: its holder has gone, or
-    /// only its socket has. Once what the store records runs no more the agent is lost; one whose
-    /// holder may still run is left as it is.
+    /// only its socket has. Once what the store records runs no more the agent is lost, or, one
+    /// closing, closed; one whose holder may still run is left as it is.
     async fn lost(&self, terminal: &TerminalId) -> Result<(), AgentError> {
         let Some(found) = self.in_terminal(terminal).await? else {
             return Ok(());
         };
-        let Some(at) = recorded(&found).filter(|_| losable(&found)) else {
+        let ends = |found: &AgentTerminal| losable(found) || found.state == AgentState::Closing;
+        let Some(at) = recorded(&found).filter(|_| ends(&found)) else {
             return Ok(());
         };
         if !self.deps.terminals.gone(&at).await {
@@ -153,16 +163,29 @@ impl Agents {
             );
             return Ok(());
         }
-        self.write(move |w| {
-            let Some(now) = w.reads().agent_of_terminal(at.terminal_id.as_str())? else {
-                return Ok(());
-            };
-            if losable(&now) && recorded(&now).as_ref() == Some(&at) {
-                append(w, &now.agent_id, Actor::System, AgentChange::Lost)?;
-            }
-            Ok(())
-        })
-        .await
+        let closed = self
+            .write(move |w| {
+                let Some(now) = w.reads().agent_of_terminal(at.terminal_id.as_str())? else {
+                    return Ok(false);
+                };
+                if recorded(&now).as_ref() != Some(&at) {
+                    return Ok(false);
+                }
+                if losable(&now) {
+                    append(w, &now.agent_id, Actor::System, AgentChange::Lost)?;
+                    return Ok(false);
+                }
+                if now.state == AgentState::Closing {
+                    record_closed(w, &now.agent_id, Actor::System)?;
+                    return Ok(true);
+                }
+                Ok(false)
+            })
+            .await?;
+        if closed {
+            self.after_closed(&found.agent_id).await;
+        }
+        Ok(())
     }
 
     /// The agent `terminal` is the current terminal of, if any.

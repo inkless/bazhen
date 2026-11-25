@@ -155,8 +155,9 @@ impl Shared {
         self
     }
 
-    /// The same, launching agents as `agents` does.
+    /// The same, launching agents as `agents` does, and serving their hooks from what they keep.
     pub(crate) fn with_agents(mut self, agents: Arc<crate::agents::Agents>) -> Self {
+        self.hooks = Arc::clone(agents.hooks());
         self.agents = Some(agents);
         self
     }

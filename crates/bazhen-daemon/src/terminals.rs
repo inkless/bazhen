@@ -174,6 +174,26 @@ pub(crate) struct FoundShell {
     pub(crate) linked_agent_id: Option<AgentId>,
 }
 
+/// An agent's terminal the runtime runs, as its inventory lists it: one tagged for `agent_id`,
+/// whether or not it is that agent's current terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FoundAgent {
+    pub(crate) terminal: Recorded,
+    /// How its process ended, where it has.
+    pub(crate) exit: Option<bazhen_holder_proto::body::ExitStatus>,
+    pub(crate) agent_id: AgentId,
+    /// The harness session its terminal was started with, where one was known.
+    pub(crate) harness_session: Option<String>,
+}
+
+/// What one read of the agents' terminals finds: those read, and those whose holders are there
+/// but couldn't be read, which prove nothing either way.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AgentsFound {
+    pub(crate) found: Vec<FoundAgent>,
+    pub(crate) unreadable: Vec<TerminalId>,
+}
+
 /// What a running shell's foreground holds, as one read of them all finds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShellForeground {
@@ -244,8 +264,21 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
     /// a reader that concludes from what is missing must not take it for one that isn't there.
     fn shells(&self) -> Answer<'_, Result<Vec<FoundShell>, TerminalError>>;
 
+    /// Every agent's terminal the runtime runs, each watched from now on. One that can't be read
+    /// is named, not taken for one that isn't there, and fails no other.
+    fn agents(&self) -> Answer<'_, Result<AgentsFound, TerminalError>>;
+
     /// Nothing answers for the terminal, and what ran it provably runs no more.
     fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool>;
+
+    /// Nothing answers for a terminal whose start recorded nothing to prove it gone by, and
+    /// nothing will: `since` is a moment after which nothing could start it, long enough ago
+    /// that what started before then would answer by now.
+    fn unstarted<'a>(
+        &'a self,
+        terminal: &'a TerminalId,
+        since: std::time::Instant,
+    ) -> Answer<'a, bool>;
 
     /// Makes a shell standalone where it runs: its terminal no longer names an agent.
     fn unlink<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, Result<(), TerminalError>>;
@@ -345,6 +378,11 @@ pub(crate) mod fake {
         pub(crate) reach: Reach,
         /// Terminals the fake doesn't list, and can't prove gone.
         pub(crate) unproven: BTreeSet<String>,
+        /// Terminals whose holders are there but can't be read: listed as unreadable.
+        pub(crate) unreadable: BTreeSet<String>,
+        /// How long after a moment nothing could start a terminal its holder may still answer,
+        /// as twice the holder's hello deadline is: none unless a test sets one.
+        pub(crate) hello_margin: std::time::Duration,
         /// The shells unlinked from their agent, in order.
         pub(crate) unlinked: Vec<String>,
         /// The signals sent, in order, each with the terminal it was sent to.
@@ -536,6 +574,39 @@ pub(crate) mod fake {
             running.gone = true;
             let generation = running.generation;
             state.tell(&Event::Lost(recorded_at(terminal_id, generation)));
+        }
+
+        /// A holder runs agent `agent_id` at `terminal_id`, at `generation`, told to no one, as
+        /// one a create the daemon never saw answer started.
+        pub(crate) fn start_unseen(
+            &self,
+            terminal_id: &str,
+            agent_id: &bazhen_protocol::ids::AgentId,
+            generation: u64,
+        ) {
+            let spec = NewTerminal {
+                terminal_id: TerminalId::parse(terminal_id).unwrap(),
+                kind: Kind::Agent {
+                    agent_id: agent_id.clone(),
+                    harness_session: None,
+                },
+                argv: Vec::new(),
+                cwd: "/".to_owned(),
+                env: BTreeMap::new(),
+                theme: None,
+                generation,
+            };
+            self.state.lock().unwrap().running.insert(
+                terminal_id.to_owned(),
+                Running {
+                    spec,
+                    foreground: None,
+                    cwd: None,
+                    exited: false,
+                    gone: false,
+                    generation,
+                },
+            );
         }
 
         /// Its process ends, told to no one, as one that ended before anything watched it.
@@ -770,11 +841,61 @@ pub(crate) mod fake {
             })
         }
 
+        fn agents(&self) -> Answer<'_, Result<AgentsFound, TerminalError>> {
+            Box::pin(async {
+                let held = self.state.lock().unwrap().hold_inventory.clone();
+                Held::pass(held).await;
+                let state = self.state.lock().unwrap();
+                if let Some(refused) = &state.reads_refused {
+                    return Err(refused.clone());
+                }
+                let mut read = AgentsFound::default();
+                for (id, running) in state.running.iter().filter(|(_, running)| !running.gone) {
+                    let Kind::Agent {
+                        agent_id,
+                        harness_session,
+                    } = &running.spec.kind
+                    else {
+                        continue;
+                    };
+                    if state.unreadable.contains(id) {
+                        read.unreadable.push(TerminalId::parse(id).unwrap());
+                        continue;
+                    }
+                    read.found.push(FoundAgent {
+                        terminal: recorded_at(id, running.generation),
+                        exit: running.exited.then(|| {
+                            bazhen_holder_proto::body::ExitStatus::Exited {
+                                code: bazhen_holder_proto::body::ExitCode::new(0).unwrap(),
+                            }
+                        }),
+                        agent_id: agent_id.clone(),
+                        harness_session: harness_session.clone(),
+                    });
+                }
+                Ok(read)
+            })
+        }
+
         fn gone<'a>(&'a self, terminal: &'a Recorded) -> Answer<'a, bool> {
             Box::pin(async move {
                 let state = self.state.lock().unwrap();
                 let id = terminal.terminal_id.as_str();
                 !state.unproven.contains(id) && state.running.get(id).is_none_or(|r| r.gone)
+            })
+        }
+
+        fn unstarted<'a>(
+            &'a self,
+            terminal: &'a TerminalId,
+            since: std::time::Instant,
+        ) -> Answer<'a, bool> {
+            Box::pin(async move {
+                let state = self.state.lock().unwrap();
+                let id = terminal.as_str();
+                since.elapsed() >= state.hello_margin
+                    && !state.unproven.contains(id)
+                    && state.running.get(id).is_none_or(|r| r.gone)
             })
         }
 

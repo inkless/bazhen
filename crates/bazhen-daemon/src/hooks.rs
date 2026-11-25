@@ -549,6 +549,12 @@ impl Hooks {
         self.waiters.wait(agent)
     }
 
+    /// Whether `agent` holds a waiter.
+    #[cfg(test)]
+    pub(crate) fn holds_waiter(&self, agent: &AgentId) -> bool {
+        self.waiters.holds(agent)
+    }
+
     /// `agent`'s turn, which a hook holds from its binding's read to its last fact.
     fn turn_of(&self, agent: &AgentId) -> Arc<tokio::sync::Mutex<()>> {
         let mut order = self
