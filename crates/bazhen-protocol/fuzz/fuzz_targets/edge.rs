@@ -1,6 +1,6 @@
 #![no_main]
 
-use bazhen_protocol::agents::{CloseAgentRequest, SignalAgentRequest};
+use bazhen_protocol::agents::{CloseAgentRequest, RespawnAgentRequest, SignalAgentRequest};
 use bazhen_protocol::edge::{EdgeCheck, MAX_SAFE_INTEGER, edge, is_object, object};
 use bazhen_protocol::mail::{HookAck, HookRequest};
 use bazhen_protocol::notices::{DismissNoticeRequest, PairRequest};
@@ -49,6 +49,7 @@ fuzz_target!(|body: &[u8]| {
     settled::<UnlinkShellRequest>(body);
     settled::<CloseAgentRequest>(body);
     settled::<SignalAgentRequest>(body);
+    settled::<RespawnAgentRequest>(body);
     settled::<DismissNoticeRequest>(body);
     settled::<PairRequest>(body);
     settled::<ShellReport>(body);

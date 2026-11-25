@@ -153,6 +153,13 @@ pub(crate) const KNOWN_MISMATCHES: Known<'static> = &[
         LONE_SHOWABLE,
     ),
     (
+        "RespawnAgentRequest",
+        "/idempotencyKey",
+        "loneSurrogate",
+        OWNER_STRINGS,
+        LONE,
+    ),
+    (
         "RestartShellRequest",
         "/idempotencyKey",
         "loneSurrogate",
