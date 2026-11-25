@@ -592,9 +592,8 @@ fn sent_to(to: &str, use_id: &str) -> Value {
     })
 }
 
-#[test]
-fn records_the_agents_send_once_to_the_agent_its_harness_started_as_the_name_it_sent_to() {
-    let f = fixture();
+/// Launches Bob beside the fixture's agent, as the hooks' caller's alone.
+fn with_bob(f: &Fixture) -> AgentId {
     let agents = f.shared.agents.clone().unwrap();
     let bob = runtime()
         .block_on(agents.launch(&LaunchAgentRequest {
@@ -619,6 +618,13 @@ fn records_the_agents_send_once_to_the_agent_its_harness_started_as_the_name_it_
             [bob.as_str()],
         )
         .unwrap();
+    bob
+}
+
+#[test]
+fn records_the_agents_send_once_to_the_agent_its_harness_started_as_the_name_it_sent_to() {
+    let f = fixture();
+    let bob = with_bob(&f);
     f.hook("PostToolUse", &sent_to("bob", "toolu_1"), its_tui());
     f.hook("PostToolUse", &sent_to("bob", "toolu_1"), its_tui());
     f.hook("PostToolUse", &sent_to("carol", "toolu_2"), its_tui());
@@ -629,4 +635,23 @@ fn records_the_agents_send_once_to_the_agent_its_harness_started_as_the_name_it_
             "text": "lunch?\nat noon", "accepted": true, "toolUseId": "toolu_1",
         })]
     );
+}
+
+#[test]
+fn records_no_send_by_a_tool_call_id_too_long_to_keep() {
+    let f = fixture();
+    with_bob(&f);
+    let longest = "t".repeat(super::observed::USE_ID_MAX);
+    f.hook(
+        "PostToolUse",
+        &sent_to("bob", &format!("{longest}t")),
+        its_tui(),
+    );
+    f.hook("PostToolUse", &sent_to("bob", &longest), its_tui());
+    let ids: Vec<Value> = f
+        .of("message.observed")
+        .iter()
+        .map(|e| e["toolUseId"].clone())
+        .collect();
+    assert_eq!(ids, [json!(longest)]);
 }

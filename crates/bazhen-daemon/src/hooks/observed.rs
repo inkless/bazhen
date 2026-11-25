@@ -19,6 +19,10 @@ const SUMMARY_MAX: usize = 120;
 /// number of combining marks, so a count of clusters alone bounds no size.
 const SUMMARY_UNITS: usize = 4 * SUMMARY_MAX;
 
+/// The longest tool call id a send is recorded by. A harness's ids are tens of bytes; one longer
+/// is refused rather than cut, since two cut alike would read as one send and drop the second.
+pub(super) const USE_ID_MAX: usize = 128;
+
 /// Records `from`'s send by the tool call `use_id`, where it names exactly one other agent.
 pub(super) async fn observe(
     shared: &Shared,
@@ -26,6 +30,13 @@ pub(super) async fn observe(
     use_id: &str,
     sent: &SentMessage,
 ) -> Result<(), String> {
+    if use_id.len() > USE_ID_MAX {
+        tracing::warn!(
+            "bazhen: recorded no send by agent {from}: its tool call id is {} bytes",
+            use_id.len()
+        );
+        return Ok(());
+    }
     let summary = summary_of(sent);
     let text = within_units(&without_controls(&sent.text), MAIL_LIMIT).to_owned();
     let (from, to, use_id, accepted) = (
