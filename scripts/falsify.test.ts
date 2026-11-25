@@ -678,22 +678,40 @@ describe("revertsOf", () => {
     ]);
   });
 
-  it("reverts the protocol's schema and fixtures with the protocol source they come from", () => {
+  it("reverts the protocol's fixtures with the TypeScript source, and not what Rust publishes", () => {
     const changes = modified(
       "packages/protocol/src/holder.ts",
       "packages/protocol/schema/HolderOk.json",
       "packages/protocol/fixtures/holder/1.0/frames.json",
+      "crates/bazhen-protocol/src/id.rs",
     );
-    expect(revertsOf(changes)).toEqual(changes);
+    expect(revertsOf(changes).map((c) => c.path)).toEqual([
+      "packages/protocol/src/holder.ts",
+      "packages/protocol/fixtures/holder/1.0/frames.json",
+    ]);
   });
 
   it("keeps a generator's output when the branch changes the output alone", () => {
     expect(revertsOf(modified(".oxlintrc.json", "scripts/lint-config.medium.test.ts"))).toEqual([]);
   });
 
-  it("reverts the protocol id the Rust crates speak with the protocol source", () => {
-    const changes = modified("packages/protocol/src/holder.ts", "crates/bazhen-protocol/src/id.rs");
-    expect(revertsOf(changes)).toEqual(changes);
+  it("reverts the published schema and the protocol id with the Rust protocol they come from", () => {
+    const published = modified(
+      "packages/protocol/schema/HolderOk.json",
+      "packages/protocol/schema/semantics.json",
+      "crates/bazhen-protocol/src/id.rs",
+    );
+    for (const source of [
+      "crates/bazhen-xtask/src/schema/files.rs",
+      "crates/bazhen-protocol/src/stream.rs",
+      "crates/bazhen-holder-proto/src/body.rs",
+    ]) {
+      const changes = [...modified(source), ...published, ...modified("README.md")];
+      expect({ rust: revertsOf(changes, { rust: true }), other: revertsOf(changes) }).toEqual({
+        rust: [...modified(source), ...published],
+        other: [],
+      });
+    }
   });
 
   it("reverts the Rust workspace's changes when a test runs a binary, and only then", () => {

@@ -306,9 +306,20 @@ const GENERATED: readonly { sources: readonly string[]; outputs: readonly string
   { sources: ["scripts/lint-config.ts"], outputs: [".oxlintrc.json"] },
   {
     sources: ["scripts/protocol-schema.ts", "packages/protocol/src/"],
+    outputs: ["packages/protocol/fixtures/"],
+  },
+  // `cargo xtask schema` publishes the schema, and writes the protocol id and the web's zod, from
+  // the types of the Rust protocol and the holder's bodies. A crate is reverted only for a test
+  // that runs a binary, so only then are these.
+  {
+    sources: [
+      "crates/bazhen-xtask/src/schema/",
+      "crates/bazhen-protocol/",
+      "crates/bazhen-holder-proto/",
+    ],
     outputs: [
       "packages/protocol/schema/",
-      "packages/protocol/fixtures/",
+      "packages/protocol/src/gen/",
       "crates/bazhen-protocol/src/id.rs",
     ],
   },
