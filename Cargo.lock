@@ -181,6 +181,7 @@ dependencies = [
  "hyper-util",
  "jiff",
  "proptest",
+ "regex-automata",
  "rusqlite",
  "rustix",
  "serde",
@@ -195,6 +196,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tungstenite",
+ "unicode-segmentation",
 ]
 
 [[package]]

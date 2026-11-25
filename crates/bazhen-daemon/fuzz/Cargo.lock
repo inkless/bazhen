@@ -150,6 +150,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "regex-automata",
  "rusqlite",
  "rustix",
  "serde",
@@ -163,6 +164,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -172,6 +174,7 @@ dependencies = [
  "bazhen-daemon",
  "libfuzzer-sys",
  "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]

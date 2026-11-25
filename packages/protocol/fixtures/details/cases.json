@@ -1,0 +1,414 @@
+[
+  {
+    "text": "Codex refused thread/resume: This chat uses model provider “deepseek”, which is no longer configured. Restore this provider’s configuration to continue. (-32600)",
+    "detail": "Codex refused thread/resume: This chat uses model provider “deepseek”, which is no longer configured. Restore this provider’s configuration to continue. (-32600)"
+  },
+  {
+    "text": "Codex refused thread/resume: no rollout found for thread id 01a1d8c8-9752-7d53-b6a1-2a4e9df16bdf (-32600)",
+    "detail": "Codex refused thread/resume: no rollout found for thread id 01a1d8c8-9752-7d53-b6a1-2a4e9df16bdf (-32600)"
+  },
+  {
+    "text": "auth: failed",
+    "detail": "auth: failed"
+  },
+  {
+    "text": "token: expired",
+    "detail": "token: expired"
+  },
+  {
+    "text": "authentication: required",
+    "detail": "authentication: required"
+  },
+  {
+    "text": "TOML parse error: invalid basic string",
+    "detail": "TOML parse error: invalid basic string"
+  },
+  {
+    "text": "requires_openai_auth = false",
+    "detail": "requires_openai_auth = false"
+  },
+  {
+    "text": "max_tokens: 4096",
+    "detail": "max_tokens: 4096"
+  },
+  {
+    "text": "token: expired after an hour",
+    "detail": "token: expired after an hour"
+  },
+  {
+    "text": "invalid basic information in the request",
+    "detail": "invalid basic information in the request"
+  },
+  {
+    "text": "bearer authentication is not configured",
+    "detail": "bearer authentication is not configured"
+  },
+  {
+    "text": "socket gone",
+    "detail": "socket gone"
+  },
+  {
+    "text": "bad config: experimental_bearer_token = \"s3cr3t\"",
+    "detail": "bad config: experimental_bearer_token = [redacted]"
+  },
+  {
+    "text": "bad config: OPENAI_API_KEY=s3cr3t",
+    "detail": "bad config: OPENAI_API_KEY=[redacted]"
+  },
+  {
+    "text": "bad config: {\"api_key\": \"s3cr3t\"}",
+    "detail": "bad config: {\"api_key\": [redacted]}"
+  },
+  {
+    "text": "bad config: {\\\"api_key\\\":\\\"s3cr3t\\\"}",
+    "detail": "bad config: {\\\"api_key\\\":[redacted]}"
+  },
+  {
+    "text": "bad config: password='s3cr3t'",
+    "detail": "bad config: password=[redacted]"
+  },
+  {
+    "text": "bad config: api_key = \"s3\\\"cr3t\" and more",
+    "detail": "bad config: api_key = [redacted] and more"
+  },
+  {
+    "text": "bad config: api_key = \"s3cr3t and the rest of the line",
+    "detail": "bad config: api_key = [redacted]"
+  },
+  {
+    "text": "bad config: ModelProviderInfo { experimental_bearer_token: Some(\"s3cr3t\"), name: \"x\" }",
+    "detail": "bad config: ModelProviderInfo { experimental_bearer_token: Some([redacted]), name: \"x\" }"
+  },
+  {
+    "text": "bad config: api_key: s3cr3t",
+    "detail": "bad config: api_key: [redacted]"
+  },
+  {
+    "text": "bad config: x-api-key: s3cr3t",
+    "detail": "bad config: x-api-key: [redacted]"
+  },
+  {
+    "text": "bad config: token: \"s3cr3t\"",
+    "detail": "bad config: token: [redacted]"
+  },
+  {
+    "text": "bad config: Authorization: Basic czNjcjN0",
+    "detail": "bad config: Authorization: [redacted]"
+  },
+  {
+    "text": "bad config: Authorization: Bearer s3cr3t-token",
+    "detail": "bad config: Authorization: [redacted]"
+  },
+  {
+    "text": "bad config: sent Bearer s3cr3t-token",
+    "detail": "bad config: sent Bearer [redacted]"
+  },
+  {
+    "text": "bad config: http_headers = { \"X-Corp\" = \"s3cr3t\" }",
+    "detail": "bad config: http_headers = {[redacted]}"
+  },
+  {
+    "text": "bad config: https://user:s3cr3t@example.com/v1",
+    "detail": "bad config: https://[redacted]@example.com/v1"
+  },
+  {
+    "text": "bad config: key sk-proj-S3cr3tKeyXS3cr3tKeyX leaked",
+    "detail": "bad config: key [redacted] leaked"
+  },
+  {
+    "text": "bad config: eyJS3cr3tKey.eyJS3cr3tKey.S3cr3tKeyXS3 in a header",
+    "detail": "bad config: [redacted] in a header"
+  },
+  {
+    "text": "bad config: sk_live_S3cr3tKeyXS3cr3t and rk_test_S3cr3tKeyXS3cr3t",
+    "detail": "bad config: [redacted] and [redacted]"
+  },
+  {
+    "text": "bad config: ghp_S3cr3tKeyXS3cr3tKeyXS3cr",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: github_pat_S3cr3tKeyXS3cr3tKeyXS3cr",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: glpat-S3cr3tKeyXS3cr3tKeyXS3cr",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: hf_S3cr3tKeyXS3cr3tKeyXS3cr",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: xoxb-S3cr3tKeyXS3",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: AKIAS3CR3TKEYXS3CR3T",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: AIzaS3cr3tKeyXS3cr3tKeyXS3cr3tKeyXS3cr3",
+    "detail": "bad config: [redacted]"
+  },
+  {
+    "text": "bad config: redis://:s3cr3t@host",
+    "detail": "bad config: redis://[redacted]@host"
+  },
+  {
+    "text": "bad config: token: 0123s3cr3t",
+    "detail": "bad config: token: [redacted]"
+  },
+  {
+    "text": "bad config: {\\\"token\\\": \\\"s3cr3t\\\"}",
+    "detail": "bad config: {\\\"token\\\": [redacted]}"
+  },
+  {
+    "text": "bad config: {\\\"api_key\\\": \\\"s3cr3t with spaces\\\"}",
+    "detail": "bad config: {\\\"api_key\\\": [redacted]}"
+  },
+  {
+    "text": "bad config: API_KEY            = \"s3cr3t\"",
+    "detail": "bad config: API_KEY            = [redacted]"
+  },
+  {
+    "text": "bad config: experimental_bearer_token: Some(s3cr3t)",
+    "detail": "bad config: experimental_bearer_token: Some([redacted]"
+  },
+  {
+    "text": "bad config: experimental_bearer_token: Some(\n    \"s3cr3t\",\n)",
+    "detail": "bad config: experimental_bearer_token: Some(\n    [redacted],\n)"
+  },
+  {
+    "text": "bad config: http_headers: Some(\n    {\n        \"X-Corp\": \"s3cr3t\",\n    },\n)",
+    "detail": "bad config: http_headers: Some(\n    {[redacted]},\n)"
+  },
+  {
+    "text": "bad config: env_http_headers = { \"X-Corp\" = \"S3CR3T_VAR\" }",
+    "detail": "bad config: env_http_headers = {[redacted]}"
+  },
+  {
+    "text": "bad config: http_headers = { \"X-Corp\" = \"s3cr3t",
+    "detail": "bad config: http_headers = {[redacted]}"
+  },
+  {
+    "text": "bad config: api_key=xyz-sk-s3cr3tABCDEFGHIJKLMNOP rest",
+    "detail": "bad config: api_key=[redacted]"
+  },
+  {
+    "text": "bad config: sent Basic dXNlcjpwYXNzd29yZA== on",
+    "detail": "bad config: sent Basic [redacted] on"
+  },
+  {
+    "text": "bad config: proxy-authorization: basic dXNlcjpwYXNzd29yZA==",
+    "detail": "bad config: proxy-authorization: [redacted]"
+  },
+  {
+    "text": "bad config: authorization bearer abcdefghijklmnop1234 sent",
+    "detail": "bad config: authorization bearer [redacted] sent"
+  },
+  {
+    "text": "bad config: password: correct horse battery staple",
+    "detail": "bad config: password: [redacted]"
+  },
+  {
+    "text": "bad config: api_key = \"\"\"\ns3cr3t\n\"\"\" after",
+    "detail": "bad config: api_key = [redacted] after"
+  },
+  {
+    "text": "bad config: https://opaques3cr3t123@host/x",
+    "detail": "bad config: https://[redacted]@host/x"
+  },
+  {
+    "text": "bad config: key -----BEGIN RSA PRIVATE KEY-----\nMIIEs3cr3t\n-----END RSA PRIVATE KEY----- end",
+    "detail": "bad config: key [redacted] end"
+  },
+  {
+    "text": "bad config: key -----BEGIN PRIVATE KEY-----\nMIIEs3cr3t cut short",
+    "detail": "bad config: key [redacted]"
+  },
+  {
+    "text": "sent baſic czNjcjN0QUJDREVG on",
+    "detail": "sent baſic czNjcjN0QUJDREVG on"
+  },
+  {
+    "text": "sent Basic czNjcjN0QUJDREVG on",
+    "detail": "sent Basic [redacted] on"
+  },
+  {
+    "text": "Key: s3cr3t",
+    "detail": "Key: s3cr3t"
+  },
+  {
+    "text": "sk-éééééééééééééééééééé",
+    "detail": "sk-éééééééééééééééééééé"
+  },
+  {
+    "text": "api_key_é = s3cr3t",
+    "detail": "api_key_é = s3cr3t"
+  },
+  {
+    "text": "ésk-proj-S3cr3tKeyXS3cr3tKeyX",
+    "detail": "é[redacted]"
+  },
+  {
+    "text": "_sk-proj-S3cr3tKeyXS3cr3tKeyX",
+    "detail": "_sk-proj-S3cr3tKeyXS3cr3tKeyX"
+  },
+  {
+    "text": "api_key=﻿\"s3cr3t\" tail",
+    "detail": "api_key=﻿[redacted] tail"
+  },
+  {
+    "text": "api_key=\"s3cr3t\" tail",
+    "detail": "api_key=[redacted]"
+  },
+  {
+    "text": "Bearer﻿s3cr3tTOKEN1 sent",
+    "detail": "Bearer﻿[redacted] sent"
+  },
+  {
+    "text": "Bearers3cr3tTOKEN1 sent",
+    "detail": "Bearers3cr3tTOKEN1 sent"
+  },
+  {
+    "text": "Bearer ABCDEFGH12 sent",
+    "detail": "Bearer [redacted] sent"
+  },
+  {
+    "text": "token: expiredx",
+    "detail": "token: [redacted]"
+  },
+  {
+    "text": "token: expired﻿x",
+    "detail": "token: expired﻿x"
+  },
+  {
+    "text": "api_key = \"s3\\\rcr3t\" tail",
+    "detail": "api_key = [redacted]\\\rcr3t\" tail"
+  },
+  {
+    "text": "api_key = \"s3\\ cr3t\" tail",
+    "detail": "api_key = [redacted]\\ cr3t\" tail"
+  },
+  {
+    "text": "api_key = \"s3\\ cr3t\" tail",
+    "detail": "api_key = [redacted]\\ cr3t\" tail"
+  },
+  {
+    "text": "api_key = \"s3\\cr3t\" tail",
+    "detail": "api_key = [redacted] tail"
+  },
+  {
+    "text": "\"api_key' = s3cr3t",
+    "detail": "\"api_key' = s3cr3t"
+  },
+  {
+    "text": "\\\"api_key\" = s3cr3t",
+    "detail": "\\\"api_key\" = [redacted]"
+  },
+  {
+    "text": "\\api_key\\ = s3cr3t",
+    "detail": "\\api_key\\ = [redacted]"
+  },
+  {
+    "text": "'api_key' = s3cr3t",
+    "detail": "'api_key' = [redacted]"
+  },
+  {
+    "text": "\\'api_key\\' = s3cr3t",
+    "detail": "\\'api_key\\' = [redacted]"
+  },
+  {
+    "text": "max_tokens = 4096",
+    "detail": "max_tokens = 4096"
+  },
+  {
+    "text": "tokens_token = s3cr3t",
+    "detail": "tokens_token = [redacted]"
+  },
+  {
+    "text": "tokens: 12 used",
+    "detail": "tokens: 12 used"
+  },
+  {
+    "text": "api_key = \"\"\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx tail",
+    "detail": "api_key = [redacted]\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "text": "api_key = \"\"\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\"\" tail",
+    "detail": "api_key = [redacted] tail"
+  },
+  {
+    "text": "api_key = \"\"\"abc\nmore lines",
+    "detail": "api_key = [redacted]"
+  },
+  {
+    "text": "api_key =\n\"s3cr3t\" tail",
+    "detail": "api_key =\n[redacted] tail"
+  },
+  {
+    "text": "api_keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx = s3cr3t",
+    "detail": "api_keyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx = [redacted]"
+  },
+  {
+    "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_key = s3cr3t",
+    "detail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_key = [redacted]"
+  },
+  {
+    "text": "token=\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\" proxy https://user:s3cr3t@host",
+    "detail": "token=[redacted] proxy…"
+  },
+  {
+    "text": "api_key=😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 tail",
+    "detail": "api_key=[redacted]😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀 tail"
+  },
+  {
+    "text": "🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 ",
+    "detail": "🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑 🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑…"
+  },
+  {
+    "text": "🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑‍🧑",
+    "detail": "…"
+  },
+  {
+    "text": "👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽",
+    "detail": "👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽…"
+  },
+  {
+    "text": "👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽",
+    "detail": "👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽"
+  },
+  {
+    "text": "👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧",
+    "detail": "👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧👨‍👩‍👧…"
+  },
+  {
+    "text": "🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵",
+    "detail": "🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵🇯🇵…"
+  },
+  {
+    "text": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "detail": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…"
+  },
+  {
+    "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "detail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "detail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+  },
+  {
+    "text": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "detail": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…"
+  },
+  {
+    "text": "token=\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" proxy https://user:s3cr3ts3cr3ts3cr3t@host",
+    "detail": "token=[redacted] proxy…"
+  },
+  {
+    "text": "api_key = \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" proxy https://admin:zzzzzzzzzzzzzzzzzzzz,zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz@db/x",
+    "detail": "api_key = [redacted] proxy…"
+  }
+]

@@ -33,6 +33,7 @@ use super::lease::{Epoch, Lease};
 use super::screen::{Opening, Snapshot};
 use super::seam::{Held, Position, RESPAWN_RESET, held_bytes, seam};
 use super::view::{Behind, Outbox};
+use crate::failure::failure_detail;
 
 /// A terminal's stream, which every view of it shares.
 pub(crate) trait TerminalStream: Send + Sync + 'static {
@@ -829,9 +830,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
                 self.deliver(watched, &mut state, &Held::Geometry(size));
             }
             StreamEvent::Failed { what, message } => {
-                // Forwarded unredacted, as holder.rs's failure detail still is, until TS's
-                // `failureDetail` redaction is ported.
-                let message = format!("{what} failed: {message}");
+                let message = format!("{what} failed: {}", failure_detail(&message));
                 for view in &state.views {
                     view.outbox.notify(StreamServerFrame::Notice {
                         message: message.clone(),
@@ -1217,7 +1216,7 @@ impl<R: Runtime, L: AttachmentLog> Shared<R, L> {
         if let Err(err) = result {
             for view in &state.views {
                 view.outbox.notify(StreamServerFrame::Notice {
-                    message: format!("resize failed: {err}"),
+                    message: format!("resize failed: {}", failure_detail(&err.to_string())),
                 });
             }
         }
@@ -3474,14 +3473,16 @@ pub(crate) mod tests {
         }
 
         #[test]
-        fn tells_every_view_what_failed_in_the_runtime() {
+        fn tells_every_view_what_failed_in_the_runtime_with_its_secrets_taken_out() {
             runtime().block_on(async {
                 let h = H::new();
                 let a = h.interactive().await;
                 let b = h.observer().await;
-                h.rt.fails("screen check", "tmux gone");
+                h.rt.fails("screen check", "tmux gone; api_key = s3cr3t");
                 settle().await;
-                let told = vec![notice("screen check failed: tmux gone")];
+                let told = vec![notice(
+                    "screen check failed: tmux gone; api_key = [redacted]",
+                )];
                 assert_eq!((a.seen.notices(), b.seen.notices()), (told.clone(), told));
             });
         }

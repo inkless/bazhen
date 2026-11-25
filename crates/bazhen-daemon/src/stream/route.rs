@@ -30,6 +30,7 @@ use super::hub::{self, Attachment, AttachmentLog, Hub, JoinError, LeaveReason, R
 use super::said::{Said, read};
 use super::view::{self, Inbox, MOST_UNSENT, Outbox, Unsent, ViewSocket, write_one};
 use crate::accept::Held;
+use crate::failure::failure_detail;
 use crate::heartbeat::{Beat, Heartbeat, Pulse};
 use crate::paired;
 use crate::routes::{Shared, not_found};
@@ -344,7 +345,9 @@ async fn join(
     match running(terminal.clone()).await {
         Ok(true) => {}
         Ok(false) => return Err(format!("no running terminal {terminal}")),
-        Err(err) => return Err(format!("attach failed: {err}")),
+        Err(err) => {
+            return Err(format!("attach failed: {}", failure_detail(&err)));
+        }
     }
     views
         .join(terminal.clone(), viewer, size, resumes)
@@ -352,7 +355,7 @@ async fn join(
         .map(|attachment| (terminal, attachment))
         .map_err(|err| match err {
             JoinError::Refused(message) => message,
-            err => format!("attach failed: {err}"),
+            err => format!("attach failed: {}", failure_detail(&err.to_string())),
         })
 }
 

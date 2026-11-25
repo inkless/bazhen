@@ -28,6 +28,7 @@ use bazhen_runtime_holder::{
 use tokio::sync::broadcast;
 
 use crate::config::RuntimeKind;
+use crate::failure::detail;
 use crate::terminals::{
     Answer, Compatibility, Event, Events, Exit, FoundShell, Kind, NewTerminal, Recorded,
     ShellForeground, TerminalError, Terminals,
@@ -36,9 +37,6 @@ use crate::terminals::{
 /// The size a terminal starts at, until a view attaches and sets its own (`DEFAULT_SIZE`).
 const COLS: u64 = 120;
 const ROWS: u64 = 40;
-
-/// The most of a failure's text an answer carries (`DETAIL_MAX` in `commands.ts`).
-const DETAIL_MAX: usize = 500;
 
 /// Where `moon run :build` puts the holder beside this daemon: `target/release-holder`, beside
 /// `target/release`, which this binary runs from.
@@ -218,24 +216,6 @@ pub(crate) fn containment_log(containment: &Containment) -> Option<(bool, String
             ))
         }
     }
-}
-
-/// A failure's own text, cut to what an answer carries, ending `…` where it was cut
-/// (`failureDetail` in `commands.ts`): its message alone, as an `Error`'s, not its causes'. It is
-/// cut by characters, where TypeScript cuts by grapheme clusters, and not yet redacted as
-/// `failureDetail` redacts: that needs its JavaScript patterns ported, a change of its own.
-fn detail(err: &dyn std::error::Error) -> String {
-    cut_detail(err.to_string())
-}
-
-/// `text` cut as [`detail`] cuts a failure's.
-pub(crate) fn cut_detail(text: String) -> String {
-    if text.chars().count() <= DETAIL_MAX {
-        return text;
-    }
-    let mut cut: String = text.chars().take(DETAIL_MAX - 1).collect();
-    cut.push('…');
-    cut
 }
 
 /// The holder's name for the signal a client asked for: the same four, by the same names.
@@ -1185,25 +1165,6 @@ mod tests {
         assert_eq!(closed, Ok(()));
         assert_eq!(told.respawned().len(), 0);
         assert_eq!(holder.told.lock().unwrap().len(), 1);
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    #[error("{0}")]
-    struct Failed(String, #[source] std::io::Error);
-
-    #[test]
-    fn answers_a_failure_by_its_own_message_cut_to_500_characters_ending_where_it_was_cut() {
-        let cause = || std::io::Error::other("the cause");
-        let long = "é".repeat(DETAIL_MAX + 1);
-        let cut = detail(&Failed(long, cause()));
-        assert_eq!(
-            [
-                detail(&Failed("socket gone".to_owned(), cause())),
-                detail(&Failed("x".repeat(DETAIL_MAX), cause())),
-            ],
-            ["socket gone".to_owned(), "x".repeat(DETAIL_MAX)]
-        );
-        assert_eq!(cut, format!("{}…", "é".repeat(DETAIL_MAX - 1)));
     }
 
     /// Shells on the real `bazhen-holder`: each test starts a holder and closes it, so each runs
