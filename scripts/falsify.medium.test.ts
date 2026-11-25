@@ -2854,6 +2854,40 @@ function guardVerdict(extra: Record<string, string> = {}, test = TEST) {
   return { status: result.status, line: line.trim(), leftovers: leftovers() };
 }
 
+/**
+ * One falsify run over a new test file for each path `breaks` names, `head` and a test `caps`,
+ * each guarded by a commit of its own that holds that file's break. By file, the line falsify
+ * printed beside its `caps`, and the line that refuses its guard for `why`, given that guard's
+ * commit.
+ */
+function refusedEach(
+  head: string,
+  breaks: Record<string, [block: string, why: (commit: string) => string]>,
+) {
+  const files = Object.keys(breaks);
+  amendBranch(Object.fromEntries(files.map((file) => [file, `${head}it("caps", () => {});\n`])));
+  const guards = Object.entries(breaks).map(([file, [block, why]]) => ({
+    file,
+    commit: guardCommit([block], [`Guard: ${file} › caps: marks it broken`]),
+    why,
+  }));
+  const result = againstBase({ ...SURVIVES, STUB_EACH: "1" });
+  const output = result.output.split("\n");
+  const printed = guards.map(({ file }) => [
+    file,
+    (output.find((l) => l.includes(` ${file} › caps`)) ?? "").trim(),
+  ]);
+  const refused = guards.map(({ file, commit, why }) => [
+    file,
+    `SURVIVED ${file} › caps (its guard doesn't hold: ${why(commit)})`,
+  ]);
+  return {
+    status: result.status,
+    printed: Object.fromEntries(printed),
+    refused: Object.fromEntries(refused),
+  };
+}
+
 /** Falsify's verdict on `caps` under one guard's marker break, and that guard's commit. */
 function underOneBreak(extra: Record<string, string>) {
   const commit = guardCommit([breakOf()]);
@@ -2870,6 +2904,14 @@ const noVerdict = (commit: string) =>
   `it has no pass or fail under the break in ${commit} (a timeout, or no result)`;
 const notItsOwn = (commit: string) =>
   `it fails under the break in ${commit}, but not on an assertion of its own`;
+const testIn = (name: string) => `packages/a/src/${name}.test.ts`;
+const notImported = (file: string) => (commit: string) =>
+  `the break in ${commit}: ${file} isn't source the branch changed that the test imports`;
+const testSupport = (file: string) => (commit: string) =>
+  `the break in ${commit}: ${file} is test support`;
+const reshapes = (commit: string) =>
+  `the break in ${commit} must only modify text: it may not create, delete, rename or copy a ` +
+  "file, change a mode, or be binary";
 
 /** The source each vitest run under a guard's break saw, in order. */
 const sourcesUnderBreaks = () =>
@@ -2982,98 +3024,95 @@ describe("falsify on a branch that guards a test of behaviour the base already h
       [fixture]: "export const f = 2;\n",
       [support]: "export const g = 2;\n",
       [unloaded]: "export const h = 2;\n",
-      [TEST]: branchTest(
-        'import { v } from "./x.ts";\nimport { f } from "./store/fixture.ts";\nimport { g } from "./testing/fake.ts";\nit("v", () => {});\n',
-      ),
     });
-    const breaks = [
-      [fixture, "export const f = 2;", "is test support"],
-      [support, "export const g = 2;", "is test support"],
-      [unloaded, "export const h = 2;", "isn't source the branch changed that the test imports"],
-      [
-        TEST,
-        'import { v } from "./x.ts";',
-        "isn't source the branch changed that the test imports",
-      ],
-    ] as const;
-    const refused = breaks.map(([file, from, why]) => {
-      const commit = guardCommit([breakOf({ file, from })]);
-      const verdict = guardVerdict();
-      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
-      writeFileSync(fx.log, "");
-      return verdict.line.endsWith(
-        `(its guard doesn't hold: the break in ${commit}: ${file} ${why})`,
-      );
+    const own = testIn("own");
+    const { printed, refused } = refusedEach(
+      `${IMPORTS}import { f } from "./store/fixture.ts";\nimport { g } from "./testing/fake.ts";\n`,
+      {
+        [testIn("store")]: [
+          breakOf({ file: fixture, from: "export const f = 2;" }),
+          testSupport(fixture),
+        ],
+        [testIn("fake")]: [
+          breakOf({ file: support, from: "export const g = 2;" }),
+          testSupport(support),
+        ],
+        [testIn("other")]: [
+          breakOf({ file: unloaded, from: "export const h = 2;" }),
+          notImported(unloaded),
+        ],
+        [own]: [breakOf({ file: own, from: IMPORTS.trimEnd() }), notImported(own)],
+      },
+    );
+    expect({ printed, underBreaks: sourcesUnderBreaks() }).toEqual({
+      printed: refused,
+      underBreaks: [],
     });
-    expect(refused).toEqual([true, true, true, true]);
   });
 
   it("refuses a break of a file outside the source falsify reverts", () => {
     amendBranch({ "package.json": "{}\n", "tests/support/x.ts": "export const s = 1;\n" });
-    const verdicts = [
-      ["package.json", "{}"],
-      ["tests/support/x.ts", "export const s = 1;"],
-    ].map(([file = "", from = ""]) => {
-      const commit = guardCommit([breakOf({ file, from })]);
-      const verdict = guardVerdict();
-      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
-      return verdict.line.endsWith(
-        `the break in ${commit}: ${file} isn't source the branch changed that the test imports)`,
-      );
+    const { printed, refused } = refusedEach(IMPORTS, {
+      [testIn("manifest")]: [
+        breakOf({ file: "package.json", from: "{}" }),
+        notImported("package.json"),
+      ],
+      [testIn("support")]: [
+        breakOf({ file: "tests/support/x.ts", from: "export const s = 1;" }),
+        notImported("tests/support/x.ts"),
+      ],
     });
-    expect(verdicts).toEqual([true, true]);
+    expect(printed).toEqual(refused);
   });
 
   it("refuses a break that creates, renames or changes a mode, or is binary", () => {
-    const breaks = [
-      lines(
-        "```diff",
-        "diff --git a/packages/a/src/n.ts b/packages/a/src/n.ts",
-        "new file mode 100644",
-        "--- /dev/null",
-        "+++ b/packages/a/src/n.ts",
-        "@@ -0,0 +1 @@",
-        "+x",
-        "```",
-      ),
-      lines(
-        "```diff",
-        `diff --git a/${SOURCE} b/packages/a/src/y.ts`,
-        "similarity index 100%",
-        `rename from ${SOURCE}`,
-        "rename to packages/a/src/y.ts",
-        "```",
-      ),
-      lines(
-        "```diff",
-        `diff --git a/${SOURCE} b/${SOURCE}`,
-        "old mode 100644",
-        "new mode 100755",
-        "```",
-      ),
-      lines(
-        "```diff",
-        `diff --git a/${SOURCE} b/${SOURCE}`,
-        "index 1111111..2222222 100644",
-        "Binary files a/x and b/x differ",
-        "```",
-      ),
-    ];
-    const verdicts = breaks.map((block) => {
-      const commit = guardCommit([block]);
-      const verdict = guardVerdict();
-      git(fx.linked, "reset", "--quiet", "--hard", "HEAD~1");
-      return [
-        verdict.status,
-        verdict.line.includes(`the break in ${commit} must only modify text`),
-      ];
+    const { status, printed, refused } = refusedEach(IMPORTS, {
+      [testIn("creates")]: [
+        lines(
+          "```diff",
+          "diff --git a/packages/a/src/n.ts b/packages/a/src/n.ts",
+          "new file mode 100644",
+          "--- /dev/null",
+          "+++ b/packages/a/src/n.ts",
+          "@@ -0,0 +1 @@",
+          "+x",
+          "```",
+        ),
+        reshapes,
+      ],
+      [testIn("renames")]: [
+        lines(
+          "```diff",
+          `diff --git a/${SOURCE} b/packages/a/src/y.ts`,
+          "similarity index 100%",
+          `rename from ${SOURCE}`,
+          "rename to packages/a/src/y.ts",
+          "```",
+        ),
+        reshapes,
+      ],
+      [testIn("mode")]: [
+        lines(
+          "```diff",
+          `diff --git a/${SOURCE} b/${SOURCE}`,
+          "old mode 100644",
+          "new mode 100755",
+          "```",
+        ),
+        reshapes,
+      ],
+      [testIn("binary")]: [
+        lines(
+          "```diff",
+          `diff --git a/${SOURCE} b/${SOURCE}`,
+          "index 1111111..2222222 100644",
+          "Binary files a/x and b/x differ",
+          "```",
+        ),
+        reshapes,
+      ],
     });
-    expect(verdicts).toEqual([
-      [1, true],
-      [1, true],
-      [1, true],
-      [1, true],
-    ]);
+    expect({ status, printed }).toEqual({ status: 1, printed: refused });
   });
 
   it("refuses a break that doesn't apply to HEAD, saying how to commit one", () => {
