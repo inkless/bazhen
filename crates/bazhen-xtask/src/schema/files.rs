@@ -147,6 +147,10 @@ pub(crate) fn typescript_constants(document: &Value) -> Result<String, Vec<Strin
             problems.push(format!(
                 "{at}/{name}: {number} is past what a JavaScript number holds exactly"
             ));
+        } else if has_proto(value) {
+            problems.push(format!(
+                "{at}/{name}: has a `__proto__` key, which a literal takes as its prototype"
+            ));
         } else {
             let typed = if value.is_array() || value.is_object() {
                 " as const"
@@ -160,6 +164,16 @@ pub(crate) fn typescript_constants(document: &Value) -> Result<String, Vec<Strin
         Ok(text)
     } else {
         Err(problems)
+    }
+}
+
+/// Whether a map in `value`, at any depth, has a `__proto__` key: a TypeScript object literal sets
+/// its prototype from it rather than holding it as a field.
+fn has_proto(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(has_proto),
+        Value::Object(fields) => fields.iter().any(|(k, v)| k == "__proto__" || has_proto(v)),
+        _ => false,
     }
 }
 
@@ -459,22 +473,24 @@ mod tests {
             "PAST": 9_007_199_254_740_992_u64,
             "BELOW": [-9_007_199_254_740_992_i64],
             "WITHIN": { "deep": 18_446_744_073_709_551_615_u64 },
+            "PROTO": { "a": [{ "__proto__": { "b": 1 } }] },
         } } });
         let at = "x-bazhen-semantics/constants";
+        let past =
+            |name, n| format!("{at}/{name}: {n} is past what a JavaScript number holds exactly");
+        let unnamed =
+            |name| format!("{at}/{name}: isn't a constant's name, in SCREAMING_SNAKE_CASE");
         assert_eq!(
             typescript_constants(&document).unwrap_err(),
             [
+                past("BELOW", "-9007199254740992"),
+                past("PAST", "9007199254740992"),
                 format!(
-                    "{at}/BELOW: -9007199254740992 is past what a JavaScript number holds exactly"
+                    "{at}/PROTO: has a `__proto__` key, which a literal takes as its prototype"
                 ),
-                format!(
-                    "{at}/PAST: 9007199254740992 is past what a JavaScript number holds exactly"
-                ),
-                format!(
-                    "{at}/WITHIN: 18446744073709551615 is past what a JavaScript number holds exactly"
-                ),
-                format!("{at}/_LEADING: isn't a constant's name, in SCREAMING_SNAKE_CASE"),
-                format!("{at}/lower: isn't a constant's name, in SCREAMING_SNAKE_CASE"),
+                past("WITHIN", "18446744073709551615"),
+                unnamed("_LEADING"),
+                unnamed("lower"),
             ]
         );
         let listed = json!({ "x-bazhen-semantics": { "constants": [1] } });

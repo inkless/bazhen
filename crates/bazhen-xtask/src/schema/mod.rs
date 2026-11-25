@@ -2,9 +2,9 @@
 //! a message into `packages/protocol/schema/` (`files`), with the protocol id those files hash to;
 //! the zod and the constants written from it into `packages/protocol/src/gen/`, where the web
 //! reads them; and the schema itself, with the planted corpus (`corpus`) and the daemon edge's
-//! verdict on each case, into `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where a
-//! committed file isn't what it would write, and where the edge's verdict isn't the protocol's, and
-//! it holds schemars to the crates' own tests (`leaks`).
+//! verdict on each case, into `target/protocol-shadow/`. With `--check` it writes nothing into the
+//! tree: it fails where a committed file isn't what it would write, and where the edge's verdict
+//! isn't the protocol's, and it holds schemars to the crates' own tests (`leaks`).
 
 mod corpus;
 mod files;
@@ -120,7 +120,8 @@ pub(crate) fn run(
 }
 
 /// Writes the schema `printed` holds, the files it publishes with their id, and the zod and the
-/// constants written from it; with `check`, holds the committed files to them in place of writing them.
+/// constants written from it; with `check`, holds the committed files to them in place of writing
+/// them.
 fn write_schema(
     printed: &str,
     check: bool,
