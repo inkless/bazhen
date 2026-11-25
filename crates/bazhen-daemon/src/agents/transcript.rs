@@ -215,7 +215,12 @@ mod tests {
     fn holds_none_for_what_isnt_a_regular_file_at_once_for_a_fifo_and_says_so_once_per_path() {
         let dir = TempDir::new("transcript");
         let fifo = dir.path().join("fifo.jsonl");
-        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, rustix::fs::Mode::RUSR).unwrap();
+        // mkfifo(1), not rustix's mkfifoat, which Apple's targets don't have.
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success(), "mkfifo failed: {made}");
         let r = reader();
         assert_eq!(
             [r.holds(&fifo), r.holds(&fifo), r.holds(dir.path())],
