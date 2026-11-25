@@ -43,7 +43,7 @@ const failures: string[] = [];
 const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/protocol/src/gen/constants.ts": "packages/protocol/src/web.test.ts",
   "packages/protocol/src/gen/id.ts": "scripts/protocol-schema.medium.test.ts",
-  "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/dual.medium.test.ts",
+  "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/gen-protocol.medium.test.ts",
   "packages/runtime-tmux/src/index.ts": "tests/integration/tmux-runtime.test.ts",
   "scripts/child-process.ts": "scripts/signal-paths.test.ts",
   "packages/runtime-holder/src/runtime-stream.ts":
