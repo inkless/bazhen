@@ -393,10 +393,13 @@ enum Job {
 /// it ends: one given up on still counts, so a slow `/proc` can't take every thread. A read is late
 /// when it waits its deadline for a turn, which TypeScript doesn't bound, or then reads past its
 /// deadline. One given up on keeps its own copy of the connection's fd until it ends, so the peer
-/// sees the close no sooner.
+/// sees the close no sooner. TCP callers take turns of their own, `MAX_READING` more, and hold
+/// them through their passes, so a flood of HTTP requests can't make the socket's callers, the
+/// CLI's and the hooks', late.
 #[derive(Clone)]
 pub(crate) struct Peers {
     turns: Arc<Semaphore>,
+    tcp_turns: Arc<Semaphore>,
     deadline: Duration,
     read: Arc<ReadFn>,
     tcp: Option<Arc<Tcp>>,
@@ -423,6 +426,7 @@ impl Peers {
     ) -> Self {
         Self {
             turns: Arc::new(Semaphore::new(MAX_READING)),
+            tcp_turns: Arc::new(Semaphore::new(MAX_READING)),
             deadline,
             read: Arc::new(read),
             // Where `/proc` says who holds a socket; elsewhere every TCP caller is refused.
@@ -454,7 +458,10 @@ impl Peers {
             (End::Unix(fd), _) => Job::Unix(Arc::clone(fd)),
             (End::Tcp { client, server }, Some(tcp)) => Job::Tcp(Arc::clone(tcp), *client, *server),
         };
-        let turns = Arc::clone(&self.turns);
+        let turns = Arc::clone(match job {
+            Job::Unix(_) => &self.turns,
+            Job::Tcp(..) => &self.tcp_turns,
+        });
         let Ok(Ok(turn)) = tokio::time::timeout(self.deadline, turns.acquire_owned()).await else {
             return PeerRead::Late;
         };
@@ -1525,6 +1532,38 @@ mod tests {
                 ]
             );
         });
+    }
+
+    /// TCP callers holding every turn they have, their pass held up, leave the socket's callers
+    /// turns of their own: a socket caller is read in time.
+    #[test]
+    fn reads_a_socket_caller_in_time_while_tcp_callers_hold_every_turn_theirs_have() {
+        let view = Arc::new(View::of(MAX_READING).shut());
+        let tcp = Arc::new(Tcp::new(
+            Arc::clone(&view) as Arc<View>,
+            1000,
+            |at, _| Ok(chain(at.as_raw_pid(), 0, &[1])),
+            |_| Err(Refused::Endless),
+        ));
+        let peers = Peers::with(READ, |_, _| Ok(chain(5, 5, &[1]))).with_tcp(Some(tcp));
+        let (unix, _theirs) = socket();
+        let (held, read, tcp_reads) = runtime().block_on(async {
+            let mut tcp_reads = tokio::task::JoinSet::new();
+            for at in 0..MAX_READING {
+                let peers = peers.clone();
+                let port = 1000 + u16::try_from(at).unwrap();
+                tcp_reads.spawn(async move { peers.read(&from_port(port)).await });
+            }
+            until(|| peers.tcp_turns.available_permits() == 0).await;
+            let held = peers.tcp_turns.available_permits();
+            let read = peers.read(&unix).await;
+            view.let_through();
+            (held, read, tcp_reads.join_all().await)
+        });
+        assert_eq!(
+            (held, read, tcp_reads.len()),
+            (0, PeerRead::Read(chain(5, 5, &[1])), MAX_READING)
+        );
     }
 
     #[test]
