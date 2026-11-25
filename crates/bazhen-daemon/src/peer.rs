@@ -771,11 +771,11 @@ fn held(peers: &[Peer], terminals: &TerminalPids) -> Reading {
 }
 
 /// Readers that find a TCP caller from port 1000 to 7900 held by no process that can be read, and
-/// the one process that may hold it unseen outside every terminal: as a caller through a
-/// forwarder reads.
+/// `unseen` the processes that may hold it unseen, outside every terminal: as a caller through a
+/// forwarder reads where `unseen` is pid 960. Pid 951 is one that changes while it is read.
 #[cfg(test)]
-pub(crate) fn through_a_forwarder() -> Peers {
-    tests::tcp_readers(tests::View::of(1).unheld(vec![vec![960]], Vec::new())).0
+pub(crate) fn through_a_forwarder(unseen: Vec<i32>) -> Peers {
+    tests::tcp_readers(tests::View::of(1).unheld(vec![unseen], Vec::new())).0
 }
 
 #[cfg(test)]

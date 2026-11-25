@@ -489,6 +489,8 @@ mod tests {
         http: Router,
         /// The HTTP router as a caller through a forwarder, such as `ssh -L`, reaches it.
         forwarder: Router,
+        /// The same, the processes that may hold its socket unseen changing while they are read.
+        changing: Router,
         shared: Shared,
         path: std::path::PathBuf,
         thread: Option<crate::writer::Thread>,
@@ -518,13 +520,17 @@ mod tests {
             allow: guard::allowlists(7900, None, external),
             pairing_required,
         };
-        let forwarded = Shared {
-            peers: crate::peer::through_a_forwarder(),
+        let through = |unseen| Shared {
+            peers: crate::peer::through_a_forwarder(unseen),
             ..shared.clone()
         };
         Daemon {
             socket: socket_router(shared.clone()),
-            forwarder: crate::testing::from_port_1000(http_router(forwarded, gate.clone())),
+            forwarder: crate::testing::from_port_1000(http_router(
+                through(vec![960]),
+                gate.clone(),
+            )),
+            changing: crate::testing::from_port_1000(http_router(through(vec![951]), gate.clone())),
             http: crate::testing::connected(http_router(shared.clone(), gate)),
             shared,
             path,
@@ -711,6 +717,28 @@ mod tests {
                 refused.clone(),
                 refused
             ]
+        );
+    }
+
+    /// A caller that changed while it was read is told to try again in a second, as one read
+    /// again soon may be read for sure.
+    #[test]
+    fn tells_a_caller_that_changed_while_it_was_read_to_try_again_in_a_second() {
+        let daemon = over_a_store(false);
+        let answer = send(
+            &daemon.changing,
+            "GET",
+            "/v1/state",
+            &[("host", HOST)],
+            None,
+        );
+        assert_eq!(
+            (
+                answer.status,
+                answer.retry_after,
+                answer.body["error"].clone()
+            ),
+            (503, Some("1".to_owned()), json!("unavailable"))
         );
     }
 
