@@ -24,7 +24,7 @@ const ROOT: i32 = 5000;
 struct Fixture {
     shared: Shared,
     agent: AgentId,
-    _dir: TempDir,
+    dir: TempDir,
     thread: Option<Thread>,
 }
 
@@ -82,22 +82,26 @@ fn fixture() -> Fixture {
     Fixture {
         shared,
         agent: launched.agent_id,
-        _dir: dir,
+        dir,
         thread: Some(thread),
     }
 }
 
 /// A hook client whose parent runs from `line`, each process by its pid and name, nearest first.
 fn caller(line: &[(i32, &str)]) -> PeerRead {
+    PeerRead::Read(peer_on(line))
+}
+
+fn peer_on(line: &[(i32, &str)]) -> Peer {
     let pid = |pid: i32| Pid::from_raw(pid).unwrap();
-    PeerRead::Read(Peer {
+    Peer {
         pid: pid(9000),
         session: None,
         codex_server: None,
         environment_withheld: false,
         ancestors: line.iter().map(|(at, _)| pid(*at)).collect(),
         names: line.iter().map(|(_, name)| (*name).to_owned()).collect(),
-    })
+    }
 }
 
 /// The TUI the agent's terminal runs.
@@ -111,13 +115,42 @@ fn nested_tui() -> PeerRead {
 }
 
 impl Fixture {
-    fn post(&self, version: &str, event: &str, payload: &Value, peer: PeerRead) -> Response {
+    fn request(&self, version: &str, event: &str, payload: &Value) -> HookRequest {
         let body = json!({
             "protocolVersion": version, "agentId": self.agent.as_str(), "event": event,
             "pid": 77, "ppid": ROOT, "payload": payload,
         });
-        let hook = edge::<HookRequest>(body.to_string().as_bytes()).unwrap();
-        runtime().block_on(taken(&self.shared, &hook, None, Some(peer)))
+        edge::<HookRequest>(body.to_string().as_bytes()).unwrap()
+    }
+
+    fn post(&self, version: &str, event: &str, payload: &Value, peer: PeerRead) -> Response {
+        let hook = self.request(version, event, payload);
+        runtime().block_on(taken(&self.shared, &hook, None, Some(peer), None))
+    }
+
+    /// Posts a waiter's hook, and says whether it is held; once it is, its client goes. A hook
+    /// neither answered nor held by the deadline fails the test rather than hang it.
+    fn wait(&self, payload: &Value, peer: PeerRead) -> bool {
+        let hook = self.request(HOOK_PROTOCOL_VERSION, "wait", payload);
+        let held = runtime().block_on(async {
+            tokio::time::timeout(DEADLINE, async {
+                let answered = taken(&self.shared, &hook, None, Some(peer), None);
+                let mut answered = std::pin::pin!(answered);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut answered => return false,
+                        () = tokio::task::yield_now() => {
+                            if self.shared.hooks.waiters.holds(&self.agent) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            })
+            .await
+        });
+        held.expect("the waiter's hook was neither answered nor held by the deadline")
     }
 
     fn hook(&self, event: &str, payload: &Value, peer: PeerRead) -> Response {
@@ -177,8 +210,8 @@ fn records_what_the_agents_own_session_says_it_is_doing_and_not_another_sessions
 #[test]
 fn moves_the_agent_to_a_session_its_own_tui_started_and_records_its_transcript() {
     let f = fixture();
-    f.hook("wait", &session_start("session-3", "clear"), nested_tui());
-    f.hook("wait", &session_start("session-2", "clear"), its_tui());
+    f.wait(&session_start("session-3", "clear"), nested_tui());
+    f.wait(&session_start("session-2", "clear"), its_tui());
     assert_eq!(
         (
             f.of("agent.external_ref_updated"),
@@ -203,8 +236,8 @@ impl Fixture {
 #[test]
 fn records_a_compaction_of_the_agents_session_with_the_hook_that_reported_it() {
     let f = fixture();
-    f.hook("wait", &session_start("session-1", "compact"), its_tui());
-    f.hook("wait", &session_start("session-1", "compact"), its_tui());
+    f.wait(&session_start("session-1", "compact"), its_tui());
+    f.wait(&session_start("session-1", "compact"), its_tui());
     assert_eq!(
         f.of("agent.compacted"),
         [json!({ "sign": "claude_hook", "hook": { "sessionId": "session-1", "pid": 77 } })]
@@ -313,4 +346,204 @@ fn takes_a_hook_past_axums_default_body_limit_as_the_typescript_daemon_does() {
     let ack = json!({ "agentId": f.agent.as_str(), "offered": [], "pad": file });
     let (hooked, acked) = (hook("/v1/hooks", &body), hook("/v1/hooks/ack", &ack));
     assert_eq!((reply_of(hooked).0, acked.status().as_u16()), (200, 200));
+}
+
+fn stop_in(session: &str) -> Value {
+    json!({ "hook_event_name": "Stop", "session_id": session })
+}
+
+impl Fixture {
+    /// Sets the agent's state as its row records it, as a close would.
+    fn set_state(&self, state: &'static str) {
+        let agent = self.agent.clone();
+        runtime()
+            .block_on(write(&self.shared.store, move |w| {
+                w.connection().execute(
+                    "UPDATE agent_sessions SET state = ? WHERE id = ?",
+                    (state, agent.as_str()),
+                )?;
+                Ok(())
+            }))
+            .unwrap();
+    }
+}
+
+#[test]
+fn records_the_harness_up_once_and_only_from_the_tui_its_terminal_started() {
+    let f = fixture();
+    f.hook("UserPromptSubmit", &prompt("session-1"), nested_tui());
+    let nested = f.of("agent.ready").len();
+    f.hook("UserPromptSubmit", &prompt("session-1"), its_tui());
+    f.hook("UserPromptSubmit", &prompt("session-1"), its_tui());
+    assert_eq!(
+        (nested, f.of("agent.ready")),
+        (0, vec![json!({ "sign": "claude_hook" })])
+    );
+}
+
+#[test]
+fn holds_the_waiter_of_the_agents_own_session_and_answers_a_closed_agents_at_once() {
+    let f = fixture();
+    let (own, other) = (
+        f.wait(&stop_in("session-1"), its_tui()),
+        f.wait(&stop_in("other"), its_tui()),
+    );
+    f.set_state("closed");
+    let closed = f.wait(&stop_in("session-1"), its_tui());
+    assert_eq!((own, other, closed), (true, false, false));
+}
+
+/// The fixture's daemon, served on a real socket through `accept::serve_on`, its caller read as
+/// the agent's own TUI.
+struct Served {
+    f: Fixture,
+    path: std::path::PathBuf,
+    stop: tokio_util::sync::CancellationToken,
+    runtime: tokio::runtime::Runtime,
+}
+
+fn served() -> Served {
+    let mut f = fixture();
+    f.shared.peers = crate::peer::Peers::with(Duration::from_secs(5), |_, _| {
+        Ok(peer_on(&[(ROOT, "claude")]))
+    });
+    let path = f.dir.path().join("hooks.sock");
+    let stop = tokio_util::sync::CancellationToken::new();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let router = crate::routes::socket_router(f.shared.clone());
+    let listener = runtime.block_on(async { tokio::net::UnixListener::bind(&path).unwrap() });
+    runtime.spawn(crate::accept::serve_on(
+        listener,
+        router,
+        crate::accept::SOCKET,
+        stop.clone(),
+        TaskTracker::new(),
+        || {},
+    ));
+    Served {
+        f,
+        path,
+        stop,
+        runtime,
+    }
+}
+
+/// How long a proof waits for what it polls for.
+const DEADLINE: Duration = Duration::from_secs(10);
+
+impl Served {
+    /// Opens a connection and sends a waiter's hook from the agent's own session on it.
+    fn wait(&self) -> tokio::net::UnixStream {
+        use tokio::io::AsyncWriteExt as _;
+        let body = json!({
+            "protocolVersion": HOOK_PROTOCOL_VERSION, "agentId": self.f.agent.as_str(),
+            "event": "wait", "pid": 77, "ppid": ROOT, "payload": stop_in("session-1"),
+        })
+        .to_string();
+        let request = format!(
+            "POST /v1/hooks HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        self.runtime.block_on(async {
+            let mut stream = tokio::net::UnixStream::connect(&self.path).await.unwrap();
+            stream.write_all(request.as_bytes()).await.unwrap();
+            stream
+        })
+    }
+
+    /// Whether the agent holds a waiter by the deadline, or no longer holds one, as `held` asks.
+    fn holds_by_deadline(&self, held: bool) -> bool {
+        let waiters = Arc::clone(&self.f.shared.hooks);
+        let agent = self.f.agent.clone();
+        self.runtime.block_on(async move {
+            tokio::time::timeout(DEADLINE, async {
+                while waiters.waiters.holds(&agent) != held {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_ok()
+        })
+    }
+
+    /// The head of the reply on `stream`, or none by the deadline.
+    fn reply_head(&self, stream: &mut tokio::net::UnixStream) -> Option<String> {
+        use tokio::io::AsyncReadExt as _;
+        self.runtime.block_on(async {
+            let mut sent = Vec::new();
+            tokio::time::timeout(DEADLINE, async {
+                while !sent.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let mut chunk = [0; 1024];
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    sent.extend_from_slice(chunk.get(..read).unwrap_or_default());
+                }
+            })
+            .await
+            .ok()
+            .map(|()| String::from_utf8_lossy(&sent).into_owned())
+        })
+    }
+
+    /// What the daemon sent on `stream` before it closed it, or none by the deadline.
+    fn read_to_close(&self, stream: &mut tokio::net::UnixStream) -> Option<Vec<u8>> {
+        use tokio::io::AsyncReadExt as _;
+        self.runtime.block_on(async {
+            let mut sent = Vec::new();
+            tokio::time::timeout(DEADLINE, stream.read_to_end(&mut sent))
+                .await
+                .ok()
+                .map(|read| {
+                    read.unwrap();
+                    sent
+                })
+        })
+    }
+}
+
+#[test]
+fn forgets_a_waiter_whose_client_closed_its_connection() {
+    let s = served();
+    let client = s.wait();
+    let registered = s.holds_by_deadline(true);
+    drop(client);
+    assert_eq!((registered, s.holds_by_deadline(false)), (true, true));
+}
+
+#[test]
+fn keeps_the_newer_waiter_when_the_older_it_answered_goes() {
+    let s = served();
+    let mut older = s.wait();
+    let registered = s.holds_by_deadline(true);
+    let _newer = s.wait();
+    let head = s.reply_head(&mut older).unwrap_or_default();
+    drop(older);
+    assert_eq!(
+        (
+            registered,
+            head.starts_with("HTTP/1.1 200"),
+            head.contains("bazhen-exit-code: 0")
+        ),
+        (true, true, true)
+    );
+    // Answered, the older's handler has gone, its wait with it; the newer stays.
+    assert!(s.f.shared.hooks.waiters.holds(&s.f.agent));
+}
+
+#[test]
+fn drops_a_held_waiters_connection_unanswered_when_the_daemon_stops() {
+    let s = served();
+    let mut client = s.wait();
+    let registered = s.holds_by_deadline(true);
+    s.stop.cancel();
+    assert_eq!(
+        (registered, s.read_to_close(&mut client)),
+        (true, Some(Vec::new()))
+    );
 }

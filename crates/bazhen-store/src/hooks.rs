@@ -4,7 +4,8 @@
 //! `rebind`).
 
 use bazhen_protocol::agent_events::{
-    AgentCompacted, AgentExternalRefUpdated, AgentTranscriptRecorded, CompactedHook, CompactedSign,
+    AgentCompacted, AgentExternalRefUpdated, AgentReady, AgentTranscriptRecorded, CompactedHook,
+    CompactedSign, ReadySign,
 };
 use bazhen_protocol::agents::{Activity, ExternalRef, ExternalRefKind, Usage};
 use bazhen_protocol::ids::{AgentId, EnvironmentId};
@@ -226,6 +227,31 @@ impl Writer<'_> {
         self.append(&system(agent, change)).map(Some)
     }
 
+    /// Records the harness's first sign of life since the agent's terminal came up
+    /// (`Readiness.ready`): only while the agent is starting and its terminal runs, so a sign
+    /// before the terminal is up, or once the agent runs, records nothing.
+    ///
+    /// # Errors
+    ///
+    /// The read's, or the append's.
+    pub fn record_ready(
+        &self,
+        agent: &AgentId,
+        sign: ReadySign,
+    ) -> Result<Option<u64>, AppendError> {
+        let waiting = self
+            .reads()
+            .agent_binding(agent.as_str())?
+            .is_some_and(|b| {
+                b.state == "starting" && b.terminal_state.as_deref() == Some("running")
+            });
+        if !waiting {
+            return Ok(None);
+        }
+        self.append(&system(agent, AgentChange::Ready(AgentReady { sign })))
+            .map(Some)
+    }
+
     /// Whether the agent is in a state its harness reports in.
     fn reporting(&self, agent: &AgentId) -> rusqlite::Result<bool> {
         let state = self.reads().agent_state(agent.as_str())?;
@@ -253,7 +279,7 @@ fn system(agent: &AgentId, change: AgentChange) -> NewEvent {
 
 #[cfg(test)]
 mod tests {
-    use bazhen_protocol::agent_events::{CompactedHook, CompactedSign};
+    use bazhen_protocol::agent_events::{CompactedHook, CompactedSign, ReadySign};
     use bazhen_protocol::agents::{
         Activity, ActivitySource, ActivityValue, ExternalRef, ExternalRefKind,
     };
@@ -558,6 +584,47 @@ mod tests {
             Some(
                 r#"{"sign":"claude_hook","before":{"model":"opus","contextUsedPercent":80},"hook":{"sessionId":"s-1","pid":7}}"#
             )
+        );
+    }
+
+    #[test]
+    fn records_a_sign_of_life_only_while_the_agent_starts_on_a_running_terminal() {
+        let dir = TempDir::new("ready");
+        let mut store = store(&dir, Some(BOUND));
+        let set = |store: &Store, agent: &str, terminal: &str| {
+            store
+                .db
+                .execute_batch(&format!(
+                    "UPDATE agent_sessions SET state = '{agent}'; UPDATE terminals SET state = '{terminal}';"
+                ))
+                .unwrap();
+        };
+        // A refusal is an answer of its own, so a guard the state machine backs fails the assert.
+        let ready = |store: &mut Store| {
+            store
+                .write(|w| w.record_ready(&agent(), ReadySign::ClaudeHook))
+                .map(|recorded| recorded.is_some())
+                .map_err(|err| err.to_string())
+        };
+        set(&store, "starting", "starting");
+        let before_terminal = ready(&mut store);
+        set(&store, "starting", "running");
+        let (first, again) = (ready(&mut store), ready(&mut store));
+        assert_eq!(
+            (
+                before_terminal,
+                first,
+                again,
+                binding(&store).map(|b| b.state)
+            ),
+            (Ok(false), Ok(true), Ok(false), Some("running".to_owned()))
+        );
+        assert_eq!(
+            events(&store),
+            [(
+                "agent.ready".to_owned(),
+                r#"{"sign":"claude_hook"}"#.to_owned()
+            )]
         );
     }
 }
