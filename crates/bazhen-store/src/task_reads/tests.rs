@@ -370,3 +370,16 @@ fn reads_an_agents_active_assignments_on_every_task_oldest_first() {
         [(asgn(1), task(2)), (asgn(2), task(1))]
     );
 }
+
+#[test]
+fn reads_a_task_in_full_only_in_a_transaction_of_its_own() {
+    let (_dir, mut store) = holding(&[Row::Task(1, "open", None, None, None, 1)]);
+    let inside = store
+        .write(|w| Ok::<_, rusqlite::Error>(w.reads().task_detail(&task(1)).map(|_| ())))
+        .unwrap();
+    assert!(
+        matches!(inside, Err(TaskReadError::Sqlite(_))),
+        "{inside:?}"
+    );
+    assert!(store.reads().task_detail(&task(1)).unwrap().is_some());
+}
