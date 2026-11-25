@@ -45,6 +45,13 @@ impl Step {
     }
 }
 
+/// Whether a terminal in `from` may record its process exited (`accepts(from,
+/// "process.exited")`): one running, or one whose process wasn't known.
+#[must_use]
+pub fn takes_exit(from: TerminalState) -> bool {
+    advance(from, Step::ProcessExited).is_ok()
+}
+
 /// Where `step` takes a terminal in `from`, as packages/core's table has it, or why it can't.
 pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, String> {
     use Step::{
@@ -442,6 +449,13 @@ const AGENT_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation,
        t.locator, t.runtime_kind
      FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE a.id = ?";
 
+/// The agent a terminal is the current terminal of, through the terminal's own agent column:
+/// one its agent has left behind, as a relaunch leaves one, finds none (`AGENT_BY_TERMINAL`).
+const AGENT_BY_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM terminals t JOIN agent_sessions a ON a.id = t.agent_session_id AND a.terminal_id = t.id
+     WHERE t.id = ?";
+
 fn agent_terminal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTerminal> {
     let unreadable = |i: usize, what: &str| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -483,6 +497,18 @@ impl Reads<'_> {
     pub fn agent_terminal(self, id: &str) -> rusqlite::Result<Option<AgentTerminal>> {
         self.0
             .query_row(AGENT_TERMINAL, [id], agent_terminal_row)
+            .optional()
+    }
+
+    /// The agent whose current terminal `terminal` is, with it, or `None` for a terminal no
+    /// agent runs in now.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_of_terminal(self, terminal: &str) -> rusqlite::Result<Option<AgentTerminal>> {
+        self.0
+            .query_row(AGENT_BY_TERMINAL, [terminal], agent_terminal_row)
             .optional()
     }
 }

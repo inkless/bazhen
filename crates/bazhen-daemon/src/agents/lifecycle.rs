@@ -3,15 +3,17 @@
 //! command accepts, at the generation it names (`Lifecycle.command`).
 
 use bazhen_core::agent::agent_commands;
-use bazhen_protocol::agent_events::AgentSignalled;
+use bazhen_holder_proto::body::Exited;
+use bazhen_protocol::agent_events::{AgentExited, AgentSignalled};
 use bazhen_protocol::agents::{
     AgentCommand, AgentCommandResponse, AgentState, CloseAgentRequest, SignalAgentRequest,
 };
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, TerminalId};
 use bazhen_protocol::mail_events::{MailUndeliverable, UndeliverableReason};
 use bazhen_protocol::record::Record;
 use bazhen_store::{
-    Actor, AgentChange, AgentTerminal, MailChange, NewEvent, Writer as StoreWriter,
+    Actor, AgentChange, AgentTerminal, AppendError, MailChange, NewEvent, Writer as StoreWriter,
+    takes_exit,
 };
 use serde::Serialize;
 
@@ -85,6 +87,34 @@ fn still_running(found: &AgentTerminal) -> String {
             field("serverPid")
         )
     }
+}
+
+/// The agent's process exited, as its terminal's stream told before any view hears of it
+/// (`told`): recorded then, ahead of the runtime's next report, so whoever acts on the exit finds
+/// the agent exited. Only the exit of the generation recorded is taken, by a terminal whose
+/// state takes one; any other is the runtime's report to read. A terminal no agent runs in now
+/// is no agent's.
+pub(crate) fn told(
+    w: &StoreWriter<'_>,
+    terminal: &TerminalId,
+    exit: &Exited,
+) -> Result<(), AppendError> {
+    let Some(found) = w.reads().agent_of_terminal(terminal.as_str())? else {
+        return Ok(());
+    };
+    if found.generation != Some(exit.generation.get())
+        || !found.terminal_state.is_some_and(takes_exit)
+    {
+        return Ok(());
+    }
+    w.append(&NewEvent::Agent {
+        agent: found.agent_id,
+        actor: Actor::System.as_str().to_owned(),
+        change: AgentChange::Exited(AgentExited {
+            exit: crate::stream::hub::exit_status(&exit.status),
+        }),
+    })?;
+    Ok(())
 }
 
 /// Appends one change to `agent`, as `actor` made it.

@@ -660,6 +660,53 @@ mod tests {
     }
 
     #[test]
+    fn finds_the_agent_a_terminal_is_current_for_and_none_for_one_left_behind() {
+        let dir = TempDir::new("agent-of-terminal");
+        let store = store(&dir);
+        let agent = "agent_0190a1b2c3d47abc8def0123456789a1";
+        let [current, left] = [
+            "term_0190a1b2c3d47abc8def0123456789a1",
+            "term_0190a1b2c3d47abc8def0123456789a2",
+        ];
+        seed(&store, &Agent { id: agent, ..AGENT });
+        terminal(&store, left, "agent", "exited", Some(agent), None);
+        terminal(&store, current, "agent", "running", Some(agent), None);
+        store
+            .db
+            .execute(
+                "UPDATE agent_sessions SET terminal_id = ? WHERE id = ?",
+                (current, agent),
+            )
+            .unwrap();
+        let reads = store.reads();
+        let found = |id: &str| {
+            reads.agent_of_terminal(id).unwrap().map(|t| {
+                (
+                    t.agent_id.as_str().to_owned(),
+                    t.terminal_id,
+                    t.terminal_state,
+                )
+            })
+        };
+        assert_eq!(
+            [
+                found(current),
+                found(left),
+                found("term_0190a1b2c3d47abc8def0123456789a3")
+            ],
+            [
+                Some((
+                    agent.to_owned(),
+                    TerminalId::parse(current),
+                    Some(TerminalState::Running)
+                )),
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
     fn reads_an_agents_state_and_none_for_one_it_doesnt_know() {
         let dir = TempDir::new("state");
         let store = store(&dir);
