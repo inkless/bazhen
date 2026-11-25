@@ -15,7 +15,7 @@ use bazhen_core::roles::{RoleBook, UserRole, resolve_roles};
 use bazhen_protocol::roles::{RoleDefinition, RoleProblem, RoleSource, RolesResponse};
 use rustix::io::Errno;
 
-/// The role files Bazhen ships, by key, as `BUILTIN_ROLES` orders them.
+/// The role files Bazhen ships, by key, as [`bazhen_protocol::roles::BUILTIN_ROLES`] orders them.
 const BUILTINS: [(&str, &str); 4] = [
     (
         "coordinator",
@@ -233,7 +233,7 @@ mod tests {
         let roles = Roles::new(None);
         assert_eq!(
             keys(&roles.current()),
-            ["coordinator", "lead", "worker", "reviewer"]
+            bazhen_protocol::roles::BUILTIN_ROLES
         );
         assert_eq!(roles.current().problems, []);
     }

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import * as generated from "./gen/constants.ts";
+import * as hand from "./index.ts";
+import { oscColour } from "./theme.ts";
 import { AgentName, AgentRef } from "./web.ts";
 
 describe("the web's protocol", () => {
@@ -8,6 +11,29 @@ describe("the web's protocol", () => {
       expect(refused.error?.issues.map((i) => i.message)).toEqual([
         "a name is 1 to 40 letters, digits, - or _, starts with a letter or digit, and isn't an id",
       ]);
+    }
+  });
+
+  it("takes each constant the Rust protocol writes at the value the hand protocol gave it", () => {
+    const pairs = {
+      MAX_ROWS: [generated.MAX_ROWS, hand.MAX_ROWS],
+      HOLDER_MAX_HISTORY_LINES: [generated.HOLDER_MAX_HISTORY_LINES, hand.HOLDER_MAX_HISTORY_LINES],
+      AGENT_NAME_MAX: [generated.AGENT_NAME_MAX, hand.AGENT_NAME_MAX],
+      BUILTIN_ROLES: [generated.BUILTIN_ROLES, hand.BUILTIN_ROLES],
+      TERMINAL_COLOURS: [generated.TERMINAL_COLOURS, hand.TERMINAL_COLOURS],
+      HISTORY_LINES: [generated.HISTORY_LINES, hand.HISTORY_LINES],
+    };
+    for (const [name, [emitted, written]] of Object.entries(pairs)) {
+      expect({ [name]: emitted }).toEqual({ [name]: written });
+    }
+  });
+
+  it("draws a terminal in colours an OSC reply can spell, as the holder tells a program", () => {
+    const drawn = Object.values(generated.TERMINAL_COLOURS).flatMap((c) => [c.text, c.background]);
+    expect(drawn).toHaveLength(4);
+    for (const colour of drawn) {
+      expect(colour).toMatch(/^#[0-9a-f]{6}$/);
+      expect(oscColour(colour)).toMatch(/^rgb:([0-9a-f]{4})\/([0-9a-f]{4})\/([0-9a-f]{4})$/);
     }
   });
 

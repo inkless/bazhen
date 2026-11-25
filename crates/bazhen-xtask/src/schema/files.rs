@@ -4,6 +4,7 @@
 //! the daemon's to know it may read its messages.
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -112,6 +113,86 @@ pub(crate) fn typescript_id(id: &str) -> String {
          */\n\
          export const PROTOCOL_ID = \"{id}\";\n"
     )
+}
+
+/// The largest integer a JavaScript number holds exactly, `Number.MAX_SAFE_INTEGER`.
+const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+/// The TypeScript module that names each of `document`'s constants, as `semantics.json` holds
+/// them: a list or a map `as const`, so a client reads each value as the literal it is. A document
+/// with no constants writes a module that names none.
+pub(crate) fn typescript_constants(document: &Value) -> Result<String, Vec<String>> {
+    let at = "x-bazhen-semantics/constants";
+    let empty = Map::new();
+    let constants = match document.pointer("/x-bazhen-semantics/constants") {
+        None => &empty,
+        Some(Value::Object(constants)) => constants,
+        Some(_) => return Err(vec![format!("{at}: isn't an object")]),
+    };
+    let mut text =
+        "// The protocol's constants. Written by `cargo xtask schema`, and held to it by its\n\
+                    // `--check`: don't edit it by hand.\n"
+            .to_owned();
+    let mut problems = Vec::new();
+    for (name, value) in constants {
+        let named = name.starts_with(|c: char| c.is_ascii_uppercase())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        if !named {
+            problems.push(format!(
+                "{at}/{name}: isn't a constant's name, in SCREAMING_SNAKE_CASE"
+            ));
+        } else if let Some(number) = inexact(value) {
+            problems.push(format!(
+                "{at}/{name}: {number} is past what a JavaScript number holds exactly"
+            ));
+        } else if has_proto(value) {
+            problems.push(format!(
+                "{at}/{name}: has a `__proto__` key, which a literal takes as its prototype"
+            ));
+        } else {
+            let typed = if value.is_array() || value.is_object() {
+                " as const"
+            } else {
+                ""
+            };
+            let _ = write!(text, "\nexport const {name} = {value}{typed};\n");
+        }
+    }
+    if problems.is_empty() {
+        Ok(text)
+    } else {
+        Err(problems)
+    }
+}
+
+/// Whether a map in `value`, at any depth, has a `__proto__` key: a TypeScript object literal sets
+/// its prototype from it rather than holding it as a field.
+fn has_proto(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(has_proto),
+        Value::Object(fields) => fields.iter().any(|(k, v)| k == "__proto__" || has_proto(v)),
+        _ => false,
+    }
+}
+
+/// The first number in `value` a JavaScript number can't hold exactly: an integer past
+/// `MAX_SAFE_INTEGER` either way.
+fn inexact(value: &Value) -> Option<&serde_json::Number> {
+    match value {
+        Value::Number(number) => {
+            let exact = match (number.as_u64(), number.as_i64()) {
+                (Some(n), _) => n <= MAX_SAFE_INTEGER,
+                (None, Some(n)) => n.unsigned_abs() <= MAX_SAFE_INTEGER,
+                (None, None) => true,
+            };
+            (!exact).then_some(number)
+        }
+        Value::Array(items) => items.iter().find_map(inexact),
+        Value::Object(fields) => fields.values().find_map(inexact),
+        _ => None,
+    }
 }
 
 /// A file's text: its JSON, two spaces an indent, and a newline after.
@@ -350,5 +431,72 @@ mod tests {
         let id = "ab".repeat(32);
         assert!(rust_id(&id).ends_with(&format!("pub const PROTOCOL_ID: &str = \"{id}\";\n")));
         assert!(typescript_id(&id).ends_with(&format!("export const PROTOCOL_ID = \"{id}\";\n")));
+    }
+
+    #[test]
+    fn writes_each_constant_as_typescript_with_a_list_or_a_map_as_const() {
+        let document = json!({ "x-bazhen-semantics": { "constants": {
+            "MOST": 9_007_199_254_740_991_u64,
+            "LEAST": -9_007_199_254_740_991_i64,
+            "KINDS": ["a", "b\"c"],
+            "SHADES": { "dark": { "text": "#000000" } },
+            "NAME_2": "x",
+        } } });
+        let written = typescript_constants(&document).unwrap();
+        let exported: Vec<&str> = written
+            .lines()
+            .filter(|l| l.starts_with("export"))
+            .collect();
+        assert_eq!(
+            exported,
+            [
+                r#"export const KINDS = ["a","b\"c"] as const;"#,
+                "export const LEAST = -9007199254740991;",
+                "export const MOST = 9007199254740991;",
+                r#"export const NAME_2 = "x";"#,
+                r##"export const SHADES = {"dark":{"text":"#000000"}} as const;"##,
+            ]
+        );
+        let none = typescript_constants(&json!({ "x-bazhen-semantics": { "revision": 1 } }));
+        assert!(
+            none.unwrap()
+                .lines()
+                .all(|l| l.starts_with("//") || l.is_empty())
+        );
+    }
+
+    #[test]
+    fn refuses_a_constant_typescript_would_misname_or_misread() {
+        let document = json!({ "x-bazhen-semantics": { "constants": {
+            "lower": 1,
+            "_LEADING": 1,
+            "PAST": 9_007_199_254_740_992_u64,
+            "BELOW": [-9_007_199_254_740_992_i64],
+            "WITHIN": { "deep": 18_446_744_073_709_551_615_u64 },
+            "PROTO": { "a": [{ "__proto__": { "b": 1 } }] },
+        } } });
+        let at = "x-bazhen-semantics/constants";
+        let past =
+            |name, n| format!("{at}/{name}: {n} is past what a JavaScript number holds exactly");
+        let unnamed =
+            |name| format!("{at}/{name}: isn't a constant's name, in SCREAMING_SNAKE_CASE");
+        assert_eq!(
+            typescript_constants(&document).unwrap_err(),
+            [
+                past("BELOW", "-9007199254740992"),
+                past("PAST", "9007199254740992"),
+                format!(
+                    "{at}/PROTO: has a `__proto__` key, which a literal takes as its prototype"
+                ),
+                past("WITHIN", "18446744073709551615"),
+                unnamed("_LEADING"),
+                unnamed("lower"),
+            ]
+        );
+        let listed = json!({ "x-bazhen-semantics": { "constants": [1] } });
+        assert_eq!(
+            typescript_constants(&listed).unwrap_err(),
+            [format!("{at}: isn't an object")]
+        );
     }
 }

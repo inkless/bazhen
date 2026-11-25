@@ -9,7 +9,8 @@
 use std::io::Write;
 use std::process::ExitCode;
 
-use serde_json::{Value, json};
+use bazhen_holder_proto::body::Theme;
+use serde_json::{Map, Value, json};
 
 fn schema() -> Value {
     let mut generator = bazhen_protocol::schema::generator();
@@ -27,9 +28,26 @@ fn schema() -> Value {
                 "HISTORY_LINES": bazhen_protocol::stream::HISTORY_LINES,
                 "STREAM_FRAME_MAX_BYTES": bazhen_protocol::stream::STREAM_FRAME_MAX_BYTES,
                 "EVENT_FRAME_MAX_BYTES": bazhen_protocol::events::EVENT_FRAME_MAX_BYTES,
+                "MAX_ROWS": bazhen_holder_proto::body::MAX_ROWS,
+                "HOLDER_MAX_HISTORY_LINES": bazhen_holder_proto::body::MAX_HISTORY_LINES,
+                "AGENT_NAME_MAX": bazhen_protocol::names::AGENT_NAME_MAX,
+                "BUILTIN_ROLES": bazhen_protocol::roles::BUILTIN_ROLES,
+                "TERMINAL_COLOURS": terminal_colours(),
             },
         },
     })
+}
+
+/// Each theme's text and background, as `#rrggbb`: what a program in a terminal of that theme is
+/// told it is drawn in, and so what a client draws it in.
+fn terminal_colours() -> Value {
+    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
+    let themes = Theme::ALL.iter().map(|theme| {
+        let colours = theme.colours();
+        let drawn = json!({ "text": hex(colours.text), "background": hex(colours.background) });
+        (theme.as_str().to_owned(), drawn)
+    });
+    Value::Object(themes.collect::<Map<String, Value>>())
 }
 
 fn verdicts(cases: &str) -> Result<Value, String> {

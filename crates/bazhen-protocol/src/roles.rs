@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::names::Role;
 
+/// The roles Bazhen ships a definition of, in the order a client lists them. A user's file may
+/// replace any, but none goes away.
+pub const BUILTIN_ROLES: [&str; 4] = ["coordinator", "lead", "worker", "reviewer"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
