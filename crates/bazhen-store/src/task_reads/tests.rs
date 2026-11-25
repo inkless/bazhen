@@ -212,6 +212,58 @@ fn moves_a_stranded_subtask_to_its_parents_owner_with_what_made_that_one_the_own
 }
 
 #[test]
+fn moves_a_stranded_subtask_up_as_delegated_from_none_where_its_parents_names_no_assignment() {
+    let (_dir, store) = holding(&[
+        Row::Task(1, "open", Some(1), None, None, 1),
+        Row::Task(2, "open", Some(2), Some(1), None, 2),
+        Row::Asgn(2, 2, 3, "lead", None, Some("unassigned"), 3),
+        Row::Task(3, "open", Some(3), Some(2), Some(2), 4),
+    ]);
+    // An assignment whose id an older store wrote in a shape this one doesn't read as one.
+    store
+        .db
+        .execute_batch(&format!(
+            "INSERT INTO assignments (id, task_id, agent_session_id, role, state,
+               created_event_id, updated_event_id)
+             VALUES ('legacy-7', '{}', '{}', 'lead', 'active', 5, 5);
+             UPDATE tasks SET delegated_from = 'legacy-7' WHERE id = '{}';",
+            task(1),
+            agent(2),
+            task(2)
+        ))
+        .unwrap();
+    assert_eq!(
+        store.reads().stranded().map_err(|err| err.to_string()),
+        Ok(vec![Stranded {
+            task_id: task(3),
+            owner_agent_id: Some(agent(2)),
+            delegated_from: None,
+        }])
+    );
+}
+
+#[test]
+fn reads_a_task_as_mail_names_it_and_counts_the_open_ones() {
+    let (_dir, store) = holding(&[
+        Row::Task(1, "open", Some(1), None, None, 1),
+        Row::Task(2, "done", None, Some(1), None, 2),
+        Row::Task(3, "open", None, Some(1), None, 3),
+    ]);
+    let reads = store.reads();
+    assert_eq!(
+        (
+            reads
+                .task(&task(1))
+                .unwrap()
+                .map(|t| (t.title, t.owner_agent_id)),
+            reads.task(&task(9)).unwrap(),
+            reads.open_task_count().unwrap(),
+        ),
+        (Some(("T1".to_owned(), Some(agent(1)))), None, 2)
+    );
+}
+
+#[test]
 fn reads_the_agents_an_assignment_was_granted_under_nearest_first_across_tasks() {
     let (_dir, store) = holding(&[
         Row::Task(1, "open", None, None, None, 1),

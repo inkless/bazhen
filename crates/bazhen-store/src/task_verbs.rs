@@ -4,7 +4,9 @@
 use bazhen_core::task::{TaskRefused, check_note};
 use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
 use bazhen_protocol::names::Role;
-use bazhen_protocol::task_events::{AssignmentGranted, TaskNoted};
+use bazhen_protocol::task_events::{
+    AssignmentEnded, AssignmentEndedReason, AssignmentGranted, TaskNoted, TaskOwnerChanged,
+};
 use bazhen_protocol::tasks::TaskCommandResponse;
 use serde::Serialize;
 
@@ -140,6 +142,46 @@ impl Writer<'_> {
             }),
         })?;
         Ok((id, granted))
+    }
+
+    /// Ends `assignment` for `reason`, by `caller`, and with it every one granted under it.
+    ///
+    /// # Errors
+    ///
+    /// [`AppendError`]: an assignment not active is refused.
+    pub fn end_assignment(
+        &self,
+        caller: Option<&AgentId>,
+        assignment: &AssignmentId,
+        reason: AssignmentEndedReason,
+    ) -> Result<u64, AppendError> {
+        self.append(&NewEvent::Assignment {
+            assignment: assignment.clone(),
+            actor: actor(caller),
+            change: AssignmentChange::Ended(AssignmentEnded { reason }),
+        })
+    }
+
+    /// Moves `task` to `owner`, the human as `None`, delegated from `delegated_from`: the system's
+    /// doing, as a subtask moves up when its owner no longer holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`AppendError`].
+    pub fn change_owner(
+        &self,
+        task: &TaskId,
+        owner: Option<AgentId>,
+        delegated_from: Option<AssignmentId>,
+    ) -> Result<u64, AppendError> {
+        self.append(&NewEvent::Task {
+            task: task.clone(),
+            actor: "system".to_owned(),
+            change: TaskChange::OwnerChanged(TaskOwnerChanged {
+                owner_agent_id: owner,
+                delegated_from,
+            }),
+        })
     }
 }
 
