@@ -82,7 +82,9 @@ pub struct HookRequest {
     pub protocol_version: ProtocolVersion,
     pub agent_id: AgentId,
     pub event: HookEvent,
+    #[serde(deserialize_with = "crate::js_number::whole_signed")]
     pub pid: i64,
+    #[serde(deserialize_with = "crate::js_number::whole_signed")]
     pub ppid: i64,
     /// The harness's own hook input, any JSON, null included: its text as the client sent it,
     /// which the harness's adapter reads as `JSON.parse` would. A lone surrogate's escape and any

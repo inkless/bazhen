@@ -367,6 +367,24 @@ mod tests {
                 Some(Refused(OBJECT_RULE.to_owned())),
             ]
         );
+        // A whole number however JSON writes it, as zod's `.int()` takes it, and no fraction.
+        let written = |pid: &str, ppid: &str| {
+            let body = format!(
+                r#"{{"protocolVersion":"1.0","agentId":"agent_01900000000070008000000000000001","event":"Stop","pid":{pid},"ppid":{ppid},"payload":null}}"#
+            );
+            edge::<HookRequest>(body.as_bytes())
+                .map(|hook| (hook.pid, hook.ppid))
+                .ok()
+        };
+        assert_eq!(
+            [
+                written("2.0", "-2e0"),
+                written("2e0", "1e3"),
+                written("2.5", "1"),
+                written("1", "-2.5"),
+            ],
+            [Some((2, -2)), Some((2, 1000)), None, None]
+        );
     }
 
     #[test]

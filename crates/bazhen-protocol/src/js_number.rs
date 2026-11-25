@@ -85,6 +85,46 @@ pub fn whole<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D
     deserializer.deserialize_any(Whole)
 }
 
+/// Deserializes a whole number that may be negative, as [`whole`] does a non-negative one: `-2`,
+/// `-2.0` and `-2e0` are the same number. One written with a fraction or exponent is taken within
+/// the safe integers; one written as digits as it is, and held to them by the edge.
+///
+/// # Errors
+///
+/// A number with a fraction, a whole one past the safe integers written as a float, one written as
+/// digits past `i64`, and anything not a number.
+pub fn whole_signed<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    struct Signed;
+
+    impl serde::de::Visitor<'_> for Signed {
+        type Value = i64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a whole number")
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<i64, E> {
+            Ok(n)
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<i64, E> {
+            i64::try_from(n)
+                .map_err(|_| E::invalid_value(serde::de::Unexpected::Unsigned(n), &self))
+        }
+
+        fn visit_f64<E: serde::de::Error>(self, x: f64) -> Result<i64, E> {
+            // Rust writes a whole f64 as its digits, with no exponent, and negative zero as `-0`.
+            x.to_string()
+                .parse::<i64>()
+                .ok()
+                .filter(|n| n.unsigned_abs() <= crate::edge::MAX_SAFE_INTEGER)
+                .ok_or_else(|| E::invalid_value(serde::de::Unexpected::Float(x), &self))
+        }
+    }
+
+    deserializer.deserialize_any(Signed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,6 +158,29 @@ mod tests {
             ("null", None),
         ] {
             assert_eq!(read_whole(text), read, "{text}");
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Signed(#[serde(deserialize_with = "whole_signed")] i64);
+
+    #[test]
+    fn reads_a_whole_number_of_either_sign_however_json_writes_it() {
+        let read = |text: &str| serde_json::from_str::<Signed>(text).ok().map(|w| w.0);
+        for (text, expected) in [
+            ("-2", Some(-2)),
+            ("-2.0", Some(-2)),
+            ("2e0", Some(2)),
+            ("-0.0", Some(0)),
+            ("-9007199254740991.0", Some(-9_007_199_254_740_991)),
+            ("-9007199254740992.0", None),
+            ("-9223372036854775808", Some(i64::MIN)),
+            ("9223372036854775808", None),
+            ("-2.5", None),
+            ("\"2\"", None),
+            ("null", None),
+        ] {
+            assert_eq!(read(text), expected, "{text}");
         }
     }
 
