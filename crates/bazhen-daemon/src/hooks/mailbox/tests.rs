@@ -75,6 +75,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         Arc::new(Machine(StdMutex::new(roomy()))),
         Box::new(|_| {}),
     );
+    let hooks = Arc::new(Hooks::with_deadlines(Duration::from_millis(50), deadlines));
     let agents = Arc::new(Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::new(Fake::default()),
@@ -89,6 +90,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
+        hooks: Arc::clone(&hooks),
     }));
     let runtime = runtime();
     let launched = runtime
@@ -104,7 +106,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         }))
         .unwrap();
     let mut shared = Shared::new(&"f".repeat(64), Stop::default(), store).with_agents(agents);
-    shared.hooks = Arc::new(Hooks::with_deadlines(Duration::from_millis(50), deadlines));
+    shared.hooks = hooks;
     Fixture {
         shared,
         agent: launched.agent_id,
