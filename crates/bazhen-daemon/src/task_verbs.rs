@@ -33,7 +33,11 @@ fn refused(err: &TaskVerbError) -> Response {
                 &format!("idempotency key {key} was first used for a different request"),
             );
         }
-        _ => return internal(err),
+        TaskVerbError::Once(_)
+        | TaskVerbError::Append(_)
+        | TaskVerbError::Read(_)
+        | TaskVerbError::Json(_)
+        | TaskVerbError::Sqlite(_) => return internal(err),
     };
     fail(status, code, &err.to_string())
 }
