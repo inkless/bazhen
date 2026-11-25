@@ -59,10 +59,14 @@ fn summary_of(sent: &SentMessage) -> String {
     within_units(&line, SUMMARY_UNITS).to_owned()
 }
 
-/// The first line with anything on it, without its controls or the space around it.
+/// The first line with anything on it, without its controls or the space around it. A line ends
+/// at a line feed, or at a line or paragraph separator.
 fn first_line(text: &str) -> String {
     let text = without_controls(text);
-    let line = trim(&text).split('\n').next().unwrap_or_default();
+    let line = trim(&text)
+        .split(['\n', '\u{2028}', '\u{2029}'])
+        .next()
+        .unwrap_or_default();
     trim(line).to_owned()
 }
 
@@ -137,6 +141,17 @@ mod tests {
         assert_eq!(
             (summary.encode_utf16().count() <= SUMMARY_UNITS, summary),
             (true, heavy.repeat(2))
+        );
+    }
+
+    #[test]
+    fn ends_a_summarys_line_at_a_line_or_paragraph_separator() {
+        assert_eq!(
+            [
+                summary_of(&sent(Some("lunch?\u{2028}at noon"), "text")),
+                summary_of(&sent(None, "\u{2029} \u{2029}lunch?\u{2029}at noon")),
+            ],
+            ["lunch?".to_owned(), "lunch?".to_owned()]
         );
     }
 
