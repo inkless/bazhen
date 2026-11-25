@@ -857,9 +857,18 @@ mod tests {
         #[test]
         fn reads_a_candidate_pinned_to_its_start_and_calls_another_start_a_race() {
             use rustix::process::{DumpableBehavior, getpid, set_dumpable_behavior};
+            /// This process non-dumpable while it lives, and dumpable again after, a panic
+            /// included.
+            struct NotDumpable;
+            impl Drop for NotDumpable {
+                fn drop(&mut self) {
+                    set_dumpable_behavior(DumpableBehavior::Dumpable).unwrap();
+                }
+            }
             let me = getpid();
             let started = start_time::start_ticks(&Proc.stat(me).unwrap()).unwrap();
             set_dumpable_behavior(DumpableBehavior::NotDumpable).unwrap();
+            let dumpable_again = NotDumpable;
             let hidden =
                 std::fs::read(format!("/proc/{}/environ", me.as_raw_pid())).map_err(|e| e.kind());
             let read = crate::candidate_of(Candidate { pid: me, started });
@@ -867,7 +876,7 @@ mod tests {
                 pid: me,
                 started: started + 1,
             });
-            set_dumpable_behavior(DumpableBehavior::Dumpable).unwrap();
+            drop(dumpable_again);
             assert_eq!(
                 (
                     hidden,

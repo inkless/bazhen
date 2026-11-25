@@ -253,9 +253,9 @@ impl Tcp {
     }
 
     /// Whether, once the processes that may hold `inode` unseen were read, the caller's socket is
-    /// still `inode`, no process holding it can be read, and those processes are still
-    /// `candidates`, each by its start: else one changed while they were read, which a request
-    /// made again may read for sure.
+    /// still `inode`, before a second pass and after it, and that pass finds no process holding it
+    /// that can be read, and those processes still `candidates`, each by its start: else one
+    /// changed while they were read, which a request made again may read for sure.
     async fn unchanged(
         self: &Arc<Self>,
         client: SocketAddr,
@@ -264,13 +264,7 @@ impl Tcp {
         mut candidates: Vec<Candidate>,
         turn: &Arc<OwnedSemaphorePermit>,
     ) -> Result<(), Refused> {
-        let (view, uid) = (Arc::clone(&self.view), self.uid);
-        let again = blocking(turn, move || tcp::end(&*view, client, server, uid)).await?;
-        if again != inode {
-            return Err(Refused::Changed(
-                "the caller's socket changed while it was read",
-            ));
-        }
+        self.still(client, server, inode, turn).await?;
         let rescanned = self.scanned(inode).await;
         blocking(turn, move || {
             let scan = scan_of(&rescanned)?;
@@ -290,7 +284,27 @@ impl Tcp {
                 ))
             }
         })
-        .await
+        .await?;
+        self.still(client, server, inode, turn).await
+    }
+
+    /// Whether the caller's end of the connection from `client` to `server` is still `inode`.
+    async fn still(
+        &self,
+        client: SocketAddr,
+        server: SocketAddr,
+        inode: u64,
+        turn: &Arc<OwnedSemaphorePermit>,
+    ) -> Result<(), Refused> {
+        let (view, uid) = (Arc::clone(&self.view), self.uid);
+        let again = blocking(turn, move || tcp::end(&*view, client, server, uid)).await?;
+        if again == inode {
+            Ok(())
+        } else {
+            Err(Refused::Changed(
+                "the caller's socket changed while it was read",
+            ))
+        }
     }
 
     /// The pass that finds who holds `inode`: the next to start.
@@ -1256,6 +1270,13 @@ mod tests {
         holders: Vec<(i32, u64)>,
         hidden: Vec<Vec<i32>>,
         rings: Vec<i32>,
+        /// From which read of the tables on the first caller's socket is another, inode 99.
+        renumbered: Option<usize>,
+        tables_read: AtomicUsize,
+        /// A process that holds the first caller's socket from the second pass on, readably.
+        late: Option<i32>,
+        /// A process that started again, at another start, by the second pass.
+        restarted: Option<i32>,
         /// What a holder's descriptor reads once its line has been read, if not its socket.
         moved: Option<i32>,
         passes: AtomicUsize,
@@ -1282,6 +1303,10 @@ mod tests {
                     .collect(),
                 hidden: Vec::new(),
                 rings: Vec::new(),
+                renumbered: None,
+                tables_read: AtomicUsize::new(0),
+                late: None,
+                restarted: None,
                 moved: None,
                 passes: AtomicUsize::new(0),
                 open: (Mutex::new(true), Condvar::new()),
@@ -1312,7 +1337,14 @@ mod tests {
 
     impl ProcView for View {
         fn tables(&self) -> io::Result<Vec<String>> {
-            Ok(vec![self.lines.join("\n"), String::new()])
+            let read = self.tables_read.fetch_add(1, Ordering::SeqCst);
+            let lines = self.lines.join("\n");
+            let lines = if self.renumbered.is_some_and(|from| read >= from) {
+                lines.replacen(" 0 70 1 ", " 0 99 1 ", 1)
+            } else {
+                lines
+            };
+            Ok(vec![lines, String::new()])
         }
         fn processes(&self) -> io::Result<Vec<Pid>> {
             let pass = self.passes.fetch_add(1, Ordering::SeqCst);
@@ -1336,12 +1368,16 @@ mod tests {
                 .map(|(p, _)| *p)
                 .chain(hidden.iter().copied())
                 .chain(self.rings.iter().copied())
+                .chain(self.late.filter(|_| pass > 0))
                 .map(pid)
                 .collect())
         }
         fn descriptors(&self, at: Pid) -> io::Result<Vec<(u32, Vec<u8>)>> {
             if self.rings.contains(&at.as_raw_pid()) {
                 return Ok(vec![(3, tcp::IO_URING.to_vec())]);
+            }
+            if self.late == Some(at.as_raw_pid()) {
+                return Ok(vec![(3, b"socket:[70]".to_vec())]);
             }
             match self.holders.iter().find(|(p, _)| pid(*p) == at) {
                 Some((_, inode)) => Ok(vec![(3, format!("socket:[{inode}]").into_bytes())]),
@@ -1350,9 +1386,10 @@ mod tests {
         }
         fn stat(&self, at: Pid) -> io::Result<Vec<u8>> {
             let raw = at.as_raw_pid();
+            let again = self.restarted == Some(raw) && self.passes.load(Ordering::SeqCst) > 1;
             Ok(format!(
                 "{raw} (p) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 {} 0 0",
-                100 + raw
+                100 + raw + if again { 1000 } else { 0 }
             )
             .into_bytes())
         }
@@ -1372,7 +1409,8 @@ mod tests {
 
     /// Readers of TCP callers through `view`, each holder read as a line under `AGENT`'s pane
     /// when it is pid 900, else outside every terminal; and each process that may hold a socket
-    /// unseen so too when it is pid 950, as changed while read when it is 951.
+    /// unseen so too when it is pid 950, as changed while read when it is 951, and as one with a
+    /// process on its line that can't be read when it is 952.
     pub(super) fn tcp_readers(view: View) -> (Peers, Arc<Tcp>) {
         let tcp = Arc::new(Tcp::new(
             Arc::new(view),
@@ -1387,6 +1425,7 @@ mod tests {
             |candidate: Candidate| match candidate.pid.as_raw_pid() {
                 950 => Ok(chain(950, 950, &[100, 10, 1])),
                 951 => Err(Refused::Changed("it went")),
+                952 => Err(Refused::Unreadable(io::ErrorKind::PermissionDenied.into())),
                 at => Ok(chain(at, at, &[1])),
             },
         ));
@@ -1665,6 +1704,72 @@ mod tests {
                 changed.clone(),
                 changed,
             ]
+        );
+    }
+
+    /// The second pass is bracketed by the caller's socket: another socket by then, whether
+    /// before that pass or after it, or a holder that can be read showing up in it, or one that
+    /// may hold it unseen started again under its pid, may each mean another holds it now: the
+    /// caller is told to try again.
+    #[test]
+    fn tells_the_caller_to_try_again_when_its_socket_or_who_holds_it_changes_by_the_second_pass() {
+        let unheld = || View::of(1).unheld(vec![vec![960]], Vec::new());
+        let reads = runtime().block_on(async {
+            let mut reads = Vec::new();
+            for view in [
+                View {
+                    renumbered: Some(1),
+                    ..unheld()
+                },
+                View {
+                    renumbered: Some(2),
+                    ..unheld()
+                },
+                View {
+                    late: Some(961),
+                    ..unheld()
+                },
+                View {
+                    restarted: Some(960),
+                    ..unheld()
+                },
+            ] {
+                reads.push(tcp_readers(view).0.read(&from_port(1000)).await);
+            }
+            reads
+        });
+        let socket = PeerRead::Retry(
+            Refused::Changed("the caller's socket changed while it was read").to_string(),
+        );
+        let holders = PeerRead::Retry(
+            Refused::Changed(
+                "the processes that may hold the caller's socket changed while they were read",
+            )
+            .to_string(),
+        );
+        assert_eq!(reads, [socket.clone(), socket, holders.clone(), holders]);
+    }
+
+    /// One that may hold the socket unseen with a process on its line that can't be read, as
+    /// another user's ancestor is, can't be read for sure however often it is asked: refused,
+    /// not told to try again.
+    #[test]
+    fn refuses_a_caller_whose_socket_may_be_held_by_one_with_a_line_that_cant_be_read() {
+        let read = runtime().block_on(async {
+            tcp_readers(View::of(1).unheld(vec![vec![960, 952]], Vec::new()))
+                .0
+                .read(&from_port(1000))
+                .await
+        });
+        let why = Refused::Unreadable(io::ErrorKind::PermissionDenied.into()).to_string();
+        assert_eq!(
+            (read.clone(), reading(read, || Ok::<_, ()>(terminals()))),
+            (
+                PeerRead::Unread(why.clone()),
+                Ok(Reading::Refused(format!(
+                    "the caller's process can't be read for sure: {why}"
+                )))
+            )
         );
     }
 
