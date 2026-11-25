@@ -404,6 +404,7 @@ pub(crate) fn socket_router(shared: Shared) -> Router {
         .route("/v1/agents/{id}/rename", post(agent_routes::rename))
         .route("/v1/agents/{id}/close", post(agent_routes::close))
         .route("/v1/agents/{id}/signal", post(agent_routes::signal))
+        .route("/v1/agents/{id}/respawn", post(agent_routes::respawn))
         // A hook carries what its harness sent, such as a whole file an edit wrote, and the
         // TypeScript daemon bounds neither body.
         .route(
@@ -467,6 +468,7 @@ pub(crate) fn http_router(shared: Shared, gate: Gate) -> Router {
         .route("/agents/{id}/rename", post(agent_routes::rename))
         .route("/agents/{id}/close", post(agent_routes::close))
         .route("/agents/{id}/signal", post(agent_routes::signal))
+        .route("/agents/{id}/respawn", post(agent_routes::respawn))
         .route("/shells", post(shell_routes::open))
         .route("/shells/{id}/close", post(shell_routes::close))
         .route("/shells/{id}/restart", post(shell_routes::restart))
@@ -781,6 +783,128 @@ mod tests {
                 Vec::new(),
             )
         );
+    }
+
+    /// Respawns `agent` over the socket with `key` at `generation`.
+    fn respawn(shared: &Shared, agent: &str, key: &str, generation: u64) -> (u16, Value) {
+        let body = json!({ "idempotencyKey": key, "generation": generation });
+        send(
+            socket_router(shared.clone()),
+            post(&format!("/v1/agents/{agent}/respawn"), &[], &body),
+        )
+    }
+
+    #[test]
+    fn starts_an_exited_agent_again_answering_a_repeat_as_the_first_and_refusing_it_while_it_starts()
+     {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let (f, agent, generation) =
+            crate::agents::restart::tests::exited(&StubHarness::new(pull()).resuming());
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let before = f.types().len() as u64;
+        let id = agent.as_str();
+        let answered = json!({ "agentId": id, "eventIds": [before + 1, before + 2] });
+        assert_eq!(
+            [
+                respawn(&shared, id, "r-1", generation),
+                respawn(&shared, id, "r-1", generation),
+                respawn(&shared, id, "r-2", generation),
+            ],
+            [
+                (200, answered.clone()),
+                (200, answered),
+                (409, refused("conflict", &format!("agent {id} is starting"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_to_start_again_an_agent_whose_session_cant_resume() {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let (f, agent, generation) =
+            crate::agents::restart::tests::exited(&StubHarness::new(pull()));
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let id = agent.as_str();
+        assert_eq!(
+            respawn(&shared, id, "r-1", generation),
+            (
+                409,
+                refused(
+                    "not_resumable",
+                    &format!("agent {id} has no session to resume")
+                )
+            )
+        );
+    }
+
+    /// An exited agent and another bound to the same session on a harness that resumes, as
+    /// `alone` says its sessions are held; with the exited one's generation.
+    fn sharing_a_session(
+        alone: bool,
+    ) -> (
+        crate::agents::tests::Fixture,
+        bazhen_protocol::ids::AgentId,
+        bazhen_protocol::ids::AgentId,
+        u64,
+    ) {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let stub = StubHarness::new(pull()).resuming();
+        let stub = if alone { stub.held_alone() } else { stub };
+        let (f, agent, generation) = crate::agents::restart::tests::exited(&stub);
+        let other = crate::testing::runtime()
+            .block_on(f.launch(crate::agents::tests::request("k-2")))
+            .unwrap()
+            .agent_id;
+        let bound = [agent.as_str().to_owned(), other.as_str().to_owned()];
+        crate::testing::runtime()
+            .block_on(f.store.run(move |store| {
+                store.write(|w| {
+                    for id in &bound {
+                        w.connection().execute(
+                            "UPDATE agent_sessions SET external_ref =
+                               json_set(external_ref, '$.id', 't-1')
+                             WHERE id = ?",
+                            [id],
+                        )?;
+                    }
+                    Ok::<_, rusqlite::Error>(())
+                })
+            }))
+            .unwrap()
+            .unwrap();
+        (f, agent, other, generation)
+    }
+
+    #[test]
+    fn refuses_to_start_again_an_agent_on_a_session_another_agent_holds_alone() {
+        let (f, agent, other, generation) = sharing_a_session(true);
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let before = f.types().len();
+        let id = agent.as_str();
+        assert_eq!(
+            (respawn(&shared, id, "r-1", generation), f.types().len()),
+            (
+                (
+                    409,
+                    refused(
+                        "not_resumable",
+                        &format!("agent {id} can't resume session t-1: {other} is on it too")
+                    )
+                ),
+                before
+            )
+        );
+    }
+
+    #[test]
+    fn starts_an_agent_again_on_a_session_another_holds_where_its_harness_shares_sessions() {
+        let (f, agent, _other, generation) = sharing_a_session(false);
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        assert_eq!(respawn(&shared, agent.as_str(), "r-1", generation).0, 200);
     }
 
     fn http(pairing_required: bool) -> Router {

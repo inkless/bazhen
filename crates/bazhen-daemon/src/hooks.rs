@@ -596,5 +596,13 @@ async fn rebind(
     Ok(true)
 }
 
+/// `agent`'s last process is gone for good, as a respawn or relaunch replaces it.
+pub(crate) fn replaced(
+    _shared: &Shared,
+    _agent: &AgentId,
+) -> impl std::future::Future<Output = ()> + Send + 'static {
+    std::future::ready(())
+}
+
 #[cfg(test)]
 mod tests;

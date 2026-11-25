@@ -7,7 +7,10 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use bazhen_protocol::agents::{AgentCommandResponse, CloseAgentRequest, SignalAgentRequest};
+use bazhen_harness::BoxFuture;
+use bazhen_protocol::agents::{
+    AgentCommandResponse, CloseAgentRequest, RespawnAgentRequest, SignalAgentRequest,
+};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::{EdgeCheck, Refused, edge};
 use bazhen_protocol::ids::AgentId;
@@ -32,6 +35,9 @@ pub(crate) fn refusal(err: &AgentError) -> Response {
         AgentError::Unknown(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
         AgentError::Conflict(_) => (StatusCode::CONFLICT, ErrorCode::Conflict),
         AgentError::Stale { .. } => (StatusCode::CONFLICT, ErrorCode::StaleGeneration),
+        AgentError::NotResumable(_) | AgentError::SessionTaken(_) => {
+            (StatusCode::CONFLICT, ErrorCode::NotResumable)
+        }
         AgentError::ServerUnconfirmed(_) => (StatusCode::CONFLICT, ErrorCode::ServerUnconfirmed),
         AgentError::NeedsRestart(_) => (StatusCode::CONFLICT, ErrorCode::NeedsRestart),
         AgentError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
@@ -130,6 +136,28 @@ pub(crate) async fn close(
                 Some(shells) => shells.close_agent(&id, &req, agents.close(&id, &req)).await,
                 None => agents.close(&id, &req).await,
             }
+        },
+    )
+    .await
+}
+
+/// `POST /v1/agents/:id/respawn`, over either listener: the exited agent started again on its
+/// session, once its hooks have let go of the process it replaces.
+pub(crate) async fn respawn(
+    State(shared): State<Shared>,
+    Path(reference): Path<String>,
+    body: Bytes,
+) -> Response {
+    let hooks = shared.clone();
+    command(
+        &shared,
+        reference,
+        &body,
+        |agents, id, req: RespawnAgentRequest| async move {
+            let replaced = move |agent: AgentId| -> BoxFuture<'static, ()> {
+                Box::pin(async move { crate::hooks::replaced(&hooks, &agent).await })
+            };
+            agents.respawn(&id, &req, replaced).await
         },
     )
     .await
@@ -252,6 +280,8 @@ mod tests {
                 generation: None,
             },
             AgentError::ServerUnconfirmed("x".to_owned()),
+            AgentError::NotResumable("x".to_owned()),
+            AgentError::SessionTaken("x".to_owned()),
             AgentError::NeedsRestart("x".to_owned()),
             AgentError::Shells(crate::shells::ShellError::Busy {
                 message: "vim is running in agent x's shells".to_owned(),
@@ -287,6 +317,8 @@ mod tests {
                 (409, code("conflict")),
                 (409, code("stale_generation")),
                 (409, code("server_unconfirmed")),
+                (409, code("not_resumable")),
+                (409, code("not_resumable")),
                 (409, code("needs_restart")),
                 (409, code("busy")),
                 (503, code("unavailable")),

@@ -7,6 +7,7 @@ use bazhen_protocol::agent_events::AgentRenamed;
 use bazhen_protocol::agents::{AgentCommandResponse, ExternalRef, HarnessId};
 use bazhen_protocol::ids::AgentId;
 use bazhen_protocol::names::{Role, name_base};
+use bazhen_protocol::shells::TuiTheme;
 use rusqlite::OptionalExtension as _;
 use serde::Serialize;
 
@@ -25,7 +26,7 @@ pub struct AgentLaunch {
     pub project: String,
     /// The directory it was launched in, as resolved.
     pub cwd: String,
-    /// The name its harness was started with, for one that has a name.
+    /// Its name now, which a start gives its harness; none for an agent from before names.
     pub name: Option<String>,
     /// The role whose prompt it was launched with.
     pub role: Option<Role>,
@@ -37,10 +38,12 @@ pub struct AgentLaunch {
     pub external_ref: Option<ExternalRef>,
     /// Where that session keeps its conversation, as one of its hooks reported it.
     pub transcript: Option<String>,
+    /// The theme its terminal was last drawn for, once it has a terminal that was.
+    pub theme: Option<TuiTheme>,
 }
 
-/// A stored word, as the enum it names.
-fn word<T: serde::de::DeserializeOwned>(text: String) -> Result<T, serde_json::Error> {
+/// A stored word, such as a state or an id, read as the protocol's type for it.
+pub(crate) fn word<T: serde::de::DeserializeOwned>(text: String) -> Result<T, serde_json::Error> {
     serde_json::from_value(serde_json::Value::String(text))
 }
 
@@ -102,6 +105,25 @@ impl Reads<'_> {
         })
     }
 
+    /// The agents that hold the harness session `session` names, by id: each bound to it that
+    /// isn't closed or failed, since an exited or lost agent is started again on the session it
+    /// is bound to.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn session_holders(self, session: &ExternalRef) -> rusqlite::Result<Vec<String>> {
+        let kind = serde_json::to_value(session.kind)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+        let mut rows = self.0.prepare(
+            "SELECT id FROM agent_sessions WHERE state NOT IN ('closed', 'failed')
+               AND json_extract(external_ref, '$.kind') = ?
+               AND json_extract(external_ref, '$.id') = ? ORDER BY id",
+        )?;
+        rows.query_map((kind.as_str(), session.id.as_str()), |row| row.get(0))?
+            .collect()
+    }
+
     /// The agent's state, or `None` for an agent the store doesn't know.
     ///
     /// # Errors
@@ -120,22 +142,25 @@ impl Reads<'_> {
     pub fn agent_launch(self, agent_id: &str) -> rusqlite::Result<Option<AgentLaunch>> {
         self.0
             .query_row(
-                "SELECT harness, project, cwd, name, role, prompt_hash, compact_window,
-                   external_ref, transcript
-                 FROM agent_sessions WHERE id = ?",
+                "SELECT a.harness, a.project, a.cwd, a.name, a.role, a.prompt_hash,
+                   a.compact_window, a.external_ref, a.transcript, t.theme
+                 FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id
+                 WHERE a.id = ?",
                 [agent_id],
                 |row| {
-                    let unreadable = |i: usize, what: &str| {
+                    use rusqlite::types::Type;
+                    let unreadable = |i: usize, kind: Type, what: &str| {
                         rusqlite::Error::FromSqlConversionFailure(
                             i,
-                            rusqlite::types::Type::Text,
+                            kind,
                             format!("{what} isn't one a launch records").into(),
                         )
                     };
                     let compact: Option<i64> = row.get(6)?;
                     let external_ref: Option<String> = row.get(7)?;
                     Ok(AgentLaunch {
-                        harness: word(row.get(0)?).map_err(|_| unreadable(0, "its harness"))?,
+                        harness: word(row.get(0)?)
+                            .map_err(|_| unreadable(0, Type::Text, "its harness"))?,
                         project: row.get(1)?,
                         cwd: row.get(2)?,
                         name: row.get(3)?,
@@ -143,20 +168,30 @@ impl Reads<'_> {
                             .get::<_, Option<String>>(4)?
                             .map(word)
                             .transpose()
-                            .map_err(|_| unreadable(4, "its role"))?,
+                            .map_err(|_| unreadable(4, Type::Text, "its role"))?,
                         prompt_hash: row.get(5)?,
                         compact_window_tokens: compact
                             .map(|n| {
-                                u32::try_from(n).map_err(|_| unreadable(6, "its compaction window"))
+                                u32::try_from(n).map_err(|_| {
+                                    unreadable(6, Type::Integer, "its compaction window")
+                                })
                             })
                             .transpose()?,
                         external_ref: external_ref
                             .map(|text| {
                                 serde_json::from_str(&text)
-                                    .map_err(|_| unreadable(7, "its harness session"))
+                                    .map_err(|_| unreadable(7, Type::Text, "its harness session"))
                             })
                             .transpose()?,
                         transcript: row.get(8)?,
+                        theme: row
+                            .get::<_, Option<String>>(9)?
+                            .map(|text| {
+                                TuiTheme::parse(&text).ok_or_else(|| {
+                                    unreadable(9, Type::Text, "its terminal's theme")
+                                })
+                            })
+                            .transpose()?,
                     })
                 },
             )
@@ -521,6 +556,7 @@ mod tests {
     fn reads_what_an_agent_was_launched_with_and_the_session_its_on_and_none_for_an_unknown_one() {
         use bazhen_protocol::agents::{ExternalRef, HarnessId};
         use bazhen_protocol::names::Role;
+        use bazhen_protocol::shells::TuiTheme;
         let dir = TempDir::new("agents");
         let store = store(&dir);
         let session = r#"{"environmentId":"env_01900000000070008000000000000001","kind":"claude-session","id":"s-1"}"#;
@@ -538,6 +574,13 @@ mod tests {
                 ..AGENT
             },
         );
+        seed(
+            &store,
+            &Agent {
+                id: "agent_04",
+                ..AGENT
+            },
+        );
         store
             .db
             .execute_batch(
@@ -546,12 +589,21 @@ mod tests {
                  UPDATE agent_sessions SET harness = 'emacs' WHERE id = 'agent_02';",
             )
             .unwrap();
+        terminal(&store, "term_1", "agent", "exited", Some("agent_01"), None);
+        store
+            .db
+            .execute_batch(
+                "UPDATE terminals SET theme = 'light' WHERE id = 'term_1';
+                 UPDATE agent_sessions SET terminal_id = 'term_1' WHERE id = 'agent_01';",
+            )
+            .unwrap();
         let reads = store.reads();
         assert_eq!(
             (
                 reads.agent_launch("agent_01").ok(),
                 reads.agent_launch("agent_02").is_err(),
                 reads.agent_launch("agent_03").ok(),
+                reads.agent_launch("agent_04").ok(),
             ),
             (
                 Some(Some(crate::AgentLaunch {
@@ -564,9 +616,22 @@ mod tests {
                     compact_window_tokens: Some(120_000),
                     external_ref: Some(serde_json::from_str::<ExternalRef>(session).unwrap()),
                     transcript: Some("/c/s-1.jsonl".to_owned()),
+                    theme: Some(TuiTheme::Light),
                 })),
                 true,
                 Some(None),
+                Some(Some(crate::AgentLaunch {
+                    harness: HarnessId::ClaudeCode,
+                    project: "p".to_owned(),
+                    cwd: "/".to_owned(),
+                    name: None,
+                    role: None,
+                    prompt_hash: None,
+                    compact_window_tokens: None,
+                    external_ref: None,
+                    transcript: None,
+                    theme: None,
+                })),
             )
         );
     }
@@ -724,6 +789,53 @@ mod tests {
                 None,
                 None
             ]
+        );
+    }
+
+    #[test]
+    fn names_every_agent_holding_a_session_but_those_closed_or_failed() {
+        let dir = TempDir::new("holders");
+        let store = store(&dir);
+        let on = |id, state, kind: &str| {
+            let external_ref = format!(r#"{{"kind":"{kind}","id":"t-1"}}"#);
+            store
+                .db
+                .execute(
+                    "INSERT INTO agent_sessions (id, environment_id, harness, project, cwd, state,
+                       external_ref, untokened, created_event_id, updated_event_id)
+                     VALUES (?, 'env_local', 'codex', 'p', '/', ?, ?, 0, 1, 1)",
+                    (id, state, external_ref),
+                )
+                .unwrap();
+        };
+        on("agent_01", "exited", "codex-thread");
+        on("agent_02", "lost", "codex-thread");
+        on("agent_03", "closed", "codex-thread");
+        on("agent_04", "failed", "codex-thread");
+        on("agent_05", "running", "claude-session");
+        on("agent_06", "running", "codex-thread");
+        let reads = store.reads();
+        let session = |id: &str| {
+            serde_json::from_value::<bazhen_protocol::agents::ExternalRef>(serde_json::json!({
+                "environmentId": "env_01900000000070008000000000000001",
+                "kind": "codex-thread",
+                "id": id,
+            }))
+            .unwrap()
+        };
+        assert_eq!(
+            (
+                reads.session_holders(&session("t-1")).unwrap(),
+                reads.session_holders(&session("t-2")).unwrap(),
+            ),
+            (
+                vec![
+                    "agent_01".to_owned(),
+                    "agent_02".to_owned(),
+                    "agent_06".to_owned()
+                ],
+                Vec::<String>::new(),
+            )
         );
     }
 

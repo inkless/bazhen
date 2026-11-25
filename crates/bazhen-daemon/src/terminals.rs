@@ -54,6 +54,30 @@ impl std::fmt::Debug for NewTerminal {
     }
 }
 
+/// A terminal's process started again in the same terminal: what it runs, where, with which of
+/// its own variables, and at which generation.
+pub(crate) struct Restart {
+    pub(crate) argv: Vec<String>,
+    pub(crate) cwd: String,
+    /// Its own variables, over the runtime's.
+    pub(crate) env: BTreeMap<String, String>,
+    pub(crate) theme: Option<TuiTheme>,
+    pub(crate) generation: u64,
+}
+
+/// Its variables by name alone: `BAZHEN_AGENT_AUTH_FILE` names the agent's token.
+impl std::fmt::Debug for Restart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Restart")
+            .field("argv", &self.argv)
+            .field("cwd", &self.cwd)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("theme", &self.theme)
+            .field("generation", &self.generation)
+            .finish()
+    }
+}
+
 /// A terminal's incarnation as the store records it: its id, and its runtime's locator, as the
 /// JSON text the runtime wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,6 +253,15 @@ pub(crate) trait Terminals: Send + Sync + std::fmt::Debug {
         signal: bazhen_protocol::agents::Signal,
     ) -> Answer<'a, Result<(), TerminalError>>;
 
+    /// Starts the terminal's process again as `restart` says, in the same terminal, once the
+    /// last one has exited, answering where the runtime keeps it now. A process still running
+    /// refuses it as [`TerminalError::ProcessState`].
+    fn respawn<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        restart: Restart,
+    ) -> Answer<'a, Result<Record<String>, TerminalError>>;
+
     /// What each terminal's runtime speaks, as this build serves it.
     fn compatibility(&self) -> Answer<'_, Result<Compatibility, TerminalError>>;
 
@@ -292,6 +325,10 @@ pub(crate) mod fake {
         /// The terminals closed, in order, each with what the store said of it as its close came.
         pub(crate) closed: Vec<String>,
         pub(crate) fail_creates: bool,
+        /// What each respawn fails with, where one does.
+        pub(crate) respawns_refused: Option<TerminalError>,
+        /// The terminals started again, in order, each with what it was started again as.
+        pub(crate) respawned: Vec<(String, Restart)>,
         pub(crate) fail_closes: bool,
         /// What each close fails with, where it fails as no unreachable runtime does.
         pub(crate) closes_refused: Option<TerminalError>,
@@ -764,6 +801,39 @@ pub(crate) mod fake {
                 }
                 state.signalled.push((id, signal));
                 Ok(())
+            })
+        }
+
+        fn respawn<'a>(
+            &'a self,
+            terminal: &'a Recorded,
+            restart: Restart,
+        ) -> Answer<'a, Result<Record<String>, TerminalError>> {
+            Box::pin(async move {
+                let mut state = self.state.lock().unwrap();
+                let id = terminal.terminal_id.as_str().to_owned();
+                if let Some(refused) = &state.respawns_refused {
+                    return Err(refused.clone());
+                }
+                let generation = restart.generation;
+                match state.running.get_mut(&id) {
+                    None => return Err(TerminalError::Stale("no such terminal".to_owned())),
+                    Some(running) if running.gone => {
+                        return Err(TerminalError::Gone("its holder is gone".to_owned()));
+                    }
+                    Some(running) if !running.exited => {
+                        return Err(TerminalError::ProcessState(format!(
+                            "terminal {id}'s process is still running"
+                        )));
+                    }
+                    Some(running) => {
+                        running.exited = false;
+                        running.generation = generation;
+                    }
+                }
+                state.respawned.push((id.clone(), restart));
+                state.tell(&Event::Respawned(recorded_at(&id, generation)));
+                Ok(locator_at(&id, generation))
             })
         }
 

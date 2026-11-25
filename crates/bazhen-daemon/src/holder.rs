@@ -30,7 +30,7 @@ use tokio::sync::broadcast;
 use crate::config::RuntimeKind;
 use crate::failure::detail;
 use crate::terminals::{
-    Answer, Compatibility, Event, Events, Exit, FoundShell, Kind, NewTerminal, Recorded,
+    Answer, Compatibility, Event, Events, Exit, FoundShell, Kind, NewTerminal, Recorded, Restart,
     ShellForeground, TerminalError, Terminals,
 };
 
@@ -676,6 +676,34 @@ impl Terminals for Holder {
                 .signal(&terminal, holder_signal(signal))
                 .await
                 .map_err(|e| terminal_error(&e))
+        })
+    }
+
+    fn respawn<'a>(
+        &'a self,
+        terminal: &'a Recorded,
+        restart: Restart,
+    ) -> Answer<'a, Result<Record<String>, TerminalError>> {
+        Box::pin(async move {
+            let terminal = holder_ref(terminal)?;
+            let launch = ProcessLaunch {
+                argv: restart.argv,
+                cwd: restart.cwd,
+                env: restart.env,
+                generation: Generation::new(restart.generation)
+                    .map_err(|e| TerminalError::Other(e.to_string()))?,
+                theme: restart.theme.map(theme),
+            };
+            let next = self
+                .runtime
+                .respawn(&terminal, &launch)
+                .await
+                .map_err(|e| terminal_error(&e))?;
+            let text = next
+                .locator
+                .encode()
+                .map_err(|e| TerminalError::Other(e.to_string()))?;
+            serde_json::from_str(&text).map_err(|e| TerminalError::Other(e.to_string()))
         })
     }
 

@@ -15,6 +15,8 @@ use bazhen_protocol::shells::TuiTheme;
 
 /// What the stub's TUI starts with, which only it could give.
 pub(crate) const STUB_ARGV: [&str; 2] = ["stub-tui", "--fresh"];
+/// What its TUI starts again with, before the session it resumes.
+pub(crate) const STUB_RESUME_ARGV: [&str; 2] = ["stub-tui", "--resume"];
 /// The session its launch makes.
 pub(crate) const STUB_SESSION: &str = "stub-session-1";
 
@@ -26,10 +28,16 @@ pub(crate) struct StubHarness {
     caps: Capabilities,
     /// Each launch's request, in order.
     pub(crate) launches: Arc<Mutex<Vec<LaunchRequest>>>,
+    /// Each resume's request, with the session it resumed, in order.
+    pub(crate) resumes_asked: Arc<Mutex<Vec<(LaunchRequest, ExternalRef)>>>,
     /// What each launch is refused with, if it is.
     refusal: Option<LaunchError>,
+    /// What each resume is refused with, if it is.
+    resume_refusal: Option<LaunchError>,
     /// What it says of whether any session resumes.
     resumes: bool,
+    /// What it says of whether a session is one agent's at a time.
+    held_alone: bool,
 }
 
 impl StubHarness {
@@ -37,8 +45,11 @@ impl StubHarness {
         Self {
             caps,
             launches: Arc::default(),
+            resumes_asked: Arc::default(),
             refusal: None,
+            resume_refusal: None,
             resumes: false,
+            held_alone: false,
         }
     }
 
@@ -46,6 +57,22 @@ impl StubHarness {
     pub(crate) fn resuming(self) -> Self {
         Self {
             resumes: true,
+            ..self
+        }
+    }
+
+    /// The same, saying a session is one agent's at a time.
+    pub(crate) fn held_alone(self) -> Self {
+        Self {
+            held_alone: true,
+            ..self
+        }
+    }
+
+    /// The same, refusing every resume with `refusal`, but no launch.
+    pub(crate) fn refusing_resumes(self, refusal: LaunchError) -> Self {
+        Self {
+            resume_refusal: Some(refusal),
             ..self
         }
     }
@@ -124,13 +151,38 @@ impl Harness for StubHarness {
         }))
     }
 
+    /// Resumes the session it is given, where it says sessions resume, on the TUI's own flag.
     fn resume<'a>(
         &'a self,
-        _request: &'a LaunchRequest,
-        _session: &'a ExternalRef,
+        request: &'a LaunchRequest,
+        session: &'a ExternalRef,
         _channel: Option<&'a dyn ChannelPort>,
     ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>> {
-        None
+        if !self.resumes {
+            return None;
+        }
+        self.resumes_asked
+            .lock()
+            .unwrap()
+            .push((request.clone(), session.clone()));
+        if let Some(refusal) = &self.resume_refusal {
+            return Some(ready(Err(refusal.clone())));
+        }
+        let mut argv: Vec<String> = STUB_RESUME_ARGV.map(str::to_owned).to_vec();
+        argv.push(session.id.clone());
+        Some(ready(Ok(LaunchSpec {
+            argv,
+            env: vec![("STUB_HOME".to_owned(), "/stub".to_owned())],
+            theme: request.theme.map(|_| TuiTheme::Dark),
+            session: Some(SessionRef {
+                kind: session.kind,
+                id: session.id.clone(),
+            }),
+        })))
+    }
+
+    fn session_held_alone(&self) -> bool {
+        self.held_alone
     }
 
     fn can_resume(&self, _evidence: &Evidence<'_>) -> bool {

@@ -59,6 +59,7 @@ const ROUTES: &[(&str, &str, bool)] = &[
     ("UnlinkShellRequest", "/v1/shells/term_1/unlink", false),
     ("CloseAgentRequest", "/v1/agents/agent_1/close", false),
     ("SignalAgentRequest", "/v1/agents/agent_1/signal", false),
+    ("RespawnAgentRequest", "/v1/agents/agent_1/respawn", false),
     ("ShellReport", "/v1/shells/term_1/report", false),
     ("ShellPrompt", "/v1/shells/term_1/prompt", false),
     ("ShellDecline", "/v1/shells/term_1/decline", false),

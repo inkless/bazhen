@@ -396,6 +396,11 @@ impl Harness for ClaudeCode {
         Some(Box::pin(std::future::ready(Ok(spec))))
     }
 
+    /// Each resume of a session goes on in a TUI of its own.
+    fn session_held_alone(&self) -> bool {
+        false
+    }
+
     /// `--resume` loads a session only once its transcript, which its hooks name, holds a
     /// conversation. A session killed before its first turn has no file, and one killed just
     /// after a turn ended can have only the metadata Claude Code writes ahead of the turn. A "no"
