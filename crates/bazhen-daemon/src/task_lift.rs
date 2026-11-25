@@ -89,11 +89,8 @@ fn lift(
             }];
             event_ids.extend(tell(w, harnesses, to, None, fresh)?);
         }
-        // An item raised on an agent the store no longer knows would name no one.
         None => {
-            if let Some(previous) = &task.owner_agent_id
-                && reads.agent_state(previous.as_str())?.is_some()
-            {
+            if let Some(previous) = &task.owner_agent_id {
                 w.open_attention(AttentionOpened {
                     agent_id: previous.clone(),
                     summary: fell_to_the_human(&task, previous),
