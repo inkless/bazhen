@@ -43,7 +43,13 @@ impl RoleBook {
     }
 
     pub fn rules(&self, key: &Role) -> RoleRules<'_> {
-        self.get(key).map_or(UNDEFINED_RULES, |r| RoleRules {
+        self.rules_of(key.as_str())
+    }
+
+    /// The rules of the role keyed `key`, for a caller that names a role rather than holds one.
+    pub fn rules_of(&self, key: &str) -> RoleRules<'_> {
+        let defined = self.roles.iter().find(|r| r.key.as_str() == key);
+        defined.map_or(UNDEFINED_RULES, |r| RoleRules {
             grants: &r.grants,
             single_per_task: r.single_per_task,
             max_active_tasks: r.max_active_tasks,
