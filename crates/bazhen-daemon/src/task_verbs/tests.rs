@@ -598,6 +598,27 @@ fn grants_an_agents_subtask_under_the_assignment_it_delegates_from_and_its_own_u
 }
 
 #[test]
+fn refuses_an_agents_subtask_assigning_a_role_its_role_on_the_parent_doesnt_grant() {
+    let f = fixture(pull());
+    let parent = made(&f, "p", "b");
+    let lead = assign_as(&f, None, &parent, "a", f.peer.as_str(), "lead");
+    assert_eq!(lead.0, 200, "{}", lead.1);
+    f.hand_over();
+    let mut sub = assigning("s", f.to.as_str(), "lead");
+    sub["parentTaskId"] = json!(parent);
+    assert_eq!(
+        (
+            refused(&create_as(&f, Some(&f.peer), &sub)),
+            tasks_made(&f).len()
+        ),
+        (
+            (403, format!("agent {} can't make an agent lead", f.peer)),
+            1
+        )
+    );
+}
+
+#[test]
 fn refuses_an_agents_subtask_under_a_task_it_neither_owns_nor_grants_on_making_nothing() {
     let f = fixture(pull());
     let parent = made(&f, "p", "b");

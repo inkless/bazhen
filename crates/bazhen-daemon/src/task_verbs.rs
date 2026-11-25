@@ -9,11 +9,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bazhen_core::roles::RoleBook;
-use bazhen_core::task::{Refusal, TaskRefused, TasksHeld, check_grant};
+use bazhen_core::task::{Refusal, TaskRefused, TasksHeld, check_delegate, check_grant};
 use bazhen_harness::Harnesses;
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
-use bazhen_protocol::ids::{AgentId, AssignmentId, TaskId};
+use bazhen_protocol::ids::{AgentId, TaskId};
 use bazhen_protocol::names::Role;
 use bazhen_protocol::roles::RoleDefinition;
 use bazhen_protocol::tasks::{
@@ -326,10 +326,9 @@ pub(crate) async fn create(shared: Shared, task: NewTask, assign: Option<TaskGra
                         role: &grant.role,
                         book: &roles.book,
                         key: &task.key,
-                        under: if task.parent.is_some() && task.caller.is_some() {
-                            Under::Delegated(made.delegated_from.clone())
-                        } else {
-                            Under::Checked
+                        under: match (&task.parent, &task.caller) {
+                            (Some(parent), Some(by)) => Under::Delegated { parent, by },
+                            _ => Under::Checked,
                         },
                     }
                     .record(w, run.harnesses(), &mut queued)?;
@@ -377,15 +376,17 @@ struct Grant<'a> {
     book: &'a RoleBook,
     /// The verb's key, which the mail's keys are derived from.
     key: &'a str,
-    under: Under,
+    under: Under<'a>,
 }
 
 /// The assignment a grant is made under.
-enum Under {
+enum Under<'a> {
     /// The one the caller grants from, as the grant is checked.
     Checked,
-    /// An agent's subtask's: the one it was delegated from, or none, made as the parent's owner.
-    Delegated(Option<AssignmentId>),
+    /// An agent's subtask's, made under `parent`: the assignment on the parent it was delegated
+    /// from, or none, made as the parent's owner. The role must be one its standing on the parent
+    /// grants, as delegating it would be: it owns the new task, where it would grant more.
+    Delegated { parent: &'a TaskId, by: &'a AgentId },
 }
 
 impl Grant<'_> {
@@ -435,11 +436,15 @@ impl Grant<'_> {
             .filter(|a| a.role == *self.role)
             .count();
         let held = TasksHeld(u64::try_from(held).unwrap_or(u64::MAX));
-        let checked = check_grant(&view, self.caller, &agent, self.role, self.book, held)?;
-        let parent = match &self.under {
-            Under::Checked => checked,
-            Under::Delegated(from) => from.clone(),
+        let delegated = match self.under {
+            Under::Checked => None,
+            Under::Delegated { parent, by } => {
+                let parent = reads.task_view(parent)?.ok_or_else(no_task)?;
+                Some(check_delegate(&parent, by, self.role, self.book)?)
+            }
         };
+        let checked = check_grant(&view, self.caller, &agent, self.role, self.book, held)?;
+        let parent = delegated.unwrap_or(checked);
         let (assignment_id, granted) = w.grant(&NewGrant {
             caller: self.caller,
             task: self.task,
