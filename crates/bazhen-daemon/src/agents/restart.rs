@@ -606,4 +606,63 @@ pub(crate) mod tests {
             )
         );
     }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn keeps_the_session_its_tui_moved_to_while_it_started_again() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = exited(&stub);
+        let launch = |f: &Fixture| {
+            f.store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_launch(agent.as_str())
+                .unwrap()
+                .unwrap()
+        };
+        let moved = ExternalRef {
+            id: "moved-session".to_owned(),
+            ..launch(&f).external_ref.unwrap()
+        };
+        let store = f.store.clone();
+        let moving = moved.clone();
+        // A quick /clear in the new TUI, told while the respawn is under way.
+        let replaced = move |agent: AgentId| -> BoxFuture<'static, ()> {
+            Box::pin(async move {
+                store
+                    .run(move |store| {
+                        store.write(|w| {
+                            w.append(&bazhen_store::NewEvent::Agent {
+                                agent,
+                                actor: Actor::System.as_str().to_owned(),
+                                change: AgentChange::ExternalRefUpdated(
+                                    bazhen_protocol::agent_events::AgentExternalRefUpdated {
+                                        external_ref: moving,
+                                    },
+                                ),
+                            })
+                        })
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+            })
+        };
+        let answer = runtime().block_on(f.agents.respawn(
+            agent.as_str(),
+            &respawning("r-1", generation),
+            replaced,
+        ));
+        assert_eq!(
+            (
+                answer.map(|answer| answer.event_ids.len()),
+                launch(&f).external_ref,
+                f.last_of("agent.respawned")
+                    .map(|p| p["externalRef"]["id"].clone()),
+            ),
+            (Ok(2), Some(moved), Some(serde_json::json!("moved-session")))
+        );
+    }
 }
