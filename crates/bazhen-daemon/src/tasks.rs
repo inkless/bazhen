@@ -15,18 +15,16 @@ use serde_json::Value;
 pub enum Refused {
     /// It breaks the schema's rules, which the message names.
     Invalid(String),
-    /// It is valid, but assigns the task, which needs agents this daemon doesn't run.
-    Assigns,
 }
 
-/// The task `body` asks for. Every rule is checked, and each one broken named, before an
-/// assignment is refused, as the schema parses the whole body before the route sees it. Keys the
-/// schema doesn't know are dropped, as it drops them.
+/// The task `body` asks for, and the role it asks to grant on it, if any. Every rule is checked,
+/// and each one broken named, as the schema parses the whole body before the route sees it. Keys
+/// the schema doesn't know are dropped, as it drops them.
 ///
 /// # Errors
 ///
 /// [`Refused`], saying why.
-pub fn asked(body: &[u8]) -> Result<NewTask, Refused> {
+pub fn asked(body: &[u8]) -> Result<(NewTask, Option<Grant>), Refused> {
     let Ok(Value::Object(body)) = serde_json::from_slice::<Value>(body) else {
         return Err(Refused::Invalid(OBJECT_RULE.to_owned()));
     };
@@ -42,31 +40,33 @@ pub fn asked(body: &[u8]) -> Result<NewTask, Refused> {
         Some(Value::String(id)) => TaskId::parse(id).map(Some),
         Some(_) => None,
     };
-    let assigns = match body.get("assign") {
-        None => Some(false),
+    let assign = match body.get("assign") {
+        None => Some(None),
         Some(grant) => serde_json::from_value::<Grant>(grant.clone())
             .ok()
-            .map(|_| true),
+            .map(Some),
     };
     let broken: Vec<&str> = [
         (key.is_none(), KEY_RULE),
         (title.is_none(), TITLE_RULE),
         (brief.is_none(), BRIEF_RULE),
         (parent.is_none(), PARENT_RULE),
-        (assigns.is_none(), "assign is an agent and a role"),
+        (assign.is_none(), "assign is an agent and a role"),
     ]
     .into_iter()
     .filter_map(|(broken, rule)| broken.then_some(rule))
     .collect();
-    match (key, title, brief, parent, assigns) {
-        (Some(key), Some(title), Some(brief), Some(parent), Some(false)) => Ok(NewTask {
-            caller: None,
-            key: key.to_owned(),
-            title: title.to_owned(),
-            brief: brief.to_owned(),
-            parent,
-        }),
-        (_, _, _, _, Some(true)) if broken.is_empty() => Err(Refused::Assigns),
+    match (key, title, brief, parent, assign) {
+        (Some(key), Some(title), Some(brief), Some(parent), Some(assign)) => Ok((
+            NewTask {
+                caller: None,
+                key: key.to_owned(),
+                title: title.to_owned(),
+                brief: brief.to_owned(),
+                parent,
+            },
+            assign,
+        )),
         _ => Err(Refused::Invalid(broken.join("; "))),
     }
 }
@@ -106,7 +106,7 @@ mod tests {
             .iter()
             .zip(log["tables"]["idempotency_keys"].as_array().unwrap())
         {
-            let task = asked(&body(request)).unwrap();
+            let (task, _) = asked(&body(request)).unwrap();
             assert_eq!(task.key, row["key"].as_str().unwrap());
             let kept: Value = serde_json::from_str(row["response"].as_str().unwrap()).unwrap();
             assert_eq!(
@@ -123,8 +123,8 @@ mod tests {
         request["title"] = json!("\u{feff} Ship\u{a0}it \n");
         request["parentTaskId"] = json!(parent);
         request["extra"] = json!(1);
-        let task = asked(&body(&request)).unwrap();
-        assert_eq!(task.title, "Ship\u{a0}it");
+        let (task, assign) = asked(&body(&request)).unwrap();
+        assert_eq!((task.title.as_str(), assign), ("Ship\u{a0}it", None));
         assert_eq!(task.parent.unwrap().as_str(), parent);
     }
 
@@ -183,12 +183,18 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_valid_assignment_as_unsupported_but_only_in_a_valid_body() {
+    fn takes_the_role_a_valid_body_asks_to_grant_with_the_task() {
         let grant = json!({ "agentId": "reviewer-1", "role": "worker" });
-        assert_eq!(asked(&with("assign", grant.clone())), Err(Refused::Assigns));
+        let (_, assign) = asked(&with("assign", grant.clone())).unwrap();
+        assert_eq!(
+            assign.map(|a| (a.agent_id.as_str().to_owned(), a.role.as_str().to_owned())),
+            Some(("reviewer-1".to_owned(), "worker".to_owned()))
+        );
         let mut request = valid();
         request["assign"] = grant;
         request["brief"] = json!("");
-        assert!(matches!(asked(&body(&request)), Err(Refused::Invalid(_))));
+        assert!(
+            matches!(asked(&body(&request)), Err(Refused::Invalid(m)) if m.starts_with("brief"))
+        );
     }
 }
