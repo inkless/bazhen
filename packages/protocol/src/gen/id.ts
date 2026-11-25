@@ -5,4 +5,4 @@
  * The SHA-256, in hex, of every file in packages/protocol/schema/, each `name\0content\0` in
  * name order.
  */
-export const PROTOCOL_ID = "6fdbf43953ce0b999d9e110b3060734a97a6f24be8003fec0829d340776589ca";
+export const PROTOCOL_ID = "5945991c2f43816e8007c69f0e42bb37a10db2df23805ad285b51337fba03043";

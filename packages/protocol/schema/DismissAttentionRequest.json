@@ -1,0 +1,15 @@
+{
+  "$id": "DismissAttentionRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "idempotencyKey"
+  ],
+  "type": "object"
+}
