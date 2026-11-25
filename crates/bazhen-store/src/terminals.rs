@@ -3,9 +3,9 @@
 //! reads back of a shell, as `store.ts` keeps them.
 
 use bazhen_holder_proto::{PROTOCOL_VERSION, negotiate};
-use bazhen_protocol::agents::{Environment, EnvironmentKind};
+use bazhen_protocol::agents::{AgentState, Environment, EnvironmentKind};
 use bazhen_protocol::events::{EnvironmentRegistered, RuntimeRefPayload};
-use bazhen_protocol::ids::{EnvironmentId, Id, TerminalId};
+use bazhen_protocol::ids::{AgentId, EnvironmentId, Id, TerminalId};
 use bazhen_protocol::shells::{
     Foreground, NeedsRestart, Shell, TerminalState, TuiTheme, shell_command_line, shell_commands,
 };
@@ -411,6 +411,72 @@ fn shell_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShellRow> {
         theme: theme.as_deref().and_then(TuiTheme::parse),
         foreground: row.get(10)?,
     })
+}
+
+/// An agent with its current terminal, as each command on it reads them (`agentTerminal`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTerminal {
+    pub agent_id: AgentId,
+    pub state: AgentState,
+    /// Its current terminal, once it has one.
+    pub terminal_id: Option<TerminalId>,
+    pub terminal_state: Option<TerminalState>,
+    pub generation: Option<u64>,
+    /// The runtime its incarnation is on, once one confirmed it.
+    pub runtime: Option<String>,
+    /// Where that runtime keeps it, as the JSON text the runtime recorded.
+    pub locator: Option<String>,
+    /// The runtime its terminal was created on, whether or not it runs there yet.
+    pub runtime_kind: Option<String>,
+}
+
+const AGENT_TERMINAL: &str = "SELECT a.id, a.state, t.id, t.state, t.generation, t.runtime,
+       t.locator, t.runtime_kind
+     FROM agent_sessions a LEFT JOIN terminals t ON t.id = a.terminal_id WHERE a.id = ?";
+
+fn agent_terminal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTerminal> {
+    let unreadable = |i: usize, what: &str| {
+        rusqlite::Error::FromSqlConversionFailure(
+            i,
+            rusqlite::types::Type::Text,
+            format!("{what} isn't one an agent has").into(),
+        )
+    };
+    let id: String = row.get(0)?;
+    let state: String = row.get(1)?;
+    let terminal: Option<String> = row.get(2)?;
+    let terminal_state: Option<String> = row.get(3)?;
+    let generation: Option<i64> = row.get(4)?;
+    Ok(AgentTerminal {
+        agent_id: AgentId::parse(&id).ok_or_else(|| unreadable(0, "its id"))?,
+        state: serde_json::from_value(serde_json::Value::String(state))
+            .map_err(|_| unreadable(1, "its state"))?,
+        terminal_id: terminal
+            .map(|t| TerminalId::parse(&t).ok_or_else(|| unreadable(2, "its terminal's id")))
+            .transpose()?,
+        terminal_state: terminal_state
+            .map(|t| TerminalState::parse(&t).ok_or_else(|| unreadable(3, "its terminal's state")))
+            .transpose()?,
+        generation: generation
+            .map(|g| u64::try_from(g).map_err(|_| unreadable(4, "its generation")))
+            .transpose()?,
+        runtime: row.get(5)?,
+        locator: row.get(6)?,
+        runtime_kind: row.get(7)?,
+    })
+}
+
+impl Reads<'_> {
+    /// The agent `id` names, with its current terminal, or `None` for one the store doesn't know.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s, or a row no agent could have written.
+    pub fn agent_terminal(self, id: &str) -> rusqlite::Result<Option<AgentTerminal>> {
+        self.0
+            .query_row(AGENT_TERMINAL, [id], agent_terminal_row)
+            .optional()
+    }
 }
 
 impl Reads<'_> {

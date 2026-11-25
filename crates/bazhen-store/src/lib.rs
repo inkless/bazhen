@@ -53,7 +53,7 @@ pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::{SnapshotError, SnapshotView};
 pub use task_events::{AssignmentChange, TaskChange};
 pub use tasks::{CreateTaskError, NewTask};
-pub use terminals::{RuntimeRow, ShellRow};
+pub use terminals::{AgentTerminal, RuntimeRow, ShellRow};
 
 /// What `schema_version` holds once migrations are named: past every version a build that
 /// numbered them supports, so such a build refuses the database rather than re-run its first.
