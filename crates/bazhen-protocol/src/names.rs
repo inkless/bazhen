@@ -170,6 +170,7 @@ impl schemars::JsonSchema for AgentName {
         schemars::json_schema!({
             "type": "string",
             "pattern": format!("^{}$", agent_name_pattern()),
+            "x-bazhen-message": AGENT_NAME_RULE,
         })
     }
 }

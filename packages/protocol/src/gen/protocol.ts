@@ -21,7 +21,7 @@ export type AgentCondition = z.infer<typeof AgentCondition>;
 export const AgentFailedReason = z.enum(["launch_rejected", "daemon_restart"]);
 export type AgentFailedReason = z.infer<typeof AgentFailedReason>;
 
-export const AgentName = z.string().regex(new RegExp("^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"));
+export const AgentName = z.string().regex(new RegExp("^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"), { message: "a name is 1 to 40 letters, digits, - or _, starts with a letter or digit, and isn't an id" });
 export type AgentName = z.infer<typeof AgentName>;
 
 export const AgentShell = z.enum(["direct", "login"]);

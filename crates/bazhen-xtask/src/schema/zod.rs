@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use serde_json::{Map, Value};
 
 /// The keywords a schema here may hold. Any other is refused.
-const KEYWORDS: [&str; 24] = [
+const KEYWORDS: [&str; 25] = [
     "$ref",
     "additionalProperties",
     "anyOf",
@@ -33,6 +33,7 @@ const KEYWORDS: [&str; 24] = [
     "type",
     CHECK,
     TRANSFORM,
+    MESSAGE,
 ];
 
 /// A rule no keyword states, named, or several in the order they are judged: the schema holds
@@ -42,6 +43,10 @@ pub(crate) const CHECK: &str = "x-bazhen-check";
 /// A change zod makes to a value before its checks, named: on a string, one of `TRANSFORMS`; on a
 /// record, a preprocess `checks.ts` exports, which sees the keys zod's record would skip.
 pub(crate) const TRANSFORM: &str = "x-bazhen-transform";
+
+/// The words a string's refusal gives, on each of its own checks, in place of zod's: what a person
+/// is shown where a page holds what they typed to the schema.
+pub(crate) const MESSAGE: &str = "x-bazhen-message";
 
 /// The document's table of event types: each one's `entity`, its `payload`, and the narrower
 /// `streamed` payload a client is sent where it has one. It is written as `EVENTS`.
@@ -472,8 +477,29 @@ impl Writer {
     }
 
     fn string(&mut self, schema: &Map<String, Value>, at: &str, common: &[&str]) -> String {
-        let allowed = [common, &["minLength", "maxLength", "pattern", TRANSFORM]].concat();
+        let allowed = [
+            common,
+            &["minLength", "maxLength", "pattern", TRANSFORM, MESSAGE],
+        ]
+        .concat();
         self.only(schema, at, &allowed);
+        let checked = ["minLength", "maxLength", "pattern"]
+            .iter()
+            .any(|k| schema.contains_key(*k));
+        let worded = match schema.get(MESSAGE) {
+            None => String::new(),
+            Some(Value::String(message)) if checked => {
+                format!(", {{ message: {} }}", quoted(message))
+            }
+            Some(Value::String(_)) => {
+                self.refuse(&format!("{at}/{MESSAGE}"), "words no check");
+                String::new()
+            }
+            Some(_) => {
+                self.refuse(&format!("{at}/{MESSAGE}"), "isn't a string");
+                String::new()
+            }
+        };
         let mut written = "z.string()".to_owned();
         if let Some(transform) = schema.get(TRANSFORM) {
             let spelled = TRANSFORMS
@@ -488,7 +514,7 @@ impl Writer {
             if let Some(n) = schema.get(key) {
                 match n.as_u64() {
                     Some(n) => {
-                        let _ = write!(written, ".{method}({n})");
+                        let _ = write!(written, ".{method}({n}{worded})");
                     }
                     None => self.refuse(&format!("{at}/{key}"), "isn't a count"),
                 }
@@ -497,7 +523,7 @@ impl Writer {
         if let Some(pattern) = schema.get("pattern") {
             match pattern.as_str() {
                 Some(pattern) => {
-                    let _ = write!(written, ".regex(new RegExp({}))", quoted(pattern));
+                    let _ = write!(written, ".regex(new RegExp({}){worded})", quoted(pattern));
                 }
                 None => self.refuse(&format!("{at}/pattern"), "isn't a string"),
             }
@@ -832,6 +858,10 @@ mod tests {
                 "z.string().trim().min(1)",
             ),
             (
+                json!({ "type": "string", "maxLength": 4, "pattern": "^a", "x-bazhen-message": "say \"a\"" }),
+                r#"z.string().max(4, { message: "say \"a\"" }).regex(new RegExp("^a"), { message: "say \"a\"" })"#,
+            ),
+            (
                 json!({ "type": "integer", "format": "uint16", "minimum": 0, "maximum": 65535 }),
                 "z.number().int().min(0).max(65535)",
             ),
@@ -1105,6 +1135,14 @@ mod tests {
             (
                 json!({ "type": "string", "minimum": 1 }),
                 "$defs/T/minimum: has no place in zod beside the others here",
+            ),
+            (
+                json!({ "type": "string", "x-bazhen-message": "say a" }),
+                "$defs/T/x-bazhen-message: words no check",
+            ),
+            (
+                json!({ "type": "string", "pattern": "^a", "x-bazhen-message": 1 }),
+                "$defs/T/x-bazhen-message: isn't a string",
             ),
             (
                 json!({ "type": "integer", "x-bazhen-transform": "trim" }),
