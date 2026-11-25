@@ -412,15 +412,16 @@ and ruff snapshot a CLI's output, those suites do it here.
 
 The daemon's API is defined by the Rust types in `crates/bazhen-protocol`, and `cargo xtask schema`
 (which `moon run :schema` runs) publishes their JSON Schema to `packages/protocol/schema/`, and
-writes the web's zod and constants from it into `packages/protocol/src/gen/`. The zod is held to
-the API fixtures by `packages/protocol/src/gen-protocol.medium.test.ts`, and the planted corpus
-holds the daemon's edge to the schema it emits, but for the cases `KNOWN_MISMATCHES` lists. While
-the TypeScript daemon runs, a Rust crate that
-speaks the API holds hand-written serde types for the messages it uses. They are held to the
-TypeScript by fixtures `moon run :schema` writes for each of those messages, as it writes the
-holder's for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate decodes each fixture and
-encodes it back to equal JSON. An object zod doesn't make strict accepts fields it doesn't know, so
-only a strict one gets `#[serde(deny_unknown_fields)]`, and a field with a default may be missing.
+writes the web's zod and constants from it into `packages/protocol/src/gen/`.
+`packages/protocol/src/gen-protocol.medium.test.ts` holds the zod to the API fixtures and to the
+planted corpus, each case of which the schema's own keywords judge, and the corpus holds the
+daemon's edge to the same schema, but for the cases `KNOWN_MISMATCHES` lists. While the TypeScript
+daemon runs, a Rust crate that speaks the API holds hand-written serde types for the messages it
+uses. They are held to the TypeScript by fixtures `moon run :schema` writes for each of those
+messages, as it writes the holder's for `crates/bazhen-holder-proto/tests/fixtures.rs`: the crate
+decodes each fixture and encodes it back to equal JSON. An object zod doesn't make strict accepts
+fields it doesn't know, so only a strict one gets `#[serde(deny_unknown_fields)]`, and a field with
+a default may be missing.
 
 `cargo xtask schema` also writes the hash of `packages/protocol/schema/` as the protocol id, to
 `crates/bazhen-protocol/src/id.rs` for the Rust crates and to `packages/protocol/src/gen/id.ts` for
