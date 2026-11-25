@@ -267,7 +267,8 @@ fn replay(fixture: &Fixture, store: &mut Store) -> Vec<String> {
     let mut wrong = Vec::new();
     for (i, step) in fixture.steps.iter().enumerate() {
         let event = event(step);
-        let got = store.write(|w| w.append(&event));
+        // The items the event causes were TypeScript's inbox's, which the fixture's store didn't run.
+        let got = store.write(|w| w.record(&event));
         // TypeScript records a refusal as its Error's text.
         let refused = step
             .refused

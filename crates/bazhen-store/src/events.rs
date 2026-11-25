@@ -300,7 +300,8 @@ pub struct Writer<'a> {
 }
 
 impl Writer<'_> {
-    /// Appends `event` and applies it to the read models, answering its id.
+    /// Appends `event` and applies it to the read models, answering its id, then opens or closes
+    /// the items for the human it causes, in the same transaction.
     ///
     /// # Errors
     ///
@@ -308,6 +309,14 @@ impl Writer<'_> {
     /// [`Store::write`](crate::Store::write), the error rolls the whole transaction back, so a
     /// caller that swallows it instead commits an event without its projection.
     pub fn append(&self, event: &NewEvent) -> Result<u64, AppendError> {
+        let id = self.record(event)?;
+        crate::attention::react(self, event)?;
+        Ok(id)
+    }
+
+    /// Appends `event` and applies it to the read models, as the TypeScript store's append did,
+    /// which left the items it causes to the inbox.
+    pub(crate) fn record(&self, event: &NewEvent) -> Result<u64, AppendError> {
         let host = self.host.ok_or(AppendError::NoHost)?;
         let kind = event_kind(event.name()).ok_or_else(|| AppendError::Refused {
             event: event.name(),
