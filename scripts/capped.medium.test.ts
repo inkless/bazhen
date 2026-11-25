@@ -184,17 +184,15 @@ describe("capped as a task's run", () => {
     });
   });
 
-  it.runIf(inScope)(
-    "ends what a run with a scope of its own started, which a run without one leaves to the task's",
-    () => {
-      // Said once each time: without the flag by the task's run, which then fails; with it by the
-      // inner run that stopped it, so the task's run found nothing left.
-      expect({ without: sessionOutcome(""), with: sessionOutcome("--own-scope") }).toEqual({
-        without: { said: 1, status: 1 },
-        with: { said: 1, status: 0 },
-      });
-    },
-  );
+  // Said once either way: by the task's run, which then fails, or by the inner run that stopped
+  // it, so the task's run finds nothing left.
+  it.runIf(inScope)("leaves what a run without a scope of its own started to the task's", () => {
+    expect(sessionOutcome("")).toEqual({ said: 1, status: 1 });
+  });
+
+  it.runIf(inScope)("ends what a run with a scope of its own started", () => {
+    expect(sessionOutcome("--own-scope")).toEqual({ said: 1, status: 0 });
+  });
 
   it.runIf(inScope)("passes a run that counts its memory kills after one in its own scope", () => {
     expect(asTask(["--memory-kills-counted"], OUTLIVES_RUNAWAY)).toMatchObject({
