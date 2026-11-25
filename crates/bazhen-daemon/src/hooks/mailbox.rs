@@ -27,6 +27,7 @@ use tokio::task::AbortHandle;
 
 use super::waiters::Waiters;
 use super::{quiet, write};
+use crate::agents::Agents;
 use crate::routes::Shared;
 
 /// How long the hook client has to write what it was handed and ack it.
@@ -614,15 +615,15 @@ impl Mailbox {
     /// marked, so that a step coming after (from a deadline firing, a send committed before the
     /// close, or a hook let in before its token went) finds it and does nothing, rather than
     /// start the agent's mail afresh beside a step still under way. A closed agent never runs
-    /// again, so the mark is never lifted.
-    #[cfg(test)]
+    /// again, so the mark is never lifted. The agents' `after_closed` calls it, once the hooks
+    /// have answered the agent's waiter, holding neither its turn nor its mail.
     pub(crate) async fn forget(
         self: &Arc<Self>,
-        shared: &Shared,
+        agents: &Agents,
         agent: &AgentId,
     ) -> Result<(), String> {
         let (mailbox, agent) = (Arc::clone(self), agent.clone());
-        whole(shared, async move {
+        whole_on(Some(agents), async move {
             let mail = mailbox.of(&agent);
             *mail.lock().await = AgentMail {
                 forgotten: true,
@@ -770,7 +771,15 @@ async fn whole<T: Send + 'static>(
     shared: &Shared,
     step: impl Future<Output = Result<T, String>> + Send + 'static,
 ) -> Result<T, String> {
-    let Some(agents) = shared.agents.as_ref() else {
+    whole_on(shared.agents.as_deref(), step).await
+}
+
+/// The same, on the tracker of `agents` where there are any.
+async fn whole_on<T: Send + 'static>(
+    agents: Option<&Agents>,
+    step: impl Future<Output = Result<T, String>> + Send + 'static,
+) -> Result<T, String> {
+    let Some(agents) = agents else {
         return step.await;
     };
     let (sent, answer) = tokio::sync::oneshot::channel();

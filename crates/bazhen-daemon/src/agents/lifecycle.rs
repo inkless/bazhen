@@ -365,6 +365,9 @@ impl Agents {
         self.deps.tokens.forget(agent);
         self.deps.prompts.remove(agent);
         self.deps.hooks.closed(&self.deps.store, agent).await;
+        if let Err(why) = self.deps.hooks.mailbox.forget(self, agent).await {
+            tracing::warn!("bazhen: agent {agent}'s mail isn't forgotten as it closed: {why}");
+        }
     }
 
     /// Closes the agent's terminal. Force records closed only what a close could not end: a
