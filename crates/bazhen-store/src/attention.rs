@@ -5,7 +5,8 @@ use bazhen_protocol::agents::AgentState;
 use bazhen_protocol::ids::{AgentId, AttentionId, MessageId};
 use bazhen_protocol::mail::AttentionKind;
 use bazhen_protocol::mail_events::{
-    AttentionClosed, AttentionClosedReason, AttentionOpened, MailUndeliverable, UndeliverableReason,
+    ApprovalDecision, AttentionAnswered, AttentionClosed, AttentionClosedReason, AttentionOpened,
+    MailUndeliverable, UndeliverableReason,
 };
 use rusqlite::OptionalExtension as _;
 
@@ -146,6 +147,47 @@ impl Writer<'_> {
         })
     }
 
+    /// Records the decision on the open item `id`, by `actor`, which closes it.
+    ///
+    /// # Errors
+    ///
+    /// The append's: an item not open is refused.
+    pub fn answer_attention(
+        &self,
+        id: &AttentionId,
+        decision: ApprovalDecision,
+        actor: &str,
+    ) -> Result<u64, AppendError> {
+        self.append(&NewEvent::Attention {
+            attention: id.clone(),
+            actor: actor.to_owned(),
+            change: AttentionChange::Answered(AttentionAnswered { decision }),
+        })
+    }
+
+    /// Closes the item `id` for `reason` while it is open, as every path that ends a harness's
+    /// request does: one that comes after another has closed it finds nothing to do. Answers its
+    /// event's id, none when the item isn't open.
+    ///
+    /// # Errors
+    ///
+    /// The read's and the append's.
+    pub fn settle_attention(
+        &self,
+        id: &AttentionId,
+        reason: AttentionClosedReason,
+        actor: &str,
+    ) -> Result<Option<u64>, AppendError> {
+        let open = self
+            .reads()
+            .attention_item(id.as_str())?
+            .is_some_and(|item| item.open);
+        if !open {
+            return Ok(None);
+        }
+        self.close_attention(id, reason, actor).map(Some)
+    }
+
     /// The agent's own turn failed, as its harness reports it: one item while its turns keep
     /// failing, saying `error`. Answers its event's id, none when one is open already or the
     /// agent is closed or unknown, since a hook can come after the close and no turn would ever
@@ -182,6 +224,40 @@ impl Writer<'_> {
             .unwrap_or(TURN_FAILED);
         let opened = self.open_attention(raised(agent, AttentionKind::Failed, summary, None))?;
         Ok(Some(opened.1))
+    }
+
+    /// Opens an item of `kind` that `agent`'s harness asks, about the tool call `tool_use_id`, by
+    /// the agent itself when `main_agent`. None for an agent gone or going, which can't be
+    /// answered.
+    ///
+    /// # Errors
+    ///
+    /// The read's and the append's.
+    pub fn ask_attention(
+        &self,
+        agent: &AgentId,
+        kind: AttentionKind,
+        summary: &str,
+        tool_use_id: Option<String>,
+        main_agent: bool,
+    ) -> Result<Option<AttentionId>, AppendError> {
+        let state: Option<String> = self
+            .connection()
+            .query_row(
+                "SELECT state FROM agent_sessions WHERE id = ?",
+                [agent.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state.is_none_or(|state| ["closing", "closed", "failed"].contains(&state.as_str())) {
+            return Ok(None);
+        }
+        let opened = AttentionOpened {
+            tool_use_id,
+            main_agent,
+            ..raised(agent, kind, summary, None)
+        };
+        Ok(Some(self.open_attention(opened)?.0))
     }
 
     /// The agent started a turn of its own, so the failure before it no longer holds it up.
@@ -308,7 +384,11 @@ mod tests {
     use bazhen_protocol::agents::AgentState;
     use bazhen_protocol::ids::{AgentId, AttentionId};
     use bazhen_protocol::mail::AttentionKind;
-    use bazhen_protocol::mail_events::{MailUndeliverable, UndeliverableReason};
+    use bazhen_protocol::mail_events::{
+        ApprovalDecision, AttentionClosedReason, MailUndeliverable, UndeliverableReason,
+    };
+
+    use serde_json::{Value, json};
 
     use super::{AttentionItem, raised};
     use crate::events::NewEvent;
@@ -462,6 +542,98 @@ mod tests {
         assert_eq!(
             (opened.0.ok(), opened.1.ok(), items(&store)),
             (Some(None), Some(None), vec![])
+        );
+    }
+
+    #[test]
+    fn opens_what_a_harness_asks_by_its_call_and_asker_for_a_live_agent_only() {
+        let dir = TempDir::new("asked");
+        let mut store = store(&dir, "running");
+        let agent = agent();
+        let asked = store.write(|w| {
+            let approval = w.ask_attention(
+                &agent,
+                AttentionKind::Approval,
+                "Bash: ls",
+                Some("toolu_1".to_owned()),
+                false,
+            )?;
+            w.connection()
+                .execute("UPDATE agent_sessions SET state = 'closing'", ())?;
+            let closing = w.ask_attention(&agent, AttentionKind::Question, "Which?", None, true)?;
+            Ok::<_, crate::AppendError>((approval.is_some(), closing))
+        });
+        let opened: Value = serde_json::from_str(
+            &store
+                .db
+                .query_row(
+                    "SELECT payload FROM events WHERE type = 'attention.opened'",
+                    (),
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                asked.ok(),
+                &opened["toolUseId"],
+                &opened["mainAgent"],
+                &opened["summary"]
+            ),
+            (
+                Some((true, None)),
+                &json!("toolu_1"),
+                &json!(false),
+                &json!("Bash: ls")
+            )
+        );
+    }
+
+    #[test]
+    fn answers_an_open_approval_once_by_its_actor_and_settles_only_an_open_item() {
+        let dir = TempDir::new("answered");
+        let mut store = store(&dir, "running");
+        let approval = open(&mut store, AttentionKind::Approval);
+        let question = open(&mut store, AttentionKind::Question);
+        let answered =
+            store.write(|w| w.answer_attention(&approval, ApprovalDecision::Deny, "user"));
+        let again = store.write(|w| w.answer_attention(&approval, ApprovalDecision::Allow, "user"));
+        let settled = store.write(|w| {
+            let first =
+                w.settle_attention(&question, AttentionClosedReason::AnsweredInTui, "system")?;
+            let second =
+                w.settle_attention(&question, AttentionClosedReason::TimedOut, "system")?;
+            let answered =
+                w.settle_attention(&approval, AttentionClosedReason::TimedOut, "system")?;
+            Ok::<_, crate::AppendError>((first.is_some(), second, answered))
+        });
+        let actor: String = store
+            .db
+            .query_row(
+                "SELECT actor FROM events WHERE type = 'attention.answered'",
+                (),
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                answered.is_ok(),
+                again.is_err(),
+                settled.ok(),
+                actor,
+                items(&store)
+            ),
+            (
+                true,
+                true,
+                Some((true, None, None)),
+                "user".to_owned(),
+                vec![
+                    row("approval", "closed", Some("answered")),
+                    row("question", "closed", Some("answered_in_tui")),
+                ]
+            )
         );
     }
 
