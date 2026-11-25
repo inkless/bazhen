@@ -14,6 +14,7 @@ mod events;
 mod events_fixture;
 #[cfg(test)]
 mod fixture;
+mod mail;
 mod mail_events;
 mod migrations;
 mod private;
@@ -48,6 +49,7 @@ pub use events::{
     Actor, AppendError, FrameError, NewEvent, OnceError, Page, Reads, StoredEvent, TerminalChange,
     Writer,
 };
+pub use mail::IN_FLIGHT;
 pub use mail_events::{AttentionChange, MailChange};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::{SnapshotError, SnapshotView};
