@@ -45,9 +45,7 @@ use self::integration::Integration;
 use self::reports::new_shell_token;
 use self::retype::{PendingRetypes, Typing};
 use crate::budget::{Budget, Counts, TerminalLimit};
-use crate::terminals::{
-    Event, Events, Exit, Kind, NewTerminal, Recorded, TerminalError, Terminals,
-};
+use crate::terminals::{Event, Exit, Kind, NewTerminal, Recorded, TerminalError, Terminals};
 use crate::turns::Turns;
 use crate::writer::Writer;
 
@@ -383,7 +381,7 @@ const PROCESS_KEYS: [&str; 4] = ["generation", "childPid", "childStart", "panePi
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 /// A locator's generation, where it is a whole number the daemon can count, as it records one.
-fn generation_of(locator: &Record<String>) -> Option<u64> {
+pub(crate) fn generation_of(locator: &Record<String>) -> Option<u64> {
     let (_, text) = locator
         .entries()
         .iter()
@@ -394,13 +392,13 @@ fn generation_of(locator: &Record<String>) -> Option<u64> {
         .filter(|n| whole && *n <= MAX_SAFE_INTEGER)
 }
 
-fn locator_of(terminal: &Recorded) -> Option<Record<String>> {
+pub(crate) fn locator_of(terminal: &Recorded) -> Option<Record<String>> {
     serde_json::from_str(&terminal.locator).ok()
 }
 
 /// Whether `found` is a later process of the terminal `recorded` names, run by the same holder
 /// (`laterGeneration`): one the daemon didn't start when `recorded` is the latest it did.
-fn later_generation(recorded: &Recorded, found: &Recorded) -> bool {
+pub(crate) fn later_generation(recorded: &Recorded, found: &Recorded) -> bool {
     let (Some(before), Some(after)) = (locator_of(recorded), locator_of(found)) else {
         return false;
     };
@@ -1193,23 +1191,33 @@ impl Shells {
 
     /// Follows what the runtime tells of each shell, until `stop`: one whose process ends is
     /// closed, a process started in one outside the daemon is adopted, and one whose holder is
-    /// lost is marked so. Each is handled on `tracker`, so one slow close holds up no other.
+    /// lost is marked so. Each is handled on `tracker`, so one slow close holds up no other. The
+    /// daemon's follower hands each event to `heard` beside the agents'.
+    #[cfg(test)]
     pub(crate) async fn watch(
         self: Arc<Self>,
-        mut events: Box<dyn Events>,
+        mut events: Box<dyn crate::terminals::Events>,
         tracker: TaskTracker,
         stop: CancellationToken,
     ) {
         while let Some(Some(event)) = stop.run_until_cancelled(events.next()).await {
-            let (shells, stop) = (Arc::clone(&self), stop.clone());
-            match event {
-                Event::Exited(exit) => {
-                    tracker.spawn(async move { shells.exited(exit, &stop).await })
-                }
-                Event::Respawned(at) => tracker.spawn(async move { shells.respawned(&at).await }),
-                Event::Lost(at) => tracker.spawn(async move { shells.lost(&at).await }),
-            };
+            self.heard(event, &tracker, &stop);
         }
+    }
+
+    /// What `watch` does with one event, on `tracker`.
+    pub(crate) fn heard(
+        self: &Arc<Self>,
+        event: Event,
+        tracker: &TaskTracker,
+        stop: &CancellationToken,
+    ) {
+        let (shells, stop) = (Arc::clone(self), stop.clone());
+        match event {
+            Event::Exited(exit) => tracker.spawn(async move { shells.exited(exit, &stop).await }),
+            Event::Respawned(at) => tracker.spawn(async move { shells.respawned(&at).await }),
+            Event::Lost(at) => tracker.spawn(async move { shells.lost(&at).await }),
+        };
     }
 
     /// A process started outside the daemon runs in a shell's terminal, as the runtime finds on
@@ -2271,6 +2279,7 @@ pub(crate) mod tests {
                     Exit {
                         terminal_id: terminal(&id),
                         generation: 1,
+                        status: bazhen_holder_proto::body::ExitStatus::Unknown,
                         found: None,
                     },
                     &stop,
@@ -2475,6 +2484,7 @@ pub(crate) mod tests {
             let exit = Exit {
                 terminal_id: terminal(id),
                 generation: 0,
+                status: bazhen_holder_proto::body::ExitStatus::Unknown,
                 found: None,
             };
             TaskTracker::new().spawn(async move { shells.exited(exit, &stop).await })

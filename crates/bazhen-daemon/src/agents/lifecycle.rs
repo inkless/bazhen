@@ -3,7 +3,7 @@
 //! command accepts, at the generation it names (`Lifecycle.command`).
 
 use bazhen_core::agent::agent_commands;
-use bazhen_holder_proto::body::Exited;
+use bazhen_holder_proto::body::{ExitStatus, Exited};
 use bazhen_protocol::agent_events::{AgentExited, AgentSignalled};
 use bazhen_protocol::agents::{
     AgentCommand, AgentCommandResponse, AgentState, CloseAgentRequest, SignalAgentRequest,
@@ -103,19 +103,27 @@ pub(crate) fn told(
     terminal: &TerminalId,
     exit: &Exited,
 ) -> Result<(), AppendError> {
+    exited_at(w, terminal, exit.generation.get(), &exit.status)
+}
+
+/// `told`, of the process of `generation` that ended as `status` says, however the daemon heard.
+pub(crate) fn exited_at(
+    w: &StoreWriter<'_>,
+    terminal: &TerminalId,
+    generation: u64,
+    status: &ExitStatus,
+) -> Result<(), AppendError> {
     let Some(found) = w.reads().agent_of_terminal(terminal.as_str())? else {
         return Ok(());
     };
-    if found.generation != Some(exit.generation.get())
-        || !found.terminal_state.is_some_and(takes_exit)
-    {
+    if found.generation != Some(generation) || !found.terminal_state.is_some_and(takes_exit) {
         return Ok(());
     }
     w.append(&NewEvent::Agent {
         agent: found.agent_id,
         actor: Actor::System.as_str().to_owned(),
         change: AgentChange::Exited(AgentExited {
-            exit: crate::stream::hub::exit_status(&exit.status),
+            exit: crate::stream::hub::exit_status(status),
         }),
     })?;
     Ok(())

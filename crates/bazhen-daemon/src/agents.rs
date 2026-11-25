@@ -8,6 +8,7 @@ pub(crate) mod prompts;
 pub(crate) mod restart;
 pub(crate) mod transcript;
 pub(crate) mod view;
+pub(crate) mod watch;
 
 use std::collections::BTreeMap;
 use std::future::Future;

@@ -307,18 +307,18 @@ async fn shells(
         tracing::warn!("bazhen: {warning}");
     }
     Ok(Running {
-        shells: Arc::new(shells),
-        agents: Arc::new(agents),
-        events,
+        watched: Watched {
+            shells: Arc::new(shells),
+            agents: Arc::new(agents),
+            events,
+        },
         doctor: runner.doctor,
     })
 }
 
 /// What runs on the daemon's terminals, as its start sets it up.
 struct Running {
-    shells: Arc<Shells>,
-    agents: Arc<Agents>,
-    events: Box<dyn Events>,
+    watched: Watched,
     doctor: Settled,
 }
 
@@ -343,6 +343,33 @@ async fn unread_shells(startup: &Startup, store: &Writer, err: &ShellError) -> R
         ),
         None => format!("bazhen can't read its shells: {err}"),
     })
+}
+
+/// What the runtime runs, and what it tells of its terminals, as `follow` watches them.
+struct Watched {
+    shells: Arc<Shells>,
+    agents: Arc<Agents>,
+    events: Box<dyn Events>,
+}
+
+/// Runs the shells' tick every `tick`, and follows what the runtime tells of its terminals, until
+/// `stop`: each event goes to the shells and to the agents, each on `tracker`, and each takes only
+/// its own terminals' events.
+async fn follow(
+    Watched {
+        shells,
+        agents,
+        mut events,
+    }: Watched,
+    tick: Duration,
+    tracker: TaskTracker,
+    stop: CancellationToken,
+) {
+    tracker.spawn(every_tick(Arc::clone(&shells), tick, stop.clone()));
+    while let Some(Some(event)) = stop.run_until_cancelled(events.next()).await {
+        agents.heard(event.clone(), &tracker);
+        shells.heard(event, &tracker, &stop);
+    }
 }
 
 /// Tries again the shells the start's reconcile couldn't settle, then reads the running shells'
@@ -439,15 +466,16 @@ async fn listen(
     if let Some(runner) = runner {
         let streaming = runner.streams.clone();
         let roles = Arc::clone(&shared.roles);
-        let running = shells(startup, &store, runner, &tracker, stop.token(), roles).await?;
-        let bundle = running.doctor.bundle.clone();
+        let Running { watched, doctor } =
+            shells(startup, &store, runner, &tracker, stop.token(), roles).await?;
+        let bundle = doctor.bundle.clone();
         shared = shared
-            .with_shells(Arc::clone(&running.shells), running.doctor)
-            .with_agents(running.agents)
+            .with_shells(Arc::clone(&watched.shells), doctor)
+            .with_agents(Arc::clone(&watched.agents))
             .with_web(bundle);
         shared.streams =
-            crate::stream::on_holders(&store, streaming, &running.shells, &tracker, stop.token());
-        watching = Some((running.shells, running.events));
+            crate::stream::on_holders(&store, streaming, &watched.shells, &tracker, stop.token());
+        watching = Some(watched);
     }
     let gate = Gate {
         allow: guard::allowlists(
@@ -482,15 +510,15 @@ async fn listen(
 
     let token = stop.token();
     let retiring = token.clone();
-    let ending = watching.as_ref().map(|(running, _)| Arc::clone(running));
+    let ending = watching.as_ref().map(|watched| Arc::clone(&watched.shells));
     let streams = shared.streams.clone();
-    if let Some((running, events)) = watching {
-        tracker.spawn(every_tick(
-            Arc::clone(&running),
+    if let Some(watched) = watching {
+        tracker.spawn(follow(
+            watched,
             serving.tick,
+            tracker.clone(),
             token.clone(),
         ));
-        tracker.spawn(running.watch(events, tracker.clone(), token.clone()));
     }
     tracker.spawn(crate::paired::close_lapsed_every_minute(
         shared.clone(),
@@ -619,6 +647,52 @@ mod tests {
 
     use super::*;
     use crate::testing::{TempDir, runtime};
+
+    /// An agent's process that exits while no view watches its terminal is recorded exited, as
+    /// the runtime tells it, while the shells take only their own terminals' events.
+    #[test]
+    fn hands_an_agents_exit_no_view_heard_to_the_agents() {
+        use crate::terminals::Terminals as _;
+        let f = crate::agents::tests::setup_with(crate::agents::tests::Setup::default());
+        let agent = runtime()
+            .block_on(f.launch(crate::agents::tests::request("k-1")))
+            .unwrap()
+            .agent_id;
+        let terminal = f.terminal_of(agent.as_str());
+        let tracker = TaskTracker::new();
+        let stop = CancellationToken::new();
+        let state = |f: &crate::agents::tests::Fixture| {
+            f.store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_state(agent.as_str())
+                .unwrap()
+        };
+        let seen = runtime().block_on(async {
+            tracker.spawn(follow(
+                Watched {
+                    shells: f.shells(),
+                    agents: Arc::clone(&f.agents),
+                    events: f.fake().events(),
+                },
+                Duration::from_secs(3600),
+                tracker.clone(),
+                stop.clone(),
+            ));
+            tokio::task::yield_now().await;
+            f.fake().exit(&terminal);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while state(&f).as_deref() != Some("exited") && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            stop.cancel();
+            tracker.close();
+            tracker.wait().await;
+            state(&f)
+        });
+        assert_eq!(seen.as_deref(), Some("exited"));
+    }
 
     fn startup(home: &Path) -> Startup {
         let at = |name: &str| home.join(name).to_string_lossy().into_owned();
@@ -836,7 +910,8 @@ mod tests {
             .await;
             started
                 .ok()
-                .map(|running| Arc::ptr_eq(running.agents.turns(), running.shells.turns()))
+                .map(|running| running.watched)
+                .map(|watched| Arc::ptr_eq(watched.agents.turns(), watched.shells.turns()))
         });
         assert_eq!(shared, Some(true));
         writer.finish();

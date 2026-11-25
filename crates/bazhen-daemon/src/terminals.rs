@@ -141,6 +141,8 @@ impl TerminalError {
 pub(crate) struct Exit {
     pub(crate) terminal_id: TerminalId,
     pub(crate) generation: u64,
+    /// How it ended, as an agent's exit records it.
+    pub(crate) status: bazhen_holder_proto::body::ExitStatus,
     /// The incarnation that ended, where the runtime named it: one at a later generation than the
     /// store's is of a process started outside the daemon, adopted as it closes.
     pub(crate) found: Option<Recorded>,
@@ -515,6 +517,9 @@ pub(crate) mod fake {
             state.tell(&Event::Exited(Exit {
                 terminal_id: TerminalId::parse(terminal_id).unwrap(),
                 generation,
+                status: bazhen_holder_proto::body::ExitStatus::Exited {
+                    code: bazhen_holder_proto::body::ExitCode::new(0).unwrap(),
+                },
                 found: Some(recorded_at(terminal_id, generation)),
             }));
         }

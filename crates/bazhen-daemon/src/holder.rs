@@ -450,12 +450,13 @@ impl Events for HolderTold {
                     Ok(RuntimeEvent::Exited {
                         terminal_id,
                         generation,
-                        ..
+                        status,
                     }) => {
                         let found = self.ended(&terminal_id, generation);
                         return Some(Event::Exited(Exit {
                             terminal_id,
                             generation: generation.get(),
+                            status,
                             found,
                         }));
                     }
@@ -1134,6 +1135,7 @@ mod tests {
             Event::Exited(Exit {
                 terminal_id: holder_at(0).terminal_id,
                 generation,
+                status: bazhen_holder_proto::body::ExitStatus::Unknown,
                 found,
             })
         };
@@ -1165,6 +1167,7 @@ mod tests {
             [Event::Exited(Exit {
                 terminal_id: holder_at(0).terminal_id,
                 generation: 1,
+                status: bazhen_holder_proto::body::ExitStatus::Unknown,
                 found: recorded_of(&holder_at(1)),
             })]
         );
