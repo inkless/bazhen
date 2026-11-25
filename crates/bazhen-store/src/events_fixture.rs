@@ -219,7 +219,7 @@ fn refuses_a_snapshot_that_would_leave_out_rows_this_build_cant_describe() {
         .unwrap();
     let refused = store.reads().snapshot(&crate::testing::view());
     assert!(
-        matches!(&refused, Err(crate::SnapshotError::NeedsAgentView(s)) if s == &["agents"]),
+        matches!(&refused, Err(crate::SnapshotError::NeedsView(s)) if s == &["agents"]),
         "{refused:?}"
     );
 }

@@ -58,7 +58,9 @@ pub trait Harness: Send + Sync {
         session: &'a ExternalRef,
         channel: Option<&'a dyn ChannelPort>,
     ) -> Option<BoxFuture<'a, Result<LaunchSpec, LaunchError>>>;
-    /// Whether [`Harness::resume`] would find the session, by what its reports said of it.
+    /// Whether [`Harness::resume`] would find the session, by what its reports said of it. A
+    /// harness whose `resume` gives none answers `false`: this is all a client is told of whether
+    /// starting the agent again resumes it.
     fn can_resume(&self, evidence: &Evidence<'_>) -> bool;
     /// The session a report over its server's channel is from, none for a harness with no server.
     /// The daemon calls it before [`Harness::ingest`], and hands `ingest` the agent bound to that

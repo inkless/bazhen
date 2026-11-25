@@ -19,6 +19,11 @@ pub(crate) fn built_beside(exe: &Path) -> Option<PathBuf> {
     built.is_file().then_some(built)
 }
 
+/// Where in `dir` a start links the hook client, whether or not one is built.
+pub(crate) fn link_in(dir: &Path) -> PathBuf {
+    dir.join(HOOK_COMMAND)
+}
+
 /// The hook client as a start installed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct InstalledHook {
@@ -36,7 +41,7 @@ pub(crate) struct InstalledHook {
 /// replaced fails with EINVAL. `dir` must be private to `uid`, since whoever can write it chooses
 /// what every hook runs. Where it can't be made, as across file systems, `client` itself, said.
 fn stable_link(dir: &Path, client: &Path, uid: u32) -> PathBuf {
-    let link = dir.join(HOOK_COMMAND);
+    let link = link_in(dir);
     let next = dir.join(format!("{HOOK_COMMAND}.tmp"));
     let made = ensure_private_dir(dir, uid)
         .map_err(|err| err.to_string())

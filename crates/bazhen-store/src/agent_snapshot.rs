@@ -22,9 +22,8 @@ use crate::terminals::{attach_command, attachable, needs_restart};
 /// How many graphemes of a note's first line a headline keeps: one line of a list.
 const HEADLINE_MAX: usize = 200;
 
-/// What the snapshot of agents and their items needs of the daemon, which the database doesn't
-/// hold: what each harness can do, whether mail reaches an agent now, the prompt it would start
-/// with, and what the human can do about an item.
+/// What the snapshot of agents needs of the daemon, which the database doesn't hold: what each
+/// harness can do, whether mail reaches an agent now, and the prompt it would start with.
 pub trait AgentView {
     /// Whether starting the agent again resumes its harness session.
     fn resumes(&self, evidence: &Evidence<'_>) -> bool;
@@ -34,6 +33,12 @@ pub trait AgentView {
     fn listening(&self, agent: &Listener<'_>) -> bool;
     /// The hash of the prompt an agent launched in `role` would start with now.
     fn prompt_hash(&self, role: Option<&Role>) -> String;
+}
+
+/// What the snapshot of the items for the human needs of the daemon: what the human can do about
+/// each open one now, which rests on what the daemon holds of it, such as a harness waiting on an
+/// approval.
+pub trait AttentionView {
     /// What the human can do about an open item now.
     fn attention_actions(&self, item: &OpenAttention<'_>) -> Vec<AttentionAction>;
 }
@@ -284,7 +289,7 @@ struct AttentionRow {
 /// Every item for the human, oldest first, each open one with what the human can do about it.
 pub(crate) fn attention(
     db: &rusqlite::Connection,
-    agents: &dyn AgentView,
+    view: &dyn AttentionView,
 ) -> Result<Vec<Attention>, SnapshotError> {
     let mut statement = db.prepare(
         "SELECT i.id, i.agent_session_id, i.state, i.close_reason, i.summary, i.kind, i.task_id,
@@ -309,16 +314,16 @@ pub(crate) fn attention(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter().map(|row| item(row, agents)).collect()
+    rows.into_iter().map(|row| item(row, view)).collect()
 }
 
-fn item(row: AttentionRow, agents: &dyn AgentView) -> Result<Attention, SnapshotError> {
+fn item(row: AttentionRow, view: &dyn AttentionView) -> Result<Attention, SnapshotError> {
     let id: AttentionId = word(row.id)?;
     let agent_id: AgentId = word(row.agent_id)?;
     let state: AttentionState = word(row.state)?;
     let kind: AttentionKind = word(row.kind)?;
     let actions = if state == AttentionState::Open {
-        agents.attention_actions(&OpenAttention {
+        view.attention_actions(&OpenAttention {
             id: &id,
             agent_id: &agent_id,
             kind: &kind,

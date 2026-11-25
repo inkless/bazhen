@@ -41,8 +41,8 @@ pub(crate) struct Runner {
     pub(crate) streams: Option<Arc<HolderRuntime>>,
     /// What hooks are given to run, or none when no hook client is built.
     pub(crate) hook: Option<String>,
-    /// The harnesses agents run in, over that hook client; none without one.
-    pub(crate) harnesses: Option<bazhen_harness::Harnesses>,
+    /// The harnesses agents run in, over that hook client, or over where its link would be.
+    pub(crate) harnesses: bazhen_harness::Harnesses,
 }
 
 /// The holder runtime, with the build installed for its new terminals, or why the daemon can't
@@ -95,13 +95,17 @@ pub(crate) async fn holders(startup: &Startup) -> Result<Runner, Refused> {
     });
     let holder = Holder::new(runtime, config.history_lines);
     let hook = hook.map(|hook| hook.path.to_string_lossy().into_owned());
-    let harnesses = hook.as_ref().map(|hook| {
-        harnesses::served(World {
-            hook: hook.clone(),
-            user_env: captured.env.clone(),
-            home: startup.home.clone(),
-            socket: startup.paths.socket.clone(),
-        })
+    // Served without a client too, so agents an earlier start launched are still described;
+    // no launch gives a hook to run until one is built.
+    let harnesses = harnesses::served(World {
+        hook: hook.clone().unwrap_or_else(|| {
+            hook_link::link_in(&state.join("hook"))
+                .to_string_lossy()
+                .into_owned()
+        }),
+        user_env: captured.env.clone(),
+        home: startup.home.clone(),
+        socket: startup.paths.socket.clone(),
     });
     Ok(Runner {
         streams: Some(holder.runtime()),

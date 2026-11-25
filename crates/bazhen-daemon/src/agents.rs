@@ -4,6 +4,8 @@
 //! of launching twice (§5.1).
 
 pub(crate) mod prompts;
+pub(crate) mod transcript;
+pub(crate) mod view;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -218,8 +220,9 @@ pub(crate) struct AgentsDeps {
     /// The daemon's tasks, which every command runs on to its end.
     pub(crate) tracker: TaskTracker,
     pub(crate) roles: Arc<Roles>,
-    /// The harnesses served, or none while no hook client is built.
-    pub(crate) harnesses: Option<Harnesses>,
+    pub(crate) harnesses: Harnesses,
+    /// Whether a hook client is built, which every agent reports through.
+    pub(crate) hook_built: bool,
     pub(crate) tokens: AgentTokens,
     pub(crate) prompts: Prompts,
     /// With `agents.shell = "login"`, the shell every agent starts through.
@@ -301,6 +304,16 @@ impl Agents {
         self.deps.store.run(move |store| store.write(job)).await?
     }
 
+    /// What the state's agents are described with now: the harnesses served, and the roles in
+    /// force as they read at this call.
+    pub(crate) fn view(self: &Arc<Self>) -> view::AgentsView {
+        view::AgentsView::new(Arc::clone(self), self.deps.roles.current())
+    }
+
+    pub(crate) fn harnesses(&self) -> &Harnesses {
+        &self.deps.harnesses
+    }
+
     /// Launches one agent. A repeat of the key while the launch is in flight gets the answer so
     /// far.
     pub(crate) async fn launch(
@@ -323,12 +336,10 @@ impl Agents {
         if let Some(prior) = self.write(move |w| replayed(w, &k, &a)).await? {
             return Ok(prior);
         }
-        let harnesses = self
-            .deps
-            .harnesses
-            .as_ref()
-            .ok_or_else(|| AgentError::Unavailable(NO_HOOK.to_owned()))?;
-        let harness = harnesses.get(req.harness).ok_or_else(|| {
+        if !self.deps.hook_built {
+            return Err(AgentError::Unavailable(NO_HOOK.to_owned()));
+        }
+        let harness = self.deps.harnesses.get(req.harness).ok_or_else(|| {
             AgentError::Unsupported(format!(
                 "this environment cannot run {}",
                 req.harness.as_str()
@@ -664,7 +675,7 @@ impl Agents {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
     use std::sync::Mutex as StdMutex;
@@ -681,10 +692,10 @@ mod tests {
     use crate::testing::{TempDir, runtime};
 
     /// Agents on a fake runtime, over a store of their own, whose user's home holds `repo`.
-    struct Fixture {
-        agents: Arc<Agents>,
+    pub(crate) struct Fixture {
+        pub(crate) agents: Arc<Agents>,
         fake: Fake,
-        store: Writer,
+        pub(crate) store: Writer,
         home: String,
         run: PathBuf,
         _dir: TempDir,
@@ -699,23 +710,25 @@ mod tests {
         }
     }
 
-    struct Setup {
-        harnesses: Option<Harnesses>,
-        max: u64,
-        login_shell: Option<String>,
+    pub(crate) struct Setup {
+        pub(crate) harnesses: Harnesses,
+        pub(crate) hook_built: bool,
+        pub(crate) max: u64,
+        pub(crate) login_shell: Option<String>,
     }
 
     impl Default for Setup {
         fn default() -> Self {
             Self {
-                harnesses: Some(StubHarness::new(pull()).served_as(HarnessId::ClaudeCode)),
+                harnesses: StubHarness::new(pull()).served_as(HarnessId::ClaudeCode),
+                hook_built: true,
                 max: 100,
                 login_shell: None,
             }
         }
     }
 
-    fn setup_with(setup: Setup) -> Fixture {
+    pub(crate) fn setup_with(setup: Setup) -> Fixture {
         let dir = TempDir::new("agents");
         let path = dir.path().join("bazhen.db");
         let (store, thread) =
@@ -740,6 +753,7 @@ mod tests {
             tracker: TaskTracker::new(),
             roles: Arc::new(Roles::new(None)),
             harnesses: setup.harnesses,
+            hook_built: setup.hook_built,
             tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
             prompts: prompts::daemon_prompts(&run, uid),
             login_shell: setup.login_shell,
@@ -760,14 +774,14 @@ mod tests {
     }
 
     /// The stub `setup` serves, with what it was asked.
-    fn stubbed(stub: &StubHarness) -> Fixture {
+    pub(crate) fn stubbed(stub: &StubHarness) -> Fixture {
         setup_with(Setup {
-            harnesses: Some(stub.served_as(HarnessId::ClaudeCode)),
+            harnesses: stub.served_as(HarnessId::ClaudeCode),
             ..Setup::default()
         })
     }
 
-    fn request(key: &str) -> LaunchAgentRequest {
+    pub(crate) fn request(key: &str) -> LaunchAgentRequest {
         LaunchAgentRequest {
             idempotency_key: key.to_owned(),
             harness: HarnessId::ClaudeCode,
@@ -788,7 +802,10 @@ mod tests {
     }
 
     impl Fixture {
-        async fn launch(&self, req: LaunchAgentRequest) -> Result<LaunchAgentResponse, AgentError> {
+        pub(crate) async fn launch(
+            &self,
+            req: LaunchAgentRequest,
+        ) -> Result<LaunchAgentResponse, AgentError> {
             self.agents.launch(&req).await
         }
 
@@ -1094,7 +1111,7 @@ mod tests {
     #[test]
     fn refuses_a_harness_the_environment_cant_run_before_recording_anything() {
         let f = setup_with(Setup {
-            harnesses: Some(production_for_test()),
+            harnesses: production_for_test(),
             ..Setup::default()
         });
         let refused = runtime().block_on(f.launch(LaunchAgentRequest {
@@ -1113,7 +1130,7 @@ mod tests {
     #[test]
     fn starts_claude_code_on_a_session_it_names_reading_its_prompt_from_the_file() {
         let f = setup_with(Setup {
-            harnesses: Some(production_for_test()),
+            harnesses: production_for_test(),
             ..Setup::default()
         });
         let answer = runtime().block_on(f.launch(request("k-1"))).unwrap();
@@ -1145,7 +1162,7 @@ mod tests {
     #[test]
     fn refuses_every_launch_while_no_hook_client_is_built_recording_nothing() {
         let f = setup_with(Setup {
-            harnesses: None,
+            hook_built: false,
             ..Setup::default()
         });
         let refused = runtime().block_on(f.launch(request("k-1")));
@@ -1245,7 +1262,7 @@ mod tests {
     fn refuses_a_launch_past_the_budget_starting_and_recording_nothing() {
         let stub = StubHarness::new(pull());
         let f = setup_with(Setup {
-            harnesses: Some(stub.served_as(HarnessId::ClaudeCode)),
+            harnesses: stub.served_as(HarnessId::ClaudeCode),
             max: 1,
             ..Setup::default()
         });
@@ -1405,7 +1422,7 @@ mod tests {
             .map(|(id, delivery)| {
                 let stub = StubHarness::new(bazhen_harness::Capabilities { delivery, ..pull() });
                 let f = setup_with(Setup {
-                    harnesses: Some(stub.served_as(id)),
+                    harnesses: stub.served_as(id),
                     ..Setup::default()
                 });
                 let answer = runtime()

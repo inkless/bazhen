@@ -238,8 +238,14 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
             .as_ref()
             .is_some_and(|shells| shells.reports()),
     };
+    let agents = shared.agents.as_ref().map(crate::agents::Agents::view);
     let read = tokio::task::spawn_blocking(move || -> Result<StateSnapshot, SnapshotError> {
-        store.reader()?.reads().snapshot(&view)
+        let reader = store.reader()?;
+        let reads = reader.reads();
+        match &agents {
+            Some(agents) => reads.snapshot_with_agents(&view, agents, None),
+            None => reads.snapshot(&view),
+        }
     })
     .await;
     match read {
@@ -252,7 +258,7 @@ async fn state(State(shared): State<Shared>, viewer: Option<Extension<Viewer>>) 
             }
             axum::Json(snapshot).into_response()
         }
-        Ok(Err(needs @ SnapshotError::NeedsAgentView(_))) => fail(
+        Ok(Err(needs @ SnapshotError::NeedsView(_))) => fail(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::Unavailable,
             &needs.to_string(),
@@ -603,6 +609,33 @@ mod tests {
                 503,
                 refused("unavailable", "this daemon can't describe agents yet")
             )
+        );
+    }
+
+    #[test]
+    fn describes_the_agents_it_runs_in_the_state_as_their_harness_says() {
+        use crate::testing::stub_harness::{StubHarness, pull};
+        let f = crate::agents::tests::stubbed(&StubHarness::new(pull()));
+        let launched = crate::testing::runtime()
+            .block_on(f.launch(crate::agents::tests::request("k-1")))
+            .unwrap();
+        let shared = Shared::new("f".repeat(64).as_str(), Stop::default(), f.store.clone())
+            .with_agents(Arc::clone(&f.agents));
+        let (status, body) = send(socket_router(shared), request("GET", "/v1/state", &[]));
+        assert_eq!(
+            (
+                status,
+                &body["agents"][0]["id"],
+                &body["agents"][0]["themes"],
+                &body["agents"][0]["resumable"],
+            ),
+            (
+                200,
+                &json!(launched.agent_id.as_str()),
+                &json!(["dark"]),
+                &json!(false)
+            ),
+            "{body}"
         );
     }
 
