@@ -18,7 +18,7 @@ use crate::tokens::AgentTokens;
 use crate::writer::Thread;
 
 /// The root process the fake runtime records for an agent's first terminal.
-const ROOT: i32 = 5000;
+pub(super) const ROOT: i32 = 5000;
 
 /// A Claude Code agent launched on the fake runtime, on the session `session-1`.
 struct Fixture {
@@ -88,7 +88,7 @@ fn fixture() -> Fixture {
 }
 
 /// A hook client whose parent runs from `line`, each process by its pid and name, nearest first.
-fn caller(line: &[(i32, &str)]) -> PeerRead {
+pub(super) fn caller(line: &[(i32, &str)]) -> PeerRead {
     PeerRead::Read(peer_on(line))
 }
 
@@ -105,7 +105,7 @@ fn peer_on(line: &[(i32, &str)]) -> Peer {
 }
 
 /// The TUI the agent's terminal runs.
-fn its_tui() -> PeerRead {
+pub(super) fn its_tui() -> PeerRead {
     caller(&[(ROOT, "claude")])
 }
 

@@ -54,9 +54,15 @@ impl Waiters {
     }
 
     /// Whether `agent` holds a waiter, which mail sent to it would wake.
-    #[cfg(test)]
     pub(crate) fn holds(&self, agent: &AgentId) -> bool {
         self.held().contains_key(agent)
+    }
+
+    /// Answers `agent`'s held waiter with `reply`, which lets it go; whether it held one whose
+    /// client was still there to take it.
+    pub(crate) fn answer(&self, agent: &AgentId, reply: HookReply) -> bool {
+        let held = self.held().remove(agent);
+        held.is_some_and(|entry| entry.answer.send(reply).is_ok())
     }
 
     fn held(&self) -> MutexGuard<'_, HashMap<AgentId, Entry>> {

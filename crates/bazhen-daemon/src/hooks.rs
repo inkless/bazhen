@@ -8,6 +8,7 @@
 
 mod activity;
 mod binding;
+pub(crate) mod mailbox;
 mod waiters;
 
 use std::collections::HashMap;
@@ -34,6 +35,7 @@ use bazhen_protocol::mail::{
 use bazhen_store::{AgentBinding, Store};
 
 use self::activity::{Change, Tracker};
+use self::mailbox::{Deadlines, Mailbox};
 use self::waiters::{Waiters, Waiting};
 use crate::accept::Holdable;
 use crate::callers::{Identity, Presented, identified, presented_by};
@@ -50,11 +52,13 @@ const CLIP_CHARS: usize = 80;
 
 const NO_SUCH_AGENT: &str = "the daemon runs no such agent";
 
-/// What the hooks keep between requests: what each agent is doing, its waiter, and its turn.
+/// What the hooks keep between requests: what each agent is doing, its waiter, its mail in
+/// flight, and its turn.
 #[derive(Debug)]
 pub(crate) struct Hooks {
     activity: StdMutex<Tracker>,
     waiters: Arc<Waiters>,
+    pub(crate) mailbox: Mailbox,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -218,11 +222,12 @@ async fn taken(
         .ingest(shared, &agent, hook, peer.as_ref())
         .await
     {
-        Ok(Some(mut waiting)) => {
+        Ok(Answering::Held(mut waiting)) => {
             let _holding = holdable.map(Holdable::hold);
             framed(&waiting.answered().await)
         }
-        Ok(None) => framed(&quiet()),
+        Ok(Answering::Now(reply)) => framed(&reply),
+        Ok(Answering::Quiet) => framed(&quiet()),
         Err(why) => {
             dropped(event, said, &why);
             framed(&quiet())
@@ -239,17 +244,37 @@ pub(crate) async fn ack(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let answered = || axum::Json(serde_json::json!({})).into_response();
     let Ok(ack) = edge::<HookAck>(&body) else {
         return answered();
     };
     let read = peer_of(&shared, socket).await;
+    acked(&shared, &ack, presented_by(&headers).token, read).await
+}
+
+/// What an ack is answered with: nothing, for the client has nothing to do with it.
+fn answered() -> Response {
+    axum::Json(serde_json::json!({})).into_response()
+}
+
+/// Confirms the offers `ack` names, once it identifies the agent acking them.
+async fn acked(
+    shared: &Shared,
+    ack: &HookAck,
+    token: Option<String>,
+    read: Option<PeerRead>,
+) -> Response {
     let presented = Presented {
-        token: presented_by(&headers).token,
+        token,
         said: Some(ack.agent_id.as_str().to_owned()),
         thread: None,
     };
-    match identified(&shared, read, presented).await {
+    match identified(shared, read, presented).await {
+        Ok(Identity::Agent(agent)) => {
+            if let Err(err) = shared.hooks.mailbox.ack(shared, &agent, &ack.offered).await {
+                tracing::warn!("bazhen: dropped an ack of agent {agent}'s mail: {err}");
+            }
+            answered()
+        }
         Ok(Identity::Refused {
             reason,
             retry: true,
@@ -282,6 +307,15 @@ async fn write<T: Send + 'static>(
         .map_err(|err| err.to_string())
 }
 
+/// How a hook is answered.
+#[derive(Debug)]
+enum Answering {
+    Quiet,
+    Now(HookReply),
+    /// Held, until mail or a newer waiter answers it.
+    Held(Waiting),
+}
+
 /// What a hook's report passes, as the daemon finds the session it came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Passes {
@@ -305,23 +339,31 @@ impl Passes {
 impl Hooks {
     /// Hooks whose start wait is `start_wait`.
     pub(crate) fn waiting(start_wait: Duration) -> Self {
+        Self::with_deadlines(start_wait, Deadlines::default())
+    }
+
+    /// Hooks whose start wait is `start_wait`, and whose mail's deadlines are `deadlines`.
+    pub(crate) fn with_deadlines(start_wait: Duration, deadlines: Deadlines) -> Self {
+        let waiters = Arc::<Waiters>::default();
         Self {
             activity: StdMutex::new(Tracker::default()),
-            waiters: Arc::default(),
+            mailbox: Mailbox::new(Arc::clone(&waiters), deadlines),
+            waiters,
             order: StdMutex::new(HashMap::new()),
             start_wait,
         }
     }
 
     /// Reads `hook` for `agent` through its harness, and applies what it says. A waiter its gate
-    /// passes is registered, and comes back to be held.
+    /// passes is registered, and comes back to be held; a fold is answered with the mail it
+    /// takes.
     async fn ingest(
         &self,
         shared: &Shared,
         agent: &AgentId,
         hook: &HookRequest,
         peer: Option<&Peer>,
-    ) -> Result<Option<Waiting>, String> {
+    ) -> Result<Answering, String> {
         let binding = binding_of(&shared.store, agent)
             .await?
             .ok_or(NO_SUCH_AGENT)?;
@@ -341,9 +383,10 @@ impl Hooks {
             event: hook.event.as_str(),
             payload: hook.payload.get().as_bytes(),
         };
+        let offered = mailbox::offered(shared, agent).await?;
         let context = IngestContext {
             agent: Some(agent),
-            offered: &[],
+            offered: &offered,
             session: session.as_ref(),
         };
         let ingested = harness.ingest(report, &context);
@@ -384,12 +427,11 @@ impl Hooks {
                 };
                 Err(why)
             } else {
-                let waits = ingested.reply == Reply::Hold(Held::Waiter);
                 match self
                     .apply(shared, agent, hook, &origin, passes, &ingested.observed)
                     .await
                 {
-                    Ok(()) => self.waits(shared, agent, waits).await,
+                    Ok(()) => self.reply(shared, agent, &ingested.reply).await,
                     Err(why) => Err(why),
                 }
             }
@@ -459,8 +501,32 @@ impl Hooks {
                 Observed::Activity(doing) => Change::Doing(doing.clone()),
                 Observed::SubagentStarted { id } => Change::SubagentStarted(id.clone()),
                 Observed::SubagentStopped { id } => Change::SubagentStopped(id.clone()),
-                Observed::SessionStarted { compacted: false } => {
-                    self.tracker().session_started(agent);
+                Observed::SessionStarted { compacted } => {
+                    let mailbox = &self.mailbox;
+                    mailbox.session_started(shared, agent, *compacted).await?;
+                    if !*compacted {
+                        self.tracker().session_started(agent);
+                    }
+                    continue;
+                }
+                Observed::PromptStarted { prompt_id, carries } => {
+                    let prompt = prompt_id.as_deref();
+                    let mailbox = &self.mailbox;
+                    mailbox
+                        .prompt_started(shared, agent, prompt, carries)
+                        .await?;
+                    continue;
+                }
+                Observed::TurnEnded { prompt_id } => {
+                    let prompt = prompt_id.as_deref();
+                    self.mailbox
+                        .turn_ended(shared, agent, prompt, false)
+                        .await?;
+                    continue;
+                }
+                Observed::TurnFailed { prompt_id, .. } => {
+                    let prompt = prompt_id.as_deref();
+                    self.mailbox.turn_ended(shared, agent, prompt, true).await?;
                     continue;
                 }
                 Observed::Compacted { sign } => {
@@ -497,19 +563,39 @@ impl Hooks {
     /// Registers `agent`'s waiter, where the report holds one, but for an agent that has closed,
     /// whose waiter is answered at once. A newer waiter answers the one it replaces, as does a
     /// session that started over, whose start only a waiter reports.
-    async fn waits(
-        &self,
-        shared: &Shared,
-        agent: &AgentId,
-        waits: bool,
-    ) -> Result<Option<Waiting>, String> {
-        if !waits {
-            return Ok(None);
-        }
+    async fn waits(&self, shared: &Shared, agent: &AgentId) -> Result<Option<Waiting>, String> {
         let closed = binding_of(&shared.store, agent)
             .await?
             .is_none_or(|binding| binding.state == "closed");
-        Ok((!closed).then(|| self.waiters.wait(agent)))
+        if closed {
+            return Ok(None);
+        }
+        let waiting = self.waiters.wait(agent);
+        self.mailbox.offer(shared, agent).await?;
+        Ok(Some(waiting))
+    }
+
+    /// How the report's hook is answered, once its facts are applied: a waiter is held, with any
+    /// queued mail offered to it, and a fold takes the mail that fits.
+    async fn reply(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        reply: &Reply,
+    ) -> Result<Answering, String> {
+        match reply {
+            Reply::Hold(Held::Waiter) => Ok(match self.waits(shared, agent).await? {
+                Some(waiting) => Answering::Held(waiting),
+                None => Answering::Quiet,
+            }),
+            Reply::Hold(Held::Fold { prompt_id }) => {
+                let folded = self.mailbox.fold(shared, agent, prompt_id).await?;
+                Ok(Answering::Now(folded))
+            }
+            Reply::Hold(Held::Approval { .. }) | Reply::Now(_) | Reply::Quiet => {
+                Ok(Answering::Quiet)
+            }
+        }
     }
 
     fn tracker(&self) -> std::sync::MutexGuard<'_, Tracker> {
