@@ -1336,6 +1336,112 @@ fn completes_a_workers_part_telling_its_giver_and_those_under_it_and_lifting_wha
 }
 
 #[test]
+fn completes_a_workers_part_for_a_giver_gone_or_unreachable_raising_nothing_and_mailing_no_one() {
+    let complete = |giver: &'static str| {
+        let f = fixture(pull());
+        let (_, task) = create_as(
+            &f,
+            Some(&f.peer),
+            &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+        );
+        let task = task["taskId"].as_str().unwrap().to_owned();
+        granted_id(&assign_as(
+            &f,
+            Some(&f.peer),
+            &task,
+            "w",
+            f.to.as_str(),
+            "worker",
+        ));
+        let peer = f.peer.as_str().to_owned();
+        sql(&f, move |db| db.execute(giver, [&peer]));
+        let before = bodies(&f).len();
+        let answer = finish_as(&f, Some(&f.to), &task, &finishing("f", "done", None, false));
+        (answer.0, bodies(&f)[before..].to_vec(), items(&f))
+    };
+    let told_no_one = (200, Vec::new(), Vec::new());
+    assert_eq!(
+        [
+            complete("UPDATE agent_sessions SET state = 'closed' WHERE id = ?"),
+            complete("UPDATE agent_sessions SET harness = 'gone' WHERE id = ?"),
+        ],
+        [told_no_one.clone(), told_no_one]
+    );
+}
+
+#[test]
+fn refuses_a_finish_whose_mail_would_run_past_the_limit_for_a_task_or_a_workers_part() {
+    let f = fixture(pull());
+    // No one to tell, so only the finish's own check keeps its mail within the mailbox's limit.
+    let lonely = made(&f, "c", "b");
+    let lines = vec!["a"; 10_000].join("\n");
+    let whole = length(&finished_mail(
+        &named(&f, &lonely),
+        TaskOutcome::Done,
+        None,
+        Some(&lines),
+    ));
+    let (_, task) = create_as(
+        &f,
+        Some(&f.peer),
+        &json!({ "idempotencyKey": "o", "title": "T", "brief": "b" }),
+    );
+    let task = task["taskId"].as_str().unwrap().to_owned();
+    granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &task,
+        "w",
+        f.to.as_str(),
+        "worker",
+    ));
+    let name = agent_named(&f, &f.to);
+    let worker = Agent {
+        id: &f.to,
+        name: &name,
+    };
+    let named = named(&f, &task);
+    let mail_of = |note: &str| length(&completed_mail(&named, worker, Some(note)));
+    // A note one unit too long for the mail to the giver, though a task's finish would carry it.
+    let note = "n".repeat(MAIL_LIMIT + 2 - mail_of("n"));
+    let part = mail_of(&note);
+    let too_long = |mail: usize| {
+        (
+            400,
+            format!(
+                "the message to the agent would be {mail} characters, over the {MAIL_LIMIT} \
+                 a message may be: shorten what you wrote"
+            ),
+        )
+    };
+    let before = events(&f);
+    assert_eq!(
+        (
+            length(&finished_mail(
+                &named,
+                TaskOutcome::Done,
+                Some(worker),
+                Some(&note)
+            )) <= MAIL_LIMIT,
+            refused(&finish_as(
+                &f,
+                None,
+                &lonely,
+                &finishing("f1", "done", Some(&lines), false)
+            )),
+            refused(&finish_as(
+                &f,
+                Some(&f.to),
+                &task,
+                &finishing("f2", "done", Some(&note), false)
+            )),
+            events(&f),
+        ),
+        (true, too_long(whole), too_long(part), before)
+    );
+}
+
+#[test]
 fn raises_task_done_for_the_human_on_whoever_finished_its_task_or_part_and_on_no_other_finish() {
     let f = fixture(pull());
     // The human gave the worker its part: no agent to tell, so the human hears.
@@ -1481,15 +1587,6 @@ fn refuses_what_it_cant_finish_recording_nothing() {
         f.to.as_str(),
         "worker",
     ));
-    // No one to tell, so only the finish's own check keeps its mail within the mailbox's limit.
-    let lonely = made(&f, "c3", "b");
-    let lines = vec!["a"; 10_000].join("\n");
-    let mail = length(&finished_mail(
-        &named(&f, &lonely),
-        TaskOutcome::Done,
-        None,
-        Some(&lines),
-    ));
     let before = events(&f);
     let long = "n".repeat(bazhen_protocol::edge::FINISH_NOTE_MAX_CHARS + 1);
     assert_eq!(
@@ -1534,12 +1631,6 @@ fn refuses_what_it_cant_finish_recording_nothing() {
                 .0,
                 String::new()
             ),
-            refused(&finish_as(
-                &f,
-                None,
-                &lonely,
-                &finishing("f7", "done", Some(&lines), false)
-            )),
         ],
         [
             (
@@ -1563,13 +1654,6 @@ fn refuses_what_it_cant_finish_recording_nothing() {
                 format!("subtasks {sub} are the human's: only the human cancels them")
             ),
             (400, String::new()),
-            (
-                400,
-                format!(
-                    "the message to the agent would be {mail} characters, over the {MAIL_LIMIT} \
-                     a message may be: shorten what you wrote"
-                )
-            ),
         ]
     );
     assert_eq!(events(&f), before);

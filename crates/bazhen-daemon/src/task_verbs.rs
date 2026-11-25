@@ -588,17 +588,16 @@ impl Finishing<'_> {
             id,
             name: &caller_name,
         });
-        let long = length(&finished_mail(&task, self.outcome, from, self.note));
-        if long > MAIL_LIMIT {
-            return Err(Sending::TooLong(long).into());
-        }
         let mut event_ids = match finish {
             Finish::Assignment(own) => {
                 let giver = reads.granters(&own.id)?.into_iter().next();
                 let giver = giver.or_else(|| view.owner_agent_id.clone());
                 self.complete(w, harnesses, &task, own, giver, queued)?
             }
-            Finish::Task => self.end_with_subtasks(w, harnesses, from, queued)?,
+            Finish::Task => {
+                within_limit(&finished_mail(&task, self.outcome, from, self.note))?;
+                self.end_with_subtasks(w, harnesses, from, queued)?
+            }
         };
         let lifted = lift_stranded(w, harnesses, queued)?;
         if lifted.outran {
@@ -623,18 +622,19 @@ impl Finishing<'_> {
         queued: &mut Vec<Queued>,
     ) -> Result<Vec<u64>, Granting> {
         let reads = w.reads();
-        let under = reads.active_under(std::slice::from_ref(&own.id))?;
-        let ended = w.end_assignment(self.caller, &own.id, AssignmentEndedReason::Completed)?;
         let worker_name = name_of(reads, Some(&own.agent_id))?;
         let worker = Agent {
             id: &own.agent_id,
             name: &worker_name,
         };
         let body = completed_mail(task, worker, self.note);
+        within_limit(&body)?;
+        let under = reads.active_under(std::slice::from_ref(&own.id))?;
+        let ended = w.end_assignment(self.caller, &own.id, AssignmentEndedReason::Completed)?;
         let mut to = Vec::new();
         match giver {
             Some(agent) => to.push(Tell { agent, body }),
-            None => self.done(w, &own.agent_id, printable(&body))?,
+            None => task_done(w, &own.agent_id, &task.id, printable(&body))?,
         }
         for a in under {
             let on = reads.task(&a.task_id)?.ok_or_else(|| no_such(&a.task_id))?;
@@ -733,7 +733,7 @@ impl Finishing<'_> {
             && ended.outcome == TaskOutcome::Done
             && view.owner_agent_id.is_none()
         {
-            self.done(w, caller, done_summary(&task, ended.note))?;
+            task_done(w, caller, ended.task, done_summary(&task, ended.note))?;
         }
         let told = finished_mail(&task, ended.outcome, from, ended.note);
         let stop = match ended.outcome {
@@ -755,20 +755,34 @@ impl Finishing<'_> {
         event_ids.extend(tell(w, harnesses, to, self.caller, queued)?);
         Ok(event_ids)
     }
+}
 
-    /// Tells the human, through an item raised on `agent`, that the work is done.
-    fn done(&self, w: &StoreWriter<'_>, agent: &AgentId, summary: String) -> Result<(), Granting> {
-        w.open_attention(AttentionOpened {
-            agent_id: agent.clone(),
-            summary,
-            kind: Some(AttentionKind::TaskDone),
-            task_id: Some(self.task.as_str().to_owned()),
-            message_id: None,
-            tool_use_id: None,
-            main_agent: true,
-        })?;
-        Ok(())
+/// Tells the human, through an item raised on `agent`, that the work on `task` is done.
+fn task_done(
+    w: &StoreWriter<'_>,
+    agent: &AgentId,
+    task: &TaskId,
+    summary: String,
+) -> Result<(), Granting> {
+    w.open_attention(AttentionOpened {
+        agent_id: agent.clone(),
+        summary,
+        kind: Some(AttentionKind::TaskDone),
+        task_id: Some(task.as_str().to_owned()),
+        message_id: None,
+        tool_use_id: None,
+        main_agent: true,
+    })?;
+    Ok(())
+}
+
+/// Refuses mail longer than a mailbox takes, before anything is written (`MAIL_LIMIT`).
+fn within_limit(body: &str) -> Result<(), Granting> {
+    let long = length(body);
+    if long > MAIL_LIMIT {
+        return Err(Sending::TooLong(long).into());
     }
+    Ok(())
 }
 
 /// A task a finish ends: the one asked for, or a subtask cancelled with it.
