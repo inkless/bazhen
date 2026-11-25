@@ -24,6 +24,7 @@ mod private;
 mod projections;
 mod snapshot;
 mod task_events;
+mod task_reads;
 mod tasks;
 mod terminals;
 #[cfg(test)]
@@ -60,6 +61,7 @@ pub use mailbox::{Mail, Message, ObservedSend, Sender};
 pub use migrations::{MIGRATIONS, Migration, NUMBERED_MIGRATIONS};
 pub use snapshot::{SnapshotError, SnapshotView};
 pub use task_events::{AssignmentChange, TaskChange};
+pub use task_reads::{Stranded, TaskReadError};
 pub use tasks::{CreateTaskError, NewTask};
 pub use terminals::{AgentTerminal, RuntimeRow, ShellRow, start_unsettled, takes_exit};
 

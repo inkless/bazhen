@@ -214,13 +214,26 @@ fn notices(db: &rusqlite::Connection) -> Result<Vec<Notice>, SnapshotError> {
         .collect::<Result<_, _>>()?)
 }
 
-/// Each row `sql` reads, as the protocol type its columns name; a column read as `accepted`, a
-/// comparison, is a boolean.
+/// The columns read as booleans: `accepted`, a comparison, and a note's `handoff`, which `SQLite`
+/// keeps as 0 or 1.
+const BOOLEAN_COLUMNS: [&str; 2] = ["accepted", "handoff"];
+
+/// Each row `sql` reads, as the protocol type its columns name; a column of `BOOLEAN_COLUMNS` is a
+/// boolean.
 fn rows<T: DeserializeOwned>(
     db: &rusqlite::Connection,
     sql: &str,
     params: impl rusqlite::Params,
 ) -> Result<Vec<T>, SnapshotError> {
+    read_rows(db, sql, params)
+}
+
+/// [`rows`], for a read with an error of its own.
+pub(crate) fn read_rows<T: DeserializeOwned, E: From<rusqlite::Error> + From<serde_json::Error>>(
+    db: &rusqlite::Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<T>, E> {
     let mut statement = db.prepare(sql)?;
     let names: Vec<String> = statement.column_names().map(str::to_owned).collect();
     let objects = statement
@@ -228,7 +241,11 @@ fn rows<T: DeserializeOwned>(
             let mut object = Map::new();
             for (i, name) in names.iter().enumerate() {
                 let value = match row.get_ref(i)? {
-                    rusqlite::types::ValueRef::Integer(n) if name == "accepted" => (n == 1).into(),
+                    rusqlite::types::ValueRef::Integer(n)
+                        if BOOLEAN_COLUMNS.contains(&name.as_str()) =>
+                    {
+                        (n == 1).into()
+                    }
                     rusqlite::types::ValueRef::Integer(n) => n.into(),
                     rusqlite::types::ValueRef::Text(t) => {
                         String::from_utf8_lossy(t).into_owned().into()
