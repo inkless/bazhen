@@ -36,6 +36,8 @@ pub(crate) struct StubHarness {
     resume_refusal: Option<LaunchError>,
     /// What it says of whether any session resumes.
     resumes: bool,
+    /// What it says of whether a session is one agent's at a time.
+    held_alone: bool,
 }
 
 impl StubHarness {
@@ -47,6 +49,7 @@ impl StubHarness {
             refusal: None,
             resume_refusal: None,
             resumes: false,
+            held_alone: false,
         }
     }
 
@@ -54,6 +57,14 @@ impl StubHarness {
     pub(crate) fn resuming(self) -> Self {
         Self {
             resumes: true,
+            ..self
+        }
+    }
+
+    /// The same, saying a session is one agent's at a time.
+    pub(crate) fn held_alone(self) -> Self {
+        Self {
+            held_alone: true,
             ..self
         }
     }
@@ -168,6 +179,10 @@ impl Harness for StubHarness {
                 id: session.id.clone(),
             }),
         })))
+    }
+
+    fn session_held_alone(&self) -> bool {
+        self.held_alone
     }
 
     fn can_resume(&self, _evidence: &Evidence<'_>) -> bool {

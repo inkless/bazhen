@@ -68,6 +68,10 @@ pub(crate) enum AgentError {
     /// The agent has no harness session that starting it again could resume.
     #[error("agent {0} has no session to resume")]
     NotResumable(String),
+    /// The session it would resume is another agent's too, for a harness whose sessions are one
+    /// agent's at a time; answered as not resumable.
+    #[error("{0}")]
+    SessionTaken(String),
     #[error("{0}")]
     ServerUnconfirmed(String),
     #[error("{0}")]

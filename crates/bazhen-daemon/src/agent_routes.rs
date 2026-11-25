@@ -34,7 +34,9 @@ pub(crate) fn refusal(err: &AgentError) -> Response {
         AgentError::Unknown(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
         AgentError::Conflict(_) => (StatusCode::CONFLICT, ErrorCode::Conflict),
         AgentError::Stale { .. } => (StatusCode::CONFLICT, ErrorCode::StaleGeneration),
-        AgentError::NotResumable(_) => (StatusCode::CONFLICT, ErrorCode::NotResumable),
+        AgentError::NotResumable(_) | AgentError::SessionTaken(_) => {
+            (StatusCode::CONFLICT, ErrorCode::NotResumable)
+        }
         AgentError::ServerUnconfirmed(_) => (StatusCode::CONFLICT, ErrorCode::ServerUnconfirmed),
         AgentError::NeedsRestart(_) => (StatusCode::CONFLICT, ErrorCode::NeedsRestart),
         AgentError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
@@ -274,6 +276,7 @@ mod tests {
             },
             AgentError::ServerUnconfirmed("x".to_owned()),
             AgentError::NotResumable("x".to_owned()),
+            AgentError::SessionTaken("x".to_owned()),
             AgentError::NeedsRestart("x".to_owned()),
             AgentError::Shells(crate::shells::ShellError::Busy {
                 message: "vim is running in agent x's shells".to_owned(),
@@ -309,6 +312,7 @@ mod tests {
                 (409, code("conflict")),
                 (409, code("stale_generation")),
                 (409, code("server_unconfirmed")),
+                (409, code("not_resumable")),
                 (409, code("not_resumable")),
                 (409, code("needs_restart")),
                 (409, code("busy")),

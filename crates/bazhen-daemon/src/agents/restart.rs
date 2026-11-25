@@ -173,6 +173,7 @@ impl Agents {
             .as_ref()
             .filter(|_| self.resumes(&launch))
             .ok_or_else(|| AgentError::NotResumable(id.to_owned()))?;
+        self.refuse_taken(&agent, &launch, session).await?;
         let roles = self.deps.roles.current();
         let prompt = compose(FLEET, &roles.book, launch.role.as_ref());
         let prompt_file = self
@@ -222,6 +223,40 @@ impl Agents {
                 .await
             }
         }
+    }
+
+    /// Refuses to start `agent` again on a session another agent holds, for a harness whose
+    /// sessions are one agent's at a time (`refuseTaken`).
+    pub(super) async fn refuse_taken(
+        &self,
+        agent: &AgentId,
+        launch: &AgentLaunch,
+        session: &ExternalRef,
+    ) -> Result<(), AgentError> {
+        let held_alone = self
+            .deps
+            .harnesses
+            .get(launch.harness)
+            .is_some_and(bazhen_harness::Harness::session_held_alone);
+        if !held_alone {
+            return Ok(());
+        }
+        let asked = session.clone();
+        let holders = self
+            .write(move |w| Ok(w.reads().session_holders(&asked)?))
+            .await?;
+        let others: Vec<String> = holders
+            .into_iter()
+            .filter(|holder| holder != agent.as_str())
+            .collect();
+        if others.is_empty() {
+            return Ok(());
+        }
+        Err(AgentError::SessionTaken(format!(
+            "agent {agent} can't resume session {}: {} is on it too",
+            session.id,
+            others.join(", ")
+        )))
     }
 
     /// Whether the agent's harness says its session resumes, by what its reports said of it.
