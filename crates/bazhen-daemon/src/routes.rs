@@ -1801,29 +1801,35 @@ mod tests {
 
     #[test]
     fn refuses_an_unassign_it_cant_read_or_run_without_agents() {
-        let (socket, _, _path, _finish) = over_a_store();
+        let (socket, http, _path, _finish) = over_a_store();
         let path = "/v1/tasks/task_01900000000070008000000000000009/unassign";
         let asgn = "asgn_01900000000070008000000000000009";
         let (status, invalid) = send(
             socket.clone(),
             post(path, &[], &json!({ "idempotencyKey": "a" })),
         );
+        let asked = |router: Router, headers: &[(&str, &str)], key: &str| {
+            let body = json!({ "idempotencyKey": key, "assignmentId": asgn });
+            let (status, answer) = send(router, post(path, headers, &body));
+            (status, answer["message"].clone())
+        };
         assert_eq!(
-            [(status, invalid["error"].clone()), {
-                let body = json!({ "idempotencyKey": "b", "assignmentId": asgn });
-                let (status, answer) = send(socket, post(path, &[], &body));
-                (status, answer["message"].clone())
-            },],
+            [
+                (status, invalid["error"].clone()),
+                asked(socket, &[], "b"),
+                asked(http, &LOCAL, "c"),
+            ],
             [
                 (400, json!("invalid_request")),
-                (503, json!("this daemon runs no terminals"))
+                (503, json!("this daemon runs no terminals")),
+                (503, json!("this daemon runs no terminals")),
             ]
         );
     }
 
     #[test]
     fn refuses_a_finish_it_cant_read_or_run_without_agents() {
-        let (socket, _, _path, _finish) = over_a_store();
+        let (socket, http, _path, _finish) = over_a_store();
         let path = "/v1/tasks/task_01900000000070008000000000000009/finish";
         let (status, invalid) = send(
             socket.clone(),
@@ -1833,15 +1839,21 @@ mod tests {
                 &json!({ "idempotencyKey": "a", "outcome": "finished" }),
             ),
         );
+        let asked = |router: Router, headers: &[(&str, &str)], key: &str| {
+            let body = json!({ "idempotencyKey": key, "outcome": "done" });
+            let (status, answer) = send(router, post(path, headers, &body));
+            (status, answer["message"].clone())
+        };
         assert_eq!(
-            [(status, invalid["error"].clone()), {
-                let body = json!({ "idempotencyKey": "b", "outcome": "done" });
-                let (status, answer) = send(socket, post(path, &[], &body));
-                (status, answer["message"].clone())
-            },],
+            [
+                (status, invalid["error"].clone()),
+                asked(socket, &[], "b"),
+                asked(http, &LOCAL, "c"),
+            ],
             [
                 (400, json!("invalid_request")),
-                (503, json!("this daemon runs no terminals"))
+                (503, json!("this daemon runs no terminals")),
+                (503, json!("this daemon runs no terminals")),
             ]
         );
     }
