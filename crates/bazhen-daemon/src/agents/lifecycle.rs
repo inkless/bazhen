@@ -360,7 +360,8 @@ impl Agents {
     }
 
     /// What follows an agent's close once it is recorded, whatever recorded it: no process runs
-    /// on its token or reads its prompt again, and the waiter it held is answered.
+    /// on its token or reads its prompt again, the waiter it held is answered, and its mail is
+    /// forgotten.
     pub(super) async fn after_closed(&self, agent: &AgentId) {
         self.deps.tokens.forget(agent);
         self.deps.prompts.remove(agent);

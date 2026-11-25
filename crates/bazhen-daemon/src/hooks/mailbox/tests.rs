@@ -643,15 +643,12 @@ fn forgets_a_closed_agents_mail_and_the_deadlines_it_held() {
 impl Fixture {
     fn close(&self) -> Result<(), crate::agents::AgentError> {
         let agents = self.shared.agents.as_deref().unwrap();
-        let agent = self.agent.clone();
-        let generation = self
-            .runtime
-            .block_on(write(&self.shared.store, move |w| {
-                Ok(w.reads()
-                    .agent_terminal(agent.as_str())?
-                    .and_then(|found| found.generation))
-            }))
+        let reader = self.shared.store.reader().unwrap();
+        let generation = reader
+            .reads()
+            .agent_terminal(self.agent.as_str())
             .unwrap()
+            .and_then(|found| found.generation)
             .unwrap_or_default();
         let request = bazhen_protocol::agents::CloseAgentRequest {
             idempotency_key: "close-1".to_owned(),
