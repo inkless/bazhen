@@ -5,6 +5,7 @@ use bazhen_protocol::ids::{AgentId, MessageId};
 use bazhen_protocol::mail::MailboxState;
 use bazhen_protocol::mail_events::MailQueued;
 use rusqlite::OptionalExtension;
+use rusqlite::types::Type;
 
 use crate::events::{AppendError, NewEvent};
 use crate::{MailChange, Reads, Writer};
@@ -31,7 +32,7 @@ impl Reads<'_> {
     ///
     /// # Errors
     ///
-    /// `SQLite`'s, or a state the protocol doesn't name.
+    /// `SQLite`'s, or a stored state the protocol doesn't name, as a failure to read its column.
     pub fn message(self, id: &str) -> rusqlite::Result<Option<Message>> {
         let row: Option<(String, String, String)> = self
             .0
@@ -42,8 +43,10 @@ impl Reads<'_> {
             )
             .optional()?;
         row.map(|(agent, body, state)| {
-            let state = serde_json::from_value(serde_json::Value::String(state))
-                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+            let state =
+                serde_json::from_value(serde_json::Value::String(state)).map_err(|err| {
+                    rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(err))
+                })?;
             Ok(Message { agent, body, state })
         })
         .transpose()
@@ -78,17 +81,14 @@ impl Writer<'_> {
     ///
     /// # Errors
     ///
-    /// The append's, or no random bytes for the id.
+    /// The append's, or [`AppendError::NoId`] for no random bytes to mint the id with.
     pub fn queue_mail(
         &self,
         agent: &AgentId,
         body: &str,
         from: Option<&AgentId>,
     ) -> Result<(MessageId, u64), AppendError> {
-        let urandom = crate::urandom().map_err(|e| AppendError::Refused {
-            event: "mailbox.queued",
-            reason: format!("no id can be made: {e}"),
-        })?;
+        let urandom = crate::urandom().map_err(AppendError::NoId)?;
         let message = MessageId::mint(crate::now_ms(), urandom);
         let id = self.append(&NewEvent::Mail {
             message: message.clone(),
@@ -121,6 +121,8 @@ mod tests {
     use bazhen_protocol::ids::{AgentId, MessageId};
     use bazhen_protocol::mail::MailboxState;
     use bazhen_protocol::mail_events::{MailAccepted, MailUndeliverable, UndeliverableReason};
+
+    use rusqlite::types::Type;
 
     use super::{Message, Sender};
     use crate::testing::TempDir;
@@ -229,6 +231,28 @@ mod tests {
         assert_eq!(
             (accepted, given_up, state),
             (true, false, Some(MailboxState::QueuedInCodex))
+        );
+    }
+
+    #[test]
+    fn reads_a_stored_state_the_protocol_doesnt_name_as_a_column_it_cant_read() {
+        let dir = TempDir::new("state");
+        let mut store = store(&dir);
+        let message = queued(&mut store, None);
+        store
+            .db
+            .execute(
+                "UPDATE mailbox SET state = 'lost' WHERE id = ?",
+                [message.as_str()],
+            )
+            .unwrap();
+        let read = store.reads().message(message.as_str());
+        assert!(
+            matches!(
+                read,
+                Err(rusqlite::Error::FromSqlConversionFailure(2, Type::Text, _))
+            ),
+            "{read:?}"
         );
     }
 

@@ -45,6 +45,8 @@ pub(crate) struct StubHarness {
     pushed: Arc<Mutex<VecDeque<Pushed>>>,
     /// Each push it was handed, in order, with when, on the runtime's clock.
     pub(crate) pushes: Arc<Mutex<Vec<StubPush>>>,
+    /// What the next push waits on before it answers, while a test holds it.
+    gate: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
 }
 
 /// A message handed to the stub to push.
@@ -69,6 +71,7 @@ impl StubHarness {
             mail_refusal: None,
             pushed: Arc::default(),
             pushes: Arc::default(),
+            gate: Arc::default(),
         }
     }
 
@@ -106,6 +109,13 @@ impl StubHarness {
     pub(crate) fn pushing(self, answers: impl IntoIterator<Item = Pushed>) -> Self {
         self.pushed.lock().unwrap().extend(answers);
         self
+    }
+
+    /// Holds the next push open until what this answers is sent or dropped.
+    pub(crate) fn holding_push(&self) -> tokio::sync::oneshot::Sender<()> {
+        let (open, gate) = tokio::sync::oneshot::channel();
+        *self.gate.lock().unwrap() = Some(gate);
+        open
     }
 
     /// The same, refusing every launch with `refusal`.
@@ -252,7 +262,13 @@ impl Harness for StubHarness {
             at: tokio::time::Instant::now(),
         });
         let answer = self.pushed.lock().unwrap().pop_front();
-        ready(answer.unwrap_or(Pushed::NotNow))
+        let gate = self.gate.lock().unwrap().take();
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                let _ = gate.await;
+            }
+            answer.unwrap_or(Pushed::NotNow)
+        })
     }
 
     fn answer(&self, _to: &Pending<'_>, _with: Resolution<'_>) -> Answer {
