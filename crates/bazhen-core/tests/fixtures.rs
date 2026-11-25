@@ -182,23 +182,98 @@ fn moves_each_machine_as_packages_core_does_and_refuses_in_its_words() -> Result
     )
 }
 
+/// A row where this crate leads packages/core, which is frozen until the cutover makes these
+/// crates the fixtures' source: what each answers there, and why they differ.
+struct KnownDifference {
+    table: &'static str,
+    state: &'static str,
+    terminal_state: Option<&'static str>,
+    rust: &'static [&'static str],
+    ts: &'static [&'static str],
+    why: &'static str,
+}
+
+const KNOWN_CORE_DIFFERENCES: &[KnownDifference] = &[
+    KnownDifference {
+        table: "commands",
+        state: "starting",
+        terminal_state: Some("creating"),
+        rust: &["close"],
+        ts: &[],
+        why: "a start whose create had no answer is closed: through the holder found for it, or once none could have started",
+    },
+    KnownDifference {
+        table: "commands",
+        state: "starting",
+        terminal_state: Some("exited"),
+        rust: &["close"],
+        ts: &[],
+        why: "a respawn whose answer was lost is closed through the holder it was asked of",
+    },
+];
+
 #[test]
-fn offers_the_commands_packages_core_offers_in_every_state() -> Result<()> {
+fn offers_the_commands_packages_core_offers_in_every_state_but_those_it_leads_in() -> Result<()> {
     let rows = read("core", "commands.json")?;
     let rows = rows.as_array().ok_or("commands.json isn't a list")?;
     assert_ne!(rows.len(), 0);
+    let mut differing = BTreeSet::new();
     for row in rows {
         let state: AgentState = decode(&row["state"])?;
         let terminal: Option<TerminalState> = decode(&row["terminalState"])?;
         let generation: Option<u64> = decode(&row["generation"])?;
         let resumes = row["resumes"].as_bool().ok_or("no resumes")?;
+        let known = KNOWN_CORE_DIFFERENCES.iter().position(|known| {
+            known.table == "commands"
+                && row["state"] == known.state
+                && row["terminalState"] == json!(known.terminal_state)
+        });
+        let rust_commands = json!(agent::agent_commands(state, terminal));
+        let rust_offered = json!(agent::offered_commands(state, terminal, generation, || {
+            resumes
+        }));
+        let Some(at) = known else {
+            assert_eq!(rust_commands, row["commands"], "{row}");
+            assert_eq!(rust_offered, row["offered"], "{row}");
+            continue;
+        };
+        differing.insert(at);
+        let known = &KNOWN_CORE_DIFFERENCES[at];
+        // Every command names a generation: an agent without one is offered none.
+        let offered = |commands: &[&str]| {
+            if generation.is_some() {
+                json!(commands)
+            } else {
+                json!([])
+            }
+        };
         assert_eq!(
-            json!(agent::agent_commands(state, terminal)),
-            row["commands"],
+            (&row["commands"], &row["offered"]),
+            (&json!(known.ts), &offered(known.ts)),
+            "packages/core's {row}"
+        );
+        assert_eq!(
+            (rust_commands, rust_offered),
+            (json!(known.rust), offered(known.rust)),
             "{row}"
         );
-        let offered = agent::offered_commands(state, terminal, generation, || resumes);
-        assert_eq!(json!(offered), row["offered"], "{row}");
+    }
+    for (at, known) in KNOWN_CORE_DIFFERENCES.iter().enumerate() {
+        assert!(
+            known.rust != known.ts,
+            "{} {} {:?} differs in nothing: {}",
+            known.table,
+            known.state,
+            known.terminal_state,
+            known.why
+        );
+        assert!(
+            differing.contains(&at),
+            "{} {} {:?} names no row",
+            known.table,
+            known.state,
+            known.terminal_state
+        );
     }
     Ok(())
 }

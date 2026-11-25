@@ -562,7 +562,8 @@ impl Agents {
         }
         match (&agent.terminal_id, agent.terminal_state) {
             (None, _) => true,
-            (Some(terminal), Some(TerminalState::Creating)) => {
+            // A close of one whose create had no answer leaves it closing, as unrecorded.
+            (Some(terminal), Some(TerminalState::Creating | TerminalState::Closing)) => {
                 let since = self.unstartable_since(terminal);
                 self.deps.terminals.unstarted(terminal, since).await
             }
@@ -1018,6 +1019,134 @@ mod tests {
                 AgentState::Lost,
                 Vec::<String>::new(),
             )
+        );
+    }
+
+    /// A launch whose create had no answer, as `answer` makes it, then answers as the fake is
+    /// set: the agent and its terminal.
+    fn unanswered_launch(
+        f: &Fixture,
+        answer: impl FnOnce(&mut crate::terminals::fake::State),
+    ) -> (AgentId, String) {
+        f.fake().set(answer);
+        let answered = runtime().block_on(f.launch(request("k-1")));
+        assert!(may_have_started(&answered), "{answered:?}");
+        f.fake().set(|state| {
+            state.answers_unknown = false;
+            state.creates_refused = None;
+        });
+        let agent = launched_last(f);
+        let terminal = f.terminal_of(agent.as_str());
+        (agent, terminal)
+    }
+
+    fn closing(key: &str, generation: u64, force: bool) -> CloseAgentRequest {
+        CloseAgentRequest {
+            idempotency_key: key.to_owned(),
+            generation,
+            force: force.then_some(true),
+            keep_shells: None,
+            confirm_busy: None,
+            confirmed_busy: None,
+        }
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_launch_whose_create_had_no_answer_through_the_holder_found_for_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, terminal) = unanswered_launch(&f, |state| state.answers_unknown = true);
+        let closed_now =
+            runtime().block_on(f.agents.close(agent.as_str(), &closing("c-1", 0, false)));
+        assert_eq!(
+            (closed_now.is_ok(), state(&f, &agent), closed(&f)),
+            (true, AgentState::Closed, vec![terminal])
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_launch_whose_create_had_no_answer_once_no_holder_could_have_started_it() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, _) = unanswered_launch(&f, |state| {
+            state.creates_refused = Some(TerminalError::Unknown("no answer".to_owned()));
+        });
+        let closed_now =
+            runtime().block_on(f.agents.close(agent.as_str(), &closing("c-1", 0, false)));
+        assert_eq!(
+            (closed_now.is_ok(), state(&f, &agent), closed(&f)),
+            (true, AgentState::Closed, Vec::<String>::new())
+        );
+    }
+
+    /// One not yet proved unstarted is left closing, which force records closed; a close after
+    /// the proof records it so too, as the reconcile does.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn leaves_a_close_of_a_start_not_proved_unstarted_closing_for_force_or_its_proof() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let ends = [true, false].map(|force| {
+            let f = setup_with(crate::agents::tests::Setup::default());
+            let (agent, terminal) = unanswered_launch(&f, |state| {
+                state.creates_refused = Some(TerminalError::Unknown("no answer".to_owned()));
+            });
+            let id = agent.as_str();
+            f.fake().set(|state| {
+                state.unproven.insert(terminal.clone());
+            });
+            let refused = runtime().block_on(f.agents.close(id, &closing("c-1", 0, false)));
+            let left = state(&f, &agent);
+            let ended = if force {
+                runtime()
+                    .block_on(f.agents.close(id, &closing("c-2", 0, true)))
+                    .is_ok()
+            } else {
+                f.fake().set(|state| {
+                    state.unproven.clear();
+                });
+                reconciled(&f.restarted());
+                true
+            };
+            (
+                matches!(refused, Err(AgentError::ServerUnconfirmed(_))),
+                left,
+                ended,
+                state(&f, &agent),
+            )
+        });
+        assert_eq!(
+            ends,
+            [(true, AgentState::Closing, true, AgentState::Closed); 2]
+        );
+    }
+
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn closes_a_respawn_whose_answer_was_lost_through_the_holder_it_was_asked_of() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = exited(&stub);
+        let terminal = f.terminal_of(agent.as_str());
+        f.fake().set(|state| state.answers_unknown = true);
+        let req = RespawnAgentRequest {
+            idempotency_key: "s-1".to_owned(),
+            generation,
+            theme: None,
+        };
+        let id = agent.as_str();
+        let answer = runtime().block_on(f.agents.respawn(id, &req, replaced_now));
+        f.fake().set(|state| state.answers_unknown = false);
+        let closed_now = runtime().block_on(f.agents.close(id, &closing("c-1", generation, false)));
+        assert_eq!(
+            (
+                may_have_started(&answer),
+                closed_now.is_ok(),
+                state(&f, &agent),
+                closed(&f)
+            ),
+            (true, true, AgentState::Closed, vec![terminal])
         );
     }
 

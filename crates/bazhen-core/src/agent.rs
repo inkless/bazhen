@@ -123,10 +123,12 @@ pub fn is_final(state: AgentState) -> bool {
 /// terminal runs: before then its start holds it, and there is no process to end.
 pub fn agent_commands(state: AgentState, terminal: Option<TerminalState>) -> Vec<AgentCommand> {
     if state == AgentState::Starting {
-        return if terminal == Some(TerminalState::Running) {
-            vec![AgentCommand::Close, AgentCommand::Signal]
-        } else {
-            Vec::new()
+        return match terminal {
+            Some(TerminalState::Running) => vec![AgentCommand::Close, AgentCommand::Signal],
+            // A start that waits on its answer, which close ends through its holder, or once
+            // none is proved to have started it.
+            Some(TerminalState::Creating | TerminalState::Exited) => vec![AgentCommand::Close],
+            _ => Vec::new(),
         };
     }
     let closes = accepts(state, AgentEvent::CloseRequested) || state == AgentState::Closing;

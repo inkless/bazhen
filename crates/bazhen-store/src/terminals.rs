@@ -77,7 +77,9 @@ pub(crate) fn advance(from: TerminalState, step: Step) -> Result<TerminalState, 
         (Running | Unknown, ProcessExited) => Ok(Exited),
         (Creating, RuntimeRejected) => Ok(Failed),
         (Running | Unknown | Exited, Step::TargetAbsent) => Ok(Lost),
-        (Running | Unknown | Exited | Lost, CloseRequested) => Ok(Closing),
+        // A creating one too, as packages/core's doesn't: its create may have had no answer,
+        // and the close finds its holder or proves none started.
+        (Creating | Running | Unknown | Exited | Lost, CloseRequested) => Ok(Closing),
         (Closing, CloseCompleted) => Ok(Closed),
         _ => Err(format!(
             "terminal cannot handle {} while {}",
@@ -1254,6 +1256,18 @@ mod tests {
         );
         assert!(advance(Closed, Step::CloseRequested).is_err());
         assert!(advance(Lost, Step::Adopted).is_err());
+    }
+
+    #[test]
+    fn closes_a_terminal_still_being_created_whose_holder_may_have_started() {
+        use TerminalState::{Closed, Closing, Creating};
+        assert_eq!(
+            [
+                advance(Creating, Step::CloseRequested),
+                advance(Closing, Step::CloseCompleted)
+            ],
+            [Ok(Closing), Ok(Closed)]
+        );
     }
 
     #[test]
