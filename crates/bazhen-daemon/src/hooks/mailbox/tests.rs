@@ -29,7 +29,10 @@ use crate::writer::Thread;
 /// How long a test waits for what it waits on before it fails.
 const DEADLINE: Duration = Duration::from_secs(5);
 
-/// A short deadline, which a test waits out on the wall clock.
+/// A short deadline, which a test waits out on the wall clock. Not on a paused one: each step
+/// awaits the store's writer, a thread of its own, and a paused runtime with nothing else to run
+/// moves its clock on to the next timer while it waits, so a deadline would come due in the middle
+/// of the step it guards. So the tests assert only that a deadline took at least its time.
 const SHORT: Duration = Duration::from_millis(100);
 
 /// Deadlines no test waits out.
@@ -596,4 +599,57 @@ fn offers_no_mail_to_an_agent_closing_and_calls_a_forgotten_agents_deadlines_off
             vec!["queued".to_owned(), "offered".to_owned()]
         )
     );
+}
+
+#[test]
+fn keeps_an_offer_whole_when_its_caller_goes_mid_step_so_its_ack_deadline_still_requeues_it() {
+    let f = fixture(Deadlines {
+        ack: SHORT,
+        ..long()
+    });
+    f.send("hello");
+    let _waiting = f.shared.hooks.waiters.wait(&f.agent);
+    // The writer takes the offer's write only once this one lets it go.
+    let (release, stalled) = std::sync::mpsc::channel::<()>();
+    let store = f.shared.store.clone();
+    let stall = f.runtime.spawn(async move {
+        write(&store, move |_| {
+            stalled.recv().ok();
+            Ok(())
+        })
+        .await
+    });
+    f.sleep(Duration::from_millis(20));
+    let (shared, agent) = (f.shared.clone(), f.agent.clone());
+    let caller = f
+        .runtime
+        .spawn(async move { shared.hooks.mailbox.offer(&shared, &agent).await });
+    f.sleep(Duration::from_millis(20));
+    caller.abort();
+    release.send(()).unwrap();
+    let stalled_write = f.runtime.block_on(stall).ok();
+    let in_time = f.until(|| f.steps().contains(&"requeued".to_owned()));
+    assert_eq!(
+        (stalled_write, in_time, f.mail().split_off(1)),
+        (
+            Some(Ok(())),
+            true,
+            vec![step("offered", json!({})), requeued("not_written")]
+        )
+    );
+}
+
+#[test]
+fn takes_the_late_end_of_a_turn_a_newer_prompt_cut_short_for_no_end_of_the_turn_under_way() {
+    let f = fixture(long());
+    let held = f.hold(&idle());
+    f.send("hello");
+    let wake = f.answered(held).unwrap();
+    f.ack(&wake.offered);
+    f.post("UserPromptSubmit", &prompt("go", "p-1"));
+    f.post("UserPromptSubmit", &prompt("go on", "p-2"));
+    f.post("Stop", &stop("p-1"));
+    f.post("Stop", &stop("p-2"));
+    // Only the turn under way ended: one boundary, which a wake outlasts.
+    assert_eq!(f.mail().last().cloned(), Some(step("emitted", json!({}))));
 }

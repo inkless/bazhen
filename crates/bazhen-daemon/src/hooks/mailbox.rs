@@ -173,7 +173,104 @@ impl Mailbox {
     }
 
     /// Offers `agent`'s queued mail to the waiter it holds, if it holds one.
-    pub(crate) async fn offer(&self, shared: &Shared, agent: &AgentId) -> Result<(), String> {
+    pub(crate) async fn offer(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+    ) -> Result<(), String> {
+        let (mailbox, on, agent) = (Arc::clone(self), shared.clone(), agent.clone());
+        whole(shared, async move { mailbox.offer_step(&on, &agent).await }).await
+    }
+
+    /// Folds `agent`'s queued mail into its turn `prompt`: see [`Self::fold_step`].
+    pub(crate) async fn fold(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+        prompt: &str,
+    ) -> Result<HookReply, String> {
+        let (mailbox, on, agent, prompt) = (
+            Arc::clone(self),
+            shared.clone(),
+            agent.clone(),
+            prompt.to_owned(),
+        );
+        whole(shared, async move {
+            mailbox.fold_step(&on, &agent, &prompt).await
+        })
+        .await
+    }
+
+    /// Confirms the offers `offered` names: see [`Self::ack_step`].
+    pub(crate) async fn ack(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+        offered: &[OfferToken],
+    ) -> Result<(), String> {
+        let (mailbox, on, agent, offered) = (
+            Arc::clone(self),
+            shared.clone(),
+            agent.clone(),
+            offered.to_vec(),
+        );
+        whole(shared, async move {
+            mailbox.ack_step(&on, &agent, &offered).await
+        })
+        .await
+    }
+
+    /// A prompt started a turn: see [`Self::prompt_started_step`].
+    pub(crate) async fn prompt_started(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+        prompt: Option<&str>,
+        carries: &[String],
+    ) -> Result<(), String> {
+        let (mailbox, on, agent) = (Arc::clone(self), shared.clone(), agent.clone());
+        let (prompt, carries) = (prompt.map(str::to_owned), carries.to_vec());
+        whole(shared, async move {
+            mailbox
+                .prompt_started_step(&on, &agent, prompt.as_deref(), &carries)
+                .await
+        })
+        .await
+    }
+
+    /// A turn ended: see [`Self::turn_ended_step`].
+    pub(crate) async fn turn_ended(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+        prompt: Option<&str>,
+        failed: bool,
+    ) -> Result<(), String> {
+        let (mailbox, on, agent) = (Arc::clone(self), shared.clone(), agent.clone());
+        let prompt = prompt.map(str::to_owned);
+        whole(shared, async move {
+            mailbox
+                .turn_ended_step(&on, &agent, prompt.as_deref(), failed)
+                .await
+        })
+        .await
+    }
+
+    /// `agent`'s session started over: see [`Self::session_started_step`].
+    pub(crate) async fn session_started(
+        self: &Arc<Self>,
+        shared: &Shared,
+        agent: &AgentId,
+        compacted: bool,
+    ) -> Result<(), String> {
+        let (mailbox, on, agent) = (Arc::clone(self), shared.clone(), agent.clone());
+        whole(shared, async move {
+            mailbox.session_started_step(&on, &agent, compacted).await
+        })
+        .await
+    }
+
+    async fn offer_step(&self, shared: &Shared, agent: &AgentId) -> Result<(), String> {
         let mail = self.of(agent);
         let mut mail = mail.lock().await;
         self.offer_held(shared, agent, &mut mail).await
@@ -197,7 +294,7 @@ impl Mailbox {
 
     /// Folds `agent`'s queued mail into its turn `prompt` at a tool call's end, as much as the
     /// harness's answer takes: quiet with nothing queued.
-    pub(crate) async fn fold(
+    async fn fold_step(
         &self,
         shared: &Shared,
         agent: &AgentId,
@@ -296,7 +393,7 @@ impl Mailbox {
 
     /// The hook client wrote what it was handed. Only the offers it names, made to `agent`, are
     /// confirmed: an ack for an offer since taken back and made again confirms nothing.
-    pub(crate) async fn ack(
+    async fn ack_step(
         &self,
         shared: &Shared,
         agent: &AgentId,
@@ -334,7 +431,7 @@ impl Mailbox {
     /// A prompt `prompt` started a turn, carrying the messages `carries` as a wake handed them
     /// over: those the agent has seen. A new prompt while a turn is still under way means that
     /// turn ended with no Stop, as Esc ends one, or its TUI died: what it took goes back.
-    pub(crate) async fn prompt_started(
+    async fn prompt_started_step(
         &self,
         shared: &Shared,
         agent: &AgentId,
@@ -386,7 +483,7 @@ impl Mailbox {
     }
 
     /// The turn `prompt` ended: stopped, what it took is delivered; failed, it goes back.
-    pub(crate) async fn turn_ended(
+    async fn turn_ended_step(
         &self,
         shared: &Shared,
         agent: &AgentId,
@@ -396,7 +493,10 @@ impl Mailbox {
         let mail = self.of(agent);
         let mut mail = mail.lock().await;
         if let Some(prompt) = prompt {
-            if mail.ended.as_deref() == Some(prompt) {
+            // The end of a turn a newer prompt cut short, reported late: that prompt took back
+            // what the turn took, and the turn under way is the newer one.
+            let stale = mail.turn.as_deref().is_some_and(|turn| turn != prompt);
+            if stale || mail.ended.as_deref() == Some(prompt) {
                 return Ok(());
             }
             mail.ended = Some(prompt.to_owned());
@@ -457,7 +557,7 @@ impl Mailbox {
     /// answered first, and the requeued mail waits for the new session's. Unless the session only
     /// compacted, the turn under way is over too, and with it what that turn saw. A compaction
     /// keeps the turn, and what was folded into it, which the model has read.
-    pub(crate) async fn session_started(
+    async fn session_started_step(
         &self,
         shared: &Shared,
         agent: &AgentId,
@@ -629,6 +729,26 @@ impl Mailbox {
             }
         }
     }
+}
+
+/// Runs a step of an agent's mail to its end as a task of its own, which the caller awaits. A
+/// caller that goes, as a hook client killed or a request out of time does, can't split the step:
+/// what its store write committed still gets what holds it, an ack's deadline or a call-off.
+async fn whole<T: Send + 'static>(
+    shared: &Shared,
+    step: impl Future<Output = Result<T, String>> + Send + 'static,
+) -> Result<T, String> {
+    let Some(agents) = shared.agents.as_ref() else {
+        return step.await;
+    };
+    let (sent, answer) = tokio::sync::oneshot::channel();
+    agents.spawn(async move {
+        // The caller may have gone: the step is done all the same.
+        sent.send(step.await).ok();
+    });
+    answer
+        .await
+        .map_err(|_| "the daemon stopped before the step was done".to_owned())?
 }
 
 /// Requeues the mail the hooks of the daemon before this one held: they went with its socket.

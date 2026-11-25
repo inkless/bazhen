@@ -58,7 +58,7 @@ const NO_SUCH_AGENT: &str = "the daemon runs no such agent";
 pub(crate) struct Hooks {
     activity: StdMutex<Tracker>,
     waiters: Arc<Waiters>,
-    pub(crate) mailbox: Mailbox,
+    pub(crate) mailbox: Arc<Mailbox>,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -347,7 +347,7 @@ impl Hooks {
         let waiters = Arc::<Waiters>::default();
         Self {
             activity: StdMutex::new(Tracker::default()),
-            mailbox: Mailbox::new(Arc::clone(&waiters), deadlines),
+            mailbox: Arc::new(Mailbox::new(Arc::clone(&waiters), deadlines)),
             waiters,
             order: StdMutex::new(HashMap::new()),
             start_wait,
