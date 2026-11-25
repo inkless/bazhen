@@ -1693,6 +1693,35 @@ mod tests {
             .unwrap();
     }
 
+    /// An agent that missed the `Respawned` of a later process in its terminal, as one that heard
+    /// it while a start was in flight and then had that start rejected on an earlier read, is told
+    /// of it no more: the next tick adopts it.
+    #[test]
+    fn adopts_on_the_next_tick_a_later_process_its_agent_was_never_told_of() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (agent, terminal) = launched(&f, "k-1");
+        f.fake().exit_unseen(&terminal);
+        recorded_as(
+            &f,
+            &agent,
+            AgentChange::Exited(bazhen_protocol::agent_events::AgentExited {
+                exit: bazhen_protocol::agents::ExitStatus::Unknown,
+            }),
+        );
+        let later = f.fake().respawn_unseen(&terminal);
+        let events = recorded(&f, || ticked(&f));
+        let again = recorded(&f, || ticked(&f));
+        let now = agent_of(&f, &agent);
+        assert_eq!(
+            (events, again, (now.state, now.generation)),
+            (
+                vec!["agent.process_adopted".to_owned()],
+                Vec::<String>::new(),
+                (AgentState::Starting, Some(later))
+            )
+        );
+    }
+
     #[test]
     fn rejects_on_the_next_tick_a_launch_with_no_clear_answer_once_nothing_could_have_started_it() {
         let f = setup_with(crate::agents::tests::Setup::default());

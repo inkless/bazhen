@@ -15,6 +15,7 @@ use bazhen_store::{Actor, AgentTerminal};
 use super::{After, Cause, Listed, Unsettled};
 use crate::agents::Agents;
 use crate::agents::lifecycle::{Doing, from_runtime, record_closed, recorded};
+use crate::agents::watch::{adopt, adopts};
 use crate::shells::RUNTIME;
 use crate::terminals::{FoundAgent, Recorded};
 
@@ -159,6 +160,11 @@ impl Agents {
                     done
                 }
                 (AgentState::Starting, _) | (_, None) => self.settle_now(id, &listed, cause).await,
+                // A later process whose `Respawned` the agent heard while a start was in flight,
+                // or never heard, is told of no more: the holder tells only a change.
+                (_, Some(found)) if adopts(agent, &found.terminal) => {
+                    self.adopt_found(id, found).await
+                }
                 _ => Ok(()),
             };
             let mut unreconciled = self.unreconciled();
@@ -227,6 +233,23 @@ impl Agents {
         if after == After::Closed {
             self.after_closed(id).await;
         }
+        Ok(())
+    }
+
+    /// Adopts the later process found in agent `id`'s terminal, in its turn if no command holds
+    /// it, where what the store records then still adopts it.
+    async fn adopt_found(&self, id: &AgentId, found: &FoundAgent) -> Result<(), Unsettled> {
+        let Some(_turn) = self.deps.turns.try_take(id.as_str()) else {
+            return Err(Unsettled::Busy);
+        };
+        let (id, at) = (id.clone(), found.terminal.clone());
+        self.write(move |w| {
+            if let Some(now) = w.reads().agent_terminal(id.as_str())? {
+                adopt(w, &now, &at)?;
+            }
+            Ok(())
+        })
+        .await?;
         Ok(())
     }
 
