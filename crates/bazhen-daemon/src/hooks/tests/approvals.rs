@@ -148,7 +148,6 @@ async fn answered_by(
         State(f.shared.clone()),
         Path(id.to_owned()),
         caller.map(Extension),
-        None,
         Bytes::from(body),
     )
     .await;
@@ -655,5 +654,38 @@ fn keeps_the_hook_held_and_the_item_open_when_its_answer_cant_be_recorded() {
     assert_eq!(
         (refused, held, allowed),
         (500, (true, true), Some("allow".to_owned()))
+    );
+}
+
+#[test]
+fn refuses_an_agents_answer_over_http_and_keeps_its_hook_held_for_the_humans() {
+    use tower::ServiceExt;
+    let mut f = fixture();
+    // The loopback listener's caller reads as the agent's own TUI.
+    f.shared.peers = crate::peer::Peers::with(DEADLINE, |_, _| Ok(peer_on(&[(ROOT, "claude")])));
+    let (by_agent, held, allowed) = runtime().block_on(async {
+        let (hook, id) = asked(&f, event(call("ls", None), "PermissionRequest", None)).await;
+        let gate = crate::routes::Gate {
+            allow: crate::guard::allowlists(7900, None, &[]),
+            pairing_required: false,
+        };
+        let http = crate::testing::connected(crate::routes::http_router(f.shared.clone(), gate));
+        let body = json!({ "idempotencyKey": "k", "decision": "allow" }).to_string();
+        let request = axum::http::Request::post(format!("/v1/attention/{id}/answer"))
+            .header("host", "127.0.0.1:7900")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body))
+            .unwrap();
+        let by_agent = http.oneshot(request).await.unwrap().status().as_u16();
+        let held = (
+            f.shared.hooks.approvals.held(&id),
+            open_items(&f) == [id.clone()],
+        );
+        answered(&f, id.as_str(), "k2", "allow").await;
+        (by_agent, held, behavior(reply(hook).await))
+    });
+    assert_eq!(
+        (by_agent, held, allowed),
+        (403, (true, true), Some("allow".to_owned()))
     );
 }
