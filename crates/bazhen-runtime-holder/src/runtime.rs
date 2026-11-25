@@ -530,9 +530,13 @@ fn is_started(hello: &HelloReply, holder: HolderProcess) -> bool {
 }
 
 /// What a create needs from its start on, in a task of the runtime's own.
+/// The holder each create started that never answered, by its terminal.
+type Unanswered = Mutex<HashMap<TerminalId, HolderProcess>>;
+
 struct Starting {
     host: Arc<dyn Host>,
     watches: Arc<Watches>,
+    unanswered: Arc<Unanswered>,
     hello: Duration,
     request: Duration,
 }
@@ -594,6 +598,10 @@ impl Starting {
                 source.to_string()
             }
         };
+        self.unanswered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(terminal_id.clone(), started.holder);
         self.close_unanswered(socket, started.holder);
         Err(RuntimeError::Unstarted { terminal_id, why })
     }
@@ -629,6 +637,9 @@ pub struct HolderRuntime {
     containment: OnceCell<Result<Containment, CapsRefused>>,
     /// The sockets reported unreadable, each reported again only once it has been readable.
     unreadable: Mutex<HashSet<PathBuf>>,
+    /// The holder each create started that never answered, by its terminal, until it is seen
+    /// ended: while it runs, it may yet bind its socket.
+    unanswered: Arc<Unanswered>,
     watches: Arc<Watches>,
     /// Each terminal's control connection, shared by its streams.
     controls: Arc<Controls>,
@@ -664,6 +675,7 @@ impl HolderRuntime {
             host,
             containment: OnceCell::new(),
             unreadable: Mutex::new(HashSet::new()),
+            unanswered: Arc::default(),
             watches,
             controls: Arc::default(),
         }
@@ -726,6 +738,23 @@ impl HolderRuntime {
     }
 
     /// Whether the holder `terminal` recorded is still the process at its pid.
+    /// Whether the holder a create started for `terminal_id` that never answered still runs.
+    /// One seen ended is forgotten.
+    fn unanswered_runs(&self, terminal_id: &TerminalId) -> bool {
+        let mut unanswered = self
+            .unanswered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(holder) = unanswered.get(terminal_id).copied() else {
+            return false;
+        };
+        if self.host.runs(holder) {
+            return true;
+        }
+        unanswered.remove(terminal_id);
+        false
+    }
+
     fn recorded_runs(&self, terminal: &HolderRef) -> bool {
         terminal
             .holder()
@@ -928,6 +957,7 @@ impl HolderRuntime {
         let starting = Starting {
             host: Arc::clone(&self.host),
             watches: Arc::clone(&self.watches),
+            unanswered: Arc::clone(&self.unanswered),
             hello: self.options.hello,
             request: self.options.request,
         };
@@ -1115,10 +1145,13 @@ impl HolderRuntime {
 
     /// Nothing answers at the socket `terminal_id`'s holder would bind, and twice the holder's
     /// hello deadline has passed since `since`, a moment after which nothing could start one for
-    /// it: a holder started before then has bound its socket by now, or never will. For a
-    /// terminal whose start recorded nothing to prove gone by.
+    /// it: a holder started before then has bound its socket by now, or never will. A holder
+    /// this runtime started for it that never answered must have ended too, as late as it may
+    /// be. For a terminal whose start recorded nothing to prove gone by.
     pub async fn unstarted(&self, terminal_id: &TerminalId, since: Instant) -> bool {
-        if since.elapsed() < self.options.hello.saturating_mul(2) {
+        if since.elapsed() < self.options.hello.saturating_mul(2)
+            || self.unanswered_runs(terminal_id)
+        {
             return false;
         }
         let Ok(socket) = self.socket_of(terminal_id) else {
@@ -2008,6 +2041,29 @@ mod tests {
             );
             fixture.runtime.shutdown().await;
         });
+    }
+
+    #[test]
+    fn takes_no_terminal_for_unstarted_while_a_holder_its_create_started_unanswered_runs() {
+        let proved = [true, false].map(|running| {
+            let host = FakeHost {
+                running,
+                ..FakeHost::default()
+            };
+            let (fixture, _) = Fixture::new(host, |_| {});
+            block_on(async {
+                let created = fixture.runtime.create(spec(&id(1))).await;
+                assert!(
+                    matches!(created, Err(RuntimeError::Unstarted { .. })),
+                    "{created:?}"
+                );
+                let long_ago = Instant::now().checked_sub(Duration::from_secs(60)).unwrap();
+                let proved = fixture.runtime.unstarted(&id(1), long_ago).await;
+                fixture.runtime.shutdown().await;
+                proved
+            })
+        });
+        assert_eq!(proved, [false, true]);
     }
 
     #[test]
