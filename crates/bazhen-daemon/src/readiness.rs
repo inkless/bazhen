@@ -5,8 +5,9 @@
 //! what a TUI asks.
 //!
 //! One task follows the committed events, so every start is timed however it was recorded, by
-//! whichever lane: a start arms its deadline, and its end disarms it. It never ends before the
-//! daemon's stop: a read that fails is tried again, and an event it can't read is passed over.
+//! whichever lane: a start arms its deadline, and its end disarms it. It ends only at the daemon's
+//! stop, or once the store has closed: a read that fails is tried again, and an event it can't
+//! read is passed over.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard, PoisonError};
@@ -147,8 +148,8 @@ struct Follower<S> {
     armed: HashMap<AgentId, Armed>,
 }
 
-/// Follows the committed events until `stop`, timing each start that waits on its harness for
-/// `deadline`, from those waiting at boot on.
+/// Follows the committed events until `stop`, or until the store closes, timing each start that
+/// waits on its harness for `deadline`, from those waiting at boot on.
 pub(crate) async fn follow(
     shared: Shared,
     source: impl Source,

@@ -49,10 +49,11 @@ fn follows(f: &Fixture, deadline: Duration) -> Following {
 }
 
 /// The log, read through a source that says when the follower has booted, and fails its first
-/// `failures` reads of events.
+/// `boot_failures` reads of the starts waiting and its first `failures` reads of events.
 struct Watched {
     store: StoreSource,
     booted: Arc<AtomicBool>,
+    boot_failures: Arc<AtomicUsize>,
     failures: Arc<AtomicUsize>,
 }
 
@@ -61,24 +62,38 @@ impl Watched {
         Self {
             store: StoreSource::new(f.shared.store.clone()),
             booted: Arc::new(AtomicBool::new(false)),
+            boot_failures: Arc::new(AtomicUsize::new(0)),
             failures: Arc::new(AtomicUsize::new(failures)),
         }
     }
+
+    /// The same, failing its first `boot_failures` reads of the starts waiting.
+    fn failing_boots(self, boot_failures: usize) -> Self {
+        self.boot_failures.store(boot_failures, Ordering::SeqCst);
+        self
+    }
+}
+
+/// Takes one from `left` and fails, while any are left.
+fn fail(left: &AtomicUsize) -> Result<(), String> {
+    let now = left.load(Ordering::SeqCst);
+    if now == 0 {
+        return Ok(());
+    }
+    left.store(now - 1, Ordering::SeqCst);
+    Err("disk I/O error".to_owned())
 }
 
 impl Source for Watched {
     fn boot(&mut self) -> Result<(u64, Vec<Waiting>), String> {
+        fail(&self.boot_failures)?;
         let booted = self.store.boot();
         self.booted.store(booted.is_ok(), Ordering::SeqCst);
         booted
     }
 
     fn events(&mut self, after: u64, limit: u32) -> Result<Vec<StoredEvent>, String> {
-        let left = self.failures.load(Ordering::SeqCst);
-        if left > 0 {
-            self.failures.store(left - 1, Ordering::SeqCst);
-            return Err("disk I/O error".to_owned());
-        }
+        fail(&self.failures)?;
         self.store.events(after, limit)
     }
 }
@@ -369,6 +384,19 @@ fn reads_on_past_a_read_that_fails_and_an_event_it_cant_read() {
             .await;
         let told = eventually(|| !f.stuck().is_empty()).await;
         assert_eq!((failures.load(Ordering::SeqCst), told), (0, true));
+        assert!(following.stopped().await);
+    });
+}
+
+#[test]
+fn tells_a_start_waiting_at_boot_once_a_read_of_the_starts_has_failed() {
+    let f = fixture();
+    runtime().block_on(async {
+        let source = Watched::new(&f, 0).failing_boots(2);
+        let boot_failures = Arc::clone(&source.boot_failures);
+        let following = following(&f, source, SOON);
+        let told = eventually(|| !f.stuck().is_empty()).await;
+        assert_eq!((boot_failures.load(Ordering::SeqCst), told), (0, true));
         assert!(following.stopped().await);
     });
 }
