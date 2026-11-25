@@ -47,7 +47,9 @@ pub const FIRST_PAUSE: Duration = Duration::from_millis(1);
 /// The process at the other end of a connection, the session it is in (`None` for one led from
 /// outside the daemon's PID namespace, which no terminal the daemon runs can lead), what its line
 /// says of Codex (`codex_of`), and every ancestor it has, nearest first, through init or the first
-/// process of its PID namespace.
+/// process of its PID namespace, each with its name: read with its parent and its start, so it is
+/// the name of the process the walk named, as `ps -o comm` shows it. Init's isn't read, so it is
+/// empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Peer {
     pub pid: Pid,
@@ -55,12 +57,15 @@ pub struct Peer {
     pub codex_server: Option<Pid>,
     pub environment_withheld: bool,
     pub ancestors: Vec<Pid>,
+    /// Beside `ancestors`, one each, lossily: a name that isn't UTF-8 is no shell's.
+    pub names: Vec<String>,
 }
 
 /// One line of decimals: the pid, the session or 0, the Codex app-server or 0, 1 when the caller's
 /// environment was withheld or else 0, then each ancestor. A daemon of another build would read
 /// these fields as other ones, the flag as an ancestor's pid; the daemon installs and runs the
-/// reader of its own build, so the two always agree.
+/// reader of its own build, so the two always agree. The names aren't printed: only this daemon
+/// reads them.
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let session = self.session.map_or(0, Pid::as_raw_pid);
@@ -113,13 +118,14 @@ pub fn of(socket: BorrowedFd<'_>, accepted: u64) -> Result<Peer, Refused> {
     }
     let pid = bazhen_pid::peer_pid(socket)?;
     let started = started(pid, accepted)?;
-    let (ancestors, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
+    let (ancestors, names, codex) = line_of(pid, step, own_args, own_environ, thread::sleep)?;
     let peer = Peer {
         pid,
         session: bazhen_pid::session(Some(pid))?,
         codex_server: codex.server,
         environment_withheld: codex.environment_withheld,
         ancestors,
+        names,
     };
     if self::started(pid, accepted)? != started {
         return Err(Refused::Replaced { started, accepted });
@@ -137,12 +143,22 @@ fn started(pid: Pid, accepted: u64) -> Result<u64, Refused> {
     Ok(started)
 }
 
-/// What one read of a process says of its place on a line: its parent, and when it started, in the
-/// finest unit the OS keeps, which a process that took its pid since would show another of.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What one read of a process says of its place on a line: its parent, when it started, in the
+/// finest unit the OS keeps, which a process that took its pid since would show another of, and
+/// its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Step {
     pub parent: Option<Pid>,
     pub started: u64,
+    pub name: String,
+}
+
+/// A process a walk passed, as its step read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Walked {
+    pid: Pid,
+    started: u64,
+    name: String,
 }
 
 /// `pid`'s ancestors as `parent` names them, nearest first, through init or a process with no
@@ -159,23 +175,32 @@ pub fn ancestors(
         Ok(Step {
             parent: parent(at)?,
             started: 0,
+            name: String::new(),
         })
     })?;
-    Ok(walked.into_iter().skip(1).map(|(at, _)| at).collect())
+    Ok(walked.into_iter().skip(1).map(|at| at.pid).collect())
 }
 
 /// `pid` and its ancestors as `step` reads each, nearest first, through init or a process with no
-/// parent, with when each started; init's, which no process can take over, isn't read.
+/// parent, with when each started and its name; init, which no process can take over, isn't read.
 ///
 /// # Errors
 ///
 /// As `ancestors`.
-fn walk(pid: Pid, step: impl Fn(Pid) -> io::Result<Step>) -> Result<Vec<(Pid, u64)>, Refused> {
+fn walk(pid: Pid, step: impl Fn(Pid) -> io::Result<Step>) -> Result<Vec<Walked>, Refused> {
     let mut walked = Vec::new();
     let mut at = pid;
     while !at.is_init() {
-        let Step { parent, started } = step(at)?;
-        walked.push((at, started));
+        let Step {
+            parent,
+            started,
+            name,
+        } = step(at)?;
+        walked.push(Walked {
+            pid: at,
+            started,
+            name,
+        });
         let Some(next) = parent else {
             return Ok(walked);
         };
@@ -184,12 +209,16 @@ fn walk(pid: Pid, step: impl Fn(Pid) -> io::Result<Step>) -> Result<Vec<(Pid, u6
         }
         at = next;
     }
-    walked.push((at, 0));
+    walked.push(Walked {
+        pid: at,
+        started: 0,
+        name: String::new(),
+    });
     Ok(walked)
 }
 
-/// `pid`'s parent and start in clock ticks since boot, from one read of its `stat`. A zombie has
-/// already handed its children on, so it is on no line.
+/// `pid`'s parent and start in clock ticks since boot, from one read of its `stat`, and its name. A
+/// zombie has already handed its children on, so it is on no line.
 #[cfg(target_os = "linux")]
 fn step(pid: Pid) -> io::Result<Step> {
     let stat = std::fs::read(format!("/proc/{}/stat", pid.as_raw_pid()))?;
@@ -202,16 +231,25 @@ fn step(pid: Pid) -> io::Result<Step> {
     Ok(Step {
         parent: Pid::from_raw(parent),
         started,
+        name: name_of(pid)?,
     })
 }
 
-/// `pid`'s parent and its start in epoch seconds, the finest that macOS's readers here keep.
+/// `pid`'s parent, its start in epoch seconds, the finest that macOS's readers here keep, and its
+/// name.
 #[cfg(target_os = "macos")]
 fn step(pid: Pid) -> io::Result<Step> {
     Ok(Step {
         parent: process::parent(pid)?,
         started: u64::from(start_time::of(pid).map_err(io::Error::other)?),
+        name: name_of(pid)?,
     })
+}
+
+/// `pid`'s name, as `ps -o comm` shows it. It is read apart from the process's start, so a process
+/// that took the pid, or renamed itself, between the two shows on the walk after.
+fn name_of(pid: Pid) -> io::Result<String> {
+    Ok(process::comm(pid)?.to_string_lossy().into_owned())
 }
 
 /// Whether `args` are a Codex app-server's: `codex`, by the file name of `argv[0]`, with
@@ -294,10 +332,10 @@ pub fn codex_of(
     })
 }
 
-/// `pid`'s ancestors and what its line says of Codex, as `step`, `args` and `environ` read them,
-/// from a line that held still while it was read: walked, each process on it read, then walked
-/// again, and answered only when both walks name the same processes, each by its pid and its
-/// start, and every read succeeded.
+/// `pid`'s ancestors, their names beside them, and what its line says of Codex, as `step`, `args`
+/// and `environ` read them, from a line that held still while it was read: walked, each process on
+/// it read, then walked again, and answered only when both walks name the same processes, each by
+/// its pid, its start and its name, and every read succeeded.
 ///
 /// A process that exits leaves the line: it shows no arguments from when it gives up its memory,
 /// and the kernel hands its children to another parent before it is a zombie, after which its pid
@@ -323,7 +361,7 @@ pub fn line_of(
     args: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
     environ: impl Fn(Pid) -> io::Result<Option<Vec<OsString>>>,
     pause: impl Fn(Duration),
-) -> Result<(Vec<Pid>, Codex), Refused> {
+) -> Result<(Vec<Pid>, Vec<String>, Codex), Refused> {
     let caller = Cell::new(None);
     let replaced = Cell::new(false);
     let gone = Cell::new(false);
@@ -349,7 +387,7 @@ pub fn line_of(
     let mut wait = FIRST_PAUSE;
     for tried in 1..=LINE_TRIES {
         let read = walk(pid, step).and_then(|walked| {
-            let line: Vec<Pid> = walked.iter().map(|&(at, _)| at).collect();
+            let line: Vec<Pid> = walked.iter().map(|at| at.pid).collect();
             let codex = codex_of(&line, &args, &environ)?;
             Ok((walked, codex))
         });
@@ -361,8 +399,12 @@ pub fn line_of(
         }
         refused = match read {
             Ok((again, (walked, codex))) if again == walked => {
-                let ancestors = walked.into_iter().skip(1).map(|(at, _)| at).collect();
-                return Ok((ancestors, codex));
+                let (ancestors, names) = walked
+                    .into_iter()
+                    .skip(1)
+                    .map(|at| (at.pid, at.name))
+                    .unzip();
+                return Ok((ancestors, names, codex));
             }
             Ok(_) => Refused::Unreadable(io::Error::other(
                 "the caller's line changed while it was read",
@@ -565,6 +607,7 @@ mod tests {
             codex_server: None,
             environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
+            names: strings(&["sh", ""]),
         };
         assert_eq!(peer.to_string(), "50 45 0 0 40 1");
     }
@@ -577,6 +620,7 @@ mod tests {
             codex_server: Some(pid(40)),
             environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
+            names: strings(&["sh", ""]),
         };
         assert_eq!(peer.to_string(), "50 0 40 0 40 1");
     }
@@ -589,6 +633,7 @@ mod tests {
             codex_server: Some(pid(40)),
             environment_withheld: false,
             ancestors: vec![pid(40), pid(1)],
+            names: strings(&["sh", ""]),
         };
         assert_eq!(peer.to_string(), "50 50 40 0 40 1");
     }
@@ -601,8 +646,13 @@ mod tests {
             codex_server: None,
             environment_withheld: true,
             ancestors: vec![pid(40), pid(1)],
+            names: strings(&["sh", ""]),
         };
         assert_eq!(peer.to_string(), "50 45 0 1 40 1");
+    }
+
+    fn strings(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
     }
 
     fn os(args: &[&str]) -> Vec<OsString> {
@@ -1020,6 +1070,7 @@ mod tests {
         Step {
             parent: Pid::from_raw(parent),
             started,
+            name: "sh".to_owned(),
         }
     }
 
@@ -1052,7 +1103,7 @@ mod tests {
         });
         let (taken, pause) = pauses();
         let answer = line_of(pid(50), step, args, no_environment(), pause).unwrap();
-        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+        assert_eq!(answer, (vec![pid(1)], vec![String::new()], NO_CODEX));
         assert_eq!(*taken.borrow(), ms(&[1]));
     }
 
@@ -1072,7 +1123,7 @@ mod tests {
         });
         let (taken, pause) = pauses();
         let answer = line_of(pid(50), step, args, no_environment(), pause).unwrap();
-        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+        assert_eq!(answer, (vec![pid(1)], vec![String::new()], NO_CODEX));
         assert_eq!(*taken.borrow(), ms(&[1, 2, 4, 8, 16]));
     }
 
@@ -1123,7 +1174,7 @@ mod tests {
             _ => Ok(Some(os(&["sh"]))),
         };
         let answer = line_of(pid(50), step, args, no_environment(), |_| {}).unwrap();
-        assert_eq!(answer, (vec![pid(1)], NO_CODEX));
+        assert_eq!(answer, (vec![pid(1)], vec![String::new()], NO_CODEX));
     }
 
     #[test]
@@ -1143,7 +1194,78 @@ mod tests {
             _ => Ok(Some(os(&["sh"]))),
         };
         let answer = line_of(pid(50), step, args, no_environment(), |_| {}).unwrap();
-        assert_eq!(answer, (vec![pid(40), pid(1)], NO_CODEX));
+        assert_eq!(
+            answer,
+            (vec![pid(40), pid(1)], strings(&["sh", ""]), NO_CODEX)
+        );
+    }
+
+    #[test]
+    fn names_each_ancestor_as_the_walk_answered_read_it() {
+        let step_of = |parent: i32, started: u64, name: &str| Step {
+            name: name.to_owned(),
+            ..to(parent, started)
+        };
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => Ok(step_of(40, 5, "bazhen-hook")),
+            40 => Ok(step_of(30, 4, "claude")),
+            30 => Ok(step_of(1, 3, "-fish")),
+            _ => Ok(to(0, 0)),
+        };
+        let (ancestors, names, _) = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            (ancestors, names),
+            (
+                vec![pid(40), pid(30), pid(1)],
+                strings(&["claude", "-fish", ""])
+            )
+        );
+    }
+
+    #[test]
+    fn reads_again_a_line_whose_ancestor_was_renamed_between_the_walks() {
+        let walks = Cell::new(0);
+        let step = |p: Pid| match p.as_raw_pid() {
+            50 => Ok(to(40, 5)),
+            40 => {
+                walks.set(walks.get() + 1);
+                let name = if walks.get() == 1 { "sh" } else { "claude" };
+                Ok(Step {
+                    name: name.to_owned(),
+                    ..to(1, 4)
+                })
+            }
+            _ => Ok(to(0, 0)),
+        };
+        let (taken, pause) = pauses();
+        let answer = line_of(
+            pid(50),
+            step,
+            shells_but(0, || Ok(None)),
+            no_environment(),
+            pause,
+        )
+        .unwrap();
+        assert_eq!(
+            (answer, taken.borrow().clone()),
+            (
+                (vec![pid(40), pid(1)], strings(&["claude", ""]), NO_CODEX),
+                ms(&[1])
+            )
+        );
+    }
+
+    #[test]
+    fn reads_this_process_s_own_name_as_ps_shows_it() {
+        let comm = process::comm(getpid()).unwrap();
+        assert_eq!(step(getpid()).unwrap().name, comm.to_string_lossy());
     }
 
     #[test]
@@ -1252,7 +1374,7 @@ mod tests {
         );
         assert_eq!(
             answer.map_err(|refused| refused.to_string()),
-            Ok((vec![pid(1)], NO_CODEX))
+            Ok((vec![pid(1)], vec![String::new()], NO_CODEX))
         );
         assert_eq!(*taken.borrow(), ms(&[1]));
     }

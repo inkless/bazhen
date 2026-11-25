@@ -133,13 +133,8 @@ pub(crate) struct TerminalPids {
 pub(crate) fn terminal_pids(terminals: &[LiveTerminal]) -> TerminalPids {
     let mut pids = TerminalPids::default();
     for terminal in terminals {
-        let at = match serde_json::from_str(&terminal.locator) {
-            Ok(Value::Object(at)) => at,
-            _ => serde_json::Map::new(),
-        };
-        let pid = |key: &str| at.get(key).and_then(pid_of);
-        let root = pid("panePid").or_else(|| pid("childPid"));
-        if let Some(runtime) = pid("serverPid").or_else(|| pid("holderPid")) {
+        let (root, runtime) = pids_of(&terminal.locator);
+        if let Some(runtime) = runtime {
             pids.runtimes.insert(runtime);
         }
         let Some(root) = root else { continue };
@@ -150,6 +145,25 @@ pub(crate) fn terminal_pids(terminals: &[LiveTerminal]) -> TerminalPids {
         }
     }
     pids
+}
+
+/// A locator's root process, a tmux pane's or a holder's child, and the process that runs it, a
+/// tmux server or a holder, each where it records one.
+fn pids_of(locator: &str) -> (Option<i32>, Option<i32>) {
+    let at = match serde_json::from_str(locator) {
+        Ok(Value::Object(at)) => at,
+        _ => serde_json::Map::new(),
+    };
+    let pid = |key: &str| at.get(key).and_then(pid_of);
+    (
+        pid("panePid").or_else(|| pid("childPid")),
+        pid("serverPid").or_else(|| pid("holderPid")),
+    )
+}
+
+/// The root process a terminal's locator records, as `terminal_pids` reads it.
+pub(crate) fn root_of(locator: &str) -> Option<i32> {
+    pids_of(locator).0
 }
 
 /// A pid a locator records, when JavaScript's `Number` of it is one: an integer past 1. One past
@@ -312,6 +326,7 @@ mod tests {
             codex_server: None,
             environment_withheld: false,
             ancestors: ancestors.iter().copied().map(pid).collect(),
+            names: vec![String::new(); ancestors.len()],
         }
     }
 

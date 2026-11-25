@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 
 use crate::agents::{CloseAgentRequest, SignalAgentRequest};
 use crate::ids::TaskId;
+use crate::mail::{HookAck, HookRequest};
 use crate::notices::{DEVICE_NAME_MAX, DismissNoticeRequest, PAIRING_CODE_TYPED_MAX, PairRequest};
 use crate::shells::{
     CloseShellRequest, OpenShellRequest, RenameShellRequest, RestartShellRequest,
@@ -300,6 +301,26 @@ impl EdgeCheck for ShellDecline {
     }
 }
 
+/// Whether `n` is an integer zod's `.int()` takes: within the integers a JSON number holds exactly.
+fn safe_integer(n: i64) -> bool {
+    n.unsigned_abs() <= MAX_SAFE_INTEGER
+}
+
+impl EdgeCheck for HookRequest {
+    fn checked(self) -> Result<Self, Refused> {
+        holds(safe_integer(self.pid), "pid is a safe integer")?;
+        holds(safe_integer(self.ppid), "ppid is a safe integer")?;
+        Ok(self)
+    }
+}
+
+/// An ack holds to no rule past its shape: its agent id and offer tokens are each read whole.
+impl EdgeCheck for HookAck {
+    fn checked(self) -> Result<Self, Refused> {
+        Ok(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -320,6 +341,61 @@ mod tests {
     }
 
     const KEY: &str = "k1";
+
+    #[test]
+    fn a_hook_is_taken_with_its_payload_as_sent_and_refused_past_a_safe_pid() {
+        let hook = |pid: Value, ppid: Value| {
+            json!({ "protocolVersion": "1.0", "agentId": "agent_01900000000070008000000000000001",
+                    "event": "Stop", "pid": pid, "ppid": ppid, "payload": {"a": [1]} })
+        };
+        let safe = (1_i64 << 53) - 1;
+        let taken = edge::<HookRequest>(hook(json!(safe), json!(-safe)).to_string().as_bytes());
+        assert_eq!(
+            taken.map(|hook| (hook.pid, hook.ppid, hook.payload.get().to_owned())),
+            Ok((safe, -safe, r#"{"a":[1]}"#.to_owned()))
+        );
+        assert_eq!(
+            [
+                hook(json!(safe + 1), json!(1)),
+                hook(json!(1), json!(-safe - 1)),
+                json!([hook(json!(1), json!(1))]),
+            ]
+            .map(|body| edge::<HookRequest>(body.to_string().as_bytes()).err()),
+            [
+                Some(Refused("pid is a safe integer".to_owned())),
+                Some(Refused("ppid is a safe integer".to_owned())),
+                Some(Refused(OBJECT_RULE.to_owned())),
+            ]
+        );
+        // A whole number however JSON writes it, as zod's `.int()` takes it, and no fraction.
+        let written = |pid: &str, ppid: &str| {
+            let body = format!(
+                r#"{{"protocolVersion":"1.0","agentId":"agent_01900000000070008000000000000001","event":"Stop","pid":{pid},"ppid":{ppid},"payload":null}}"#
+            );
+            edge::<HookRequest>(body.as_bytes())
+                .map(|hook| (hook.pid, hook.ppid))
+                .ok()
+        };
+        assert_eq!(
+            [
+                written("2.0", "-2e0"),
+                written("2e0", "1e3"),
+                written("2.5", "1"),
+                written("1", "-2.5"),
+            ],
+            [Some((2, -2)), Some((2, 1000)), None, None]
+        );
+    }
+
+    #[test]
+    fn an_ack_is_taken_as_its_shape_reads_it() {
+        let ack = json!({ "agentId": "agent_01900000000070008000000000000001",
+                          "offered": ["msg_0190000000007000800000000000000a-1"] });
+        assert_eq!(verdict::<HookAck>(&ack), Ok(ack.clone()));
+        assert!(refused::<HookAck>(
+            &json!({ "agentId": "agent_1", "offered": [] })
+        ));
+    }
 
     #[test]
     fn a_task_is_taken_with_its_title_trimmed_and_refused_past_each_bound() {

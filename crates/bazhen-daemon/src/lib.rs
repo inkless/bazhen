@@ -20,6 +20,7 @@ mod harnesses;
 mod heartbeat;
 mod holder;
 mod hook_link;
+mod hooks;
 mod lock;
 mod log;
 mod paired;
