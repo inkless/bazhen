@@ -1,0 +1,27 @@
+{
+  "$id": "FleetAttention",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "id": {
+      "pattern": "^attn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "approval",
+        "question",
+        "failed",
+        "undeliverable",
+        "escalation",
+        "task_done",
+        "stuck_starting"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "kind"
+  ],
+  "type": "object"
+}

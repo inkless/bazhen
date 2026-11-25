@@ -1,34 +1,16 @@
 {
   "$id": "EventEnvelope",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "id": {
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991
-    },
-    "ts": {
-      "type": "string"
-    },
-    "type": {
-      "type": "string"
-    },
-    "entityType": {
-      "type": "string"
-    },
-    "entityId": {
-      "type": "string"
-    },
     "actor": {
       "type": "string"
     },
     "causationId": {
       "anyOf": [
         {
-          "type": "integer",
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
         },
         {
           "type": "null"
@@ -41,7 +23,24 @@
         "null"
       ]
     },
-    "payload": {}
+    "entityId": {
+      "type": "string"
+    },
+    "entityType": {
+      "type": "string"
+    },
+    "id": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "payload": true,
+    "ts": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    }
   },
   "required": [
     "id",
@@ -53,5 +52,6 @@
     "causationId",
     "correlationId",
     "payload"
-  ]
+  ],
+  "type": "object"
 }

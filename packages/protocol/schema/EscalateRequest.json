@@ -1,25 +1,26 @@
 {
   "$id": "EscalateRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "idempotencyKey": {
-      "type": "string",
+      "maxLength": 200,
       "minLength": 1,
-      "maxLength": 200
+      "type": "string"
     },
     "summary": {
-      "type": "string",
+      "maxLength": 2000,
       "minLength": 1,
-      "maxLength": 2000
+      "type": "string",
+      "x-bazhen-transform": "trim"
     },
     "taskId": {
-      "type": "string",
-      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     }
   },
   "required": [
     "idempotencyKey",
     "summary"
-  ]
+  ],
+  "type": "object"
 }

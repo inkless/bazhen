@@ -1,18 +1,18 @@
 {
   "$id": "ShellPrompt",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "token": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128
-    },
     "brackets": {
       "type": "boolean"
+    },
+    "token": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
     }
   },
   "required": [
     "token"
-  ]
+  ],
+  "type": "object"
 }

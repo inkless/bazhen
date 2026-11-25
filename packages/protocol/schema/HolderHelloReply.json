@@ -1,114 +1,73 @@
 {
   "$id": "HolderHelloReply",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "version": {
-      "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+$"
-    },
-    "protocol": {
-      "minItems": 1,
-      "maxItems": 16,
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 0,
-        "description": "At most 32 UTF-8 bytes."
-      }
-    },
-    "terminalId": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]{1,64}$"
-    },
-    "tags": {
-      "description": "Tag names __proto__, constructor, prototype are refused.",
-      "type": "object",
-      "propertyNames": {
-        "type": "string",
-        "minLength": 1,
-        "description": "At most 64 UTF-8 bytes."
-      },
-      "additionalProperties": {
-        "type": "string",
-        "minLength": 0,
-        "description": "At most 1024 UTF-8 bytes."
-      }
-    },
-    "generation": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "holderPid": {
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991
-    },
-    "holderStart": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
+    "alternate": {
+      "type": "boolean"
     },
     "childPid": {
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
     },
     "childStart": {
-      "type": "integer",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
+    },
+    "engine": {
+      "type": "boolean"
     },
     "exit": {
       "anyOf": [
         {
           "oneOf": [
             {
-              "type": "object",
               "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "exited"
-                },
                 "code": {
-                  "type": "integer",
+                  "maximum": 9007199254740991,
                   "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "exited",
+                  "type": "string"
                 }
               },
               "required": [
                 "type",
                 "code"
-              ]
+              ],
+              "type": "object"
             },
             {
-              "type": "object",
               "properties": {
-                "type": {
-                  "type": "string",
-                  "const": "signalled"
-                },
                 "signal": {
+                  "type": "string",
+                  "x-bazhen-check": "wellFormed"
+                },
+                "type": {
+                  "const": "signalled",
                   "type": "string"
                 }
               },
               "required": [
                 "type",
                 "signal"
-              ]
+              ],
+              "type": "object"
             },
             {
-              "type": "object",
               "properties": {
                 "type": {
-                  "type": "string",
-                  "const": "unknown"
+                  "const": "unknown",
+                  "type": "string"
                 }
               },
               "required": [
                 "type"
-              ]
+              ],
+              "type": "object"
             }
           ]
         },
@@ -117,45 +76,95 @@
         }
       ]
     },
+    "generation": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "historyLines": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "holderPid": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "holderStart": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "offset": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protocol": {
+      "items": {
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost32Bytes"
+        ]
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "type": "array"
+    },
     "size": {
-      "type": "object",
       "properties": {
         "cols": {
-          "type": "integer",
+          "maximum": 1000,
           "minimum": 0,
-          "maximum": 1000
+          "type": "integer"
         },
         "rows": {
-          "type": "integer",
+          "maximum": 1000,
           "minimum": 0,
-          "maximum": 1000
+          "type": "integer"
         }
       },
       "required": [
         "cols",
         "rows"
-      ]
+      ],
+      "type": "object"
     },
-    "offset": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
+    "tags": {
+      "additionalProperties": {
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost1024Bytes"
+        ]
+      },
+      "propertyNames": {
+        "minLength": 1,
+        "pattern": "^(?!(?:__proto__|constructor|prototype)$)",
+        "type": "string",
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost64Bytes"
+        ]
+      },
+      "type": "object",
+      "x-bazhen-transform": "refusingOwnProto"
     },
-    "title": {
+    "terminalId": {
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
       "type": "string"
     },
-    "alternate": {
-      "type": "boolean"
+    "title": {
+      "type": "string",
+      "x-bazhen-check": "wellFormed"
     },
-    "historyLines": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
+    "version": {
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
     },
     "writer": {
-      "type": "boolean"
-    },
-    "engine": {
       "type": "boolean"
     }
   },
@@ -176,5 +185,6 @@
     "alternate",
     "historyLines",
     "writer"
-  ]
+  ],
+  "type": "object"
 }

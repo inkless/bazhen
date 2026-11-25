@@ -1,0 +1,9 @@
+{
+  "$id": "OriginsFrom",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "BAZHEN_EXTERNAL_ORIGINS",
+    "config"
+  ],
+  "type": "string"
+}

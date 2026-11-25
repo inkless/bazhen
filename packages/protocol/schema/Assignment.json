@@ -1,58 +1,53 @@
 {
   "$id": "Assignment",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "id": {
-      "type": "string",
-      "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    },
-    "taskId": {
-      "type": "string",
-      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    },
     "agentId": {
-      "type": "string",
-      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    },
-    "role": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{0,31}$"
-    },
-    "parentAssignmentId": {
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "state": {
-      "type": "string",
-      "enum": [
-        "active",
-        "ended"
-      ]
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     },
     "endReason": {
       "anyOf": [
         {
-          "type": "string",
           "enum": [
             "unassigned",
             "completed",
             "task_finished",
             "agent_closed",
             "parent_ended"
-          ]
+          ],
+          "type": "string"
         },
         {
           "type": "null"
         }
       ]
+    },
+    "id": {
+      "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "parentAssignmentId": {
+      "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "pattern": "^[a-z][a-z0-9-]{0,31}$",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "active",
+        "ended"
+      ],
+      "type": "string"
+    },
+    "taskId": {
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     }
   },
   "required": [
@@ -63,5 +58,6 @@
     "parentAssignmentId",
     "state",
     "endReason"
-  ]
+  ],
+  "type": "object"
 }

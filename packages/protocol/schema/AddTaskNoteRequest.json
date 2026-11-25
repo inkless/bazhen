@@ -1,24 +1,28 @@
 {
   "$id": "AddTaskNoteRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "text": {
-      "type": "string",
-      "minLength": 1,
-      "description": "At most 4000 UTF-8 bytes."
-    },
     "handoff": {
       "type": "boolean"
+    },
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "text": {
+      "minLength": 1,
+      "type": "string",
+      "x-bazhen-check": [
+        "taskNoteBytes",
+        "noteText"
+      ],
+      "x-bazhen-transform": "trim"
     }
   },
   "required": [
     "idempotencyKey",
     "text"
-  ]
+  ],
+  "type": "object"
 }

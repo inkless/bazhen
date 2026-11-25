@@ -1,36 +1,41 @@
 {
   "$id": "BroadcastMessageResponse",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "sent": {
-      "type": "array",
+    "eventIds": {
       "items": {
-        "type": "object",
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "sent": {
+      "items": {
         "properties": {
           "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
           "messageId": {
-            "type": "string",
-            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           }
         },
         "required": [
           "agentId",
           "messageId"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "skipped": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
           "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
           "reason": {
             "type": "string"
@@ -39,21 +44,16 @@
         "required": [
           "agentId",
           "reason"
-        ]
-      }
-    },
-    "eventIds": {
-      "type": "array",
-      "items": {
-        "type": "integer",
-        "exclusiveMinimum": 0,
-        "maximum": 9007199254740991
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
   "required": [
     "sent",
     "skipped",
     "eventIds"
-  ]
+  ],
+  "type": "object"
 }

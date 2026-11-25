@@ -1,0 +1,25 @@
+{
+  "$id": "ErrorCode",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "invalid_request",
+    "unsupported",
+    "launch_failed",
+    "conflict",
+    "stale_generation",
+    "not_resumable",
+    "unavailable",
+    "server_unconfirmed",
+    "needs_restart",
+    "busy",
+    "not_found",
+    "origin_not_allowed",
+    "host_not_allowed",
+    "forbidden",
+    "unpaired",
+    "pairing_failed",
+    "rate_limited",
+    "terminal_limit"
+  ],
+  "type": "string"
+}

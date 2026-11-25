@@ -1,5 +1,4 @@
-import { jsonSchemas } from "./json-schema.ts";
-import { PROTOCOL_SEMANTICS } from "./semantics.ts";
+import { PROTOCOL_ID } from "./gen/id.ts";
 
 /** Files, by name and content, as one SHA-256 in hex: each `name\0content\0`, in name order. */
 export async function filesHash(files: Readonly<Record<string, string>>): Promise<string> {
@@ -12,21 +11,11 @@ export async function filesHash(files: Readonly<Record<string, string>>): Promis
 }
 
 /**
- * The files `moon run :schema` commits to `packages/protocol/schema/`: the JSON Schema of every
- * message, and `semantics.json` for what a schema can't say.
- */
-export function protocolFiles(): Record<string, string> {
-  return {
-    ...jsonSchemas(),
-    "semantics.json": `${JSON.stringify(PROTOCOL_SEMANTICS, null, 2)}\n`,
-  };
-}
-
-/**
- * The protocol a build speaks: the hash of `protocolFiles()`. A client and a daemon with different
- * ids may not read each other's messages, so a client compares its own with the daemon's and asks
- * to reload or restart. A build that can't run zod hashes the committed files and gets the same id.
+ * The protocol a build speaks: the hash of the files `cargo xtask schema` publishes from the Rust
+ * protocol into `packages/protocol/schema/`. A client and a daemon with different ids may not read
+ * each other's messages, so a client compares its own with the daemon's and asks to reload or
+ * restart. The Rust crates name the same id, so both daemons and the web agree on it.
  */
 export function protocolId(): Promise<string> {
-  return filesHash(protocolFiles());
+  return Promise.resolve(PROTOCOL_ID);
 }

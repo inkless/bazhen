@@ -1,22 +1,22 @@
 {
   "$id": "HookAck",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "agentId": {
-      "type": "string",
-      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     },
     "offered": {
-      "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$"
-      }
+        "pattern": "^msg_[0-9a-f]{32}-[0-9a-z]{1,32}$",
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
     "agentId",
     "offered"
-  ]
+  ],
+  "type": "object"
 }

@@ -1,19 +1,19 @@
 {
   "$id": "EventStreamQuery",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "epoch": {
-      "type": "string",
-      "minLength": 1
-    },
     "after": {
-      "type": "string",
-      "pattern": "^\\d+$"
+      "pattern": "^\\d+$",
+      "type": "string"
+    },
+    "epoch": {
+      "minLength": 1,
+      "type": "string"
     }
   },
   "required": [
     "epoch",
     "after"
-  ]
+  ],
+  "type": "object"
 }

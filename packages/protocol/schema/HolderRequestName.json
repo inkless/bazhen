@@ -1,7 +1,6 @@
 {
   "$id": "HolderRequestName",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "string",
   "enum": [
     "hello",
     "snapshot",
@@ -17,5 +16,6 @@
     "set-theme",
     "paste",
     "screen"
-  ]
+  ],
+  "type": "string"
 }

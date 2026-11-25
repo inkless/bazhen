@@ -1,0 +1,27 @@
+{
+  "$id": "HostPtys",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "exact": {
+      "type": "boolean"
+    },
+    "max": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "used": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "used",
+    "max",
+    "exact"
+  ],
+  "type": "object"
+}

@@ -1,86 +1,8 @@
 {
   "$id": "DoctorResponse",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "appVersion": {
-      "type": "string"
-    },
-    "protocolId": {
-      "type": "string"
-    },
-    "runtimes": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "healthy",
-              "unreachable",
-              "not-running",
-              "unused"
-            ]
-          },
-          "version": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "workarounds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "kind",
-          "state",
-          "version"
-        ]
-      }
-    },
-    "hookClient": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string"
-        },
-        "fallback": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "path",
-        "fallback"
-      ]
-    },
-    "peerReader": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "path"
-          ]
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "agentCli": {
-      "type": "object",
       "properties": {
         "expected": {
           "type": [
@@ -98,55 +20,43 @@
       "required": [
         "expected",
         "onPath"
-      ]
-    },
-    "config": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string"
-        },
-        "found": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "path",
-        "found"
-      ]
+      ],
+      "type": "object"
     },
     "agents": {
-      "type": "object",
       "properties": {
-        "shell": {
-          "type": "string",
-          "enum": [
-            "direct",
-            "login"
-          ]
-        },
         "loginShell": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "shell": {
+          "enum": [
+            "direct",
+            "login"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "shell",
         "loginShell"
-      ]
+      ],
+      "type": "object"
+    },
+    "appVersion": {
+      "type": "string"
     },
     "codex": {
-      "type": "object",
       "properties": {
-        "daemon": {
+        "cli": {
           "type": [
             "string",
             "null"
           ]
         },
-        "cli": {
+        "daemon": {
           "type": [
             "string",
             "null"
@@ -155,11 +65,19 @@
         "toolCalls": {
           "anyOf": [
             {
-              "type": "string",
-              "enum": [
-                "marked",
-                "unmarked",
-                "unread"
+              "oneOf": [
+                {
+                  "const": "marked",
+                  "type": "string"
+                },
+                {
+                  "const": "unmarked",
+                  "type": "string"
+                },
+                {
+                  "const": "unread",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -171,151 +89,323 @@
       "required": [
         "daemon",
         "cli"
-      ]
+      ],
+      "type": "object"
     },
-    "web": {
-      "type": "object",
+    "config": {
       "properties": {
-        "externalOrigins": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "from": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "BAZHEN_EXTERNAL_ORIGINS",
-                "config"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "allowInsecureOrigins": {
+        "found": {
           "type": "boolean"
         },
-        "pairing": {
-          "type": "object",
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "found"
+      ],
+      "type": "object"
+    },
+    "containment": {
+      "oneOf": [
+        {
           "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "always"
-              ]
-            },
-            "required": {
+            "oomPolicy": {
               "type": "boolean"
+            },
+            "state": {
+              "const": "scoped",
+              "type": "string"
+            },
+            "swap": {
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ],
+              "type": "object"
+            },
+            "systemd": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "terminal": {
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ],
+              "type": "object"
+            },
+            "total": {
+              "properties": {
+                "asked": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "asked",
+                "bytes"
+              ],
+              "type": "object"
             }
           },
           "required": [
-            "mode",
-            "required"
-          ]
+            "state",
+            "systemd",
+            "oomPolicy",
+            "terminal",
+            "total",
+            "swap"
+          ],
+          "type": "object"
         },
-        "app": {
+        {
+          "properties": {
+            "state": {
+              "const": "uncontained",
+              "type": "string"
+            },
+            "why": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "why"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "const": "unchecked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "env": {
+      "properties": {
+        "capturedAt": {
+          "type": "string"
+        },
+        "kept": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "additionalProperties": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "source": {
+          "enum": [
+            "start",
+            "refresh"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "capturedAt",
+        "source",
+        "kept",
+        "removed"
+      ],
+      "type": "object"
+    },
+    "holder": {
+      "properties": {
+        "binary": {
           "type": [
             "string",
             "null"
           ]
         },
-        "appRefused": {
-          "type": "string"
+        "build": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "lan": {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "url": {
+        "holders": {
+          "items": {
+            "properties": {
+              "build": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "contained": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "holderPid": {
+                "format": "uint64",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "protocol": {
+                "items": {
                   "type": "string"
                 },
-                "allow": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "certificate": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "fingerprint": {
-                          "type": "string"
-                        },
-                        "path": {
-                          "type": "string"
-                        },
-                        "expiresAt": {
-                          "type": "string",
-                          "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                        }
-                      },
-                      "required": [
-                        "fingerprint",
-                        "path",
-                        "expiresAt"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "error": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "subnets": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
+                "type": "array"
+              },
+              "socket": {
+                "type": "string"
+              },
+              "stats": {
+                "anyOf": [
+                  {
                     "properties": {
-                      "interface": {
-                        "type": "string"
+                      "engineBytes": {
+                        "format": "uint64",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
                       },
-                      "cidr": {
-                        "type": "string"
+                      "engineResets": {
+                        "format": "uint64",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "historyLines": {
+                        "format": "uint64",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "ringBytes": {
+                        "format": "uint64",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "rss": {
+                        "format": "uint64",
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
-                      "interface",
-                      "cidr"
-                    ]
+                      "engineBytes",
+                      "rss",
+                      "ringBytes",
+                      "historyLines"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
                   }
-                }
+                ]
               },
-              "required": [
-                "url",
-                "allow",
-                "certificate",
-                "error",
-                "subnets"
-              ]
+              "terminalId": {
+                "type": "string"
+              }
             },
-            {
-              "type": "null"
-            }
+            "required": [
+              "terminalId",
+              "build",
+              "protocol"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
       "required": [
-        "externalOrigins",
-        "from",
-        "allowInsecureOrigins"
-      ]
+        "binary",
+        "build",
+        "reason",
+        "holders"
+      ],
+      "type": "object"
+    },
+    "hookClient": {
+      "properties": {
+        "fallback": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "fallback"
+      ],
+      "type": "object"
     },
     "notifications": {
-      "type": "object",
       "properties": {
         "desktop": {
           "type": "boolean"
@@ -330,59 +420,121 @@
       "required": [
         "desktop",
         "notifier"
+      ],
+      "type": "object"
+    },
+    "peerReader": {
+      "anyOf": [
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
+    "protocolId": {
+      "type": "string"
+    },
+    "runtimes": {
+      "items": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "healthy",
+              "unreachable",
+              "not-running",
+              "unused"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workarounds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "version"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "terminals": {
-      "type": "object",
       "properties": {
-        "open": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "max": {
-          "type": "integer",
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
-        },
         "host": {
           "anyOf": [
             {
-              "type": "object",
               "properties": {
-                "used": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "max": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
-                },
                 "exact": {
                   "type": "boolean"
+                },
+                "max": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "used": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
                 }
               },
               "required": [
                 "used",
                 "max",
                 "exact"
-              ]
+              ],
+              "type": "object"
             },
             {
               "type": "null"
             }
           ]
         },
+        "max": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
         "refusing": {
           "anyOf": [
             {
-              "type": "string",
               "enum": [
                 "budget",
                 "host"
-              ]
+              ],
+              "type": "string"
             },
             {
               "type": "null"
@@ -395,301 +547,148 @@
         "max",
         "host",
         "refusing"
-      ]
+      ],
+      "type": "object"
     },
-    "holder": {
-      "type": "object",
+    "web": {
       "properties": {
-        "binary": {
+        "allowInsecureOrigins": {
+          "type": "boolean"
+        },
+        "app": {
           "type": [
             "string",
             "null"
           ]
         },
-        "build": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "appRefused": {
+          "type": "string"
         },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "holders": {
-          "type": "array",
+        "externalOrigins": {
           "items": {
-            "type": "object",
-            "properties": {
-              "terminalId": {
-                "type": "string"
-              },
-              "build": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "protocol": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "contained": {
-                "type": [
-                  "boolean",
-                  "null"
-                ]
-              },
-              "socket": {
-                "type": "string"
-              },
-              "holderPid": {
-                "anyOf": [
-                  {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "enum": [
+                "BAZHEN_EXTERNAL_ORIGINS",
+                "config"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lan": {
+          "anyOf": [
+            {
+              "properties": {
+                "allow": {
+                  "items": {
+                    "type": "string"
                   },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "stats": {
-                "anyOf": [
-                  {
-                    "type": "object",
+                  "type": "array"
+                },
+                "certificate": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "expiresAt": {
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                          "type": "string"
+                        },
+                        "fingerprint": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fingerprint",
+                        "path",
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subnets": {
+                  "items": {
                     "properties": {
-                      "engineBytes": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
+                      "cidr": {
+                        "type": "string"
                       },
-                      "rss": {
-                        "anyOf": [
-                          {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "ringBytes": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "historyLines": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "engineResets": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
+                      "interface": {
+                        "type": "string"
                       }
                     },
                     "required": [
-                      "engineBytes",
-                      "rss",
-                      "ringBytes",
-                      "historyLines"
-                    ]
+                      "interface",
+                      "cidr"
+                    ],
+                    "type": "object"
                   },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "terminalId",
-              "build",
-              "protocol"
-            ]
-          }
-        }
-      },
-      "required": [
-        "binary",
-        "build",
-        "reason",
-        "holders"
-      ]
-    },
-    "containment": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "state": {
-              "type": "string",
-              "const": "scoped"
-            },
-            "systemd": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
-            },
-            "oomPolicy": {
-              "type": "boolean"
-            },
-            "terminal": {
-              "type": "object",
-              "properties": {
-                "asked": {
-                  "type": "string"
+                  "type": "array"
                 },
-                "bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
+                "url": {
+                  "type": "string"
                 }
               },
               "required": [
-                "asked",
-                "bytes"
-              ]
+                "url",
+                "allow",
+                "certificate",
+                "error",
+                "subnets"
+              ],
+              "type": "object"
             },
-            "total": {
-              "type": "object",
-              "properties": {
-                "asked": {
-                  "type": "string"
-                },
-                "bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "asked",
-                "bytes"
-              ]
-            },
-            "swap": {
-              "type": "object",
-              "properties": {
-                "asked": {
-                  "type": "string"
-                },
-                "bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "asked",
-                "bytes"
-              ]
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "state",
-            "systemd",
-            "oomPolicy",
-            "terminal",
-            "total",
-            "swap"
           ]
         },
-        {
-          "type": "object",
+        "pairing": {
           "properties": {
-            "state": {
-              "type": "string",
-              "const": "uncontained"
-            },
-            "why": {
+            "mode": {
+              "enum": [
+                "auto",
+                "always"
+              ],
               "type": "string"
+            },
+            "required": {
+              "type": "boolean"
             }
           },
           "required": [
-            "state",
-            "why"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "state": {
-              "type": "string",
-              "const": "unchecked"
-            }
-          },
-          "required": [
-            "state"
-          ]
-        }
-      ]
-    },
-    "env": {
-      "type": "object",
-      "properties": {
-        "capturedAt": {
-          "type": "string"
-        },
-        "source": {
-          "type": "string",
-          "enum": [
-            "start",
-            "refresh"
-          ]
-        },
-        "kept": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "removed": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
+            "mode",
+            "required"
+          ],
+          "type": "object"
         }
       },
       "required": [
-        "capturedAt",
-        "source",
-        "kept",
-        "removed"
-      ]
+        "externalOrigins",
+        "from",
+        "allowInsecureOrigins"
+      ],
+      "type": "object"
     }
   },
   "required": [
@@ -700,5 +699,6 @@
     "config",
     "agents",
     "env"
-  ]
+  ],
+  "type": "object"
 }

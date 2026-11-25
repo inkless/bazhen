@@ -1,31 +1,32 @@
 {
   "$id": "HookRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "protocolVersion": {
-      "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+$"
-    },
     "agentId": {
-      "type": "string",
-      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+      "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
     },
     "event": {
-      "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "type": "string"
     },
+    "payload": true,
     "pid": {
-      "type": "integer",
+      "format": "int64",
+      "maximum": 9007199254740991,
       "minimum": -9007199254740991,
-      "maximum": 9007199254740991
+      "type": "integer"
     },
     "ppid": {
-      "type": "integer",
+      "format": "int64",
+      "maximum": 9007199254740991,
       "minimum": -9007199254740991,
-      "maximum": 9007199254740991
+      "type": "integer"
     },
-    "payload": {}
+    "protocolVersion": {
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "type": "string"
+    }
   },
   "required": [
     "protocolVersion",
@@ -34,5 +35,6 @@
     "pid",
     "ppid",
     "payload"
-  ]
+  ],
+  "type": "object"
 }

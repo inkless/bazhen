@@ -1,0 +1,46 @@
+{
+  "$id": "DaemonHolderStats",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "engineBytes": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "engineResets": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "historyLines": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ringBytes": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rss": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "engineBytes",
+    "rss",
+    "ringBytes",
+    "historyLines"
+  ],
+  "type": "object"
+}

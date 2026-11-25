@@ -1,11 +1,13 @@
-//! `cargo xtask schema`: the zod written from the protocol's JSON Schema, as the Rust crates emit
-//! it, into `packages/protocol/src/gen/`, where the web reads it; and the schema itself, with the
-//! planted corpus (`corpus`) and the daemon edge's verdict on each case, into
-//! `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where the
-//! committed zod isn't what it would write, and where the edge's verdict isn't the protocol's, and
+//! `cargo xtask schema`: the protocol's JSON Schema, as the Rust crates emit it, published one file
+//! a message into `packages/protocol/schema/` (`files`), with the protocol id those files hash to;
+//! the zod written from it into `packages/protocol/src/gen/`, where the web reads it; and the
+//! schema itself, with the planted corpus (`corpus`) and the daemon edge's verdict on each case,
+//! into `target/protocol-shadow/`. With `--check` it writes nothing into the tree: it fails where a
+//! committed file isn't what it would write, and where the edge's verdict isn't the protocol's, and
 //! it holds schemars to the crates' own tests (`leaks`).
 
 mod corpus;
+mod files;
 mod leaks;
 mod zod;
 
@@ -33,8 +35,23 @@ const EMIT: &[&str] = &[
 /// The cases' file, which the example reads for `verdicts`, under `SHADOW`.
 const CASES: &str = "corpus/cases.json";
 
-/// The protocol's own schemas, one file a message.
+/// The protocol's published files, one a message, which only `cargo xtask schema` writes.
 const PROTOCOL_SCHEMAS: &str = "packages/protocol/schema";
+
+/// The published files git tracks, which are the ones that count as committed: one left unstaged
+/// would pass here and fail in CI.
+const TRACKED: &[&str] = &[
+    "git",
+    "ls-files",
+    "--",
+    ":(glob)packages/protocol/schema/*.json",
+];
+
+/// The protocol id, as the Rust crates read it.
+const RUST_ID: &str = "crates/bazhen-protocol/src/id.rs";
+
+/// The protocol id, as a TypeScript build reads it.
+const TYPESCRIPT_ID: &str = "packages/protocol/src/gen/id.ts";
 
 /// The protocol's fixtures, one file a message.
 const FIXTURES: &str = "packages/protocol/fixtures/api";
@@ -51,9 +68,10 @@ const GENERATED: &str = "packages/protocol/src/gen/protocol.ts";
 /// `CHECKS` as `GENERATED` imports it.
 const CHECKS_FROM_GENERATED: &str = "../checks.ts";
 
-/// Writes the zod into `GENERATED`, and the schema and the corpus into `SHADOW`. With `check` it
-/// holds the committed zod to the zod it would write instead, the corpus to the edge's verdicts but
-/// for `known`, and schemars to the crates' tests.
+/// Publishes the schema into `PROTOCOL_SCHEMAS` with its id, writes the zod into `GENERATED`, and
+/// the schema and the corpus into `SHADOW`. With `check` it holds the committed files to what it
+/// would write instead, the corpus to the edge's verdicts but for `known`, and schemars to the
+/// crates' tests.
 pub(crate) fn run(
     check: bool,
     known: corpus::Known<'_>,
@@ -73,7 +91,7 @@ pub(crate) fn run(
     }
     match host.output(EMIT, &env) {
         Ok(Some(printed)) => {
-            problems.extend(write_schema(&printed, check, places, host));
+            problems.extend(write_schema(&printed, check, &env, places, host));
             if problems.is_empty() {
                 problems.extend(write_corpus(
                     &printed,
@@ -98,9 +116,15 @@ pub(crate) fn run(
     Exit::Failed
 }
 
-/// Writes the schema `printed` holds, and the zod written from it; with `check`, holds the
-/// committed zod to it in place of writing it.
-fn write_schema(printed: &str, check: bool, places: &Places, host: &mut impl Host) -> Vec<String> {
+/// Writes the schema `printed` holds, the files it publishes with their id, and the zod written
+/// from it; with `check`, holds the committed files to them in place of writing them.
+fn write_schema(
+    printed: &str,
+    check: bool,
+    env: &Env,
+    places: &Places,
+    host: &mut impl Host,
+) -> Vec<String> {
     let document: serde_json::Value = match serde_json::from_str(printed) {
         Ok(document) => document,
         Err(error) => return vec![format!("the schema's example printed no JSON: {error}")],
@@ -109,30 +133,77 @@ fn write_schema(printed: &str, check: bool, places: &Places, host: &mut impl Hos
         Ok(source) => source,
         Err(problems) => return problems,
     };
+    let published = match files::published(&document) {
+        Ok(published) => published,
+        Err(problems) => return problems,
+    };
+    let tracked: BTreeSet<String> = match host.output(TRACKED, env) {
+        Ok(Some(listed)) => listed.lines().map(str::to_owned).collect(),
+        Ok(None) => return vec![format!("`{}` failed", TRACKED.join(" "))],
+        Err(error) => return vec![format!("git: {error}")],
+    };
     let mut problems = match host.read(&places.root.join(CHECKS)) {
         Ok(text) => unmatched_checks(&source.checks, text.as_deref()),
         Err(error) => vec![format!("{CHECKS}: {error}")],
     };
-    let mut writes = vec![(places.root.join(SHADOW).join("schema.json"), printed)];
-    let generated = places.root.join(GENERATED);
+    let id = files::protocol_id(&published);
+    let mut outputs: Vec<(String, String)> = published
+        .iter()
+        .map(|(name, text)| (format!("{PROTOCOL_SCHEMAS}/{name}"), text.clone()))
+        .collect();
+    let stale: Vec<&String> = tracked
+        .iter()
+        .filter(|path| !outputs.iter().any(|(written, _)| written == *path))
+        .collect();
+    outputs.push((RUST_ID.to_owned(), files::rust_id(&id)));
+    outputs.push((TYPESCRIPT_ID.to_owned(), files::typescript_id(&id)));
+    outputs.push((GENERATED.to_owned(), source.text));
     if check {
-        match host.read(&generated) {
-            Ok(Some(committed)) if committed == source.text => {}
-            Ok(_) => problems.push(format!(
-                "{GENERATED} isn't the zod the Rust protocol writes: run `cargo xtask schema`, \
-                 and commit what it writes"
-            )),
-            Err(error) => problems.push(format!("{GENERATED}: {error}")),
+        for (path, text) in &outputs {
+            let untracked = path.starts_with(PROTOCOL_SCHEMAS) && !tracked.contains(path);
+            match host.read(&places.root.join(path)) {
+                Ok(Some(committed)) if committed == *text && !untracked => {}
+                Ok(_) => problems.push(format!(
+                    "{path} isn't what the Rust protocol writes: run `cargo xtask schema`, and \
+                     commit what it writes"
+                )),
+                Err(error) => problems.push(format!("{path}: {error}")),
+            }
         }
-    } else {
-        writes.push((generated, source.text.as_str()));
+        problems.extend(stale.iter().map(|path| {
+            format!("{path} is a file the Rust protocol no longer writes: run `cargo xtask schema`")
+        }));
+        outputs.clear();
     }
-    for (path, text) in writes {
-        if let Err(error) = host.write(&path, text) {
-            problems.push(format!("{}: {error}", path.display()));
+    outputs.push((format!("{SHADOW}/schema.json"), printed.to_owned()));
+    for (path, text) in &outputs {
+        if let Err(error) = host.write(&places.root.join(path), text) {
+            problems.push(format!("{path}: {error}"));
+        }
+    }
+    if !check {
+        for path in stale {
+            let removed = if is_published_file(path) {
+                host.remove(&places.root.join(path))
+                    .map_err(|error| error.to_string())
+            } else {
+                Err("isn't a JSON file in the published folder, so stays".to_owned())
+            };
+            if let Err(why) = removed {
+                problems.push(format!("{path}: {why}"));
+            }
         }
     }
     problems
+}
+
+/// Whether `path`, from the repository's root, is a JSON file directly in `PROTOCOL_SCHEMAS`: the
+/// only files `cargo xtask schema` removes.
+fn is_published_file(path: &str) -> bool {
+    path.strip_prefix(PROTOCOL_SCHEMAS)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .and_then(|name| name.strip_suffix(".json"))
+        .is_some_and(|stem| !stem.is_empty() && !stem.contains(['/', '\\', '.']))
 }
 
 /// Plants the corpus from the schema `printed` holds, has the example judge each case as the
@@ -285,6 +356,7 @@ mod tests {
         files: BTreeMap<PathBuf, String>,
         judge: Option<fn(&serde_json::Value) -> serde_json::Value>,
         written: BTreeMap<PathBuf, String>,
+        removed: Vec<PathBuf>,
         ran: Vec<String>,
     }
 
@@ -317,23 +389,57 @@ mod tests {
             self.written.insert(path.to_owned(), text.to_owned());
             Ok(())
         }
+        fn remove(&mut self, path: &Path) -> std::io::Result<()> {
+            self.removed.push(path.to_owned());
+            Ok(())
+        }
+    }
+
+    fn document(defs: &serde_json::Value) -> serde_json::Value {
+        json!({ "$defs": defs, "x-bazhen-events": {}, "x-bazhen-semantics": { "revision": 1 } })
     }
 
     fn schema(defs: &serde_json::Value) -> String {
-        json!({ "$defs": defs }).to_string()
+        document(defs).to_string()
+    }
+
+    /// Each file the schema of `defs` writes into the tree, by its path from the root, as
+    /// `cargo xtask schema` writes it.
+    fn tree(defs: &serde_json::Value) -> BTreeMap<String, String> {
+        let published = files::published(&document(defs)).unwrap();
+        let id = files::protocol_id(&published);
+        let mut tree: BTreeMap<String, String> = published
+            .into_iter()
+            .map(|(name, text)| (format!("{PROTOCOL_SCHEMAS}/{name}"), text))
+            .collect();
+        tree.insert(RUST_ID.to_owned(), files::rust_id(&id));
+        tree.insert(TYPESCRIPT_ID.to_owned(), files::typescript_id(&id));
+        if let Ok(source) = zod::generate(&document(defs), CHECKS_FROM_GENERATED) {
+            tree.insert(GENERATED.to_owned(), source.text);
+        }
+        tree
+    }
+
+    /// `git ls-files`' answer when it tracks `paths`.
+    fn listed<'a>(paths: impl IntoIterator<Item = &'a String>) -> Option<String> {
+        let lines: Vec<&str> = paths.into_iter().map(String::as_str).collect();
+        (!lines.is_empty()).then(|| lines.join("\n") + "\n")
     }
 
     fn metadata(packages: &serde_json::Value) -> String {
         json!({ "packages": packages }).to_string()
     }
 
-    /// A host whose example prints `defs`, and whose tree holds the zod written from them.
+    /// A host whose example prints `defs`, and whose tree holds, and git tracks, what is written
+    /// from them.
     fn fake(defs: &serde_json::Value) -> Fake {
         let mut host = Fake::default();
         host.printed.insert(EMIT.join(" "), Some(schema(defs)));
-        if let Ok(source) = zod::generate(&json!({ "$defs": defs }), CHECKS_FROM_GENERATED) {
-            host.files
-                .insert(Path::new("/a/repo").join(GENERATED), source.text);
+        let tree = tree(defs);
+        let published = tree.keys().filter(|p| p.starts_with(PROTOCOL_SCHEMAS));
+        host.printed.insert(TRACKED.join(" "), listed(published));
+        for (path, text) in tree {
+            host.files.insert(Path::new("/a/repo").join(path), text);
         }
         host.printed.insert(
             leaks::TREE.join(" "),
@@ -361,7 +467,7 @@ mod tests {
 
     #[test]
     fn writes_the_zod_into_the_tree_and_the_schema_into_the_shadow_folder() {
-        let defs = json!({ "Role": { "type": "string" } });
+        let defs = json!({ "Role": { "type": "string", "description": "A role." } });
         let shadow = Path::new("/a/repo").join(SHADOW);
         let generated = Path::new("/a/repo").join(GENERATED);
         let mut host = fake(&defs);
@@ -373,12 +479,26 @@ mod tests {
             host.written.get(&shadow.join("schema.json")),
             Some(&schema(&defs))
         );
-        assert!(
-            host.written
-                .keys()
-                .all(|p| p.starts_with(&shadow) || *p == generated)
+        let role = &host.written[&Path::new("/a/repo")
+            .join(PROTOCOL_SCHEMAS)
+            .join("Role.json")];
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(role).unwrap(),
+            json!({ "$id": "Role", "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "string" })
         );
-        assert_eq!(host.ran, vec![EMIT.join(" "), judged()]);
+        let tree = tree(&defs);
+        assert!(
+            host.written.keys().all(|p| p.starts_with(&shadow)
+                || tree.keys().any(|t| *p == Path::new("/a/repo").join(t)))
+        );
+        for path in tree.keys() {
+            assert!(
+                host.written.contains_key(&Path::new("/a/repo").join(path)),
+                "{path}"
+            );
+        }
+        assert_eq!(host.removed, Vec::<PathBuf>::new());
+        assert_eq!(host.ran, vec![EMIT.join(" "), TRACKED.join(" "), judged()]);
         assert_eq!(
             host.written
                 .get(&shadow.join("corpus.json"))
@@ -388,29 +508,105 @@ mod tests {
     }
 
     #[test]
-    fn with_check_holds_the_committed_zod_to_the_zod_it_writes_and_writes_none() {
+    fn writes_the_same_id_into_the_rust_and_the_typescript_and_a_new_one_for_a_new_schema() {
+        let id_of = |defs: &serde_json::Value| {
+            let mut host = fake(defs);
+            assert_eq!(ran(&mut host, false).0, Exit::Done);
+            let rust = &host.written[&Path::new("/a/repo").join(RUST_ID)];
+            let typescript = &host.written[&Path::new("/a/repo").join(TYPESCRIPT_ID)];
+            let quoted = |text: &str| text.split('"').nth(1).unwrap().to_owned();
+            assert_eq!(quoted(rust), quoted(typescript));
+            quoted(rust)
+        };
+        let role = id_of(&json!({ "Role": { "type": "string" } }));
+        assert_eq!(role.len(), 64);
+        let reworded = id_of(&json!({ "Role": { "type": "string", "description": "Who." } }));
+        assert_eq!(role, reworded);
+        assert_ne!(role, id_of(&json!({ "Role": { "type": "integer" } })));
+    }
+
+    #[test]
+    fn with_check_holds_each_committed_file_to_what_it_writes_and_writes_none() {
         let defs = json!({ "Role": { "type": "string" } });
-        let generated = Path::new("/a/repo").join(GENERATED);
         let mut host = fake(&defs);
         assert_eq!(ran(&mut host, true), (Exit::Done, String::new()));
-        assert!(!host.written.contains_key(&generated));
-        let stale = "export const Role = z.number();\n".to_owned();
-        for committed in [Some(stale.clone()), None] {
+        let shadow = Path::new("/a/repo").join(SHADOW);
+        assert!(host.written.keys().all(|p| p.starts_with(&shadow)));
+        let role = format!("{PROTOCOL_SCHEMAS}/Role.json");
+        for path in [GENERATED, RUST_ID, TYPESCRIPT_ID, role.as_str()] {
+            let at = Path::new("/a/repo").join(path);
+            for committed in [Some("stale\n".to_owned()), None] {
+                let mut host = fake(&defs);
+                match &committed {
+                    Some(text) => host.files.insert(at.clone(), text.clone()),
+                    None => host.files.remove(&at),
+                };
+                let (exit, err) = ran(&mut host, true);
+                assert_eq!(exit, Exit::Failed);
+                assert!(
+                    err.contains(&format!("{path} isn't what the Rust protocol writes")),
+                    "{err}"
+                );
+                assert_eq!(host.files.get(&at), committed.as_ref());
+                assert!(host.written.keys().all(|p| p.starts_with(&shadow)));
+            }
+        }
+        let mut host = fake(&defs);
+        let others = [format!("{PROTOCOL_SCHEMAS}/events.json")];
+        host.printed.insert(TRACKED.join(" "), listed(&others));
+        let (exit, err) = ran(&mut host, true);
+        assert_eq!(exit, Exit::Failed);
+        assert!(
+            err.contains(&format!("{role} isn't what the Rust protocol writes")),
+            "an untracked file passed: {err}"
+        );
+    }
+
+    #[test]
+    fn removes_only_the_tracked_published_files_it_no_longer_writes() {
+        let defs = json!({ "Role": { "type": "string" } });
+        let gone = format!("{PROTOCOL_SCHEMAS}/Gone.json");
+        let mut tracked: Vec<String> = tree(&defs)
+            .into_keys()
+            .filter(|p| p.starts_with(PROTOCOL_SCHEMAS))
+            .collect();
+        tracked.push(gone.clone());
+        let mut host = fake(&defs);
+        host.printed.insert(TRACKED.join(" "), listed(&tracked));
+        let (exit, err) = ran(&mut host, true);
+        assert_eq!(exit, Exit::Failed);
+        assert!(
+            err.contains(&format!(
+                "{gone} is a file the Rust protocol no longer writes"
+            )),
+            "{err}"
+        );
+        assert_eq!(host.removed, Vec::<PathBuf>::new());
+        assert_eq!(ran(&mut host, false), (Exit::Done, String::new()));
+        assert_eq!(host.removed, [Path::new("/a/repo").join(&gone)]);
+        let outside = [
+            "packages/protocol/src/gen/protocol.ts",
+            "packages/protocol/schema/nested/Gone.json",
+            "packages/protocol/schema/../../../Cargo.toml",
+            "packages/protocol/schemas/Gone.json",
+            "packages/protocol/schema/Gone.ts",
+            "packages/protocol/schema/.json",
+        ];
+        for path in outside {
             let mut host = fake(&defs);
-            match &committed {
-                Some(text) => host.files.insert(generated.clone(), text.clone()),
-                None => host.files.remove(&generated),
-            };
-            let (exit, err) = ran(&mut host, true);
-            assert_eq!(exit, Exit::Failed);
+            let mut listed_paths = tracked.clone();
+            listed_paths.push(path.to_owned());
+            host.printed
+                .insert(TRACKED.join(" "), listed(&listed_paths));
+            let (exit, err) = ran(&mut host, false);
+            assert_eq!(exit, Exit::Failed, "{path}");
             assert!(
-                err.contains(
-                    "packages/protocol/src/gen/protocol.ts isn't the zod the Rust protocol writes"
-                ),
+                err.contains(&format!(
+                    "{path}: isn't a JSON file in the published folder"
+                )),
                 "{err}"
             );
-            assert_eq!(host.files.get(&generated), committed.as_ref());
-            assert!(!host.written.contains_key(&generated));
+            assert_eq!(host.removed, [Path::new("/a/repo").join(&gone)], "{path}");
         }
     }
 
@@ -526,6 +722,7 @@ mod tests {
             host.ran,
             vec![
                 EMIT.join(" "),
+                TRACKED.join(" "),
                 judged(),
                 leaks::TREE.join(" "),
                 leaks::METADATA.join(" ")

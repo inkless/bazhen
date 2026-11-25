@@ -1,0 +1,29 @@
+{
+  "$id": "RequeueReason",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "enum": [
+        "not_written",
+        "daemon_restart"
+      ],
+      "type": "string"
+    },
+    {
+      "const": "session_started",
+      "type": "string"
+    },
+    {
+      "const": "stop_failed",
+      "type": "string"
+    },
+    {
+      "const": "interrupted",
+      "type": "string"
+    },
+    {
+      "const": "not_seen",
+      "type": "string"
+    }
+  ]
+}

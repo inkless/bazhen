@@ -1,0 +1,21 @@
+{
+  "$id": "HolderSubscribeFrom",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "generation": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "offset": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "generation",
+    "offset"
+  ],
+  "type": "object"
+}

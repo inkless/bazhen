@@ -63,6 +63,13 @@ impl Host for Real {
         }
         std::fs::write(path, text)
     }
+
+    fn remove(&mut self, path: &Path) -> io::Result<()> {
+        match std::fs::remove_file(path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            done => done,
+        }
+    }
 }
 
 impl Real {

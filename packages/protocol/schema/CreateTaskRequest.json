@@ -1,56 +1,59 @@
 {
   "$id": "CreateTaskRequest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "title": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "brief": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 20000
-    },
-    "parentTaskId": {
-      "type": "string",
-      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    },
     "assign": {
-      "type": "object",
       "properties": {
         "agentId": {
           "anyOf": [
             {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             {
+              "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$",
               "type": "string",
-              "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+              "x-bazhen-message": "a name is 1 to 40 letters, digits, - or _, starts with a letter or digit, and isn't an id"
             }
           ]
         },
         "role": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
+          "type": "string"
         }
       },
       "required": [
         "agentId",
         "role"
-      ]
+      ],
+      "type": "object"
+    },
+    "brief": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "type": "string"
+    },
+    "idempotencyKey": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "parentTaskId": {
+      "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string",
+      "x-bazhen-check": "newTaskTitle",
+      "x-bazhen-transform": "trim"
     }
   },
   "required": [
     "idempotencyKey",
     "title",
     "brief"
-  ]
+  ],
+  "type": "object"
 }

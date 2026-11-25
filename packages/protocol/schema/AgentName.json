@@ -1,6 +1,7 @@
 {
   "$id": "AgentName",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$",
   "type": "string",
-  "pattern": "^(?!(?:host|env|agent|task|asgn|attn|ntc|msg|term|dev|att|lease|obs)_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$)[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+  "x-bazhen-message": "a name is 1 to 40 letters, digits, - or _, starts with a letter or digit, and isn't an id"
 }

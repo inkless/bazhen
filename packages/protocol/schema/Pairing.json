@@ -1,0 +1,21 @@
+{
+  "$id": "Pairing",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "mode": {
+      "enum": [
+        "auto",
+        "always"
+      ],
+      "type": "string"
+    },
+    "required": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "mode",
+    "required"
+  ],
+  "type": "object"
+}

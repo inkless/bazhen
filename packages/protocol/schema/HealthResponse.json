@@ -1,12 +1,7 @@
 {
   "$id": "HealthResponse",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "status": {
-      "type": "string",
-      "const": "ok"
-    },
     "appVersion": {
       "type": "string"
     },
@@ -14,21 +9,19 @@
       "type": "string"
     },
     "runtimes": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
           "kind": {
             "type": "string"
           },
           "state": {
-            "type": "string",
             "enum": [
               "healthy",
               "unreachable",
               "not-running",
               "unused"
-            ]
+            ],
+            "type": "string"
           },
           "version": {
             "type": [
@@ -37,18 +30,26 @@
             ]
           },
           "workarounds": {
-            "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "type": "array"
           }
         },
         "required": [
           "kind",
           "state",
           "version"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "ok"
+      ],
+      "type": "string"
     }
   },
   "required": [
@@ -56,5 +57,6 @@
     "appVersion",
     "protocolId",
     "runtimes"
-  ]
+  ],
+  "type": "object"
 }

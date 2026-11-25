@@ -10,6 +10,9 @@ use crate::ids::AttachmentId;
 /// The largest frame a view may send.
 pub const STREAM_FRAME_MAX_BYTES: usize = 1 << 20;
 
+/// The history each new terminal keeps, in lines, when its config names none.
+pub const HISTORY_LINES: u32 = 10_000;
+
 /// Whether a view may drive the terminal, or only watches it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

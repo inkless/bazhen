@@ -1,20 +1,23 @@
 {
   "$id": "HolderScreen",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
+    "history": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
     "text": {
       "type": "string",
-      "description": "No C0 or C1 control or DEL but the newline ending each row."
-    },
-    "history": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
+      "x-bazhen-check": [
+        "wellFormed",
+        "screenText"
+      ]
     }
   },
   "required": [
     "text",
     "history"
-  ]
+  ],
+  "type": "object"
 }

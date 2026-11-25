@@ -1,0 +1,123 @@
+{
+  "$id": "Containment",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "properties": {
+        "oomPolicy": {
+          "type": "boolean"
+        },
+        "state": {
+          "const": "scoped",
+          "type": "string"
+        },
+        "swap": {
+          "properties": {
+            "asked": {
+              "type": "string"
+            },
+            "bytes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "asked",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        "systemd": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "terminal": {
+          "properties": {
+            "asked": {
+              "type": "string"
+            },
+            "bytes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "asked",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        "total": {
+          "properties": {
+            "asked": {
+              "type": "string"
+            },
+            "bytes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "asked",
+            "bytes"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "state",
+        "systemd",
+        "oomPolicy",
+        "terminal",
+        "total",
+        "swap"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "state": {
+          "const": "uncontained",
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "why"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "state": {
+          "const": "unchecked",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    }
+  ]
+}

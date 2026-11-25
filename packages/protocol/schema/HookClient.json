@@ -1,0 +1,17 @@
+{
+  "$id": "HookClient",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "fallback": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "fallback"
+  ],
+  "type": "object"
+}

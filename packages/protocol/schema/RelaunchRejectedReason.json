@@ -1,0 +1,26 @@
+{
+  "$id": "RelaunchRejectedReason",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "const": "not_resumable",
+      "type": "string"
+    },
+    {
+      "const": "terminal_exists",
+      "type": "string"
+    },
+    {
+      "const": "harness_refused",
+      "type": "string"
+    },
+    {
+      "const": "unavailable",
+      "type": "string"
+    },
+    {
+      "const": "daemon_restart",
+      "type": "string"
+    }
+  ]
+}

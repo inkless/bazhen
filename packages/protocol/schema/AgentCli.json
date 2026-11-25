@@ -1,0 +1,23 @@
+{
+  "$id": "AgentCli",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "expected": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "onPath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "expected",
+    "onPath"
+  ],
+  "type": "object"
+}

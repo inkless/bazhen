@@ -1,31 +1,36 @@
 {
   "$id": "HolderError",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "request": {
-      "type": "string"
-    },
     "code": {
-      "type": "string"
+      "type": "string",
+      "x-bazhen-check": "wellFormed"
     },
     "message": {
-      "type": "string"
+      "type": "string",
+      "x-bazhen-check": "wellFormed"
     },
     "protocol": {
-      "minItems": 1,
-      "maxItems": 16,
-      "type": "array",
       "items": {
         "type": "string",
-        "minLength": 0,
-        "description": "At most 32 UTF-8 bytes."
-      }
+        "x-bazhen-check": [
+          "wellFormed",
+          "utf8AtMost32Bytes"
+        ]
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "type": "array"
+    },
+    "request": {
+      "type": "string",
+      "x-bazhen-check": "wellFormed"
     }
   },
   "required": [
     "request",
     "code",
     "message"
-  ]
+  ],
+  "type": "object"
 }

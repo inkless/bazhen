@@ -1,0 +1,71 @@
+{
+  "$id": "Terminals",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "host": {
+      "anyOf": [
+        {
+          "properties": {
+            "exact": {
+              "type": "boolean"
+            },
+            "max": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "used": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "used",
+            "max",
+            "exact"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "max": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "open": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "refusing": {
+      "anyOf": [
+        {
+          "enum": [
+            "budget",
+            "host"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "open",
+    "max",
+    "host",
+    "refusing"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+{
+  "$id": "HolderEnv",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": {
+    "type": "string",
+    "x-bazhen-check": "wellFormed"
+  },
+  "propertyNames": {
+    "pattern": "^(?!(?:__proto__)$)",
+    "type": "string",
+    "x-bazhen-check": "wellFormed"
+  },
+  "type": "object",
+  "x-bazhen-transform": "refusingOwnProto"
+}

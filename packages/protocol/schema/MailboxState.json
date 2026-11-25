@@ -1,7 +1,6 @@
 {
   "$id": "MailboxState",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "string",
   "enum": [
     "queued",
     "offered",
@@ -10,5 +9,6 @@
     "queued_in_codex",
     "delivered",
     "undeliverable"
-  ]
+  ],
+  "type": "string"
 }

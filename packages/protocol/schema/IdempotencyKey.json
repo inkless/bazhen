@@ -1,7 +1,7 @@
 {
   "$id": "IdempotencyKey",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "string",
+  "maxLength": 200,
   "minLength": 1,
-  "maxLength": 200
+  "type": "string"
 }

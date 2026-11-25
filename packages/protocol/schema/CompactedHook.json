@@ -1,0 +1,23 @@
+{
+  "$id": "CompactedHook",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "pid": {
+      "format": "int64",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "sessionId",
+    "pid"
+  ],
+  "type": "object"
+}

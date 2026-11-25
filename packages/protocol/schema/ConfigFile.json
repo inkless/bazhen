@@ -1,0 +1,17 @@
+{
+  "$id": "ConfigFile",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "found": {
+      "type": "boolean"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "found"
+  ],
+  "type": "object"
+}

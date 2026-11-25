@@ -1,224 +1,38 @@
 {
   "$id": "StateSnapshot",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
-    "epoch": {
-      "type": "string"
-    },
-    "eventId": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "environments": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "local",
-              "opencode-server"
-            ]
-          },
-          "host": {
-            "default": "",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "kind"
-        ]
-      }
-    },
     "agents": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "name": {
-            "default": "",
-            "type": "string"
-          },
-          "environmentId": {
-            "type": "string",
-            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "harness": {
-            "type": "string",
-            "enum": [
-              "claude-code",
-              "codex"
-            ]
-          },
-          "project": {
-            "type": "string"
-          },
-          "cwd": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "starting",
-              "running",
-              "exited",
-              "unknown",
-              "lost",
-              "closing",
-              "closed",
-              "failed"
-            ]
-          },
-          "terminalId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "generation": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "externalRef": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "environmentId": {
-                    "type": "string",
-                    "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                  },
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "claude-session",
-                      "codex-thread"
-                    ]
-                  },
-                  "id": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "environmentId",
-                  "kind",
-                  "id"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "exit": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "exited"
-                      },
-                      "code": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "code"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "signalled"
-                      },
-                      "signal": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "signal"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "unknown"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "theme": {
-            "default": "dark",
-            "type": "string",
-            "enum": [
-              "light",
-              "dark"
-            ]
-          },
-          "themes": {
-            "default": [
-              "dark"
-            ],
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "light",
-                "dark"
-              ]
-            }
-          },
           "activity": {
-            "type": "object",
             "properties": {
+              "confidence": {
+                "format": "double",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "detail": {
+                "maxLength": 200,
+                "type": "string"
+              },
+              "observedAt": {
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              "resetsAt": {
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "native",
+                  "heuristic"
+                ],
+                "type": "string"
+              },
               "value": {
-                "type": "string",
                 "enum": [
                   "working",
                   "waiting_input",
@@ -228,33 +42,8 @@
                   "failed",
                   "limited",
                   "unknown"
-                ]
-              },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "native",
-                  "heuristic"
-                ]
-              },
-              "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "observedAt": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-              },
-              "detail": {
-                "type": "string",
-                "maxLength": 200
-              },
-              "resetsAt": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                ],
+                "type": "string"
               }
             },
             "required": [
@@ -262,53 +51,8 @@
               "source",
               "confidence",
               "observedAt"
-            ]
-          },
-          "usage": {
-            "type": "object",
-            "properties": {
-              "model": {
-                "type": "string",
-                "maxLength": 200
-              },
-              "contextUsedPercent": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 100
-              },
-              "contextWindowTokens": {
-                "type": "integer",
-                "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
-              },
-              "limits": {
-                "maxItems": 20,
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "window": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 60
-                    },
-                    "usedPercent": {
-                      "type": "number",
-                      "minimum": 0
-                    },
-                    "resetsAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                    }
-                  },
-                  "required": [
-                    "window",
-                    "usedPercent"
-                  ]
-                }
-              }
-            }
+            ],
+            "type": "object"
           },
           "attachCommand": {
             "default": null,
@@ -317,66 +61,81 @@
               "null"
             ]
           },
+          "canOpenShell": {
+            "default": false,
+            "type": "boolean"
+          },
           "commands": {
             "default": [],
-            "type": "array",
             "items": {
-              "type": "string",
               "enum": [
                 "close",
                 "respawn",
                 "signal",
                 "relaunch"
-              ]
-            }
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
-          "resumable": {
-            "default": false,
-            "type": "boolean"
+          "cwd": {
+            "type": "string"
           },
-          "canOpenShell": {
-            "default": false,
-            "type": "boolean"
+          "environmentId": {
+            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
-          "launchedBy": {
-            "default": null,
+          "exit": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "listening": {
-            "default": false,
-            "type": "boolean"
-          },
-          "headline": {
-            "default": null,
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "text": {
-                    "type": "string"
+                "oneOf": [
+                  {
+                    "properties": {
+                      "code": {
+                        "format": "int64",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "type": {
+                        "const": "exited",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "code"
+                    ],
+                    "type": "object"
                   },
-                  "taskId": {
-                    "type": "string",
-                    "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                  {
+                    "properties": {
+                      "signal": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "signalled",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "signal"
+                    ],
+                    "type": "object"
                   },
-                  "at": {
-                    "type": "string",
-                    "format": "date-time",
-                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  {
+                    "properties": {
+                      "type": {
+                        "const": "unknown",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "text",
-                  "taskId",
-                  "at"
                 ]
               },
               {
@@ -384,22 +143,114 @@
               }
             ]
           },
-          "needsRestart": {
-            "default": null,
+          "externalRef": {
             "anyOf": [
               {
-                "type": "object",
+                "properties": {
+                  "environmentId": {
+                    "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                    "type": "string"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "claude-session",
+                      "codex-thread"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "environmentId",
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "harness": {
+            "enum": [
+              "claude-code",
+              "codex"
+            ],
+            "type": "string"
+          },
+          "headline": {
+            "anyOf": [
+              {
+                "properties": {
+                  "at": {
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "taskId",
+                  "at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "id": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "launchedBy": {
+            "default": null,
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "listening": {
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "needsRestart": {
+            "anyOf": [
+              {
                 "properties": {
                   "holderPid": {
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
                     ]
                   },
                   "served": {
@@ -409,41 +260,138 @@
                 },
                 "required": [
                   "holderPid"
-                ]
+                ],
+                "type": "object"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "default": null
           },
-          "role": {
-            "default": null,
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[a-z][a-z0-9-]{0,31}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "project": {
+            "type": "string"
           },
           "promptChanged": {
             "default": false,
             "type": "boolean"
           },
-          "startRequestedAt": {
-            "default": null,
+          "resumable": {
+            "default": false,
+            "type": "boolean"
+          },
+          "role": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                "type": "string"
               },
               {
                 "type": "null"
               }
+            ],
+            "default": null
+          },
+          "startRequestedAt": {
+            "anyOf": [
+              {
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "running",
+              "exited",
+              "unknown",
+              "lost",
+              "closing",
+              "closed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "terminalId": {
+            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
             ]
+          },
+          "theme": {
+            "default": "dark",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "type": "string"
+          },
+          "themes": {
+            "default": [
+              "dark"
+            ],
+            "items": {
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "usage": {
+            "properties": {
+              "contextUsedPercent": {
+                "format": "double",
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              },
+              "contextWindowTokens": {
+                "format": "uint64",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "limits": {
+                "items": {
+                  "properties": {
+                    "resetsAt": {
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "usedPercent": {
+                      "format": "double",
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "window": {
+                      "maxLength": 60,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "usedPercent"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              "model": {
+                "maxLength": 200,
+                "type": "string"
+              }
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -457,33 +405,99 @@
           "generation",
           "externalRef",
           "exit"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
-    "attention": {
-      "type": "array",
+    "assignments": {
+      "default": [],
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^attn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
           "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "endReason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unassigned",
+                  "completed",
+                  "task_finished",
+                  "agent_closed",
+                  "parent_ended"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "parentAssignmentId": {
+            "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "pattern": "^[a-z][a-z0-9-]{0,31}$",
+            "type": "string"
           },
           "state": {
-            "type": "string",
             "enum": [
-              "open",
-              "closed"
-            ]
+              "active",
+              "ended"
+            ],
+            "type": "string"
+          },
+          "taskId": {
+            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "agentId",
+          "role",
+          "parentAssignmentId",
+          "state",
+          "endReason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "attention": {
+      "items": {
+        "properties": {
+          "actions": {
+            "items": {
+              "enum": [
+                "allow",
+                "deny",
+                "reply",
+                "resend",
+                "dismiss"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agentId": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
           "closeReason": {
             "anyOf": [
               {
-                "type": "string",
                 "enum": [
                   "answered",
                   "answered_in_tui",
@@ -494,18 +508,19 @@
                   "replied",
                   "dismissed",
                   "resent"
-                ]
+                ],
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "summary": {
+          "id": {
+            "pattern": "^attn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
             "type": "string"
           },
           "kind": {
-            "type": "string",
             "enum": [
               "approval",
               "question",
@@ -514,42 +529,35 @@
               "escalation",
               "task_done",
               "stuck_starting"
+            ],
+            "type": "string"
+          },
+          "messageId": {
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
             ]
+          },
+          "openedAt": {
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
           },
           "taskId": {
             "type": [
               "string",
               "null"
             ]
-          },
-          "messageId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-          },
-          "actions": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "allow",
-                "deny",
-                "reply",
-                "resend",
-                "dismiss"
-              ]
-            }
           }
         },
         "required": [
@@ -563,24 +571,59 @@
           "messageId",
           "openedAt",
           "actions"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "environments": {
+      "items": {
+        "properties": {
+          "host": {
+            "default": "",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "local",
+              "opencode-server"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "epoch": {
+      "type": "string"
+    },
+    "eventId": {
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
     },
     "messages": {
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
           "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           },
           "state": {
-            "type": "string",
             "enum": [
               "queued",
               "offered",
@@ -589,364 +632,34 @@
               "queued_in_codex",
               "delivered",
               "undeliverable"
-            ]
+            ],
+            "type": "string"
           }
         },
         "required": [
           "id",
           "agentId",
           "state"
-        ]
-      }
-    },
-    "shells": {
-      "default": [],
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "environmentId": {
-            "type": "string",
-            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "creating",
-              "running",
-              "exited",
-              "unknown",
-              "lost",
-              "closing",
-              "closed",
-              "failed"
-            ]
-          },
-          "generation": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "cwd": {
-            "type": "string"
-          },
-          "linkedAgentId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "name": {
-            "default": null,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "foreground": {
-            "default": null,
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "command": {
-                    "type": "string"
-                  },
-                  "since": {
-                    "type": "string",
-                    "format": "date-time",
-                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-                  }
-                },
-                "required": [
-                  "command",
-                  "since"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "theme": {
-            "type": "string",
-            "enum": [
-              "light",
-              "dark"
-            ]
-          },
-          "attachCommand": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "commands": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "close",
-                "restart",
-                "rename",
-                "unlink"
-              ]
-            }
-          },
-          "retypeable": {
-            "default": false,
-            "type": "boolean"
-          },
-          "needsRestart": {
-            "default": null,
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "holderPid": {
-                    "anyOf": [
-                      {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "served": {
-                    "default": false,
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "holderPid"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "environmentId",
-          "state",
-          "generation",
-          "cwd",
-          "linkedAgentId",
-          "theme",
-          "attachCommand",
-          "commands"
-        ]
-      }
-    },
-    "tasks": {
-      "default": [],
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "title": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "open",
-              "done",
-              "cancelled"
-            ]
-          },
-          "ownerAgentId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parentTaskId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "state",
-          "ownerAgentId",
-          "parentTaskId"
-        ]
-      }
-    },
-    "assignments": {
-      "default": [],
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "taskId": {
-            "type": "string",
-            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "agentId": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "role": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{0,31}$"
-          },
-          "parentAssignmentId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "active",
-              "ended"
-            ]
-          },
-          "endReason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "unassigned",
-                  "completed",
-                  "task_finished",
-                  "agent_closed",
-                  "parent_ended"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "taskId",
-          "agentId",
-          "role",
-          "parentAssignmentId",
-          "state",
-          "endReason"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "notices": {
       "default": [],
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^ntc_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "open",
-              "closed"
-            ]
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "closeReason": {
             "type": [
               "string",
               "null"
             ]
-          },
-          "summary": {
-            "type": "string"
-          },
-          "openedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-          },
-          "device": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "origin": {
-                    "type": "string"
-                  },
-                  "address": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "origin",
-                  "address"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "actions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "closedBy": {
             "type": [
@@ -957,11 +670,10 @@
           "closedFrom": {
             "anyOf": [
               {
-                "type": "object",
                 "properties": {
                   "id": {
-                    "type": "string",
-                    "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                    "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                    "type": "string"
                   },
                   "name": {
                     "type": "string"
@@ -970,12 +682,68 @@
                 "required": [
                   "id",
                   "name"
-                ]
+                ],
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ]
+          },
+          "device": {
+            "anyOf": [
+              {
+                "properties": {
+                  "address": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "origin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "origin",
+                  "address"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "pattern": "^ntc_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "openedAt": {
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
           }
         },
         "required": [
@@ -989,37 +757,36 @@
           "actions",
           "closedBy",
           "closedFrom"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "observed": {
       "default": [],
-      "type": "array",
       "items": {
-        "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "from": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "to": {
-            "type": "string",
-            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "summary": {
-            "type": "string"
-          },
           "accepted": {
             "type": "boolean"
           },
           "at": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "from": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
           }
         },
         "required": [
@@ -1029,8 +796,201 @@
           "summary",
           "accepted",
           "at"
-        ]
-      }
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "shells": {
+      "default": [],
+      "items": {
+        "properties": {
+          "attachCommand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commands": {
+            "items": {
+              "enum": [
+                "close",
+                "restart",
+                "rename",
+                "unlink"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "environmentId": {
+            "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "foreground": {
+            "anyOf": [
+              {
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "since": {
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command",
+                  "since"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "generation": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "linkedAgentId": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needsRestart": {
+            "anyOf": [
+              {
+                "properties": {
+                  "holderPid": {
+                    "format": "uint64",
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "served": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "holderPid"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "retypeable": {
+            "default": false,
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "creating",
+              "running",
+              "exited",
+              "unknown",
+              "lost",
+              "closing",
+              "closed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "theme": {
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "environmentId",
+          "state",
+          "generation",
+          "cwd",
+          "linkedAgentId",
+          "theme",
+          "attachCommand",
+          "commands"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tasks": {
+      "default": [],
+      "items": {
+        "properties": {
+          "id": {
+            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "ownerAgentId": {
+            "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentTaskId": {
+            "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "open",
+              "done",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "state",
+          "ownerAgentId",
+          "parentTaskId"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -1040,5 +1000,6 @@
     "agents",
     "attention",
     "messages"
-  ]
+  ],
+  "type": "object"
 }

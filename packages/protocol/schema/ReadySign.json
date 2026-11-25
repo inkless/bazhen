@@ -1,0 +1,9 @@
+{
+  "$id": "ReadySign",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "enum": [
+    "claude_hook",
+    "codex_title"
+  ],
+  "type": "string"
+}

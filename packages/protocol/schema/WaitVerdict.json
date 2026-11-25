@@ -1,11 +1,24 @@
 {
   "$id": "WaitVerdict",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "string",
-  "enum": [
-    "met",
-    "never",
-    "bounced",
-    "pending"
+  "oneOf": [
+    {
+      "enum": [
+        "met"
+      ],
+      "type": "string"
+    },
+    {
+      "const": "never",
+      "type": "string"
+    },
+    {
+      "const": "bounced",
+      "type": "string"
+    },
+    {
+      "const": "pending",
+      "type": "string"
+    }
   ]
 }

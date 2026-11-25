@@ -1,6 +1,7 @@
 {
   "$id": "FinishNoteText",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "maxLength": 20000,
   "type": "string",
-  "maxLength": 20000
+  "x-bazhen-check": "noteText"
 }

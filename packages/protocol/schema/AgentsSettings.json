@@ -1,0 +1,24 @@
+{
+  "$id": "AgentsSettings",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "loginShell": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "shell": {
+      "enum": [
+        "direct",
+        "login"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "shell",
+    "loginShell"
+  ],
+  "type": "object"
+}

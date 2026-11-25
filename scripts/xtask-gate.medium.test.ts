@@ -35,8 +35,8 @@ exit "\${STUB_EXIT:-0}"
 `;
 
 // `cargo metadata`, which `lint` asks for the crates to lint alone: two crates, named out of order.
-// The schema's example, which a test gate runs first, prints a schema of no messages, and judges
-// the corpus that leaves, which is empty.
+// The schema's example, which a test gate runs first, prints a schema of no messages, no events and
+// the first revision of its semantics, and judges the corpus that leaves, which is empty.
 const CARGO_STUB = `#!/bin/sh
 echo "ARGV: $*" >> "$STUB_LOG"
 echo "ENV:" >> "$STUB_LOG"
@@ -44,7 +44,7 @@ env -0 >> "$STUB_LOG"
 echo >> "$STUB_LOG"
 case "$*" in
   *emit_schema*verdicts*) echo '[]' ;;
-  *emit_schema*) echo '{"$defs":{}}' ;;
+  *emit_schema*) echo '{"$defs":{},"x-bazhen-events":{},"x-bazhen-semantics":{"revision":1}}' ;;
   *) echo '{"packages":[{"name":"two"},{"name":"one"}]}' ;;
 esac
 `;
@@ -103,6 +103,10 @@ beforeEach(() => {
   }
   writeFileSync(join(bin, "cargo"), CARGO_STUB);
   chmodSync(join(bin, "cargo"), 0o755);
+  // `git`, which the schema step asks which published files are committed: in the scratch
+  // repository, none.
+  writeFileSync(join(bin, "git"), "#!/bin/sh\n");
+  chmodSync(join(bin, "git"), 0o755);
   // `env`, which the stubs run to log what they were started with: PATH holds only this folder.
   const env = spawnSync("sh", ["-c", "command -v env"], { encoding: "utf8" }).stdout.trim();
   writeFileSync(join(bin, "env"), `#!/bin/sh\nexec ${env} "$@"\n`);

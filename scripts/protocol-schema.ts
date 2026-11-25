@@ -1,13 +1,12 @@
-// Writes the protocol's JSON Schema into packages/protocol/schema/ (foundation-design §5.5), the
-// holder protocol's fixtures for its current version into
+// Writes the holder protocol's fixtures for its current version into
 // packages/protocol/fixtures/holder/<version>/, and the API messages' fixtures, which hold other
-// languages' types to these, into packages/protocol/fixtures/api/. With `--check`, writes nothing and fails when the
-// committed files differ from a fresh export, so a protocol change can't ship without them. Only
-// files git tracks count as committed: a generated file left unstaged would pass here and fail in
-// CI. An older version's fixtures are never written: they are what its peers really sent, so
-// each is pinned by its hash in FROZEN_HOLDER_FIXTURES, and both modes fail when one changes.
-// It also writes the protocol id the Rust crates speak, crates/bazhen-protocol/src/id.rs, held
-// to the same check.
+// languages' types to these, into packages/protocol/fixtures/api/. With `--check`, writes nothing
+// and fails when the committed files differ from a fresh export, so a protocol change can't ship
+// without them. Only files git tracks count as committed: a generated file left unstaged would
+// pass here and fail in CI. An older version's fixtures are never written: they are what its peers
+// really sent, so each is pinned by its hash in FROZEN_HOLDER_FIXTURES, and both modes fail when
+// one changes. The protocol's JSON Schema, packages/protocol/schema/, and the id it hashes to are
+// `cargo xtask schema`'s, from the Rust protocol.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,7 +23,7 @@ import { coreFixture } from "./core-fixtures.ts";
 import { detailFixture } from "./detail-fixtures.ts";
 import { numberFixture } from "./number-fixtures.ts";
 import { roleFixture } from "./role-fixtures.ts";
-import { filesHash, protocolFiles, protocolId } from "../packages/protocol/src/id.ts";
+import { filesHash } from "../packages/protocol/src/id.ts";
 import { isMain } from "./is-main.ts";
 
 /** The files that are missing, stale or extra in `actual`, compared with `expected`. */
@@ -83,7 +82,6 @@ const holderRoot = join(root, "fixtures/holder");
 
 /** Each generated directory, relative to the package, with the files it should hold. */
 const outputs = async (): Promise<Record<string, Record<string, string>>> => ({
-  "schema/": protocolFiles(),
   [`fixtures/holder/${HOLDER_PROTOCOL_VERSION}/`]: holderFixtures(),
   "fixtures/api/": apiFixtures(),
   "fixtures/store/": storeFixture(),
@@ -95,29 +93,6 @@ const outputs = async (): Promise<Record<string, Record<string, string>>> => ({
   "fixtures/details/": detailFixture(),
   "fixtures/codex/": await codexFixture(),
 });
-
-/** Where the Rust crates' protocol id is written, relative to the repository. */
-const RUST_ID = "crates/bazhen-protocol/src/id.rs";
-
-/** The Rust source that names `id` as the protocol the Rust crates speak. */
-export function rustProtocolId(id: string): string {
-  return [
-    "//! The protocol this build speaks, as `protocolId()` in packages/protocol/src/id.ts hashes it.",
-    "//! Written by `moon run :schema`, and held to it by `moon run :schema -- --check`: don't edit it by hand.",
-    "",
-    "/// The SHA-256, in hex, of every file in packages/protocol/schema/, each `name\\0content\\0` in",
-    "/// name order. A daemon that answers with another is another build, to restart.",
-    `pub const PROTOCOL_ID: &str = "${id}";`,
-    "",
-  ].join("\n");
-}
-
-/** A file as git tracks it, or undefined when git doesn't: an unstaged one would pass in CI. */
-function trackedFile(path: string): string | undefined {
-  const repo = join(root, "../..");
-  const tracked = execFileSync("git", ["ls-files", "--", path], { cwd: repo, encoding: "utf8" });
-  return tracked.trim() === "" ? undefined : readFileSync(join(repo, path), "utf8");
-}
 
 function committed(dir: string): Record<string, string> {
   if (!existsSync(dir)) return {};
@@ -150,15 +125,6 @@ if (isMain(import.meta)) {
       const content = expected[name];
       if (content === undefined) rmSync(join(dir, name));
       else writeFileSync(join(dir, name), content);
-    }
-  }
-  const rust = rustProtocolId(await protocolId());
-  if (trackedFile(RUST_ID) !== rust) {
-    if (check) {
-      console.error(`${RUST_ID} is stale: run \`moon run :schema\` and commit the result.`);
-      failed = true;
-    } else {
-      writeFileSync(join(root, "../..", RUST_ID), rust);
     }
   }
   const versions = existsSync(holderRoot) ? readdirSync(holderRoot) : [];

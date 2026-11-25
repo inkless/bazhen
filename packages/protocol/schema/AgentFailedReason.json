@@ -1,0 +1,16 @@
+{
+  "$id": "AgentFailedReason",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "enum": [
+        "launch_rejected"
+      ],
+      "type": "string"
+    },
+    {
+      "const": "daemon_restart",
+      "type": "string"
+    }
+  ]
+}

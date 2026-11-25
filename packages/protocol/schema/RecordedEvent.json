@@ -3,138 +3,130 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "environment.registered"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
               "enum": [
                 "local",
                 "opencode-server"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "environment.registered",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "environment.harness_version"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "harness": {
-              "type": "string",
               "enum": [
                 "claude-code",
                 "codex"
-              ]
-            },
-            "version": {
-              "type": "string",
-              "minLength": 1
+              ],
+              "type": "string"
             },
             "previous": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
             "harness",
             "version",
             "previous"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "environment.harness_version",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.launched"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "environmentId": {
-              "type": "string",
-              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
-            "harness": {
-              "type": "string",
-              "enum": [
-                "claude-code",
-                "codex"
-              ]
-            },
-            "project": {
-              "type": "string"
+            "compactWindowTokens": {
+              "format": "uint32",
+              "maximum": 10000000,
+              "minimum": 100000,
+              "type": "integer"
             },
             "cwd": {
               "type": "string"
             },
-            "terminalId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "environmentId": {
+              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
+            },
+            "harness": {
+              "enum": [
+                "claude-code",
+                "codex"
+              ],
+              "type": "string"
             },
             "launchedBy": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "name": {
               "type": "string"
             },
             "nameOrdinal": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
             },
-            "runtime": {
-              "type": "string",
-              "minLength": 1
-            },
-            "role": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9-]{0,31}$"
+            "project": {
+              "type": "string"
             },
             "promptHash": {
               "type": "string"
             },
-            "compactWindowTokens": {
-              "type": "integer",
-              "minimum": 100000,
-              "maximum": 10000000
+            "role": {
+              "pattern": "^[a-z][a-z0-9-]{0,31}$",
+              "type": "string"
+            },
+            "runtime": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "terminalId": {
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -143,23 +135,23 @@
             "project",
             "cwd",
             "terminalId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.launched",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.renamed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
@@ -171,78 +163,78 @@
           "required": [
             "name",
             "previous"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.renamed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.running"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "externalRef": {
               "anyOf": [
                 {
-                  "type": "object",
                   "properties": {
                     "environmentId": {
-                      "type": "string",
-                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
                     },
                     "kind": {
-                      "type": "string",
                       "enum": [
                         "claude-session",
                         "codex-thread"
-                      ]
-                    },
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
                     "environmentId",
                     "kind",
                     "id"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
                   "type": "null"
                 }
               ]
             },
+            "harnessName": {
+              "type": "string"
+            },
             "runtimeRef": {
               "anyOf": [
                 {
-                  "type": "object",
                   "properties": {
-                    "runtime": {
-                      "type": "string"
-                    },
                     "locator": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string"
-                      },
                       "additionalProperties": {
                         "type": "string"
-                      }
+                      },
+                      "type": "object"
+                    },
+                    "runtime": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "runtime",
                     "locator"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
                   "type": "null"
@@ -250,230 +242,201 @@
               ]
             },
             "theme": {
-              "type": "string",
               "enum": [
                 "light",
                 "dark"
-              ]
-            },
-            "harnessName": {
+              ],
               "type": "string"
             }
           },
           "required": [
             "externalRef",
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.running",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.ready"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "sign": {
-              "type": "string",
               "enum": [
                 "claude_hook",
                 "codex_title"
-              ]
-            }
-          },
-          "required": [
-            "sign"
-          ]
-        }
-      },
-      "required": [
-        "type",
-        "payload"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.failed"
-        },
-        "payload": {
-          "type": "object",
-          "properties": {
-            "reason": {
-              "type": "string",
-              "enum": [
-                "launch_rejected",
-                "daemon_restart"
-              ]
-            },
-            "detail": {
+              ],
               "type": "string"
             }
           },
           "required": [
-            "reason"
-          ]
+            "sign"
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.ready",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.lost"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
-        }
-      },
-      "required": [
-        "type",
-        "payload"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.process_adopted"
-        },
-        "payload": {
-          "type": "object",
           "properties": {
-            "runtimeRef": {
-              "type": "object",
-              "properties": {
-                "runtime": {
+            "detail": {
+              "type": "string"
+            },
+            "reason": {
+              "oneOf": [
+                {
+                  "enum": [
+                    "launch_rejected"
+                  ],
                   "type": "string"
                 },
+                {
+                  "const": "daemon_restart",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.failed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.lost",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "properties": {
+            "runtimeRef": {
+              "properties": {
                 "locator": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
                   "additionalProperties": {
                     "type": "string"
-                  }
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
                 }
               },
               "required": [
                 "runtime",
                 "locator"
-              ]
+              ],
+              "type": "object"
             }
           },
           "required": [
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.process_adopted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.respawn_requested"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.respawn_requested",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.respawned"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "externalRef": {
               "anyOf": [
                 {
-                  "type": "object",
                   "properties": {
                     "environmentId": {
-                      "type": "string",
-                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
                     },
                     "kind": {
-                      "type": "string",
                       "enum": [
                         "claude-session",
                         "codex-thread"
-                      ]
-                    },
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
                     "environmentId",
                     "kind",
                     "id"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
                   "type": "null"
                 }
-              ]
-            },
-            "runtimeRef": {
-              "type": "object",
-              "properties": {
-                "runtime": {
-                  "type": "string"
-                },
-                "locator": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "runtime",
-                "locator"
-              ]
-            },
-            "theme": {
-              "type": "string",
-              "enum": [
-                "light",
-                "dark"
               ]
             },
             "harnessName": {
@@ -481,161 +444,176 @@
             },
             "promptHash": {
               "type": "string"
+            },
+            "runtimeRef": {
+              "properties": {
+                "locator": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ],
+              "type": "object"
+            },
+            "theme": {
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "externalRef",
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.respawned",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.respawn_rejected"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "reason": {
-              "type": "string",
-              "enum": [
-                "not_resumable",
-                "no_terminal",
-                "terminal_changed",
-                "harness_refused",
-                "unavailable",
-                "daemon_restart"
-              ]
-            },
             "detail": {
               "type": "string"
+            },
+            "reason": {
+              "oneOf": [
+                {
+                  "const": "not_resumable",
+                  "type": "string"
+                },
+                {
+                  "const": "no_terminal",
+                  "type": "string"
+                },
+                {
+                  "const": "terminal_changed",
+                  "type": "string"
+                },
+                {
+                  "const": "harness_refused",
+                  "type": "string"
+                },
+                {
+                  "const": "unavailable",
+                  "type": "string"
+                },
+                {
+                  "const": "daemon_restart",
+                  "type": "string"
+                }
+              ]
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.respawn_rejected",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.relaunch_requested"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "terminalId": {
-              "type": "string",
-              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
-            "generation": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
-            },
             "fresh": {
               "type": "boolean"
             },
+            "generation": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
             "runtime": {
-              "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "type": "string"
+            },
+            "terminalId": {
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             }
           },
           "required": [
             "terminalId",
             "generation",
             "fresh"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.relaunch_requested",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.relaunched"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "externalRef": {
               "anyOf": [
                 {
-                  "type": "object",
                   "properties": {
                     "environmentId": {
-                      "type": "string",
-                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                      "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
                     },
                     "kind": {
-                      "type": "string",
                       "enum": [
                         "claude-session",
                         "codex-thread"
-                      ]
-                    },
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
                     "environmentId",
                     "kind",
                     "id"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
                   "type": "null"
                 }
-              ]
-            },
-            "runtimeRef": {
-              "type": "object",
-              "properties": {
-                "runtime": {
-                  "type": "string"
-                },
-                "locator": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "runtime",
-                "locator"
-              ]
-            },
-            "theme": {
-              "type": "string",
-              "enum": [
-                "light",
-                "dark"
               ]
             },
             "harnessName": {
@@ -643,173 +621,235 @@
             },
             "promptHash": {
               "type": "string"
+            },
+            "runtimeRef": {
+              "properties": {
+                "locator": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "runtime",
+                "locator"
+              ],
+              "type": "object"
+            },
+            "theme": {
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "externalRef",
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.relaunched",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.relaunch_rejected"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "reason": {
-              "type": "string",
-              "enum": [
-                "not_resumable",
-                "terminal_exists",
-                "harness_refused",
-                "unavailable",
-                "daemon_restart"
-              ]
-            },
             "detail": {
               "type": "string"
+            },
+            "reason": {
+              "oneOf": [
+                {
+                  "const": "not_resumable",
+                  "type": "string"
+                },
+                {
+                  "const": "terminal_exists",
+                  "type": "string"
+                },
+                {
+                  "const": "harness_refused",
+                  "type": "string"
+                },
+                {
+                  "const": "unavailable",
+                  "type": "string"
+                },
+                {
+                  "const": "daemon_restart",
+                  "type": "string"
+                }
+              ]
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.relaunch_rejected",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.external_ref_updated"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "externalRef": {
-              "type": "object",
               "properties": {
                 "environmentId": {
-                  "type": "string",
-                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                  "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
                 },
                 "kind": {
-                  "type": "string",
                   "enum": [
                     "claude-session",
                     "codex-thread"
-                  ]
-                },
-                "id": {
-                  "type": "string",
-                  "minLength": 1
+                  ],
+                  "type": "string"
                 }
               },
               "required": [
                 "environmentId",
                 "kind",
                 "id"
-              ]
+              ],
+              "type": "object"
             }
           },
           "required": [
             "externalRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.external_ref_updated",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.transcript_recorded"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "sessionId": {
-              "type": "string",
-              "minLength": 1
-            },
             "path": {
-              "type": "string",
               "maxLength": 4096,
-              "format": "starts_with",
-              "pattern": "^\\/.*"
+              "pattern": "^\\/.*",
+              "type": "string"
+            },
+            "sessionId": {
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [
             "sessionId",
             "path"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.transcript_recorded",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.signalled"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "signal": {
-              "type": "string",
               "enum": [
                 "SIGINT",
                 "SIGTERM",
                 "SIGHUP",
                 "SIGKILL"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "signal"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.signalled",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.activity"
-        },
         "payload": {
-          "type": "object",
           "properties": {
+            "confidence": {
+              "format": "double",
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "detail": {
+              "maxLength": 200,
+              "type": "string"
+            },
+            "observedAt": {
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "type": "string"
+            },
+            "resetsAt": {
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "native",
+                "heuristic"
+              ],
+              "type": "string"
+            },
             "value": {
-              "type": "string",
               "enum": [
                 "working",
                 "waiting_input",
@@ -819,33 +859,8 @@
                 "failed",
                 "limited",
                 "unknown"
-              ]
-            },
-            "source": {
-              "type": "string",
-              "enum": [
-                "native",
-                "heuristic"
-              ]
-            },
-            "confidence": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1
-            },
-            "observedAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
-            },
-            "detail": {
-              "type": "string",
-              "maxLength": 200
-            },
-            "resetsAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              ],
+              "type": "string"
             }
           },
           "required": [
@@ -853,610 +868,598 @@
             "source",
             "confidence",
             "observedAt"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.activity",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.usage"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "model": {
-              "type": "string",
-              "maxLength": 200
-            },
             "contextUsedPercent": {
-              "type": "number",
+              "format": "double",
+              "maximum": 100,
               "minimum": 0,
-              "maximum": 100
+              "type": "number"
             },
             "contextWindowTokens": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
             },
             "limits": {
-              "maxItems": 20,
-              "type": "array",
               "items": {
-                "type": "object",
                 "properties": {
-                  "window": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 60
+                  "resetsAt": {
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
                   },
                   "usedPercent": {
-                    "type": "number",
-                    "minimum": 0
+                    "format": "double",
+                    "minimum": 0,
+                    "type": "number"
                   },
-                  "resetsAt": {
-                    "type": "string",
-                    "format": "date-time",
-                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  "window": {
+                    "maxLength": 60,
+                    "minLength": 1,
+                    "type": "string"
                   }
                 },
                 "required": [
                   "window",
                   "usedPercent"
-                ]
-              }
+                ],
+                "type": "object"
+              },
+              "maxItems": 20,
+              "type": "array"
+            },
+            "model": {
+              "maxLength": 200,
+              "type": "string"
             }
-          }
+          },
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.usage",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.compacted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "sign": {
-              "type": "string",
-              "enum": [
-                "claude_hook",
-                "codex_item"
-              ]
-            },
             "before": {
-              "type": "object",
               "properties": {
-                "model": {
-                  "type": "string",
-                  "maxLength": 200
-                },
                 "contextUsedPercent": {
-                  "type": "number",
+                  "format": "double",
+                  "maximum": 100,
                   "minimum": 0,
-                  "maximum": 100
+                  "type": "number"
                 },
                 "contextWindowTokens": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 1,
+                  "type": "integer"
                 },
                 "limits": {
-                  "maxItems": 20,
-                  "type": "array",
                   "items": {
-                    "type": "object",
                     "properties": {
-                      "window": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 60
+                      "resetsAt": {
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                        "type": "string"
                       },
                       "usedPercent": {
-                        "type": "number",
-                        "minimum": 0
+                        "format": "double",
+                        "minimum": 0,
+                        "type": "number"
                       },
-                      "resetsAt": {
-                        "type": "string",
-                        "format": "date-time",
-                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      "window": {
+                        "maxLength": 60,
+                        "minLength": 1,
+                        "type": "string"
                       }
                     },
                     "required": [
                       "window",
                       "usedPercent"
-                    ]
-                  }
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                "model": {
+                  "maxLength": 200,
+                  "type": "string"
                 }
-              }
+              },
+              "type": "object"
             },
             "hook": {
-              "type": "object",
               "properties": {
+                "pid": {
+                  "format": "int64",
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
                 "sessionId": {
                   "type": [
                     "string",
                     "null"
                   ]
-                },
-                "pid": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
                 }
               },
               "required": [
                 "sessionId",
                 "pid"
-              ]
+              ],
+              "type": "object"
+            },
+            "sign": {
+              "enum": [
+                "claude_hook",
+                "codex_item"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "sign"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.compacted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.exited"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "exit": {
               "oneOf": [
                 {
-                  "type": "object",
                   "properties": {
-                    "type": {
-                      "type": "string",
-                      "const": "exited"
-                    },
                     "code": {
-                      "type": "integer",
+                      "format": "int64",
+                      "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
+                      "type": "integer"
+                    },
+                    "type": {
+                      "const": "exited",
+                      "type": "string"
                     }
                   },
                   "required": [
                     "type",
                     "code"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
-                  "type": "object",
                   "properties": {
-                    "type": {
-                      "type": "string",
-                      "const": "signalled"
-                    },
                     "signal": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "const": "signalled",
                       "type": "string"
                     }
                   },
                   "required": [
                     "type",
                     "signal"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
-                  "type": "object",
                   "properties": {
                     "type": {
-                      "type": "string",
-                      "const": "unknown"
+                      "const": "unknown",
+                      "type": "string"
                     }
                   },
                   "required": [
                     "type"
-                  ]
+                  ],
+                  "type": "object"
                 }
               ]
             }
           },
           "required": [
             "exit"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.exited",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.closing"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.closing",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "agent.closed"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "agent.closed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.opened"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "environmentId": {
-              "type": "string",
-              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
             "cwd": {
               "type": "string"
             },
-            "linkedAgentId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "environmentId": {
+              "pattern": "^env_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
-            "theme": {
-              "type": "string",
-              "enum": [
-                "light",
-                "dark"
+            "linkedAgentId": {
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "restartOf": {
-              "type": "string",
-              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "runtime": {
-              "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "type": "string"
+            },
+            "theme": {
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "environmentId",
             "cwd",
             "linkedAgentId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.opened",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.running"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "runtimeRef": {
-              "type": "object",
               "properties": {
-                "runtime": {
-                  "type": "string"
-                },
                 "locator": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
                   "additionalProperties": {
                     "type": "string"
-                  }
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
                 }
               },
               "required": [
                 "runtime",
                 "locator"
-              ]
+              ],
+              "type": "object"
             }
           },
           "required": [
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.running",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.failed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "open_rejected",
                 "daemon_restart"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.failed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.process_adopted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "runtimeRef": {
-              "type": "object",
               "properties": {
-                "runtime": {
-                  "type": "string"
-                },
                 "locator": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string"
-                  },
                   "additionalProperties": {
                     "type": "string"
-                  }
+                  },
+                  "type": "object"
+                },
+                "runtime": {
+                  "type": "string"
                 }
               },
               "required": [
                 "runtime",
                 "locator"
-              ]
+              ],
+              "type": "object"
             }
           },
           "required": [
             "runtimeRef"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.process_adopted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.lost"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.lost",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.closing"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.closing",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.closed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "user",
                 "exited",
                 "agent_closed",
                 "restarted"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.closed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.foreground_changed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "command": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 200
-                },
-                {
-                  "type": "null"
-                }
+              "maxLength": 200,
+              "type": [
+                "string",
+                "null"
               ]
             }
           },
           "required": [
             "command"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.foreground_changed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.needs_restart"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "protocol": {
-              "minItems": 1,
-              "maxItems": 16,
-              "type": "array",
               "items": {
                 "type": "string",
-                "minLength": 0,
-                "description": "At most 32 UTF-8 bytes."
-              }
+                "x-bazhen-check": [
+                  "wellFormed",
+                  "utf8AtMost32Bytes"
+                ]
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
             }
           },
           "required": [
             "protocol"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.needs_restart",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.restart_cleared"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.restart_cleared",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.unlinked"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.unlinked",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "terminal.renamed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "name": {
               "type": [
@@ -1467,59 +1470,58 @@
           },
           "required": [
             "name"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "terminal.renamed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "attachment.started"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "terminalId": {
-              "type": "string",
-              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
             "mode": {
-              "type": "string",
               "enum": [
                 "observe",
                 "interactive"
-              ]
+              ],
+              "type": "string"
+            },
+            "terminalId": {
+              "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             }
           },
           "required": [
             "terminalId",
             "mode"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "attachment.started",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "attachment.ended"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "client_closed",
                 "terminal_closed",
@@ -1529,99 +1531,99 @@
                 "evicted_slow",
                 "timed_out",
                 "replaced"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "attachment.ended",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.queued"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "agentId": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "body": {
               "type": "string"
             },
             "from": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             }
           },
           "required": [
             "agentId",
             "body"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.queued",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.offered"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "promptId": {
               "type": "string"
             }
-          }
+          },
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.offered",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.emitted"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.emitted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.seen"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "promptId": {
               "type": "string"
@@ -1629,40 +1631,39 @@
           },
           "required": [
             "promptId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.seen",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.delivered"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.delivered",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.accepted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "offline": {
               "type": "boolean"
@@ -1670,59 +1671,58 @@
           },
           "required": [
             "offline"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.accepted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.undeliverable"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "agent_closed",
                 "gave_up"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.undeliverable",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "message.observed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "from": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "accepted": {
+              "type": "boolean"
             },
-            "to": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            "from": {
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "summary": {
               "type": "string"
@@ -1730,8 +1730,9 @@
             "text": {
               "type": "string"
             },
-            "accepted": {
-              "type": "boolean"
+            "to": {
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "toolUseId": {
               "type": "string"
@@ -1744,65 +1745,77 @@
             "text",
             "accepted",
             "toolUseId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "message.observed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "mailbox.requeued"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
-              "enum": [
-                "not_written",
-                "daemon_restart",
-                "session_started",
-                "stop_failed",
-                "interrupted",
-                "not_seen"
+              "oneOf": [
+                {
+                  "enum": [
+                    "not_written",
+                    "daemon_restart"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "const": "session_started",
+                  "type": "string"
+                },
+                {
+                  "const": "stop_failed",
+                  "type": "string"
+                },
+                {
+                  "const": "interrupted",
+                  "type": "string"
+                },
+                {
+                  "const": "not_seen",
+                  "type": "string"
+                }
               ]
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "mailbox.requeued",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "attention.opened"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "agentId": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
-            "summary": {
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
               "type": "string"
             },
             "kind": {
-              "type": "string",
               "enum": [
                 "approval",
                 "question",
@@ -1811,23 +1824,27 @@
                 "escalation",
                 "task_done",
                 "stuck_starting"
-              ]
+              ],
+              "type": "string"
+            },
+            "mainAgent": {
+              "type": "boolean"
+            },
+            "messageId": {
+              "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
             },
             "taskId": {
               "type": "string"
-            },
-            "messageId": {
-              "type": "string",
-              "pattern": "^msg_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
             },
             "toolUseId": {
               "type": [
                 "string",
                 "null"
               ]
-            },
-            "mainAgent": {
-              "type": "boolean"
             }
           },
           "required": [
@@ -1835,54 +1852,53 @@
             "summary",
             "toolUseId",
             "mainAgent"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "attention.opened",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "attention.answered"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "decision": {
-              "type": "string",
               "enum": [
                 "allow",
                 "deny"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "decision"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "attention.answered",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "attention.closed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "answered_in_tui",
                 "timed_out",
@@ -1892,28 +1908,29 @@
                 "replied",
                 "dismissed",
                 "resent"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "attention.closed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "device.paired"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
@@ -1921,67 +1938,59 @@
           },
           "required": [
             "name"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "device.paired",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "device.revoked"
-        },
         "payload": {
-          "type": "object",
-          "properties": {}
+          "type": "object"
+        },
+        "type": {
+          "const": "device.revoked",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "notice.opened"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "kind": {
-              "type": "string"
-            },
-            "summary": {
-              "type": "string"
-            },
             "device": {
               "anyOf": [
                 {
-                  "type": "object",
                   "properties": {
+                    "address": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "id": {
-                      "type": "string",
-                      "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+                      "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                      "type": "string"
                     },
                     "name": {
                       "type": "string"
                     },
                     "origin": {
                       "type": "string"
-                    },
-                    "address": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
                     }
                   },
                   "required": [
@@ -1989,150 +1998,147 @@
                     "name",
                     "origin",
                     "address"
-                  ]
+                  ],
+                  "type": "object"
                 },
                 {
                   "type": "null"
                 }
               ]
+            },
+            "kind": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
             }
           },
           "required": [
             "kind",
             "summary",
             "device"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "notice.opened",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "notice.closed"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "reason": {
-              "type": "string",
-              "enum": [
-                "dismissed",
-                "revoked"
-              ]
-            },
             "by": {
-              "type": "string",
               "enum": [
                 "owner-socket",
                 "owner-loopback",
                 "revoke"
-              ]
+              ],
+              "type": "string"
             },
             "fromDevice": {
-              "type": "string",
-              "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^dev_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "dismissed",
+                "revoked"
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason",
             "by"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "notice.closed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "lease.granted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "attachmentId": {
-              "type": "string",
-              "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+              "pattern": "^att_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "epoch": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "required": [
             "attachmentId",
             "epoch"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "lease.granted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "task.created"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "title": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
             "brief": {
-              "type": "string",
+              "maxLength": 20000,
               "minLength": 1,
-              "maxLength": 20000
+              "type": "string"
+            },
+            "delegatedFrom": {
+              "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "ownerAgentId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
               ]
             },
             "parentTaskId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
+              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
               ]
             },
-            "delegatedFrom": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string",
+              "x-bazhen-transform": "trim"
             }
           },
           "required": [
@@ -2140,32 +2146,68 @@
             "brief",
             "ownerAgentId",
             "parentTaskId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "task.created",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "task.finished"
-        },
         "payload": {
-          "type": "object",
           "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "outcome": {
-              "type": "string",
               "enum": [
                 "done",
                 "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "note"
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "task.finished",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "properties": {
+            "delegatedFrom": {
+              "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
               ]
             },
-            "note": {
+            "ownerAgentId": {
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
               "type": [
                 "string",
                 "null"
@@ -2173,132 +2215,84 @@
             }
           },
           "required": [
-            "outcome",
-            "note"
-          ]
-        }
-      },
-      "required": [
-        "type",
-        "payload"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "const": "task.owner_changed"
-        },
-        "payload": {
-          "type": "object",
-          "properties": {
-            "ownerAgentId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "delegatedFrom": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
             "ownerAgentId",
             "delegatedFrom"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "task.owner_changed",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "task.noted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "text": {
-              "type": "string"
-            },
             "handoff": {
               "type": "boolean"
             },
             "role": {
               "anyOf": [
                 {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                  "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ]
+            },
+            "text": {
+              "type": "string"
             }
           },
           "required": [
             "text",
             "handoff",
             "role"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "task.noted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "assignment.granted"
-        },
         "payload": {
-          "type": "object",
           "properties": {
-            "taskId": {
-              "type": "string",
-              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
             "agentId": {
-              "type": "string",
-              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-            },
-            "role": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9-]{0,31}$"
+              "pattern": "^agent_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             },
             "parentAssignmentId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-                },
-                {
-                  "type": "null"
-                }
+              "pattern": "^asgn_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": [
+                "string",
+                "null"
               ]
+            },
+            "role": {
+              "pattern": "^[a-z][a-z0-9-]{0,31}$",
+              "type": "string"
+            },
+            "taskId": {
+              "pattern": "^task_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+              "type": "string"
             }
           },
           "required": [
@@ -2306,41 +2300,47 @@
             "agentId",
             "role",
             "parentAssignmentId"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "assignment.granted",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     },
     {
-      "type": "object",
       "properties": {
-        "type": {
-          "type": "string",
-          "const": "assignment.ended"
-        },
         "payload": {
-          "type": "object",
           "properties": {
             "reason": {
-              "type": "string",
               "enum": [
                 "unassigned",
                 "completed"
-              ]
+              ],
+              "type": "string"
             }
           },
           "required": [
             "reason"
-          ]
+          ],
+          "type": "object"
+        },
+        "type": {
+          "const": "assignment.ended",
+          "type": "string"
         }
       },
       "required": [
         "type",
         "payload"
-      ]
+      ],
+      "type": "object"
     }
   ]
 }

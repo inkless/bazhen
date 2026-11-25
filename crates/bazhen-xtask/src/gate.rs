@@ -314,6 +314,8 @@ pub(crate) trait Host {
     fn output(&mut self, argv: &[&str], env: &Env) -> std::io::Result<Option<String>>;
     /// Writes `text` to `path`, making the folders it is in.
     fn write(&mut self, path: &Path, text: &str) -> std::io::Result<()>;
+    /// Removes the file at `path`; one already gone is no error.
+    fn remove(&mut self, path: &Path) -> std::io::Result<()>;
 }
 
 /// The names of the crates `cargo metadata --no-deps` printed as `json`.
@@ -681,6 +683,9 @@ mod tests {
             Ok(self.metadata.map(str::to_owned))
         }
         fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
+        fn remove(&mut self, _: &Path) -> std::io::Result<()> {
             Err(std::io::ErrorKind::Unsupported.into())
         }
     }

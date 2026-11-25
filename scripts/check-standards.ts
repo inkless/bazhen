@@ -41,6 +41,7 @@ const failures: string[] = [];
 // Source files whose behaviour is covered by a test somewhere other than a sibling file. Each
 // entry names that test, and the check fails if it disappears.
 const COVERED_ELSEWHERE: Record<string, string> = {
+  "packages/protocol/src/gen/id.ts": "scripts/protocol-schema.medium.test.ts",
   "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/dual.medium.test.ts",
   "packages/runtime-tmux/src/index.ts": "tests/integration/tmux-runtime.test.ts",
   "scripts/child-process.ts": "scripts/signal-paths.test.ts",
@@ -49,7 +50,6 @@ const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/runtime-holder/src/title-watch.ts":
     "packages/runtime-holder/src/runtime.medium.test.ts",
   "apps/daemon/src/main.ts": "tests/e2e/health.spec.ts",
-  "packages/protocol/src/semantics.ts": "scripts/protocol-schema.medium.test.ts",
   "apps/daemon/src/start.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/detach.ts": "tests/api/cli.test.ts",
   "apps/daemon/src/store/migrations.ts": "apps/daemon/src/store/store.medium.test.ts",

@@ -1,60 +1,60 @@
 {
   "$id": "HolderExited",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
     "generation": {
-      "type": "integer",
+      "maximum": 9007199254740991,
       "minimum": 0,
-      "maximum": 9007199254740991
+      "type": "integer"
     },
     "status": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "exited"
-            },
             "code": {
-              "type": "integer",
+              "maximum": 9007199254740991,
               "minimum": -9007199254740991,
-              "maximum": 9007199254740991
+              "type": "integer"
+            },
+            "type": {
+              "const": "exited",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "code"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "signalled"
-            },
             "signal": {
+              "type": "string",
+              "x-bazhen-check": "wellFormed"
+            },
+            "type": {
+              "const": "signalled",
               "type": "string"
             }
           },
           "required": [
             "type",
             "signal"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "unknown"
+              "const": "unknown",
+              "type": "string"
             }
           },
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         }
       ]
     }
@@ -62,5 +62,6 @@
   "required": [
     "generation",
     "status"
-  ]
+  ],
+  "type": "object"
 }

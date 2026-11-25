@@ -108,9 +108,9 @@ Imports use the `.ts` extension. `import type` is for types only, because
   in a comment. Otherwise let it propagate.
 - **Validate at network boundaries.** Every request and response body goes through its zod
   schema in `packages/protocol`, at the daemon's edge, in both directions.
-- **Publish the protocol.** `packages/protocol/schema/` is the protocol as JSON Schema, generated
-  from every zod schema `packages/protocol` exports, for clients in other languages. After
-  changing a schema, run `moon run :schema` and commit the files with it.
+- **Publish the protocol.** `packages/protocol/schema/` is the protocol as JSON Schema, published
+  from the Rust protocol (`crates/bazhen-protocol`) for clients in other languages. After changing
+  a message, run `moon run :schema` and commit the files with it.
 
 ## Comments
 

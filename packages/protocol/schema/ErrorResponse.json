@@ -1,10 +1,28 @@
 {
   "$id": "ErrorResponse",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "properties": {
+    "busy": {
+      "items": {
+        "properties": {
+          "program": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "terminalId": {
+            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "terminalId",
+          "program"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "error": {
-      "type": "string",
       "enum": [
         "invalid_request",
         "unsupported",
@@ -24,34 +42,16 @@
         "pairing_failed",
         "rate_limited",
         "terminal_limit"
-      ]
+      ],
+      "type": "string"
     },
     "message": {
       "type": "string"
-    },
-    "busy": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "terminalId": {
-            "type": "string",
-            "pattern": "^term_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-          },
-          "program": {
-            "type": "string",
-            "maxLength": 200
-          }
-        },
-        "required": [
-          "terminalId",
-          "program"
-        ]
-      }
     }
   },
   "required": [
     "error",
     "message"
-  ]
+  ],
+  "type": "object"
 }

@@ -17,7 +17,9 @@ import {
   readSpawnSpec,
   SpawnSpecFixtures,
 } from "../packages/protocol/src/holder-fixtures.ts";
+import { EVENT_FRAME_MAX_BYTES } from "../packages/protocol/src/events.ts";
 import { protocolId } from "../packages/protocol/src/id.ts";
+import { HISTORY_LINES, STREAM_FRAME_MAX_BYTES } from "../packages/protocol/src/stream.ts";
 
 const root = fileURLToPath(new URL("../packages/protocol/fixtures/holder/", import.meta.url));
 const versions = readdirSync(root).toSorted((a, b) => a.localeCompare(b));
@@ -122,5 +124,12 @@ describe("the protocol id", () => {
         .update("\0");
     }
     expect(await protocolId()).toBe(hash.digest("hex"));
+  });
+
+  it("counts the constants the TypeScript daemon runs with, as the Rust protocol names them", () => {
+    const semantics = new URL("../packages/protocol/schema/semantics.json", import.meta.url);
+    expect(JSON.parse(readFileSync(semantics, "utf8"))).toMatchObject({
+      constants: { HISTORY_LINES, STREAM_FRAME_MAX_BYTES, EVENT_FRAME_MAX_BYTES },
+    });
   });
 });
