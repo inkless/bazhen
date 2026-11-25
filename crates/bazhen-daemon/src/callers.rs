@@ -259,9 +259,8 @@ pub(crate) const HUMANS_ONLY: &[(&str, &str)] = &[
     ("/v1/terminals/:id/screen", "read a terminal's screen"),
 ];
 
-/// Routes the guard doesn't identify a caller for: the hooks identify their agent themselves, and
-/// tmux's pane-title hook runs under the tmux server in no terminal.
-pub(crate) const SELF_IDENTIFIED: &[&str] = &["/v1/hooks", "/v1/hooks/ack", "/v1/codex/pane-title"];
+/// Routes the guard doesn't identify a caller for: the hooks identify their agent themselves.
+pub(crate) const SELF_IDENTIFIED: &[&str] = &["/v1/hooks", "/v1/hooks/ack"];
 
 /// Whether `path` is one `pattern` names, as Hono matches it: each `:name` one segment, not empty.
 fn matches(pattern: &str, path: &str) -> bool {
@@ -1104,6 +1103,15 @@ mod tests {
                         None,
                         true
                     ),
+                    // tmux's pane-title hook, which no Rust daemon serves, isn't let through.
+                    ask(
+                        router(&store, tmux()),
+                        "POST",
+                        "/v1/codex/pane-title",
+                        &[],
+                        None,
+                        true
+                    ),
                 ],
                 [
                     refused("forbidden", reason),
@@ -1111,9 +1119,10 @@ mod tests {
                         "forbidden",
                         &format!("an agent can't stop the daemon: {reason}")
                     ),
+                    refused("forbidden", reason),
                 ]
             );
-            for path in ["/v1/hooks", "/v1/hooks/ack", "/v1/codex/pane-title"] {
+            for path in ["/v1/hooks", "/v1/hooks/ack"] {
                 assert_eq!(
                     ask(router(&store, tmux()), "POST", path, &[], None, true).0,
                     404,
