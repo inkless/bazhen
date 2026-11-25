@@ -85,6 +85,7 @@ fn fixture(deadlines: Deadlines) -> Fixture {
         roles: Arc::new(Roles::new(None)),
         harnesses: production_for_test(),
         hook_built: true,
+        turns: Arc::default(),
         tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
         prompts: prompts::daemon_prompts(&run, uid),
         login_shell: None,
