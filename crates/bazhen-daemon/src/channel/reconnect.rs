@@ -433,6 +433,9 @@ mod tests {
 
     /// Long enough for any test in paused time, where waiting costs nothing.
     const LIMIT: Duration = Duration::from_secs(3600);
+    /// For one step that comes at once or never, as `bounded` gives a whole test: a step that never
+    /// comes fails at the test's own line, saying what didn't happen.
+    const PROMPTLY: Duration = Duration::from_secs(5);
     const START: [&str; 2] = ["serve", "--start"];
 
     /// A harness's session as the channel drives it: `initialize` names the version, and each
@@ -907,7 +910,10 @@ mod tests {
                 method: "note".to_owned(),
                 params: Some(json!(1)),
             };
-            assert_eq!(rig.told().await, Told::Inbound(note));
+            let told = tokio::time::timeout(PROMPTLY, rig.told())
+                .await
+                .expect("the server's note waits behind the request");
+            assert_eq!(told, Told::Inbound(note));
             assert!(!slow.is_finished());
             say(&mut server, json!({ "id": asked["id"], "result": "late" })).await;
             assert_eq!(slow.await.unwrap(), Ok(json!("late")));
@@ -1146,7 +1152,10 @@ mod tests {
             handshake(&mut server, None).await;
             heard(&mut server).await;
             rig.stop.cancel();
-            assert!(ends(&mut server).await);
+            let ended = tokio::time::timeout(PROMPTLY, ends(&mut server))
+                .await
+                .expect("the connection outlives the stop");
+            assert!(ended);
             let failed = slow.await.unwrap().unwrap_err();
             assert_eq!(failed.message, "slow: the connection ended");
             let refused = rig.channel.request("work", json!({})).await.unwrap_err();
