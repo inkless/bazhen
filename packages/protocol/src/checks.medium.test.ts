@@ -31,6 +31,23 @@ const TEXTS = [
   `${"é".repeat(protocol.TASK_NOTE_MAX_BYTES / 2)}a`,
 ];
 
+/** Command lines, each of `ShellCommandLine`'s rules met and broken. */
+const COMMAND_LINES = [
+  "git status",
+  "\u{1f600} caf\u00e9",
+  "",
+  " git status",
+  "make\n",
+  "a\x1b[Db",
+  "a\u009bb",
+  "ls \u202e/etc",
+  "a\ud800b",
+  "a\u200bb",
+  "a\u2060b",
+  "\u00e9".repeat(1024),
+  `${"\u00e9".repeat(1024)}a`,
+];
+
 const AGENT = "agent_01900000000070008000000000000000";
 
 /** The schema `module` exports as `name`. */
@@ -50,6 +67,7 @@ function verdict(schema: z.ZodType, value: unknown) {
 
 /** Each message the protocol names whose schema a refinement judges, and the values to judge. */
 const CASES: [string, unknown[]][] = [
+  ["ShellCommandLine", COMMAND_LINES],
   ["NewTaskTitle", TEXTS],
   ["TaskNoteText", TEXTS],
   ["FinishNoteText", TEXTS],
