@@ -1657,6 +1657,12 @@ const NOT_DECODERS: Record<string, string> = {
     "hands out the HolderRuntime it keeps, for views to stream from; reads no bytes",
   "crates/bazhen-daemon/src/peer.rs::Peers::read":
     "hands a connection's fd to bazhen_peer::of, which asks the kernel for the peer; reads no bytes",
+  "crates/bazhen-daemon/src/readiness.rs::StoreSource::read":
+    "opens the store's reader connection and runs the query it is given; reads no bytes",
+  "crates/bazhen-daemon/src/readiness.rs::StoreSource::boot":
+    "queries the store through StoreSource::read for the newest event id and the starts waiting; reads no bytes",
+  "crates/bazhen-daemon/src/readiness.rs::StoreSource::events":
+    "queries the store through StoreSource::read for the events after an id, which the store wrote; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::reads":
     "opens the store's reader connection for queries; reads no bytes",
   "crates/bazhen-daemon/src/callers.rs::Stored::agent_of":

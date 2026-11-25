@@ -65,6 +65,29 @@ impl Reads<'_> {
             locator: row.get(6)?,
         }))
     }
+
+    /// The usage the agent's harness last reported, if any it holds reads as one.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn agent_usage(self, agent_id: &str) -> rusqlite::Result<Option<Usage>> {
+        let held = self.first_text("SELECT usage FROM agent_sessions WHERE id = ?", agent_id)?;
+        Ok(held.and_then(|text| serde_json::from_str(&text).ok()))
+    }
+
+    /// What the agent was last recorded doing, if it reads as an activity.
+    ///
+    /// # Errors
+    ///
+    /// `SQLite`'s.
+    pub fn latest_activity(self, agent_id: &str) -> rusqlite::Result<Option<Activity>> {
+        let latest = self.first_text(
+            "SELECT activity FROM activity_latest WHERE agent_session_id = ?",
+            agent_id,
+        )?;
+        Ok(latest.and_then(|text| serde_json::from_str(&text).ok()))
+    }
 }
 
 impl Writer<'_> {
