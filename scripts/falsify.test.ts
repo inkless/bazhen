@@ -790,6 +790,42 @@ describe("namedBinaries", () => {
     ].join("\n");
     expect(namedBinaries("web/x.test.tsx", source)).toEqual(["release/bazhen"]);
   });
+
+  it("counts every quoted path where a comment, a template or a `${` is still open at the end", () => {
+    const fixture = `const fixture = 'join(repo, "target/release/bazhen")';\n`;
+    const sources = ["/* still open", "const t = `still open", "const t = `${stillOpen"];
+    expect(sources.map((tail) => namedBinaries("tests/cli/x.test.ts", fixture + tail))).toEqual([
+      ["release/bazhen"],
+      ["release/bazhen"],
+      ["release/bazhen"],
+    ]);
+  });
+
+  it("counts a quoted path it reads inside what it took for a regular expression", () => {
+    const sources = [
+      "const half = n! / 2, B = 'target/release/bazhen'; // it's half",
+      "const avg = total++ / 2; run('target/release/bazhen'); // don't",
+      'const x = n++ / t[spawnSync("target/release/bazhen").status] / 2;',
+      'const y = a.in / t[spawnSync("target/release/bazhen").status] / 2; // it\'s',
+    ];
+    expect(sources.map((source) => namedBinaries("tests/cli/x.test.ts", source))).toEqual([
+      ["release/bazhen"],
+      ["release/bazhen"],
+      ["release/bazhen"],
+      ["release/bazhen"],
+    ]);
+  });
+
+  it("reads a regular expression after a block or a statement's condition", () => {
+    const sources = [
+      "{}\n/'/.test(s) && run(\"target/release/bazhen\"); // it's",
+      "if (ok) /'/.test(s) && run(\"target/release/bazhen\"); // it's",
+    ];
+    expect(sources.map((source) => namedBinaries("tests/cli/x.test.ts", source))).toEqual([
+      ["release/bazhen"],
+      ["release/bazhen"],
+    ]);
+  });
 });
 
 describe("projectsOf", () => {
