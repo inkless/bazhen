@@ -5115,7 +5115,6 @@ const HARNESS_NAMED: Record<string, { names: string[]; why: string }> = {
       "is_codex_thread",
       '"bazhen-codex-thread',
       "Codex",
-      '"codex',
     ],
     why:
       "caller identity, a security edge, read from the kernel-vouched process tree and a " +
