@@ -617,9 +617,65 @@ fn leaves_a_forgotten_agents_mail_alone_for_a_step_that_comes_after() {
     );
 }
 
+/// Closing an agent forgets its mail: the store has settled it as undeliverable, and what the
+/// mailbox held of it, an offer awaiting its ack, goes, and the agent is marked so that no step
+/// touches its mail again.
+#[test]
+#[ignore = "signals processes; runs in moon run :test-real -- rust"]
+fn forgets_a_closed_agents_mail_and_the_offers_it_held() {
+    bazhen_test_signal::require_sandbox().unwrap();
+    let f = fixture(long());
+    f.send("hello");
+    let reply = f.answered(f.hold(&idle()));
+    let before = f.held_mail();
+    let closed = f.close();
+    assert_eq!(
+        (
+            reply.map(|r| r.offered.len()),
+            before,
+            closed,
+            f.held_mail()
+        ),
+        (Some(1), (false, 1), Ok(()), (true, 0))
+    );
+}
+
 impl Fixture {
+    fn close(&self) -> Result<(), crate::agents::AgentError> {
+        let agents = self.shared.agents.as_deref().unwrap();
+        let reader = self.shared.store.reader().unwrap();
+        let generation = reader
+            .reads()
+            .agent_terminal(self.agent.as_str())
+            .unwrap()
+            .and_then(|found| found.generation)
+            .unwrap_or_default();
+        let request = bazhen_protocol::agents::CloseAgentRequest {
+            idempotency_key: "close-1".to_owned(),
+            generation,
+            force: None,
+            keep_shells: None,
+            confirm_busy: None,
+            confirmed_busy: None,
+        };
+        self.runtime
+            .block_on(agents.close(self.agent.as_str(), &request))
+            .map(drop)
+    }
+
+    /// Whether the mailbox has forgotten the agent, and how many offers it holds awaiting their
+    /// acks.
+    fn held_mail(&self) -> (bool, usize) {
+        let mail = self.shared.hooks.mailbox.of(&self.agent);
+        self.runtime.block_on(async {
+            let mail = mail.lock().await;
+            (mail.forgotten, mail.unacked.len())
+        })
+    }
+
     fn forget(&self) {
-        let forgotten = self.shared.hooks.mailbox.forget(&self.shared, &self.agent);
+        let agents = self.shared.agents.as_deref().unwrap();
+        let forgotten = self.shared.hooks.mailbox.forget(agents, &self.agent);
         let forgotten = self
             .runtime
             .block_on(async { tokio::time::timeout(DEADLINE, forgotten).await });

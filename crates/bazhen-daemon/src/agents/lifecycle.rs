@@ -360,11 +360,15 @@ impl Agents {
     }
 
     /// What follows an agent's close once it is recorded, whatever recorded it: no process runs
-    /// on its token or reads its prompt again, and the waiter it held is answered.
+    /// on its token or reads its prompt again, the waiter it held is answered, and its mail is
+    /// forgotten.
     pub(super) async fn after_closed(&self, agent: &AgentId) {
         self.deps.tokens.forget(agent);
         self.deps.prompts.remove(agent);
         self.deps.hooks.closed(&self.deps.store, agent).await;
+        if let Err(why) = self.deps.hooks.mailbox.forget(self, agent).await {
+            tracing::warn!("bazhen: agent {agent}'s mail isn't forgotten as it closed: {why}");
+        }
     }
 
     /// Closes the agent's terminal. Force records closed only what a close could not end: a
