@@ -303,7 +303,7 @@ impl Hooks {
         let harnesses = shared
             .agents
             .as_ref()
-            .and_then(|agents| agents.harnesses())
+            .map(|agents| agents.harnesses())
             .ok_or("this daemon runs no agents")?;
         let harness = HarnessId::parse(&binding.harness)
             .and_then(|id| harnesses.get(id))
