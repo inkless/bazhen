@@ -31,6 +31,7 @@ mod pairing;
 mod peer;
 mod private_dir;
 mod probe;
+mod readiness;
 mod restarts;
 mod retention;
 mod roles;

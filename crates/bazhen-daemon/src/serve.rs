@@ -500,7 +500,7 @@ async fn listen(
             crate::stream::on_holders(&store, streaming, &watched.shells, &tracker, stop.token());
         watching = Some(watched);
     }
-    let_go(&store).await;
+    let_go(&shared, &tracker, startup).await;
     let gate = Gate {
         allow: guard::allowlists(
             startup.port,
@@ -575,10 +575,18 @@ async fn listen(
     Ok(stop.reason().unwrap_or(Reason::Requested))
 }
 
-/// Lets go of what the daemon before this one held: it went with its sockets.
-async fn let_go(store: &Writer) {
+/// Lets go of what the daemon before this one held, which went with its sockets, then times each
+/// start that waits on its harness, those it left waiting on from their own starts.
+async fn let_go(shared: &Shared, tracker: &TaskTracker, startup: &Startup) {
+    let store = &shared.store;
     crate::hooks::mailbox::requeue_in_flight(store).await;
     crate::attention::close_abandoned(store).await;
+    tracker.spawn(crate::readiness::follow(
+        shared.clone(),
+        crate::readiness::StoreSource::new(store.clone()),
+        Duration::from_millis(startup.settings.config.start_deadline_ms),
+        shared.stop.token().clone(),
+    ));
 }
 
 /// Closes the terminals' streams, a parked one without waiting out its linger, then the runtime's

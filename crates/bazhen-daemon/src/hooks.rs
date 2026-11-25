@@ -9,6 +9,7 @@
 mod activity;
 pub(crate) mod approvals;
 mod binding;
+pub(crate) mod limits;
 pub(crate) mod mailbox;
 mod observed;
 mod waiters;
@@ -23,10 +24,11 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bazhen_harness::{
-    Gate, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report, SessionRef, ToolKey,
+    Gate, HarnessActivity, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report,
+    SessionRef, ToolKey,
 };
 use bazhen_peer::Peer;
-use bazhen_protocol::agent_events::CompactedHook;
+use bazhen_protocol::agent_events::{CompactedHook, ReadySign};
 use bazhen_protocol::agents::{Activity, ActivitySource};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
@@ -40,11 +42,13 @@ use bazhen_store::{AgentBinding, Store};
 
 use self::activity::{Change, Tracker};
 use self::approvals::{Approvals, Entry, Holding};
+use self::limits::Limits;
 use self::mailbox::{Deadlines, Mailbox};
 use self::waiters::{Waiters, Waiting};
 use crate::accept::Holdable;
 use crate::callers::{Identity, Presented, identified, presented_by};
 use crate::peer::{PeerRead, PeerSocket, root_of};
+use crate::readiness::Signs;
 use crate::routes::{Shared, fail};
 use crate::writer::Writer;
 
@@ -66,6 +70,10 @@ pub(crate) struct Hooks {
     pub(crate) mailbox: Arc<Mailbox>,
     /// The approvals and questions open, and the hooks held for their answers.
     pub(crate) approvals: Arc<Approvals>,
+    /// Each agent's latest stop its account's limit may explain.
+    pub(crate) limits: Arc<Limits>,
+    /// The signs of life kept for starts not yet recorded.
+    pub(crate) signs: Arc<Signs>,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -364,6 +372,8 @@ impl Hooks {
             mailbox: Arc::new(Mailbox::new(Arc::clone(&waiters), deadlines)),
             waiters,
             approvals: Arc::default(),
+            limits: Arc::default(),
+            signs: Arc::default(),
             order: StdMutex::new(HashMap::new()),
             start_wait,
         }
@@ -443,7 +453,14 @@ impl Hooks {
                 Err(why)
             } else {
                 match self
-                    .apply(shared, agent, hook, &origin, passes, &ingested.observed)
+                    .apply(
+                        shared,
+                        agent,
+                        hook,
+                        &origin,
+                        (passes, peer),
+                        &ingested.observed,
+                    )
                     .await
                 {
                     Ok(asked) => self.reply(shared, agent, &ingested.reply, asked).await,
@@ -496,7 +513,7 @@ impl Hooks {
         agent: &AgentId,
         hook: &HookRequest,
         origin: &Origin,
-        passes: Passes,
+        (passes, peer): (Passes, Option<&Peer>),
         observed: &[bazhen_harness::Keyed],
     ) -> Result<Option<AttentionId>, String> {
         let subagent = origin.subagent.as_deref();
@@ -513,10 +530,14 @@ impl Hooks {
             }
             let change = match &keyed.fact {
                 Observed::Ready { sign } => {
-                    if passes.started_here {
-                        let (agent, sign) = (agent.clone(), *sign);
-                        write(&shared.store, move |w| w.record_ready(&agent, sign)).await?;
-                    }
+                    self.ready(shared, agent, *sign, passes, peer).await?;
+                    continue;
+                }
+                Observed::Usage(usage) => {
+                    let (limits, agent, usage) =
+                        (Arc::clone(&self.limits), agent.clone(), usage.clone());
+                    let now = jiff::Timestamp::now();
+                    write(&shared.store, move |w| limits.usage(w, &agent, &usage, now)).await?;
                     continue;
                 }
                 Observed::Activity(doing) => Change::Doing(doing.clone()),
@@ -581,18 +602,33 @@ impl Hooks {
             let Some(doing) = self.tracker().observe(agent, subagent, change) else {
                 continue;
             };
-            let activity = Activity {
-                value: doing.value,
-                source: ActivitySource::Native,
-                confidence: 1.0,
-                observed_at: format!("{:.3}", jiff::Timestamp::now()),
-                detail: doing.detail,
-                resets_at: None,
-            };
-            let agent = agent.clone();
-            write(&shared.store, move |w| w.record_activity(&agent, &activity)).await?;
+            self.doing(shared, agent, doing).await?;
         }
         Ok(asked)
+    }
+
+    /// Records what the agent is now doing, `limited` where its account's limit stopped it.
+    async fn doing(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        doing: HarnessActivity,
+    ) -> Result<(), String> {
+        let now = jiff::Timestamp::now();
+        let activity = Activity {
+            value: doing.value,
+            source: ActivitySource::Native,
+            confidence: 1.0,
+            observed_at: format!("{now:.3}"),
+            detail: doing.detail,
+            resets_at: None,
+        };
+        let (limits, agent, limit) = (Arc::clone(&self.limits), agent.clone(), doing.limit);
+        write(&shared.store, move |w| {
+            limits.record(w, &agent, activity, limit, now)
+        })
+        .await
+        .map(drop)
     }
 
     /// Applies a fact about the requests `agent`'s harness asks, from `session`: a call started or
@@ -833,6 +869,38 @@ impl Hooks {
         }
     }
 
+    /// The agent's harness gave a sign of life. From the TUI its terminal started, while the agent
+    /// starts, it records the harness up. From the agent's own session but no start waiting, as
+    /// when the hook came before its start was recorded, the sign is kept for that start, with
+    /// the newest event as it was kept and who sent it.
+    async fn ready(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        sign: ReadySign,
+        passes: Passes,
+        peer: Option<&Peer>,
+    ) -> Result<(), String> {
+        if !passes.owner {
+            return Ok(());
+        }
+        let recorded = if passes.started_here {
+            let id = agent.clone();
+            write(&shared.store, move |w| w.record_ready(&id, sign)).await?
+        } else {
+            None
+        };
+        // Read after the binding this hook was checked against, which the writer read after any
+        // start request committed before it: a request the stamp is short of came after the sign.
+        let stamp = *shared.store.committed().borrow();
+        if recorded.is_none()
+            && let Some(peer) = peer
+        {
+            self.signs.remember(agent, sign, stamp, peer.clone());
+        }
+        Ok(())
+    }
+
     /// Waits, at most the start wait, while `agent`'s start is still being recorded.
     async fn started(&self, store: &Writer, agent: &AgentId) -> Result<(), String> {
         let mut committed = store.committed();
@@ -856,7 +924,7 @@ impl Hooks {
 
 /// Whether the hook's caller ran from the TUI `binding`'s terminal started, on the line the
 /// kernel vouched for.
-fn ran_from_pane(binding: &AgentBinding, peer: Option<&Peer>) -> bool {
+pub(crate) fn ran_from_pane(binding: &AgentBinding, peer: Option<&Peer>) -> bool {
     let root = binding.locator.as_deref().and_then(root_of);
     peer.zip(root)
         .is_some_and(|(peer, root)| binding::ran_by_pane(peer, root))
