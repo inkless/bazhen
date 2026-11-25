@@ -7,6 +7,7 @@
 //! agent's waiter, which is held until a newer one replaces it.
 
 mod activity;
+pub(crate) mod approvals;
 mod binding;
 pub(crate) mod mailbox;
 mod observed;
@@ -22,20 +23,23 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bazhen_harness::{
-    Gate, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report, SessionRef,
+    Gate, HarnessId, Held, IngestContext, Key, Observed, Origin, Reply, Report, SessionRef, ToolKey,
 };
 use bazhen_peer::Peer;
 use bazhen_protocol::agent_events::CompactedHook;
 use bazhen_protocol::agents::{Activity, ActivitySource};
 use bazhen_protocol::daemon::ErrorCode;
 use bazhen_protocol::edge::edge;
-use bazhen_protocol::ids::AgentId;
+use bazhen_protocol::ids::{AgentId, AttentionId};
 use bazhen_protocol::mail::{
-    HOOK_PROTOCOL_VERSION, HOOK_REPLY_TYPE, HookAck, HookReply, HookRequest, OfferToken,
+    AttentionKind, HOOK_PROTOCOL_VERSION, HOOK_REPLY_TYPE, HookAck, HookReply, HookRequest,
+    OfferToken,
 };
+use bazhen_protocol::mail_events::AttentionClosedReason;
 use bazhen_store::{AgentBinding, Store};
 
 use self::activity::{Change, Tracker};
+use self::approvals::{Approvals, Entry, Holding};
 use self::mailbox::{Deadlines, Mailbox};
 use self::waiters::{Waiters, Waiting};
 use crate::accept::Holdable;
@@ -60,6 +64,8 @@ pub(crate) struct Hooks {
     activity: StdMutex<Tracker>,
     waiters: Arc<Waiters>,
     pub(crate) mailbox: Arc<Mailbox>,
+    /// The approvals and questions open, and the hooks held for their answers.
+    pub(crate) approvals: Arc<Approvals>,
     /// One hook of an agent at a time, from its binding's read to its last fact.
     order: StdMutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>,
     start_wait: Duration,
@@ -227,6 +233,10 @@ async fn taken(
             let _holding = holdable.map(Holdable::hold);
             framed(&waiting.answered().await)
         }
+        Ok(Answering::Approval(holding)) => {
+            let _holding = holdable.map(Holdable::hold);
+            framed(&holding.answered().await)
+        }
         Ok(Answering::Now(reply)) => framed(&reply),
         Ok(Answering::Quiet) => framed(&quiet()),
         Err(why) => {
@@ -315,6 +325,9 @@ enum Answering {
     Now(HookReply),
     /// Held, until mail or a newer waiter answers it.
     Held(Waiting),
+    /// An approval's hook, held for the human's answer; awaited once the agent's turn is let go,
+    /// so the agent's other hooks go on meanwhile.
+    Approval(Holding),
 }
 
 /// What a hook's report passes, as the daemon finds the session it came from.
@@ -350,6 +363,7 @@ impl Hooks {
             activity: StdMutex::new(Tracker::default()),
             mailbox: Arc::new(Mailbox::new(Arc::clone(&waiters), deadlines)),
             waiters,
+            approvals: Arc::default(),
             order: StdMutex::new(HashMap::new()),
             start_wait,
         }
@@ -432,7 +446,7 @@ impl Hooks {
                     .apply(shared, agent, hook, &origin, passes, &ingested.observed)
                     .await
                 {
-                    Ok(()) => self.reply(shared, agent, &ingested.reply).await,
+                    Ok(asked) => self.reply(shared, agent, &ingested.reply, asked).await,
                     Err(why) => Err(why),
                 }
             }
@@ -484,11 +498,17 @@ impl Hooks {
         origin: &Origin,
         passes: Passes,
         observed: &[bazhen_harness::Keyed],
-    ) -> Result<(), String> {
+    ) -> Result<Option<AttentionId>, String> {
         let subagent = origin.subagent.as_deref();
+        let session = origin.session.as_ref().map(|session| session.id.as_str());
+        let mut asked = None;
         for keyed in observed {
             let ours = matches!(&keyed.key, Key::Agent(id) if id == agent);
             if !ours || !passes.passes(keyed.gate) {
+                continue;
+            }
+            if let Some(opened) = self.requests(shared, agent, &keyed.fact, session).await? {
+                asked = opened.or(asked);
                 continue;
             }
             let change = match &keyed.fact {
@@ -572,7 +592,120 @@ impl Hooks {
             let agent = agent.clone();
             write(&shared.store, move |w| w.record_activity(&agent, &activity)).await?;
         }
-        Ok(())
+        Ok(asked)
+    }
+
+    /// Applies a fact about the requests `agent`'s harness asks, from `session`: a call started or
+    /// settled, a request asked, and what ends the requests asked before it. None for a fact about
+    /// something else, which a new prompt and a new session also are, once their requests are
+    /// settled; else the approval it opened, which its hook holds.
+    async fn requests(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        fact: &Observed,
+        session: Option<&str>,
+    ) -> Result<Option<Option<AttentionId>>, String> {
+        let answered = AttentionClosedReason::AnsweredInTui;
+        match fact {
+            Observed::ToolStarted { key, use_id } => {
+                // One too long to keep is matched by nothing, rather than by a cut another shares.
+                if use_id.len() <= observed::USE_ID_MAX {
+                    let approvals = &self.approvals;
+                    approvals.started(agent, key.clone(), use_id.clone());
+                }
+            }
+            Observed::ToolSettled { use_id } => {
+                let ids = self.approvals.tool_settled(agent, use_id);
+                self.approvals.settle(&shared.store, ids, answered).await?;
+            }
+            Observed::ApprovalAsked {
+                key,
+                summary,
+                question,
+            } => {
+                let kind = if *question {
+                    AttentionKind::Question
+                } else {
+                    AttentionKind::Approval
+                };
+                let opened = self.ask(shared, agent, key, summary, kind, session).await?;
+                return Ok(Some(opened.filter(|_| !*question)));
+            }
+            Observed::QuestionAsked { key, summary } => {
+                let question = AttentionKind::Question;
+                self.ask(shared, agent, key, summary, question, session)
+                    .await?;
+            }
+            Observed::TurnOver => {
+                let main =
+                    |entry: &Entry| entry.key.main_agent() && entry.session.as_deref() == session;
+                self.settle(shared, agent, main, answered).await?;
+                self.approvals.forget_tools(agent);
+            }
+            Observed::SubagentOver { id } => {
+                let its = |entry: &Entry| entry.key.caller.as_ref() == Some(id);
+                self.settle(shared, agent, its, answered).await?;
+            }
+            Observed::PromptStarted { .. } => {
+                let same = |entry: &Entry| entry.session.as_deref() == session;
+                self.settle(shared, agent, same, answered).await?;
+                self.approvals.forget_tools(agent);
+                return Ok(None);
+            }
+            Observed::SessionStarted { compacted: false } => {
+                let other = |entry: &Entry| entry.session.as_deref() != session;
+                let superseded = AttentionClosedReason::Superseded;
+                self.settle(shared, agent, other, superseded).await?;
+                self.approvals.forget_tools(agent);
+                return Ok(None);
+            }
+            _ => return Ok(None),
+        }
+        Ok(Some(None))
+    }
+
+    /// Opens the item `agent`'s harness asks under `key`, about the earliest call started under
+    /// it that no request has taken; none for an agent gone or going.
+    async fn ask(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        key: &ToolKey,
+        summary: &str,
+        kind: AttentionKind,
+        session: Option<&str>,
+    ) -> Result<Option<AttentionId>, String> {
+        let use_id = self.approvals.take_use_id(agent, key);
+        let (asker, summary, call) = (agent.clone(), summary.to_owned(), use_id.clone());
+        let main_agent = key.main_agent();
+        let opened = write(&shared.store, move |w| {
+            w.ask_attention(&asker, kind, &summary, call, main_agent)
+        })
+        .await?;
+        if let Some(id) = &opened {
+            let entry = Entry {
+                agent: agent.clone(),
+                key: key.clone(),
+                session: session.map(str::to_owned),
+                use_id,
+                responder: None,
+            };
+            self.approvals.opened(id.clone(), entry);
+        }
+        Ok(opened)
+    }
+
+    /// Closes `agent`'s open items that `settles` picks, for `reason`.
+    async fn settle(
+        &self,
+        shared: &Shared,
+        agent: &AgentId,
+        settles: impl Fn(&Entry) -> bool,
+        reason: AttentionClosedReason,
+    ) -> Result<(), String> {
+        let ids = self.approvals.matching(agent, settles);
+        self.approvals.settle(&shared.store, ids, reason).await
     }
 
     /// Registers `agent`'s waiter, where the report holds one, but for an agent that has closed,
@@ -597,6 +730,7 @@ impl Hooks {
         shared: &Shared,
         agent: &AgentId,
         reply: &Reply,
+        asked: Option<AttentionId>,
     ) -> Result<Answering, String> {
         match reply {
             Reply::Hold(Held::Waiter) => Ok(match self.waits(shared, agent).await? {
@@ -607,9 +741,14 @@ impl Hooks {
                 let folded = self.mailbox.fold(shared, agent, prompt_id).await?;
                 Ok(Answering::Now(folded))
             }
-            Reply::Hold(Held::Approval { .. }) | Reply::Now(_) | Reply::Quiet => {
-                Ok(Answering::Quiet)
+            Reply::Hold(Held::Approval { wait_ms, .. }) => {
+                let wait = wait_ms.map(Duration::from_millis);
+                let stop = shared.stop.token();
+                let held =
+                    asked.and_then(|id| self.approvals.holding(&id, wait, &shared.store, stop));
+                Ok(held.map_or(Answering::Quiet, Answering::Approval))
             }
+            Reply::Now(_) | Reply::Quiet => Ok(Answering::Quiet),
         }
     }
 
@@ -634,6 +773,12 @@ impl Hooks {
                         .is_none_or(|binding| binding.state == "closed") =>
                 {
                     self.waiters.release(agent);
+                    let ids = self.approvals.matching(agent, |_| true);
+                    let closed = AttentionClosedReason::AgentClosed;
+                    if let Err(why) = self.approvals.settle(store, ids, closed).await {
+                        tracing::warn!("bazhen: agent {agent}'s approvals stay open: {why}");
+                    }
+                    self.approvals.forget_tools(agent);
                 }
                 Ok(_) => {}
                 Err(why) => tracing::warn!(

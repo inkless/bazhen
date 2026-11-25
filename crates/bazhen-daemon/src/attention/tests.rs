@@ -31,6 +31,11 @@ fn call<F: Future<Output = Response>>(
     )
 }
 
+/// The human's answer over HTTP, where the gate let in every caller.
+async fn by_human(state: State<Shared>, id: Path<String>, body: Bytes) -> Response {
+    answer(state, id, None, None, body).await
+}
+
 /// The status and refusal of a call, its item named `A`.
 fn refused(answer: &(u16, Value), id: &str) -> (u16, String) {
     let message = answer.1["message"].as_str().unwrap_or_default();
@@ -192,7 +197,7 @@ fn refuses_a_verb_its_item_doesnt_offer_now_and_any_on_an_item_not_open() {
     let resend_failed = call(&f, resend, &id, &key("r"));
     let allow = call(
         &f,
-        answer,
+        by_human,
         &id,
         &json!({ "idempotencyKey": "a", "decision": "allow" }),
     );
@@ -245,7 +250,7 @@ fn offers_a_dismissal_of_all_but_a_harness_request_and_a_reply_while_its_agent_t
         AgentId::parse("agent_01900000000070008000000000000001").unwrap(),
     );
     let offered = |kind: AttentionKind, state: Option<&str>| {
-        Inbox.attention_actions(&OpenAttention {
+        Inbox(Arc::default()).attention_actions(&OpenAttention {
             id: &id,
             agent_id: &agent,
             kind: &kind,
