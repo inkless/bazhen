@@ -235,6 +235,10 @@ pub(super) enum Cause {
 /// The detail a start settled as unconfirmed is rejected with.
 const UNCONFIRMED: &str = "start unconfirmed; proved not started";
 
+/// The same for a respawn: its holder runs, so the process may yet start, and is adopted if it
+/// does.
+const NOT_RUNNING: &str = "start unconfirmed; not running when checked";
+
 impl Cause {
     fn detail(self) -> Option<String> {
         match self {
@@ -271,7 +275,10 @@ impl Cause {
                 Self::Restart => RespawnRejectedReason::DaemonRestart,
                 Self::Unconfirmed => RespawnRejectedReason::Unavailable,
             },
-            detail: self.detail(),
+            detail: match self {
+                Self::Restart => None,
+                Self::Unconfirmed => Some(NOT_RUNNING.to_owned()),
+            },
         }
     }
 }
@@ -1080,7 +1087,7 @@ mod tests {
             (
                 true,
                 (
-                    json!({"reason": "unavailable", "detail": UNCONFIRMED}),
+                    json!({"reason": "unavailable", "detail": NOT_RUNNING}),
                     AgentState::Exited
                 ),
                 vec!["agent.process_adopted".to_owned()],
