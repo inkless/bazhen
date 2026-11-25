@@ -38,6 +38,8 @@ pub(crate) struct NewTerminal {
     /// Its own variables, over the runtime's.
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) theme: Option<TuiTheme>,
+    /// The generation its first process starts at: 0, but for an agent relaunched on it.
+    pub(crate) generation: u64,
 }
 
 /// Its variables by name alone: `BAZHEN_SHELL_TOKEN`'s value proves the shell.
@@ -50,6 +52,7 @@ impl std::fmt::Debug for NewTerminal {
             .field("cwd", &self.cwd)
             .field("env", &self.env.keys().collect::<Vec<_>>())
             .field("theme", &self.theme)
+            .field("generation", &self.generation)
             .finish()
     }
 }
@@ -578,6 +581,7 @@ pub(crate) mod fake {
                     gate.acquire().await.unwrap().forget();
                 }
                 let id = spec.terminal_id.as_str().to_owned();
+                let generation = spec.generation;
                 let exits_as_created = {
                     let mut state = self.state.lock().unwrap();
                     if state.fail_creates {
@@ -591,7 +595,7 @@ pub(crate) mod fake {
                             cwd: None,
                             exited: false,
                             gone: false,
-                            generation: 0,
+                            generation,
                         },
                     );
                     state.exit_as_created

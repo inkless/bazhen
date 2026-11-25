@@ -374,6 +374,7 @@ mod tests {
                 cwd: "/".to_owned(),
                 env: std::collections::BTreeMap::new(),
                 theme: None,
+                generation: 0,
             };
             self.fake.set(|state| {
                 state.running.insert(
