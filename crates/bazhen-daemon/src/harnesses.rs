@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use bazhen_harness::{HarnessDeps, Harnesses, production};
 
+use crate::agents::transcript::TranscriptReader;
 use crate::env::Env;
 use crate::pairing::random_bytes;
 
@@ -89,6 +90,9 @@ pub(crate) fn served(world: World) -> Harnesses {
         home,
         socket,
     } = world;
+    let transcripts = TranscriptReader::new(Box::new(|message| {
+        tracing::warn!("bazhen: {message}");
+    }));
     production(HarnessDeps {
         new_session_id: Box::new(new_session_id),
         hook_command: hook_command(&hook),
@@ -105,9 +109,7 @@ pub(crate) fn served(world: World) -> Harnesses {
                 .ok()
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         }),
-        // Only a resume asks, and this daemon resumes no agent yet: a session nothing can say is
-        // resumable holds no conversation.
-        scan_transcript: Box::new(|_, _| false),
+        scan_transcript: Box::new(move |path, line| transcripts.scan(path, line)),
         now_ms: Box::new(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -160,5 +162,42 @@ mod tests {
             [expected.clone(), expected]
         );
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn resumes_a_session_once_its_transcript_on_disk_holds_a_message_or_a_commands_output() {
+        let dir = crate::testing::TempDir::new("served-transcript");
+        let served = served(World {
+            hook: "/hook".to_owned(),
+            user_env: Env::default(),
+            home: dir.path().display().to_string(),
+            socket: "/socket".to_owned(),
+        });
+        let harness = served
+            .get(bazhen_protocol::agents::HarnessId::ClaudeCode)
+            .unwrap();
+        let metadata = concat!(
+            r#"{"type":"mode","mode":"normal"}"#,
+            "\n",
+            r#"{"type":"file-history-snapshot","messageId":"m","snapshot":{}}"#,
+            "\n",
+        );
+        let command = r#"{"type":"system","subtype":"local_command","content":"/model"}"#;
+        let user = r#"{"type":"user","message":{"role":"user","content":"hello"}}"#;
+        let resumes = |name: &str, text: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).unwrap();
+            harness.can_resume(&bazhen_harness::Evidence {
+                transcript: path.to_str(),
+            })
+        };
+        assert_eq!(
+            [
+                resumes("metadata.jsonl", metadata),
+                resumes("command.jsonl", &format!("{metadata}{command}\n")),
+                resumes("user.jsonl", &format!("{metadata}{user}\n")),
+            ],
+            [false, true, true]
+        );
     }
 }

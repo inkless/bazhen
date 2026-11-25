@@ -4,6 +4,7 @@
 //! of launching twice (§5.1).
 
 pub(crate) mod prompts;
+pub(crate) mod transcript;
 
 use std::collections::BTreeMap;
 use std::future::Future;
