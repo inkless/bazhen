@@ -18,6 +18,8 @@
 //! `newgrp` or `sg` shell does, is said to be withheld rather than refused: that says nothing of
 //! Codex, and the daemon takes the thread the call presents instead.
 
+pub mod tcp;
+
 use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
 use std::fmt;

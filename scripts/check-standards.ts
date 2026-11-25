@@ -947,6 +947,7 @@ const FUZZED_DECODERS: Record<string, string> = {
   "crates/bazhen-holder/src/process.rs::procargs2_args": "proc_args",
   "crates/bazhen-holder/src/process.rs::procargs2_env": "proc_args",
   "crates/bazhen-daemon/src/config.rs::parse_config": "config",
+  "crates/bazhen-peer/src/tcp.rs::socket_inode": "proc_net_tcp",
 };
 const NOT_DECODERS: Record<string, string> = {
   "crates/bazhen-harness/src/js.rs::Js::parse":
