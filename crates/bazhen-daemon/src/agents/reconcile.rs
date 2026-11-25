@@ -1037,6 +1037,58 @@ mod tests {
         );
     }
 
+    /// The watch rejects a respawn with no clear answer whose process hasn't started, as
+    /// unconfirmed; the process its holder starts after all is adopted when told, and starts.
+    #[test]
+    #[ignore = "signals processes; runs in moon run :test-real -- rust"]
+    fn adopts_the_process_of_a_respawn_the_watch_rejected_when_its_late_start_is_told() {
+        bazhen_test_signal::require_sandbox().unwrap();
+        let stub = StubHarness::new(pull()).resuming();
+        let (f, agent, generation) = exited(&stub);
+        let terminal = f.terminal_of(agent.as_str());
+        f.fake().set(|state| {
+            state.respawns_refused = Some(TerminalError::Unknown("no answer".to_owned()));
+        });
+        let req = RespawnAgentRequest {
+            idempotency_key: "s-1".to_owned(),
+            generation,
+            theme: None,
+        };
+        let answer = runtime().block_on(f.agents.respawn(agent.as_str(), &req, replaced_now));
+        f.fake().set(|state| state.respawns_refused = None);
+        ticked(&f);
+        let rejected = (f.last("agent.respawn_rejected"), state(&f, &agent));
+        let later = f.fake().respawn_unseen(&terminal);
+        let told = recorded(&f, || {
+            runtime()
+                .block_on(
+                    f.agents
+                        .observed(crate::terminals::Event::Respawned(recorded_at(
+                            &terminal, later,
+                        ))),
+                )
+                .unwrap();
+        });
+        let now = agent_of(&f, &agent);
+        assert_eq!(
+            (
+                may_have_started(&answer),
+                rejected,
+                told,
+                (now.state, now.generation)
+            ),
+            (
+                true,
+                (
+                    json!({"reason": "unavailable", "detail": UNCONFIRMED}),
+                    AgentState::Exited
+                ),
+                vec!["agent.process_adopted".to_owned()],
+                (AgentState::Starting, Some(later))
+            )
+        );
+    }
+
     #[test]
     #[ignore = "signals processes; runs in moon run :test-real -- rust"]
     fn leaves_a_relaunch_whose_create_had_no_answer_requested_then_rejects_it_where_nothing_runs() {
