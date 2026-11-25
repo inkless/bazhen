@@ -65,7 +65,7 @@ pub use readiness::{STARTS, Waiting};
 pub use snapshot::{SnapshotError, SnapshotView};
 pub use task_events::{AssignmentChange, TaskChange};
 pub use task_reads::{Stranded, TaskReadError};
-pub use task_verbs::{NewNote, TaskVerbError};
+pub use task_verbs::{NewGrant, NewNote, TaskVerbError};
 pub use tasks::{CreateTaskError, NewTask};
 pub use terminals::{AgentTerminal, RuntimeRow, ShellRow, start_unsettled, takes_exit};
 

@@ -383,3 +383,19 @@ fn reads_a_task_in_full_only_in_a_transaction_of_its_own() {
     );
     assert!(store.reads().task_detail(&task(1)).unwrap().is_some());
 }
+
+#[test]
+fn reads_a_task_in_full_inside_a_writers_transaction_as_the_writer_sees_it() {
+    let (_dir, mut store) = holding(&[Row::Task(1, "open", None, None, None, 1)]);
+    let title = store.write(|w| {
+        w.connection().execute(
+            "UPDATE tasks SET title = 'Renamed' WHERE id = ?",
+            [task(1).as_str()],
+        )?;
+        Ok::<_, TaskReadError>(w.task_detail(&task(1))?.map(|t| t.title))
+    });
+    assert_eq!(
+        title.map_err(|e| e.to_string()),
+        Ok(Some("Renamed".to_owned()))
+    );
+}
