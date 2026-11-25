@@ -1,8 +1,9 @@
 //! The planted corpus: each fixture example of a message, and that example broken or stretched
-//! at each of its fields, by every keyword either schema gives the field, the protocol's own
-//! (`packages/protocol/schema`) or the one the Rust crates emit. Each case says whether the
-//! protocol takes it, as its keyword says; the edge's verdict on it, where the daemon's edge reads
-//! the message, must agree, but for the cases `KNOWN_MISMATCHES` lists.
+//! at each of its fields, by every keyword the Rust protocol's schema gives the field, read both as
+//! the crates emit it and as `packages/protocol/schema` publishes it, each type written in place.
+//! Each case says whether the protocol takes it, as its keyword says; the edge's verdict on it,
+//! where the daemon's edge reads the message, must agree, but for the cases `KNOWN_MISMATCHES`
+//! lists.
 
 use std::collections::BTreeSet;
 
@@ -67,8 +68,10 @@ struct Plant {
 }
 
 /// The cases the edge's verdict disagrees with today, each named by its message, path and kind,
-/// which together name one case of each example, with what owns the fix and why they differ. The
-/// list only shrinks: an entry that no longer disagrees fails, as does a disagreement not listed.
+/// which together name one case of each example, with what owns the fix and why they differ. Both
+/// sides are the Rust protocol's, the schema it emits and the edge it serves, so the list holds the
+/// Rust daemon to its own schema, not to the TypeScript protocol. It only shrinks: an entry that no
+/// longer disagrees fails, as does a disagreement not listed.
 /// Each disagreement the edge may keep, as (message, path, kind, owner, reason).
 pub(crate) type Known<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 

@@ -43,7 +43,7 @@ const failures: string[] = [];
 const COVERED_ELSEWHERE: Record<string, string> = {
   "packages/protocol/src/gen/constants.ts": "packages/protocol/src/web.test.ts",
   "packages/protocol/src/gen/id.ts": "scripts/protocol-schema.medium.test.ts",
-  "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/dual.medium.test.ts",
+  "packages/protocol/src/gen/protocol.ts": "packages/protocol/src/gen-protocol.medium.test.ts",
   "packages/runtime-tmux/src/index.ts": "tests/integration/tmux-runtime.test.ts",
   "scripts/child-process.ts": "scripts/signal-paths.test.ts",
   "packages/runtime-holder/src/runtime-stream.ts":
@@ -4287,14 +4287,7 @@ export const RUST_GATE_TASKS: Record<string, string> = {
   "test-rust": `node scripts/capped.ts --memory 4G --time 30m -- ${GATE} test`,
 };
 export const GATE_STEPS: Record<string, readonly string[]> = {
-  check: [
-    "format-check",
-    "lint-rust",
-    "deny",
-    "test-rust",
-    "rust-schema-check",
-    "protocol-dual-types",
-  ],
+  check: ["format-check", "lint-rust", "deny", "test-rust", "rust-schema-check"],
   "format-check": ["gate-fmt"],
 };
 

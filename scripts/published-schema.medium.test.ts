@@ -3,6 +3,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+/** Where a schema in `node`, at any depth, closes an object: each pointer below `at`. */
+function closed(node: unknown, at: string): string[] {
+  if (Array.isArray(node)) return node.flatMap((item, i) => closed(item, `${at}/${i}`));
+  if (typeof node !== "object" || node === null) return [];
+  return Object.entries(node).flatMap(([key, value]) =>
+    ["additionalProperties", "unevaluatedProperties"].includes(key) && value === false
+      ? [`${at}/${key}`]
+      : closed(value, `${at}/${key}`),
+  );
+}
+
 // What a peer in another language relies on in the schema the Rust protocol publishes, read as
 // committed.
 describe("the published schema", () => {
@@ -11,10 +22,11 @@ describe("the published schema", () => {
     JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8"));
 
   it("leaves every object open, as a newer peer within the same major sends fields it adds", () => {
-    const closed = readdirSync(dir).filter((name) =>
-      readFileSync(join(dir, name), "utf8").includes('"additionalProperties": false'),
-    );
-    expect(closed).toEqual([]);
+    const files = readdirSync(dir).filter((name) => name.endsWith(".json"));
+    expect(files.length).toBeGreaterThan(0);
+    expect(
+      files.flatMap((name) => closed(JSON.parse(readFileSync(join(dir, name), "utf8")), name)),
+    ).toEqual([]);
   });
 
   it("states a protocol version in ASCII digits, which a peer in any language reads alike", () => {
