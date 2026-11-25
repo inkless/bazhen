@@ -469,9 +469,11 @@ that agent's until you restart it outside Bazhen. A connection that another user
 such as a proxy's, is refused. So is one forwarded by `ssh -L`, whose `sshd` can't be read, until
 the browser is paired through that forward once: then a request through it that carries the
 paired browser's cookie is yours, as long as every process of yours that may hold its socket
-unseen reads as yours (docs/remote.md, Pairing). Where `/proc` doesn't say who holds a socket (`hidepid`, a daemon in another PID
-namespace, or macOS), every API request over HTTP is refused: the daemon warns at start, and
-`bazhen doctor` shows `HTTP callers: unidentified`.
+unseen reads as yours (docs/remote.md, Pairing). `hidepid` hides only other users' processes, so
+it leaves this working. Where `/proc` doesn't say who holds a socket (`/proc` mounted with
+`subset=pid`, which hides `/proc/net`; a daemon in another PID namespace; or macOS), every API
+request over HTTP is refused: the daemon warns at start, and `bazhen doctor` shows
+`HTTP callers: unidentified`.
 
 These checks catch an agent's ordinary and accidental calls, not a determined agent's. Agents run
 as you, the same user, so an agent that does any of these looks like you to Bazhen:
