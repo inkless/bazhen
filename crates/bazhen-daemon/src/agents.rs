@@ -3,6 +3,7 @@
 //! (foundation-design §8.1), and the request's key makes a retry answer as the first did instead
 //! of launching twice (§5.1).
 
+pub(crate) mod lifecycle;
 pub(crate) mod prompts;
 pub(crate) mod transcript;
 pub(crate) mod view;
@@ -56,7 +57,18 @@ pub(crate) enum AgentError {
     /// The agent is recorded failed; `why` carries no secret.
     #[error("agent {agent} failed to launch: {why}")]
     LaunchFailed { agent: String, why: String },
-    /// The daemon can't launch agents as it runs now.
+    #[error("no agent {0}")]
+    Unknown(String),
+    /// Its state doesn't allow the command, or its terminal isn't the one recorded.
+    #[error("{0}")]
+    Conflict(String),
+    #[error("agent {id} is at generation {}", generation.map_or_else(|| "null".to_owned(), |g| g.to_string()))]
+    Stale { id: String, generation: Option<u64> },
+    #[error("{0}")]
+    ServerUnconfirmed(String),
+    #[error("{0}")]
+    NeedsRestart(String),
+    /// The daemon can't do it as it runs now, or the environment couldn't just now.
     #[error("{0}")]
     Unavailable(String),
     /// A failure no command expects, which is the daemon's.
@@ -809,6 +821,33 @@ pub(crate) mod tests {
             self.agents.launch(&req).await
         }
 
+        /// The agent's current terminal.
+        pub(crate) fn terminal_of(&self, agent: &str) -> String {
+            self.store
+                .reader()
+                .unwrap()
+                .reads()
+                .agent_terminal(agent)
+                .unwrap()
+                .and_then(|found| found.terminal_id)
+                .unwrap()
+                .as_str()
+                .to_owned()
+        }
+
+        /// The signals the runtime was asked to send, in order.
+        pub(crate) fn fake_signalled(&self) -> Vec<(String, bazhen_protocol::agents::Signal)> {
+            let mut signalled = Vec::new();
+            self.fake
+                .set(|state| signalled.clone_from(&state.signalled));
+            signalled
+        }
+
+        /// The terminal's process ends, told to no one.
+        pub(crate) fn fake_exit_unseen(&self, terminal: &str) {
+            self.fake.exit_unseen(terminal);
+        }
+
         /// Each event recorded, as its type and payload, oldest first.
         fn events(&self) -> Vec<(String, serde_json::Value)> {
             let reader = self.store.reader().unwrap();
@@ -819,7 +858,7 @@ pub(crate) mod tests {
                 .collect()
         }
 
-        fn types(&self) -> Vec<String> {
+        pub(crate) fn types(&self) -> Vec<String> {
             self.events().into_iter().map(|(kind, _)| kind).collect()
         }
 
