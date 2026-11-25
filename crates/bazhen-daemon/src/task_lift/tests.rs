@@ -141,7 +141,7 @@ mod properties {
                 .write(|w| {
                     w.connection().execute_batch(&sql)?;
                     let mut queued = Vec::new();
-                    lift_stranded(w, &harnesses, "lifted", &mut queued)
+                    lift_stranded(w, &harnesses, &mut queued)
                 })
                 .unwrap();
             prop_assert!(!lifted.outran);

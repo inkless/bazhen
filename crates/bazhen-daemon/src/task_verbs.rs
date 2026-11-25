@@ -28,7 +28,7 @@ use bazhen_store::{
 use serde::Serialize;
 
 use crate::callers::{Caller, caller_of};
-use crate::mail::{CLOSED_CALLER, GONE, MAIL_LIMIT, Queued, Sending, refusal, send_under};
+use crate::mail::{CLOSED_CALLER, GONE, MAIL_LIMIT, Queued, Sending, queue, refusal, send_under};
 use crate::routes::{Shared, fail, internal};
 use crate::task_lift::lift_stranded;
 use crate::task_mail::{
@@ -401,7 +401,6 @@ pub(crate) async fn unassign(
                         caller: caller.as_ref(),
                         task: &task,
                         assignment: &assignment,
-                        key: &req.idempotency_key,
                     };
                     taking.record(w, run.harnesses(), &mut queued)
                 })?;
@@ -423,7 +422,6 @@ struct Taking<'a> {
     caller: Option<&'a AgentId>,
     task: &'a TaskId,
     assignment: &'a AssignmentId,
-    key: &'a str,
 }
 
 impl Taking<'_> {
@@ -461,7 +459,6 @@ impl Taking<'_> {
         let mut to: Vec<Tell> = target
             .into_iter()
             .map(|agent| Tell {
-                id: agent.as_str().to_owned(),
                 body: unassigned_mail(&task, from),
                 agent,
             })
@@ -469,14 +466,13 @@ impl Taking<'_> {
         for a in under {
             let on = reads.task(&a.task_id)?.ok_or_else(no_task)?;
             to.push(Tell {
-                id: a.id.as_str().to_owned(),
                 body: line_ended_mail(&on),
                 agent: a.agent_id,
             });
         }
         let mut event_ids = vec![ended];
-        event_ids.extend(tell(w, harnesses, to, self.caller, self.key, queued)?);
-        let lifted = lift_stranded(w, harnesses, self.key, queued)?;
+        event_ids.extend(tell(w, harnesses, to, self.caller, queued)?);
+        let lifted = lift_stranded(w, harnesses, queued)?;
         if lifted.outran {
             return Err(Sending::Internal(
                 "subtasks were still stranded after lifting every level".to_owned(),
@@ -488,22 +484,22 @@ impl Taking<'_> {
     }
 }
 
-/// Mail a verb sends one agent: its body, and the id its key is derived under.
+/// Mail a verb sends one agent.
 pub(crate) struct Tell {
     pub(crate) agent: AgentId,
-    pub(crate) id: String,
     pub(crate) body: String,
 }
 
-/// Mails each agent but the caller its body, under the verb's key and the one's id, so a retry
-/// mails no one twice (`tellEach`). An agent that can't take mail now, gone or one whose harness
-/// takes none, goes untold: the verb already happened, and the dashboard shows it.
+/// Mails each agent but the caller its body (`tellEach`), in the verb's write: a retry of the verb
+/// replays its answer and sends nothing again, so the mail needs no key of its own, and a later
+/// write that tells the same agent the same thing tells it again. An agent that can't take mail
+/// now, gone or one whose harness takes none, goes untold: the verb already happened, and the
+/// dashboard shows it.
 pub(crate) fn tell(
     w: &StoreWriter<'_>,
     harnesses: &Harnesses,
     to: Vec<Tell>,
     caller: Option<&AgentId>,
-    key: &str,
     fresh: &mut Vec<Queued>,
 ) -> Result<Vec<u64>, Sending> {
     let mut event_ids = Vec::new();
@@ -511,8 +507,7 @@ pub(crate) fn tell(
         if caller == Some(&one.agent) {
             continue;
         }
-        let key = format!("{key}:{}", one.id);
-        match send_under(w, harnesses, &one.agent, &key, &one.body, fresh) {
+        match queue(w, harnesses, &one.agent, &one.body, None, fresh) {
             Ok(sent) => event_ids.extend(sent.event_ids),
             Err(Sending::NoAgent(_) | Sending::Gone { .. }) => {}
             Err(err) => return Err(err),

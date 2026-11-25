@@ -23,8 +23,8 @@ pub(crate) struct Lifted {
     pub(crate) outran: bool,
 }
 
-/// Moves every stranded subtask up a level, and again, until none is left, mailing each new owner
-/// under keys derived from `key`. A move can strand the level below, but each pass lifts one
+/// Moves every stranded subtask up a level, and again, until none is left, mailing each new
+/// owner. A move can strand the level below, but each pass lifts one
 /// level, so it ends within as many passes as there are open tasks, and one more finds none left.
 ///
 /// # Errors
@@ -34,7 +34,6 @@ pub(crate) struct Lifted {
 pub(crate) fn lift_stranded(
     w: &StoreWriter<'_>,
     harnesses: &Harnesses,
-    key: &str,
     fresh: &mut Vec<Queued>,
 ) -> Result<Lifted, Sending> {
     let bound = w.reads().open_task_count()?.saturating_add(1);
@@ -42,7 +41,7 @@ pub(crate) fn lift_stranded(
     let ended = passes(bound, || {
         let stranded = w.reads().stranded()?;
         for lifted in &stranded {
-            event_ids.extend(lift(w, harnesses, key, lifted, fresh)?);
+            event_ids.extend(lift(w, harnesses, lifted, fresh)?);
         }
         Ok::<_, Sending>(!stranded.is_empty())
     })?;
@@ -68,7 +67,6 @@ fn passes<E>(bound: u64, mut pass: impl FnMut() -> Result<bool, E>) -> Result<bo
 fn lift(
     w: &StoreWriter<'_>,
     harnesses: &Harnesses,
-    key: &str,
     lifted: &Stranded,
     fresh: &mut Vec<Queued>,
 ) -> Result<Vec<u64>, Sending> {
@@ -85,13 +83,11 @@ fn lift(
     let mut event_ids = vec![moved];
     match owner {
         Some(owner) => {
-            let id = format!("owner:{}:{owner}", task.id);
             let to = vec![Tell {
                 body: owned_mail(&task),
                 agent: owner,
-                id,
             }];
-            event_ids.extend(tell(w, harnesses, to, None, key, fresh)?);
+            event_ids.extend(tell(w, harnesses, to, None, fresh)?);
         }
         // An item raised on an agent the store no longer knows would name no one.
         None => {
@@ -122,8 +118,7 @@ pub(crate) async fn at_start(store: &crate::writer::Writer, agents: &Arc<Agents>
     let lifted = store
         .run(move |store| {
             let mut queued = Vec::new();
-            let lifted =
-                store.write(|w| lift_stranded(w, run.harnesses(), "lifted", &mut queued))?;
+            let lifted = store.write(|w| lift_stranded(w, run.harnesses(), &mut queued))?;
             Ok::<_, Sending>((lifted, queued))
         })
         .await;

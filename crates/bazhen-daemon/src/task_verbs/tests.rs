@@ -997,6 +997,46 @@ fn lifts_a_chain_of_subtasks_to_the_live_owner_above_with_its_delegation_and_mai
 }
 
 #[test]
+fn mails_an_owner_each_time_a_start_lifts_a_subtask_to_it_however_often_it_was_told_before() {
+    let f = fixture(pull());
+    let top = made(&f, "c", "b");
+    granted_id(&assign_as(&f, None, &top, "a1", f.peer.as_str(), "lead"));
+    let (_, part) = create_as(&f, Some(&f.peer), &under("p", &top));
+    let part = part["taskId"].as_str().unwrap().to_owned();
+    let lead = granted_id(&assign_as(
+        &f,
+        Some(&f.peer),
+        &part,
+        "a2",
+        f.to.as_str(),
+        "lead",
+    ));
+    let (_, sub) = create_as(&f, Some(&f.to), &under("s", &part));
+    let sub = sub["taskId"].as_str().unwrap().to_owned();
+    let agents = Arc::clone(f.shared.agents.as_ref().unwrap());
+    let before = bodies(&f).len();
+    // The lead's delegation ended as a daemon that didn't lift in the same write would leave it,
+    // then the subtask left with `to` under it again, as a store a daemon restored would hold it.
+    for _ in 0..2 {
+        let (to, sub, lead) = (f.to.as_str().to_owned(), sub.clone(), lead.clone());
+        sql(&f, move |db| {
+            db.execute(
+                "UPDATE tasks SET owner_agent_id = ?, delegated_from = ? WHERE id = ?",
+                (&to, &lead, &sub),
+            )?;
+            db.execute(
+                "UPDATE assignments SET state = 'ended', end_reason = 'unassigned' WHERE id = ?",
+                [&lead],
+            )
+        });
+        f.runtime
+            .block_on(crate::task_lift::at_start(&f.shared.store, &agents));
+    }
+    let owned = crate::task_mail::owned_mail(&named(&f, &sub));
+    assert_eq!(bodies(&f)[before..].to_vec(), vec![owned.clone(), owned]);
+}
+
+#[test]
 fn lifts_what_a_store_left_stranded_at_start_and_nothing_a_second_time() {
     let f = fixture(pull());
     let task = made(&f, "c", "b");
