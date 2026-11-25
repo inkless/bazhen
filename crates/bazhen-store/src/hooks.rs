@@ -3,12 +3,17 @@
 //! session keeps its conversation (`store.ts` `claudeBinding`, `recordTranscript`, binding.ts's
 //! `rebind`).
 
-use bazhen_protocol::agent_events::{AgentExternalRefUpdated, AgentTranscriptRecorded};
-use bazhen_protocol::agents::{ExternalRef, ExternalRefKind};
+use bazhen_protocol::agent_events::{
+    AgentCompacted, AgentExternalRefUpdated, AgentTranscriptRecorded, CompactedHook, CompactedSign,
+};
+use bazhen_protocol::agents::{Activity, ExternalRef, ExternalRefKind, Usage};
 use bazhen_protocol::ids::{AgentId, EnvironmentId};
 
 use crate::agent_events::AgentChange;
 use crate::events::{AppendError, NewEvent, Reads, Writer};
+
+/// The states in which an agent's harness reports what it is doing (`store.ts` `REPORTING`).
+const REPORTING: [&str; 3] = ["starting", "running", "unknown"];
 
 /// The longest transcript path the protocol holds, in code points, as zod counts them.
 pub const MAX_TRANSCRIPT_PATH: usize = 4096;
@@ -137,6 +142,107 @@ impl Writer<'_> {
     }
 }
 
+impl Writer<'_> {
+    /// Records what the agent's harness says it is doing (`store.ts` `recordActivity`), unless the
+    /// agent isn't in a state that reports, the last recorded was observed later, or it says the
+    /// same as the last: the same value, source, detail and reset, however sure and whenever seen.
+    ///
+    /// # Errors
+    ///
+    /// The append's.
+    pub fn record_activity(
+        &self,
+        agent: &AgentId,
+        activity: &Activity,
+    ) -> Result<Option<u64>, AppendError> {
+        if !self.reporting(agent)? {
+            return Ok(None);
+        }
+        let latest: Option<String> = self.reads().first_text(
+            "SELECT activity FROM activity_latest WHERE agent_session_id = ?",
+            agent.as_str(),
+        )?;
+        if let Some(latest) = latest.and_then(|text| serde_json::from_str::<Activity>(&text).ok()) {
+            // Every stored time is written as `toISOString` writes it, so two compare as text as
+            // they do as times.
+            let same = latest.value == activity.value
+                && latest.source == activity.source
+                && latest.detail == activity.detail
+                && latest.resets_at == activity.resets_at;
+            if activity.observed_at < latest.observed_at || same {
+                return Ok(None);
+            }
+        }
+        let change = AgentChange::Activity(activity.clone());
+        self.append(&system(agent, change)).map(Some)
+    }
+
+    /// Records that the agent's session compacted its context (`store.ts` `recordCompaction`),
+    /// with the usage recorded last as what it held before, unless the agent isn't in a state that
+    /// reports, or the same hook, by its session and process, reported it already.
+    ///
+    /// # Errors
+    ///
+    /// The append's.
+    pub fn record_compaction(
+        &self,
+        agent: &AgentId,
+        sign: CompactedSign,
+        hook: Option<CompactedHook>,
+    ) -> Result<Option<u64>, AppendError> {
+        if !self.reporting(agent)? {
+            return Ok(None);
+        }
+        if let Some(hook) = &hook {
+            let reported: Option<i64> = self
+                .connection()
+                .query_row(
+                    "SELECT 1 FROM events WHERE entity_type = 'agent' AND entity_id = ?
+                       AND type = 'agent.compacted' AND json_extract(payload, '$.hook.pid') = ?
+                       AND json_extract(payload, '$.hook.sessionId') IS ? LIMIT 1",
+                    (agent.as_str(), hook.pid, hook.session_id.as_deref()),
+                    |row| row.get(0),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    err => Err(err),
+                })?;
+            if reported.is_some() {
+                return Ok(None);
+            }
+        }
+        // The status line reports apart from the hook, so a reading taken just after the
+        // compaction may land first, and `before` then holds the use after it.
+        let before: Option<String> = self.reads().first_text(
+            "SELECT usage FROM agent_sessions WHERE id = ?",
+            agent.as_str(),
+        )?;
+        let change = AgentChange::Compacted(AgentCompacted {
+            sign,
+            before: before.and_then(|text| serde_json::from_str::<Usage>(&text).ok()),
+            hook,
+        });
+        self.append(&system(agent, change)).map(Some)
+    }
+
+    /// Whether the agent is in a state its harness reports in.
+    fn reporting(&self, agent: &AgentId) -> rusqlite::Result<bool> {
+        let state = self.reads().agent_state(agent.as_str())?;
+        Ok(state.is_some_and(|state| REPORTING.contains(&state.as_str())))
+    }
+}
+
+impl Reads<'_> {
+    /// The first row's text column, or none: no row, or a null.
+    fn first_text(self, sql: &str, key: &str) -> rusqlite::Result<Option<String>> {
+        let mut rows = self.0.prepare(sql)?;
+        let mut found = rows.query([key])?;
+        let text: Option<Option<String>> = found.next()?.map(|row| row.get(0)).transpose()?;
+        Ok(text.flatten())
+    }
+}
+
 fn system(agent: &AgentId, change: AgentChange) -> NewEvent {
     NewEvent::Agent {
         agent: agent.clone(),
@@ -147,7 +253,10 @@ fn system(agent: &AgentId, change: AgentChange) -> NewEvent {
 
 #[cfg(test)]
 mod tests {
-    use bazhen_protocol::agents::{ExternalRef, ExternalRefKind};
+    use bazhen_protocol::agent_events::{CompactedHook, CompactedSign};
+    use bazhen_protocol::agents::{
+        Activity, ActivitySource, ActivityValue, ExternalRef, ExternalRefKind,
+    };
     use bazhen_protocol::ids::{AgentId, EnvironmentId};
 
     use super::{AgentBinding, MAX_TRANSCRIPT_PATH};
@@ -340,6 +449,115 @@ mod tests {
                 record("s-1", &longest),
             ],
             [false, false, false, true]
+        );
+    }
+
+    fn activity(value: ActivityValue, at: &str, confidence: f64) -> Activity {
+        Activity {
+            value,
+            source: ActivitySource::Native,
+            confidence,
+            observed_at: format!("2026-11-24T00:00:{at}.000Z"),
+            detail: None,
+            resets_at: None,
+        }
+    }
+
+    #[test]
+    fn records_a_change_of_activity_and_not_an_older_or_the_same_one_however_sure() {
+        let dir = TempDir::new("activity");
+        let mut store = store(&dir, Some(BOUND));
+        let mut record = |activity: Activity| {
+            store
+                .write(|w| w.record_activity(&agent(), &activity))
+                .unwrap()
+                .is_some()
+        };
+        assert_eq!(
+            [
+                record(activity(ActivityValue::Working, "10", 1.0)),
+                record(activity(ActivityValue::Working, "20", 0.5)),
+                record(activity(ActivityValue::Idle, "05", 1.0)),
+                record(activity(ActivityValue::Idle, "30", 1.0)),
+                record(activity(ActivityValue::Working, "30", 1.0)),
+            ],
+            [true, false, false, true, true]
+        );
+    }
+
+    #[test]
+    fn records_no_activity_or_compaction_for_an_agent_in_a_state_that_doesnt_report() {
+        let dir = TempDir::new("exited");
+        let mut store = store(&dir, Some(BOUND));
+        store
+            .db
+            .execute("UPDATE agent_sessions SET state = 'exited'", ())
+            .unwrap();
+        let recorded = store.write(|w| {
+            Ok::<_, crate::AppendError>([
+                w.record_activity(&agent(), &activity(ActivityValue::Working, "10", 1.0))?,
+                w.record_compaction(&agent(), CompactedSign::ClaudeHook, None)?,
+            ])
+        });
+        assert_eq!((recorded.unwrap(), events(&store)), ([None, None], vec![]));
+    }
+
+    #[test]
+    fn records_a_compaction_with_nothing_before_it_for_an_agent_that_reported_no_usage() {
+        let dir = TempDir::new("no-usage");
+        let mut store = store(&dir, Some(BOUND));
+        let compacted =
+            store.write(|w| w.record_compaction(&agent(), CompactedSign::ClaudeHook, None));
+        assert_eq!(
+            (compacted.unwrap().is_some(), events(&store)),
+            (
+                true,
+                vec![(
+                    "agent.compacted".to_owned(),
+                    r#"{"sign":"claude_hook"}"#.to_owned()
+                )]
+            )
+        );
+    }
+
+    #[test]
+    fn records_a_compaction_once_per_hook_with_the_usage_held_before_it() {
+        let dir = TempDir::new("compacted");
+        let mut store = store(&dir, Some(BOUND));
+        store
+            .db
+            .execute(
+                r#"UPDATE agent_sessions SET usage = '{"model":"opus","contextUsedPercent":80}'"#,
+                (),
+            )
+            .unwrap();
+        let hook = |session: Option<&str>, pid| CompactedHook {
+            session_id: session.map(str::to_owned),
+            pid,
+        };
+        let mut compacted = |hook: Option<CompactedHook>| {
+            store
+                .write(|w| w.record_compaction(&agent(), CompactedSign::ClaudeHook, hook))
+                .unwrap()
+                .is_some()
+        };
+        assert_eq!(
+            [
+                compacted(Some(hook(Some("s-1"), 7))),
+                compacted(Some(hook(Some("s-1"), 7))),
+                compacted(Some(hook(None, 7))),
+                compacted(Some(hook(None, 7))),
+                compacted(Some(hook(Some("s-1"), 8))),
+                compacted(None),
+                compacted(None),
+            ],
+            [true, false, true, false, true, true, true]
+        );
+        assert_eq!(
+            events(&store).first().map(|(_, payload)| payload.as_str()),
+            Some(
+                r#"{"sign":"claude_hook","before":{"model":"opus","contextUsedPercent":80},"hook":{"sessionId":"s-1","pid":7}}"#
+            )
         );
     }
 }
