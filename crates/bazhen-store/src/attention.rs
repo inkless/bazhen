@@ -147,7 +147,9 @@ impl Writer<'_> {
     }
 
     /// The agent's own turn failed, as its harness reports it: one item while its turns keep
-    /// failing, saying `error`. Answers its event's id, none when one is open already.
+    /// failing, saying `error`. Answers its event's id, none when one is open already or the
+    /// agent is closed or unknown, since a hook can come after the close and no turn would ever
+    /// close the item.
     ///
     /// # Errors
     ///
@@ -157,6 +159,17 @@ impl Writer<'_> {
         agent: &AgentId,
         error: Option<&str>,
     ) -> Result<Option<u64>, AppendError> {
+        let state: Option<String> = self
+            .connection()
+            .query_row(
+                "SELECT state FROM agent_sessions WHERE id = ?",
+                [agent.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state.is_none_or(|state| state == "closed") {
+            return Ok(None);
+        }
         if self
             .open_of(agent, &AttentionKind::Failed)?
             .next()
@@ -434,6 +447,21 @@ mod tests {
                 ],
                 vec!["overloaded".to_owned(), "A turn failed".to_owned()]
             )
+        );
+    }
+
+    #[test]
+    fn a_failed_turn_opens_nothing_for_an_agent_closed_or_unknown() {
+        let dir = TempDir::new("failed-closed");
+        let mut store = store(&dir, "closed");
+        let unknown = AgentId::parse("agent_01900000000070008000000000000002").unwrap();
+        let opened = (
+            store.write(|w| w.turn_failed(&agent(), Some("late"))),
+            store.write(|w| w.turn_failed(&unknown, Some("late"))),
+        );
+        assert_eq!(
+            (opened.0.ok(), opened.1.ok(), items(&store)),
+            (Some(None), Some(None), vec![])
         );
     }
 
