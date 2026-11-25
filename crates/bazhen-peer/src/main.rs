@@ -32,7 +32,8 @@ fn main() -> ExitCode {
                 | Refused::Ambiguous
                 | Refused::NoReadableHolder { .. }
                 | Refused::TooManyHolders { .. }
-                | Refused::HolderChanged => 1,
+                | Refused::HolderChanged
+                | Refused::Changed(_) => 1,
             })
         }
     }

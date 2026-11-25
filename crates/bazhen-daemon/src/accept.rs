@@ -86,14 +86,18 @@ impl Drop for Holding {
 }
 
 /// A connection's own socket, kept for its requests to read who is at the other end: a Unix
-/// socket's, which the kernel names the peer of; none for TCP, whose callers are paired instead.
+/// socket's, which the kernel names the peer of; a TCP connection's two addresses, by which the
+/// processes holding the caller's socket are found.
 pub(crate) trait Connected {
     fn peer(&self) -> Option<PeerSocket>;
 }
 
 impl Connected for tokio::net::TcpStream {
     fn peer(&self) -> Option<PeerSocket> {
-        None
+        Some(PeerSocket::tcp_accepted_now(
+            self.peer_addr(),
+            self.local_addr(),
+        ))
     }
 }
 
@@ -107,7 +111,7 @@ impl Connected for tokio::net::UnixStream {
 /// still listens, so a socket file `stopped` removes never refuses a connection, closes the
 /// listener, and asks each open connection to end once it has answered the request it is on; an
 /// upgraded one is its route's to end. Every connection is a task on `tracker`, so waiting on it
-/// waits on them, and every request on a Unix connection carries its `PeerSocket`.
+/// waits on them, and every request carries its connection's `PeerSocket`.
 pub(crate) async fn serve_on<L>(
     mut listener: L,
     router: Router,
@@ -489,6 +493,11 @@ mod tests {
                 };
                 match crate::peer::Peers::default().read(&peer).await {
                     crate::peer::PeerRead::Read(read) => read.pid.as_raw_pid().to_string(),
+                    crate::peer::PeerRead::Held(held) => held
+                        .iter()
+                        .map(|read| read.pid.as_raw_pid().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
                     other => format!("{other:?}"),
                 }
             }),
@@ -508,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn gives_each_request_on_a_unix_connection_its_socket_to_read_the_peer_of_and_tcps_none() {
+    fn gives_each_request_its_connections_socket_to_read_the_caller_of_over_unix_and_tcp() {
         let dir = crate::testing::TempDir::new("peered");
         let path = dir.path().join("s.sock");
         runtime().block_on(async {
@@ -535,9 +544,18 @@ mod tests {
             ));
             let unix = tokio::net::UnixStream::connect(&path).await.unwrap();
             let tcp = TcpStream::connect(address).await.unwrap();
+            // Where `/proc` says who holds a socket; elsewhere a TCP caller is refused, and why.
+            let over_tcp = if cfg!(target_os = "linux") {
+                std::process::id().to_string()
+            } else {
+                format!(
+                    "{:?}",
+                    crate::peer::PeerRead::Unread(crate::peer::UNIDENTIFIABLE.to_owned())
+                )
+            };
             assert_eq!(
                 [peer_said(unix).await, peer_said(tcp).await],
-                [std::process::id().to_string(), "none".to_owned()]
+                [std::process::id().to_string(), over_tcp]
             );
             stop.cancel();
         });

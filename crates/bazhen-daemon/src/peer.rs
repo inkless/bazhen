@@ -1,16 +1,22 @@
-//! Who is at the other end of a socket connection (`auth/peer.ts`), read in-process by
-//! `bazhen_peer::of`, and whose process that is among the terminals the daemon runs.
+//! Who is at the other end of a connection (`auth/peer.ts`), read in-process: a Unix socket's peer
+//! by `bazhen_peer::of`, a loopback TCP caller as the processes holding its socket
+//! (`bazhen_peer::tcp`); and whose process that is among the terminals the daemon runs.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::io;
+use std::net::SocketAddr;
 use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use bazhen_peer::tcp::{self, ProcView, Scan};
 use bazhen_peer::{Peer, Refused};
 use bazhen_protocol::ids::AgentId;
 use bazhen_store::LiveTerminal;
+use rustix::process::Pid;
 use serde_json::Value;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio_util::task::TaskTracker;
 
 use crate::config::js;
 
@@ -20,40 +26,218 @@ pub(crate) const READ: Duration = Duration::from_secs(2);
 /// The most readings at once; more wait their turn.
 pub(crate) const MAX_READING: usize = 8;
 
-/// A socket connection, as every request on it carries it: a dup of its descriptor, or why there
-/// is none, and the epoch second it was accepted by, which its peer's process must have started by.
+/// Why a loopback TCP caller isn't read where `/proc` doesn't say who holds a socket.
+pub(crate) const UNIDENTIFIABLE: &str =
+    "the caller of a loopback HTTP request can't be identified on this platform";
+
+/// A connection, as every request on it carries it: its end of a Unix socket, a dup of its
+/// descriptor or why there is none, or a loopback TCP connection's two addresses; and the epoch
+/// second it was accepted by, which its peer's process must have started by.
 #[derive(Debug, Clone)]
 pub(crate) struct PeerSocket {
-    fd: Result<Arc<OwnedFd>, String>,
+    end: End,
     accepted: u64,
+}
+
+#[derive(Debug, Clone)]
+enum End {
+    Unix(Arc<OwnedFd>),
+    Tcp {
+        client: SocketAddr,
+        server: SocketAddr,
+    },
+    Unreadable(String),
+}
+
+/// Now, as the epoch second a connection accepted now was accepted by.
+fn accepted_now() -> u64 {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis());
+    u64::try_from(ms.div_ceil(1000)).unwrap_or(u64::MAX)
 }
 
 impl PeerSocket {
     /// `socket`, accepted now.
     pub(crate) fn accepted_now(socket: BorrowedFd<'_>) -> Self {
-        let ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| since.as_millis());
         Self {
-            fd: socket
-                .try_clone_to_owned()
-                .map(Arc::new)
-                .map_err(|err| Refused::Unreadable(err).to_string()),
-            accepted: u64::try_from(ms.div_ceil(1000)).unwrap_or(u64::MAX),
+            end: match socket.try_clone_to_owned() {
+                Ok(fd) => End::Unix(Arc::new(fd)),
+                Err(err) => End::Unreadable(Refused::Unreadable(err).to_string()),
+            },
+            accepted: accepted_now(),
+        }
+    }
+
+    /// A TCP connection, from `client` to the daemon's `server` as each end's address was read,
+    /// accepted now.
+    pub(crate) fn tcp_accepted_now(
+        client: io::Result<SocketAddr>,
+        server: io::Result<SocketAddr>,
+    ) -> Self {
+        Self {
+            end: match (client, server) {
+                (Ok(client), Ok(server)) => End::Tcp { client, server },
+                (Err(err), _) | (_, Err(err)) => {
+                    End::Unreadable(Refused::Unreadable(err).to_string())
+                }
+            },
+            accepted: accepted_now(),
         }
     }
 }
 
-/// A reading of a socket's peer: who it is; nobody, and why; or late, when the reading was still
-/// running at its deadline, which says nothing of the caller but that it wasn't read in time.
+/// A reading of a connection's peer: who it is, or each process holding a TCP caller's socket;
+/// nobody, and why; or late, when the reading was still running at its deadline, which says
+/// nothing of the caller but that it wasn't read in time; or to be tried again, when the caller
+/// changed while it was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PeerRead {
     Read(Peer),
+    Held(Vec<Peer>),
     Unread(String),
     Late,
+    Retry(String),
 }
 
 type ReadFn = dyn Fn(BorrowedFd<'_>, u64) -> Result<Peer, Refused> + Send + Sync;
+type HolderFn = dyn Fn(Pid, u64) -> Result<Peer, Refused> + Send + Sync;
+type View = dyn ProcView + Send + Sync;
+
+/// Reads loopback TCP callers: each one's socket from the connection tables, then the processes
+/// holding it, found by one pass over `/proc` for every caller waiting when the pass starts, so
+/// callers that arrive together cost one pass rather than one each; then each holder, as a Unix
+/// socket's peer is read.
+pub(crate) struct Tcp {
+    view: Arc<View>,
+    read: Arc<HolderFn>,
+    uid: u32,
+    pass: Mutex<Pass>,
+    passes: TaskTracker,
+}
+
+/// The callers waiting on the next pass: their sockets, and where to answer each.
+#[derive(Default)]
+struct Pass {
+    inodes: BTreeSet<u64>,
+    waiting: Vec<oneshot::Sender<Arc<Result<Scan, String>>>>,
+    running: bool,
+}
+
+impl Tcp {
+    pub(crate) fn new(
+        view: Arc<View>,
+        uid: u32,
+        read: impl Fn(Pid, u64) -> Result<Peer, Refused> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            view,
+            read: Arc::new(read),
+            uid,
+            pass: Mutex::new(Pass::default()),
+            passes: TaskTracker::new(),
+        }
+    }
+
+    /// The processes holding the socket of the caller connected from `client` to `server`, each
+    /// read as one that started by `accepted`. Each read of `/proc` holds `turn` until it ends,
+    /// even once this is given up on.
+    async fn read(
+        self: Arc<Self>,
+        client: SocketAddr,
+        server: SocketAddr,
+        accepted: u64,
+        turn: Arc<OwnedSemaphorePermit>,
+    ) -> Result<Vec<Peer>, Refused> {
+        let (view, uid) = (Arc::clone(&self.view), self.uid);
+        let inode = blocking(&turn, move || tcp::end(&*view, client, server, uid)).await?;
+        let scanned = self.scanned(inode).await;
+        let (view, read) = (Arc::clone(&self.view), Arc::clone(&self.read));
+        blocking(&turn, move || {
+            let scan = scanned
+                .as_ref()
+                .as_ref()
+                .map_err(|why| Refused::Unreadable(io::Error::other(why.clone())))?;
+            let holders = tcp::holders(scan, inode)?;
+            tcp::peers(&*view, inode, &holders, |pid| read(pid, accepted))
+        })
+        .await
+    }
+
+    /// The pass that finds who holds `inode`: the next to start.
+    async fn scanned(self: &Arc<Self>, inode: u64) -> Arc<Result<Scan, String>> {
+        let (answer, answered) = oneshot::channel();
+        let start = {
+            let mut pass = self.pass.lock().unwrap_or_else(PoisonError::into_inner);
+            pass.inodes.insert(inode);
+            pass.waiting.push(answer);
+            !std::mem::replace(&mut pass.running, true)
+        };
+        if start {
+            self.passes.spawn(Arc::clone(self).run());
+        }
+        answered
+            .await
+            .unwrap_or_else(|_| Arc::new(Err("the scan ended without an answer".to_owned())))
+    }
+
+    /// Passes, each for every caller waiting when it starts, until none is.
+    async fn run(self: Arc<Self>) {
+        loop {
+            let (inodes, waiting) = {
+                let mut pass = self.pass.lock().unwrap_or_else(PoisonError::into_inner);
+                if pass.waiting.is_empty() {
+                    pass.running = false;
+                    return;
+                }
+                (
+                    std::mem::take(&mut pass.inodes),
+                    std::mem::take(&mut pass.waiting),
+                )
+            };
+            let view = Arc::clone(&self.view);
+            let scanned = tokio::task::spawn_blocking(move || {
+                tcp::scan(&*view, &inodes).map_err(|err| err.to_string())
+            })
+            .await
+            .unwrap_or_else(|_| Err("the scan panicked".to_owned()));
+            let scanned = Arc::new(scanned);
+            for answer in waiting {
+                let _ = answer.send(Arc::clone(&scanned));
+            }
+        }
+    }
+
+    /// How many callers wait on the next pass.
+    #[cfg(test)]
+    fn waiting(&self) -> usize {
+        self.pass
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .waiting
+            .len()
+    }
+}
+
+/// `read` on a blocking thread, which holds `turn` until it ends.
+async fn blocking<T: Send + 'static>(
+    turn: &Arc<OwnedSemaphorePermit>,
+    read: impl FnOnce() -> Result<T, Refused> + Send + 'static,
+) -> Result<T, Refused> {
+    let turn = Arc::clone(turn);
+    tokio::task::spawn_blocking(move || {
+        let _turn = turn;
+        read()
+    })
+    .await
+    .unwrap_or_else(|_| Err(Refused::Unreadable(io::Error::other("the reader panicked"))))
+}
+
+/// What one reading reads.
+enum Job {
+    Unix(Arc<OwnedFd>),
+    Tcp(Arc<Tcp>, SocketAddr, SocketAddr),
+}
 
 /// Reads peers, at most `MAX_READING` at once, each on a blocking thread that holds its turn until
 /// it ends: one given up on still counts, so a slow `/proc` can't take every thread. A read is late
@@ -65,6 +249,7 @@ pub(crate) struct Peers {
     turns: Arc<Semaphore>,
     deadline: Duration,
     read: Arc<ReadFn>,
+    tcp: Option<Arc<Tcp>>,
 }
 
 impl std::fmt::Debug for Peers {
@@ -90,30 +275,62 @@ impl Peers {
             turns: Arc::new(Semaphore::new(MAX_READING)),
             deadline,
             read: Arc::new(read),
+            // Where `/proc` says who holds a socket; elsewhere every TCP caller is refused.
+            #[cfg(target_os = "linux")]
+            tcp: Some(Arc::new(Tcp::new(
+                Arc::new(tcp::Proc),
+                rustix::process::geteuid().as_raw(),
+                bazhen_peer::of_pid,
+            ))),
+            #[cfg(not(target_os = "linux"))]
+            tcp: None,
         }
     }
 
-    /// Who is at the other end of `socket`. The deadline runs from the reading's turn.
+    /// These, reading TCP callers with `tcp`, or refusing every one with none.
+    #[cfg(test)]
+    pub(crate) fn with_tcp(self, tcp: Option<Arc<Tcp>>) -> Self {
+        Self { tcp, ..self }
+    }
+
+    /// Who is at the other end of `socket`. The deadline runs from the reading's turn, which a TCP
+    /// caller holds through its pass too.
     pub(crate) async fn read(&self, socket: &PeerSocket) -> PeerRead {
-        let fd = match &socket.fd {
-            Ok(fd) => Arc::clone(fd),
-            Err(why) => return PeerRead::Unread(why.clone()),
+        let accepted = socket.accepted;
+        let job = match (&socket.end, &self.tcp) {
+            (End::Unreadable(why), _) => return PeerRead::Unread(why.clone()),
+            (End::Tcp { .. }, None) => return PeerRead::Unread(UNIDENTIFIABLE.to_owned()),
+            (End::Unix(fd), _) => Job::Unix(Arc::clone(fd)),
+            (End::Tcp { client, server }, Some(tcp)) => Job::Tcp(Arc::clone(tcp), *client, *server),
         };
         let turns = Arc::clone(&self.turns);
-        let read = Arc::clone(&self.read);
-        let accepted = socket.accepted;
         let Ok(Ok(turn)) = tokio::time::timeout(self.deadline, turns.acquire_owned()).await else {
             return PeerRead::Late;
         };
-        let reading = tokio::task::spawn_blocking(move || {
-            let _turn = turn;
-            read(fd.as_fd(), accepted)
-        });
-        match tokio::time::timeout(self.deadline, reading).await {
+        let read = match job {
+            Job::Tcp(tcp, client, server) => {
+                let reading = tcp.read(client, server, accepted, Arc::new(turn));
+                tokio::time::timeout(self.deadline, reading)
+                    .await
+                    .map(|read| Some(read.map(PeerRead::Held)))
+            }
+            Job::Unix(fd) => {
+                let read = Arc::clone(&self.read);
+                let reading = tokio::task::spawn_blocking(move || {
+                    let _turn = turn;
+                    read(fd.as_fd(), accepted).map(PeerRead::Read)
+                });
+                tokio::time::timeout(self.deadline, reading)
+                    .await
+                    .map(Result::ok)
+            }
+        };
+        match read {
             Err(_) => PeerRead::Late,
-            Ok(Err(_)) => PeerRead::Unread("the reader panicked".to_owned()),
-            Ok(Ok(Err(refused))) => PeerRead::Unread(refused.to_string()),
-            Ok(Ok(Ok(peer))) => PeerRead::Read(peer),
+            Ok(None) => PeerRead::Unread("the reader panicked".to_owned()),
+            Ok(Some(Err(refused))) if refused.is_race() => PeerRead::Retry(refused.to_string()),
+            Ok(Some(Err(refused))) => PeerRead::Unread(refused.to_string()),
+            Ok(Some(Ok(read))) => read,
         }
     }
 }
@@ -283,8 +500,28 @@ pub(crate) fn reading<E>(
             tracing::warn!("refused a caller: {why}");
             Reading::Refused(why)
         }
+        PeerRead::Retry(why) => {
+            tracing::warn!("a caller changed while it was read; it was told to try again: {why}");
+            Reading::Late
+        }
         PeerRead::Read(peer) => reading_of(&peer, &terminals()?),
+        PeerRead::Held(peers) => held(&peers, &terminals()?),
     })
+}
+
+/// What the processes holding a TCP caller's socket say of it: their reading when they all agree,
+/// else refused, since one of them may be an agent's.
+fn held(peers: &[Peer], terminals: &TerminalPids) -> Reading {
+    let mut readings = peers.iter().map(|peer| reading_of(peer, terminals));
+    let refused = |why: &str| {
+        tracing::warn!("refused a caller: {why}");
+        Reading::Refused(why.to_owned())
+    };
+    match readings.next() {
+        None => refused("no process holds the caller's socket"),
+        Some(first) if readings.all(|other| other == first) => first,
+        Some(_) => refused("the processes holding the caller's socket read as different callers"),
+    }
 }
 
 #[cfg(test)]
@@ -761,13 +998,233 @@ mod tests {
         });
     }
 
+    /// `/proc` as a test sets it out: one table line per connection, each caller's socket held by
+    /// a process of its own; the first pass waits until `open`.
+    struct View {
+        lines: Vec<String>,
+        holders: Vec<(i32, u64)>,
+        /// What a holder's descriptor reads once its line has been read, if not its socket.
+        moved: Option<i32>,
+        passes: AtomicUsize,
+        open: (Mutex<bool>, Condvar),
+    }
+
+    impl View {
+        /// Callers from ports 1000, 1001, … to the daemon's 7900, each held by pid 900 + its index.
+        fn of(callers: usize) -> Self {
+            Self {
+                lines: (0..callers)
+                    .map(|at| {
+                        format!(
+                            "{at:4}: 0100007F:{:04X} 0100007F:1EDC 01 00000000:00000000 \
+                             00:00000000 00000000  1000        0 {} 1 0000000000000000 20 0 0 \
+                             10 -1",
+                            1000 + at,
+                            70 + at
+                        )
+                    })
+                    .collect(),
+                holders: (0..callers)
+                    .map(|at| (900 + i32::try_from(at).unwrap(), 70 + at as u64))
+                    .collect(),
+                moved: None,
+                passes: AtomicUsize::new(0),
+                open: (Mutex::new(true), Condvar::new()),
+            }
+        }
+
+        fn shut(self) -> Self {
+            *self.open.0.lock().unwrap() = false;
+            self
+        }
+
+        fn let_through(&self) {
+            *self.open.0.lock().unwrap() = true;
+            self.open.1.notify_all();
+        }
+    }
+
+    impl ProcView for View {
+        fn tables(&self) -> io::Result<Vec<String>> {
+            Ok(vec![self.lines.join("\n"), String::new()])
+        }
+        fn processes(&self) -> io::Result<Vec<Pid>> {
+            if self.passes.fetch_add(1, Ordering::SeqCst) == 0 {
+                let open = self.open.0.lock().unwrap();
+                let (_open, waited) = self
+                    .open
+                    .1
+                    .wait_timeout_while(open, Duration::from_secs(10), |open| !*open)
+                    .unwrap();
+                assert!(!waited.timed_out(), "the first pass was never let through");
+            }
+            Ok(self.holders.iter().map(|(p, _)| pid(*p)).collect())
+        }
+        fn descriptors(&self, at: Pid) -> io::Result<Vec<(u32, Vec<u8>)>> {
+            let (_, inode) = self.holders.iter().find(|(p, _)| pid(*p) == at).unwrap();
+            Ok(vec![(3, format!("socket:[{inode}]").into_bytes())])
+        }
+        fn descriptor(&self, at: Pid, fd: u32) -> io::Result<Vec<u8>> {
+            if self.moved == Some(at.as_raw_pid()) {
+                return Ok(b"socket:[1]".to_vec());
+            }
+            Ok(self
+                .descriptors(at)?
+                .remove(usize::try_from(fd).unwrap() - 3)
+                .1)
+        }
+    }
+
+    /// Readers of TCP callers through `view`, each holder read as a line under `AGENT`'s pane
+    /// when it is pid 900, else outside every terminal.
+    fn tcp_readers(view: View) -> (Peers, Arc<Tcp>) {
+        let tcp = Arc::new(Tcp::new(Arc::new(view), 1000, |at, _| {
+            Ok(if at.as_raw_pid() == 900 {
+                chain(900, 900, &[100, 10, 1])
+            } else {
+                chain(at.as_raw_pid(), at.as_raw_pid(), &[1])
+            })
+        }));
+        let peers =
+            Peers::with(READ, |_, _| Err(Refused::Endless)).with_tcp(Some(Arc::clone(&tcp)));
+        (peers, tcp)
+    }
+
+    /// Once `done`, or 5 s on, letting every other task run meanwhile.
+    async fn until(done: impl Fn() -> bool) {
+        let by = std::time::Instant::now() + Duration::from_secs(5);
+        while !done() && std::time::Instant::now() < by {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn from_port(port: u16) -> PeerSocket {
+        PeerSocket::tcp_accepted_now(
+            Ok(SocketAddr::from(([127, 0, 0, 1], port))),
+            Ok(SocketAddr::from(([127, 0, 0, 1], 7900))),
+        )
+    }
+
+    #[test]
+    fn reads_a_tcp_caller_as_the_processes_holding_its_socket() {
+        let (peers, _) = tcp_readers(View::of(2));
+        runtime().block_on(async {
+            assert_eq!(
+                [
+                    peers.read(&from_port(1000)).await,
+                    peers.read(&from_port(1001)).await
+                ],
+                [
+                    PeerRead::Held(vec![chain(900, 900, &[100, 10, 1])]),
+                    PeerRead::Held(vec![chain(901, 901, &[1])]),
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn finds_the_holders_of_tcp_callers_that_wait_together_in_one_pass() {
+        let view = Arc::new(View::of(3).shut());
+        let tcp = Arc::new(Tcp::new(Arc::clone(&view) as Arc<View>, 1000, |at, _| {
+            Ok(chain(at.as_raw_pid(), 0, &[1]))
+        }));
+        let peers =
+            Peers::with(READ, |_, _| Err(Refused::Endless)).with_tcp(Some(Arc::clone(&tcp)));
+        let reads = runtime().block_on(async {
+            let sockets = [1000, 1001, 1002].map(from_port);
+            let later = async {
+                until(|| view.passes.load(Ordering::SeqCst) == 1).await;
+                let let_through = async {
+                    until(|| tcp.waiting() == 2).await;
+                    view.let_through();
+                };
+                let (b, c, ()) = tokio::join!(
+                    peers.read(&sockets[1]),
+                    peers.read(&sockets[2]),
+                    let_through
+                );
+                (b, c)
+            };
+            let (a, (b, c)) = tokio::join!(peers.read(&sockets[0]), later);
+            [a, b, c]
+        });
+        assert_eq!(
+            (reads, view.passes.load(Ordering::SeqCst)),
+            (
+                [900, 901, 902].map(|at| PeerRead::Held(vec![chain(at, 0, &[1])])),
+                2
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_every_tcp_caller_where_proc_cant_say_who_holds_a_socket() {
+        let peers = Peers::with(READ, |_, _| Err(Refused::Endless)).with_tcp(None);
+        assert_eq!(
+            runtime().block_on(peers.read(&from_port(1000))),
+            PeerRead::Unread(UNIDENTIFIABLE.to_owned())
+        );
+    }
+
+    #[test]
+    fn tells_a_caller_that_changed_while_it_was_read_to_try_again() {
+        let (peer, _theirs) = socket();
+        let changing = Peers::with(READ, |_, _| Err(Refused::Changed("it moved")));
+        let (moving, _) = tcp_readers(View {
+            moved: Some(900),
+            ..View::of(1)
+        });
+        let reads = runtime().block_on(async {
+            [
+                changing.read(&peer).await,
+                moving.read(&from_port(1000)).await,
+            ]
+        });
+        assert_eq!(
+            (
+                reads.clone(),
+                reads.map(|read| reading(read, || Ok::<_, ()>(terminals())))
+            ),
+            (
+                [
+                    PeerRead::Retry(Refused::Changed("it moved").to_string()),
+                    PeerRead::Retry(Refused::HolderChanged.to_string()),
+                ],
+                [Ok(Reading::Late), Ok(Reading::Late)]
+            )
+        );
+    }
+
+    #[test]
+    fn reads_a_tcp_caller_as_its_holders_say_only_when_they_all_agree() {
+        let under = |at: i32| chain(at, at, &[100, 10, 1]);
+        let held = |peers: Vec<Peer>| reading(PeerRead::Held(peers), || Ok::<_, ()>(terminals()));
+        assert_eq!(
+            [
+                held(vec![under(150), under(151)]),
+                held(vec![under(150), chain(950, 950, &[1])]),
+                held(vec![]),
+            ],
+            [
+                Ok(agent()),
+                Ok(Reading::Refused(
+                    "the processes holding the caller's socket read as different callers"
+                        .to_owned()
+                )),
+                Ok(Reading::Refused(
+                    "no process holds the caller's socket".to_owned()
+                )),
+            ]
+        );
+    }
+
     #[test]
     fn says_why_it_read_nobody_when_a_reading_refuses_or_panics_or_the_socket_wasnt_kept() {
         let (peer, _theirs) = socket();
         let refusing = Peers::with(READ, |_, _| Err(Refused::Foreign { uid: 7 }));
         let panicking = Peers::with(READ, |_, _| panic!("lost"));
         let unkept = PeerSocket {
-            fd: Err("no descriptor".to_owned()),
+            end: End::Unreadable("no descriptor".to_owned()),
             accepted: 0,
         };
         runtime().block_on(async {

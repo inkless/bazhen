@@ -184,7 +184,7 @@ pub trait ProcView {
 ///
 /// `NoEnd`, `Ambiguous`, `Foreign` for a socket of another user, `Unreadable` for a table.
 pub fn end(
-    view: &impl ProcView,
+    view: &(impl ProcView + ?Sized),
     client: SocketAddr,
     server: SocketAddr,
     uid: u32,
@@ -223,7 +223,7 @@ pub struct Scan {
 /// # Errors
 ///
 /// When the processes can't be listed.
-pub fn scan(view: &impl ProcView, inodes: &BTreeSet<u64>) -> io::Result<Scan> {
+pub fn scan(view: &(impl ProcView + ?Sized), inodes: &BTreeSet<u64>) -> io::Result<Scan> {
     let mut found = Scan::default();
     for pid in view.processes()? {
         match view.descriptors(pid) {
@@ -274,7 +274,7 @@ pub fn holders(scan: &Scan, inode: u64) -> Result<Vec<Holder>, Refused> {
 ///
 /// `read`'s refusal, or `HolderChanged` for a holder no longer holding the socket.
 pub fn peers(
-    view: &impl ProcView,
+    view: &(impl ProcView + ?Sized),
     inode: u64,
     holders: &[Holder],
     read: impl Fn(Pid) -> Result<Peer, Refused>,

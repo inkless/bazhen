@@ -128,6 +128,21 @@ pub enum Refused {
     /// A process that held the caller's socket didn't hold it any more once its line was read.
     #[error("the caller's socket changed hands while its holder was read")]
     HolderChanged,
+    /// The caller's line didn't hold still while it was read, or its pid was taken meanwhile.
+    #[error("a process on the caller's line can't be read: {0}")]
+    Changed(&'static str),
+}
+
+impl Refused {
+    /// Whether the caller was refused only for what changed while it was read, so that the same
+    /// request may be read for sure if it is made again.
+    #[must_use]
+    pub fn is_race(&self) -> bool {
+        matches!(
+            self,
+            Self::Replaced { .. } | Self::HolderChanged | Self::Changed(_)
+        )
+    }
 }
 
 /// Who is at the other end of `socket`, accepted at `accepted` (epoch seconds), as the kernel names
@@ -428,9 +443,9 @@ pub fn line_of(
         });
         let read = read.and_then(|read| Ok((walk(pid, step)?, read)));
         if replaced.get() {
-            return Err(Refused::Unreadable(io::Error::other(
+            return Err(Refused::Changed(
                 "the caller's pid was taken by another process while its line was read",
-            )));
+            ));
         }
         refused = match read {
             Ok((again, (walked, codex))) if again == walked => {
@@ -441,9 +456,7 @@ pub fn line_of(
                     .unzip();
                 return Ok((ancestors, names, codex));
             }
-            Ok(_) => Refused::Unreadable(io::Error::other(
-                "the caller's line changed while it was read",
-            )),
+            Ok(_) => Refused::Changed("the caller's line changed while it was read"),
             Err(refused) => refused,
         };
         if gone.get() {
@@ -566,6 +579,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn takes_only_what_changed_while_the_caller_was_read_for_a_race() {
+        let refusals = [
+            Refused::Replaced {
+                started: 2,
+                accepted: 1,
+            },
+            Refused::HolderChanged,
+            Refused::Changed("moved"),
+            Refused::Unreadable(io::Error::other("denied")),
+            Refused::Foreign { uid: 0 },
+            Refused::Endless,
+            Refused::NoEnd,
+            Refused::Ambiguous,
+            Refused::NoReadableHolder { unreadable: 1 },
+            Refused::TooManyHolders { holders: 17 },
+        ];
+        assert_eq!(
+            refusals.map(|r| r.is_race()),
+            [
+                true, true, true, false, false, false, false, false, false, false
+            ]
+        );
+    }
     #[test]
     fn walks_the_ancestors_nearest_first_through_init() {
         let walked = ancestors(pid(50), table(&[(50, 40), (40, 30), (30, 1)])).unwrap();
