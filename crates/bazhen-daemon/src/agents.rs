@@ -926,12 +926,16 @@ pub(crate) mod tests {
 
         /// The payload of the last event of `kind`.
         pub(crate) fn last(&self, kind: &str) -> serde_json::Value {
+            self.last_of(kind).unwrap()
+        }
+
+        /// The payload of the last event of `kind`, where one was recorded.
+        pub(crate) fn last_of(&self, kind: &str) -> Option<serde_json::Value> {
             self.events()
                 .into_iter()
                 .rev()
                 .find(|(k, _)| k == kind)
                 .map(|(_, payload)| payload)
-                .unwrap()
         }
 
         fn state(&self, agent: &AgentId) -> Option<String> {

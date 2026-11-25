@@ -443,13 +443,11 @@ pub(crate) mod tests {
         let calls = Calls::default();
         let id = agent.as_str();
         let [first, again] = [(); 2].map(|()| {
-            runtime()
-                .block_on(f.agents.respawn(
-                    id,
-                    &respawning("r-1", generation),
-                    recording(&f, &calls),
-                ))
-                .unwrap()
+            runtime().block_on(f.agents.respawn(
+                id,
+                &respawning("r-1", generation),
+                recording(&f, &calls),
+            ))
         });
         let now = found(&f, &agent);
         let asked: Vec<Option<TuiTheme>> = stub
@@ -471,7 +469,7 @@ pub(crate) mod tests {
         assert_eq!(
             (
                 f.types().split_off(before),
-                first.event_ids.len(),
+                first.as_ref().map(|first| first.event_ids.len()),
                 first == again,
                 calls.lock().unwrap().clone(),
                 asked,
@@ -487,7 +485,7 @@ pub(crate) mod tests {
                     "agent.respawn_requested".to_owned(),
                     "agent.respawned".to_owned()
                 ],
-                2,
+                Ok(2),
                 true,
                 vec![(agent.clone(), Some("agent.respawn_requested".to_owned()))],
                 vec![Some(TuiTheme::Dark)],
@@ -550,9 +548,10 @@ pub(crate) mod tests {
         let now = found(&f, &agent);
         assert_eq!(
             (
-                refused.is_err(),
+                refused,
                 f.types().split_off(before),
-                f.last("agent.respawn_rejected")["reason"].clone(),
+                f.last_of("agent.respawn_rejected")
+                    .map(|p| p["reason"].clone()),
                 calls.lock().unwrap().len(),
                 (
                     now.state,
@@ -561,12 +560,12 @@ pub(crate) mod tests {
                 ),
             ),
             (
-                true,
+                Err(AgentError::Conflict("still running".to_owned())),
                 vec![
                     "agent.respawn_requested".to_owned(),
                     "agent.respawn_rejected".to_owned()
                 ],
-                serde_json::json!("terminal_changed"),
+                Some(serde_json::json!("terminal_changed")),
                 1,
                 (AgentState::Exited, Some(generation), Some(terminal)),
             )
@@ -591,7 +590,8 @@ pub(crate) mod tests {
         assert_eq!(
             (
                 refused,
-                f.last("agent.respawn_rejected")["reason"].clone(),
+                f.last_of("agent.respawn_rejected")
+                    .map(|p| p["reason"].clone()),
                 calls.lock().unwrap().len(),
                 respawned(&f).len(),
             ),
@@ -599,7 +599,7 @@ pub(crate) mod tests {
                 Err(AgentError::Conflict(format!(
                     "agent {id}'s harness won't resume it: session archived"
                 ))),
-                serde_json::json!("harness_refused"),
+                Some(serde_json::json!("harness_refused")),
                 1,
                 0,
             )
