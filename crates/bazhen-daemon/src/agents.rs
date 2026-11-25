@@ -906,6 +906,8 @@ pub(crate) mod tests {
         pub(crate) store: Writer,
         home: String,
         run: PathBuf,
+        /// What the agents hand over for delivery.
+        handed: StdMutex<tokio::sync::mpsc::UnboundedReceiver<crate::mail::Queued>>,
         _dir: TempDir,
         thread: Option<crate::writer::Thread>,
     }
@@ -953,6 +955,7 @@ pub(crate) mod tests {
         );
         let uid = rustix::process::getuid().as_raw();
         let hooks = Arc::new(crate::hooks::Hooks::default());
+        let (handing, handed) = tokio::sync::mpsc::unbounded_channel();
         let agents = Agents::new(AgentsDeps {
             store: store.clone(),
             terminals: Arc::new(fake.clone()),
@@ -968,7 +971,7 @@ pub(crate) mod tests {
             login_shell: setup.login_shell,
             turns: Arc::default(),
             hooks: Arc::clone(&hooks),
-            handing: tokio::sync::mpsc::unbounded_channel().0,
+            handing,
         });
         Fixture {
             agents: Arc::new(agents),
@@ -976,6 +979,7 @@ pub(crate) mod tests {
             store,
             home,
             run,
+            handed: StdMutex::new(handed),
             _dir: dir,
             thread: Some(thread),
         }
@@ -1115,6 +1119,29 @@ pub(crate) mod tests {
 
         pub(crate) fn types(&self) -> Vec<String> {
             self.events().into_iter().map(|(kind, _)| kind).collect()
+        }
+
+        /// The agents the mail handed over since the last call is for, in the order handed.
+        pub(crate) fn handed(&self) -> Vec<AgentId> {
+            let mut handed = self.handed.lock().unwrap();
+            std::iter::from_fn(|| handed.try_recv().ok())
+                .map(|queued| queued.agent)
+                .collect()
+        }
+
+        /// Makes every later write that appends an event of `kind` fail at that append.
+        pub(crate) fn failing(&self, kind: &str) {
+            let sql = format!(
+                "CREATE TEMP TRIGGER failing BEFORE INSERT ON events WHEN NEW.type = '{kind}'
+                 BEGIN SELECT RAISE(ABORT, 'an append this test fails'); END;"
+            );
+            runtime()
+                .block_on(
+                    self.store
+                        .run(move |s| s.write(|w| w.connection().execute_batch(&sql))),
+                )
+                .unwrap()
+                .unwrap();
         }
 
         /// Makes `lead` the lead on a task the human owns, `worker` a worker granted under that

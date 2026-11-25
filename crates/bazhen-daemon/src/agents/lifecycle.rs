@@ -190,24 +190,25 @@ impl Drop for ClosedMail {
 /// recorded closed but a row whose id no message could have, which `in_flight_mail` skips. Each
 /// agent granted under one the close ends is told its line has ended, and what the close
 /// strands is lifted, in the same write, so no restart between them leaves a subtask stranded or
-/// an agent untold.
+/// an agent untold. Telling and lifting never stop the close: where either fails, both are
+/// undone and the close is recorded without them.
 pub(crate) fn record_closed(
     w: &StoreWriter<'_>,
     closing: &Closing,
     agent: &AgentId,
     actor: Actor,
 ) -> Result<Closed, AgentError> {
-    let held: Vec<_> = w
-        .reads()
-        .active_assignments_of(agent)
-        .map_err(|err| AgentError::Internal(err.to_string()))?
-        .into_iter()
-        .map(|held| held.id)
-        .collect();
     let under = w
         .reads()
-        .active_under(&held)
-        .map_err(|err| AgentError::Internal(err.to_string()))?;
+        .active_assignments_of(agent)
+        .and_then(|held| {
+            let held: Vec<_> = held.into_iter().map(|held| held.id).collect();
+            w.reads().active_under(&held)
+        })
+        .unwrap_or_else(|err| {
+            tracing::warn!("bazhen: agent {agent} closes telling no one granted under it: {err}");
+            Vec::new()
+        });
     let mut ids = vec![append(w, agent, actor, AgentChange::Closed)?];
     for message in w.reads().in_flight_mail(agent.as_str())? {
         ids.push(w.append(&NewEvent::Mail {
@@ -219,10 +220,16 @@ pub(crate) fn record_closed(
         })?);
     }
     let mut queued = Vec::new();
-    ids.extend(
-        tell_and_lift(w, &closing.harnesses, under, &mut queued)
-            .map_err(|err| AgentError::Internal(err.to_string()))?,
-    );
+    match w.undoable(|w| tell_and_lift(w, &closing.harnesses, under, &mut queued))? {
+        Ok(told) => ids.extend(told),
+        Err(err) => {
+            queued.clear();
+            tracing::warn!(
+                "bazhen: agent {agent} closes leaving those under it untold and what it strands \
+                 where it is, for the next start to lift: {err}"
+            );
+        }
+    }
     Ok(Closed {
         ids,
         mail: ClosedMail {

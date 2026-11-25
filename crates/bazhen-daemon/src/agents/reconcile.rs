@@ -1805,6 +1805,86 @@ mod tests {
     }
 
     #[test]
+    fn hands_the_mail_a_close_on_the_tick_tells_over_for_delivery_once_it_commits() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, _) = launched(&f, "k-1");
+        let (worker, _) = launched(&f, "k-2");
+        f.leading(&lead, &worker);
+        recorded_as(&f, &lead, AgentChange::Closing);
+        let before = f.handed();
+        ticked(&f);
+        assert_eq!((before, f.handed()), (Vec::new(), vec![worker]));
+    }
+
+    #[test]
+    fn closes_on_the_tick_an_agent_whose_lift_fails_undoing_what_it_told_and_lifted() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, _) = launched(&f, "k-1");
+        let (worker, _) = launched(&f, "k-2");
+        let sub = f.leading(&lead, &worker);
+        recorded_as(&f, &lead, AgentChange::Closing);
+        f.handed();
+        f.failing("task.owner_changed");
+        ticked(&f);
+        assert_eq!(
+            (state(&f, &lead), f.left(&sub, &worker), f.handed()),
+            (
+                AgentState::Closed,
+                (Some(lead.clone()), Vec::new(), Vec::new()),
+                Vec::new()
+            )
+        );
+    }
+
+    #[test]
+    fn closes_on_the_tick_an_agent_whose_lift_outruns_its_bound() {
+        let f = setup_with(crate::agents::tests::Setup::default());
+        let (lead, _) = launched(&f, "k-1");
+        let (other, _) = launched(&f, "k-2");
+        // Two tasks each under the other, owned by a live agent and each delegated from an ended
+        // assignment: every pass moves each up to the other, still stranded, as no tree of tasks
+        // could leave them.
+        let sql = format!(
+            "INSERT INTO tasks (id, title, brief, state, owner_agent_id, created_event_id,
+               updated_event_id)
+               SELECT 'task_0190a1b2c3d47abc8def0123456789d1', 'X', 'b', 'open', '{other}',
+                 max(id), max(id) FROM events;
+             INSERT INTO tasks (id, title, brief, state, owner_agent_id, parent_task_id,
+               created_event_id, updated_event_id)
+               SELECT 'task_0190a1b2c3d47abc8def0123456789d2', 'Y', 'b', 'open', '{other}',
+                 'task_0190a1b2c3d47abc8def0123456789d1', max(id), max(id) FROM events;
+             UPDATE tasks SET parent_task_id = 'task_0190a1b2c3d47abc8def0123456789d2'
+               WHERE id = 'task_0190a1b2c3d47abc8def0123456789d1';
+             INSERT INTO assignments (id, task_id, agent_session_id, role, state, end_reason,
+               created_event_id, updated_event_id)
+               SELECT 'asgn_0190a1b2c3d47abc8def0123456789d' || n,
+                 'task_0190a1b2c3d47abc8def0123456789d' || n, '{other}', 'lead', 'ended',
+                 'unassigned', max(id), max(id)
+               FROM events, (SELECT 1 AS n UNION SELECT 2) GROUP BY n;
+             UPDATE tasks SET delegated_from = 'asgn_' || substr(id, 6) WHERE title IN ('X', 'Y');"
+        );
+        let stranded = runtime()
+            .block_on(f.store.run(move |s| {
+                s.write(|w| {
+                    w.connection().execute_batch(&sql)?;
+                    Ok::<_, rusqlite::Error>(w.reads().stranded().map(|s| s.len()))
+                })
+            }))
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        recorded_as(&f, &lead, AgentChange::Closing);
+        let moved = recorded(&f, || ticked(&f))
+            .into_iter()
+            .filter(|kind| kind == "task.owner_changed")
+            .count();
+        assert_eq!(
+            (stranded, moved, state(&f, &lead)),
+            (2, 6, AgentState::Closed)
+        );
+    }
+
+    #[test]
     fn tells_at_start_those_under_an_agent_it_closes_and_lifts_what_the_close_strands() {
         let f = setup_with(crate::agents::tests::Setup::default());
         let (lead, terminal) = launched(&f, "k-1");
