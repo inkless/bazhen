@@ -233,7 +233,7 @@ impl Agents {
                 found.state == AgentState::Closed || offers(AgentCommand::Close)(found)
             }
         };
-        let _turn = self.turns.take(id).await;
+        let _turn = self.deps.turns.take(id).await;
         let found = match self
             .begin(id, key, &request, req.generation, accepts)
             .await?
@@ -302,7 +302,7 @@ impl Agents {
     ) -> Result<AgentCommandResponse, AgentError> {
         let request = asked("signal", id, req)?;
         let key = &req.idempotency_key;
-        let _turn = self.turns.take(id).await;
+        let _turn = self.deps.turns.take(id).await;
         let found = match self
             .begin(
                 id,

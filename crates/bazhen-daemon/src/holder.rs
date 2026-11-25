@@ -1255,6 +1255,7 @@ mod tests {
                 Box::new(|_| {}),
             );
             let shells = Shells::new(ShellsDeps {
+                turns: Arc::default(),
                 store: store.clone(),
                 terminals,
                 budget: Arc::new(budget),
@@ -1541,6 +1542,7 @@ mod tests {
                     let snippets = dir.join("state/shell-integration");
                     install_shell_integration(&snippets, uid).unwrap();
                     Arc::new(Shells::new(ShellsDeps {
+                        turns: Arc::default(),
                         store: store.clone(),
                         terminals,
                         budget: Arc::new(Budget::new(

@@ -262,6 +262,7 @@ async fn shells(
     let integration = shell_integration(startup, store, runner.hook.as_deref()).await?;
     let budget = Arc::clone(&runner.budget);
     let run = Path::new(&startup.paths.run);
+    let turns = Arc::<crate::turns::Turns>::default();
     let agents = Agents::new(AgentsDeps {
         store: store.clone(),
         terminals: Arc::clone(&runner.terminals),
@@ -275,8 +276,10 @@ async fn shells(
         tokens: AgentTokens::new(run.join("agents"), startup.uid, store.clone()),
         prompts: daemon_prompts(run, startup.uid),
         login_shell: startup.settings.config.login_shell.clone(),
+        turns: Arc::clone(&turns),
     });
     let shells = Shells::new(ShellsDeps {
+        turns,
         store: store.clone(),
         terminals: runner.terminals,
         budget: runner.budget,
@@ -761,6 +764,7 @@ mod tests {
         };
         let (kept, gone) = runtime().block_on(async {
             let before = Shells::new(ShellsDeps {
+                turns: Arc::default(),
                 store: store.clone(),
                 terminals: Arc::new(fake.clone()),
                 budget: budget(3),
@@ -887,6 +891,7 @@ mod tests {
                 ..faked(&startup)
             };
             let before = Shells::new(ShellsDeps {
+                turns: Arc::default(),
                 store: store.clone(),
                 terminals: Arc::clone(&runner.terminals),
                 budget: Arc::clone(&runner.budget),
@@ -957,6 +962,7 @@ mod tests {
             ..faked(&startup)
         };
         let shells = Shells::new(crate::shells::ShellsDeps {
+            turns: Arc::default(),
             store: store.clone(),
             terminals: runner.terminals,
             budget: runner.budget,

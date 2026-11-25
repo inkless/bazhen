@@ -255,6 +255,9 @@ pub(crate) struct ShellsDeps {
     /// With `shells.retype_last_command` on, what each new shell reports its lines with; without
     /// it, shells report nothing.
     pub(crate) integration: Option<Integration>,
+    /// Commands on shells and agents, one at a time by what each acts on, shared with the
+    /// agents.
+    pub(crate) turns: Arc<Turns>,
 }
 
 /// How long an exited shell's failed close waits to be tried again, at first and at most.
@@ -286,7 +289,6 @@ impl From<ShellError> for Unended {
 #[derive(Debug)]
 pub(crate) struct Shells {
     deps: ShellsDeps,
-    turns: Turns,
     /// Exited shells whose terminal couldn't be ended and is being tried again, by terminal and
     /// generation, each said once. One no try can end is said once as it is given up, and not
     /// kept, since nothing tries it again.
@@ -442,7 +444,6 @@ impl Shells {
         Self {
             retypes,
             deps,
-            turns: Turns::default(),
             unended: Mutex::new(HashSet::new()),
             foreground_fault: Mutex::new(None),
             restarts: crate::restarts::Restarts::default(),
@@ -652,7 +653,7 @@ impl Shells {
         let terminal = opened.terminal_id.clone();
         // Held until it is recorded running or failed: an exit told while the runtime still
         // starts it waits, and then finds it running, to close.
-        let _turn = self.turns.take(terminal.as_str()).await;
+        let _turn = self.deps.turns.take(terminal.as_str()).await;
         // Held before the shell starts, which may reach its prompt before its start answers here.
         if let Some(line) = opening.retype.clone() {
             self.retypes.hold(terminal.as_str(), line);
@@ -833,7 +834,7 @@ impl Shells {
                     offers(ShellCommand::Close)(found)
                 }
         };
-        let _turn = self.turns.take(id).await;
+        let _turn = self.deps.turns.take(id).await;
         let found = match self
             .begin(id, key, &request, Some(req.generation), accepts)
             .await?
@@ -933,7 +934,7 @@ impl Shells {
     ) -> Result<ShellCommandResponse, ShellError> {
         let request = asked("restart", Some(id), req)?;
         let key = &req.idempotency_key;
-        let _turn = self.turns.take(id).await;
+        let _turn = self.deps.turns.take(id).await;
         let found = match self
             .begin(
                 id,
@@ -1039,7 +1040,7 @@ impl Shells {
     ) -> Result<ShellCommandResponse, ShellError> {
         let request = asked("rename", Some(id), req)?;
         let key = &req.idempotency_key;
-        let _turn = self.turns.take(id).await;
+        let _turn = self.deps.turns.take(id).await;
         let found = match self
             .begin(id, key, &request, None, offers(ShellCommand::Rename))
             .await?
@@ -1089,7 +1090,7 @@ impl Shells {
             {
                 return Ok(());
             }
-            let _turn = self.turns.take(id).await;
+            let _turn = self.deps.turns.take(id).await;
             if self
                 .shell(id)
                 .await?
@@ -1115,7 +1116,7 @@ impl Shells {
     async fn lost(&self, at: &Recorded) {
         let id = at.terminal_id.as_str();
         let marked = async {
-            let _turn = self.turns.take(id).await;
+            let _turn = self.deps.turns.take(id).await;
             let Some(found) = self.shell(id).await? else {
                 return Ok(());
             };
@@ -1153,7 +1154,7 @@ impl Shells {
         let mut wait = RETRY_FIRST;
         loop {
             let ended = {
-                let _turn = self.turns.take(&id).await;
+                let _turn = self.deps.turns.take(&id).await;
                 self.close_exited(&id, &exit).await
             };
             {
@@ -1330,6 +1331,7 @@ pub(crate) mod tests {
             Box::new(|_| {}),
         );
         let shells = Shells::new(ShellsDeps {
+            turns: Arc::default(),
             store: store.clone(),
             terminals: Arc::new(fake.clone()),
             budget: Arc::new(budget),
@@ -1395,6 +1397,7 @@ pub(crate) mod tests {
         /// new shells told to report with `integration`.
         pub(crate) fn again(&self, integration: Option<Integration>) -> Shells {
             Shells::new(ShellsDeps {
+                turns: Arc::default(),
                 store: self.store.clone(),
                 terminals: Arc::new(self.fake.clone()),
                 budget: Arc::new(Budget::new(

@@ -237,7 +237,7 @@ impl Shells {
         id: &TerminalId,
         found: Option<&FoundShell>,
     ) -> Result<(), Unsettled> {
-        let _turn = self.turns.take(id.as_str()).await;
+        let _turn = self.deps.turns.take(id.as_str()).await;
         match self.shell(id.as_str()).await? {
             Some(shell) if recoverable(shell.state) => self.settle(&shell, found).await,
             _ => Ok(()),
@@ -433,7 +433,7 @@ mod tests {
         async fn turn_awaited(&self, id: &str) {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
-                let waiting = self.shells.turns.waiting(id);
+                let waiting = self.shells.deps.turns.waiting(id);
                 if waiting {
                     return;
                 }

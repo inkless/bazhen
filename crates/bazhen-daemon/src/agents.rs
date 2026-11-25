@@ -239,6 +239,9 @@ pub(crate) struct AgentsDeps {
     pub(crate) prompts: Prompts,
     /// With `agents.shell = "login"`, the shell every agent starts through.
     pub(crate) login_shell: Option<String>,
+    /// Commands on agents and shells, one at a time by what each acts on, shared with the
+    /// shells: a linked shell opens in its agent's turn.
+    pub(crate) turns: Arc<Turns>,
 }
 
 /// What a launch records of itself before anything starts.
@@ -279,16 +282,11 @@ struct Started {
 #[derive(Debug)]
 pub(crate) struct Agents {
     deps: AgentsDeps,
-    /// Each agent's commands, one at a time: a launch holds its agent's until its last event.
-    turns: Turns,
 }
 
 impl Agents {
     pub(crate) fn new(deps: AgentsDeps) -> Self {
-        Self {
-            deps,
-            turns: Turns::default(),
-        }
+        Self { deps }
     }
 
     /// Runs `command` to its end on the daemon's tasks, whether or not its caller waits for the
@@ -385,7 +383,7 @@ impl Agents {
             .to_string_lossy()
             .into_owned();
         // Taken before the agent is recorded, so nothing else settles it while it starts.
-        let _turn = self.turns.take(agent.as_str()).await;
+        let _turn = self.deps.turns.take(agent.as_str()).await;
         let recording = Recording {
             agent: agent.clone(),
             terminal: terminal.clone(),
@@ -769,6 +767,7 @@ pub(crate) mod tests {
             tokens: AgentTokens::new(run.join("agents"), uid, store.clone()),
             prompts: prompts::daemon_prompts(&run, uid),
             login_shell: setup.login_shell,
+            turns: Arc::default(),
         });
         Fixture {
             agents: Arc::new(agents),
